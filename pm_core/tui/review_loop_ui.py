@@ -611,9 +611,10 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
 
+    # Pass the flag explicitly in both directions — the in-tmux env-var
+    # default would otherwise flip resolve_window=False back on.
     merge_cmd = "pr merge"
-    if resolve_window:
-        merge_cmd += " --resolve-window"
+    merge_cmd += " --resolve-window" if resolve_window else " --no-resolve-window"
     if propagation_only:
         merge_cmd += " --propagation-only"
     merge_cmd += " --background"

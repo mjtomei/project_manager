@@ -66,6 +66,19 @@ def find_local_pm_core():
     return None
 
 
+def _mark_tmux_session(env: dict) -> None:
+    """Set PM_IN_TMUX_SESSION=1 when running under tmux.
+
+    Sub-commands consume this to default to TUI-parity behavior — e.g.
+    ``pm pr merge`` enables ``--resolve-window`` so picker / shell-pane
+    / command-bar invocations all launch a Claude resolution window
+    when a merge needs one. Outside tmux the var stays unset and
+    behavior is unchanged.
+    """
+    if env.get("TMUX"):
+        env["PM_IN_TMUX_SESSION"] = "1"
+
+
 def main():
     """Entry point that prefers local pm_core.
 
@@ -74,6 +87,7 @@ def main():
     2. Local pm_core in cwd or parent directories
     3. Installed pm_core
     """
+    _mark_tmux_session(os.environ)
     # First check for active session override
     override_root = _find_active_override()
     if override_root and override_root not in sys.path:

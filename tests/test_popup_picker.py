@@ -1,10 +1,14 @@
 """Tests for the action-based popup PR picker logic."""
 
+from unittest.mock import patch, MagicMock
+
 from pm_core.cli.session import (
     _actions_for_status,
     _status_phase,
     _current_window_pr_id,
     _build_picker_lines,
+    _run_picker_command,
+    _ALL_ACTIONS,
 )
 
 
@@ -224,3 +228,43 @@ class TestBuildPickerLines:
         lines = _build_picker_lines(prs, "#158", open_windows={"#158", "review-#158"})
         rl_lines = [d for d, cmd, _ in lines if cmd and "review-loop" in d]
         assert not any("[open]" in d for d in rl_lines)
+
+
+class TestPickerMergeDispatch:
+    def test_merge_action_passes_resolve_window(self):
+        """Picker merge entry must pass --resolve-window so conflicts launch
+        a Claude resolution window, matching the TUI's behavior in
+        pm_core/tui/pr_view.py."""
+        merge_cmd = next(cmd for label, cmd in _ALL_ACTIONS if label == "merge")
+        assert "--resolve-window" in merge_cmd
+        assert "{pr_id}" in merge_cmd
+
+    def test_run_picker_command_surfaces_stderr_on_failure(self):
+        """Direct-CLI dispatch from the popup must capture stderr and
+        re-emit it on non-zero exit so the user sees the failure
+        instead of an empty popup."""
+        fake_result = MagicMock(returncode=1, stdout="", stderr="boom: branch protected")
+        with patch("pm_core.cli.session.subprocess.run", return_value=fake_result) as run_mock, \
+             patch("pm_core.cli.session._wait_dismiss") as wait_mock, \
+             patch("pm_core.cli.session.click.echo") as echo_mock:
+            _run_picker_command("pr merge --resolve-window pr-123", "sess")
+
+        assert run_mock.called
+        # stderr must be captured (capture_output or stderr=PIPE)
+        kwargs = run_mock.call_args.kwargs
+        assert kwargs.get("capture_output") or kwargs.get("stderr") is not None
+        # Some echo call must include the captured stderr text
+        echoed = " ".join(
+            str(c.args[0]) if c.args else "" for c in echo_mock.call_args_list
+        )
+        assert "boom: branch protected" in echoed
+        assert wait_mock.called
+
+    def test_run_picker_command_silent_on_success(self):
+        """Successful direct-CLI dispatch should not block waiting for a
+        keypress (popup closes promptly)."""
+        fake_result = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("pm_core.cli.session.subprocess.run", return_value=fake_result), \
+             patch("pm_core.cli.session._wait_dismiss") as wait_mock:
+            _run_picker_command("pr start pr-123", "sess")
+        assert not wait_mock.called
