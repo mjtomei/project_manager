@@ -1087,9 +1087,8 @@ def cleanup_pr_containers(pr_id: str,
     removed: list[str] = []
     if candidates:
         with ThreadPoolExecutor(max_workers=min(len(candidates), 8)) as ex:
-            futures = {ex.submit(remove_container, c): c for c in candidates}
-            for cname in candidates:
-                fut = next(f for f, n in futures.items() if n == cname)
+            futures = [(c, ex.submit(remove_container, c)) for c in candidates]
+            for cname, fut in futures:
                 try:
                     fut.result()
                     removed.append(cname)
