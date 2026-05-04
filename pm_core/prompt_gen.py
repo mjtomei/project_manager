@@ -17,31 +17,78 @@ def _is_bug_pr(pr: dict) -> bool:
     return pr.get("plan") == "bugs" or pr.get("type") == "bug"
 
 
+def _touches_tui(pr: dict) -> bool:
+    """Heuristic for whether a PR is about the TUI.
+
+    Prompt generation runs at session start, before the workdir has any
+    changes, so we can't use a real diff.  Match PR title + description
+    text for `tui`, `textual`, or `pm_core/tui`.  False positives (e.g.
+    "intuitive") only mean a session sees a pointer to a manual-repro
+    file it doesn't need — cheap and harmless.
+    """
+    text = ((pr.get("title") or "") + " " + (pr.get("description") or "")).lower()
+    return any(k in text for k in ("tui", "textual", "pm_core/tui"))
+
+
+_BUG_FIX_TUI_BLOCK = """
+## TUI Repro Recipe (this bug touches the TUI)
+
+This bug touches the TUI, so the venv-install + tmux-drive recipe in
+`pm/qa/instructions/tui-manual-test.md` is the primary reproduction path.
+Read that file before writing a fix. Key points:
+
+- `pip install -e .` into a fresh venv and confirm with `pm which` that
+  you're running your clone (not `/opt/pm-src`).
+- Spin up a throwaway pm project, start a session, and drive it from
+  another terminal with `pm tui send` / `pm tui view`.
+- Reproduce the reported symptom against the pre-fix code first (see
+  step 2 of the Bug Fix Flow). If the symptom does not show up,
+  **stop and ask the user** — the reported behavior may have already
+  been fixed, or your theory of the bug may be wrong.
+"""
+
+
 _BUG_FIX_FLOW_BLOCK = """
-## Bug Fix Flow (reproduce → fix → verify → reconcile)
+## Bug Fix Flow (reproduce → confirm-on-pre-fix → fix → verify → reconcile)
 
 This PR is a bug fix. Follow this sequence rather than a feature-style
 implementation:
 
-1. **Reproduce** — Write or identify a failing test that demonstrates the
-   bug. The test must fail *for the right reason* (matching the reported
-   symptom) before you change any product code.
-   - If the bug involves Claude session behavior, prefer a Claude-guided
-     integration test using `FakeClaudeSession` (or the `fake-claude`
-     binary) so the reproduction is deterministic.
-   - For non-Claude bugs, a plain unit or integration test is fine.
-   - If the bug is genuinely untestable in code (e.g. a visual TUI
-     regression), record a manual repro in a PR note and, if appropriate,
-     a regression instruction file under `pm/qa/regression/`. The reviewer
-     will accept that as a substitute, but the substitute must exist.
+1. **Reproduce** — Demonstrate the bug deterministically before touching
+   product code. Pick the path that actually exercises the surface a user
+   hits:
+   - **TUI bugs** (anything under `pm_core/tui/` or affecting how the
+     Textual app renders / handles input) — follow
+     `pm/qa/instructions/tui-manual-test.md`: venv-install pm into a
+     throwaway project and drive it via `pm tui send` / `pm tui view`.
+     This is the primary path, not a fallback. A reactive/focus theory
+     that hasn't been observed in a real running TUI is not a reproduction.
+   - **Claude session behavior** — prefer a Claude-guided integration
+     test using `FakeClaudeSession` (or the `fake-claude` binary).
+   - **Other** — a plain unit or integration test that fails for the
+     right reason (matching the reported symptom).
+   - If the bug is genuinely untestable in code, record a manual repro
+     in a PR note and a regression instruction file under
+     `pm/qa/regression/`. Reviewer accepts the substitute, but the
+     substitute must exist.
 
-2. **Fix** — Implement the smallest change that addresses the root cause.
+2. **Confirm on pre-fix code** — Before applying any fix, verify the
+   reproduction *fails on the pre-fix code*. Concretely: `git stash` your
+   in-progress changes (or `git checkout <parent> -- <touched-files>`),
+   re-run the repro, and confirm it shows the reported symptom. If you
+   cannot reproduce on pre-fix code, **stop and ask the user** — say so
+   explicitly. Do not write a fix on top of an unreproduced bug; two
+   recent sessions burned cycles on plausible-but-unverified theories
+   that were later reverted.
+
+3. **Fix** — Implement the smallest change that addresses the root cause.
    Avoid drive-by refactors.
 
-3. **Verify** — Re-run the reproduction test to confirm it now passes.
-   Run any related suite to check for regressions.
+4. **Verify** — Re-run the reproduction to confirm it now passes (or, for
+   manual TUI repros, that the symptom is gone). Run any related suite
+   to check for regressions.
 
-4. **Reconcile** (verification-only, at session end) — Scan this PR's notes
+5. **Reconcile** (verification-only, at session end) — Scan this PR's notes
    (`pm pr note list <pr-id>` or read the PR Notes section above) for
    cross-references the discovery supervisor (`pr-271cb3a`) may have filed
    linking overlapping bug PRs. For each linked overlap:
@@ -234,6 +281,8 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
     bug_fix_block = _BUG_FIX_FLOW_BLOCK if _is_bug_pr(pr) else ""
+    if _is_bug_pr(pr) and _touches_tui(pr):
+        bug_fix_block += _BUG_FIX_TUI_BLOCK
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 

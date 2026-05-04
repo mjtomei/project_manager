@@ -68,3 +68,49 @@ def test_type_bug_field_also_triggers_flow():
                   "description": "broken"})
     p = prompt_gen.generate_prompt(data, "pr-z")
     assert "Bug Fix Flow" in p
+
+
+def test_bug_flow_references_tui_manual_test_file():
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken"})
+    p = prompt_gen.generate_prompt(data, "pr-x")
+    assert "pm/qa/instructions/tui-manual-test.md" in p
+
+
+def test_bug_flow_includes_pre_fix_repro_gate():
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken"})
+    p = prompt_gen.generate_prompt(data, "pr-x")
+    assert "Confirm on pre-fix code" in p
+    assert "git stash" in p
+
+
+def test_touches_tui_detects_keywords():
+    assert prompt_gen._touches_tui({"title": "Fix TUI bug", "description": ""})
+    assert prompt_gen._touches_tui({"title": "x", "description": "Textual focus"})
+    assert prompt_gen._touches_tui({"title": "x",
+                                    "description": "in pm_core/tui/app.py"})
+    assert not prompt_gen._touches_tui({"title": "Fix CLI", "description": "bug"})
+
+
+def test_tui_bug_pr_gets_tui_repro_block():
+    data = _data({"id": "pr-tui", "title": "TUI focus regression",
+                  "plan": "bugs", "description": "broken"})
+    p = prompt_gen.generate_prompt(data, "pr-tui")
+    assert "TUI Repro Recipe" in p
+    assert "pm/qa/instructions/tui-manual-test.md" in p
+
+
+def test_non_tui_bug_pr_omits_tui_repro_block():
+    data = _data({"id": "pr-cli", "title": "CLI argparse bug",
+                  "plan": "bugs", "description": "broken"})
+    p = prompt_gen.generate_prompt(data, "pr-cli")
+    assert "TUI Repro Recipe" not in p
+
+
+def test_tui_feature_pr_omits_tui_repro_block():
+    data = _data({"id": "pr-feat", "title": "TUI new feature",
+                  "description": "add a thing"})
+    p = prompt_gen.generate_prompt(data, "pr-feat")
+    assert "TUI Repro Recipe" not in p
+    assert "Bug Fix Flow" not in p
