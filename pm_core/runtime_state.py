@@ -143,6 +143,19 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                     if not isinstance(cur, dict):
                         cur = {}
                     if state is not None:
+                        prior_state = cur.get("state")
+                        # A fresh launch of this action invalidates any
+                        # suppress_switch flag set by a prior, now-orphaned
+                        # invocation: the flag's meaning is "the user
+                        # dismissed the *current* invocation's popup", and
+                        # a new invocation has just begun. Detect by
+                        # transitioning into launching/running from a state
+                        # other than launching/running.
+                        if (state in ("launching", "running")
+                                and prior_state not in ("launching", "running")
+                                and "suppress_switch" not in extras
+                                and cur.get("suppress_switch")):
+                            cur.pop("suppress_switch", None)
                         cur["state"] = state
                         cur.setdefault("started_at", _now_iso())
                     for k, v in extras.items():
