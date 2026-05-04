@@ -1110,7 +1110,7 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
 
     # Split horizontally with an interactive shell in the workdir
     shell = os.environ.get("SHELL", "/bin/bash")
-    companion_cmd = f"cd '{workdir}' && exec {shell}"
+    companion_cmd = f"cd {shell_quote(workdir)} && exec {shell}"
     companion_pane = tmux_mod.split_pane_at(claude_pane, "h", companion_cmd,
                                              background=True)
 
