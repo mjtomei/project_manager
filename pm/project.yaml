@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-cfe24ea
+  active_pr: pr-f74988c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13121,7 +13121,7 @@ prs:
   title: 'Picker actions: open shell, impl spec, or QA spec pane in the current window
     for the selected PR'
   branch: pm/pr-cfe24ea-picker-action-open-shell-pane-in-current-window-cd
-  status: in_progress
+  status: in_review
   depends_on: []
   description: "Add three new action keys to the prefix+P picker, each opening a new\
     \ tmux pane *in the current window* targeting the highlighted PR. The shell shortcut\
@@ -13169,9 +13169,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/195
   gh_pr_number: 195
   created_at: '2026-05-04T14:20:49.261555+00:00'
-  updated_at: '2026-05-04T17:51:45.692159+00:00'
+  updated_at: '2026-05-04T19:01:36.956517+00:00'
   started_at: '2026-05-04T17:51:45.692159+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-04T19:01:36.956517+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfe24ea-picker-action-open-shell-pane-in-cur-563aedc0
@@ -14024,7 +14024,7 @@ prs:
   title: 'Improvement: prefix+M command popup becomes a scrollable shell with persistent
     history shared with the TUI command bar'
   branch: pm/pr-3526677-improvement-prefix-m-command-popup-becomes-a-scrol
-  status: pending
+  status: in_review
   depends_on: []
   description: '## Goal
 
@@ -14183,21 +14183,22 @@ prs:
 
     - Concurrent prefix+M from two attached clients → both append to the same file
     without corruption (file-lock test).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/198
+  gh_pr_number: 198
   created_at: '2026-05-04T16:52:29.746985+00:00'
-  updated_at: '2026-05-04T17:25:28.776217+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-04T19:01:37.495672+00:00'
+  started_at: '2026-05-04T17:52:29.154111+00:00'
+  reviewed_at: '2026-05-04T19:01:37.495672+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3526677-improvement-prefix-m-command-popup-b-1d7ca7a5
 - id: pr-438028c
   plan: improvements
   title: Remove popup-cmd carve-outs by giving 'pr qa' and 'review-loop start' real
     CLI window management
   branch: pm/pr-438028c-remove-popup-cmd-carve-outs-by-giving-pr-qa-and-re
-  status: pending
+  status: in_progress
   depends_on:
   - pr-fcaa434
   description: "## Goal\nEliminate the two special-case routing branches in `popup_cmd_cmd`\
@@ -14269,21 +14270,22 @@ prs:
     \ _launch_review_window) — the per-container-name lock from the updated note keeps\
     \ the new CLI-level launcher safe under concurrent invocation.\n- pr-3526677 (scrollable\
     \ popup with history) — independent surface change, not blocked by this."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/199
+  gh_pr_number: 199
   created_at: '2026-05-04T16:53:21.828066+00:00'
-  updated_at: '2026-05-04T16:54:56.040732+00:00'
-  started_at: null
+  updated_at: '2026-05-04T17:52:37.122779+00:00'
+  started_at: '2026-05-04T17:52:37.122779+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-438028c-remove-popup-cmd-carve-outs-by-givin-1d7ca7a5
 - id: pr-e5b4dd8
   plan: improvements
   title: 'Improvement: window-attached persistent Claude popup for ad-hoc diagnostics
     outside the container'
   branch: pm/pr-e5b4dd8-improvement-window-attached-persistent-claude-popu
-  status: pending
+  status: in_review
   depends_on: []
   description: '## Goal
 
@@ -14386,21 +14388,22 @@ prs:
     - Switch back, press binding → original session reappears with prior conversation.
 
     - Close the original window → its session terminates; map entry cleaned up.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/197
+  gh_pr_number: 197
   created_at: '2026-05-04T17:20:29.220513+00:00'
-  updated_at: '2026-05-04T17:20:29.220513+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-04T19:01:38.567735+00:00'
+  started_at: '2026-05-04T17:52:21.762961+00:00'
+  reviewed_at: '2026-05-04T19:01:38.567735+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e5b4dd8-improvement-window-attached-persiste-1d7ca7a5
 - id: pr-fe4ca5d
   plan: improvements
   title: 'Improvement: prefix-key plan picker popup with single-key plan actions and
     horizontal scroll'
   branch: pm/pr-fe4ca5d-improvement-prefix-key-plan-picker-popup-with-sing
-  status: pending
+  status: in_review
   depends_on:
   - pr-fcaa434
   description: "## Goal\nAdd a popup picker for plans, modeled on the existing PR\
@@ -14449,11 +14452,183 @@ prs:
     \ popup closes.\n- With more plans than popup rows, scroll down to one not initially\
     \ visible → press `r` → action runs against the highlighted plan, not the original\
     \ top one.\n- Filter via / and run an action → still works."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/196
+  gh_pr_number: 196
+  created_at: '2026-05-04T17:20:58.908941+00:00'
+  updated_at: '2026-05-04T19:01:38.024215+00:00'
+  started_at: '2026-05-04T17:52:14.172608+00:00'
+  reviewed_at: '2026-05-04T19:01:38.024215+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fe4ca5d-improvement-prefix-key-plan-picker-p-1d7ca7a5
+- id: pr-f74988c
+  plan: improvements
+  title: 'Improvement: pm pr start auto-commits the PR''s project.yaml entry on master
+    if not yet committed'
+  branch: pm/pr-f74988c-improvement-pm-pr-start-auto-commits-the-pr-s-proj
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+    When `pm pr start <pr_id>` fails the ''not committed on master yet'' check (pm_core/cli/pr.py:858-886),
+    automatically build a small isolated commit on master containing **just that PR''s
+    row** in project.yaml and try to push it, instead of erroring out and asking the
+    user to run `pm push` manually. If the auto-commit or push fails, fall through
+    to today''s error.
+
+
+    Concurrent invocations are force-serialized through a process-wide lock so multiple
+    agents firing `pm pr start` at the same time can''t race on the project.yaml commit
+    and produce churn / merge conflicts.
+
+
+    ## Why
+
+    The error is useful but mostly costs friction. The PR exists in the local project.yaml
+    — the user (or watcher / agent) just hasn''t run `pm push` yet. That manual step
+    is the main thing today that makes ''in_progress'' feel like a gate even though
+    the surrounding commands (`pr review`, `pr qa`, `pr merge`) are themselves the
+    transitions, not gates.
+
+
+    Removing this friction also has a secondary benefit: the smaller-than-pm-push
+    commit scope (one PR''s row only) is safer to auto-create than the broader `pm
+    push` commit could be.
+
+
+    ## Behavior
+
+
+    In `pr_start` at the spot where today we error:
+
+
+    1. Detect ''PR exists in working project.yaml but not committed on base_branch''.
+
+    2. Verify the PR''s referenced plan (if any) is **already committed on base_branch**.
+    If the plan isn''t committed yet, **don''t** include it in the auto-commit — fall
+    through to today''s error and let the user run `pm push` to land the plan + PR
+    together. Auto-commit''s contract is *one PR row, no other content*.
+
+    3. Acquire a process-wide lock on `~/.pm/sessions/<tag>/yaml-commit.lock` (file-lock
+    via `fcntl.flock`, blocking with a 30s deadline). All concurrent `pm pr start`
+    invocations within the same session serialize on this lock so they take turns
+    rather than racing into push conflicts.
+
+    4. Inside the lock: re-read base_branch''s project.yaml (state may have changed
+    while we waited). If the PR is now present on base_branch, release lock and skip
+    to step 8.
+
+    5. Build a synthetic project.yaml that copies the committed version and adds *only*
+    this one PR''s working entry. No plan additions, no other PR additions, no status
+    changes to other PRs, no metadata fields beyond what `pm pr add` originally wrote.
+    The smallest possible diff: one new entry under the `prs:` list.
+
+    6. Verify the diff is exactly that — exclusively additive, exclusively within
+    the `prs:` list, exactly one new entry. Bail (release lock, fall through to error)
+    on any unexpected difference.
+
+    7. Commit on a fresh branch from base_branch tip with message `pm: add <pr_id>
+    entry on <base_branch>`, push, fast-forward base_branch locally.
+
+    8. Release the lock and continue with the original `pr_start` flow.
+
+
+    If any step fails (commit conflict, push rejection mid-lock, dirty working tree
+    we don''t want to touch, network error, plan not committed), release the lock
+    and surface a clear error: ''Auto-commit failed (<reason>); run `pm push` manually
+    to commit project state.'' Do not leave half-applied state behind.
+
+
+    ## Lock semantics
+
+    - Path: `~/.pm/sessions/<tag>/yaml-commit.lock`. Per-session so concurrent runs
+    in different projects don''t block each other.
+
+    - Acquired via `fcntl.flock(fd, LOCK_EX)` with a 30-second timeout (raise / fall
+    through if exceeded).
+
+    - Released on completion or on any error path inside the locked block.
+
+    - Independent of pr-fc6db6a''s per-container-name lock and pr-438028c''s loop-daemon
+    pidfiles; separate file at separate path.
+
+
+    ## Edge cases
+
+
+    - Plan referenced by the PR isn''t on master yet → fall through to today''s error.
+    Don''t try to be clever and bundle the plan; that grows the auto-commit''s scope
+    and risks landing plan content the user hasn''t reviewed.
+
+    - Working tree has uncommitted changes to project.yaml *other than* this PR''s
+    row → unchanged in the working tree; the synthetic commit pulls only the one new
+    PR entry.
+
+    - Working tree has uncommitted changes to non-yaml files → untouched.
+
+    - base_branch advanced remotely while we held the lock → fetch and rebase the
+    synthetic commit onto the new tip; if rebase fails, release lock and error.
+
+    - Concurrent `pm pr start` calls for two different PRs → each acquires the lock
+    in turn, sees the other''s commit on base_branch when it re-reads, and either
+    commits its own row on top or no-ops if its row was somehow already added.
+
+    - Repo backend = local → skip push, still create the commit on base_branch under
+    the same lock.
+
+
+    ## Out of scope
+
+
+    - Auto-committing on `pm pr add`. Users often add several PRs in a session before
+    any is ready to start. Keep manual.
+
+    - Auto-committing plan additions. Bundling plan content widens the commit''s blast
+    radius and crosses the ''one row, no other content'' contract. Plans land via
+    `pm push` as today.
+
+    - Auto-committing other yaml edits (status changes, dependencies, notes). Those
+    go through `pm push`.
+
+    - Cross-host coordination via the lock. fcntl.flock is per-host; cross-host racers
+    fall through to the existing push-rejection error path.
+
+
+    ## Code paths
+
+    - pm_core/cli/pr.py:858-886 — replace the click.echo + SystemExit with a call
+    to a new helper, e.g. `pm_core/store_commit.commit_pr_entry_on_base(base_branch,
+    pr_id) -> bool`.
+
+    - pm_core/store_commit.py (new) — encapsulates the synthetic-commit-and-push logic
+    plus the file-lock acquisition; reusable from any future caller that wants to
+    land a single PR''s row.
+
+
+    ## Test
+
+    - pm pr start on a PR that exists in working yaml only with its plan already committed
+    → auto-commits the PR row and starts; `git log` shows a one-line yaml diff.
+
+    - pm pr start on a PR whose plan isn''t committed yet → falls through to today''s
+    error (no auto-commit attempted).
+
+    - Two concurrent pm pr start invocations for two different PRs → both succeed,
+    base_branch ends up with two clean single-row commits, no rejection.
+
+    - pm pr start when push is rejected → falls through to today''s error.
+
+    - pm pr start with backend=local → commit lands locally, no push.
+
+    - pm pr start on a PR not in working yaml → unchanged ''not found'' error.
+
+    - Lock timeout: simulated stuck holder → clear error after 30s, no hang.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-04T17:20:58.908941+00:00'
-  updated_at: '2026-05-04T17:20:58.908941+00:00'
+  created_at: '2026-05-04T19:50:22.167828+00:00'
+  updated_at: '2026-05-04T19:52:10.043784+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
