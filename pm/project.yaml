@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-48cb564
+  active_pr: pr-7b3b639
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8205,7 +8205,7 @@ prs:
   plan: bugs
   title: Fix pr select not scrolling selected PR into view in TUI
   branch: pm/pr-177dec0-fix-pr-select-not-scrolling-selected-pr-into-view-
-  status: in_progress
+  status: in_review
   depends_on: []
   description: When using the pr select command (e.g. from the command bar), the TUI
     updates the selected PR but does not scroll the tech tree to bring it into view.
@@ -8217,9 +8217,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/157
   gh_pr_number: 157
   created_at: '2026-04-06T19:18:52.240715+00:00'
-  updated_at: '2026-05-03T11:55:48.161143+00:00'
+  updated_at: '2026-05-04T12:32:22.801526+00:00'
   started_at: '2026-04-06T19:20:59.040562+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-04T12:32:22.801526+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-f6381eb7
@@ -11884,7 +11884,7 @@ prs:
   plan: bugs
   title: Cleanup leaves QA/review loop state stale and stops containers sequentially
   branch: pm/pr-0c530e1-cleanup-leaves-qa-review-loop-state-stale-and-stop
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'After `yt` (cleanup-then-QA), the QA loop''s persistent state (`~/.pm/runtime/pr-<id>.json`)
     is not cleared. The follow-up QA action re-attaches to stale state, surfacing
@@ -11928,10 +11928,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/185
   gh_pr_number: 185
   created_at: '2026-05-03T16:30:50.168588+00:00'
-  updated_at: '2026-05-04T11:58:27.973081+00:00'
+  updated_at: '2026-05-04T12:45:13.996659+00:00'
   started_at: '2026-05-04T11:48:35.746772+00:00'
-  reviewed_at: null
-  merged_at: null
+  reviewed_at: '2026-05-04T12:37:26.838830+00:00'
+  merged_at: '2026-05-04T12:45:13.996659+00:00'
   notes:
   - id: note-b3316e9
     text: 'From another agent''s investigation: the same root cause that motivates
@@ -12873,7 +12873,7 @@ prs:
   plan: bugs
   title: 'Bug: popup hangs after ''pr start <new-pr>'' even though impl window opens'
   branch: pm/pr-7b3b639-bug-popup-hangs-after-pr-start-new-pr-even-though-
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'When prefix+M opens the popup and the user types ''pr start <pr_id>''
     for a PR that has not yet been started, the implementation window opens correctly
@@ -12932,15 +12932,16 @@ prs:
     to ''pr start <new-pr-id>\n'' and asserts the process exits within a bounded time;
     integration test that runs prefix+M against a fresh pm test session and asserts
     the popup closes after a successful pr start.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/186
+  gh_pr_number: 186
   created_at: '2026-05-04T11:56:53.121732+00:00'
-  updated_at: '2026-05-04T11:56:53.121732+00:00'
-  started_at: null
+  updated_at: '2026-05-04T12:49:14.138985+00:00'
+  started_at: '2026-05-04T12:49:14.138985+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7b3b639-bug-popup-hangs-after-pr-start-new-p-ae8aa651
 - id: pr-7fe2588
   plan: bugs
   title: 'Bug: popup should close on Ctrl+C / Esc regardless of body state'
@@ -13128,6 +13129,309 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-04T12:02:52.811047+00:00'
   updated_at: '2026-05-04T12:02:52.811047+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c3bf868
+  plan: bugs
+  title: 'Bug: stale TUI pidfile lets picker / reload IPC silently target a dead or
+    wrong process'
+  branch: pm/pr-c3bf868-bug-stale-tui-pidfile-lets-picker-reload-ipc-silen
+  status: pending
+  depends_on: []
+  description: 'The TUI''s pidfile (~/.pm/tui-<session>.pid) drives two IPC paths
+    today: SIGUSR1 (reload, from pr-2173cf1) and SIGUSR2 (command queue, added later).
+    Both look up the target PID by reading the pidfile, then os.kill it with the relevant
+    signal. The flow assumes the pidfile points at a live TUI that knows how to handle
+    the signal it''s about to receive. Three real-world failure modes break this assumption
+    — all observed in a single debugging session today.
+
+
+    (1) **Signal/handler version skew (the killer one).** The TUI process running
+    today was started before the SIGUSR2 handler code merged. Its loaded module has
+    only the SIGUSR1 handler installed; it has no SIGUSR2 handler. SIGUSR2''s default
+    action when unhandled is terminate. The picker sent SIGUSR2 to it at 05:22:56,
+    the kernel signaled it dead, no traceback because no Python exception was involved.
+    The user noticed the dead pane and pm-respawned the TUI at 05:31:04 — the new
+    TUI logs both handlers (''Installed SIGUSR1 reload + SIGUSR2 cmd-queue handlers'')
+    confirming the old one had only SIGUSR1. Class of problem: any long-running TUI
+    process predating a new signal handler will be killed by callers that send that
+    signal.
+
+
+    (2) **Stale pidfile from a crashed / SIGKILL''d predecessor.** If a TUI wrote
+    the pidfile and died without graceful shutdown (or — like the case above — was
+    killed by a signal it didn''t handle), the file stays. The next caller signals
+    a dead PID. trigger_tui_command''s ProcessLookupError path *does* clean up here,
+    but only if the kill genuinely fails. With PID reuse, the kill ''succeeds'' —
+    see (3).
+
+
+    (3) **PID reuse.** On a long-uptime box, the dead TUI''s PID gets reassigned to
+    an unrelated process. SIGUSR1 / SIGUSR2 lands on that other process, which either
+    ignores it (silent failure) or is killed by it (collateral damage). The picker
+    spins on ''queued…'' forever.
+
+
+    Concrete repro from today: review-loop action triggered from prefix+P picker for
+    pr-177dec0 enqueued the command at ~/.pm/tui-pm-project_manager-c5a1006b.cmd-queue
+    and called trigger_tui_command, which signaled the pidfile''s PID (1620979). That
+    TUI predated the SIGUSR2 handler — SIGUSR2 terminated it. The picker spun on ''review-loop:
+    queued…'' forever because no live TUI ever drained the queue.
+
+
+    Fix has three pieces:
+
+
+    **Versioned pidfile / capability check (closes mode 1).** Pidfile becomes more
+    than just a number — store JSON like {pid: 1234, started_at: ..., caps: [''sigusr1'',
+    ''sigusr2'', ...]}. The TUI writes its current capabilities at startup. trigger_tui_command
+    and trigger_tui_reload both check that the relevant cap is present before signaling.
+    If the cap is missing (older TUI), the caller surfaces ''this TUI predates the
+    cmd-queue feature; restart the TUI to use it'' — never sends the signal. New TUIs
+    always advertise their full set; old TUIs implicitly have an empty caps list and
+    are signal-protected.
+
+
+    **TUI-side pidfile takeover (closes mode 2).** On startup, before installing handlers,
+    take exclusive ownership of the pidfile. If the file exists with a live PID *and*
+    /proc/<pid>/cmdline indicates a pm TUI, refuse to start (another TUI owns this
+    session) — print a clear error and exit. Otherwise atomically write our own descriptor.
+
+
+    **Caller-side cmdline validation (closes mode 3).** trigger_tui_command and trigger_tui_reload
+    validate /proc/<pid>/cmdline contains the TUI marker before signaling. On any
+    of (file missing, parse error, PID dead, PID alive but wrong cmdline), treat as
+    ''no TUI available'' — return False, remove the stale pidfile, let the caller
+    surface the error. Picker''s _wait_for_tui_command aborts the spinner with a clear
+    message rather than spinning indefinitely.
+
+
+    Defensive bonus: the SIGUSR2 handler itself can also be installed unconditionally
+    (even if cmd-queue logic isn''t fully wired yet) so that a no-op handler protects
+    the TUI from the default-terminate semantics during version-skew windows. Cheap
+    insurance and decouples ''handler exists'' from ''handler does work'', so future
+    signals can be added safely.
+
+
+    Files: pm_core/tui/app.py (versioned pidfile descriptor, exclusive takeover at
+    startup, no-op SIGUSR* handler bootstrap), pm_core/cli/helpers.py (trigger_tui_command
+    / trigger_tui_reload — read JSON pidfile, validate caps + cmdline, fail gracefully),
+    pm_core/cli/session.py (picker''s _wait_for_tui_command — abort on validation
+    failure with a useful message).
+
+
+    Tests: TUI startup with a stale pidfile (PID dead) takes over cleanly; TUI startup
+    refuses when an actual sibling TUI owns the same session; trigger_tui_command
+    returns False and removes the stale pidfile when PID is dead or cmdline mismatches;
+    signaling a TUI that lacks the requested capability fails fast with a ''restart
+    the TUI'' message rather than killing it; TUI without yet-implemented signal handlers
+    still doesn''t terminate when poked (the no-op bootstrap covers it); picker shows
+    a useful error when trigger_tui_command returns False instead of spinning forever.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T12:31:09.535902+00:00'
+  updated_at: '2026-05-04T12:33:34.183770+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bc010f4
+  plan: bugs
+  title: 'Bug: create_container fails on name collision instead of reusing or recreating'
+  branch: pm/pr-bc010f4-bug-create-container-fails-on-name-collision-inste
+  status: pending
+  depends_on: []
+  description: 'create_container in pm_core/container.py fails with ''name is in use:
+    container already exists'' when a container of the requested name exists, regardless
+    of whether the existing container is actually serving anyone. This trips on a
+    common failure mode: a previous attempt to start a session was interrupted (TUI
+    killed mid-launch, podman run completed but the wrapper crashed before exec, etc.),
+    leaving an orphan container in ''Created'' or ''Exited'' state with no live process
+    attached. The next attempt to start the same session sees the orphan and refuses,
+    with a misleading error blaming podman.
+
+
+    Concrete repro from today: running review-loop for pr-177dec0 failed with rc=125
+    ''name pm-review-pr-177dec0 is in use''. podman ps -a showed the container in
+    ''Created'' state — never actually ran. Manual ''podman rm -f pm-review-pr-177dec0''
+    followed by retry succeeded.
+
+
+    The orphan was almost certainly the correct container for this session — same
+    name, same image, same workdir mount — just half-built. So two reasonable behaviors:
+
+
+    (1) **Reuse if safely-correct.** Inspect the existing container; if its image,
+    workdir mount, and relevant env vars match what we''d create, just docker start
+    (or podman start) it. Most precise; preserves any work-in-progress state. Downside:
+    requires careful inspect comparison and exposes us to subtle drift if the session
+    config changed between attempts.
+
+
+    (2) **Force-recreate when not in use.** If the existing container is in ''Created''
+    or ''Exited'' state (no live process), ''podman rm -f <name>'' first, then run.
+    If it''s ''Up'' (something is actually using it), error clearly with a useful
+    message naming the running container and suggesting cleanup. Simpler, catches
+    the common case (interrupted previous attempt), and matches the user''s preference.
+
+
+    Recommendation: ship (2) as the fast fix. (1) is a nicer follow-up if reuse turns
+    out to matter.
+
+
+    Concretely: in container.py:create_container, before the ''podman run'' attempt,
+    run ''podman inspect --format "{{.State.Status}}" <name>''. If it returns a status
+    indicating not-running (''created'', ''exited'', ''dead'', ''configured''), ''podman
+    rm -f <name>'' and proceed. If it returns ''running'' or ''up'', raise a clear
+    ContainerError naming the conflict and suggesting ''pm container cleanup'' to
+    investigate. If the inspect returns no-such-container, proceed normally.
+
+
+    Files: pm_core/container.py (create_container preflight check; helper to query
+    container status). Tests: orphan in Created state is removed and recreate succeeds;
+    orphan in Exited state same; existing Running container produces a clear error
+    rather than the cryptic ''name in use'' subprocess failure; race between two concurrent
+    create_container calls for the same name produces one winner and one clear error
+    rather than corruption.
+
+
+    Cross-reference: pr-748e708 (push-proxy keyed by session_tag+pr_id collisions)
+    is a similar identity-collision class for a different resource. The shape of the
+    fix is similar — detect, decide reuse vs replace, give a clear error if neither
+    works.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T12:35:56.159231+00:00'
+  updated_at: '2026-05-04T12:35:56.159231+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6553192
+  plan: bugs
+  title: 'Bug: suppress-switch flag leaks across action invocations when consume only
+    happens inside picker'
+  branch: pm/pr-6553192-bug-suppress-switch-flag-leaks-across-action-invoc
+  status: pending
+  depends_on: []
+  description: 'request_suppress_switch / consume_suppress_switch in pm_core/runtime_state.py
+    manage a per-(pr_id, action) flag that tells callers to skip the post-launch focus
+    switch when the user has explicitly dismissed the popup (q/Esc). Today the flag
+    is *set* in the picker spinner when the user dismisses (session.py:1363) and *consumed*
+    in the same picker spinner when the target window appears (session.py:1328). That
+    works only when the action''s lifecycle stays inside one picker invocation.
+
+
+    The leak: if the user dismissed a popup spinner for action X (flag set), then
+    triggered action X *a different way* — e.g. TUI keybinding, or a fresh popup invocation
+    that exited before reaching the spinner — the flag was never consumed. The next
+    time anything checks consume_suppress_switch for that (pr_id, action), it sees
+    the stale True and skips the focus switch even though the user''s intent for *this*
+    invocation was to focus.
+
+
+    Concrete repro: user pressed prefix+P, triggered an action, pressed q on the spinner
+    (flag set). Later in a different window, pressed zzd (TUI keybinding) for the
+    same PR. The expected focus switch to the review window did not happen. Pressing
+    zzd again worked because by then the flag had been cleared by some other path.
+    Inconsistent and hard to reason about.
+
+
+    Fix: clear suppress-switch when the action''s window actually opens, not just
+    from inside the picker spinner. The natural hook is set_action_state — when transitioning
+    to ''launching'' or ''running'' (a fresh launch of this action), clear any pending
+    suppress_switch for the same (pr_id, action). That covers every entry point: picker
+    spinner, TUI keybinding, auto-start, watcher-triggered, ad-hoc CLI. The flag''s
+    purpose is ''the user dismissed the *current* invocation''s popup''; once a new
+    invocation begins, the flag is necessarily stale.
+
+
+    Concretely: in runtime_state.set_action_state, if the new state is ''launching''
+    or ''running'' and the prior state was anything else (including absent), call
+    _clear_suppress_switch as part of the same write. Single-place fix; no changes
+    needed at call sites.
+
+
+    Files: pm_core/runtime_state.py (set_action_state hook to clear suppress_switch
+    on transition to launching/running). Tests: dismissing a popup sets the flag;
+    opening a fresh action window for the same PR clears it; subsequent action invocations
+    switch focus normally; the flag still works inside a single picker invocation
+    (set when user dismisses, consumed when window opens, no surprise pre-clear).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T12:41:11.689063+00:00'
+  updated_at: '2026-05-04T12:41:11.689063+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b56e079
+  plan: bugs
+  title: 'Bug: picker-driven ''pr merge'' swallows errors and doesn''t launch merge-resolve
+    window'
+  branch: pm/pr-b56e079-bug-picker-driven-pr-merge-swallows-errors-and-doe
+  status: pending
+  depends_on: []
+  description: "Two related issues observed when running 'merge' from the prefix+P\
+    \ action picker on a PR (concrete repro: pr-177dec0 / #157). Same flow on a different\
+    \ PR (#185) worked because that PR had no error and didn't need the resolve window.\
+    \ The picker's merge dispatch is silently incomplete in both directions — error\
+    \ path hidden, conflict path missing.\n\n(1) Errors from the merge subprocess\
+    \ get swallowed because the popup closes immediately when the subprocess exits.\n\
+    \nThe picker's direct-CLI dispatch in pm_core/cli/session.py:1442-1445 does call\
+    \ _wait_dismiss when result.returncode != 0, so in principle errors are visible.\
+    \ But in practice the user reports the popup vanished without showing anything\
+    \ readable. Likely culprits:\n\n  (a) 'pm pr merge' returned 0 even though the\
+    \ merge itself failed (e.g. printed an error to stdout/stderr and exited 0 because\
+    \ merging needs a resolve window — see issue 2).\n  (b) The error was printed\
+    \ to a stream that got swallowed by display-popup -E's terminal buffering.\n\n\
+    Fix: any non-zero exit from the picker's CLI dispatch should _wait_dismiss as\
+    \ today, but ALSO show stderr explicitly (today subprocess.run inherits stderr\
+    \ to the popup's tty, but if the popup is in raw mode the bytes may not render\
+    \ correctly). And subprocess invocations should be reviewed to ensure they exit\
+    \ non-zero on failures that the user needs to see — particularly 'pm pr merge'\
+    \ when it can't auto-resolve.\n\n(2) Picker-driven merge doesn't launch the resolve\
+    \ window when the merge needs one. TUI-driven merge does.\n\nThe TUI's merge action\
+    \ calls 'pm pr merge --resolve-window <pr_id>' (and similar flags) which causes\
+    \ pm to launch a Claude session in a new tmux window to resolve conflicts. The\
+    \ picker dispatches plain 'pm pr merge {pr_id}' (session.py:877) without --resolve-window,\
+    \ so when the merge encounters a conflict (or needs the post-merge propagation\
+    \ step), the subprocess prints a message and exits — no Claude session launches\
+    \ to handle the resolution.\n\nFix: any pm command invoked from inside the tmux\
+    \ session — picker, popup-cmd shell, or shell-pane CLI — should default to behaviors\
+    \ that match the TUI's invocation when those behaviors require tmux. Specifically:\
+    \ the picker's merge entry should pass --resolve-window. More generally, the in-tmux\
+    \ dispatch path should set a 'tmux-aware' flag that pm sub-commands consume to\
+    \ enable window-launching auto-resolve flows. This matches the user's intent:\
+    \ 'commands run from inside the tmux session in shells or in the picker should\
+    \ behave similar to running commands in the command bar in the tui.'\n\nConcretely:\n\
+    \n- session.py:877 ACTIONS['merge'] becomes 'pr merge --resolve-window {pr_id}'\
+    \ (or even better, --background --resolve-window if the picker's wait-for-window\
+    \ logic should drive the focus switch).\n- Add an environment variable PM_IN_TMUX_SESSION=1\
+    \ set whenever pm runs under TMUX (already implicit via /tmp/tmux-1000/default,1620978,12);\
+    \ pm sub-commands that have --tmux-aware behaviors auto-enable when set, so any\
+    \ CLI invocation inside the session gets parity with the TUI command bar.\n- _popup-picker's\
+    \ direct-CLI dispatch surfaces stderr clearly on failure: capture it, _wait_dismiss\
+    \ with the captured text, prefix with 'pm error:' so the user knows what to look\
+    \ at.\n\nFiles: pm_core/cli/session.py (ACTIONS table + _popup-picker direct-CLI\
+    \ error rendering), pm_core/cli/pr.py (merge command — ensure non-zero on actual\
+    \ failure), pm_core/wrapper.py (set PM_IN_TMUX_SESSION when /tmp/tmux-1000/default,1620978,12\
+    \ is set, propagate to subcommands).\n\nTests: simulate a pr merge that needs\
+    \ --resolve-window — verify the picker invocation launches the window same as\
+    \ the TUI invocation; simulate a pr merge that errors (e.g. branch protection\
+    \ rejection) — verify the picker shows the error and waits for keypress before\
+    \ closing; running 'pm pr merge' from a shell inside the tmux session has identical\
+    \ observable behavior to running the same from the TUI command bar."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T12:48:23.584952+00:00'
+  updated_at: '2026-05-04T12:48:23.584952+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
