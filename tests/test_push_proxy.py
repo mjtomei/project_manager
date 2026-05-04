@@ -278,6 +278,33 @@ class TestPushProxyLifecycle:
     def test_stop_nonexistent_is_noop(self):
         stop_push_proxy("nonexistent-container")  # Should not raise
 
+    def test_proxy_subprocess_does_not_inherit_stdin(self, tmp_path):
+        """Detached proxy daemon must redirect stdin to /dev/null.
+
+        Otherwise it inherits its parent's FD 0 — when the parent is a tmux
+        popup pty (`display-popup -E pm _popup-cmd`), the popup overlay
+        cannot close until every FD on the pty closes, so the long-lived
+        proxy daemon hangs the popup indefinitely. See pr-7b3b639.
+        """
+        from pm_core.push_proxy import _start_proxy_subprocess
+
+        sock = str(tmp_path / "push.sock")
+        with patch("pm_core.push_proxy.subprocess.Popen") as mock_popen, \
+             patch("pm_core.push_proxy.proxy_is_alive", return_value=True), \
+             patch("pm_core.push_proxy.os.path.exists", return_value=True):
+            mock_popen.return_value = MagicMock(pid=12345)
+            _start_proxy_subprocess(sock, "/workdir", "pm/pr-x")
+
+        assert mock_popen.called
+        kwargs = mock_popen.call_args.kwargs
+        assert kwargs.get("stdin") is subprocess.DEVNULL, (
+            "proxy daemon must not inherit popup pty stdin "
+            "(would hang display-popup -E)"
+        )
+        assert kwargs.get("stdout") is subprocess.DEVNULL
+        assert kwargs.get("stderr") is subprocess.DEVNULL
+        assert kwargs.get("start_new_session") is True
+
     def test_container_socket_path(self):
         assert container_socket_path() == _CONTAINER_SOCKET_PATH
         assert container_socket_path() == "/run/pm-push-proxy/push.sock"
