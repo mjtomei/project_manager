@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f5b7eef
+  active_pr: pr-49ce773
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13408,7 +13408,7 @@ prs:
   title: 'Improvement: dedicated ''pr list'' tmux window that becomes the auto-target
     when other windows close'
   branch: pm/pr-f5b7eef-improvement-dedicated-pr-list-tmux-window-that-bec
-  status: pending
+  status: in_review
   depends_on: []
   description: "## Goal\nProvide a long-lived tmux window that displays `pm pr list\
     \ -t --open` (most-recently-updated open PRs), and use it as the *destination*\
@@ -13473,11 +13473,180 @@ prs:
     \ set a client's last-window pre-kill.\n- Audit `tmux.kill_window` callers in\
     \ pm_core/ to invoke `home_window.ensure_and_park` where the user might be on\
     \ the killed window.\n- Settings: add `home-window-provider` (default `pr-list`)."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/193
+  gh_pr_number: 193
+  created_at: '2026-05-04T14:41:10.397036+00:00'
+  updated_at: '2026-05-04T15:27:23.137013+00:00'
+  started_at: '2026-05-04T14:43:46.387391+00:00'
+  reviewed_at: '2026-05-04T15:27:23.137013+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f5b7eef-improvement-dedicated-pr-list-tmux-w-0e2bc17a
+- id: pr-66bb520
+  plan: improvements
+  title: 'Improvement: pm pr list --actions shows action-key hints for each PR (enabled
+    by default in home window)'
+  branch: pm/pr-66bb520-improvement-pm-pr-list-actions-shows-action-key-hi
+  status: pending
+  depends_on:
+  - pr-f5b7eef
+  description: "## Goal\nMake `pm pr list` optionally surface the same action keybindings\
+    \ used by the picker (`s/e/d/t/g` plus `z` / `zz` modifiers), shown alongside\
+    \ each PR row. The hint shows the keys for the action corresponding to the PR's\
+    \ *current phase* (in_progress → start, in_review → review, qa → qa, etc.), so\
+    \ the list doubles as a cheat sheet for what to press next on each PR.\n\nThe\
+    \ pr-list home window (pr-f5b7eef) enables this flag in its render so the user\
+    \ sees an at-a-glance home view that is also a per-PR action menu reference.\n\
+    \n## Proposed CLI\n\n- New flag: `pm pr list --actions` (or `-a`). Off by default\
+    \ to avoid changing existing output.\n- When enabled, each non-terminal row gets\
+    \ a trailing hint showing the keys that apply to its current phase, e.g.:\n  -\
+    \ `in_progress` → `[s | z s: fresh]`\n  - `in_review` → `[d | z d: fresh | zz\
+    \ d: loop]`\n  - `qa` → `[t | z t: fresh | zz t: loop]`\n  - statuses with no\
+    \ current-phase action (e.g. ready-to-start in unusual states) fall back to the\
+    \ full key list.\n- Terminal statuses (`merged`, `closed`) — no hint, matching\
+    \ the picker's `_TERMINAL_STATUSES` behavior.\n- Combinable with existing flags\
+    \ (`-t`, `--open`, etc.).\n\n## Single source of truth\nThe keybindings live in\
+    \ `pm_core/cli/session.py` (`_SHORTCUT_KEYS` at ~line 1601, `_MODIFIED_ACTION_CMDS`\
+    \ at ~line 884, `_STATUS_PHASE` at ~line 924). Don't duplicate. Extract a small\
+    \ helper — e.g. `pm_core/action_keys.py` with `hint_for_status(status: str) ->\
+    \ str` — that both the picker and pr_list_cmd consume. This keeps the picker and\
+    \ the list in sync as the binding map evolves.\n\n## Home-window default\nThe\
+    \ `pr-list` HomeWindowProvider from pr-f5b7eef invokes `pm pr list -t --open --actions`\
+    \ so the home view always carries the hints. Other callers / scripts get the unchanged\
+    \ default output.\n\n## Out of scope\n- Making the hints clickable / interactive\
+    \ — this is a printed cheat sheet, not a TUI.\n- Adding a separate column for\
+    \ live action runtime-state (queued/running/done badges) — that's a different\
+    \ surface; orthogonal.\n\n## Code paths\n- pm_core/action_keys.py (new): hint\
+    \ helper.\n- pm_core/cli/session.py: refactor to consume the helper instead of\
+    \ inlining the maps in the picker render.\n- pm_core/cli/pr.py (pr_list_cmd):\
+    \ add `--actions` flag + render the hint.\n- pm_core/home_window/pr_list.py (added\
+    \ by pr-f5b7eef): pass `--actions` in the rendered command."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-04T14:41:10.397036+00:00'
-  updated_at: '2026-05-04T14:41:54.906127+00:00'
+  created_at: '2026-05-04T14:49:58.574373+00:00'
+  updated_at: '2026-05-04T14:49:58.574373+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-26ca427
+  plan: null
+  title: 'Bug: popup picker says ''No project.yaml found'' because display-popup doesn''t
+    inherit launching pane''s cwd'
+  branch: pm/pr-26ca427-bug-popup-picker-says-no-project-yaml-found-becaus
+  status: pending
+  depends_on: []
+  description: "## Symptom\nPressing the picker key (prefix+P or whatever the current\
+    \ binding is) opens the picker popup but it immediately fails with:\n\n    No\
+    \ project.yaml found.\n\neven though the active window's pane is in a valid pm\
+    \ repo (verified via `tmux display-message -p '#{pane_current_path}'` returning\
+    \ e.g. /home/matt/claude-work/project-manager).\n\n## Diagnosis\nThe `_log.info('popup-picker\
+    \ invoked: ...')` entry for failing invocations lands in `~/.pm/debug/default.log`\
+    \ — not the session's per-tag log file. `get_session_tag()` (pm_core/paths.py:81)\
+    \ returns None when `get_git_root(start_path or cwd)` returns None, which happens\
+    \ because the popup's cwd is *not inside any git repo*.\n\nThe cause: `session.py:750`\
+    \ invokes `tmux display-popup -E -w <width> -h <height> <body>` with no `-d <start-dir>`\
+    \ argument. Without `-d`, the popup's cwd is tmux's server-side default — typically\
+    \ the directory the tmux *server* was started in, not the active pane's `pane_current_path`.\
+    \ So even though the user's pane is in /home/matt/claude-work/project-manager,\
+    \ the popup's bash starts somewhere else (often /, /home/matt, or the server's\
+    \ launch dir) and `find_project_root()` walks up from there finding nothing.\n\
+    \n`state_root() → find_project_root()` then raises FileNotFoundError, which session.py:1518-1523\
+    \ catches and prints 'No project.yaml found.'\n\n## Fix\nTwo parts.\n\n1. **Pass\
+    \ `-d` to display-popup.** In `_popup-show` (session.py:711-753) include `-d`\
+    \ resolved to the launching pane's cwd:\n\n       subprocess.run(tmux_mod._tmux_cmd(\n\
+    \           'display-popup', '-E',\n           '-d', subprocess.run(tmux_mod._tmux_cmd('display-message',\
+    \ '-p', '#{pane_current_path}'),\n                                capture_output=True,\
+    \ text=True).stdout.strip() or '~',\n           '-w', width, '-h', height, body))\n\
+    \n   This makes the popup's cwd match the launching pane. Apply to both `_POPUP_PICKER_BODY`\
+    \ and `_POPUP_CMD_BODY` paths and any other display-popup callers.\n\n2. **Resolve\
+    \ project root from session metadata, not cwd.** Even with the cwd fix, the popup\
+    \ still breaks if the launching pane's cwd is a deleted workdir (post-merge cleanup\
+    \ race) or the user has manually cd'd outside the repo. Add a per-session 'pm_root'\
+    \ record:\n\n   - When `pm session` starts, persist the project root to either\
+    \ the pane-registry JSON (`~/.pm/pane-registry/<base>.json`) or a sidecar (`~/.pm/sessions/<tag>/pm_root`).\n\
+    \   - `_popup-picker` and `_popup-cmd` (and ideally state_root() for any session-aware\
+    \ caller) resolve via that record first, fall back to cwd-walking only if it isn't\
+    \ set.\n\n   This also fixes a deleted-cwd race: after `pm pr merge` cleans up\
+    \ a workdir, panes with that path as cwd can no longer resolve project root via\
+    \ getcwd() — the popup picker hits FileNotFoundError on os.getcwd() itself, which\
+    \ the existing handler bucket-catches as 'No project.yaml found' (also misleading).\n\
+    \n## Test\n- Repro: from any tmux client, switch to a session-window whose pane\
+    \ is at a valid cwd inside the pm repo, press picker key. Expected: picker opens.\
+    \ Actual: 'No project.yaml found'.\n- Verify the cwd issue: bind a debug key that\
+    \ runs `display-popup -E 'pwd; read'` (no -d) — confirms the popup's cwd is not\
+    \ the pane's cwd.\n\n## Code paths\n- pm_core/cli/session.py:711-753 `_popup-show`:\
+    \ add `-d <pane_current_path>` to the display-popup invocation.\n- pm_core/cli/session.py:1490+\
+    \ `_popup-picker` / `_popup-cmd`: resolve project root via session metadata first.\n\
+    - pm_core/pane_registry.py or pm_core/paths.py: helper for storing/retrieving\
+    \ per-session pm_root."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T15:25:44.771573+00:00'
+  updated_at: '2026-05-04T15:25:44.771573+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-49ce773
+  plan: null
+  title: 'Bug: popup picker exits with misleading ''merged or closed'' on empty lines,
+    blocking navigation to other PRs'
+  branch: pm/pr-49ce773-bug-popup-picker-exits-with-misleading-merged-or-c
+  status: pending
+  depends_on: []
+  description: "## Symptom\nWith PR #193 (pr-f5b7eef, status: in_review) selected,\
+    \ the popup picker shows:\n\n    PR Actions — #193\n    No actions available (PR\
+    \ is merged or closed).\n\nthen exits on a keypress. The user cannot navigate\
+    \ to other PRs that have open windows. The status claim is wrong (PR is in_review,\
+    \ not merged or closed) and the navigation block is wrong even when the status\
+    \ claim is right.\n\n## Root cause\n`pm_core/cli/session.py:1601-1606` short-circuits\
+    \ whenever `_build_picker_lines` returns an empty list:\n\n    lines, _picked_pr,\
+    \ _label_to_cmd = _resolve_for(current_pr)\n    if not lines:\n        click.echo(f\"\
+    PR Actions — {current_pr}\")\n        click.echo(\"No actions available (PR is\
+    \ merged or closed).\")\n        _pause_and_exit(0)\n\nThere are two compounded\
+    \ problems with this:\n\n1. **Misattribution.** Empty lines is treated as 'PR\
+    \ is merged or closed' but the only path `_build_picker_lines` (lines 1038-1126)\
+    \ returns [] *because of merged/closed status* is via `if not actions: return\
+    \ []` after `_actions_for_status(status)`. It also returns [] when the PR lookup\
+    \ fails (`if not pr: return []` at line 1068). For #193 the lookup is the suspect\
+    \ path — same condition (`_pr_display_id(p) == pr_disp`) is used in nav_pr_ids\
+    \ construction but _resolve_for / _build_picker_lines use independent dict lookups\
+    \ against the loaded prs list, leaving room for stale-data or dict-shape inconsistencies.\
+    \ The user-facing copy hardcodes one cause for what is actually a multi-cause\
+    \ condition.\n\n2. **Navigation blocked.** Even when the PR genuinely is merged/closed\
+    \ (the user's explicit point: 'even if it was, I should still be able to start\
+    \ the pane and move around to other prs, the actions should just be blocked for\
+    \ that one'), the picker exits immediately. There's no way to use h/l (or whatever\
+    \ the nav keys are) to move to another PR that does have actions.\n\n## Fix\n\
+    - Replace the early `_pause_and_exit(0)` on empty lines with a render path that\
+    \ still shows the picker shell + navigation hint, with a clear inline message\
+    \ scoped to the *current* PR:\n  - For terminal status (merged/closed): 'No actions\
+    \ — PR is {status}.' Navigation keys still work.\n  - For lookup failure / unexpected\
+    \ empty: 'Could not load actions for {current_pr}.' (don't claim the PR is merged\
+    \ when we don't know that). Log enough at `_log.warning` to diagnose.\n- Audit\
+    \ `_build_picker_lines` and `_resolve_for` to ensure the lookup-failure case for\
+    \ #193 is identified — the symptom suggests a code path where `_pr_has_open_window`\
+    \ puts a display_id into nav_pr_ids that the subsequent `_pr_display_id == pr_disp`\
+    \ lookup then fails to match. Possible causes to check:\n  - case/whitespace differences\
+    \ between nav-list-time and resolve-time\n  - PR data mutated mid-popup (unlikely\
+    \ but possible)\n  - gh_pr_number type drift (int vs str) producing different\
+    \ display_id strings on different reads\n- Consider passing the resolved `pr`\
+    \ dict from nav-list construction directly into `_resolve_for` instead of re-looking-up\
+    \ by display_id, removing the lookup-divergence class of bug entirely.\n\n## Test\n\
+    - Repro: with #193 in_review and a window open, invoke picker → expect actions\
+    \ list, observe the misleading exit message.\n- Repro nav block: edit a PR's status\
+    \ to 'merged' in project.yaml manually, ensure the PR still has an open tmux window,\
+    \ invoke picker landing on that PR → expect to be able to press nav key and move\
+    \ to another PR."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T15:33:47.848571+00:00'
+  updated_at: '2026-05-04T15:33:47.848571+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
