@@ -79,6 +79,22 @@ def _mark_tmux_session(env: dict) -> None:
         env["PM_IN_TMUX_SESSION"] = "1"
 
 
+def _is_session_ipc_command(argv: list[str]) -> bool:
+    """Return True for hidden commands that drive session-level IPC.
+
+    These are invoked from tmux key bindings or hooks and must use the
+    host pm_core, not whichever pm_core happens to live near the
+    launching pane's cwd. Otherwise (for example) a popup launched from
+    a PR workdir loads the workdir's stale pm_core and silently runs
+    pre-fix code while the user thinks they're on master.
+    """
+    for arg in argv[1:]:
+        if arg.startswith("-"):
+            continue
+        return arg.startswith("_popup") or arg.startswith("_pane") or arg.startswith("_window") or arg in {"_tui", "rebalance"}
+    return False
+
+
 def main():
     """Entry point that prefers local pm_core.
 
@@ -86,8 +102,14 @@ def main():
     1. Active session override (from ~/.pm/sessions/{tag}/override)
     2. Local pm_core in cwd or parent directories
     3. Installed pm_core
+
+    Session-IPC commands (popup pickers, pane/window hooks) always use
+    the host pm_core regardless of cwd — they're invoked from tmux
+    bindings whose cwd is the launching pane's, which can be a workdir
+    clone with stale code.
     """
     _mark_tmux_session(os.environ)
+    skip_local = _is_session_ipc_command(sys.argv)
     # First check for active session override
     override_root = _find_active_override()
     if override_root and override_root not in sys.path:
@@ -95,7 +117,7 @@ def main():
         to_remove = [k for k in sys.modules if k == 'pm_core' or k.startswith('pm_core.')]
         for k in to_remove:
             del sys.modules[k]
-    else:
+    elif not skip_local:
         # Check for local pm_core before importing cli
         local_root = find_local_pm_core()
         if local_root and local_root not in sys.path:
