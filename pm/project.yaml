@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7b3b639
+  active_pr: pr-b423bfd
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8205,7 +8205,7 @@ prs:
   plan: bugs
   title: Fix pr select not scrolling selected PR into view in TUI
   branch: pm/pr-177dec0-fix-pr-select-not-scrolling-selected-pr-into-view-
-  status: in_review
+  status: merged
   depends_on: []
   description: When using the pr select command (e.g. from the command bar), the TUI
     updates the selected PR but does not scroll the tech tree to bring it into view.
@@ -8217,10 +8217,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/157
   gh_pr_number: 157
   created_at: '2026-04-06T19:18:52.240715+00:00'
-  updated_at: '2026-05-04T12:37:00.078345+00:00'
+  updated_at: '2026-05-04T12:55:43.583182+00:00'
   started_at: '2026-04-06T19:20:59.040562+00:00'
   reviewed_at: '2026-05-04T12:32:22.801526+00:00'
-  merged_at: null
+  merged_at: '2026-05-04T12:55:43.583182+00:00'
   notes:
   - id: note-2f7aacc
     text: 'Manual repro (no automated test possible — visual TUI regression):
@@ -12907,7 +12907,7 @@ prs:
   plan: bugs
   title: 'Bug: popup hangs after ''pr start <new-pr>'' even though impl window opens'
   branch: pm/pr-7b3b639-bug-popup-hangs-after-pr-start-new-pr-even-though-
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'When prefix+M opens the popup and the user types ''pr start <pr_id>''
     for a PR that has not yet been started, the implementation window opens correctly
@@ -12970,10 +12970,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/186
   gh_pr_number: 186
   created_at: '2026-05-04T11:56:53.121732+00:00'
-  updated_at: '2026-05-04T12:49:14.138985+00:00'
+  updated_at: '2026-05-04T13:30:55.404523+00:00'
   started_at: '2026-05-04T12:49:14.138985+00:00'
-  reviewed_at: null
-  merged_at: null
+  reviewed_at: '2026-05-04T13:08:12.142267+00:00'
+  merged_at: '2026-05-04T13:30:55.404523+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7b3b639-bug-popup-hangs-after-pr-start-new-p-ae8aa651
 - id: pr-7fe2588
@@ -13409,7 +13409,7 @@ prs:
   title: 'Bug: picker-driven ''pr merge'' swallows errors and doesn''t launch merge-resolve
     window'
   branch: pm/pr-b56e079-bug-picker-driven-pr-merge-swallows-errors-and-doe
-  status: pending
+  status: in_review
   depends_on: []
   description: "Two related issues observed when running 'merge' from the prefix+P\
     \ action picker on a PR (concrete repro: pr-177dec0 / #157). Same flow on a different\
@@ -13461,11 +13461,169 @@ prs:
     \ rejection) — verify the picker shows the error and waits for keypress before\
     \ closing; running 'pm pr merge' from a shell inside the tmux session has identical\
     \ observable behavior to running the same from the TUI command bar."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/187
+  gh_pr_number: 187
+  created_at: '2026-05-04T12:48:23.584952+00:00'
+  updated_at: '2026-05-04T13:05:46.814039+00:00'
+  started_at: '2026-05-04T12:54:35.376343+00:00'
+  reviewed_at: '2026-05-04T13:05:46.814039+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b56e079-bug-picker-driven-pr-merge-swallows--7f4eaacf
+- id: pr-315f753
+  plan: bugs
+  title: 'Bug: review-loop fails with ''Review window not found after launch'' even
+    when container created'
+  branch: pm/pr-315f753-bug-review-loop-fails-with-review-window-not-found
+  status: pending
+  depends_on: []
+  description: 'EXACT root cause: PR titles containing single quotes (apostrophes)
+    or other shell-meta characters break the diff_cmd shell pipeline that pr_review.py:_launch_review_window
+    builds for the diff pane. The pane''s command exits or misbehaves on shell syntax
+    error; depending on what the broken parse evaluates to, either the whole window
+    dies before find_window_by_name sees it, or the diff pane renders garbled content
+    but the window survives long enough to confuse downstream code.
+
+
+    Confirmed reproductions in this session:
+
+    - pr-b56e079 / #187: title contains ''pr merge'' and doesn''t. The broken parse
+    turns into ''pr merge'' as an unquoted command. pr is not a binary, the && chain
+    shorts, the shell exits, tmux closes the window, find_window_by_name returns None.
+
+    - pr-7b3b639 / #186: title contains ''pr start <new-pr>''. The broken parse turns
+    into ''pr start'' with input redirection from a missing ''new-pr'' file. That
+    errors but doesn''t kill the chain as cleanly — the window opens but the diff
+    pane content is garbled.
+
+
+    Same root cause (title interpolated raw into a single-quoted echo at pr.py:1242
+    / 1251-1264), different observable symptoms depending on what the malformed parse
+    executes.
+
+
+    Mechanism:
+
+    (1) pr.py:1242: header = f''Review: {display_id} - {title}''
+
+    (2) pr.py:1251-1264: diff_cmd builds ''cd <workdir-quoted> && { echo <single-quoted-header>
+    && ... }'' — title interpolated raw into the single-quoted echo.
+
+    (3) Title with apostrophe terminates the shell single-quote early; subsequent
+    characters become commands or syntax errors.
+
+    (4) tmux new-window -d -c cwd <diff_cmd> succeeds rc=0 (tmux launches whatever
+    shell cmd you give it).
+
+    (5) Pane shell hits the syntax error, exits or behaves strangely.
+
+    (6) For fatal exits: default tmux closes the window when its initial cmd exits,
+    find_window_by_name returns None, new_window_get_pane returns None, silent click.echo
+    + return 0; review_loop raises after its 2s sleep.
+
+    (7) For non-fatal exits (some apostrophe positions): window survives but diff
+    pane content is wrong.
+
+
+    Fix — three pieces:
+
+
+    (A) PRIMARY: shlex.quote every user-controlled interpolation into shell command
+    strings. Titles, workdirs, branch names, plan names — anything a user can write
+    that ends up in a shell pipeline gets shlex.quote(). pr.py:1241-1264 is the immediate
+    offender. Audit every call site that constructs a shell cmd string and confirm
+    user-controlled values are quoted. shlex.quote handles apostrophes by closing
+    the surrounding quote, inserting backslash-escaped apostrophe, and reopening —
+    fully shell-safe. Apostrophes in titles stay legal because the shell layer handles
+    them; no need to restrict the alphabet.
+
+
+    (B) GUARDRAIL: a small helper in pm_core/shell.py (e.g. shell_quote(value) that
+    wraps shlex.quote and a build_shell_cmd(parts) that combines literals + quoted
+    values) that becomes the canonical way to construct shell command strings. New
+    code that wants raw f-string interpolation into a shell needs to either use the
+    helper or explicitly justify why. Optional lint rule grep for f-strings adjacent
+    to subprocess/tmux calls; flag for reviewer to confirm shlex.quote is used. Stops
+    the same bug class from sneaking back in via a future code path.
+
+
+    (C) DIAGNOSTIC: log when new_window_get_pane returns None. Today the failure is
+    silent (click.echo to a captured-and-discarded stdout). Add _log.warning at pr.py:1276
+    with window_name + pm_session + a short hint to check the diff_cmd for unquoted
+    user strings. Future similar mysteries become a single grep instead of multi-hour
+    trace.
+
+
+    Title validation (the previously-considered option of disallowing apostrophes/quotes/etc.
+    at pm pr add time) is explicitly NOT taken — apostrophes read more naturally in
+    human PR titles, and the shell layer handles them safely once shlex.quote is in
+    place. Validation would be a workaround for missing quoting, not a real fix.
+
+
+    Files: pm_core/cli/pr.py (shlex.quote in _launch_review_window''s diff_cmd construction;
+    _log.warning on new_window_get_pane None); audit pm_core/prompt_gen.py and other
+    places that interpolate titles/paths into shell cmd strings; new pm_core/shell.py
+    helper for canonical safe construction.
+
+
+    Tests: PR with title containing apostrophes opens its review window cleanly with
+    diff pane rendering correctly; PR with title containing dollars / backticks /
+    parens / quotes also opens cleanly; the previously-failing PRs pr-b56e079 / pr-7b3b639
+    succeed end-to-end after the fix; new_window_get_pane returning None produces
+    a clear log warning.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-04T12:48:23.584952+00:00'
-  updated_at: '2026-05-04T12:48:23.584952+00:00'
+  created_at: '2026-05-04T13:07:56.002115+00:00'
+  updated_at: '2026-05-04T13:30:26.064792+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b423bfd
+  plan: bugs
+  title: 'Bug: picker spinner shows ''review-loop: done…'' when the loop actually
+    errored'
+  branch: pm/pr-b423bfd-bug-picker-spinner-shows-review-loop-done-when-the
+  status: pending
+  depends_on: []
+  description: "When the review loop ends with verdict=ERROR, the action picker pane\
+    \ shows 'review-loop: done…' with a moving spinner — implying success and still\
+    \ in progress. The user can't tell from the picker that the action failed. Looking\
+    \ at the runtime_state state machine, the picker spinner reads cur_state from\
+    \ runtime_state and renders it with a spinner; when the loop errored, set_action_state\
+    \ was called with a terminal state (probably 'done' or 'failed') but the picker\
+    \ treats both indistinguishably and keeps spinning.\n\nTwo issues bundled:\n\n\
+    (1) **Verdict-vs-state confusion.** The runtime_state state field tracks lifecycle\
+    \ (queued/launching/running/idle/waiting/done/failed) and a separate verdict field\
+    \ tracks PASS/NEEDS_WORK/ERROR/etc. When the loop completes with ERROR, set_action_state\
+    \ should land in state='failed' (terminal failure) not state='done' (terminal\
+    \ success). Whichever code path emitted the terminal state for an ERROR verdict\
+    \ is mapping incorrectly; pick one of:\n  - state='done' with verdict='ERROR':\
+    \ picker should look at verdict before showing 'done'\n  - state='failed' with\
+    \ verdict='ERROR': picker uses the state directly\n\nEither way, the picker should\
+    \ distinguish. Today it doesn't — 'done' is shown for both PASS and ERROR.\n\n\
+    (2) **Spinner should stop on terminal state.** Picker spinner today keeps rendering\
+    \ frames even after the action enters a terminal state. The wait loop in session.py:_wait_for_tui_command\
+    \ should check for terminal state and exit the spinner — either dismiss the popup\
+    \ automatically (success path) or _wait_dismiss with the verdict so the user can\
+    \ read it (failure path).\n\nConcrete fix:\n- pm_core/runtime_state.py: when the\
+    \ loop reports ERROR / FAILED, set state='failed' and verdict='ERROR' (or whatever\
+    \ the actual emitted verdict was).\n- pm_core/cli/session.py:_wait_for_tui_command:\
+    \ when cur_state in {'done', 'failed'}, exit the spin loop. If 'failed' or verdict\
+    \ in {'ERROR', 'NEEDS_WORK'}, _wait_dismiss with the verdict so the user reads\
+    \ it. If 'done' with success verdict, dismiss popup as today.\n- Consider rendering\
+    \ 'review-loop: failed (ERROR)' instead of 'done…' when the picker can read the\
+    \ verdict.\n\nTests: a review loop that errors produces state='failed' and the\
+    \ picker shows the error and waits for keypress; a review loop that PASSes produces\
+    \ state='done' and the picker dismisses cleanly; a still-running loop continues\
+    \ spinning until terminal."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T13:08:11.100568+00:00'
+  updated_at: '2026-05-04T13:08:11.100568+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
