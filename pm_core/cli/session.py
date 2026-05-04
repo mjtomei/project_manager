@@ -1313,6 +1313,33 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             else:
                 window_open = bool(cur_window_ids)
                 cur_window_id = cur_window_ids[0] if cur_window_ids else None
+            # Terminal-state short-circuit: if the action has reached a
+            # terminal state (done/failed) without producing the expected
+            # tmux window — review-loop in particular has no persistent
+            # window between iterations — exit the spinner instead of
+            # spinning forever.  Failures get surfaced via _wait_dismiss
+            # so the user sees the verdict before the popup closes;
+            # successes dismiss as today.
+            if cur_state in ("done", "failed") and not window_open:
+                verdict = (entry.get("verdict") if entry else "") or ""
+                failed = cur_state == "failed" or verdict in ("ERROR", "KILLED")
+                # Restore terminal *before* writing final lines / waiting
+                # for keypress so cbreak/cursor state doesn't leak.
+                if old_attrs is not None:
+                    try:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                    except termios.error:
+                        pass
+                    old_attrs = None
+                click.echo(SHOW_CURSOR, nl=False)
+                if failed:
+                    suffix = f" ({verdict})" if verdict else ""
+                    click.echo(f"\r✗ {action}: failed{suffix}{CLR_EOL}")
+                    _wait_dismiss()
+                else:
+                    suffix = f" ({verdict})" if verdict else ""
+                    click.echo(f"\r✓ {action}: done{suffix}{CLR_EOL}")
+                return
             if window_open:
                 # Switch the invoking session to the target window
                 # unless the user pre-emptively suppressed it.  Doing
@@ -1340,6 +1367,9 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             spin = frames[i % len(frames)]
             if fresh and initial_window_ids and not saw_disappear:
                 label = "rebuilding window"
+            elif cur_state == "failed":
+                v = (entry.get("verdict") if entry else "") or ""
+                label = f"failed ({v})" if v else "failed"
             else:
                 label = cur_state or "queued"
             click.echo(f"\r{spin} {action}: {label}…{CLR_EOL}", nl=False)
