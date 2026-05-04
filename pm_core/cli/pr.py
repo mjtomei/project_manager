@@ -1878,14 +1878,16 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                 # The idle tracker will re-attempt and finalize after resolution.
                 return
 
-        # Fallback: direct user to merge manually
+        # Fallback: direct user to merge manually. Exits non-zero so the
+        # popup picker / TUI surfaces the message instead of closing
+        # silently — the user must take a manual action to proceed.
         gh_pr = pr_entry.get("gh_pr")
         if gh_pr:
             click.echo(f"GitHub PR: {gh_pr}")
-            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.")
+            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.", err=True)
         else:
-            click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.")
-        return
+            click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.", err=True)
+        raise SystemExit(1)
 
     # For local/vanilla: merge in the PR's workdir (branch always exists there)
     workdir = pr_entry.get("workdir")
@@ -1974,6 +1976,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
             transcript=transcript, companion=companion,
         )
         if not pull_ok:
+            # When resolve_window=True, a window was launched — exit 0
+            # so callers (idle tracker, review loop) don't treat it as
+            # failure. When resolve_window=False, the helper printed
+            # "Pull manually..." — exit non-zero so the popup / TUI
+            # surfaces it.
+            if not resolve_window:
+                raise SystemExit(1)
             return
         _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")
@@ -1993,7 +2002,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                                          companion=companion)
                     return
                 click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
-                return
+                raise SystemExit(1)
             click.echo(f"Pushed merged {base_branch} to origin.")
         else:
             click.echo("Propagation only: skipping push to origin.")
@@ -2007,7 +2016,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
             companion=companion,
         )
         if not pull_ok:
-            # Merge window launched for pull conflict — don't finalize yet
+            # resolve_window=True: window launched — caller will retry
+            # via idle tracker; exit 0 so they don't treat the handoff
+            # as failure. resolve_window=False: helper printed "Resolve
+            # conflicts manually..." — exit non-zero so the popup / TUI
+            # actually surfaces it instead of closing silently.
+            if not resolve_window:
+                raise SystemExit(1)
             return
         _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")
