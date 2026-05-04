@@ -675,6 +675,31 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.query_one("#tech-tree", TechTree).focus()
         return
 
+    # Plan actions dispatched via `tui:plan <action> [<id>]` from the
+    # plan popup (or typed in the command bar).  Routes through the
+    # existing per-plan tmux window machinery so each action lands in
+    # the plan's dedicated window.
+    if (parts and parts[0] == "plan" and len(parts) >= 2
+            and parts[1] in ("review", "breakdown", "edit", "view",
+                             "load", "deps", "fix")):
+        plan_action = parts[1]
+        plan_arg: str | None = parts[2] if len(parts) >= 3 else None
+        if plan_action in ("deps", "fix"):
+            plan_arg = None  # cross-plan
+        elif plan_arg is None:
+            # Fall back to the highlighted plan in the plans pane.
+            try:
+                pp = app.query_one("#plans-pane", PlansPane)
+                plan_arg = getattr(pp, "selected_plan_id", None)
+            except Exception:
+                plan_arg = None
+        pane_ops.handle_plan_action(app, plan_action, plan_arg)
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+
     # Commands that launch interactive Claude sessions need a tmux pane
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")
