@@ -744,11 +744,24 @@ def popup_show_cmd(kind: str):
     else:
         width = "80"
 
-    _log.info("_popup-show: kind=%s window_width=%s threshold=%d -> width=%s",
-              kind, win_width, threshold, width)
+    # Resolve the launching pane's cwd so the popup's shell starts where
+    # the user is, not in tmux's server-side default. Without -d the
+    # popup's cwd can land outside any git repo, which makes
+    # find_project_root() fail with a misleading 'No project.yaml found'.
+    cwd_result = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", "-p", "#{pane_current_path}"),
+        capture_output=True, text=True, check=False,
+    )
+    pane_cwd = cwd_result.stdout.strip() if cwd_result.returncode == 0 else ""
+
+    _log.info("_popup-show: kind=%s window_width=%s threshold=%d -> width=%s cwd=%r",
+              kind, win_width, threshold, width, pane_cwd)
+    popup_cmd = ["display-popup", "-E", "-w", width, "-h", height]
+    if pane_cwd:
+        popup_cmd[2:2] = ["-d", pane_cwd]
+    popup_cmd.append(body)
     subprocess.run(
-        tmux_mod._tmux_cmd("display-popup", "-E",
-                           "-w", width, "-h", height, body),
+        tmux_mod._tmux_cmd(*popup_cmd),
         check=False,
     )
 
