@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f74988c
+  active_pr: pr-f27b882
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13458,7 +13458,7 @@ prs:
   title: 'Improvement: dedicated ''pr list'' tmux window that becomes the auto-target
     when other windows close'
   branch: pm/pr-f5b7eef-improvement-dedicated-pr-list-tmux-window-that-bec
-  status: in_review
+  status: qa
   depends_on: []
   description: "## Goal\nProvide a long-lived tmux window that displays `pm pr list\
     \ -t --open` (most-recently-updated open PRs), and use it as the *destination*\
@@ -13761,60 +13761,95 @@ prs:
   title: 'Bug: picker spinner exits immediately on stale terminal state when restarting
     a finished review-loop'
   branch: pm/pr-f27b882-bug-picker-spinner-exits-immediately-on-stale-term
-  status: pending
+  status: in_progress
   depends_on: []
-  description: "## Symptom\nStarting a review-loop via the popup picker (zz d / picker\
-    \ action) shows a different behavior depending on whether the previous loop is\
-    \ finished or running:\n\n- Previous loop finished (terminal state on disk): the\
-    \ popup spinner shows '✓ review-loop: done' immediately and exits, without giving\
-    \ the new launch any time to run. The user sees a flash of success but no review\
-    \ window appears (or it appears later, unattributed to the picker action).\n-\
-    \ Previous loop running: the popup spinner waits correctly until the new fresh\
-    \ window appears.\n\n## Root cause\nThe terminal-state short-circuit at pm_core/cli/session.py:1313-1342\
-    \ (added by commit 2257590 / pr-b423bfd / #191) reads runtime_state on every tick\
-    \ and exits when `cur_state in ('done','failed')` without a target window. This\
-    \ was correct for the original case (loop completes without producing a window\
-    \ — short-circuit so the spinner doesn't hang forever). But it doesn't account\
-    \ for the case where terminal state on disk is *stale*: the previous loop wrote\
-    \ 'done' / 'failed' and nothing has cleared it yet. The new launcher hasn't transitioned\
-    \ the state to 'running' yet because the TUI hasn't drained the SIGUSR2 queue.\
-    \ The popup polls first, reads stale 'done', and bails.\n\nThe 'previous loop\
-    \ running' case works because cur_state is 'running' at popup start — not terminal\
-    \ — so the short-circuit doesn't fire until the new run actually produces a terminal\
-    \ state.\n\n## Fix\nSnapshot the initial state at popup start, mirroring the existing\
-    \ `initial_window_ids` snapshot at session.py:1250-1252. Short-circuit only when\
-    \ the *current* cur_state is terminal AND different from the snapshot — i.e.,\
-    \ the launcher genuinely transitioned during this invocation. For `fresh` mode\
-    \ actions (review-loop, qa fresh, qa loop) where the launcher is expected to overwrite\
-    \ stale state, this also handles the 'queued/launching → running' transition implicitly.\n\
-    \nSketch:\n\n    initial_state = (entry.get('state') if entry else None) if fresh\
-    \ else None\n    saw_state_change = False\n    while True:\n        entry = _rs.get_action_state(pr_id,\
-    \ action)\n        cur_state = entry.get('state') if entry else None\n       \
-    \ if fresh and cur_state != initial_state:\n            saw_state_change = True\n\
-    \        ...\n        if cur_state in ('done','failed') and not window_open:\n\
-    \            if fresh and not saw_state_change:\n                # stale terminal\
-    \ state — wait for launcher to overwrite\n                pass\n            else:\n\
-    \                # genuine terminal state from this run — handle as today\n  \
-    \              ...\n\n## Out of scope\n- Clearing stale terminal state on launcher\
-    \ entry. That would also fix this but couples spinner correctness to launcher\
-    \ behavior across all entry points (TUI key, command bar, picker, watcher). Snapshot-in-spinner\
-    \ is local and independent.\n\n## Test\nRepro:\n1. Run a review loop to completion\
-    \ (let it PASS or ERROR — either leaves terminal state on disk).\n2. Press the\
-    \ picker key → 'd' (or zz d) for the same PR.\n3. Observe the popup flashes '✓\
-    \ review-loop: done' and exits without running anything new.\nExpected: spinner\
-    \ waits through queued/launching/running transitions and exits when the new fresh\
-    \ window appears.\n\nRelated:\n- pr-55c265f (review-loop early-returns leave stale\
-    \ state — same family, fix on the writer side)\n- pr-b423bfd / #191 (introduced\
-    \ the terminal-state short-circuit being abused here)"
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  description: "## Symptom\nPressing zz d (or the picker review-loop action) on a\
+    \ PR auto-switches the tmux window to the review window correctly in three of\
+    \ four cases but not the fourth:\n\n- **No review window open at all**: zz d creates\
+    \ the review window, popup spinner waits for it to appear, switches to it. Works.\n\
+    - **Review window already open and a loop is running**: zz d kills the existing\
+    \ loop's window, creates a fresh one, popup spinner sees it appear, switches.\
+    \ Works.\n- **Review window already open with prior loop in terminal state, AND\
+    \ the user is currently on that review window**: zz d kills the window the user\
+    \ is on, tmux's own behavior moves focus elsewhere; the recreated same-name window\
+    \ captures focus from tmux's window-recreation handling. Works incidentally —\
+    \ the popup spinner's behavior is irrelevant because tmux did the switch for free.\n\
+    - **Review window already open with prior loop in terminal state, AND the user\
+    \ is on a different window** (the one where they triggered the picker): zz d kills\
+    \ the existing review window, creates a fresh one — but **does not switch the\
+    \ user's tmux focus**. The popup pane flashes '✓ review-loop: done' and dismisses;\
+    \ the new review window appears in the background unattributed to the picker action.\n\
+    \nThe auto-switch is the user-visible failure: you press zz d from elsewhere expecting\
+    \ to land in the new review session, and you stay where you are.\n\nThat the third\
+    \ case (on the review window) works by accident isolates the bug to the popup\
+    \ spinner — nothing else is wrong with the launcher, the kill, or the recreate.\
+    \ When tmux's own kill-active-window behavior happens to do the switch, the bug\
+    \ is invisible.\n\n## Root cause\nThe window-switch on first start is owned by\
+    \ the popup spinner — `_wait_for_tui_command` at pm_core/cli/session.py:1291-1366\
+    \ polls runtime_state and tmux's window list, calls `tmux select_window` once\
+    \ the new fresh window appears (line 1360), and then exits.\n\nCommit 2257590\
+    \ / pr-b423bfd / #191 added a terminal-state short-circuit at session.py:1313-1342\
+    \ to handle the original case where a review-loop completes without producing\
+    \ a window (so the spinner doesn't hang forever). It exits when `cur_state in\
+    \ ('done','failed')` without a target window.\n\nThat short-circuit doesn't distinguish\
+    \ stale terminal state from fresh terminal state. When the previous loop finished,\
+    \ runtime_state's on-disk entry is still 'done' / 'failed'. The new launcher hasn't\
+    \ transitioned state to 'running' yet because the TUI hasn't drained the SIGUSR2\
+    \ queue. The spinner polls *first*, reads the stale 'done', hits the short-circuit,\
+    \ prints '✓ done', and exits — **before reaching the window-appearance branch\
+    \ that performs the auto-switch**.\n\nThe two non-broken cases work because cur_state\
+    \ is never terminal-and-stale at popup start (loop running → 'running'; no prior\
+    \ loop → None). The third case (on the review window) works because tmux's own\
+    \ focus handling fills in for the spinner — pure luck.\n\n## Fix\nSnapshot the\
+    \ initial state at popup start, mirroring the existing `initial_window_ids` snapshot\
+    \ at session.py:1250-1252. Short-circuit only when the *current* cur_state is\
+    \ terminal AND different from the snapshot — i.e., the launcher genuinely transitioned\
+    \ during this invocation. For `fresh` mode actions (review-loop, qa fresh, qa\
+    \ loop) where the launcher is expected to overwrite stale state, this also handles\
+    \ the 'queued/launching → running' transition implicitly, so the spinner waits\
+    \ through the legitimate transitions and eventually performs the window-switch\
+    \ in the success branch.\n\nSketch:\n\n    initial_state = (entry.get('state')\
+    \ if entry else None) if fresh else None\n    saw_state_change = False\n    while\
+    \ True:\n        entry = _rs.get_action_state(pr_id, action)\n        cur_state\
+    \ = entry.get('state') if entry else None\n        if fresh and cur_state != initial_state:\n\
+    \            saw_state_change = True\n        ...\n        if cur_state in ('done','failed')\
+    \ and not window_open:\n            if fresh and not saw_state_change:\n     \
+    \           # stale terminal state — wait for launcher to overwrite\n        \
+    \        pass\n            else:\n                # genuine terminal state from\
+    \ this run — handle as today\n                ...\n\n## Out of scope\n- Clearing\
+    \ stale terminal state on launcher entry. That would also fix this but couples\
+    \ spinner correctness to launcher behavior across all entry points (TUI key, command\
+    \ bar, picker, watcher). Snapshot-in-spinner is local and independent.\n\n## Success\
+    \ criteria\nFor all four cases, pressing zz d on a PR ends with the user's tmux\
+    \ focus on the freshly-created review window:\n\n1. No review window open → window\
+    \ created, switch happens.\n2. Review window open and a loop is running → old\
+    \ window killed, new one created, switch happens.\n3. Review window open with\
+    \ prior loop in terminal state, user is on the review window → switch happens\
+    \ (works today incidentally; should still work after the fix).\n4. Review window\
+    \ open with prior loop in terminal state, user is on a different window → switch\
+    \ happens (regression case fixed by this PR).\n\n## Test\nRepro of case 4:\n1.\
+    \ Run a review loop to completion (PASS or ERROR — either leaves terminal state\
+    \ on disk and a review window).\n2. Switch to a different tmux window (any window\
+    \ that isn't the review one).\n3. Press the picker key → zz d for the same PR.\n\
+    4. Observe the popup flashes '✓ review-loop: done' and exits while the new review\
+    \ window opens elsewhere unattributed.\n\nCross-check case 3 (regression test\
+    \ against the incidental-success path): repeat the above but trigger the picker\
+    \ from the review window itself; the auto-switch should still work after the fix,\
+    \ not just before.\n\nExpected after fix for both: spinner waits through queued/launching/running\
+    \ transitions, observes the new window, and switches focus to it.\n\nRelated:\n\
+    - pr-55c265f (review-loop early-returns leave stale state — same family, fix on\
+    \ the writer side)\n- pr-b423bfd / #191 (introduced the terminal-state short-circuit\
+    \ being abused here)"
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/201
+  gh_pr_number: 201
   created_at: '2026-05-04T16:29:58.163771+00:00'
-  updated_at: '2026-05-04T16:29:58.163771+00:00'
-  started_at: null
+  updated_at: '2026-05-05T12:13:00.262697+00:00'
+  started_at: '2026-05-05T12:13:00.262697+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f27b882-bug-picker-spinner-exits-immediately-a70c31eb
 - id: pr-f17e22b
   plan: improvements
   title: 'Bug: ''Interacting with the TUI'' block in container-bound prompts tells
