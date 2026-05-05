@@ -1874,6 +1874,7 @@ def _run_qa(mode: str, pr_id: str | None, session_name: str | None) -> None:
         _data = _store.load(captured_root)
         _pr = _store.get_pr(_data, captured_pr_id) or {}
         state = _QAState(pr_id=captured_pr_id, loop_id=loop_id)
+        loop_daemon.bridge_stop_to_state(state)
 
         __rs.set_action_state(captured_pr_id, "qa", "running",
                                loop_id=loop_id)
@@ -2005,6 +2006,7 @@ def review_loop_start(pr_id: str | None, session_name: str | None):
         _pr = _store.get_pr(_data, captured_pr_id) or {}
         state = _RLState(pr_id=captured_pr_id)
         state.loop_id = loop_id
+        loop_daemon.bridge_stop_to_state(state)
 
         def on_iteration(s):
             try:

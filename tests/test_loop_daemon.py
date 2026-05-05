@@ -97,6 +97,27 @@ def test_sweep_protects_alive_in_runtime_state():
     assert runtime_state.get_action_state("pr-y", "review") == {}
 
 
+def test_bridge_stop_to_state_flips_state_on_sigterm_flag():
+    """bridge_stop_to_state spawns a watcher that flips state.stop_requested
+    when the daemon's SIGTERM handler sets the module-level flag."""
+    class _S:
+        stop_requested = False
+
+    s = _S()
+    loop_daemon._STOP_FLAG["set"] = False
+    loop_daemon.bridge_stop_to_state(s, poll_interval=0.01)
+    # Flag not yet set — watcher idles.
+    time.sleep(0.05)
+    assert s.stop_requested is False
+    # Simulate SIGTERM handler.
+    loop_daemon._STOP_FLAG["set"] = True
+    deadline = time.time() + 1
+    while time.time() < deadline and not s.stop_requested:
+        time.sleep(0.01)
+    assert s.stop_requested is True
+    loop_daemon._STOP_FLAG["set"] = False
+
+
 def test_spawn_runs_loop_main_in_detached_process():
     """End-to-end: spawn() forks, the child writes runtime_state, exits."""
     sentinel = Path(os.environ.get("PYTEST_TMPDIR", "/tmp")) / (

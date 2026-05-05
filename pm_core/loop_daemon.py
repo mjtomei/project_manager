@@ -366,6 +366,32 @@ def stop_requested() -> bool:
     return bool(_STOP_FLAG.get("set"))
 
 
+def bridge_stop_to_state(state, poll_interval: float = 0.5) -> None:
+    """Spawn a daemon thread that sets ``state.stop_requested`` on SIGTERM.
+
+    ``run_qa_sync`` / ``run_review_loop_sync`` check ``state.stop_requested``
+    at iteration boundaries; the daemon's signal handler only flips
+    :data:`_STOP_FLAG`.  Without a bridge, ``request_stop()`` always
+    escalates to SIGKILL after the graceful-drain window because the
+    coordinator never sees the request.  Call this once after
+    constructing the loop's *state* object and before starting the
+    coordinator.
+    """
+    import threading
+
+    def _watch():
+        while True:
+            if stop_requested():
+                try:
+                    state.stop_requested = True
+                except Exception:  # pragma: no cover - defensive
+                    pass
+                return
+            time.sleep(poll_interval)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 # ---------------------------------------------------------------------------
 # Stop signal (start-only in v1, but the helper is here for completeness)
 # ---------------------------------------------------------------------------
