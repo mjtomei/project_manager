@@ -1595,8 +1595,12 @@ def _open_pane_for_pr(
     silently after dispatching; on user-facing errors prints a message
     and waits for dismiss so the popup stays visible.
     """
-    from pm_core import spec_gen
-    from pm_core.cli.pr import _build_diff_cmd
+    from pm_core.cli.pr import (
+        _build_diff_cmd,
+        _build_shell_at_workdir_cmd,
+        _build_spec_viewer_cmd,
+        _resolve_spec_path,
+    )
 
     pr_id = pr.get("id", "")
 
@@ -1606,18 +1610,11 @@ def _open_pane_for_pr(
             click.echo(f"PR {pr_id} has no workdir; start it first.")
             _wait_dismiss()
             return
-        cmd = f"bash -c {shlex.quote(f'cd {shlex.quote(workdir)}; exec ${{SHELL:-/bin/bash}}')}"
+        cmd = _build_shell_at_workdir_cmd(workdir)
         role = "pr-shell"
     elif kind in ("impl-spec", "qa-spec"):
         phase = "impl" if kind == "impl-spec" else "qa"
-        # Prefer the workdir copy (most up-to-date while PR is in flight),
-        # fall back to the merged-back canonical path under pm-root.
-        candidates: list[Path] = []
-        workdir = pr.get("workdir")
-        if workdir:
-            candidates.append(Path(workdir) / "pm" / "specs" / pr_id / f"{phase}.md")
-        candidates.append(spec_gen.spec_file_path(root, pr_id, phase))
-        spec_path: Path | None = next((p for p in candidates if p.is_file()), None)
+        spec_path = _resolve_spec_path(pr, root, phase)
         if spec_path is None:
             click.echo(
                 f"No {phase} spec for {pr_id} — "
@@ -1625,14 +1622,7 @@ def _open_pane_for_pr(
             )
             _wait_dismiss()
             return
-        q = shlex.quote(str(spec_path))
-        # glow if available, then less, then cat+read so an installed-pager
-        # mismatch never leaves the user staring at a blank pane.
-        viewer = (
-            f"(command -v glow >/dev/null && glow -p {q}) || "
-            f"less -R {q} || {{ cat {q}; read -n 1 -s; }}"
-        )
-        cmd = f"bash -c {shlex.quote(viewer)}"
+        cmd = _build_spec_viewer_cmd(spec_path)
         role = f"pr-{kind}"
     elif kind == "diff":
         workdir = pr.get("workdir")
