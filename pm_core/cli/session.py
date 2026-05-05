@@ -1581,6 +1581,91 @@ def _wait_dismiss(prompt: str = "\nPress q/Esc/Enter to close...") -> None:
         pass
 
 
+def _open_pane_for_pr(
+    session: str,
+    window_name: str,
+    pr: dict,
+    kind: str,
+    root: Path,
+    data: dict | None = None,
+) -> None:
+    """Open a split pane in *window_name* for the given PR.
+
+    *kind* is one of 'shell', 'impl-spec', 'qa-spec', 'diff'.  Returns
+    silently after dispatching; on user-facing errors prints a message
+    and waits for dismiss so the popup stays visible.
+    """
+    from pm_core.cli.pr import (
+        _build_diff_cmd,
+        _build_shell_at_workdir_cmd,
+        _build_spec_viewer_cmd,
+        _resolve_spec_path,
+    )
+
+    pr_id = pr.get("id", "")
+
+    if kind == "shell":
+        workdir = pr.get("workdir")
+        if not workdir or not Path(workdir).is_dir():
+            click.echo(f"PR {pr_id} has no workdir; start it first.")
+            _wait_dismiss()
+            return
+        cmd = _build_shell_at_workdir_cmd(workdir)
+        role = "pr-shell"
+    elif kind in ("impl-spec", "qa-spec"):
+        phase = "impl" if kind == "impl-spec" else "qa"
+        spec_path = _resolve_spec_path(pr, root, phase)
+        if spec_path is None:
+            click.echo(
+                f"No {phase} spec for {pr_id} — "
+                f"run 'pm pr spec {pr_id} {phase}' first."
+            )
+            _wait_dismiss()
+            return
+        cmd = _build_spec_viewer_cmd(spec_path)
+        role = f"pr-{kind}"
+    elif kind == "diff":
+        workdir = pr.get("workdir")
+        if not workdir or not Path(workdir).is_dir():
+            click.echo(f"PR {pr_id} has no workdir; start it first.")
+            _wait_dismiss()
+            return
+        # Reuse review window's diff command builder so picker D, CLI
+        # view-diff, and review pane all show identical content.
+        from pm_core.cli.helpers import _pr_display_id, state_root
+        if data is None:
+            try:
+                from pm_core import store
+                data = store.load(state_root())
+            except Exception:
+                data = {}
+        display_id = _pr_display_id(pr)
+        title = pr.get("title", "")
+        base_branch = (data.get("project", {}) or {}).get("base_branch", "master")
+        backend_name = (data.get("project", {}) or {}).get("backend", "vanilla")
+        cmd = _build_diff_cmd(workdir, display_id, title, base_branch,
+                              backend_name)
+        role = "pr-diff"
+    else:
+        return
+
+    # Resolve the launching window's id so we can register the pane.
+    win = tmux_mod.find_window_by_name(session, window_name) if window_name else None
+    target_window = window_name or None
+    try:
+        pane_id = tmux_mod.split_pane(session, "h", cmd, window=target_window)
+    except subprocess.CalledProcessError as e:
+        click.echo(f"split-window failed: {e}")
+        _wait_dismiss()
+        return
+
+    if win and win.get("id"):
+        try:
+            pane_registry.register_pane(session, win["id"], pane_id, role, cmd)
+        except Exception:
+            pass
+
+
 def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
     import sys
@@ -1759,11 +1844,22 @@ def popup_picker_cmd(session: str, window_name: str):
         "t": "qa",
         "g": "merge",
     }
+    # Shortcuts that open a split pane in the launching window
+    # rather than firing a phase action (see _open_pane_for_pr).
+    _PANE_SHORTCUT_KEYS = {
+        "c": "shell",
+        "i": "impl-spec",
+        "u": "qa-spec",
+        "y": "diff",
+    }
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
 
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+        )
+        pane_hint = "  ".join(
+            f"{key}={label}" for key, label in _PANE_SHORTCUT_KEYS.items()
         )
         chord_hint = "z s/d/t: fresh   zz d/t: loop"
         multi_pr = len(nav_pr_ids) > 1
@@ -1824,11 +1920,14 @@ def popup_picker_cmd(session: str, window_name: str):
                           if multi_pr else "")
                 header_lines = [f"PR Actions — {current_pr}{pr_pos}",
                                 f"q/Esc: quit  {shortcut_hint}",
+                                f"pane: {pane_hint}",
                                 chord_hint]
                 if nav_hint:
                     header_lines.append(nav_hint)
                 header = "\n".join(header_lines)
-                expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
+                expect = (list(_SHORTCUT_KEYS.keys())
+                          + list(_PANE_SHORTCUT_KEYS.keys())
+                          + ["z"])
                 if multi_pr:
                     expect += ["h", "l", "left", "right"]
                     if home_pr:
@@ -1887,6 +1986,15 @@ def popup_picker_cmd(session: str, window_name: str):
                 if pressed_key == "z":
                     chord_state = "z"
                     continue
+                if pressed_key in _PANE_SHORTCUT_KEYS:
+                    if _picked_pr is not None:
+                        # Target the launching window in the base session;
+                        # the popup runs in a transient overlay.
+                        _open_pane_for_pr(
+                            base, window_name, _picked_pr,
+                            _PANE_SHORTCUT_KEYS[pressed_key], Path(root),
+                            data=data)
+                    raise SystemExit(0)
                 if pressed_key in _SHORTCUT_KEYS:
                     cmd_to_run = _label_to_cmd.get(
                         _SHORTCUT_KEYS[pressed_key])
