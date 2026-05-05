@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,6 +52,40 @@ from pm_core.cli.helpers import (
     trigger_tui_refresh,
     trigger_tui_restart,
 )
+
+
+@contextmanager
+def _action_runtime_state(pr_id: str, action: str):
+    """Track a CLI action's outer lifecycle in runtime_state.
+
+    Writes ``running`` on entry so the picker popup spinner has a label
+    to display while the handler runs (clone, window creation, gh calls,
+    etc.).  Writes ``failed`` (with verdict) on non-zero ``SystemExit``
+    or unhandled exception, ``done`` on clean exit.
+
+    pane_idle's mirror_register will subsequently overwrite ``done``
+    with ``running`` (plus session_id/pane_id) when the action's pane
+    registers — that's intentional: the outer-lifecycle write only
+    needs to drive the popup spinner, after which the live pane owns
+    state reporting.
+    """
+    from pm_core import runtime_state as _rs
+    _rs.set_action_state(pr_id, action, "running")
+    try:
+        yield
+    except SystemExit as e:
+        code = getattr(e, "code", 0) or 0
+        if code != 0:
+            _rs.set_action_state(pr_id, action, "failed",
+                                 verdict=f"exit:{code}")
+        else:
+            _rs.set_action_state(pr_id, action, "done")
+        raise
+    except BaseException:
+        _rs.set_action_state(pr_id, action, "failed", verdict="error")
+        raise
+    else:
+        _rs.set_action_state(pr_id, action, "done")
 
 
 # ---------------------------------------------------------------------------
@@ -758,6 +793,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    with _action_runtime_state(pr_id, "start"):
+        _pr_start_body(root, data, pr_entry, pr_id, workdir, fresh,
+                       background, transcript, companion)
+
+
+def _pr_start_body(root, data, pr_entry, pr_id, workdir, fresh,
+                   background, transcript, companion):
     # Reload fresh data to catch any spec_pending written since load
     data = store.load(root)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
@@ -1355,6 +1397,15 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    with _action_runtime_state(pr_id, "review"):
+        _pr_review_body(root, data, pr_entry, pr_id, fresh, background,
+                        review_loop, review_iteration, review_loop_id,
+                        transcript)
+
+
+def _pr_review_body(root, data, pr_entry, pr_id, fresh, background,
+                    review_loop, review_iteration, review_loop_id,
+                    transcript):
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
@@ -1802,6 +1853,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    with _action_runtime_state(pr_id, "merge"):
+        _pr_merge_body(root, data, pr_entry, pr_id, resolve_window,
+                       background, transcript, companion, propagation_only)
+
+
+def _pr_merge_body(root, data, pr_entry, pr_id, resolve_window, background,
+                   transcript, companion, propagation_only):
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
