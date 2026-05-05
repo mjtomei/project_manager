@@ -1298,6 +1298,25 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     )
     saw_disappear = False
 
+    # For fresh-mode actions, the on-disk runtime_state entry from a
+    # prior completed run may still read 'done'/'failed' at popup start
+    # — the launcher hasn't yet overwritten it because the TUI hasn't
+    # drained the SIGUSR2 queue.  Snapshot the initial entry so the
+    # terminal-state short-circuit below can distinguish stale terminal
+    # state (must wait through the launcher's transitions) from a
+    # genuine terminal state produced by this invocation.  Track the
+    # full (state, updated_at) identity rather than state alone so a
+    # rapid stale-done → fresh-done transition still trips the flag.
+    if fresh:
+        _initial_entry = _rs.get_action_state(pr_id, action) or {}
+        initial_state_key = (
+            _initial_entry.get("state"),
+            _initial_entry.get("updated_at"),
+        )
+    else:
+        initial_state_key = (None, None)
+    saw_state_change = False
+
     # Print a header line so the popup clearly shows what's happening
     # underneath the picker.  The spinner below uses \r to overwrite a
     # single line; this header stays put.
@@ -1337,6 +1356,13 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         while True:
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
+            if fresh and not saw_state_change:
+                cur_key = (
+                    (entry.get("state") if entry else None),
+                    (entry.get("updated_at") if entry else None),
+                )
+                if cur_key != initial_state_key:
+                    saw_state_change = True
             cur_window_ids = _find_target_window_ids()
             if fresh and initial_window_ids:
                 # Wait for *all* original windows to be killed and a new
@@ -1366,7 +1392,15 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             # spinning forever.  Failures get surfaced via _wait_dismiss
             # so the user sees the verdict before the popup closes;
             # successes dismiss as today.
-            if cur_state in ("done", "failed") and not window_open:
+            # For fresh-mode actions, 'done'/'failed' at popup start is
+            # stale state from a prior run; the launcher will overwrite
+            # it once the TUI drains the queue.  Treat the action as
+            # non-terminal until we observe *some* change to the entry,
+            # at which point any subsequent terminal state is genuinely
+            # from this invocation.
+            terminal = (cur_state in ("done", "failed")
+                        and (not fresh or saw_state_change))
+            if terminal and not window_open:
                 verdict = (entry.get("verdict") if entry else "") or ""
                 failed = cur_state == "failed" or verdict in ("ERROR", "KILLED")
                 # Restore terminal *before* writing final lines / waiting
