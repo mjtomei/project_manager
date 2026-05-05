@@ -1470,9 +1470,10 @@ adjacent regressions the fix could have introduced.
 
 ## Task
 
-Analyze this PR's changes and the available QA instruction library to generate
-a structured test plan. Your goal is to fully exercise the impacted code
-to verify this PR works correctly.
+Analyze this PR's changes and the available QA library (instructions,
+regression tests, and artifact recipes) to generate a structured test plan.
+Your goal is to fully exercise the impacted code to verify this PR works
+correctly.
 {bug_fix_qa_block}
 
 Each scenario runs in its own isolated container — scenarios cannot share
@@ -1592,7 +1593,8 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Get instruction library summary for Scenario 0 (instructions only, not regression)
+    # QA library summary for Scenario 0 (instructions + artifact recipes;
+    # regression is excluded by default in instruction_summary_for_prompt).
     instruction_library_block = ""
     try:
         root = store.find_project_root()
@@ -1600,11 +1602,11 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
         if library_summary and "No QA instructions" not in library_summary:
             instruction_library_block = f"""
-## QA Instruction Library
+## QA Library
 
-The project has user-defined QA instructions and regression tests that the
-automated scenarios may be running.  You can read any of these files to
-understand what's being tested:
+The project has user-defined QA instructions and artifact recipes that the
+automated scenarios may be running or referencing.  Read any of these
+files to understand what's being tested or how to capture evidence:
 
 {library_summary}
 """

@@ -1,9 +1,14 @@
 """QA instruction library management.
 
-Manages instruction files in pm/qa/instructions/ (reusable procedures),
-pm/qa/regression/ (migrated TUI tests), and pm/qa/mocks/ (shared mock
-definitions injected into every QA scenario prompt).  Files are markdown
-with YAML frontmatter.
+Manages four categories of files under pm/qa/, all markdown with YAML
+frontmatter:
+
+- pm/qa/instructions/ — reusable test-environment procedures
+- pm/qa/regression/   — migrated TUI tests
+- pm/qa/artifacts/    — recipes for capturing reviewable evidence
+                        (screen recordings, command logs)
+- pm/qa/mocks/        — shared mock definitions injected into every QA
+                        scenario prompt
 """
 
 from pathlib import Path
