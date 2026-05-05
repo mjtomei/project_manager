@@ -1704,17 +1704,46 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
 
 
 @pr.command("qa")
-@click.argument("pr_id", default=None, required=False)
-def pr_qa(pr_id: str | None):
-    """Start the full QA loop for a PR (planner + scenarios).
+@click.argument("args", nargs=-1)
+@click.option("--session", "session_name", default=None,
+              help="tmux session to target (defaults to PM_SESSION or "
+                   "current pm session)")
+def pr_qa(args: tuple[str, ...], session_name: str | None):
+    """Manage the QA loop for a PR.
 
-    This command must be run from within a pm tmux session (or via the
-    TUI command bar as ``/pr qa <pr_id>``).  The QA process requires the
-    TUI for managing scenario windows and tracking QA state.
+    Forms:
 
-    If PR_ID is omitted, infers from cwd (if inside a workdir) or
-    auto-selects when there's exactly one in_review/qa PR.
+    \b
+      pm pr qa <pr_id>          — focus existing QA window or start a
+                                  one-shot QA run.
+      pm pr qa fresh <pr_id>    — kill stale scenario windows and
+                                  restart QA fresh.
+      pm pr qa loop <pr_id>     — start a self-driving QA loop.
+
+    The QA coordinator runs in a detached daemon (one per PR-action)
+    so the loop survives this CLI invocation.  Verdict completion
+    policy (NEEDS_WORK → review, PASS → merge) stays TUI-side and is
+    driven from runtime_state once the daemon records its terminal
+    state.
     """
+    mode = "default"
+    rest = list(args)
+    if rest and rest[0] in ("fresh", "loop"):
+        mode = rest.pop(0)
+    pr_id = rest[0] if rest else None
+
+    _run_qa(mode, pr_id, session_name)
+
+
+def _run_qa(mode: str, pr_id: str | None, session_name: str | None) -> None:
+    from pm_core.cli._session_target import resolve_target_session
+    from pm_core import loop_daemon
+    from pm_core import runtime_state as _rs
+    from pm_core.qa_loop import (
+        _compute_qa_window_name,
+        _cleanup_stale_scenario_windows,
+    )
+
     root = state_root()
     data = store.load(root)
 
@@ -1722,13 +1751,16 @@ def pr_qa(pr_id: str | None):
         pr_id = _infer_pr_id(data, status_filter=("in_review", "qa"))
         if pr_id is None:
             prs = data.get("prs") or []
-            candidates = [p for p in prs if p.get("status") in ("in_review", "qa")]
-            if len(candidates) == 0:
+            candidates = [p for p in prs
+                          if p.get("status") in ("in_review", "qa")]
+            if not candidates:
                 click.echo("No PRs in in_review or qa status.", err=True)
             else:
-                click.echo("Multiple PRs eligible for QA. Specify one:", err=True)
+                click.echo("Multiple PRs eligible for QA. Specify one:",
+                           err=True)
                 for p in candidates:
-                    click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
+                    click.echo(f"  {_pr_display_id(p)}: "
+                               f"{p.get('title', '???')}", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -1736,23 +1768,267 @@ def pr_qa(pr_id: str | None):
     pr_id = pr_entry["id"]
 
     if pr_entry.get("status") not in ("in_progress", "in_review", "qa"):
-        click.echo(f"PR {pr_id} has status '{pr_entry.get('status')}' — QA requires in_progress, in_review, or qa.", err=True)
+        click.echo(
+            f"PR {pr_id} has status '{pr_entry.get('status')}' — "
+            f"QA requires in_progress, in_review, or qa.", err=True)
         raise SystemExit(1)
 
-    # QA requires the TUI for managing scenario windows and state tracking.
-    # When run from the TUI command bar, the command is intercepted by
-    # handle_command_submitted and routed to qa_loop_ui directly.
-    # When run from CLI, tell the user to use the TUI.
-    pm_session = _get_pm_session()
-    if not pm_session:
-        click.echo("QA requires a pm tmux session for managing scenario windows.", err=True)
-        click.echo("Start a session first with: pm session", err=True)
-        click.echo(f"Then use the TUI command bar: /pr qa {_pr_display_id(pr_entry)}", err=True)
+    target_session = resolve_target_session(session_name)
+    loop_daemon.sweep_stale_pidfiles(target_session)
+
+    # Default mode: if the QA window already exists, just focus it.
+    if mode == "default":
+        window_name = _compute_qa_window_name(pr_entry)
+        win = tmux_mod.find_window_by_name(target_session, window_name)
+        if win:
+            suppress = _rs.consume_suppress_switch(pr_id, "qa")
+            if not suppress:
+                tmux_mod.select_window(target_session, window_name)
+                click.echo(f"Focused QA window for {pr_id}")
+            else:
+                click.echo(
+                    f"QA window for {pr_id} ready (focus suppressed)")
+            return
+        # No window yet — fall through to launch the daemon.
+
+    # Refuse if an existing daemon is already coordinating QA for this PR.
+    if loop_daemon.is_loop_alive(target_session, pr_id, "qa"):
+        if mode == "fresh":
+            # Fresh reset: stop the running daemon first.
+            loop_daemon.request_stop(target_session, pr_id, "qa")
+        else:
+            click.echo(
+                f"QA daemon already running for {pr_id} — use "
+                f"'pm pr qa fresh {pr_id}' to restart.", err=True)
+            raise SystemExit(1)
+
+    if mode == "fresh":
+        _cleanup_stale_scenario_windows(target_session, pr_entry,
+                                         include_main=True)
+
+    # Transition status to "qa" if currently in_review (mirrors qa_loop_ui).
+    if pr_entry.get("status") == "in_review":
+        def _set_qa(d):
+            p = store.get_pr(d, pr_id)
+            if p and p.get("status") == "in_review":
+                p["status"] = "qa"
+        try:
+            store.locked_update(root, _set_qa)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            click.echo(f"Error transitioning to qa: {e}", err=True)
+            raise SystemExit(1)
+        # Reload after status change.
+        data = store.load(root)
+        pr_entry = _require_pr(data, pr_id)
+
+    import secrets as _secrets
+    loop_id = _secrets.token_hex(4)
+
+    extras: dict = {"loop_id": loop_id, "verdict": None}
+    if mode == "loop":
+        from pm_core.qa_loop import get_qa_pass_count
+        extras["self_driving"] = {
+            "pass_count": 0,
+            "required_passes": get_qa_pass_count(),
+        }
+    _rs.set_action_state(pr_id, "qa", "launching", **extras)
+
+    # Capture the data the daemon's loop_main needs as plain values —
+    # pr_entry is reloaded inside the daemon to avoid sharing dict
+    # references across fork.
+    captured_pr_id = pr_id
+    captured_root = root
+    captured_session = target_session
+
+    def loop_main():
+        # Propagate the resolved target session into the daemon — the
+        # double-forked child may not share $TMUX with the original
+        # caller, so loop_shared.get_pm_session() needs PM_SESSION to
+        # find the right tmux session.
+        os.environ["PM_SESSION"] = captured_session
+
+        from pm_core import store as _store
+        from pm_core import runtime_state as __rs
+        from pm_core.qa_loop import QALoopState as _QAState
+        from pm_core.qa_loop import run_qa_sync as _run
+
+        _data = _store.load(captured_root)
+        _pr = _store.get_pr(_data, captured_pr_id) or {}
+        state = _QAState(pr_id=captured_pr_id, loop_id=loop_id)
+        loop_daemon.bridge_stop_to_state(state)
+
+        __rs.set_action_state(captured_pr_id, "qa", "running",
+                               loop_id=loop_id)
+
+        def on_update(s):
+            try:
+                __rs.set_action_state(
+                    captured_pr_id, "qa", "running",
+                    loop_id=loop_id,
+                    verdict=s.latest_verdict or None,
+                )
+            except Exception:
+                pass
+
+        result = _run(state, captured_root, _pr, on_update)
+        # Final verdict is recorded by the daemon's finally block, but
+        # emit it explicitly so the verdict is in runtime_state before
+        # the wrapper transitions to "done".
+        __rs.set_action_state(
+            captured_pr_id, "qa", "running",
+            loop_id=loop_id,
+            verdict=result.latest_verdict or "UNKNOWN",
+        )
+
+    try:
+        pid = loop_daemon.spawn(
+            session=target_session,
+            pr_id=pr_id,
+            action="qa",
+            loop_id=loop_id,
+            loop_main=loop_main,
+        )
+    except loop_daemon.LoopAlreadyRunning as e:
+        click.echo(str(e), err=True)
         raise SystemExit(1)
 
-    click.echo(f"Use the TUI command bar to start QA: /pr qa {_pr_display_id(pr_entry)}", err=True)
-    click.echo("Or press 't' on the PR in the TUI.", err=True)
-    raise SystemExit(1)
+    if pid <= 0:
+        click.echo(
+            f"Failed to spawn QA daemon for {pr_id} (no PID returned).",
+            err=True)
+        raise SystemExit(1)
+    click.echo(f"Started QA daemon for {pr_id} (pid={pid}, mode={mode})")
+
+
+@pr.group("review-loop")
+def review_loop_group():
+    """Manage the review-loop coordinator for a PR."""
+
+
+@review_loop_group.command("start")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--session", "session_name", default=None,
+              help="tmux session to target (defaults to PM_SESSION or "
+                   "current pm session)")
+def review_loop_start(pr_id: str | None, session_name: str | None):
+    """Start a fresh review loop for a PR.
+
+    Spawns a detached daemon that runs the review-loop coordinator
+    (iterating ``pm pr review --review-loop`` until PASS).  Verdict
+    completion policy stays TUI-side and reads from runtime_state.
+    """
+    from pm_core.cli._session_target import resolve_target_session
+    from pm_core import loop_daemon
+    from pm_core import runtime_state as _rs
+
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("in_review",))
+        if pr_id is None:
+            click.echo("No PR specified and no in_review PR found.",
+                       err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if pr_entry.get("status") not in ("in_progress", "in_review"):
+        click.echo(
+            f"PR {pr_id} has status '{pr_entry.get('status')}' — "
+            f"review-loop requires in_progress or in_review.", err=True)
+        raise SystemExit(1)
+
+    target_session = resolve_target_session(session_name)
+    loop_daemon.sweep_stale_pidfiles(target_session)
+
+    # Supersede any running review-loop daemon for this PR — matches
+    # zz d's "always start a fresh loop" semantics in review_loop_ui.
+    if loop_daemon.is_loop_alive(target_session, pr_id, "review-loop"):
+        # Kill the existing review window so the running iteration's
+        # verdict-poll bails immediately, mirroring start_or_stop_loop.
+        try:
+            display_id = _pr_display_id(pr_entry)
+            tmux_mod.kill_window(target_session, f"review-{display_id}")
+        except Exception:
+            pass
+        loop_daemon.request_stop(target_session, pr_id, "review-loop")
+
+    import secrets as _secrets
+    loop_id = _secrets.token_hex(4)
+
+    tdir = loop_daemon.transcript_dir(root)
+
+    _rs.set_action_state(pr_id, "review-loop", "launching",
+                         loop_id=loop_id, iteration=0, verdict=None)
+
+    captured_pr_id = pr_id
+    captured_root = root
+    captured_tdir = str(tdir)
+    captured_session = target_session
+
+    def loop_main():
+        # Propagate the resolved target session into the daemon — the
+        # double-forked child may not share $TMUX with the original
+        # caller, so loop_shared.get_pm_session() needs PM_SESSION to
+        # find the right tmux session.
+        os.environ["PM_SESSION"] = captured_session
+
+        from pm_core import store as _store
+        from pm_core import runtime_state as __rs
+        from pm_core.review_loop import (
+            ReviewLoopState as _RLState,
+            run_review_loop_sync as _run,
+        )
+
+        _data = _store.load(captured_root)
+        _pr = _store.get_pr(_data, captured_pr_id) or {}
+        state = _RLState(pr_id=captured_pr_id)
+        state.loop_id = loop_id
+        loop_daemon.bridge_stop_to_state(state)
+
+        def on_iteration(s):
+            try:
+                __rs.set_action_state(
+                    captured_pr_id, "review-loop", "running",
+                    iteration=s.iteration,
+                    loop_id=loop_id,
+                    verdict=s.latest_verdict or None,
+                )
+            except Exception:
+                pass
+
+        __rs.set_action_state(captured_pr_id, "review-loop", "running",
+                                iteration=0, loop_id=loop_id)
+        result = _run(state, str(captured_root), _pr, captured_tdir,
+                      on_iteration=on_iteration)
+        __rs.set_action_state(
+            captured_pr_id, "review-loop", "running",
+            iteration=result.iteration,
+            loop_id=loop_id,
+            verdict=result.latest_verdict or "UNKNOWN",
+        )
+
+    try:
+        pid = loop_daemon.spawn(
+            session=target_session,
+            pr_id=pr_id,
+            action="review-loop",
+            loop_id=loop_id,
+            loop_main=loop_main,
+        )
+    except loop_daemon.LoopAlreadyRunning as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+
+    if pid <= 0:
+        click.echo(
+            f"Failed to spawn review-loop daemon for {pr_id} "
+            f"(no PID returned).", err=True)
+        raise SystemExit(1)
+    click.echo(f"Started review-loop daemon for {pr_id} (pid={pid})")
 
 
 def _resolve_window_default() -> bool:

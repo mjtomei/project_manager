@@ -192,7 +192,8 @@ def clear_action(pr_id: str, action: str) -> None:
     set_action_state(pr_id, action, None)
 
 
-def sweep_stale_states(reason: str = "tui-restart") -> int:
+def sweep_stale_states(reason: str = "tui-restart",
+                       protect_alive_for_session: str | None = None) -> int:
     """Reset any in-flight action states across all PRs.
 
     Called by the TUI on mount: a fresh TUI process can't own panes or
@@ -203,8 +204,36 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
     Terminal states (``done`` / ``failed``) are left untouched so
     post-mortem info — e.g. last review-loop verdict — survives restart.
 
+    When *protect_alive_for_session* is set, in-flight entries for the
+    ``review-loop`` and ``qa`` actions are preserved if a live daemon
+    pidfile exists for them under that session — those loops outlive
+    the TUI process and should keep driving the spinner / verdict
+    state across restarts.
+
     Returns the number of action entries that were cleared.
     """
+    alive_keys: set[tuple[str, str]] = set()
+    if protect_alive_for_session:
+        try:
+            from pm_core import loop_daemon
+            # Sweep dead pidfiles first so we don't protect entries
+            # whose daemon already died.
+            loop_daemon.sweep_stale_pidfiles(protect_alive_for_session)
+            for action in ("review-loop", "qa"):
+                d = loop_daemon.loops_dir(protect_alive_for_session)
+                for path in d.glob(f"*-{action}.pid"):
+                    info = loop_daemon.read_pidfile(path)
+                    if not info:
+                        continue
+                    pid = info[0]
+                    if pid <= 0:
+                        continue
+                    pr_id = path.stem[: -len(f"-{action}")]
+                    alive_keys.add((pr_id, action))
+        except Exception:
+            _log.debug("sweep: protect-alive enumeration failed",
+                       exc_info=True)
+
     runtime_dir = _runtime_dir()
     in_flight = {"queued", "launching", "running", "idle", "waiting"}
     swept = 0
@@ -227,6 +256,7 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
         if not targets:
             continue
         pr_id = data.get("pr_id") or path.stem
+        targets = [a for a in targets if (pr_id, a) not in alive_keys]
         for action in targets:
             try:
                 clear_action(pr_id, action)

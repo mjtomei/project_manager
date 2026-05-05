@@ -919,7 +919,7 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("start", "pr start {pr_id}"),
     ("edit", "tui:edit {pr_id}"),
     ("review", "pr review {pr_id}"),
-    ("qa", "tui:pr qa {pr_id}"),
+    ("qa", "pr qa {pr_id}"),
     ("merge", "pr merge --resolve-window {pr_id}"),
 ]
 
@@ -930,9 +930,9 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
 _MODIFIED_ACTION_CMDS: dict[tuple[str, str], str] = {
     ("z",  "start"):  "pr start --fresh {pr_id}",
     ("z",  "review"): "pr review --fresh {pr_id}",
-    ("zz", "review"): "tui:review-loop start {pr_id}",
-    ("z",  "qa"):     "tui:pr qa fresh {pr_id}",
-    ("zz", "qa"):     "tui:pr qa loop {pr_id}",
+    ("zz", "review"): "pr review-loop start {pr_id}",
+    ("z",  "qa"):     "pr qa fresh {pr_id}",
+    ("zz", "qa"):     "pr qa loop {pr_id}",
 }
 
 # Map action labels to tmux window name patterns.
@@ -1958,12 +1958,6 @@ def popup_cmd_cmd(session: str):
         click.echo(f"Invalid command syntax: {e}")
         _wait_dismiss()
         raise SystemExit(1)
-    _cmd_norm = cmd.replace("review loop", "review-loop")
-    if (_cmd_norm.startswith("pr qa")
-            or _cmd_norm.startswith("review-loop")):
-        _run_picker_command(f"tui:{_cmd_norm}", session)
-        return
-
     full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
 
     rc = _run_with_abort_keys(full_cmd)

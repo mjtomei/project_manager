@@ -419,7 +419,10 @@ class ProjectManagerApp(App):
         # rewrite real entries as panes register and loops resume.
         try:
             from pm_core import runtime_state as _rs
-            _rs.sweep_stale_states("tui-mount")
+            _rs.sweep_stale_states(
+                "tui-mount",
+                protect_alive_for_session=self._session_name,
+            )
         except Exception:
             _log.debug("runtime_state sweep on mount failed", exc_info=True)
         # Load any existing capture config
