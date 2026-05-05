@@ -397,7 +397,16 @@ class ProjectManagerApp(App):
         yield CommandBar(id="command-bar")
 
     def on_mount(self) -> None:
-        _log.info("TUI mounted (cwd=%s)", Path.cwd())
+        import os
+        try:
+            from pm_core.tui import auto_start as _auto_start
+            trigger = ("merge_restart"
+                       if _auto_start.has_merge_restart_marker()
+                       else "initial")
+        except Exception:
+            trigger = "initial"
+        _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
+                  os.getpid(), Path.cwd(), trigger)
         # Get session name for frame capture file naming
         if tmux_mod.in_tmux():
             try:
@@ -931,6 +940,9 @@ class ProjectManagerApp(App):
         from pm_core.tui import auto_start
         if auto_start.has_merge_restart_marker():
             auto_start.save_breadcrumb(self)
+            _log.info("action_restart: reason=merge_restart_marker")
+        else:
+            _log.info("action_restart: reason=user")
         pane_ops.restart_app(self)
 
     def action_refresh(self) -> None:
@@ -1036,14 +1048,16 @@ class ProjectManagerApp(App):
             cmd = line.strip()
             if not cmd:
                 continue
-            _log.info("dispatching queued TUI command: %r", cmd)
+            _log.info("queue dispatch: cmd=%r", cmd)
             try:
                 pr_view.handle_command_submitted(self, cmd)
+                _log.info("queue dispatch: cmd=%r result=ok", cmd)
             except Exception:
-                _log.exception("queued command failed: %r", cmd)
+                _log.exception("queue dispatch: cmd=%r result=exc", cmd)
 
     def on_unmount(self) -> None:
         """Clean up the reload pidfile and command queue on shutdown."""
+        _log.info("TUI unmount: session=%s", self._session_name)
         for path in (self._reload_pidfile(), self._command_queue_file()):
             if path is not None:
                 try:

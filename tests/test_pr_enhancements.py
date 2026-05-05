@@ -615,9 +615,74 @@ class TestPrMerge:
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
 
-        assert result.exit_code == 0
+        # Soft failure with manual instructions exits non-zero so the
+        # popup picker / TUI surfaces the error instead of closing
+        # silently.
+        assert result.exit_code != 0
         assert "Push to origin failed" in result.output
         mock_finalize.assert_not_called()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    def test_local_pull_failure_without_resolve_window_exits_nonzero(
+        self, mock_git_ops, mock_finalize, tmp_merge_project,
+    ):
+        """When the post-merge pull into the main repo dir fails and no
+        resolve window was requested, exit non-zero so the popup picker
+        / TUI surfaces the manual instructions instead of vanishing."""
+        def run_git_side_effect(*args, **kwargs):
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return MagicMock(returncode=0, stdout="master\n", stderr="")
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+            if args[0] == "fetch":
+                return MagicMock(returncode=1, stdout="",
+                                 stderr="fetch failed: connection refused")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-resolve-window"])
+
+        assert result.exit_code != 0
+        assert "Pull manually" in result.output or "Fetch" in result.output
+        mock_finalize.assert_not_called()
+
+
+class TestGithubFallbackExitCode:
+    """When the GitHub backend cannot run gh CLI, pr merge prints manual
+    instructions. That is a soft failure — exit non-zero so the popup
+    picker / TUI surfaces it."""
+
+    @mock.patch("shutil.which", return_value=None)
+    def test_no_gh_cli_exits_nonzero_with_pr_url(
+        self, _mock_which, tmp_path,
+    ):
+        from pm_core import store
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        data = {
+            "project": {"name": "p", "repo": str(tmp_path),
+                        "base_branch": "master", "backend": "github"},
+            "prs": [{
+                "id": "pr-001", "title": "t", "description": "",
+                "branch": "pm/pr-001", "status": "in_review",
+                "gh_pr": "https://github.com/x/y/pull/1",
+            }],
+            "plans": [],
+        }
+        store.save(data, pm_dir)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code != 0
+        assert "GitHub PR" in result.output
+        assert "Merge via GitHub" in result.output
 
 
 # ---------------------------------------------------------------------------

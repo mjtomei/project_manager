@@ -78,6 +78,10 @@ def stop_loop_or_fresh_review(app) -> None:
         if pr and app._session_name:
             win_name = f"review-{_pr_display_id(pr)}"
             try:
+                from pm_core import home_window
+                win = tmux_mod.find_window_by_name(app._session_name, win_name)
+                if win:
+                    home_window.park_if_on(app._session_name, win["id"])
                 tmux_mod.kill_window(app._session_name, win_name)
             except Exception:
                 _log.debug(
@@ -133,6 +137,10 @@ def start_or_stop_loop(app) -> None:
         if pr and app._session_name:
             win_name = f"review-{_pr_display_id(pr)}"
             try:
+                from pm_core import home_window
+                win = tmux_mod.find_window_by_name(app._session_name, win_name)
+                if win:
+                    home_window.park_if_on(app._session_name, win["id"])
                 tmux_mod.kill_window(app._session_name, win_name)
             except Exception:
                 _log.debug("review_loop_ui: kill of review window for"
@@ -312,7 +320,14 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                    "superseded loop_id=%s verdict=%s",
                    state.loop_id, state.latest_verdict)
         return
-    _rs.set_action_state(state.pr_id, "review-loop", "done",
+    # ERROR/KILLED are runtime failures, not clean completions; record
+    # them as state="failed" so the popup spinner can distinguish a
+    # successful loop end from a failure and surface the verdict to the
+    # user instead of silently dismissing.
+    final_state = ("failed"
+                   if state.latest_verdict in ("ERROR", "KILLED")
+                   else "done")
+    _rs.set_action_state(state.pr_id, "review-loop", final_state,
                          iteration=state.iteration,
                          verdict=state.latest_verdict)
 
@@ -611,9 +626,10 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
 
+    # Pass the flag explicitly in both directions — the in-tmux env-var
+    # default would otherwise flip resolve_window=False back on.
     merge_cmd = "pr merge"
-    if resolve_window:
-        merge_cmd += " --resolve-window"
+    merge_cmd += " --resolve-window" if resolve_window else " --no-resolve-window"
     if propagation_only:
         merge_cmd += " --propagation-only"
     merge_cmd += " --background"
@@ -672,6 +688,8 @@ def _kill_merge_window(app, pr_id: str) -> None:
     window_name = f"merge-{display_id}"
     win = tmux_mod.find_window_by_name(session, window_name)
     if win:
+        from pm_core import home_window
+        home_window.park_if_on(session, win["id"])
         tmux_mod.kill_window(session, window_name)
         _log.info("killed merge window %s for %s", window_name, pr_id)
 

@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-315f753
+  active_pr: pr-23d97f8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -95,6 +95,11 @@ plans:
 - id: plan-state
   name: Unified persistent state store (not pursued)
   file: plans/plan-state.md
+  status: draft
+  parent: null
+- id: plan-self-improve
+  name: Recursive pm tournament across targets
+  file: plans/plan-self-improve.md
   status: draft
   parent: null
 prs:
@@ -5328,7 +5333,7 @@ prs:
   plan: watchers
   title: 'Session health watcher: detect and recover stuck/dead Claude sessions'
   branch: pm/pr-18ac983-session-health-watcher-detect-and-recover-stuck-de
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-3032fb6
   description: 'Built-in watcher using the BaseWatcher framework that monitors all
@@ -5370,9 +5375,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/184
   gh_pr_number: 184
   created_at: '2026-03-09T15:17:01.313859+00:00'
-  updated_at: '2026-05-03T11:57:41.026322+00:00'
+  updated_at: '2026-05-05T12:15:18.337503+00:00'
   started_at: '2026-05-03T11:57:41.026322+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-05T12:15:18.337503+00:00'
   merged_at: null
   notes:
   - id: note-85c3833
@@ -7023,11 +7028,11 @@ prs:
     \ scenarios\n\nCovers the main slow-iteration cases: verdict detection polling,\
     \ review loop iteration counting, QA loop scenario worker completion, verification\
     \ pass/fail transitions."
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-04-24T17:09:34.251001+00:00'
+  updated_at: '2026-05-05T17:35:32.693345+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
@@ -8121,11 +8126,11 @@ prs:
     Fix: In done_pr() (pr_view.py ~line 136), check app._review_loops.get(pr_id) before
     proceeding. If a loop is running for the selected PR, show a message like ''Review
     loop running — use z d to stop'' and return without spawning a second window.'
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/156
   gh_pr_number: 156
   created_at: '2026-04-06T19:14:44.223134+00:00'
-  updated_at: '2026-04-24T17:09:29.690246+00:00'
+  updated_at: '2026-05-05T12:27:01.162703+00:00'
   started_at: '2026-04-06T19:17:16.583998+00:00'
   reviewed_at: '2026-04-07T13:30:18.816990+00:00'
   merged_at: null
@@ -8140,6 +8145,98 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:29Z'
     last_edited: '2026-04-24T17:09:29Z'
+  - id: note-67038eb
+    text: "Heads-up from a 2026-05-04 09:29 incident in project-manager-c5a1006b:\
+      \ hit the more general concurrent-_launch_review_window race that this PR's\
+      \ fix only addresses at one entry point.\n\nLogs (~/.pm/debug/project-manager-c5a1006b.log)\
+      \ show two _launch_review_window invocations for pr-f5b7eef firing the same\
+      \ second:\n\n  09:29:22 [push_proxy] Push proxy started ... (twice — same socket)\n\
+      \  09:29:22 [container] podman run -d --name pm-review-pr-f5b7eef ... (twice)\n\
+      \  09:29:22 ERROR podman: name 'pm-review-pr-f5b7eef' already in use by 0683a5f204bd\n\
+      \                                                   (the container the first\
+      \ run just created)\n\nSame shape as 'plain d while loop is running': two paths\
+      \ into _launch_review_window for the same PR, no mutual exclusion at the launcher\
+      \ itself. Likely trigger this time was the popup-spinner stale-terminal-state\
+      \ bug (pr-f27b882): the spinner exits instantly when the previous loop finished,\
+      \ the user re-clicks thinking nothing happened, and now two launches race.\n\
+      \nSuggestion: serialize at the container-name granularity, not per-PR. The contended\
+      \ resource is the container name (pm-review-pr-<id>); review and review-loop\
+      \ share that name (correct — they share window + container), but review and\
+      \ qa for the same PR use different names (pm-review-pr-<id> vs pm-qa-pr-<id>)\
+      \ and shouldn't be artificially serialized. A file lock at ~/.pm/locks/<container_name>.lock\
+      \ around the remove_container + wrap_claude_cmd block in pm_core/cli/pr.py:1221-1229\
+      \ (and the equivalent QA path) falls naturally out of the existing _make_container_name(label)\
+      \ keying. Lets any number of entry points call _launch_review_window concurrently\
+      \ while only one container creation per name goes through.\n\nCheaper than auditing\
+      \ every entry point that could hit this (plain d, zz d, picker review, picker\
+      \ review-loop, auto-sequence, watcher restarts, popup retry-after-spurious-exit).\n\
+      \nRelated: pr-bc010f4 (force-rm orphan), pr-f27b882 (stale-state spinner), pr-748e708\
+      \ (push-proxy keyed only by container name)."
+    created_at: '2026-05-04T16:33:36Z'
+    last_edited: '2026-05-04T16:35:39Z'
+  - id: note-80159c9
+    text: 'Second incident, 2026-05-05 ~05:18 in project-manager-c5a1006b. Same family
+      of race, plus a new dimension that confirms the per-container-name lock needs
+      to be cross-process (OS flock), not in-process.
+
+
+      Sequence (master log + per-workdir log):
+
+      - 05:18:33 master log: review-loop iteration 2 for pr-18ac983. transcript symlink
+      + podman rm -f pm-review-pr-18ac983.
+
+      - 05:18:33-05:18:43: 10s wait loop in remove_container — confirms removed.
+
+      - 05:18:44 master log: podman run -d --name pm-review-pr-18ac983 → succeeds,
+      id=263f3e6c542c.
+
+      - 05:18:44 workdir log (pm-pr-18ac983-...-90100632.log): podman run -d --name
+      pm-review-pr-18ac983 → fails with ''name already in use by 263f3e6c542c'' (the
+      ID master just created).
+
+
+      The two invocations came from different pm_core installations:
+
+      - master pm_core: user''s zz d via the picker (post-fix wrapper now skip_local
+      for IPC, so picker uses host code).
+
+      - workdir pm_core: the loop''s own iteration-relauncher at review_loop.py:117-130
+      runs ''pm pr review --fresh --review-loop'' as a subprocess with cwd=pm_root
+      pointing into the workdir; wrapper cwd-walks for non-IPC commands, finds workdir''s
+      local pm_core, uses that.
+
+
+      Implication: in-process locks (Python-level) won''t help because the racers
+      are *separate processes from different pm_core installs*. The lock has to be
+      OS-level (fcntl.flock on a host file like /tmp/pm-locks/<container_name>.lock
+      or ~/.pm/locks/<container_name>.lock) so both processes see the same lock regardless
+      of which pm_core they imported.
+
+
+      Additional observed symptom: the popup spinner stays stuck open on top of the
+      affected window after the failed-launch race. The host''s _launch_review_window
+      apparently succeeded (container 263f3e6c exists, window created), but the workdir''s
+      failed launch may have left state that confuses the spinner''s exit logic. Worth
+      verifying whether the lock fix incidentally clears this, or whether spinner
+      state cleanup needs separate attention.
+
+
+      Suggested fix path:
+
+      1. host file at ~/.pm/locks/<container_name>.lock acquired via fcntl.flock LOCK_EX
+      with a short timeout (say 60s, generous because remove_container''s wait is
+      10s).
+
+      2. lock acquired BEFORE remove_container, released AFTER wrap_claude_cmd returns.
+      Both racers serialize on that lock; the second one re-checks ''is this container
+      still there or already created by the first racer'' after acquiring and either
+      no-ops or proceeds.
+
+      3. Inside the lock, an idempotent path: if the container with this name is already
+      running and matches our intended config, attach to it instead of recreating.
+      (Optional, but turns the race into a no-op rather than a wait.)'
+    created_at: '2026-05-05T12:27:00Z'
+    last_edited: '2026-05-05T12:27:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-f6381eb7
 - id: pr-177dec0
   plan: bugs
@@ -8382,7 +8479,7 @@ prs:
   plan: bugs
   title: 'Consolidate window refocus: switch all co-viewing sessions consistently'
   branch: pm/pr-1735d44-consolidate-window-refocus-switch-all-co-viewing-s
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Window refocusing is split between tmux.select_window (switches one
     session) and tmux.switch_sessions_to_window (switches all grouped sessions). The
@@ -8400,9 +8497,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/159
   gh_pr_number: 159
   created_at: '2026-04-07T12:51:22.561975+00:00'
-  updated_at: '2026-05-03T12:08:21.050718+00:00'
+  updated_at: '2026-05-04T14:00:14.026192+00:00'
   started_at: '2026-04-07T13:06:32.173284+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-04T14:00:14.026192+00:00'
   merged_at: null
   notes:
   - id: note-3b6b377
@@ -10433,7 +10530,7 @@ prs:
   plan: plan-ambient
   title: pm rc mobile voice document viewer and editor
   branch: pm/pr-4702a11-pm-rc-mobile-voice-document-viewer-and-editor
-  status: qa
+  status: in_review
   depends_on: []
   description: 'New `pm rc start <path> [--port N]` command (pm-session only) that
     lets a user review and edit a document by voice from a remote device while the
@@ -10681,9 +10778,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/170
   gh_pr_number: 170
   created_at: '2026-05-01T15:07:09.683797+00:00'
-  updated_at: '2026-05-03T23:01:20.123110+00:00'
+  updated_at: '2026-05-05T12:15:40.039649+00:00'
   started_at: '2026-05-01T15:21:01.117727+00:00'
-  reviewed_at: '2026-05-01T15:42:13.613594+00:00'
+  reviewed_at: '2026-05-05T12:15:40.039649+00:00'
   merged_at: null
   notes:
   - id: note-1404198
@@ -12427,48 +12524,6 @@ prs:
   merged_at: '2026-05-04T13:30:55.404523+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7b3b639-bug-popup-hangs-after-pr-start-new-p-ae8aa651
-- id: pr-7fe2588
-  plan: bugs
-  title: 'Bug: popup should close on Ctrl+C / Esc regardless of body state'
-  branch: pm/pr-7fe2588-bug-popup-should-close-on-ctrl-c-esc-regardless-of
-  status: pending
-  depends_on: []
-  description: "Today the prefix+M / prefix+P popup closes only when the body command\
-    \ exits. If the body is in an unexpected state — subprocess hung, _wait_dismiss\
-    \ not entered, container creation blocked — the user has no way to dismiss the\
-    \ popup with Ctrl+C or Esc. Tmux's display-popup -E has no built-in keyboard escape;\
-    \ the popup is effectively hostage to whatever the body is doing.\n\nFix: wrap\
-    \ the popup body shell so Ctrl+C and Esc both unconditionally exit the body, which\
-    \ then triggers display-popup -E to close.\n\nConcretely:\n\n(1) Ctrl+C — easy.\
-    \ Add 'trap exit 130 INT' at the top of the popup body shell wrapper. Today the\
-    \ SIGINT propagates to whatever subprocess is running but the wrapper shell does\
-    \ not exit on its own. The trap makes the shell exit 130 on SIGINT, which closes\
-    \ the popup.\n\n(2) Esc — harder. The popup is a regular pty; Esc as a single\
-    \ key doesn't terminate processes. Two approaches:\n  (a) Wrap the body in a small\
-    \ Python that reads stdin in raw mode in a background thread and exits on Esc.\
-    \ While the foreground subprocess runs, the background watcher kills it on Esc.\
-    \ This works but adds complexity to every popup.\n  (b) Bind a key inside the\
-    \ popup pane: tmux 3.4+ display-popup -B doesn't exist as such, but you can bind\
-    \ keys in the calling client's table that target the popup pane. Less reliable\
-    \ across tmux versions.\n  \n  Recommended: (a) — implement once in pm_core/cli/_popup.py\
-    \ as a wrapper that the picker_inner / cmd_inner shell bodies call instead of\
-    \ directly exec'ing pm _popup-cmd. The wrapper spawns the underlying pm command\
-    \ and watches for Esc concurrently.\n\n(3) Update both prefix+M and prefix+P bodies\
-    \ to use the new wrapper. The trap-INT change is a one-liner; the Esc-watcher\
-    \ addition is the bigger piece.\n\nTests: a popup body that is intentionally hung\
-    \ via a sleep can be dismissed by Ctrl+C; same body dismissed by Esc; existing\
-    \ successful pr_start / popup-cmd flows still close cleanly when the body exits\
-    \ naturally; the wrapper does not interfere with subcommand stdin (e.g. the 'pm>'\
-    \ prompt in popup-cmd still works)."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-04T11:57:06.474649+00:00'
-  updated_at: '2026-05-04T11:57:06.474649+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-748e708
   plan: bugs
   title: 'Bug: push-proxy keyed only by (session_tag, pr_id) — impl and QA containers
@@ -12801,7 +12856,7 @@ prs:
   title: 'Bug: suppress-switch flag leaks across action invocations when consume only
     happens inside picker'
   branch: pm/pr-6553192-bug-suppress-switch-flag-leaks-across-action-invoc
-  status: pending
+  status: merged
   depends_on: []
   description: 'request_suppress_switch / consume_suppress_switch in pm_core/runtime_state.py
     manage a per-(pr_id, action) flag that tells callers to skip the post-launch focus
@@ -12846,21 +12901,22 @@ prs:
     opening a fresh action window for the same PR clears it; subsequent action invocations
     switch focus normally; the flag still works inside a single picker invocation
     (set when user dismisses, consumed when window opens, no surprise pre-clear).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/192
+  gh_pr_number: 192
   created_at: '2026-05-04T12:41:11.689063+00:00'
-  updated_at: '2026-05-04T12:41:11.689063+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-04T14:36:50.517751+00:00'
+  started_at: '2026-05-04T14:27:50.328743+00:00'
+  reviewed_at: '2026-05-04T14:32:52.479443+00:00'
+  merged_at: '2026-05-04T14:36:50.517751+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6553192-bug-suppress-switch-flag-leaks-acros-5702da0a
 - id: pr-b56e079
   plan: bugs
   title: 'Bug: picker-driven ''pr merge'' swallows errors and doesn''t launch merge-resolve
     window'
   branch: pm/pr-b56e079-bug-picker-driven-pr-merge-swallows-errors-and-doe
-  status: in_review
+  status: merged
   depends_on: []
   description: "Two related issues observed when running 'merge' from the prefix+P\
     \ action picker on a PR (concrete repro: pr-177dec0 / #157). Same flow on a different\
@@ -12916,10 +12972,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/187
   gh_pr_number: 187
   created_at: '2026-05-04T12:48:23.584952+00:00'
-  updated_at: '2026-05-04T13:05:46.814039+00:00'
+  updated_at: '2026-05-04T14:17:42.674712+00:00'
   started_at: '2026-05-04T12:54:35.376343+00:00'
   reviewed_at: '2026-05-04T13:05:46.814039+00:00'
-  merged_at: null
+  merged_at: '2026-05-04T14:17:42.674712+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b56e079-bug-picker-driven-pr-merge-swallows--7f4eaacf
 - id: pr-315f753
@@ -12927,7 +12983,7 @@ prs:
   title: 'Bug: review-loop fails with ''Review window not found after launch'' even
     when container created'
   branch: pm/pr-315f753-bug-review-loop-fails-with-review-window-not-found
-  status: in_review
+  status: merged
   depends_on: []
   description: 'EXACT root cause: PR titles containing single quotes (apostrophes)
     or other shell-meta characters break the diff_cmd shell pipeline that pr_review.py:_launch_review_window
@@ -13027,10 +13083,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/189
   gh_pr_number: 189
   created_at: '2026-05-04T13:07:56.002115+00:00'
-  updated_at: '2026-05-04T13:42:45.949421+00:00'
+  updated_at: '2026-05-04T13:58:33.053143+00:00'
   started_at: '2026-05-04T13:37:36.310056+00:00'
   reviewed_at: '2026-05-04T13:42:45.949421+00:00'
-  merged_at: null
+  merged_at: '2026-05-04T13:58:33.053143+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-315f753-bug-review-loop-fails-with-review-wi-8dd2c3bd
 - id: pr-b423bfd
@@ -13038,7 +13094,7 @@ prs:
   title: 'Bug: picker spinner shows ''review-loop: done…'' when the loop actually
     errored'
   branch: pm/pr-b423bfd-bug-picker-spinner-shows-review-loop-done-when-the
-  status: pending
+  status: merged
   depends_on: []
   description: "When the review loop ends with verdict=ERROR, the action picker pane\
     \ shows 'review-loop: done…' with a moving spinner — implying success and still\
@@ -13071,21 +13127,22 @@ prs:
     \ picker shows the error and waits for keypress; a review loop that PASSes produces\
     \ state='done' and the picker dismisses cleanly; a still-running loop continues\
     \ spinning until terminal."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/191
+  gh_pr_number: 191
   created_at: '2026-05-04T13:08:11.100568+00:00'
-  updated_at: '2026-05-04T13:08:11.100568+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-04T14:26:30.818968+00:00'
+  started_at: '2026-05-04T14:17:06.668369+00:00'
+  reviewed_at: '2026-05-04T14:23:51.868370+00:00'
+  merged_at: '2026-05-04T14:26:30.818968+00:00'
   notes: []
   spec_impl: /workspace/pm/specs/pr-177dec0/impl.md
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b423bfd-bug-picker-spinner-shows-review-loop-e802a472
 - id: pr-6be8ee6
   plan: improvements
   title: 'Bug-fix flow: surface TUI QA repro instructions in session prompt'
   branch: pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-
-  status: pending
+  status: in_review
   depends_on: []
   description: "The bug-fix flow prompt (pm_core/prompt_gen.py:_BUG_FIX_FLOW_BLOCK)\
     \ tells sessions to write a failing test or fall back to a \"manual repro note\"\
@@ -13117,13 +13174,13 @@ prs:
     \ folded into _BUG_FIX_FLOW_BLOCK gated on `_is_bug_pr(pr) and touches_tui(pr)`\n\
     - pm/qa/instructions/tui-manual-test.md: existing instruction file — no changes\
     \ expected, just referenced."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/190
+  gh_pr_number: 190
   created_at: '2026-05-04T12:22:33.932646+00:00'
-  updated_at: '2026-05-05T12:42:09.049670+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-04T16:00:20.045289+00:00'
+  started_at: '2026-05-04T14:15:15.348715+00:00'
+  reviewed_at: '2026-05-04T16:00:20.045289+00:00'
   merged_at: null
   notes:
   - id: note-a3ed531
@@ -13136,3 +13193,2460 @@ prs:
       evidence.'
     created_at: '2026-05-05T12:42:08Z'
     last_edited: '2026-05-05T12:42:08Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-in-e802a472
+- id: pr-cfe24ea
+  plan: improvements
+  title: 'Picker actions: open shell, impl spec, or QA spec pane in the current window
+    for the selected PR'
+  branch: pm/pr-cfe24ea-picker-action-open-shell-pane-in-current-window-cd
+  status: in_review
+  depends_on: []
+  description: "Add three new action keys to the prefix+P picker, each opening a new\
+    \ tmux pane *in the current window* targeting the highlighted PR. The shell shortcut\
+    \ was the original ask; the spec viewers are a natural extension since the same\
+    \ plumbing (split pane, run a command, register for cleanup) covers all three.\n\
+    \n## Shortcuts\n\n(1) Shell pane — `c` for 'cd' (or 's' for 'shell'). Opens a\
+    \ split-window pane with a shell pre-run via 'pm pr cd <pr_id>' so the shell lands\
+    \ in the PR's workdir. Use case: ad-hoc git / file inspection / running test commands\
+    \ without leaving the current window.\n\n(2) Implementation spec viewer — `i`\
+    \ (for 'impl'). Opens a split-window pane that displays `pm/specs/<pr_id>/impl.md`\
+    \ (path resolved via the analog of `pm pr spec-path`) using `glow -p` if available,\
+    \ falling back to `less` otherwise. Use case: quickly read the implementation\
+    \ spec while working on review / QA without bouncing through file pickers.\n\n\
+    (3) QA spec viewer — `Q` or similar (avoid collision with `q` = picker quit, `a`/`t`\
+    \ = qa actions). Same shape as (2) but for `pm/specs/<pr_id>/qa.md` (or whatever\
+    \ the QA spec convention resolves to — the impl is keyed on whatever `pm pr spec`\
+    \ already produces).\n\n## Common dispatch\n\nA new ACTIONS-table category for\
+    \ 'open a pane in the current window' that runs:\n\n    tmux split-window -t <current-window>\
+    \ -h <command>\n\nwith the command per shortcut:\n\n- shell: `bash -c 'cd <workdir>;\
+    \ exec /bin/bash'` (or `pm pr cd <pr_id>; exec /bin/bash`)\n- impl spec: `(command\
+    \ -v glow >/dev/null && glow -p <path>) || less <path>`\n- qa spec: same as impl-spec\
+    \ with the QA path\n\nPane registered with the pane-registry under roles `pr-shell`\
+    \ / `pr-impl-spec` / `pr-qa-spec` so cleanup tracks it.\n\nSplit direction (-h\
+    \ vs -v): horizontal when the current pane is wider than tall, vertical otherwise.\
+    \ Tmux's default split is acceptable too.\n\nWorks whether the picker was opened\
+    \ from an impl window, review window, QA window, or the main TUI window — same\
+    \ pane gets created in whichever window the picker fired in.\n\n## Edge cases\n\
+    \n- PR has no workdir yet (pending status): for the shell shortcut, surface 'PR\
+    \ has no workdir; start it first'. For the spec viewers the workdir isn't required\
+    \ (specs live in pm/specs/<pr_id>/, not in the workdir).\n- Spec file missing:\
+    \ show 'No impl spec for <pr_id> — run \\\"pm pr spec <pr_id>\\\" first' (or equivalent)\
+    \ in the popup briefly instead of opening an empty pager.\n- glow not installed:\
+    \ silently fall through to `less` — no warning.\n- less not installed (rare):\
+    \ fall back to `cat <path>; read` so the pane stays up long enough to read.\n\n\
+    ## Files\n\n- pm_core/cli/session.py — ACTIONS table additions and dispatch handler\
+    \ for the three new actions.\n- pm_core/cli/pr.py — if a 'spec-path' helper doesn't\
+    \ already exist, expose one used by both the spec subcommand and these shortcuts.\n\
+    \n## Tests\n\n- Press the shell shortcut on a PR with a workdir → split pane in\
+    \ current window with cwd = workdir.\n- Press the impl-spec shortcut on a PR with\
+    \ a spec → split pane shows glow-rendered markdown (or less).\n- Press the impl-spec\
+    \ shortcut on a PR with no spec → clear error in popup; no empty pane created.\n\
+    - glow absent → less used; specs still display.\n- Pane registered for cleanup;\
+    \ closing the parent window kills the spec/shell pane."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/195
+  gh_pr_number: 195
+  created_at: '2026-05-04T14:20:49.261555+00:00'
+  updated_at: '2026-05-04T19:01:36.956517+00:00'
+  started_at: '2026-05-04T17:51:45.692159+00:00'
+  reviewed_at: '2026-05-04T19:01:36.956517+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfe24ea-picker-action-open-shell-pane-in-cur-563aedc0
+- id: pr-eb450a0
+  plan: plan-regression
+  title: 'Bug-fix flow: persist pre-fix repro and post-fix verification evidence as
+    artifacts'
+  branch: pm/pr-eb450a0-bug-fix-flow-persist-pre-fix-repro-and-post-fix-ve
+  status: pending
+  depends_on: []
+  description: 'Make the bug-fix loop''s reproduce / fix / verify steps produce machine-checkable
+    artifacts on disk, so the watcher and merge gate can confirm each step actually
+    happened (not just that the prompt asked for it).
+
+
+    ## Motivation
+
+
+    #190 / pr-6be8ee6 adds a ''did you reproduce on pre-fix code?'' gate to the bug-fix
+    prompt, but the gate is purely advisory — nothing attests that the session actually
+    performed the repro. For unsupervised runs we need evidence on disk so the watcher
+    / verdict can hard-gate on it.
+
+
+    ## Proposed convention
+
+
+    Persist evidence under `pm/evidence/<pr_id>/`:
+
+
+    - `pre-fix.md` — written before the fix is applied. Must include: the sha that
+    was checked out for repro (parent / pre-fix), the exact commands or test invocation
+    used, and the captured output / log / screenshot path showing the bug occurring.
+    The session must produce this file *before* modifying any source.
+
+    - `post-fix.md` — written after the fix is applied on the fix branch. Same structure:
+    sha (HEAD of fix branch), commands, captured output showing the bug no longer
+    reproduces. Must reference `pre-fix.md` so the diff of behavior is auditable.
+
+
+    For TUI bugs the captured output is a `pm tui view` snapshot; for CLI bugs it
+    is the relevant stdout/stderr; for unit-testable bugs it can be a pytest output.
+
+
+    ## Watcher / gate behavior
+
+
+    - Bug-fix implementation watcher (#177) refuses to mark the PR ready-for-review
+    unless `pre-fix.md` exists and references a sha != HEAD of the fix branch.
+
+    - Review/QA verdict gate refuses PASS unless `post-fix.md` exists and references
+    HEAD of the fix branch (or a descendant sha).
+
+    - If the fix is fundamentally not reproducible (rare), the session writes `pre-fix.md`
+    with an explicit ''NOT_REPRODUCIBLE'' marker and a justification; this routes
+    to INPUT_REQUIRED instead of silently proceeding.
+
+
+    ## Code paths
+
+    - pm_core/prompt_gen.py: extend _BUG_FIX_FLOW_BLOCK to instruct writing the artifacts
+    and reference the path convention.
+
+    - pm_core/watchers/<bug-fix-impl>: check `pre-fix.md` exists and sha-references
+    parent before allowing review handoff.
+
+    - pm_core/qa or review verdict path: check `post-fix.md` references fix-branch
+    sha before PASS.
+
+    - pm/evidence/ added to .gitignore? — open question. Probably git-track it so
+    reviewers can read the evidence and so it survives workdir cleanup. Decide during
+    impl.
+
+
+    ## Out of scope
+
+    - Auto-generating the artifacts from session output (would be nice, but for now
+    the session writes them explicitly).
+
+    - Evidence formats for non-bug PR types.
+
+
+    ## Depends on
+
+    - #190 / pr-6be8ee6 (introduces the pre-fix repro gate this PR makes machine-checkable)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T14:32:28.076697+00:00'
+  updated_at: '2026-05-04T14:32:28.076697+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8ed578d
+  plan: plan-regression
+  title: 'QA: fix-line coverage gate ties coverage to the diff so PASS requires the
+    fix code to be exercised'
+  branch: pm/pr-8ed578d-qa-fix-line-coverage-gate-ties-coverage-to-the-dif
+  status: pending
+  depends_on:
+  - pr-b42059d
+  description: 'Build on pr-b42059d (line coverage feeds verdict) so PASS additionally
+    requires that the lines *added or modified by this PR* were executed by the QA
+    scenario — not just that overall coverage is high.
+
+
+    ## Motivation
+
+
+    A QA run can hit a high overall coverage number while never executing the lines
+    the fix actually changed: the scenario exercises an unrelated path and the verdict
+    still passes. For an unsupervised bug-fix loop this is the difference between
+    ''we know the fix code ran and the bug is gone'' and ''something ran and nothing
+    crashed.''
+
+
+    ## Proposed behavior
+
+
+    1. Compute the changed-line set from the PR''s diff against its base.
+
+    2. Intersect with the per-line coverage data produced by pr-b42059d.
+
+    3. Verdict PASS requires: (a) every changed *executable* line in the fix is covered
+    by at least one QA scenario, OR (b) explicit justification recorded in the PR
+    notes for any uncovered line (e.g. ''defensive branch only triggered on impossible
+    input'').
+
+    4. Verdict surfaces a ''fix-line coverage'' percentage distinct from total coverage.
+
+
+    ## Code paths
+
+    - Wherever pr-b42059d emits coverage data: add a diff-aware filter.
+
+    - Verdict computation path: add fix-line gate.
+
+    - pm pr show / list: show fix-line coverage when present.
+
+
+    ## Out of scope
+
+    - Path / branch coverage on the diff (covered by pr-8422dea).
+
+    - Mutation testing of the fix lines (separate idea).
+
+
+    ## Depends on
+
+    - pr-b42059d (line coverage data must exist first)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T14:32:40.753683+00:00'
+  updated_at: '2026-05-04T14:32:40.753683+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-55c265f
+  plan: null
+  title: 'Bug: review-loop failure paths leave stale ''done'' state, popup reports
+    success on failed launch'
+  branch: pm/pr-55c265f-bug-review-loop-failure-paths-leave-stale-done-sta
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    User triggers review-loop from the picker against an in-progress PR. The picker
+    popup reports ''✓ review-loop: done'', but the TUI logs ''No workdir for <pr>.
+    Start the PR first.'' and no review window opens. Re-running succeeds (because
+    the TUI''s in-memory state has reloaded between the two tries — see companion
+    bug for that side).
+
+
+    ## Root cause
+
+    `_start_loop` in pm_core/tui/review_loop_ui.py:153-200 has four early-return paths
+    (no PR / no tmux / no workdir / mkdir failed). Each calls `app.log_message(...)`
+    and returns without ever calling `runtime_state.set_action_state(pr_id, ''review-loop'',
+    ''failed'', ...)`. The success path at line 236 transitions to ''running''.
+
+
+    The popup spinner at pm_core/cli/session.py:1291-1342 polls `runtime_state.get_action_state(pr_id,
+    ''review-loop'')` and short-circuits at line 1323 when state ∈ {done, failed}.
+    Because review-loop completes leave ''done'' in runtime_state across loop iterations,
+    a follow-up failed-launch sees the prior loop''s ''done'' immediately and prints
+    ''✓ review-loop: done''.
+
+
+    The bug is symmetric for any caller of _start_loop (zz d keypress, picker, command
+    bar) and applies to all four early-return paths.
+
+
+    ## Fix
+
+    Each early-return in _start_loop must call `set_action_state(pr_id, ''review-loop'',
+    ''failed'', error=<short reason>)` before returning. The popup spinner already
+    has the failed-state path (line 1335-1338) which writes ''✗ review-loop: failed
+    (<verdict>)'' and waits for dismissal — so once the state is set correctly the
+    user sees the actual error rather than a misleading success.
+
+
+    Optional but recommended: have the popup additionally remember the state value
+    it saw on first poll. If state is already ''done''/''failed'' before the launch
+    was even attempted, treat it as stale (i.e. wait one tick to see whether the launcher
+    overwrites it before short-circuiting). Belt-and-suspenders against future paths
+    that might miss the explicit transition.
+
+
+    ## Audit other actions
+
+    QA, review (non-loop), merge — same audit. Look for early-return paths in the
+    launchers that don''t transition state and could leave the popup reading stale
+    done/failed values.
+
+
+    ## Test
+
+    Repro: from picker, pick ''review-loop'' on a PR whose runtime_state has a stale
+    ''done'' from a previous run AND whose workdir is unset. Expected: ''✗ review-loop:
+    failed (no workdir)'' or similar; actual: ''✓ review-loop: done''.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T14:37:35.402123+00:00'
+  updated_at: '2026-05-04T14:37:35.402123+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3251c21
+  plan: null
+  title: 'Bug: TUI review-loop reads stale workdir from in-memory PR snapshot, bails
+    when workdir actually exists on disk'
+  branch: pm/pr-3251c21-bug-tui-review-loop-reads-stale-workdir-from-in-me
+  status: pending
+  depends_on: []
+  description: "## Symptom\nUser triggers review-loop on a PR whose implementation\
+    \ session is currently running (so the workdir definitely exists on disk and is\
+    \ recorded in pm/project.yaml). The TUI logs 'No workdir for <pr>. Start the PR\
+    \ first.' and bails. A second attempt moments later succeeds.\n\n## Root cause\n\
+    `_start_loop` at pm_core/tui/review_loop_ui.py:184 reads:\n\n    workdir = pr.get('workdir')\n\
+    \nwhere `pr` is a dict the caller resolved from the TUI's in-memory app state\
+    \ (typically via _get_selected_pr → app's cached project data). The TUI does not\
+    \ auto-reload project.yaml on file changes. If `pm pr start` was run after the\
+    \ TUI's last reload — e.g. via the picker, an auto-start watcher, or a subprocess\
+    \ from an impl session — the on-disk yaml has `workdir: ...` set, but the TUI's\
+    \ snapshot still shows None.\n\nThe CLI review path at pm_core/cli/pr.py:1141-1147\
+    \ is more defensive: if workdir is missing or the path doesn't exist, it falls\
+    \ back to `_ensure_workdir(data, pr_entry, root)` which can recreate the workdir.\
+    \ The TUI review-loop path skips that fallback entirely.\n\n## Fix\nTwo pieces:\n\
+    \n1. In _start_loop, re-read project.yaml from disk before the workdir check:\n\
+    \   - Resolve fresh data via `store.load(app._root)`, look up the PR by id, use\
+    \ the on-disk workdir.\n   - This both fixes the stale-snapshot case and matches\
+    \ what the CLI does.\n2. If the freshly-read workdir is still None or the path\
+    \ doesn't exist, call `_ensure_workdir` (same fallback the CLI uses) before declaring\
+    \ failure. Only fall through to the failure path (with proper failed-state transition\
+    \ — see companion bug pr-55c265f) if _ensure_workdir also fails.\n\n## Audit other\
+    \ TUI launchers\nThe same in-memory-snapshot pattern likely affects start, review,\
+    \ qa, merge launchers. Audit each for: (a) freshness of the pr dict at the workdir\
+    \ check; (b) presence of the _ensure_workdir fallback. Standardise on a single\
+    \ helper that resolves PR + workdir from disk for all TUI-triggered actions.\n\
+    \n## Test\nRepro: with a PR that has no workdir, run `pm pr start <pr>` from outside\
+    \ the TUI (or via a watcher), then immediately invoke review-loop from the TUI\
+    \ picker. Expected: review window opens. Actual: 'No workdir for <pr>'."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T14:37:51.592437+00:00'
+  updated_at: '2026-05-04T14:37:51.592437+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f5b7eef
+  plan: improvements
+  title: 'Improvement: dedicated ''pr list'' tmux window that becomes the auto-target
+    when other windows close'
+  branch: pm/pr-f5b7eef-improvement-dedicated-pr-list-tmux-window-that-bec
+  status: merged
+  depends_on: []
+  description: "## Goal\nProvide a long-lived tmux window that displays `pm pr list\
+    \ -t --open` (most-recently-updated open PRs), and use it as the *destination*\
+    \ tmux switches to whenever the currently-focused window is killed — for example\
+    \ after `pm pr merge` finishes and tears down the merge / impl / review / qa windows.\n\
+    \nToday, when the current window goes away, tmux falls back to the previous window\
+    \ in this client's history. In a multi-attached setup that history can land us\
+    \ on a window already focused in another attached session, scrambling that other\
+    \ view's layout. A dedicated 'home' window that pm always parks the user on after\
+    \ a destructive action removes that surprise and gives a useful overview to land\
+    \ on.\n\n## Design constraint: pluggable home-window provider\n\nThis is the first\
+    \ concrete instance of a more general 'home window' concept. The in-progress 'work\
+    \ pane' (from plan-ambient / plan-improvements) is the natural longer-term replacement\
+    \ — same role (a stable place to land after window kills), richer content (live\
+    \ PR status, attention surfaces, recent activity). Build the seam now so swapping\
+    \ providers later is a setting change, not a rewrite of every kill-window call\
+    \ site.\n\nConcretely:\n- Define a tiny **HomeWindowProvider** interface (or just\
+    \ a dotted-path setting + a couple of well-known functions): `ensure_window(session)\
+    \ -> window_name`, `refresh(session) -> None`. Default implementation is the pr-list\
+    \ provider this PR introduces.\n- Resolve the active provider via a project setting\
+    \ (e.g. `home-window-provider = pr-list` in pm config), with the work-pane provider\
+    \ added as another value when it lands.\n- All kill-window call sites that invoke\
+    \ the auto-park behavior call `home_window.ensure_and_park(session, client)` —\
+    \ they don't know or care which provider is active.\n- The CLI command (`pm session\
+    \ home` or similar — see below) dispatches to the active provider's ensure/refresh,\
+    \ so binding a hotkey to 'go home' works regardless of which provider is in use.\n\
+    \nThis means the work-pane PR, when it lands, just registers a new provider and\
+    \ flips the setting. None of the kill-window plumbing has to change.\n\n## Proposed\
+    \ behavior\n\n1. **New command** — name it after the role, not the implementation:\
+    \ `pm session home` (or `pm home` — bikeshed during impl). The command resolves\
+    \ the active provider and calls its ensure/refresh.\n   - First invocation: provider\
+    \ creates a tmux window in the current pm session (default name `pm-home`, provider\
+    \ can override) running its content. The pr-list provider runs a small Python\
+    \ loop that calls pr_list_cmd directly (avoid depending on `watch` being installed\
+    \ in containers).\n   - Subsequent invocations: provider refreshes immediately.\
+    \ User can rebind a hotkey to this command for instant refresh.\n   - Switches\
+    \ the invoking client to the window after creation/refresh.\n\n2. **Auto-park\
+    \ on window kill.**\n   When pm code deliberately kills a window the user is currently\
+    \ focused on (merge cleanup, picker-driven kills, supersede-on-fresh-loop, etc.),\
+    \ ensure the home window exists and set it as the client's `last-window` *before*\
+    \ the kill, so tmux's normal previous-window fallback lands there. Use `select-window\
+    \ -t <home>` followed by `select-window -l` to seed last-window without changing\
+    \ focus before the kill, or call `select-window -t <home>` after the kill — whichever\
+    \ sequence avoids flicker.\n\n   Call sites to wire through:\n   - merge cleanup\
+    \ path that kills impl/review/qa windows after a merge\n   - picker / TUI 'kill\
+    \ window' actions\n   - review-loop supersede (kills old review window before\
+    \ fresh start)\n   - any other place pm calls `tmux kill-window` on a window the\
+    \ user might be on\n\n3. **Per-session, not per-client.**\n   The home window\
+    \ lives in the pm tmux session. Multiple attached clients of that session share\
+    \ it (read-only). The 'auto-park' behavior targets the client that triggered the\
+    \ kill, not all clients, so other attached views aren't yanked around.\n\n4. **Refresh\
+    \ granularity** (provider-specific).\n   The pr-list provider polls every ~5s\
+    \ and re-renders. The work-pane provider, when added, can use whatever cadence/event-source\
+    \ it wants — that's its concern, not the home-window seam's.\n\n## Out of scope\n\
+    - The work-pane provider itself — that lands as a separate PR that adds a new\
+    \ provider implementation and bumps the setting default. This PR just establishes\
+    \ the seam.\n- Full TUI replacement — this is an at-a-glance window, not interactive.\n\
+    \n## Code paths\n- pm_core/home_window.py (new): provider interface, registry,\
+    \ ensure_and_park helper.\n- pm_core/cli/session.py: new `home` command that dispatches\
+    \ to the active provider.\n- pm_core/home_window/pr_list.py (new): default provider\
+    \ running `pm pr list -t --open` on a poll.\n- pm_core/tmux.py: small helper to\
+    \ set a client's last-window pre-kill.\n- Audit `tmux.kill_window` callers in\
+    \ pm_core/ to invoke `home_window.ensure_and_park` where the user might be on\
+    \ the killed window.\n- Settings: add `home-window-provider` (default `pr-list`)."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/193
+  gh_pr_number: 193
+  created_at: '2026-05-04T14:41:10.397036+00:00'
+  updated_at: '2026-05-05T12:22:53.198212+00:00'
+  started_at: '2026-05-04T14:43:46.387391+00:00'
+  reviewed_at: '2026-05-04T15:27:23.137013+00:00'
+  merged_at: '2026-05-05T12:22:53.198212+00:00'
+  notes:
+  - id: note-9d72043
+    text: 'QA PASS: pm session home command, content, and idempotency: PASS; Auto-park
+      on kill across kill sites: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f5b7eef-bbe1d0d6cfda3c0e)'
+    created_at: '2026-05-05T12:21:59Z'
+    last_edited: '2026-05-05T12:21:59Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f5b7eef-improvement-dedicated-pr-list-tmux-w-0e2bc17a
+- id: pr-66bb520
+  plan: improvements
+  title: 'Improvement: pm pr list --actions shows action-key hints for each PR (enabled
+    by default in home window)'
+  branch: pm/pr-66bb520-improvement-pm-pr-list-actions-shows-action-key-hi
+  status: pending
+  depends_on:
+  - pr-f5b7eef
+  description: "## Goal\nMake `pm pr list` optionally surface the same action keybindings\
+    \ used by the picker (`s/e/d/t/g` plus `z` / `zz` modifiers), shown alongside\
+    \ each PR row. The hint shows the keys for the action corresponding to the PR's\
+    \ *current phase* (in_progress → start, in_review → review, qa → qa, etc.), so\
+    \ the list doubles as a cheat sheet for what to press next on each PR.\n\nThe\
+    \ pr-list home window (pr-f5b7eef) enables this flag in its render so the user\
+    \ sees an at-a-glance home view that is also a per-PR action menu reference.\n\
+    \n## Proposed CLI\n\n- New flag: `pm pr list --actions` (or `-a`). Off by default\
+    \ to avoid changing existing output.\n- When enabled, each non-terminal row gets\
+    \ a trailing hint showing the keys that apply to its current phase, e.g.:\n  -\
+    \ `in_progress` → `[s | z s: fresh]`\n  - `in_review` → `[d | z d: fresh | zz\
+    \ d: loop]`\n  - `qa` → `[t | z t: fresh | zz t: loop]`\n  - statuses with no\
+    \ current-phase action (e.g. ready-to-start in unusual states) fall back to the\
+    \ full key list.\n- Terminal statuses (`merged`, `closed`) — no hint, matching\
+    \ the picker's `_TERMINAL_STATUSES` behavior.\n- Combinable with existing flags\
+    \ (`-t`, `--open`, etc.).\n\n## Single source of truth\nThe keybindings live in\
+    \ `pm_core/cli/session.py` (`_SHORTCUT_KEYS` at ~line 1601, `_MODIFIED_ACTION_CMDS`\
+    \ at ~line 884, `_STATUS_PHASE` at ~line 924). Don't duplicate. Extract a small\
+    \ helper — e.g. `pm_core/action_keys.py` with `hint_for_status(status: str) ->\
+    \ str` — that both the picker and pr_list_cmd consume. This keeps the picker and\
+    \ the list in sync as the binding map evolves.\n\n## Home-window default\nThe\
+    \ `pr-list` HomeWindowProvider from pr-f5b7eef invokes `pm pr list -t --open --actions`\
+    \ so the home view always carries the hints. Other callers / scripts get the unchanged\
+    \ default output.\n\n## Out of scope\n- Making the hints clickable / interactive\
+    \ — this is a printed cheat sheet, not a TUI.\n- Adding a separate column for\
+    \ live action runtime-state (queued/running/done badges) — that's a different\
+    \ surface; orthogonal.\n\n## Code paths\n- pm_core/action_keys.py (new): hint\
+    \ helper.\n- pm_core/cli/session.py: refactor to consume the helper instead of\
+    \ inlining the maps in the picker render.\n- pm_core/cli/pr.py (pr_list_cmd):\
+    \ add `--actions` flag + render the hint.\n- pm_core/home_window/pr_list.py (added\
+    \ by pr-f5b7eef): pass `--actions` in the rendered command."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T14:49:58.574373+00:00'
+  updated_at: '2026-05-04T14:49:58.574373+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-26ca427
+  plan: null
+  title: 'Bug: popup picker says ''No project.yaml found'' because display-popup doesn''t
+    inherit launching pane''s cwd'
+  branch: pm/pr-26ca427-bug-popup-picker-says-no-project-yaml-found-becaus
+  status: merged
+  depends_on: []
+  description: "## Symptom\nPressing the picker key (prefix+P or whatever the current\
+    \ binding is) opens the picker popup but it immediately fails with:\n\n    No\
+    \ project.yaml found.\n\neven though the active window's pane is in a valid pm\
+    \ repo (verified via `tmux display-message -p '#{pane_current_path}'` returning\
+    \ e.g. /home/matt/claude-work/project-manager).\n\n## Diagnosis\nThe `_log.info('popup-picker\
+    \ invoked: ...')` entry for failing invocations lands in `~/.pm/debug/default.log`\
+    \ — not the session's per-tag log file. `get_session_tag()` (pm_core/paths.py:81)\
+    \ returns None when `get_git_root(start_path or cwd)` returns None, which happens\
+    \ because the popup's cwd is *not inside any git repo*.\n\nThe cause: `session.py:750`\
+    \ invokes `tmux display-popup -E -w <width> -h <height> <body>` with no `-d <start-dir>`\
+    \ argument. Without `-d`, the popup's cwd is tmux's server-side default — typically\
+    \ the directory the tmux *server* was started in, not the active pane's `pane_current_path`.\
+    \ So even though the user's pane is in /home/matt/claude-work/project-manager,\
+    \ the popup's bash starts somewhere else (often /, /home/matt, or the server's\
+    \ launch dir) and `find_project_root()` walks up from there finding nothing.\n\
+    \n`state_root() → find_project_root()` then raises FileNotFoundError, which session.py:1518-1523\
+    \ catches and prints 'No project.yaml found.'\n\n## Fix\nTwo parts.\n\n1. **Pass\
+    \ `-d` to display-popup.** In `_popup-show` (session.py:711-753) include `-d`\
+    \ resolved to the launching pane's cwd:\n\n       subprocess.run(tmux_mod._tmux_cmd(\n\
+    \           'display-popup', '-E',\n           '-d', subprocess.run(tmux_mod._tmux_cmd('display-message',\
+    \ '-p', '#{pane_current_path}'),\n                                capture_output=True,\
+    \ text=True).stdout.strip() or '~',\n           '-w', width, '-h', height, body))\n\
+    \n   This makes the popup's cwd match the launching pane. Apply to both `_POPUP_PICKER_BODY`\
+    \ and `_POPUP_CMD_BODY` paths and any other display-popup callers.\n\n2. **Resolve\
+    \ project root from session metadata, not cwd.** Even with the cwd fix, the popup\
+    \ still breaks if the launching pane's cwd is a deleted workdir (post-merge cleanup\
+    \ race) or the user has manually cd'd outside the repo. Add a per-session 'pm_root'\
+    \ record:\n\n   - When `pm session` starts, persist the project root to either\
+    \ the pane-registry JSON (`~/.pm/pane-registry/<base>.json`) or a sidecar (`~/.pm/sessions/<tag>/pm_root`).\n\
+    \   - `_popup-picker` and `_popup-cmd` (and ideally state_root() for any session-aware\
+    \ caller) resolve via that record first, fall back to cwd-walking only if it isn't\
+    \ set.\n\n   This also fixes a deleted-cwd race: after `pm pr merge` cleans up\
+    \ a workdir, panes with that path as cwd can no longer resolve project root via\
+    \ getcwd() — the popup picker hits FileNotFoundError on os.getcwd() itself, which\
+    \ the existing handler bucket-catches as 'No project.yaml found' (also misleading).\n\
+    \n## Test\n- Repro: from any tmux client, switch to a session-window whose pane\
+    \ is at a valid cwd inside the pm repo, press picker key. Expected: picker opens.\
+    \ Actual: 'No project.yaml found'.\n- Verify the cwd issue: bind a debug key that\
+    \ runs `display-popup -E 'pwd; read'` (no -d) — confirms the popup's cwd is not\
+    \ the pane's cwd.\n\n## Code paths\n- pm_core/cli/session.py:711-753 `_popup-show`:\
+    \ add `-d <pane_current_path>` to the display-popup invocation.\n- pm_core/cli/session.py:1490+\
+    \ `_popup-picker` / `_popup-cmd`: resolve project root via session metadata first.\n\
+    - pm_core/pane_registry.py or pm_core/paths.py: helper for storing/retrieving\
+    \ per-session pm_root."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/194
+  gh_pr_number: 194
+  created_at: '2026-05-04T15:25:44.771573+00:00'
+  updated_at: '2026-05-04T15:57:20.949273+00:00'
+  started_at: '2026-05-04T15:47:23.172861+00:00'
+  reviewed_at: '2026-05-04T15:53:38.071504+00:00'
+  merged_at: '2026-05-04T15:57:20.949273+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-26ca427-bug-popup-picker-says-no-project-yam-37a927cd
+- id: pr-49ce773
+  plan: null
+  title: 'Bug: popup picker exits with misleading ''merged or closed'' on empty lines,
+    blocking navigation to other PRs'
+  branch: pm/pr-49ce773-bug-popup-picker-exits-with-misleading-merged-or-c
+  status: pending
+  depends_on: []
+  description: "## Symptom\nWith PR #193 (pr-f5b7eef, status: in_review) selected,\
+    \ the popup picker shows:\n\n    PR Actions — #193\n    No actions available (PR\
+    \ is merged or closed).\n\nthen exits on a keypress. The user cannot navigate\
+    \ to other PRs that have open windows. The status claim is wrong (PR is in_review,\
+    \ not merged or closed) and the navigation block is wrong even when the status\
+    \ claim is right.\n\n## Root cause\n`pm_core/cli/session.py:1601-1606` short-circuits\
+    \ whenever `_build_picker_lines` returns an empty list:\n\n    lines, _picked_pr,\
+    \ _label_to_cmd = _resolve_for(current_pr)\n    if not lines:\n        click.echo(f\"\
+    PR Actions — {current_pr}\")\n        click.echo(\"No actions available (PR is\
+    \ merged or closed).\")\n        _pause_and_exit(0)\n\nThere are two compounded\
+    \ problems with this:\n\n1. **Misattribution.** Empty lines is treated as 'PR\
+    \ is merged or closed' but the only path `_build_picker_lines` (lines 1038-1126)\
+    \ returns [] *because of merged/closed status* is via `if not actions: return\
+    \ []` after `_actions_for_status(status)`. It also returns [] when the PR lookup\
+    \ fails (`if not pr: return []` at line 1068). For #193 the lookup is the suspect\
+    \ path — same condition (`_pr_display_id(p) == pr_disp`) is used in nav_pr_ids\
+    \ construction but _resolve_for / _build_picker_lines use independent dict lookups\
+    \ against the loaded prs list, leaving room for stale-data or dict-shape inconsistencies.\
+    \ The user-facing copy hardcodes one cause for what is actually a multi-cause\
+    \ condition.\n\n2. **Navigation blocked.** Even when the PR genuinely is merged/closed\
+    \ (the user's explicit point: 'even if it was, I should still be able to start\
+    \ the pane and move around to other prs, the actions should just be blocked for\
+    \ that one'), the picker exits immediately. There's no way to use h/l (or whatever\
+    \ the nav keys are) to move to another PR that does have actions.\n\n## Fix\n\
+    - Replace the early `_pause_and_exit(0)` on empty lines with a render path that\
+    \ still shows the picker shell + navigation hint, with a clear inline message\
+    \ scoped to the *current* PR:\n  - For terminal status (merged/closed): 'No actions\
+    \ — PR is {status}.' Navigation keys still work.\n  - For lookup failure / unexpected\
+    \ empty: 'Could not load actions for {current_pr}.' (don't claim the PR is merged\
+    \ when we don't know that). Log enough at `_log.warning` to diagnose.\n- Audit\
+    \ `_build_picker_lines` and `_resolve_for` to ensure the lookup-failure case for\
+    \ #193 is identified — the symptom suggests a code path where `_pr_has_open_window`\
+    \ puts a display_id into nav_pr_ids that the subsequent `_pr_display_id == pr_disp`\
+    \ lookup then fails to match. Possible causes to check:\n  - case/whitespace differences\
+    \ between nav-list-time and resolve-time\n  - PR data mutated mid-popup (unlikely\
+    \ but possible)\n  - gh_pr_number type drift (int vs str) producing different\
+    \ display_id strings on different reads\n- Consider passing the resolved `pr`\
+    \ dict from nav-list construction directly into `_resolve_for` instead of re-looking-up\
+    \ by display_id, removing the lookup-divergence class of bug entirely.\n\n## Test\n\
+    - Repro: with #193 in_review and a window open, invoke picker → expect actions\
+    \ list, observe the misleading exit message.\n- Repro nav block: edit a PR's status\
+    \ to 'merged' in project.yaml manually, ensure the PR still has an open tmux window,\
+    \ invoke picker landing on that PR → expect to be able to press nav key and move\
+    \ to another PR."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T15:33:47.848571+00:00'
+  updated_at: '2026-05-04T15:33:47.848571+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-562d71d
+  plan: null
+  title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
+  branch: pm/pr-562d71d-bug-selected-pr-still-scrolls-under-bottom-bars-af
+  status: pending
+  depends_on: []
+  description: "## Symptom\nSelecting a PR (programmatically via command bar / shortcut,\
+    \ or via tech-tree navigation that requires scrolling) still ends with the selected\
+    \ node positioned under the bottom command bar / log line — it's there in the\
+    \ layout but visually obscured by the docked widgets.\n\n#157 (pr-177dec0, merged\
+    \ today 2026-05-04) attempted to fix this by adding `bottom_padding = 4` to the\
+    \ node region and `Spacing(top=1, bottom=2, ...)` to `scroll_to_region` in pm_core/tui/tech_tree.py:982-993.\
+    \ That improved the worst case but the bug still reproduces.\n\n## Likely causes\
+    \ (need to be confirmed during impl)\n\n1. **Spacing values undersized for current\
+    \ layout.** `pm_core/tui/app.py` CSS shows:\n   - StatusBar: height 1 + margin-top\
+    \ 1 = 2 rows top\n   - LogLine (id='log-line'): height 1, undocked, sits in vertical\
+    \ flow above CommandBar\n   - CommandBar: dock:bottom, height 1, margin-bottom\
+    \ 1 = 2 rows\n   \n   Tree-container is inside main-area (height 1fr) which sits\
+    \ between StatusBar and LogLine. `Spacing(bottom=2)` may not cover both LogLine\
+    \ (1) and CommandBar's overlay/floating behavior when the viewport is short.\n\
+    \n2. **Timing race on programmatic select.** `select_pr` (tech_tree.py:141-163)\
+    \ calls `self.refresh()` then `self.call_after_refresh(self._scroll_selected_into_view)`.\
+    \ If layout hasn't settled (e.g. because main-area was resized concurrently —\
+    \ mobile mode, plans pane toggle, terminal resize), the container's `size` reports\
+    \ stale dimensions and `scroll_to_region` computes the wrong target. e460dcf reverted\
+    \ a speculative `set_timer` fallback; a non-speculative one (chained `call_after_refresh`\
+    \ or explicit await of layout) may be needed.\n\n3. **Wrong scroller.** `container\
+    \ = self.parent if self.parent else self` (tech_tree.py:985). TechTree's parent\
+    \ is `TreeScroll` (id='tree-container') which is correct, but if a future widget\
+    \ is inserted between them this assumption breaks silently. Pin the scroller via\
+    \ `query_one('#tree-container')` to avoid the silent regression.\n\n## Repro\n\
+    1. Have enough PRs in the tree that scrolling is necessary.\n2. From the command\
+    \ bar, type `select <pr-id>` (or use any path that goes through TechTree.select_pr)\
+    \ for a PR near the bottom of the tree.\n3. Observe: tree scrolls but the highlighted\
+    \ node sits under the LogLine / CommandBar.\n\n## Fix candidates\n- Increase `Spacing(bottom=...)`\
+    \ until empirically clear (LogLine + CommandBar + margin = at least 3 rows). Consider\
+    \ computing it from the actual heights of `#log-line` and `#command-bar` instead\
+    \ of hard-coding.\n- Wrap the scroll call in a layout-await: `await self.app.refresh()`\
+    \ or use a chained `call_after_refresh` so the second tick sees a settled layout.\n\
+    - Add a regression test (Claude-based, via the watcher framework or a textual\
+    \ snapshot) so this doesn't regress again — the existing #157 fix didn't catch\
+    \ the residual case.\n\n## Code paths\n- pm_core/tui/tech_tree.py:141 `select_pr`\
+    \ — call_after_refresh sequencing.\n- pm_core/tui/tech_tree.py:948-1005 `_scroll_selected_into_view`\
+    \ — region/spacing math.\n- pm_core/tui/app.py:42-121 — CSS layout to determine\
+    \ the correct bottom spacing."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T15:57:19.365090+00:00'
+  updated_at: '2026-05-04T15:57:19.365090+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f27b882
+  plan: null
+  title: 'Bug: picker spinner exits immediately on stale terminal state when restarting
+    a finished review-loop'
+  branch: pm/pr-f27b882-bug-picker-spinner-exits-immediately-on-stale-term
+  status: merged
+  depends_on: []
+  description: "## Symptom\nPressing zz d (or the picker review-loop action) on a\
+    \ PR auto-switches the tmux window to the review window correctly in three of\
+    \ four cases but not the fourth:\n\n- **No review window open at all**: zz d creates\
+    \ the review window, popup spinner waits for it to appear, switches to it. Works.\n\
+    - **Review window already open and a loop is running**: zz d kills the existing\
+    \ loop's window, creates a fresh one, popup spinner sees it appear, switches.\
+    \ Works.\n- **Review window already open with prior loop in terminal state, AND\
+    \ the user is currently on that review window**: zz d kills the window the user\
+    \ is on, tmux's own behavior moves focus elsewhere; the recreated same-name window\
+    \ captures focus from tmux's window-recreation handling. Works incidentally —\
+    \ the popup spinner's behavior is irrelevant because tmux did the switch for free.\n\
+    - **Review window already open with prior loop in terminal state, AND the user\
+    \ is on a different window** (the one where they triggered the picker): zz d kills\
+    \ the existing review window, creates a fresh one — but **does not switch the\
+    \ user's tmux focus**. The popup pane flashes '✓ review-loop: done' and dismisses;\
+    \ the new review window appears in the background unattributed to the picker action.\n\
+    \nThe auto-switch is the user-visible failure: you press zz d from elsewhere expecting\
+    \ to land in the new review session, and you stay where you are.\n\nThat the third\
+    \ case (on the review window) works by accident isolates the bug to the popup\
+    \ spinner — nothing else is wrong with the launcher, the kill, or the recreate.\
+    \ When tmux's own kill-active-window behavior happens to do the switch, the bug\
+    \ is invisible.\n\n## Root cause\nThe window-switch on first start is owned by\
+    \ the popup spinner — `_wait_for_tui_command` at pm_core/cli/session.py:1291-1366\
+    \ polls runtime_state and tmux's window list, calls `tmux select_window` once\
+    \ the new fresh window appears (line 1360), and then exits.\n\nCommit 2257590\
+    \ / pr-b423bfd / #191 added a terminal-state short-circuit at session.py:1313-1342\
+    \ to handle the original case where a review-loop completes without producing\
+    \ a window (so the spinner doesn't hang forever). It exits when `cur_state in\
+    \ ('done','failed')` without a target window.\n\nThat short-circuit doesn't distinguish\
+    \ stale terminal state from fresh terminal state. When the previous loop finished,\
+    \ runtime_state's on-disk entry is still 'done' / 'failed'. The new launcher hasn't\
+    \ transitioned state to 'running' yet because the TUI hasn't drained the SIGUSR2\
+    \ queue. The spinner polls *first*, reads the stale 'done', hits the short-circuit,\
+    \ prints '✓ done', and exits — **before reaching the window-appearance branch\
+    \ that performs the auto-switch**.\n\nThe two non-broken cases work because cur_state\
+    \ is never terminal-and-stale at popup start (loop running → 'running'; no prior\
+    \ loop → None). The third case (on the review window) works because tmux's own\
+    \ focus handling fills in for the spinner — pure luck.\n\n## Fix\nSnapshot the\
+    \ initial state at popup start, mirroring the existing `initial_window_ids` snapshot\
+    \ at session.py:1250-1252. Short-circuit only when the *current* cur_state is\
+    \ terminal AND different from the snapshot — i.e., the launcher genuinely transitioned\
+    \ during this invocation. For `fresh` mode actions (review-loop, qa fresh, qa\
+    \ loop) where the launcher is expected to overwrite stale state, this also handles\
+    \ the 'queued/launching → running' transition implicitly, so the spinner waits\
+    \ through the legitimate transitions and eventually performs the window-switch\
+    \ in the success branch.\n\nSketch:\n\n    initial_state = (entry.get('state')\
+    \ if entry else None) if fresh else None\n    saw_state_change = False\n    while\
+    \ True:\n        entry = _rs.get_action_state(pr_id, action)\n        cur_state\
+    \ = entry.get('state') if entry else None\n        if fresh and cur_state != initial_state:\n\
+    \            saw_state_change = True\n        ...\n        if cur_state in ('done','failed')\
+    \ and not window_open:\n            if fresh and not saw_state_change:\n     \
+    \           # stale terminal state — wait for launcher to overwrite\n        \
+    \        pass\n            else:\n                # genuine terminal state from\
+    \ this run — handle as today\n                ...\n\n## Out of scope\n- Clearing\
+    \ stale terminal state on launcher entry. That would also fix this but couples\
+    \ spinner correctness to launcher behavior across all entry points (TUI key, command\
+    \ bar, picker, watcher). Snapshot-in-spinner is local and independent.\n\n## Success\
+    \ criteria\nFor all four cases, pressing zz d on a PR ends with the user's tmux\
+    \ focus on the freshly-created review window:\n\n1. No review window open → window\
+    \ created, switch happens.\n2. Review window open and a loop is running → old\
+    \ window killed, new one created, switch happens.\n3. Review window open with\
+    \ prior loop in terminal state, user is on the review window → switch happens\
+    \ (works today incidentally; should still work after the fix).\n4. Review window\
+    \ open with prior loop in terminal state, user is on a different window → switch\
+    \ happens (regression case fixed by this PR).\n\n## Test\nRepro of case 4:\n1.\
+    \ Run a review loop to completion (PASS or ERROR — either leaves terminal state\
+    \ on disk and a review window).\n2. Switch to a different tmux window (any window\
+    \ that isn't the review one).\n3. Press the picker key → zz d for the same PR.\n\
+    4. Observe the popup flashes '✓ review-loop: done' and exits while the new review\
+    \ window opens elsewhere unattributed.\n\nCross-check case 3 (regression test\
+    \ against the incidental-success path): repeat the above but trigger the picker\
+    \ from the review window itself; the auto-switch should still work after the fix,\
+    \ not just before.\n\nExpected after fix for both: spinner waits through queued/launching/running\
+    \ transitions, observes the new window, and switches focus to it.\n\nRelated:\n\
+    - pr-55c265f (review-loop early-returns leave stale state — same family, fix on\
+    \ the writer side)\n- pr-b423bfd / #191 (introduced the terminal-state short-circuit\
+    \ being abused here)"
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/201
+  gh_pr_number: 201
+  created_at: '2026-05-04T16:29:58.163771+00:00'
+  updated_at: '2026-05-05T12:58:19.051476+00:00'
+  started_at: '2026-05-05T12:13:00.262697+00:00'
+  reviewed_at: '2026-05-05T12:50:14.879821+00:00'
+  merged_at: '2026-05-05T12:55:07.621126+00:00'
+  notes:
+  - id: note-d0138ec
+    text: 'Confirmed-in-the-wild repro on 2026-05-05 in project-manager-c5a1006b:
+      pressing zz d on pr-cb2a29d (#183) produced the silent-no-op failure mode that
+      this PR''s fix is targeting.
+
+
+      Evidence:
+
+      - ~/.pm/runtime/pr-cb2a29d.json: file does not exist (no review-loop state was
+      ever written for this PR).
+
+      - tmux list-windows: no review-#183 / review-pr-cb2a29d window exists.
+
+      - ~/.pm/debug/project-manager-c5a1006b.log: the only entry mentioning pr-cb2a29d
+      during the relevant window is one ''gh pr view pm/pr-cb2a29d-...'' lookup, no
+      review-loop activity, no container creation, no push proxy start.
+
+
+      So the loop never launched at all. This confirms the symptom in the PR description:
+      stale terminal state on disk → popup spinner short-circuits → exits before the
+      TUI drains the SIGUSR2 queue → no actual launch occurs. The user-visible result
+      is ''I pressed zz d and nothing happened'' — no window, no error, no signal
+      that the action did anything.
+
+
+      This makes the fix''s success criterion sharper:
+
+      - After fix, even when prior runtime_state for review-loop says ''done'' or
+      ''failed'' (or there''s no state at all but some other bookkeeping is stale),
+      pressing zz d MUST produce at least one of: a transition to ''queued''/''launching''/''running'',
+      a created tmux window, or a logged error. The current behavior of silently returning
+      ''✓ done'' and exiting with no side effects is the broken case.
+
+
+      Cross-reference: contemporaneous incident on pr-18ac983 (#184) hit the concurrent-launch
+      race documented in pr-fc6db6a''s note-80159c9; that''s separate from this stale-state
+      issue but shares the trigger (user re-firing zz d when the previous loop is
+      in some terminal state).'
+    created_at: '2026-05-05T12:27:18Z'
+    last_edited: '2026-05-05T12:27:18Z'
+  - id: note-21c157c
+    text: 'Second concrete repro on 2026-05-05 ~05:52 — different specific failure
+      mode than the stale-terminal-state case the PR description targets. Worth widening
+      the fix scope to cover this too.
+
+
+      Setup: zz d on pr-f27b882 (#201) for the FIRST time. No prior review window
+      or runtime state for review-loop. fresh=True, initial_window_ids=set().
+
+
+      Timeline (~/.pm/debug/project-manager-c5a1006b.log + ~/.pm/runtime/pr-f27b882.json):
+
+      - 05:50:12 UTC: loop start. runtime_state: state=running iteration=0.
+
+      - 05:52:41: iteration 1 launcher fires: ''transcript: symlink ... review-pr-f27b882-i1.jsonl''.
+      podman rm -f starts.
+
+      - 05:52:51: remove_container''s 10s wait loop confirms gone.
+
+      - 05:52:52: podman run succeeds (id=2eea93fc4067), tmux window @728 ''review-#201''
+      created, panes registered.
+
+      - 05:54:53: iteration 1 completes verdict=PASS, state=done.
+
+
+      User-visible: popup pane stayed showing ''review-loop: running…'' the whole
+      time, never switched the user''s client to the new review-#201 window. Spinner
+      appeared frozen on ''running'' until the loop completed and the popup eventually
+      went away on its own. The user sat on the impl window the entire time.
+
+
+      Why this isn''t covered by the PR''s stated fix: the stale-terminal-state short-circuit
+      only fires when cur_state in (''done'',''failed''). For this incident cur_state
+      was ''running'' all the way through. So the spinner skipped the short-circuit
+      but ALSO failed to detect the window-open transition that should have fired
+      its happy-path exit at session.py:1389-1412.
+
+
+      Diagnostic asks for the implementing session:
+
+      1. Confirm _find_target_window_ids() returns the new window id at the right
+      tick. Possible cause: name-comparison edge case when target_window contains
+      a literal ''#'' (e.g. ''review-#201'') vs whatever list_windows returns. Print
+      the returned names verbatim and compare bytes.
+
+      2. Confirm consume_suppress_switch isn''t returning True spuriously and silently
+      skipping select_window. (Even if it did, the spinner echoes and returns — popup
+      would close, not stay on ''running''. But still worth ruling out.)
+
+      3. Confirm the spinner loop is actually ticking after window creation. Add a
+      log statement at each tick recording (cur_state, window_open, len(cur_window_ids),
+      saw_disappear). If the loop stops ticking before the window appears, the bug
+      is elsewhere (some early-exit path, signal handling, blocked tmux call).
+
+      4. Verify the popup process is indeed the one producing the stuck ''running…''
+      display. ps -ef showed no live _popup-picker for #201 by the time we investigated;
+      either the process exited (and the popup is somehow held visible by tmux without
+      the controlling process) or it was running long enough to span the whole loop.
+
+
+      Suggested broadening: the fix should cover BOTH the stale-terminal-state symptom
+      (described in PR body) AND the failed-to-detect-fresh-window symptom (this note).
+      Both manifest as ''spinner did not switch user to the review window despite
+      the window existing''. They share the same observability gap and probably share
+      a fix surface (better state-snapshot + better window-appearance detection).'
+    created_at: '2026-05-05T12:58:18Z'
+    last_edited: '2026-05-05T12:58:18Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f27b882-bug-picker-spinner-exits-immediately-a70c31eb
+- id: pr-f17e22b
+  plan: improvements
+  title: 'Bug: ''Interacting with the TUI'' block in container-bound prompts tells
+    sessions to run pm tui send/view they cannot reach'
+  branch: pm/pr-f17e22b-bug-interacting-with-the-tui-block-in-container-bo
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    Five prompt generators ship the ''Interacting with the TUI'' block (`tui_section()`
+    at pm_core/prompt_gen.py:106) into sessions that run inside containers. Those
+    sessions cannot reach the host''s tmux socket, so commands like `pm tui send`
+    / `pm tui view` either fail or sit silently. The block is misleading at best and
+    actively wastes session effort at worst (sessions try to drive the TUI as instructed
+    and get nowhere).
+
+
+    ## Affected generators
+
+
+    Container-bound (block should NOT appear):
+
+    - generate_prompt (impl session, prompt_gen.py:177) — including bug-fix flow which
+    appends _BUG_FIX_FLOW_BLOCK on top
+
+    - generate_review_prompt (prompt_gen.py:262)
+
+    - generate_merge_prompt (prompt_gen.py:485)
+
+    - generate_qa_interactive_prompt (prompt_gen.py:1556)
+
+    - generate_standalone_qa_prompt (prompt_gen.py:1795)
+
+
+    Host-side (block IS appropriate, keep as-is):
+
+    - generate_watcher_prompt
+
+    - generate_discovery_supervisor_prompt
+
+    - generate_bug_fix_impl_prompt (the watcher orchestrator, not the per-PR impl
+    session)
+
+    - generate_improvement_fix_impl_prompt
+
+    - generate_watcher_review_prompt
+
+
+    ## Fix
+
+    Add a `containerized: bool = False` parameter to `tui_section(session_name, containerized=False)`
+    that returns `""` when True. Have the five container-bound generators pass `containerized=True`
+    (or have them resolve container mode via `pm_core.container.is_container_mode_enabled()`
+    so the gating tracks the actual launch mode rather than a hardcoded assumption).
+
+
+    Slightly cleaner alternative: add a `include_tui` parameter to the generators
+    themselves, defaulted False for the container-bound ones and True for the host-side
+    ones — that keeps the policy at the call site where the launch context is known,
+    instead of inside `tui_section`.
+
+
+    Either way, only the policy-decision lives at the boundary; `tui_section` itself
+    stays a leaf helper.
+
+
+    ## Test
+
+    Spot-check the rendered prompts:
+
+    - pm pr start <bug-pr> in container mode → impl prompt should not contain ''Interacting
+    with the TUI''.
+
+    - pm pr review <pr> in container mode → review prompt likewise clean.
+
+    - generate_bug_fix_impl_prompt (watcher) → should still contain the block.
+
+
+    ## Out of scope
+
+    - Building a container-side TUI proxy so contained sessions could legitimately
+    reach the host TUI. Separate idea; this PR just stops claiming the capability
+    where it doesn''t exist.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T16:43:24.605637+00:00'
+  updated_at: '2026-05-04T16:43:24.605637+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-fcaa434
+  plan: improvements
+  title: 'Bug: plan subcommands launch Claude inline instead of switching to / creating
+    a tmux window when run inside a pm session'
+  branch: pm/pr-fcaa434-bug-plan-subcommands-launch-claude-inline-instead-
+  status: in_review
+  depends_on: []
+  description: '## Symptom
+
+    Running plan subcommands from the command popup (prefix+M) — or from any shell
+    pane inside a pm tmux session — launches the Claude session *in the calling pane*
+    instead of switching to (or creating) the dedicated per-plan tmux window. Concretely:
+    in a session where the plan-regression window already exists, typing `plan review
+    plan-regression` in the popup runs Claude inside the popup, ignoring the existing
+    window. Same problem for every plan subcommand that calls `launch_claude` directly.
+
+
+    `pr start` does this correctly today (pm_core/cli/pr.py:822-846): it checks `tmux_mod.find_window_by_name`,
+    switches to an existing window or creates a new one, and only falls back to inline
+    Claude when not in tmux. The plan commands skip that pattern entirely and call
+    `launch_claude` straight away.
+
+
+    ## Affected plan subcommands
+
+    All six plan commands that call `launch_claude`:
+
+    - `plan_add` (pm_core/cli/plan.py:139) — should use a per-instance plan-add window
+    (the TUI side already uses _DEPS_PSEUDO_PLAN_ID-style synthetic ids).
+
+    - `plan_breakdown` (line 241) — per-plan window keyed on plan_id.
+
+    - `plan_review` (line 415) — per-plan window keyed on plan_id.
+
+    - `plan_deps` (line 493) — synthetic plan-deps window (matches TUI''s `_DEPS_PSEUDO_PLAN_ID`
+    at pane_ops.py:627).
+
+    - `plan_fixes` (line 661) — likely matches plan-deps'' synthetic-window pattern;
+    pick one and apply.
+
+    - `plan_fix` (line 818) — same shape.
+
+
+    The TUI-side equivalent already exists at `pane_ops._launch_in_plans_window` (pane_ops.py:570),
+    called from `handle_plan_action` for the `e/v/breakdown/deps/review` plan-picker
+    actions. Window naming via `_plans_window_name(plan_id)`.
+
+
+    ## Other similar breakages found
+
+    Same pattern check across CLI: any `launch_claude` caller that should run in its
+    own dedicated tmux window when invoked inside a pm session.
+
+
+    - `cli/cluster.py:224` — cluster planning launches inline. Should get its own
+    dedicated window (e.g., `cluster` synthetic).
+
+    - `cli/container.py:186` (container build) — runs a long-lived Claude session
+    for image builds. Inline is wrong inside a pm session.
+
+    - `cli/guide.py:88, 128` — interactive guide. Probably *should* take over the
+    calling pane in some cases, but if invoked from the popup needs to land in a dedicated
+    guide window.
+
+
+    Already correct (reference patterns):
+
+    - `cli/pr.py:pr_start` (line 822-846) — find-or-create window with proper fallback.
+
+    - `cli/pr.py:_launch_review_window` — same pattern.
+
+    - `cli/meta.py:166-196` — same pattern.
+
+
+    ## Fix
+
+    Lift the find-or-create-window logic into a small CLI helper (e.g. `pm_core/cli/_window_launch.py`
+    or extend `claude_launcher`) that takes (window_name, prompt, cwd, session_key,
+    fresh) and:
+
+    1. If in tmux session, find_window_by_name → select_window if exists (kill if
+    --fresh); else new_window with the wrapped `pm <subcmd>` invocation.
+
+    2. If not in tmux, fall back to existing `launch_claude` inline behavior.
+
+
+    Have all six plan subcommands plus the cluster/container-build/guide cases route
+    through it. Window names use `_plans_window_name(plan_id)` for plan-keyed actions
+    and synthetic strings (`plan-deps`, `plan-fixes`, `cluster`, `container-build`,
+    `guide`) otherwise.
+
+
+    ## Out of scope
+
+    - Fixing the popup-cmd routing list (session.py:1903-1907) — that exists because
+    some commands lack CLI-level window management; with this fix the routing list
+    no longer needs to grow as new commands are added.
+
+
+    ## Test
+
+    - From a pm tmux session shell or popup, run `plan review <plan-id>` for a plan
+    that already has its window open → expect window switch, not inline Claude.
+
+    - Run `plan breakdown <plan-id>` for a plan without a window → expect a new window
+    created and Claude launched there.
+
+    - Same for deps, fixes, fix, add, cluster, container build, guide.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/202
+  gh_pr_number: 202
+  created_at: '2026-05-04T16:49:56.497186+00:00'
+  updated_at: '2026-05-05T17:34:57.749578+00:00'
+  started_at: '2026-05-05T12:17:16.474249+00:00'
+  reviewed_at: '2026-05-05T17:34:57.749578+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fcaa434-bug-plan-subcommands-launch-claude-i-e2eb17b8
+- id: pr-3526677
+  plan: improvements
+  title: 'Improvement: prefix+M command popup becomes a scrollable shell with persistent
+    history shared with the TUI command bar'
+  branch: pm/pr-3526677-improvement-prefix-m-command-popup-becomes-a-scrol
+  status: in_review
+  depends_on: []
+  description: '## Goal
+
+    Replace the current single-shot prefix+M popup (one `input(''pm> '')` per invocation,
+    popup closes when the command finishes) with a long-lived scrollable terminal-like
+    surface that:
+
+
+    1. Shows previous commands and their outputs in a scrollable buffer (up to a sensible
+    cap, e.g. last 200 commands or N MB).
+
+    2. Supports up-arrow / down-arrow / Ctrl-R history recall.
+
+    3. Shares command history with the TUI command bar (`/` in the TUI), so a command
+    typed in either surface is recallable from the other.
+
+    4. Tab-completes PR IDs, plan IDs, and pm subcommands.
+
+
+    ## Why
+
+    The popup is the only one-handed way to drive pm from a shell pane that isn''t
+    the TUI itself. Today every popup invocation is a fresh dialog — no scrollback,
+    no recall of the command you just ran, no awareness of what you typed in the TUI
+    command bar five seconds ago. With the popup-cmd''s bug surface around it (the
+    routing-list problem fixed in pr-fcaa434, the abort/error-stay-open behavior,
+    the popup-spinner stale-state bug pr-f27b882), users build up muscle memory for
+    re-typing rather than re-running, which costs accuracy and time. Tab completion
+    compounds the win: PR IDs are short hashes that are tedious to type from memory.
+
+
+    A scrollable, history-aware, completing popup makes it the natural ''inspect +
+    dispatch'' surface and reduces the pull toward keeping the TUI focused for everything.
+
+
+    ## Design
+
+
+    ### Persistence layer
+
+    Single shared file (e.g. `~/.pm/sessions/<tag>/command_history`) with newline-separated
+    submitted commands. Append-on-submit from both surfaces. Read on surface mount
+    to populate the up-arrow stack. Lock-free reads, lock-on-append (file lock keyed
+    by path) to handle concurrent writes from multiple surfaces.
+
+
+    Cap the file at e.g. 1000 lines — when it grows past, trim to the most recent
+    1000 atomically. Per-session, not global, so each project''s history stays separate.
+
+
+    ### Popup surface
+
+    Replace the current `popup_cmd_cmd` (pm_core/cli/session.py:popup_cmd_cmd) implementation:
+
+    - Long-lived loop, not single `input()`.
+
+    - Render a banner + prior buffer (read from the same persistence file) on entry.
+
+    - Read commands with readline-style history: up/down navigate, Ctrl-R search,
+    Enter submits, Ctrl-D / Esc dismisses.
+
+    - After each command runs, append output to the in-popup buffer and to the persistence
+    file''s command list.
+
+    - Buffer is scrollable via Page Up / Page Down or by piping through `less` when
+    it exceeds the popup''s visible rows.
+
+    - Existing abort-keys behavior (Esc/Ctrl+C interrupts running command) preserved
+    per-invocation.
+
+
+    Implementation likely uses Python''s `readline` module plus a small ring-buffer
+    renderer; or shells out to a thin tmux pane that runs an interactive `pm-popup-shell`
+    REPL — pick whichever is simpler for the cap.
+
+
+    ### Tab completion
+
+    Plug into the same readline-driven input loop:
+
+    - Top-level: pm subcommand names (`pr`, `plan`, `session`, `watcher`, `meta`,
+    etc.) — sourced from Click''s command tree (each Click group exposes `commands.keys()`).
+
+    - After `pr` / `pr edit` / `pr review` / etc., complete with PR IDs read from
+    the resolved project.yaml. Include both internal IDs (`pr-f5b7eef`) and gh display
+    IDs (`#193`); typing either matches the right entry.
+
+    - After `plan` subcommands, complete with plan IDs from project.yaml.
+
+    - After flags like `--plan`, complete with plan IDs; after `--depends-on`, complete
+    with PR IDs.
+
+
+    The completion source is `store.load(saved_root)` (resolved via the same `_resolve_root_from_session`
+    already used for project resolution from pr-26ca427), cached per popup invocation.
+    New PRs added during the session refresh on next prompt.
+
+
+    Make the same completer available to the TUI command bar (Textual''s `Input` doesn''t
+    do tab completion natively; subclass it or use a custom `Input` widget that consults
+    the shared completer). If wiring it into Textual is non-trivial, ship the popup-side
+    completer in this PR and follow up with the TUI bar.
+
+
+    ### TUI command bar surface
+
+    Extend `pm_core/tui/command_bar.py`:
+
+    - On submit, append to the same persistence file.
+
+    - Up/down arrow when the bar has focus walks the recalled history (currently the
+    bar is Textual''s `Input` which already supports basic line editing; need to wire
+    arrow keys to history walk).
+
+    - On bar focus, populate from file so a command typed in the popup minutes ago
+    is recallable here.
+
+    - Tab completes via the shared completer (or follow-up if it''s awkward in Textual).
+
+
+    ### Shared with the popup-cmd routing
+
+    The current `popup_cmd_cmd` routes `pr qa` and `review-loop` through the TUI via
+    SIGUSR2; pr-438028c removes those carve-outs once their CLI counterparts have
+    proper window management. The new long-lived popup keeps the dispatch shape —
+    only the input loop, output buffering, and completion change.
+
+
+    ## Out of scope
+
+    - Implementing a full PTY-based shell with interactive subprocess support (e.g.
+    running editors in the popup). The popup remains a pm-command dispatch surface,
+    not a general shell.
+
+    - History deduplication / fuzzy search beyond Ctrl-R.
+
+    - Wiring the completer into the TUI command bar if Textual integration proves
+    expensive — file follow-up if so.
+
+
+    ## Test
+
+    - Open prefix+M, run several commands, dismiss with Esc → no error pause, popup
+    remembers commands.
+
+    - Reopen prefix+M, press up-arrow → previous commands scroll back. Run an old
+    one → output appended to scrollback.
+
+    - Type `pr edit ` and press Tab → list of PR IDs (internal + #N) shows; tabbing
+    again cycles. Selecting one inserts it.
+
+    - Type `#19` Tab → completes to matching gh-numbered PR(s).
+
+    - Switch to TUI, press `/`, up-arrow → see commands typed in the popup. And vice
+    versa.
+
+    - Concurrent prefix+M from two attached clients → both append to the same file
+    without corruption (file-lock test).'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/198
+  gh_pr_number: 198
+  created_at: '2026-05-04T16:52:29.746985+00:00'
+  updated_at: '2026-05-04T19:01:37.495672+00:00'
+  started_at: '2026-05-04T17:52:29.154111+00:00'
+  reviewed_at: '2026-05-04T19:01:37.495672+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3526677-improvement-prefix-m-command-popup-b-1d7ca7a5
+- id: pr-438028c
+  plan: improvements
+  title: Remove popup-cmd carve-outs by giving 'pr qa' and 'review-loop start' real
+    CLI window management
+  branch: pm/pr-438028c-remove-popup-cmd-carve-outs-by-giving-pr-qa-and-re
+  status: in_review
+  depends_on:
+  - pr-fcaa434
+  description: "## Goal\nEliminate the two special-case routing branches in `popup_cmd_cmd`\
+    \ (pm_core/cli/session.py:1903-1907):\n\n    _cmd_norm = cmd.replace('review loop',\
+    \ 'review-loop')\n    if (_cmd_norm.startswith('pr qa') or _cmd_norm.startswith('review-loop')):\n\
+    \        _run_picker_command(f'tui:{_cmd_norm}', session)\n        return\n\n\
+    Today these two commands need TUI routing (via SIGUSR2 + the queue file) because\
+    \ they don't have a CLI implementation that does proper tmux window management\
+    \ — only the TUI knows how to find or create the QA / review-loop windows and\
+    \ wire them into the TUI's in-memory state. The popup compensates by tossing the\
+    \ command over the fence to the TUI.\n\nAfter pr-fcaa434 (plan-subcommand window\
+    \ management at the CLI level) the routing list shouldn't need to grow as new\
+    \ commands arrive, but the *existing* two carve-outs are still there. Get rid\
+    \ of them by giving the underlying CLI commands their own tmux-aware launchers,\
+    \ the same way `pr start`, `pr review`, `pr merge`, and `meta` already do (pm_core/cli/pr.py:822-846\
+    \ is the reference pattern).\n\nThese commands manage tmux windows by definition.\
+    \ When the caller is *inside* a pm session, default to that session. When the\
+    \ caller is outside (a watcher, an automation, a different shell), accept an explicit\
+    \ `--session <name>` flag (or `PM_SESSION` env var) so they can still target the\
+    \ right tmux session. With no session resolvable from either source, error out\
+    \ cleanly.\n\n## Concrete changes\n\n### 1. `pm pr qa <pr_id>` (and `pr qa fresh`,\
+    \ `pr qa loop`)\nToday's CLI command exists but presumes the TUI is driving —\
+    \ it doesn't manage QA windows itself. Refactor so the CLI handler:\n- Resolves\
+    \ target session: `--session <name>` flag if passed, else `PM_SESSION` env, else\
+    \ `_get_pm_session()` (in-tmux detection). Errors with a clear message if none\
+    \ resolve.\n- Looks up existing `qa-<display_id>` window(s) (QA can have scenario\
+    \ suffixes like `qa-#158-s1`) in that session.\n- For `pr qa <id>`: switch to\
+    \ the existing window if there, else create.\n- For `pr qa fresh <id>`: kill existing\
+    \ scenario windows, create fresh ones.\n- For `pr qa loop <id>`: ensure loop state\
+    \ is registered (today this lives in `app._qa_loops` — externalize to runtime_state\
+    \ so the CLI handler can write it without going through the TUI).\n\nThe QA-pane\
+    \ infrastructure on the TUI side (`pane_ops.launch_qa_item`, `qa_loop_ui`) already\
+    \ encapsulates most of the window/state logic — extract the tmux-bound parts into\
+    \ a shared helper that both the TUI and CLI handlers consume.\n\n### 2. `pm pr\
+    \ review-loop start <pr_id>` (new CLI command)\nToday there's no CLI surface for\
+    \ review-loop start; the chord `zz d` translates to `tui:review-loop start {pr_id}`.\
+    \ Add a real CLI command:\n- `pm pr review-loop start <pr_id> [--session <name>]`\
+    \ — start a fresh loop. Same session resolution as `pr qa` above.\n- (Optional\
+    \ later) `pm pr review-loop stop <pr_id>`.\n\nThe handler does the same window\
+    \ management `_launch_review_window` already does (pm_core/cli/pr.py:_launch_review_window),\
+    \ with `review_loop=True`. Loop state (currently `app._review_loops`) needs to\
+    \ externalize to runtime_state — pr-55c265f and pr-f27b882 are already pushing\
+    \ that direction (writers must persist failed-state, spinner needs initial-state\
+    \ snapshot), so this is mostly the same refactor surfaced here too.\n\n### 3.\
+    \ Shared session resolution\nAdd a small helper `pm_core/cli/_session_target.py`\
+    \ (or extend `helpers`) with `resolve_target_session(explicit: str | None) ->\
+    \ str` that runs flag → env → in-tmux detection → error. Use it in both new handlers\
+    \ and any future CLI command that needs to target a session.\n\n`pr start`, `pr\
+    \ review`, `pr merge`, `meta` already accept the in-tmux-only mode; consider extending\
+    \ them with the same flag in a follow-up if there's demand. Out of scope for this\
+    \ PR — those work today and don't have the popup carve-out problem.\n\n### 4.\
+    \ Remove the carve-out\nOnce both commands have working CLI-level window+state\
+    \ management, delete lines 1903-1907 of `popup_cmd_cmd`. Popup-cmd becomes a uniform\
+    \ direct-subprocess dispatcher with no command-specific routing.\n\n### 5. Update\
+    \ the picker / chord tables\n`_ALL_ACTIONS` and `_MODIFIED_ACTION_CMDS` (session.py:898+)\
+    \ have `tui:pr qa ...` and `tui:review-loop start ...` entries. Change them to\
+    \ plain `pr qa ...` / `pr review-loop start ...` so the picker uses the new CLI\
+    \ surface directly. `_run_picker_command`'s `tui:` branch stays — there might\
+    \ be other uses, and removing it is a separate cleanup.\n\n## Out of scope\n-\
+    \ Removing the `tui:` prefix dispatch entirely from `_run_picker_command`. Keep\
+    \ it as a generic escape hatch.\n- Loop-stop CLI command — write only `start`\
+    \ first.\n- Inline (non-tmux) fallback for `pr qa` / `review-loop` — these manage\
+    \ tmux windows by definition. The `--session` flag is the supported way to target\
+    \ a session you're not currently inside.\n- Adding `--session` to other existing\
+    \ commands (`pr start`, etc.). They work today; widen later if needed.\n\n## Depends\
+    \ on / related\n- pr-fcaa434 (plan-subcommand window management) — same pattern,\
+    \ lays groundwork.\n- pr-f27b882 (popup spinner stale-state) — the runtime_state\
+    \ externalization for review-loop is shared.\n- pr-fc6db6a / #156 (concurrent\
+    \ _launch_review_window) — the per-container-name lock from the updated note keeps\
+    \ the new CLI-level launcher safe under concurrent invocation.\n- pr-3526677 (scrollable\
+    \ popup with history) — independent surface change, not blocked by this."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/199
+  gh_pr_number: 199
+  created_at: '2026-05-04T16:53:21.828066+00:00'
+  updated_at: '2026-05-05T12:16:09.540663+00:00'
+  started_at: '2026-05-04T17:52:37.122779+00:00'
+  reviewed_at: '2026-05-05T12:16:09.540663+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-438028c-remove-popup-cmd-carve-outs-by-givin-1d7ca7a5
+- id: pr-e5b4dd8
+  plan: improvements
+  title: 'Improvement: window-attached persistent Claude popup for ad-hoc diagnostics
+    outside the container'
+  branch: pm/pr-e5b4dd8-improvement-window-attached-persistent-claude-popu
+  status: in_review
+  depends_on: []
+  description: '## Goal
+
+    Generalize today''s `c` keybinding (TUI: launches a Claude session in a new pane
+    via `pane_ops.launch_claude`) as a **window-attached popup**: a Claude session
+    bound to a specific tmux window that survives window switches, can be dismissed
+    and re-summoned, and runs *outside* any container so it has host-level access.
+
+
+    ## Why
+
+    A common workflow today: hit `c` from the TUI, ask the Claude session a question
+    that needs host-level access (run host commands, read files outside the workdir
+    bind-mount, inspect tmux state, etc.), then switch windows to do other work. When
+    you come back you want to keep talking to the same session — not start a new one
+    and lose context.
+
+
+    Today `c` opens a pane in the current TUI window, so dismissing means killing
+    the pane and the session. There''s no way to keep the session alive while temporarily
+    hiding it, or to summon a new ad-hoc session attached to *another* window (e.g.
+    one of the impl/review/QA workdirs) with the same persistence semantics.
+
+
+    ## Proposed surface
+
+
+    A new keybinding (e.g. prefix+? or prefix+/ — bikeshed during impl) that:
+
+
+    1. **First press in a window**: spawns a long-lived Claude session attached to
+    that window. Session lives in a tmux popup overlaid on the current window. The
+    session itself runs outside any container — full host filesystem and tmux access,
+    distinct from impl/review/QA which run boxed.
+
+
+    2. **Subsequent presses**: re-shows the same session''s popup over the current
+    window. Same conversation, same scrollback. Esc / dismissal hides the popup; the
+    session continues in the background.
+
+
+    3. **Window-attached identity**: each tmux window gets its own session (key: window-id).
+    Press the binding from a different window → different session, summoned/dismissed
+    independently. Closing the window terminates its session.
+
+
+    4. **Persistent across window switches**: switch away with the popup hidden →
+    come back, hit the binding → same session resurfaces. Switch away with the popup
+    *visible* → tmux''s usual popup-per-window behavior; coming back re-shows it (or
+    it stays open depending on how display-popup interacts with select-window).
+
+
+    ## Implementation sketch
+
+    - One detached background tmux pane per window-id, holding the Claude session.
+    Run the session there from the start so it survives popup dismiss/re-show.
+
+    - The popup binding finds the pane for the current window''s id, attaches a popup
+    that mirrors / sends input to it (e.g. `tmux display-popup -E ''tmux attach-session
+    -t <session> \\; select-pane -t <pane>''` or a thinner wrapper that splits a pane
+    into the popup).
+
+    - State map at `~/.pm/sessions/<tag>/diag-panes.json` mapping window-id → pane-id
+    so re-presses across pm restarts can rebind.
+
+    - Run outside the container by default — it''s the explicit point of the feature.
+    Provide a flag to opt into containerized mode if there''s a future use case for
+    that, but keep the default unboxed.
+
+
+    ## Relationship to existing `c`
+
+    - `c` becomes a deprecated alias / shortcut for opening the popup attached to
+    the current window.
+
+    - Existing `c` behavior of spawning a fresh pane stays accessible if there''s
+    a use case (probably not — the popup should subsume it).
+
+
+    ## Out of scope
+
+    - Cross-window session reuse (one session shared across all windows). The feature
+    is window-attached on purpose so each context gets its own thread.
+
+    - Containerized variant — separate idea.
+
+    - Session state inspection / management UI (list all attached sessions, kill them,
+    etc.). Handled by closing the host window.
+
+
+    ## Test
+
+    - Open a TUI window, press the binding → Claude session appears as popup, type
+    something.
+
+    - Dismiss with Esc → popup closes.
+
+    - Switch to a different window, press binding → different session appears.
+
+    - Switch back, press binding → original session reappears with prior conversation.
+
+    - Close the original window → its session terminates; map entry cleaned up.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/197
+  gh_pr_number: 197
+  created_at: '2026-05-04T17:20:29.220513+00:00'
+  updated_at: '2026-05-04T19:01:38.567735+00:00'
+  started_at: '2026-05-04T17:52:21.762961+00:00'
+  reviewed_at: '2026-05-04T19:01:38.567735+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e5b4dd8-improvement-window-attached-persiste-1d7ca7a5
+- id: pr-fe4ca5d
+  plan: improvements
+  title: 'Improvement: prefix-key plan picker popup with single-key plan actions and
+    horizontal scroll'
+  branch: pm/pr-fe4ca5d-improvement-prefix-key-plan-picker-popup-with-sing
+  status: in_review
+  depends_on:
+  - pr-fcaa434
+  description: "## Goal\nAdd a popup picker for plans, modeled on the existing PR\
+    \ picker (prefix+P, `popup_picker_cmd` at pm_core/cli/session.py:1490+) but tuned\
+    \ for plans: one row per plan, no per-action subrows, single-key shortcuts dispatch\
+    \ the action against the highlighted plan. Scrollable when more plans exist than\
+    \ fit the popup viewport.\n\n## Why\nPlan management today goes through:\n- TUI\
+    \ plans pane (toggled with `p`) — fine when the TUI is focused.\n- Plan picker\
+    \ UI inside the TUI — extra step from any non-TUI pane.\n- `pm plan ...` from\
+    \ a shell — no quick selection of which plan to act on.\n\nA single keybinding\
+    \ (e.g. prefix+L or prefix+B — bikeshed) opens a popup that lists plans and lets\
+    \ the user fire any plan command on the selected one in one chord, parallel to\
+    \ how prefix+P works for PRs.\n\n## Surface\n\n- Each row: `<plan-name> [<status>]\
+    \ (<n PRs, m merged, k pending>)` — terse summary, no per-action expansion. Column\
+    \ counts come from project.yaml.\n- Navigation: j/k or Up/Down to highlight a\
+    \ plan; / to filter by name (fzf if available, else simple substring match).\n\
+    - Single-key actions on the highlighted plan, mirroring `_SHORTCUT_KEYS` for PRs:\n\
+    \  - `r` — review (`pm plan review <id>`)\n  - `b` — breakdown (`pm plan breakdown\
+    \ <id>`)\n  - `e` — edit (`pm plan edit <id>` or open the plan file)\n  - `v`\
+    \ — view (read-only viewer)\n  - `d` — deps view\n  - `l` — load PRs from plan\n\
+    \  - `f` — fix (`pm plan fix`)\n- Enter — default action (review).\n- q/Esc —\
+    \ dismiss.\n\n## Scrolling\nWhen the plan list is taller than the popup, scroll\
+    \ vertically (up/down past the visible bottom moves the viewport). Single-key\
+    \ actions still apply to whichever row is currently highlighted, regardless of\
+    \ whether earlier rows are scrolled out of view. (The user noted: 'if there are\
+    \ too many plans to fit horizontally, we should be able to scroll and the single\
+    \ buttons to reach a plan that is shown should still work' — that means single-key\
+    \ shortcuts must continue to work *while scrolling*; they aren't tied to a static\
+    \ numeric mapping.)\n\nIf horizontal overflow happens (very long plan names),\
+    \ allow horizontal scroll as well — fzf already handles this when invoked with\
+    \ a long input line; the fallback numbered renderer should truncate with ellipsis.\n\
+    \n## Implementation\n- Reuse `popup_picker_cmd`'s scaffolding (display-popup -E,\
+    \ fzf integration, abort keys, session-root resolution via `_resolve_root_from_session`\
+    \ from pr-26ca427).\n- New entry point `pm _popup-plans <session>` analogous to\
+    \ `_popup-picker`.\n- Plan-action dispatch goes through whatever CLI surface pr-fcaa434\
+    \ establishes for plan-window-management — so `r` runs `pm plan review <id>` and\
+    \ the CLI handler does its own tmux window switching.\n- Bind via `_bind_popups`\
+    \ (`session.py:81`) the same way picker / cmd are bound.\n\n## Out of scope\n\
+    - Plan-level multi-select (act on multiple plans at once). Future idea.\n- Inline\
+    \ plan creation (`pm plan add`). Use the popup-cmd or TUI plans pane for that.\n\
+    \n## Depends on\n- pr-fcaa434 (plan subcommands manage their own tmux windows)\
+    \ — without it the popup would dispatch commands that run Claude inline in the\
+    \ popup pane, which was the problem that motivated this whole thread.\n\n## Test\n\
+    - Press the new binding → popup with plan list appears.\n- Highlight a plan, press\
+    \ `r` → existing plan-review window for that plan is selected (or new one created);\
+    \ popup closes.\n- With more plans than popup rows, scroll down to one not initially\
+    \ visible → press `r` → action runs against the highlighted plan, not the original\
+    \ top one.\n- Filter via / and run an action → still works."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/196
+  gh_pr_number: 196
+  created_at: '2026-05-04T17:20:58.908941+00:00'
+  updated_at: '2026-05-04T19:01:38.024215+00:00'
+  started_at: '2026-05-04T17:52:14.172608+00:00'
+  reviewed_at: '2026-05-04T19:01:38.024215+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fe4ca5d-improvement-prefix-key-plan-picker-p-1d7ca7a5
+- id: pr-f74988c
+  plan: improvements
+  title: 'Improvement: pm pr start auto-commits the PR''s project.yaml entry on master
+    if not yet committed'
+  branch: pm/pr-f74988c-improvement-pm-pr-start-auto-commits-the-pr-s-proj
+  status: in_review
+  depends_on: []
+  description: '## Goal
+
+    When `pm pr start <pr_id>` fails the ''not committed on master yet'' check (pm_core/cli/pr.py:858-886),
+    automatically build a small isolated commit on master containing **just that PR''s
+    row** in project.yaml and try to push it, instead of erroring out and asking the
+    user to run `pm push` manually. If the auto-commit or push fails, fall through
+    to today''s error.
+
+
+    Concurrent invocations are force-serialized through a process-wide lock so multiple
+    agents firing `pm pr start` at the same time can''t race on the project.yaml commit
+    and produce churn / merge conflicts.
+
+
+    ## Why
+
+    The error is useful but mostly costs friction. The PR exists in the local project.yaml
+    — the user (or watcher / agent) just hasn''t run `pm push` yet. That manual step
+    is the main thing today that makes ''in_progress'' feel like a gate even though
+    the surrounding commands (`pr review`, `pr qa`, `pr merge`) are themselves the
+    transitions, not gates.
+
+
+    Removing this friction also has a secondary benefit: the smaller-than-pm-push
+    commit scope (one PR''s row only) is safer to auto-create than the broader `pm
+    push` commit could be.
+
+
+    ## Behavior
+
+
+    In `pr_start` at the spot where today we error:
+
+
+    1. Detect ''PR exists in working project.yaml but not committed on base_branch''.
+
+    2. Verify the PR''s referenced plan (if any) is **already committed on base_branch**.
+    If the plan isn''t committed yet, **don''t** include it in the auto-commit — fall
+    through to today''s error and let the user run `pm push` to land the plan + PR
+    together. Auto-commit''s contract is *one PR row, no other content*.
+
+    3. Acquire a process-wide lock on `~/.pm/sessions/<tag>/yaml-commit.lock` (file-lock
+    via `fcntl.flock`, blocking with a 30s deadline). All concurrent `pm pr start`
+    invocations within the same session serialize on this lock so they take turns
+    rather than racing into push conflicts.
+
+    4. Inside the lock: re-read base_branch''s project.yaml (state may have changed
+    while we waited). If the PR is now present on base_branch, release lock and skip
+    to step 8.
+
+    5. Build a synthetic project.yaml that copies the committed version and adds *only*
+    this one PR''s working entry. No plan additions, no other PR additions, no status
+    changes to other PRs, no metadata fields beyond what `pm pr add` originally wrote.
+    The smallest possible diff: one new entry under the `prs:` list.
+
+    6. Verify the diff is exactly that — exclusively additive, exclusively within
+    the `prs:` list, exactly one new entry. Bail (release lock, fall through to error)
+    on any unexpected difference.
+
+    7. Commit on a fresh branch from base_branch tip with message `pm: add <pr_id>
+    entry on <base_branch>`, push, fast-forward base_branch locally.
+
+    8. Release the lock and continue with the original `pr_start` flow.
+
+
+    If any step fails (commit conflict, push rejection mid-lock, dirty working tree
+    we don''t want to touch, network error, plan not committed), release the lock
+    and surface a clear error: ''Auto-commit failed (<reason>); run `pm push` manually
+    to commit project state.'' Do not leave half-applied state behind.
+
+
+    ## Lock semantics
+
+    - Path: `~/.pm/sessions/<tag>/yaml-commit.lock`. Per-session so concurrent runs
+    in different projects don''t block each other.
+
+    - Acquired via `fcntl.flock(fd, LOCK_EX)` with a 30-second timeout (raise / fall
+    through if exceeded).
+
+    - Released on completion or on any error path inside the locked block.
+
+    - Independent of pr-fc6db6a''s per-container-name lock and pr-438028c''s loop-daemon
+    pidfiles; separate file at separate path.
+
+
+    ## Edge cases
+
+
+    - Plan referenced by the PR isn''t on master yet → fall through to today''s error.
+    Don''t try to be clever and bundle the plan; that grows the auto-commit''s scope
+    and risks landing plan content the user hasn''t reviewed.
+
+    - Working tree has uncommitted changes to project.yaml *other than* this PR''s
+    row → unchanged in the working tree; the synthetic commit pulls only the one new
+    PR entry.
+
+    - Working tree has uncommitted changes to non-yaml files → untouched.
+
+    - base_branch advanced remotely while we held the lock → fetch and rebase the
+    synthetic commit onto the new tip; if rebase fails, release lock and error.
+
+    - Concurrent `pm pr start` calls for two different PRs → each acquires the lock
+    in turn, sees the other''s commit on base_branch when it re-reads, and either
+    commits its own row on top or no-ops if its row was somehow already added.
+
+    - Repo backend = local → skip push, still create the commit on base_branch under
+    the same lock.
+
+
+    ## Out of scope
+
+
+    - Auto-committing on `pm pr add`. Users often add several PRs in a session before
+    any is ready to start. Keep manual.
+
+    - Auto-committing plan additions. Bundling plan content widens the commit''s blast
+    radius and crosses the ''one row, no other content'' contract. Plans land via
+    `pm push` as today.
+
+    - Auto-committing other yaml edits (status changes, dependencies, notes). Those
+    go through `pm push`.
+
+    - Cross-host coordination via the lock. fcntl.flock is per-host; cross-host racers
+    fall through to the existing push-rejection error path.
+
+
+    ## Code paths
+
+    - pm_core/cli/pr.py:858-886 — replace the click.echo + SystemExit with a call
+    to a new helper, e.g. `pm_core/store_commit.commit_pr_entry_on_base(base_branch,
+    pr_id) -> bool`.
+
+    - pm_core/store_commit.py (new) — encapsulates the synthetic-commit-and-push logic
+    plus the file-lock acquisition; reusable from any future caller that wants to
+    land a single PR''s row.
+
+
+    ## Test
+
+    - pm pr start on a PR that exists in working yaml only with its plan already committed
+    → auto-commits the PR row and starts; `git log` shows a one-line yaml diff.
+
+    - pm pr start on a PR whose plan isn''t committed yet → falls through to today''s
+    error (no auto-commit attempted).
+
+    - Two concurrent pm pr start invocations for two different PRs → both succeed,
+    base_branch ends up with two clean single-row commits, no rejection.
+
+    - pm pr start when push is rejected → falls through to today''s error.
+
+    - pm pr start with backend=local → commit lands locally, no push.
+
+    - pm pr start on a PR not in working yaml → unchanged ''not found'' error.
+
+    - Lock timeout: simulated stuck holder → clear error after 30s, no hang.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/200
+  gh_pr_number: 200
+  created_at: '2026-05-04T19:50:22.167828+00:00'
+  updated_at: '2026-05-05T17:29:39.794582+00:00'
+  started_at: '2026-05-04T19:53:30.713246+00:00'
+  reviewed_at: '2026-05-05T17:29:39.794582+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f74988c-improvement-pm-pr-start-auto-commits-203ee4e9
+- id: pr-23d97f8
+  plan: null
+  title: 'Bug: popup spinner becomes unresponsive to q/Esc/Ctrl+C dismissal in some
+    failure states, leaving the popup stuck open'
+  branch: pm/pr-23d97f8-bug-popup-spinner-becomes-unresponsive-to-q-esc-ct
+  status: in_progress
+  depends_on: []
+  description: '## Symptom
+
+    The picker popup spinner (`_wait_for_tui_command` in pm_core/cli/session.py:1171-1457)
+    usually responds to q / Q / Esc keypresses to dismiss the popup without cancelling
+    the queued command (line 1434), and to Ctrl+C via the `KeyboardInterrupt` handler
+    (line 1449). In some states it becomes unresponsive to all of those — the popup
+    stays open on top of the affected window indefinitely until the user either kills
+    the pane externally or the underlying tmux session goes away.
+
+
+    Concretely observed on 2026-05-05: after the concurrent _launch_review_window
+    race for pr-18ac983 (#184) (documented in pr-fc6db6a''s note-80159c9), the popup
+    ended up stuck on top of #184 and could not be dismissed via q / Esc / Ctrl+C.
+
+
+    ## Hypotheses worth investigating
+
+
+    1. **cbreak mode setup silently failed.** session.py:1280-1289 wraps termios setup
+    in try/except. If `tcgetattr` or `tty.setcbreak` raises, `old_attrs` is set to
+    None. The select+read loop continues running, but stdin is now in canonical mode
+    — `sys.stdin.read(1)` won''t return a single character until Enter is pressed,
+    so q / Esc on their own do nothing. Reproduces if anything in the popup''s parent
+    shell environment changed termios state before the spinner''s setup ran.
+
+
+    2. **Spinner loop blocked on a slow tmux call.** Inside the loop, `tmux_mod.list_windows(session)`
+    and `_rs.get_action_state(pr_id, action)` each round-trip the tmux server / read
+    a JSON file. Under contention (e.g., another pm command holding a lock, tmux server
+    temporarily unresponsive), one of these can block past the 0.15s tick. While blocked,
+    the select+read for keypresses isn''t running, so keypresses queue in the kernel
+    buffer until the call returns. If the call hangs longer, the popup feels unresponsive.
+
+
+    3. **Race-induced state confusion.** Under the concurrent-launch race (pr-fc6db6a),
+    the window can flicker: master creates → workdir removes → workdir create fails.
+    Spinner ticks during this might see cur_window_ids empty (saw_disappear=True)
+    one tick, cur_state=running another tick, and never reach the terminal-state-and-no-window
+    condition that would short-circuit. The spinner keeps spinning. q/Esc should still
+    work in this case; it''s only stuck because nothing satisfies the exit conditions.
+
+
+    If (3) is the only issue, the popup is responsive but just doesn''t have an exit
+    condition to take. If q/Esc genuinely don''t work, (1) or (2) is in play.
+
+
+    ## Diagnostic ask
+
+
+    Add a temporary debug log in the spinner loop showing each tick''s: `cur_state`,
+    `window_open`, `saw_disappear`, `old_attrs is None`, and any keypress chars read.
+    Reproduce the stuck-popup case (easiest path: trigger the concurrent-launch race
+    in pr-fc6db6a). Confirm whether the loop is ticking and whether keypresses are
+    being received.
+
+
+    ## Fix candidates by hypothesis
+
+
+    - (1): if `old_attrs` is None after setup, log a warning and force the popup to
+    exit immediately rather than spinning unresponsively. The user''s keypress in
+    canonical mode would arrive only after Enter — at which point we should still
+    honor it, but defaulting to ''exit'' keeps the popup from getting stuck.
+
+    - (2): wrap the per-tick tmux + state calls with a short timeout (e.g. 1s); on
+    timeout, count the loop iteration but skip the call. After N consecutive timeouts,
+    exit the spinner with an error message.
+
+    - (3): add a ''spinner stuck'' detection — if N ticks (e.g. 100, ~15s) pass with
+    no state change *and* no window event, surface a message and offer Esc to dismiss
+    with explicit text. (User''s q/Esc would already work in this case — this is just
+    a UX hint.)
+
+
+    Most likely combined fix: log enough state per tick to root-cause the specific
+    case, then implement whichever cause the logs point to.
+
+
+    ## Out of scope
+
+    - The underlying race that triggered the stuck popup in the observed incident
+    (pr-fc6db6a). This PR is about the popup''s responsiveness when something goes
+    wrong, not preventing things from going wrong.
+
+
+    ## Test
+
+    Repro: trigger the concurrent-launch race in pr-fc6db6a (or simulate by manually
+    creating runtime_state in a stuck shape: state=running, no review window present,
+    fresh=True, initial_window_ids non-empty). Press q / Esc / Ctrl+C → expect the
+    popup to close. Currently does not.
+
+
+    Related:
+
+    - pr-fc6db6a (#156) — the race that triggered this in the wild.
+
+    - pr-f27b882 — adjacent spinner short-circuit issue (stale terminal state).'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/204
+  gh_pr_number: 204
+  created_at: '2026-05-05T12:29:53.361872+00:00'
+  updated_at: '2026-05-05T17:43:53.544531+00:00'
+  started_at: '2026-05-05T17:43:53.544531+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-23d97f8-bug-popup-spinner-becomes-unresponsi-3e8b2538
+- id: pr-813cc19
+  plan: improvements
+  title: 'Improvement: add structured observability for window/pane lifecycle, popup
+    spinner, runtime_state transitions, and wrapper code-path selection'
+  branch: pm/pr-813cc19-improvement-add-structured-observability-for-windo
+  status: merged
+  depends_on: []
+  description: '## Goal
+
+    Several recent bugs were hard to diagnose because the relevant primitives don''t
+    log. Auditing the incidents from 2026-05-04 and 2026-05-05 surfaces a consistent
+    set of silent paths. This PR adds structured INFO-level logging at those spots
+    so the next incident is debuggable from `~/.pm/debug/<session-tag>.log` without
+    code reading.
+
+
+    The cost is a handful of `_log.info` lines plus one or two helpers; the benefit
+    is that every recurring class of bug we''ve hit recently leaves a trail.
+
+
+    ## Logging-level policy
+
+
+    Today: default INFO, DEBUG when `~/.pm/sessions/<tag>/debug` exists, rotated at
+    10MB with 1 backup. Most additions below are INFO and fire at human-event cadence
+    (a few per minute at most), so volume is fine.
+
+
+    The one volume-sensitive case is the popup spinner''s per-tick state at 0.15s
+    tick × ~5min iteration ≈ 2,000 ticks. Per-tick logs are only useful when reproducing
+    a stuck spinner; almost every tick is uneventful (cur_state=running for many seconds
+    in a row).
+
+
+    **Spinner approach: transition-only at INFO + opt-in per-tick under env var.**
+
+    - Log at INFO when something actually changes: cur_state flip, window_open flip,
+    saw_disappear flip, keypress received, exit. Expect ~10-50 lines per spinner instance,
+    not 2,000.
+
+    - Per-tick verbose state behind `PM_SPINNER_TRACE=1` env var (not a Python log
+    level). Off by default. Avoids polluting the level taxonomy for one diagnostic
+    and keeps the on/off knob obvious for users investigating.
+
+
+    ## Audit of silent primitives → why they matter
+
+
+    ### 1. Window / pane lifecycle (pm_core/tmux.py + pm_core/cli/helpers.py)
+
+    - `tmux.kill_window` — no log. Couldn''t tell whether the merge cleanup actually
+    killed #201''s windows or whether they died from pane-exit. Add INFO: ''kill_window:
+    session=<s> window=<id-or-name>''.
+
+    - `tmux.select_window` and `tmux.select_window_in_session` — no log. `switch_sessions_to_window`
+    logs but the underlying primitive doesn''t. Add INFO: ''select_window: target=<s>:<w>
+    rc=<rc>'' for both.
+
+    - `tmux.new_window` and `new_window_get_pane` — partial logging. Add post-creation
+    window id/name confirmation.
+
+    - `cli.helpers.kill_pr_windows` — silent. Add INFO entry/exit: ''kill_pr_windows:
+    pr=<id> windows_found=<list>'' / ''kill_pr_windows: pr=<id> killed=<list>''.
+
+    - `home_window.park_if_on` — silent on success. Already logs failures via except.
+    Add INFO when watching is non-empty: ''park_if_on: target_window=<id> watching=<sessions>
+    parked_to=<home>''.
+
+    - `home_window.ensure_home_window` — INFO: ''ensure_home_window: provider=<name>
+    created=<bool> name=<win>''.
+
+
+    All of these fire on user/automation events, low cadence.
+
+
+    ### 2. Popup spinner (pm_core/cli/session.py:_wait_for_tui_command)
+
+    The spinner has been the suspect in three recent incidents (pr-f27b882 stale-state,
+    pr-23d97f8 unresponsive-dismiss, pr-f27b882 second repro ''didn''t switch when
+    window appeared''). It runs in a popup process that doesn''t share the TUI''s
+    logger but does log to its own session-tag log.
+
+
+    INFO additions (transition-only — see policy above):
+
+    - Entry: `spinner: pr=<id> action=<a> fresh=<b> target_window=<w> initial_window_ids=<set>
+    initial_state=<s>`.
+
+    - State transitions only (not every tick): `spinner transition: <field> <old>
+    -> <new>`.
+
+    - Each select_window attempt and rc.
+
+    - Each consume_suppress_switch result.
+
+    - Each keypress received (small volume — only fires on user input).
+
+    - Exit: `spinner exit: reason=<window_open|terminal_state|keypress|kbinterrupt>`.
+
+
+    DEBUG (only under debug-mode marker file):
+
+    - cbreak-setup outcome: `spinner stdin: cbreak=<bool> reason=<...>`.
+
+
+    Opt-in (PM_SPINNER_TRACE=1):
+
+    - Per-tick: `tick i=<n> cur_state=<s> verdict=<v> cur_window_ids=<list> saw_disappear=<b>
+    window_open=<b>`.
+
+
+    ### 3. Runtime-state transitions (pm_core/runtime_state.py)
+
+    `set_action_state` and `consume_suppress_switch` are silent. Stale-state and missed-transition
+    bugs (pr-f27b882 family) are entirely about runtime_state contents and writers.
+
+    - INFO on transitions only (skip no-op writes): `set_action_state: pr=<id> action=<a>
+    from=<old> to=<new> verdict=<v>`.
+
+    - INFO: `consume_suppress_switch: pr=<id> action=<a> consumed=<bool>`. Skip when
+    consumed=False to avoid noise from picker callers — only log the True case.
+
+
+    ### 4. Wrapper code-path selection (pm_core/wrapper.py)
+
+    We hit two bugs caused by the wrapper loading the wrong pm_core (master vs. workdir,
+    IPC vs. non-IPC). Once per pm invocation, very low volume.
+
+    - INFO: `wrapper: argv0=<...> selected_root=<path> chosen_via=<override|pm_root|cwd_walk|installed>
+    is_ipc=<bool>`.
+
+
+    ### 5. TUI mount / unmount and trigger
+
+    TUI restarts at 05:55:08 (the #201 merge incident) and we don''t know what triggered
+    it.
+
+    - INFO mount: `TUI mount: pid=<n> session=<s> trigger=<initial|restart|signal>`.
+
+    - INFO unmount: `TUI unmount: reason=<...>`.
+
+    - The restart-self path records the reason it''s restarting.
+
+
+    Once per restart — negligible volume.
+
+
+    ### 6. Container launcher (pm_core/container.py)
+
+    Most container ops do log. Gaps:
+
+    - `wrap_claude_cmd`: log entry with label, workdir, container name. Already logs
+    creation; add the lock acquisition (when pr-fc6db6a''s flock lands) and the container-name
+    decision.
+
+    - `remove_container`: log entry param.
+
+
+    ### 7. Iteration relauncher (pm_core/review_loop.py:_launch_review_window)
+
+    The subprocess that fires `pm pr review --fresh --review-loop` is quiet. Per iteration,
+    low cadence.
+
+    - INFO: `relauncher: pr=<id> iteration=<n> loop_id=<id> cmd=<cmd>` on entry.
+
+    - INFO: `relauncher: pr=<id> rc=<rc> elapsed=<s>` on exit.
+
+
+    ### 8. SIGUSR2 command queue (pm_core/tui/app.py)
+
+    Currently logs queue drain at DEBUG. Lift the actual command-dispatch log to INFO:
+    `queue dispatch: cmd=<c> result=<ok|exc>`. One per command, low cadence.
+
+
+    ### 9. Picker action dispatch (pm_core/cli/session.py:popup_picker_cmd)
+
+    `_run_picker_command` doesn''t log which command was selected. Add INFO: `picker
+    dispatch: action=<lbl> cmd=<c> route=<tui|direct>`.
+
+
+    ## Out of scope
+
+    - Structured-log format change (move to JSON). Today''s log is human-readable
+    and grep-friendly; keep it.
+
+    - Span-style tracing (no opentelemetry).
+
+    - Adding a custom TRACE level — env-var-gated PM_SPINNER_TRACE is the only opt-in
+    we need.
+
+
+    ## Test
+
+    - After this PR, repro one of the recent incidents (e.g. concurrent _launch_review_window)
+    and confirm the log shows the full causal chain: wrapper code-path → kill_window
+    → park_if_on → kill_window → relauncher → container create → spinner entry → state
+    transitions → exit reason.
+
+    - Verify spinner logging stays under e.g. 100 lines per iteration with PM_SPINNER_TRACE
+    unset.
+
+    - Existing tests for tmux primitives should still pass; the new logs are additive.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/203
+  gh_pr_number: 203
+  created_at: '2026-05-05T13:03:48.659670+00:00'
+  updated_at: '2026-05-05T17:25:11.423953+00:00'
+  started_at: '2026-05-05T13:11:01.754532+00:00'
+  reviewed_at: '2026-05-05T13:24:02.719651+00:00'
+  merged_at: '2026-05-05T17:25:11.423953+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-813cc19-improvement-add-structured-observabi-ccaf3d46
+- id: pr-28bda5d
+  plan: improvements
+  title: 'Improvement: home window redraws only on actual content change, not on a
+    5s timer'
+  branch: pm/pr-28bda5d-improvement-home-window-redraws-only-on-actual-con
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+    Today the pm-home window''s loop (`pm_core/home_window/pr_list.py:_loop_main`)
+    redraws every 5 seconds and on sentinel touch. The 5s timer was needed for the
+    clock in the header line; the actual project state usually doesn''t change between
+    ticks, so most redraws are no-ops that just blink the screen.
+
+
+    Switch to redraw-only-on-change. The window stays current because every state-mutating
+    pm command can touch the sentinel (which wakes the loop early), but a quiet pm
+    produces a quiet pm-home — no flicker, no wasted clears, easier to read.
+
+
+    ## Behavior
+
+
+    Replace the timer-based redraw with hash-based change detection:
+
+
+    - Loop wakes on a short tick (e.g. 0.5–1s), on sentinel touch, or on SIGWINCH.
+
+    - On wake, call `_render_once()` to produce the output text and compute a hash.
+
+    - Compare to the last rendered hash. **Write to stdout only if the hash differs.**
+    Sentinel touch is a hint to recheck, not a force-redraw.
+
+
+    Sentinel + tick + SIGWINCH are all ''check'' triggers; the hash is the only ''should
+    we paint'' decision. Callers signaling refresh don''t have to know whether their
+    change affected the rendered output — they say ''I touched something'' and the
+    loop figures it out.
+
+
+    Alternatives considered:
+
+    - **Mtime-watching of source files.** Cheaper per tick but brittle — easy to miss
+    a source.
+
+    - **inotify (Linux only).** Could layer on top of hashing later.
+
+
+    ## Width- and height-aware rendering
+
+
+    The current renderer writes `format_pr_line` output without truncation, and prints
+    the full PR list which often overflows the pane. The terminal scrolls, leaving
+    the *oldest* (bottom of the list) visible — wrong way around. The user wants the
+    *most recent* (top of the list) visible.
+
+
+    `_render_once` should be both width- and height-aware:
+
+
+    - **Pane size** read from `os.get_terminal_size()` (the home process is attached
+    to the pane''s TTY, so this returns the right dimensions).
+
+    - **Width**: truncate or wrap each line to fit the current width. Pass the width
+    into `format_pr_line` or post-process the output.
+
+    - **Height**: the renderer already sorts by `updated_at` descending, so `prs[0]`
+    is the most recent. Print only the first N rows that fit the visible height (height
+    − header lines − optional footer line). If there are more PRs than fit, append
+    a footer like `(… and M more)`.
+
+    - After writing, the cursor lands at the bottom of the rendered output, but since
+    the rendered output is bounded by pane height, no scrolling occurs — the most
+    recent rows stay visible at the top.
+
+
+    Width-aware rendering means resize naturally produces different text → hash differs
+    → redraw fires. SIGWINCH wakes the loop immediately so the user doesn''t see stale-look
+    during the inter-tick wait.
+
+
+    Add a SIGWINCH handler that simply sets a wake flag — the existing select/sleep
+    loop wakes, the next iteration recomputes width/height and renders.
+
+
+    ## Header / clock decision
+
+
+    The current header includes `(updated HH:MM:SS)` which is clock-time, so it changes
+    every second even when content doesn''t. Drop the absolute clock from the header;
+    render staleness with relative phrasing only at redraw time (e.g. `(updated 8s
+    ago)` derived from the last-changed timestamp of the rendered content). Relative
+    phrasing makes freshness self-evident on a quiet window without driving redraws.
+
+
+    ## Sentinel kick still required
+
+
+    Anything that mutates state and wants pm-home to reflect it immediately should
+    touch the sentinel (`provider.refresh(session)`, already implemented at home_window/pr_list.py:63-68).
+    Audit existing call sites — currently only the explicit `pm session home` invocation
+    calls it. Add refresh calls in:
+
+    - `pr add` / `pr edit` / `pr close` / `pr merge` / `pr review` / `pr start` /
+    `pr qa` (anywhere project.yaml or runtime_state changes).
+
+    - `set_action_state` writes.
+
+
+    A small helper in home_window — `refresh_home(session=None)` that resolves the
+    active session and touches the sentinel — keeps callers terse.
+
+
+    Note: with hash-based ''don''t write if unchanged'', a redundant refresh call
+    is free — it triggers a recheck that confirms nothing changed and writes nothing.
+
+
+    ## Out of scope
+
+    - inotify-based event watching (linux-only optimization).
+
+    - Live-streaming change deltas to the home window (instead of full re-render).
+
+    - Vertical scrolling within the home window. The ''most recent first, truncate
+    to fit, footer says +M more'' approach is enough; if a user wants to see the whole
+    list they run `pm pr list -t --open` in a shell.
+
+
+    ## Test
+
+    - Open pm-home. Idle for 30s with no pm activity → no redraws (no flicker, no
+    screen clear).
+
+    - Run `pm pr edit <id> --status in_review` from a shell → home redraws within
+    ~1s showing the new status.
+
+    - `touch ~/.pm/runtime/home-refresh-<base>` with no underlying change → loop wakes,
+    computes hash, sees no diff, does NOT redraw.
+
+    - Resize the pane (via tmux split-pane / kill-pane changing the width) → home
+    redraws immediately with truncated/fitted lines, no leftover wrapped output from
+    the previous width.
+
+    - Make the pane very narrow (mobile-mode width) → titles truncate cleanly with
+    ellipsis, no soft-wrap artifacts.
+
+    - Project with more open PRs than the pane is tall → only the most recent N fit,
+    footer reads `(… and M more)`, oldest are hidden, top of list is visible (not
+    the bottom).
+
+
+    ## Code paths
+
+    - pm_core/home_window/pr_list.py: `_loop_main` and `_render_once` — hashing, width-
+    and height-aware rendering, SIGWINCH handler, drop absolute clock from header,
+    `(… and M more)` footer.
+
+    - pm_core/home_window/__init__.py: add `refresh_home(session=None)` helper.
+
+    - Mutating CLI commands that should kick: pr add/edit/close/merge/review/start/qa,
+    set_action_state.
+
+
+    Related: pr-813cc19 (observability — once landed, the per-redraw log will only
+    fire on actual changes, which is itself useful telemetry).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-05T13:29:33.145323+00:00'
+  updated_at: '2026-05-05T17:30:17.574182+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6f542a2
+  plan: improvements
+  title: 'Bug: action pane shows nothing while picker-dispatched commands are running;
+    audit all actions for silent-pane and missing window paths'
+  branch: pm/pr-6f542a2-bug-action-pane-shows-nothing-while-waiting-on-a-m
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    Selecting an action from the picker leaves the action pane blank during the run
+    for any command that the picker dispatches *directly* (the non-`tui:` branch of
+    `_run_picker_command` at session.py:1470+). Most prominent for merge-with-no-conflict
+    (no merge window appears, no progress message), but the same shape hits other
+    actions:
+
+
+    - **Implementation re-start** (`pr start`): when there''s no existing window and
+    the user fires the start action a second time, the popup pane is blank for a while
+    during the run. Fresh first-time starts feel fine because the user expects setup
+    time; the second-invocation case is more confusing because the workdir already
+    exists and the run is short.
+
+    - **Plain review** (`pr review` without loop): same shape — popup is silent until
+    the review window appears.
+
+    - **Merge with no conflict**: silent throughout because no window is ever created.
+
+
+    The user-visible problem is the same in every case: no spinner label changes,
+    no streamed output, no indication anything is happening.
+
+
+    ## Root cause
+
+    Two separable issues, the second more pervasive than the first:
+
+
+    ### A. `_run_picker_command`''s direct-subprocess branch captures output
+
+    At session.py:1470-1487, when the dispatched command doesn''t start with `tui:`,
+    the picker runs `pm <cmd>` as a subprocess with `capture_output=True` and only
+    prints stdout/stderr after the subprocess exits. The reason for capture (per the
+    comment at line 1472-1474) is that display-popup''s raw-mode TTY mangles bytes
+    streamed by the child. Whether that''s still true on current tmux is worth re-verifying
+    — newer tmux versions handle popup TTY streaming better, and even if there''s
+    mangling it''s preferable to a fully blank pane.
+
+
+    ### B. Most action commands don''t write runtime_state, so the spinner has nothing
+    to label
+
+    `_wait_for_tui_command`''s spinner displays `cur_state or "queued"` (session.py:1420).
+    When the underlying CLI command doesn''t transition runtime_state, the spinner
+    shows "queued…" or nothing meaningful. Currently:
+
+    - `pr_start`: doesn''t write runtime_state at all.
+
+    - `pr_review`: same — no runtime_state writes from the CLI handler. (review-loop
+    iterations DO write, but plain `pr review` doesn''t.)
+
+    - `pr_merge`: same.
+
+    - `pr_qa`: writes via `runtime_state.set_action_state` for some paths but not
+    consistently.
+
+
+    So even for picker-dispatched actions that *do* go through `tui:` routing (the
+    spinner fires), the lack of state transitions means the user sees "queued…" forever.
+
+
+    ## Audit checklist
+
+    For each picker-dispatched action, verify the user-experience during a typical
+    run:
+
+
+    | Action | Picker dispatch route | Window-name pattern | runtime_state writes
+    | Behavior today |
+
+    |---|---|---|---|---|
+
+    | `pr start` | direct subprocess | `{display_id}` | none | silent until window
+    appears |
+
+    | `pr start --fresh` | direct subprocess | `{display_id}` | none | silent until
+    window appears |
+
+    | `pr review` | direct subprocess | `review-{display_id}` | none | silent until
+    window appears |
+
+    | `pr review --fresh` | direct subprocess | `review-{display_id}` | none | silent
+    during kill+recreate |
+
+    | `review-loop start` | tui: route | `review-{display_id}` | yes (running/done/failed)
+    | spinner shows running |
+
+    | `pr qa` | tui: route | `qa-{display_id}` | partial | inconsistent labels |
+
+    | `pr qa fresh/loop` | tui: route | `qa-{display_id}` | partial | inconsistent
+    labels |
+
+    | `pr merge` | direct subprocess | (no window unless conflict) | none | silent
+    throughout no-conflict path |
+
+
+    ## Proposed fix
+
+    Two-part. Either alone would be a partial fix; both together close the issue.
+
+
+    ### 1. Wire every picker-dispatched action into runtime_state
+
+    Each action''s CLI entry point writes `set_action_state(pr_id, action, "running")`
+    on entry and `"done"`/`"failed"` on exit. Make the action label visible via the
+    existing spinner label path. Concretely:
+
+
+    - `pr_start` (cli/pr.py:745+): on entry, `set_action_state(pr_id, "start", "running")`.
+    On window-created success, "done". On error path, "failed" with verdict in the
+    entry.
+
+    - `pr_review` (cli/pr.py:1126+): same pattern, action="review".
+
+    - `pr_merge` (cli/pr.py:1781+): same, action="merge". Especially valuable here
+    because the no-conflict path opens no window.
+
+    - `pr_qa`: audit existing writes for completeness.
+
+
+    The spinner already labels by `cur_state` so this Just Works once the writes are
+    in place. Picker-dispatched commands also need to route via `tui:` (or have the
+    picker spawn the spinner against the action''s runtime_state regardless of route)
+    so the spinner is actually polling.
+
+
+    ### 2. Stream output for direct-subprocess actions
+
+    For commands that benefit from streaming (informational lines like ''Merging GitHub
+    PR #N...''), have `_run_picker_command`''s else-branch use line-buffered stdout
+    instead of capture. Verify the display-popup raw-mode TTY mangling concern is
+    still relevant; if it is, fall back to the runtime_state path from (1) and accept
+    that streaming is unavailable in popups.
+
+
+    ## Audit for missing-window paths
+
+    Same pass should verify each action correctly opens a window (or correctly reports
+    none-needed) on the relevant code paths. Specifically for merge (the original
+    symptom):
+
+
+    - Conflict path uses `_launch_merge_window` (cli/pr.py:1441) at multiple call
+    sites (1596, 1645, 1664, 1691, 1847, 1926, 1945, 1995) — every conflict branch
+    should fire it; none should silently echo manual instructions and return.
+
+    - No-conflict path is correctly window-less but should still surface progress
+    through the runtime_state mechanism in (1).
+
+
+    ## No claude -p in any of these paths
+
+    Audit for incidental `claude -p` invocations (`launch_claude_print` / `launch_claude_print_background`
+    in `pm_core/claude_launcher.py`) anywhere in the merge, start, review, or merge-window
+    flow. Direct callers today: `review.py` (review checks), `spec_gen.py` (spec generation),
+    `qa_loop.py` (QA scoring) — none should be on these picker action paths. Confirm
+    by tracing.
+
+
+    ## Code paths
+
+    - pm_core/cli/pr.py: `pr_start` (745), `pr_review` (1126), `pr_merge` (1781),
+    `pr_qa`, `_launch_review_window` (1126), `_launch_merge_window` (1441) — add runtime_state
+    transitions.
+
+    - pm_core/cli/session.py:1450 `_run_picker_command` — possibly stream stdout for
+    direct-subprocess branch.
+
+    - pm_core/runtime_state.py — no changes expected; `set_action_state` already supports
+    the needed transitions.
+
+
+    ## Test
+
+    - Picker → `pr start` on a PR with an existing workdir but no live window → action
+    pane shows ''start: running…'' progress, then ''done'' and dismisses (or switches
+    to the new window if focus follows).
+
+    - Picker → `pr review` on an in_progress PR → progress visible during kill+recreate.
+
+    - Picker → `pr merge` on a clean-merge PR → progress visible, no window opened,
+    action pane shows ''merge: done'' on exit.
+
+    - Picker → `pr merge` on a conflict PR → progress visible, then merge window opens,
+    action pane switches to it.
+
+    - grep the merge / start / review call graphs for `launch_claude_print` → zero
+    hits.
+
+
+    ## Related
+
+    - pr-c1f8086 (just filed) — `_wait_for_tui_command` reads stale workdir yaml;
+    also a ''spinner doesn''t reflect reality'' bug, distinct from this one.
+
+    - pr-fc6db6a (#156) — the per-container-name lock recommended there; relevant
+    to merge if merge ever wraps Claude in a container (it doesn''t today, but worth
+    noting).
+
+    - pr-813cc19 (observability — merged) — the spinner / runtime_state / window logs
+    made this diagnosable. Once the runtime_state writes from this PR land, the per-action
+    lifecycle becomes visible in logs too.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-05T17:29:21.143691+00:00'
+  updated_at: '2026-05-05T17:38:52.897286+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c1f8086
+  plan: null
+  title: 'Bug: popup spinner watches wrong window because _wait_for_tui_command reads
+    project.yaml via cwd-walk, hits stale workdir yaml'
+  branch: pm/pr-c1f8086-bug-popup-spinner-watches-wrong-window-because-wai
+  status: pending
+  depends_on: []
+  description: "## Symptom\nPressing zz d (or any picker action) from a pane whose\
+    \ cwd is inside a PR workdir produces a popup spinner that watches a window name\
+    \ derived from the *workdir's* stale project.yaml — typically the internal PR\
+    \ id (`review-pr-XXXX`) — while the launcher subprocess uses the master yaml and\
+    \ creates a window named after the gh number (`review-#NNN`). The names don't\
+    \ match, so the spinner never sees the new window appear, never fires its window-open\
+    \ switch, and spins on 'running…' indefinitely until the user dismisses with q.\n\
+    \nConfirmed by the new spinner logging (pr-813cc19) on 2026-05-05:\n- For pr-f74988c\
+    \ (#200): spinner watched `target_window=review-pr-f74988c`; launcher created\
+    \ `review-#200` (window @737). User saw 'running…' forever until pressing q.\n\
+    - For pr-fcaa434 (#202): same shape. spinner watched `target_window=review-pr-fcaa434`;\
+    \ launcher created `review-#202`.\n\nMaster yaml has `gh_pr_number` set for both;\
+    \ workdir's clone-time yaml does not.\n\n## Root cause\n`_wait_for_tui_command`\
+    \ at pm_core/cli/session.py:1247-1259 resolves the PR's display_id via:\n\n  \
+    \  root = state_root()\n    data = store.load(root)\n    for p in data.get('prs')\
+    \ or []:\n        if p.get('id') == pr_id:\n            display_id = _pr_display_id(p)\n\
+    \    target_window = pattern.format(display_id=display_id) ...\n\n`state_root()`\
+    \ (cli/helpers.py:236) returns the `-C`/`PM_PROJECT` override if set, otherwise\
+    \ calls `store.find_project_root()` which walks up from cwd. When the popup runs\
+    \ from a workdir cwd, that walk lands inside the workdir and loads the workdir's\
+    \ stale clone-time yaml — which doesn't yet have `gh_pr_number` for the PR being\
+    \ acted on.\n\nAdjacent code already solved this. `popup_picker_cmd` (session.py:1554-1563)\
+    \ uses `_resolve_root_from_session(session)` (added in pr-26ca427) which reads\
+    \ `~/.pm/sessions/<tag>/pm_root` — the project root the session was started with\
+    \ — and falls back to cwd-walk only when no record exists. The picker also sets\
+    \ `os.environ[\"PM_PROJECT\"]` so subprocesses inherit the right root. But `_wait_for_tui_command`\
+    \ runs in the same process as the picker; `os.environ` is set, but `state_root()`\
+    \ doesn't re-read `PM_PROJECT` — its only env-var path is via click's top-level\
+    \ `-C` option parsing, which has already happened.\n\nSo the spinner code path\
+    \ drops through to `store.find_project_root()` and walks cwd, picking the stale\
+    \ workdir yaml.\n\n## Fix\nOne-line change at `_wait_for_tui_command`'s root resolution:\
+    \ use `_resolve_root_from_session(session)` first, fall back to `state_root()`\
+    \ only when no session record exists. Mirrors what `popup_picker_cmd` already\
+    \ does at session.py:1554-1556.\n\n    saved_root = _resolve_root_from_session(session)\n\
+    \    root = saved_root if saved_root is not None else state_root()\n    data =\
+    \ store.load(root)\n\nAfter the fix:\n- Spinner reads master's yaml, sees `gh_pr_number:\
+    \ 200` (or whatever), computes `display_id=#200`, watches `target_window=review-#200`,\
+    \ matches the launcher's window name, fires the switch on first appearance.\n\n\
+    ## Out of scope\n- Refactoring `state_root()` to honor `PM_PROJECT` env in all\
+    \ callers. That's a broader change with its own risk surface; targeted spinner\
+    \ fix is small and obvious.\n- Auditing other in-process callers of `state_root()`\
+    \ for the same bug. (There may be others; flag as a follow-up if found.)\n\n##\
+    \ Test\n- From a pane with cwd inside a workdir whose yaml lacks `gh_pr_number`,\
+    \ fire zz d → spinner logs should show `target_window=review-#NNN` (gh-prefixed),\
+    \ not `review-pr-XXXX`. Window appears → spinner exits with `reason=window_open`\
+    \ and switches the user.\n- Cross-check the four cases enumerated in pr-f27b882's\
+    \ description (no window / running / done on review window / done on different\
+    \ window) — all should still behave correctly.\n\n## Related\n- pr-26ca427 — fixed\
+    \ the equivalent bug for `_popup-picker` via session-metadata resolution.\n- pr-f27b882\
+    \ — fixed the stale-terminal-state spinner short-circuit. The window-name-mismatch\
+    \ bug here is distinct: even with no stale terminal state, the spinner would never\
+    \ switch because the window name it's watching for doesn't exist.\n- pr-813cc19\
+    \ — the spinner logging that made this diagnosable in two log lines."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-05T17:36:02.098878+00:00'
+  updated_at: '2026-05-05T17:36:02.098878+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

@@ -273,6 +273,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         data = None
         has_project = False
 
+    # Persist project root for popup commands so they can resolve it
+    # without relying on the launching pane's cwd (popups run with a
+    # cwd that may sit outside any pm repo, or in a deleted workdir).
+    if has_project and root is not None:
+        from pm_core.paths import get_session_tag, set_session_pm_root
+        _persist_tag = get_session_tag(start_path=root)
+        if _persist_tag:
+            set_session_pm_root(_persist_tag, root)
+
     # Generate session name with path hash (uses helper to ensure consistency)
     # Use the repo directory (parent of pm/) as the working directory
     if root and store.is_internal_pm_dir(root):
@@ -681,6 +690,30 @@ def session_mobile(force: bool | None):
             click.echo(f"Threshold: {pane_layout._get_mobile_width_threshold()}")
 
 
+@session.command("home")
+def session_home():
+    """Ensure the home window exists and switch to it.
+
+    The home window is a long-lived 'park here' tmux window providing
+    an at-a-glance overview (default: open PRs by recent activity).
+    First invocation creates it; subsequent invocations refresh and
+    re-focus.  See ``home-window-provider`` setting to swap providers.
+    """
+    from pm_core.cli.helpers import _get_pm_session
+    from pm_core import home_window
+
+    session_name = _get_pm_session()
+    if not session_name or not tmux_mod.session_exists(session_name):
+        click.echo("Not inside a pm tmux session.", err=True)
+        raise SystemExit(1)
+
+    provider = home_window.get_active_provider()
+    win_name = provider.ensure_window(session_name)
+    provider.refresh(session_name)
+    tmux_mod.select_window(session_name, win_name)
+    click.echo(f"Home window: {win_name} (provider: {provider.name})")
+
+
 # --- Internal pane/window commands ---
 
 @cli.command("_pane-exited", hidden=True)
@@ -744,11 +777,24 @@ def popup_show_cmd(kind: str):
     else:
         width = "80"
 
-    _log.info("_popup-show: kind=%s window_width=%s threshold=%d -> width=%s",
-              kind, win_width, threshold, width)
+    # Resolve the launching pane's cwd so the popup's shell starts where
+    # the user is, not in tmux's server-side default. Without -d the
+    # popup's cwd can land outside any git repo, which makes
+    # find_project_root() fail with a misleading 'No project.yaml found'.
+    cwd_result = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", "-p", "#{pane_current_path}"),
+        capture_output=True, text=True, check=False,
+    )
+    pane_cwd = cwd_result.stdout.strip() if cwd_result.returncode == 0 else ""
+
+    _log.info("_popup-show: kind=%s window_width=%s threshold=%d -> width=%s cwd=%r",
+              kind, win_width, threshold, width, pane_cwd)
+    popup_cmd = ["display-popup", "-E", "-w", width, "-h", height]
+    if pane_cwd:
+        popup_cmd[2:2] = ["-d", pane_cwd]
+    popup_cmd.append(body)
     subprocess.run(
-        tmux_mod._tmux_cmd("display-popup", "-E",
-                           "-w", width, "-h", height, body),
+        tmux_mod._tmux_cmd(*popup_cmd),
         check=False,
     )
 
@@ -874,7 +920,7 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("edit", "tui:edit {pr_id}"),
     ("review", "pr review {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
-    ("merge", "pr merge {pr_id}"),
+    ("merge", "pr merge --resolve-window {pr_id}"),
 ]
 
 # Modifier-key (z / zz) variants for actions that support fresh / loop.
@@ -1188,12 +1234,15 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
 
     pr_id, action, fresh = _parse_tui_action(tui_cmd)
     if not pr_id or not action:
+        _log.info("spinner exit: reason=not_pr_or_action tui_cmd=%r", tui_cmd)
         return
     # 'edit' opens in the current window — there's no window-appearance
     # signal to wait for and the launch is effectively instant.  Skip
     # the spinner entirely so the popup closes without a visible flash.
     if action == "edit":
+        _log.info("spinner exit: reason=edit_skip pr=%s", pr_id)
         return
+    _trace = os.environ.get("PM_SPINNER_TRACE") == "1"
     try:
         root = state_root()
         data = store.load(root)
@@ -1252,6 +1301,32 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     )
     saw_disappear = False
 
+    # For fresh-mode actions, the on-disk runtime_state entry from a
+    # prior completed run may still read 'done'/'failed' at popup start
+    # — the launcher hasn't yet overwritten it because the TUI hasn't
+    # drained the SIGUSR2 queue.  Snapshot the initial entry so the
+    # terminal-state short-circuit below can distinguish stale terminal
+    # state (must wait through the launcher's transitions) from a
+    # genuine terminal state produced by this invocation.  Track the
+    # full (state, updated_at) identity rather than state alone so a
+    # rapid stale-done → fresh-done transition still trips the flag.
+    if fresh:
+        _initial_entry = _rs.get_action_state(pr_id, action) or {}
+        initial_state_key = (
+            _initial_entry.get("state"),
+            _initial_entry.get("updated_at"),
+        )
+    else:
+        initial_state_key = (None, None)
+    saw_state_change = False
+
+    _log.info(
+        "spinner: pr=%s action=%s fresh=%s target_window=%s "
+        "initial_window_ids=%s initial_state=%s",
+        pr_id, action, fresh, target_window,
+        sorted(initial_window_ids), initial_state_key[0],
+    )
+
     # Print a header line so the popup clearly shows what's happening
     # underneath the picker.  The spinner below uses \r to overwrite a
     # single line; this header stays put.
@@ -1278,19 +1353,38 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     # without waiting for Enter.  Restore in finally so the popup shell
     # isn't left in a broken state if anything raises.
     fd = sys.stdin.fileno()
+    cbreak_ok = False
+    cbreak_reason = ""
     try:
         old_attrs = termios.tcgetattr(fd)
-    except termios.error:
+    except termios.error as e:
         old_attrs = None
+        cbreak_reason = f"tcgetattr_failed:{e}"
     if old_attrs is not None:
         try:
             tty.setcbreak(fd)
-        except termios.error:
+            cbreak_ok = True
+        except termios.error as e:
             old_attrs = None
+            cbreak_reason = f"setcbreak_failed:{e}"
+    _log.debug("spinner stdin: cbreak=%s reason=%s",
+               cbreak_ok, cbreak_reason or "ok")
+
+    # Transition tracking — log only when these flip, not every tick.
+    prev_cur_state = None
+    prev_window_open = None
+    prev_saw_disappear = False
     try:
         while True:
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
+            if fresh and not saw_state_change:
+                cur_key = (
+                    (entry.get("state") if entry else None),
+                    (entry.get("updated_at") if entry else None),
+                )
+                if cur_key != initial_state_key:
+                    saw_state_change = True
             cur_window_ids = _find_target_window_ids()
             if fresh and initial_window_ids:
                 # Wait for *all* original windows to be killed and a new
@@ -1313,6 +1407,64 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             else:
                 window_open = bool(cur_window_ids)
                 cur_window_id = cur_window_ids[0] if cur_window_ids else None
+
+            if cur_state != prev_cur_state:
+                _log.info("spinner transition: cur_state %s -> %s",
+                          prev_cur_state, cur_state)
+                prev_cur_state = cur_state
+            if window_open != prev_window_open:
+                _log.info("spinner transition: window_open %s -> %s",
+                          prev_window_open, window_open)
+                prev_window_open = window_open
+            if saw_disappear != prev_saw_disappear:
+                _log.info("spinner transition: saw_disappear %s -> %s",
+                          prev_saw_disappear, saw_disappear)
+                prev_saw_disappear = saw_disappear
+            if _trace:
+                _log.info(
+                    "spinner tick i=%d cur_state=%s cur_window_ids=%s "
+                    "saw_disappear=%s window_open=%s",
+                    i, cur_state, cur_window_ids,
+                    saw_disappear, window_open,
+                )
+
+            # Terminal-state short-circuit: if the action has reached a
+            # terminal state (done/failed) without producing the expected
+            # tmux window — review-loop in particular has no persistent
+            # window between iterations — exit the spinner instead of
+            # spinning forever.  Failures get surfaced via _wait_dismiss
+            # so the user sees the verdict before the popup closes;
+            # successes dismiss as today.
+            # For fresh-mode actions, 'done'/'failed' at popup start is
+            # stale state from a prior run; the launcher will overwrite
+            # it once the TUI drains the queue.  Treat the action as
+            # non-terminal until we observe *some* change to the entry,
+            # at which point any subsequent terminal state is genuinely
+            # from this invocation.
+            terminal = (cur_state in ("done", "failed")
+                        and (not fresh or saw_state_change))
+            if terminal and not window_open:
+                verdict = (entry.get("verdict") if entry else "") or ""
+                failed = cur_state == "failed" or verdict in ("ERROR", "KILLED")
+                _log.info("spinner exit: reason=terminal_state state=%s verdict=%s",
+                          cur_state, verdict)
+                # Restore terminal *before* writing final lines / waiting
+                # for keypress so cbreak/cursor state doesn't leak.
+                if old_attrs is not None:
+                    try:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                    except termios.error:
+                        pass
+                    old_attrs = None
+                click.echo(SHOW_CURSOR, nl=False)
+                if failed:
+                    suffix = f" ({verdict})" if verdict else ""
+                    click.echo(f"\r✗ {action}: failed{suffix}{CLR_EOL}")
+                    _wait_dismiss()
+                else:
+                    suffix = f" ({verdict})" if verdict else ""
+                    click.echo(f"\r✓ {action}: done{suffix}{CLR_EOL}")
+                return
             if window_open:
                 # Switch the invoking session to the target window
                 # unless the user pre-emptively suppressed it.  Doing
@@ -1330,9 +1482,15 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                         suppressed = False
                     if not suppressed:
                         try:
-                            tmux_mod.select_window(session, target_window)
+                            rc = tmux_mod.select_window(session, target_window)
+                            _log.info(
+                                "spinner select_window: target=%s:%s ok=%s",
+                                session, target_window, rc,
+                            )
                         except Exception:
-                            pass
+                            _log.exception("spinner select_window failed")
+                _log.info("spinner exit: reason=window_open target=%s",
+                          target_window)
                 click.echo(
                     f"\r✓ {action}: window {target_window} is open"
                     f"{CLR_EOL}")
@@ -1340,6 +1498,9 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             spin = frames[i % len(frames)]
             if fresh and initial_window_ids and not saw_disappear:
                 label = "rebuilding window"
+            elif cur_state == "failed":
+                v = (entry.get("verdict") if entry else "") or ""
+                label = f"failed ({v})" if v else "failed"
             else:
                 label = cur_state or "queued"
             click.echo(f"\r{spin} {action}: {label}…{CLR_EOL}", nl=False)
@@ -1356,6 +1517,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 except OSError:
                     ch = ""
                 if ch in ("q", "Q", "\x1b"):  # Esc
+                    _log.info("spinner keypress: ch=%r", ch)
                     # Tell the TUI to skip its window-switch for this
                     # action — the user explicitly dismissed; don't
                     # steal focus when the launch eventually completes.
@@ -1368,9 +1530,11 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                             termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
                         except termios.error:
                             pass
+                    _log.info("spinner exit: reason=keypress")
                     raise SystemExit(0)
             i += 1
     except KeyboardInterrupt:
+        _log.info("spinner exit: reason=kbinterrupt")
         return
     finally:
         if old_attrs is not None:
@@ -1421,6 +1585,8 @@ def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
     import sys
 
+    route = "tui" if cmd.startswith("tui:") else "direct"
+    _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
     if cmd.startswith("tui:"):
         # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
         # independent: doesn't depend on tmux send-keys timing, can't
@@ -1438,11 +1604,37 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # state transition or when the target window appears.
         _wait_for_tui_command(base, tui_cmd)
     else:
-        # Run pm command directly
+        # Run pm command directly. Capture stdout/stderr so we can re-emit
+        # them ourselves — display-popup -E's raw-mode TTY mangles bytes
+        # streamed by the child, leaving the user staring at an empty
+        # popup when something fails.
         full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
-        result = subprocess.run(full_cmd, text=True)
+        result = subprocess.run(full_cmd, text=True, capture_output=True)
+        if result.stdout:
+            click.echo(result.stdout, nl=False)
         if result.returncode != 0:
+            err = (result.stderr or "").strip()
+            if err:
+                click.echo(f"pm error: {err}", err=True)
             _wait_dismiss()
+        elif result.stderr:
+            # Even on success some commands print informational lines to
+            # stderr; surface them so they don't vanish.
+            click.echo(result.stderr, nl=False, err=True)
+
+
+def _resolve_root_from_session(session: str) -> Path | None:
+    """Resolve a pm session's persisted project root from its name.
+
+    The session name is ``pm-<tag>`` (see ``_get_session_name_for_cwd``).
+    Returns the persisted root if present and still on disk, else None.
+    """
+    from pm_core.paths import get_session_pm_root
+    base = pane_registry.base_session_name(session)
+    tag = base.removeprefix("pm-")
+    if tag == base:
+        return None
+    return get_session_pm_root(tag)
 
 
 @cli.command("_popup-picker", hidden=True)
@@ -1473,12 +1665,16 @@ def popup_picker_cmd(session: str, window_name: str):
         click.echo("Not a pm session.")
         _pause_and_exit(1)
 
+    saved_root = _resolve_root_from_session(session)
     try:
-        root = state_root()
+        root = saved_root if saved_root is not None else state_root()
         data = store.load(root)
     except FileNotFoundError:
         click.echo("No project.yaml found.")
         _pause_and_exit(1)
+    # Make subcommands inherit the session's root rather than walking
+    # up from the popup's cwd (which may be outside the repo or deleted).
+    os.environ["PM_PROJECT"] = str(root)
 
     prs = data.get("prs") or []
     current_pr = _current_window_pr_id(window_name)
@@ -1795,6 +1991,13 @@ def popup_cmd_cmd(session: str):
         click.echo("Not a pm session.")
         _wait_dismiss()
         raise SystemExit(1)
+
+    # Inherit the session's persisted root so user commands resolve
+    # project state correctly even if the popup's cwd is outside the
+    # repo or in a deleted workdir.
+    saved_root = _resolve_root_from_session(session)
+    if saved_root is not None:
+        os.environ["PM_PROJECT"] = str(saved_root)
 
     try:
         cmd = input("pm> ").strip()

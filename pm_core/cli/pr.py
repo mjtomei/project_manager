@@ -34,6 +34,7 @@ from pm_core.cli.helpers import (
     _log,
     _make_pr_entry,
     _pr_display_id,
+    format_pr_line,
     _pr_id_sort_key,
     _record_status_timestamp,
     _require_pr,
@@ -523,33 +524,9 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
-    status_icons = {
-        "pending": "⏳",
-        "in_progress": "🔨",
-        "in_review": "👀",
-        "qa": "🧪",
-        "merged": "✅",
-        "closed": "🚫",
-        "blocked": "🚫",
-    }
     out: list[str] = []
     for p in prs:
-        icon = status_icons.get(p.get("status", "pending"), "?")
-        deps = p.get("depends_on") or []
-        dep_str = f" <- [{', '.join(deps)}]" if deps else ""
-        machine = p.get("agent_machine")
-        machine_str = f" ({machine})" if machine else ""
-        active_str = " *" if p["id"] == active_pr else ""
-        ts_str = ""
-        if timestamps:
-            ts = p.get("updated_at") or p.get("created_at") or ""
-            if ts:
-                try:
-                    dt = datetime.fromisoformat(ts).astimezone()
-                    ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
-                except ValueError:
-                    ts_str = f" [{ts}]"
-        out.append(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
+        out.append(format_pr_line(p, active_pr=active_pr, with_timestamp=timestamps))
         if workdirs:
             wd = p.get("workdir")
             if wd and Path(wd).exists():
@@ -826,6 +803,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
                 if fresh:
+                    from pm_core import home_window
+                    home_window.park_if_on(pm_session, existing["id"])
                     tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
                 elif use_companion and not background:
@@ -1167,6 +1146,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 sessions_on_review = tmux_mod.sessions_on_window(
                     pm_session, existing["id"],
                 )
+            from pm_core import home_window
+            home_window.park_if_on(pm_session, existing["id"])
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
@@ -1774,9 +1755,20 @@ def pr_qa(pr_id: str | None):
     raise SystemExit(1)
 
 
+def _resolve_window_default() -> bool:
+    """Whether ``pr merge`` should default to launching a resolve window.
+
+    True when running inside the pm tmux session (PM_IN_TMUX_SESSION=1),
+    so picker / shell-pane / typed-in-command-bar invocations all match
+    the TUI command-bar behavior. False outside tmux.
+    """
+    return bool(os.environ.get("PM_IN_TMUX_SESSION"))
+
+
 @pr.command("merge")
 @click.argument("pr_id", default=None, required=False)
-@click.option("--resolve-window", is_flag=True, default=False, hidden=True,
+@click.option("--resolve-window/--no-resolve-window", "resolve_window",
+              default=None, hidden=True,
               help="On merge conflict, launch a Claude resolution window instead of exiting")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create merge window without switching focus (used by auto-start)")
@@ -1786,7 +1778,7 @@ def pr_qa(pr_id: str | None):
               help="Open a companion shell pane alongside the merge resolution window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
               help="Skip workdir merge, go straight to pull into repo dir (step 2)")
-def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
+def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
              transcript: str | None, companion: bool, propagation_only: bool):
     """Merge a PR's branch into the base branch.
 
@@ -1795,6 +1787,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
     directs the user to merge on GitHub manually.
     If PR_ID is omitted, infers from cwd or auto-selects.
     """
+    if resolve_window is None:
+        resolve_window = _resolve_window_default()
     root = state_root()
     data = store.load(root)
 
@@ -1879,14 +1873,16 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                 # The idle tracker will re-attempt and finalize after resolution.
                 return
 
-        # Fallback: direct user to merge manually
+        # Fallback: direct user to merge manually. Exits non-zero so the
+        # popup picker / TUI surfaces the message instead of closing
+        # silently — the user must take a manual action to proceed.
         gh_pr = pr_entry.get("gh_pr")
         if gh_pr:
             click.echo(f"GitHub PR: {gh_pr}")
-            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.")
+            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.", err=True)
         else:
-            click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.")
-        return
+            click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.", err=True)
+        raise SystemExit(1)
 
     # For local/vanilla: merge in the PR's workdir (branch always exists there)
     workdir = pr_entry.get("workdir")
@@ -1975,6 +1971,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
             transcript=transcript, companion=companion,
         )
         if not pull_ok:
+            # When resolve_window=True, a window was launched — exit 0
+            # so callers (idle tracker, review loop) don't treat it as
+            # failure. When resolve_window=False, the helper printed
+            # "Pull manually..." — exit non-zero so the popup / TUI
+            # surfaces it.
+            if not resolve_window:
+                raise SystemExit(1)
             return
         _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")
@@ -1994,7 +1997,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                                          companion=companion)
                     return
                 click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
-                return
+                raise SystemExit(1)
             click.echo(f"Pushed merged {base_branch} to origin.")
         else:
             click.echo("Propagation only: skipping push to origin.")
@@ -2008,7 +2011,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
             companion=companion,
         )
         if not pull_ok:
-            # Merge window launched for pull conflict — don't finalize yet
+            # resolve_window=True: window launched — caller will retry
+            # via idle tracker; exit 0 so they don't treat the handoff
+            # as failure. resolve_window=False: helper printed "Resolve
+            # conflicts manually..." — exit non-zero so the popup / TUI
+            # actually surfaces it instead of closing silently.
+            if not resolve_window:
+                raise SystemExit(1)
             return
         _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")

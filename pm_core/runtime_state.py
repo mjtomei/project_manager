@@ -122,6 +122,8 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                      state, pr_id, action)
     path = runtime_path(pr_id)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    prior_state_for_log: str | None = None
+    new_state_for_log: str | None = None
     try:
         with os.fdopen(fd, "r+") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
@@ -137,13 +139,29 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                     actions = {}
                     data["actions"] = actions
                 if state is None and not extras:
+                    prior_state_for_log = (actions.get(action) or {}).get("state")
                     actions.pop(action, None)
                 else:
                     cur = actions.get(action) or {}
                     if not isinstance(cur, dict):
                         cur = {}
+                    prior_state_for_log = cur.get("state")
                     if state is not None:
+                        prior_state = cur.get("state")
+                        # A fresh launch of this action invalidates any
+                        # suppress_switch flag set by a prior, now-orphaned
+                        # invocation: the flag's meaning is "the user
+                        # dismissed the *current* invocation's popup", and
+                        # a new invocation has just begun. Detect by
+                        # transitioning into launching/running from a state
+                        # other than launching/running.
+                        if (state in ("launching", "running")
+                                and prior_state not in ("launching", "running")
+                                and "suppress_switch" not in extras
+                                and cur.get("suppress_switch")):
+                            cur.pop("suppress_switch", None)
                         cur["state"] = state
+                        new_state_for_log = state
                         cur.setdefault("started_at", _now_iso())
                     for k, v in extras.items():
                         if v is None:
@@ -173,6 +191,16 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except OSError as e:
         _log.debug("runtime_state: write %s failed: %s", path, e)
+        return
+    # Log only genuine transitions: state actually changed.  Skip no-op
+    # writes (e.g. consume_suppress_switch on a missing entry, repeat
+    # 'running' heartbeats) so the log stays signal-rich.
+    if state is not None and new_state_for_log != prior_state_for_log:
+        verdict = extras.get("verdict") if extras else None
+        _log.info(
+            "set_action_state: pr=%s action=%s from=%s to=%s verdict=%s",
+            pr_id, action, prior_state_for_log, new_state_for_log, verdict,
+        )
 
 
 def clear_action(pr_id: str, action: str) -> None:
@@ -249,6 +277,8 @@ def consume_suppress_switch(pr_id: str, action: str) -> bool:
     if not entry.get("suppress_switch"):
         return False
     set_action_state(pr_id, action, None, suppress_switch=None)
+    _log.info("consume_suppress_switch: pr=%s action=%s consumed=True",
+              pr_id, action)
     return True
 
 
