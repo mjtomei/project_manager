@@ -1,0 +1,66 @@
+Traceback (most recent call last):
+  File "/tmp/pm-venv/bin/pm", line 8, in <module>
+    sys.exit(main())
+  File "/workspace/pm_core/wrapper.py", line 97, in main
+    return cli_main()
+  File "/workspace/pm_core/cli/__init__.py", line 682, in main
+    cli()
+  File "/tmp/pm-venv/lib/python3.10/site-packages/click/core.py", line 1514, in __call__
+    return self.main(*args, **kwargs)
+  File "/tmp/pm-venv/lib/python3.10/site-packages/click/core.py", line 1435, in main
+    rv = self.invoke(ctx)
+  File "/tmp/pm-venv/lib/python3.10/site-packages/click/core.py", line 1902, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+  File "/tmp/pm-venv/lib/python3.10/site-packages/click/core.py", line 1298, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "/tmp/pm-venv/lib/python3.10/site-packages/click/core.py", line 853, in invoke
+    return callback(*args, **kwargs)
+  File "/workspace/pm_core/cli/guide.py", line 191, in notes_cmd
+    ret, _ = run_watched_editor(template, on_save)
+  File "/workspace/pm_core/editor.py", line 81, in run_watched_editor
+    ret = subprocess.call([editor, tmp_path])
+  File "/usr/lib/python3.10/subprocess.py", line 345, in call
+    with Popen(*popenargs, **kwargs) as p:
+  File "/usr/lib/python3.10/subprocess.py", line 971, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.10/subprocess.py", line 1863, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'vi'
+pm pr list
+[?2004l  ⏳ pr-d17fe55: Add unit tests
+      [pending]
+  ⏳ pr-9c40675: Refactor auth module
+      [pending] <- [pr-95325c4,
+      pr-6cd925d]
+  ⏳ pr-95325c4: Add login feature
+      [pending] *
+  ⏳ pr-6cd925d: Fix database migration
+      [pending] <- [pr-95325c4]
+[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ pm pr show pr-95325c4 M[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[K4
+[?2004lUsage: pm pr [OPTIONS] COMMAND [ARGS]...
+Try 'pm pr -h' for help.
+
+Error: No such command 'show'.
+[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ pm pr note add pr-95325c4 'demo note from artifact recipe'
+[?2004lAdded note note-b3581d4 to pr-95325c4
+[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ pm pr show pr-95325c4 M[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[K4
+[?2004lUsage: pm pr [OPTIONS] COMMAND [ARGS]...
+Try 'pm pr -h' for help.
+
+Error: No such command 'show'.
+[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ clear
+[?2004l[H[J[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ pm pr list
+[?2004l  ⏳ pr-d17fe55: Add unit tests
+      [pending]
+  ⏳ pr-9c40675: Refactor auth module
+      [pending] <- [pr-95325c4,
+      pr-6cd925d]
+  ⏳ pr-95325c4: Add login feature
+      [pending] *
+  ⏳ pr-6cd925d: Fix database migration
+      [pending] <- [pr-95325c4]
+[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ pm pr note list pr-95325c4
+[?2004l  note-b3581d4 (2026-05-05T12:51:51Z): demo note from artifact recipe
+[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ pm plan list
+[?2004lNo plans.
+[?2004h(pm-venv) pm@23754388932a:/workspace/pm-test-1777985423$ 
