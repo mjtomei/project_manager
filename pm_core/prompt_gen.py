@@ -32,11 +32,13 @@ def _bug_fix_flow_block(pr: dict) -> str:
    of steps that produces the symptom — not a theory about what's wrong.
    - Look in `pm/qa/instructions/` for env-setup recipes that may help
      bring up a reproduction environment.
-   - Follow a recipe from `pm/qa/artifacts/` to capture a replayable
-     artifact. Save under `pm/qa/captures/{seg}/impl/pre-fix/`. Each
-     capture must contain the recording plus a `manifest.md` with
-     copy-pasteable commands, the workdir and commit they ran in, and
-     one paragraph on what the recording demonstrates.
+   - Follow a recipe from `pm/qa/artifacts/` to capture replayable
+     artifacts. Save under `pm/qa/captures/{seg}/impl/pre-fix/` — single
+     capture's files can go directly there, or use sub-subdirs
+     (`pre-fix/<short-name>/`) when you need more than one capture for
+     this phase. Each capture must contain its recording plus a
+     `manifest.md` with copy-pasteable commands, the workdir and commit
+     they ran in, and one paragraph on what the recording demonstrates.
    - If you can't reproduce, stop and ask the user — don't write a fix
      on top of an unreproduced bug.
 
@@ -52,9 +54,10 @@ def _bug_fix_flow_block(pr: dict) -> str:
    Run any related suite to check for regressions.
 
 5. **Verify manually** — Re-run the step-1 repro against the post-fix
-   code and confirm the symptom is gone. Capture the post-fix run
-   under `pm/qa/captures/{seg}/impl/post-fix/`. A passing test is
-   not sufficient on its own.
+   code and confirm the symptom is gone. Capture under
+   `pm/qa/captures/{seg}/impl/post-fix/` (sub-subdirs allowed if you
+   need more than one capture, mirroring the pre-fix layout). A passing
+   test is not sufficient on its own.
 """
 
 
