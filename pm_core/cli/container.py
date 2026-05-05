@@ -2,7 +2,7 @@
 
 import click
 
-from pm_core.cli.helpers import state_root, _get_pm_session
+from pm_core.cli.helpers import state_root
 from pm_core.cli import cli
 
 

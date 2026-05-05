@@ -88,10 +88,9 @@ class TestBuildContainerBuildPrompt:
 class TestContainerBuildCommand:
     """Tests for the pm container build CLI command."""
 
-    @patch("pm_core.cli.container._get_pm_session", return_value=None)
     @patch("pm_core.cli.container.state_root")
     @patch("pm_core.cli.container._build_container_build_prompt", return_value="test prompt")
-    def test_exits_when_claude_not_found(self, mock_prompt, mock_root, mock_session):
+    def test_exits_when_claude_not_found(self, mock_prompt, mock_root):
         mock_root.return_value = Path("/fake/pm")
 
         with patch("pm_core.store.load", return_value={"project": {"name": "test"}}), \
@@ -105,9 +104,8 @@ class TestContainerBuildCommand:
         assert result.exit_code != 0
         assert "Claude CLI not found" in result.output
 
-    @patch("pm_core.cli.container._get_pm_session", return_value=None)
     @patch("pm_core.cli.container.state_root")
-    def test_uses_custom_tag(self, mock_root, mock_session):
+    def test_uses_custom_tag(self, mock_root):
         mock_root.return_value = Path("/fake/pm")
 
         with patch("pm_core.store.load", return_value={"project": {"name": "test"}}), \
@@ -121,9 +119,8 @@ class TestContainerBuildCommand:
         # Should show the prompt with our custom tag since claude isn't found
         assert "custom:v1" in result.output
 
-    @patch("pm_core.cli.container._get_pm_session", return_value=None)
     @patch("pm_core.cli.container.state_root")
-    def test_uses_custom_base(self, mock_root, mock_session):
+    def test_uses_custom_base(self, mock_root):
         mock_root.return_value = Path("/fake/pm")
 
         with patch("pm_core.store.load", return_value={"project": {"name": "test"}}), \
@@ -183,9 +180,8 @@ class TestContainerBuildCommand:
         assert "Switched to existing window" in result.output
         mock_select.assert_called_once_with("pm-test-session", "@5")
 
-    @patch("pm_core.cli.container._get_pm_session", return_value=None)
     @patch("pm_core.cli.container.state_root")
-    def test_default_tag_uses_project_name(self, mock_root, mock_session):
+    def test_default_tag_uses_project_name(self, mock_root):
         mock_root.return_value = Path("/fake/pm")
 
         with patch("pm_core.store.load", return_value={"project": {"name": "cool-app"}}), \
