@@ -78,6 +78,10 @@ def stop_loop_or_fresh_review(app) -> None:
         if pr and app._session_name:
             win_name = f"review-{_pr_display_id(pr)}"
             try:
+                from pm_core import home_window
+                win = tmux_mod.find_window_by_name(app._session_name, win_name)
+                if win:
+                    home_window.park_if_on(app._session_name, win["id"])
                 tmux_mod.kill_window(app._session_name, win_name)
             except Exception:
                 _log.debug(
@@ -133,6 +137,10 @@ def start_or_stop_loop(app) -> None:
         if pr and app._session_name:
             win_name = f"review-{_pr_display_id(pr)}"
             try:
+                from pm_core import home_window
+                win = tmux_mod.find_window_by_name(app._session_name, win_name)
+                if win:
+                    home_window.park_if_on(app._session_name, win["id"])
                 tmux_mod.kill_window(app._session_name, win_name)
             except Exception:
                 _log.debug("review_loop_ui: kill of review window for"
@@ -680,6 +688,8 @@ def _kill_merge_window(app, pr_id: str) -> None:
     window_name = f"merge-{display_id}"
     win = tmux_mod.find_window_by_name(session, window_name)
     if win:
+        from pm_core import home_window
+        home_window.park_if_on(session, win["id"])
         tmux_mod.kill_window(session, window_name)
         _log.info("killed merge window %s for %s", window_name, pr_id)
 

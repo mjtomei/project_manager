@@ -879,6 +879,7 @@ def remove_container(name: str) -> None:
     """
     import time
     from pm_core.push_proxy import stop_push_proxy
+    _log.info("remove_container: name=%s", name)
     stop_push_proxy(name)
     _run_runtime("rm", "-f", name, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
@@ -933,6 +934,10 @@ def wrap_claude_cmd(
 
     config = load_container_config()
     cname = _make_container_name(label, session_tag=session_tag)
+    _log.info(
+        "wrap_claude_cmd: label=%s workdir=%s container=%s session_tag=%s pr_id=%s",
+        label, workdir, cname, session_tag, pr_id,
+    )
 
     try:
         create_container(
