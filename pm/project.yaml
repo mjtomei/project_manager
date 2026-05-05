@@ -8182,7 +8182,7 @@ prs:
   plan: bugs
   title: Fix pr select not scrolling selected PR into view in TUI
   branch: pm/pr-177dec0-fix-pr-select-not-scrolling-selected-pr-into-view-
-  status: in_progress
+  status: merged
   depends_on: []
   description: When using the pr select command (e.g. from the command bar), the TUI
     updates the selected PR but does not scroll the tech tree to bring it into view.
@@ -8194,10 +8194,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/157
   gh_pr_number: 157
   created_at: '2026-04-06T19:18:52.240715+00:00'
-  updated_at: '2026-04-06T19:20:59.040562+00:00'
+  updated_at: '2026-05-04T12:57:35.013081+00:00'
   started_at: '2026-04-06T19:20:59.040562+00:00'
   reviewed_at: null
-  merged_at: null
+  merged_at: '2026-05-04T12:57:35.013081+00:00'
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-d18c9763
 - id: pr-2d0588a

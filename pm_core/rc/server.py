@@ -194,7 +194,8 @@ def create_app(path: Path, watch_interval: float = 0.15) -> FastAPI:
                 raise HTTPException(400, f"selection out of range (file has {total} lines)")
             state.selection = (body.start, body.end)
             top = max(1, body.start - 3)
-            state.viewport = {"top": top, "bottom": (state.viewport or {}).get("bottom", top)}
+            prev_bottom = (state.viewport or {}).get("bottom", top)
+            state.viewport = {"top": top, "bottom": max(top, prev_bottom)}
             snap = state.snapshot(include_text=False)
         state.broadcast("state", snap)
         return {"ok": True}
