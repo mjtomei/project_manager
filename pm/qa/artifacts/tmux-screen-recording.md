@@ -40,8 +40,35 @@ asciinema rec pm/qa/captures/<pr-id>/<short-name>/recording.cast \
     -c '<command-or-shell-that-reproduces-the-behavior>'
 ```
 
-If `asciinema` is not installed, note it in the manifest and skip the
-`.cast` file — the transcript is the minimum bar.
+`asciinema rec` requires a TTY. If your shell has one (you're running
+this from a terminal), the line above is all you need.
+
+#### No-TTY environments (e.g. automated agents)
+
+If you're running in a no-TTY environment — typical for Claude sessions
+driving the recipe via a non-interactive Bash tool — `asciinema rec`
+will refuse to start. Work around it by recording **inside a tmux
+pane**, since each tmux pane is backed by its own pty:
+
+```
+# 1. Open a fresh pane in the existing tmux session and start recording
+tmux split-window -t <session>:<window>
+tmux send-keys   -t <session>:<window>.<recorder-pane> \
+    "asciinema rec <capture-dir>/recording.cast \
+        -c '<command-to-record>'" Enter
+
+# 2. Drive the recorded program from outside (no TTY needed for the driver)
+#    For a TUI under tmux, this is `tmux send-keys` to the recorded pane,
+#    or any equivalent IPC the program exposes.
+
+# 3. End the recording: have the recorded command exit, e.g.
+tmux send-keys -t <session>:<window>.<recorder-pane> "exit" Enter
+# asciinema flushes recording.cast on the recorded process exiting.
+```
+
+If `asciinema` isn't installed and can't be installed, note it in the
+manifest and skip the `.cast` file — the `transcript.log` from
+`pipe-pane` is the minimum bar.
 
 ## Manifest format
 
