@@ -201,6 +201,18 @@ def set_action_state(pr_id: str, action: str, state: str | None,
             "set_action_state: pr=%s action=%s from=%s to=%s verdict=%s",
             pr_id, action, prior_state_for_log, new_state_for_log, verdict,
         )
+    # Kick the home window on any real transition (or on entry/exit),
+    # not on no-op heartbeat writes. Hash-diff in the home loop makes
+    # a redundant kick free, but skipping the no-ops keeps log noise
+    # down and avoids waking the loop for nothing.
+    if (state is None and prior_state_for_log is not None) or (
+            state is not None and new_state_for_log != prior_state_for_log):
+        try:
+            from pm_core.home_window import refresh_home
+            refresh_home()
+        except Exception:
+            _log.debug("set_action_state: refresh_home failed",
+                       exc_info=True)
 
 
 def clear_action(pr_id: str, action: str) -> None:

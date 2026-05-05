@@ -159,6 +159,35 @@ def park_if_on(session: str | None, target_window_id: str | None) -> list[str]:
         return []
 
 
+def refresh_home(session: str | None = None) -> None:
+    """Touch the home-window sentinel so the loop re-checks for changes.
+
+    Cheap to call: with the loop's hash-diff repaint, a no-op refresh
+    just wakes the loop, recomputes a hash, and writes nothing. Callers
+    don't need to know whether their state change affects rendered
+    output — they signal "something happened" and the loop decides.
+
+    Resolves the active session via the same logic as the TUI-reload
+    helper (current tmux session if running inside one, else the
+    cwd-derived session name). Silently no-ops outside tmux or when
+    the session can't be resolved.
+    """
+    try:
+        if session is None:
+            from pm_core.cli.helpers import _get_pm_session
+            session = _get_pm_session()
+        if not session:
+            return
+        if not tmux_mod.has_tmux():
+            return
+        if not tmux_mod.session_exists(session):
+            return
+        provider = get_active_provider()
+        provider.refresh(session)
+    except Exception:
+        _log.debug("refresh_home: failed", exc_info=True)
+
+
 def park(session: str, home_window: str | None = None) -> None:
     """Switch the calling client's grouped session to the home window.
 

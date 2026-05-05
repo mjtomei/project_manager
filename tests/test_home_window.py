@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 import pm_core.home_window as home_window
 from pm_core.cli.helpers import format_pr_line
-from pm_core.home_window.pr_list import PrListProvider, _render_once
+from pm_core.home_window.pr_list import PrListProvider, _render_content
+
+
+def _render_once(width: int = 80, height: int = 24) -> str:
+    body, _ = _render_content(width, height)
+    return f"pm pr list -t --open\n{'=' * 20}\n{body}"
 
 
 class TestRegistry:

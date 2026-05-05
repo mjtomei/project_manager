@@ -477,6 +477,16 @@ def trigger_tui_reload(session: str | None = None) -> None:
     try:
         if session is None:
             _, session = _find_tui_pane()
+        # Kick the home window in lockstep with the TUI: every state
+        # mutation that warrants a TUI reload also warrants pm-home
+        # rechecking its rendered content. With hash-diff in the home
+        # loop, a redundant kick is free.
+        try:
+            from pm_core.home_window import refresh_home
+            refresh_home(session)
+        except Exception:
+            _log.debug("trigger_tui_reload: refresh_home failed",
+                       exc_info=True)
         if not session:
             return
         pidfile = _tui_pidfile_for_session(session)
