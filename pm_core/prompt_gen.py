@@ -1407,6 +1407,16 @@ def generate_session_health_prompt(data: dict, session_name: str | None = None,
     work_log = f"{meta_pm_root}/watchers/session-health.log"
     session_ref = session_name or "<pm-session>"
 
+    # Derive the watcher-window skip list from the registry so future
+    # watchers added to WATCHER_REGISTRY are excluded automatically.
+    try:
+        from pm_core.watchers import WATCHER_REGISTRY
+        watcher_windows = sorted({cls.WINDOW_NAME for cls in WATCHER_REGISTRY.values()})
+    except Exception:
+        watcher_windows = ["session-health", "watcher", "discovery",
+                           "bug-fix-impl", "improvement-fix-impl"]
+    skip_bullets = "\n".join(f"- `{w}`" for w in watcher_windows)
+
     prompt = f"""This is one tick of the **Session Health Watcher** for project "{project_name}".{iteration_label}
 
 ## Role
@@ -1450,9 +1460,7 @@ tmux list-windows -t {session_ref} -F "#{{window_id}} #{{window_name}}"
 
 **Skip** these windows — they belong to watchers (including this one)
 and to the user's main shell:
-- `session-health` (this watcher)
-- `watcher` (auto-start)
-- `discovery`, `bug-fix-impl`, `improvement-fix-impl` (regression-loop)
+{skip_bullets}
 - The user's main window (window index 0)
 
 For each remaining window, list its panes and capture the last ~120
