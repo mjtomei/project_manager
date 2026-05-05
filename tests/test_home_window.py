@@ -4,11 +4,16 @@ from unittest.mock import patch
 
 import pm_core.home_window as home_window
 from pm_core.cli.helpers import format_pr_line
-from pm_core.home_window.pr_list import PrListProvider, _render_content
+from pm_core.home_window.pr_list import (
+    PrListProvider,
+    _format_relative,
+    _render_content,
+    _truncate,
+)
 
 
 def _render_once(width: int = 80, height: int = 24) -> str:
-    body, _ = _render_content(width, height)
+    body = _render_content(width, height)
     return f"pm pr list -t --open\n{'=' * 20}\n{body}"
 
 
@@ -109,6 +114,51 @@ class TestPrListProvider:
         assert "Open PR" in out
         assert "Closed PR" not in out
         assert "pm pr list -t --open" in out
+
+
+class TestRenderHelpers:
+    def test_format_relative_buckets_sub_minute_to_just_now(self):
+        # Sub-minute granularity must NOT change with each second, or the
+        # paint hash flips every tick and the home window flickers.
+        assert _format_relative(0) == "just now"
+        assert _format_relative(1) == "just now"
+        assert _format_relative(8) == "just now"
+        assert _format_relative(59) == "just now"
+
+    def test_format_relative_minute_and_hour_buckets(self):
+        assert _format_relative(60) == "1m ago"
+        assert _format_relative(125) == "2m ago"
+        assert _format_relative(3600) == "1h ago"
+        assert _format_relative(7200) == "2h ago"
+
+    def test_truncate_short_line_unchanged(self):
+        assert _truncate("hello", 10) == "hello"
+
+    def test_truncate_long_line_appends_ellipsis(self):
+        assert _truncate("abcdefghij", 5) == "abcd…"
+
+    def test_truncate_zero_or_negative_width(self):
+        assert _truncate("abc", 0) == ""
+        assert _truncate("abc", -1) == ""
+
+    def test_truncate_width_one(self):
+        assert _truncate("abcdef", 1) == "…"
+
+    def test_render_content_overflow_emits_more_footer(self):
+        prs = [
+            {"id": f"pr-{i}", "title": f"T{i}", "status": "in_progress",
+             "updated_at": f"2026-01-{i:02d}T10:00:00+00:00"}
+            for i in range(1, 11)
+        ]
+        with patch("pm_core.store.find_project_root", return_value="/tmp"), \
+             patch("pm_core.store.load", return_value={"prs": prs,
+                                                       "project": {}}):
+            body = _render_content(80, 5)
+        # height=5 -> rows_for_prs=3, overflow -> visible 2 + footer
+        assert "and" in body and "more" in body
+        # most recent (highest date) should be visible, oldest hidden
+        assert "T10" in body  # most recent
+        assert "T1:" not in body  # oldest hidden (no plain "T1:" form)
 
 
 class TestFormatPrLine:

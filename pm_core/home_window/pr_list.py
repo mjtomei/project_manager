@@ -93,9 +93,13 @@ def _truncate(line: str, width: int) -> str:
 
 
 def _format_relative(seconds: float) -> str:
+    # Bucket coarsely so the staleness header doesn't drive a repaint
+    # every second on an otherwise-idle window. "just now" covers the
+    # first minute (matches the no-flicker quietness test), then we
+    # step in minutes, then hours.
     s = int(seconds)
     if s < 60:
-        return f"{s}s ago"
+        return "just now"
     m = s // 60
     if m < 60:
         return f"{m}m ago"
@@ -103,14 +107,12 @@ def _format_relative(seconds: float) -> str:
     return f"{h}h ago"
 
 
-def _render_content(width: int, height: int) -> tuple[str, int]:
+def _render_content(width: int, height: int) -> str:
     """Render the size-fitted content body, *without* the staleness suffix.
 
-    Returns (body, header_width) — the caller composes the header with
-    the relative-time string and concatenates with the body. Splitting
-    this out lets us hash the size+content separately from the
-    staleness phrasing so we can reset the 'last changed' clock only on
-    real content changes.
+    Splitting body rendering from the staleness header lets us hash the
+    size+content independently of the relative-time phrasing, so the
+    'last changed' clock only resets on real content changes.
     """
     from pm_core import store
     from pm_core.cli.helpers import format_pr_line
@@ -119,9 +121,8 @@ def _render_content(width: int, height: int) -> tuple[str, int]:
         root = store.find_project_root()
         data = store.load(root)
     except Exception as e:
-        msg = _truncate(f"pm pr list (home): error loading project: {e}",
-                        width)
-        return msg, len(msg)
+        return _truncate(f"pm pr list (home): error loading project: {e}",
+                         width)
 
     prs = data.get("prs") or []
     prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
@@ -152,7 +153,7 @@ def _render_content(width: int, height: int) -> tuple[str, int]:
             more = len(prs) - visible_n
             body_lines.append(_truncate(f"(… and {more} more)", width))
 
-    return "\n".join(body_lines), 0
+    return "\n".join(body_lines)
 
 
 def _compose(header_text: str, body: str, width: int, height: int) -> str:
@@ -161,9 +162,9 @@ def _compose(header_text: str, body: str, width: int, height: int) -> str:
     parts = [head, ruler]
     if body:
         parts.append(body)
-    # Cap to height rows.
-    return "\n".join(parts[: max(height, 1)] if height < len(parts)
-                     else parts)
+    if height >= 1 and len(parts) > height:
+        parts = parts[:height]
+    return "\n".join(parts)
 
 
 def _hash(*parts: str) -> str:
@@ -199,7 +200,7 @@ def _loop_main(session: str) -> None:
         width, height = _terminal_size()
 
         try:
-            body, _ = _render_content(width, height)
+            body = _render_content(width, height)
         except Exception as e:
             body = f"pm pr list (home): render error: {e}"
 
