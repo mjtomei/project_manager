@@ -136,7 +136,7 @@ class TestContainerBuildCommand:
 
         assert "ubuntu:22.04" in result.output
 
-    @patch("pm_core.cli.container._get_pm_session", return_value="pm-test-session")
+    @patch("pm_core.cli._window_launch._get_pm_session", return_value="pm-test-session")
     @patch("pm_core.cli.container.state_root")
     def test_launches_in_tmux_window(self, mock_root, mock_session):
         mock_root.return_value = Path("/fake/pm")
@@ -146,7 +146,9 @@ class TestContainerBuildCommand:
              patch("pm_core.container.load_container_config",
                    return_value=MagicMock(image="pm-dev:latest")), \
              patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude"), \
-             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude --prompt test"), \
+             patch("pm_core.cli._window_launch.build_claude_shell_cmd", return_value="claude --prompt test"), \
+             patch("pm_core.cli._window_launch.load_session", return_value=None), \
+             patch("pm_core.cli._window_launch.save_session"), \
              patch("pm_core.tmux.session_exists", return_value=True), \
              patch("pm_core.tmux.find_window_by_name", return_value=None), \
              patch("pm_core.tmux.new_window") as mock_new_window, \
@@ -155,12 +157,12 @@ class TestContainerBuildCommand:
             result = runner.invoke(container_build, [])
 
         assert result.exit_code == 0
-        assert "Launched container build session" in result.output
+        assert "Launched Claude in tmux window 'container-build'" in result.output
         mock_new_window.assert_called_once()
         # Window name should be "container-build"
         assert mock_new_window.call_args[0][1] == "container-build"
 
-    @patch("pm_core.cli.container._get_pm_session", return_value="pm-test-session")
+    @patch("pm_core.cli._window_launch._get_pm_session", return_value="pm-test-session")
     @patch("pm_core.cli.container.state_root")
     def test_switches_to_existing_window(self, mock_root, mock_session):
         mock_root.return_value = Path("/fake/pm")
@@ -171,7 +173,6 @@ class TestContainerBuildCommand:
              patch("pm_core.container.load_container_config",
                    return_value=MagicMock(image="pm-dev:latest")), \
              patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude"), \
-             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude"), \
              patch("pm_core.tmux.session_exists", return_value=True), \
              patch("pm_core.tmux.find_window_by_name", return_value=existing_win), \
              patch("pm_core.tmux.select_window") as mock_select:
@@ -180,7 +181,7 @@ class TestContainerBuildCommand:
 
         assert result.exit_code == 0
         assert "Switched to existing window" in result.output
-        mock_select.assert_called_once_with("pm-test-session", 3)
+        mock_select.assert_called_once_with("pm-test-session", "@5")
 
     @patch("pm_core.cli.container._get_pm_session", return_value=None)
     @patch("pm_core.cli.container.state_root")
@@ -197,7 +198,7 @@ class TestContainerBuildCommand:
 
         assert "pm-project-cool-app:latest" in result.output
 
-    @patch("pm_core.cli.container._get_pm_session", return_value=None)
+    @patch("pm_core.cli._window_launch._get_pm_session", return_value=None)
     @patch("pm_core.cli.container.state_root")
     def test_fallback_interactive_launch(self, mock_root, mock_session):
         mock_root.return_value = Path("/fake/pm")
@@ -207,13 +208,11 @@ class TestContainerBuildCommand:
              patch("pm_core.container.load_container_config",
                    return_value=MagicMock(image="pm-dev:latest")), \
              patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude"), \
-             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude"), \
-             patch("pm_core.claude_launcher.launch_claude") as mock_launch:
+             patch("pm_core.cli._window_launch.launch_claude") as mock_launch:
             runner = CliRunner()
             result = runner.invoke(container_build, [])
 
         assert result.exit_code == 0
-        assert "Launching Claude..." in result.output
         mock_launch.assert_called_once()
         call_kwargs = mock_launch.call_args
         assert call_kwargs[1]["session_key"] == "container:build"

@@ -15,6 +15,7 @@ from pm_core.claude_launcher import (
     find_claude, find_editor, launch_claude, load_session, save_session,
     clear_session, build_claude_shell_cmd,
 )
+from pm_core.cli._window_launch import launch_claude_in_window
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -81,11 +82,14 @@ def _run_guide(fresh=False):
             click.echo(f"---\n{prompt}\n---")
             return
 
-        if _in_pm_tmux_session():
-            cmd = build_claude_shell_cmd(prompt=prompt)
-            os.execvp("bash", ["bash", "-c", cmd])
-        else:
+        if root is None:
+            # No project yet — can't persist session. Launch inline.
             launch_claude(prompt)
+            return
+        launch_claude_in_window(
+            "guide", prompt, cwd=str(root),
+            session_key="guide:assist", pm_root=root, fresh=fresh,
+        )
     else:
         # Setup mode — no PRs yet
         prompt = guide_mod.build_setup_prompt(state, ctx, root, session_name=pm_session)
@@ -96,36 +100,14 @@ def _run_guide(fresh=False):
             click.echo(f"---\n{prompt}\n---")
             return
 
-        session_key = "guide:setup"
-
-        if fresh and root:
-            clear_session(root, session_key)
-
-        if _in_pm_tmux_session():
-            import uuid as uuid_mod
-
-            # Get or create session ID for resume
-            session_id = None
-            is_resuming = False
-            if root and not fresh:
-                session_id = load_session(root, session_key)
-                if session_id:
-                    is_resuming = True
-
-            save_cmd = ""
-            if not session_id and root:
-                session_id = str(uuid_mod.uuid4())
-                save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
-
-            claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id, resume=is_resuming)
-
-            # On failure (non-zero exit), clear the session so next launch starts fresh
-            clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
-            cmd = f"{save_cmd}{claude_cmd} ; rc=$? ; if [ $rc -ne 0 ]; then {clear_cmd}; fi"
-
-            os.execvp("bash", ["bash", "-c", cmd])
-        else:
-            launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+        if root is None:
+            # No project yet — can't persist session. Launch inline.
+            launch_claude(prompt)
+            return
+        launch_claude_in_window(
+            "guide", prompt, cwd=str(root),
+            session_key="guide:setup", pm_root=root, fresh=fresh,
+        )
 
 
 @cli.command("notes")

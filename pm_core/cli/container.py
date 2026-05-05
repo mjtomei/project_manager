@@ -121,8 +121,7 @@ def container_build(tag: str | None, base: str | None):
 
     If the build fails, Claude will fix the Dockerfile and retry.
     """
-    from pm_core import tmux as tmux_mod
-    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    from pm_core.claude_launcher import find_claude
     from pm_core.container import load_container_config
 
     root = state_root()
@@ -158,33 +157,11 @@ def container_build(tag: str | None, base: str | None):
         click.echo(prompt)
         raise SystemExit(1)
 
-    claude_cmd = build_claude_shell_cmd(prompt=prompt)
-
-    # Try to launch in tmux
-    pm_session = _get_pm_session()
-    if pm_session and tmux_mod.session_exists(pm_session):
-        window_name = "container-build"
-        existing = tmux_mod.find_window_by_name(pm_session, window_name)
-        if existing:
-            tmux_mod.select_window(pm_session, existing["index"])
-            click.echo(f"Switched to existing window '{window_name}'")
-            return
-        try:
-            tmux_mod.new_window(pm_session, window_name, claude_cmd,
-                                str(project_dir))
-            win = tmux_mod.find_window_by_name(pm_session, window_name)
-            if win:
-                tmux_mod.set_shared_window_size(pm_session, win["id"])
-            click.echo(f"Launched container build session in window '{window_name}'")
-            return
-        except Exception as e:
-            click.echo(f"Failed to create tmux window: {e}", err=True)
-
-    # Fallback: launch interactively
-    click.echo("Launching Claude...")
-    from pm_core.claude_launcher import launch_claude
-    launch_claude(prompt, cwd=str(project_dir), session_key="container:build",
-                  pm_root=root)
+    from pm_core.cli._window_launch import launch_claude_in_window
+    launch_claude_in_window(
+        "container-build", prompt, cwd=str(project_dir),
+        session_key="container:build", pm_root=root,
+    )
 
 
 def _build_container_build_prompt(
