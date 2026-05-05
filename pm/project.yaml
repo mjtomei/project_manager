@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f27b882
+  active_pr: pr-813cc19
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -5333,7 +5333,7 @@ prs:
   plan: watchers
   title: 'Session health watcher: detect and recover stuck/dead Claude sessions'
   branch: pm/pr-18ac983-session-health-watcher-detect-and-recover-stuck-de
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-3032fb6
   description: 'Built-in watcher using the BaseWatcher framework that monitors all
@@ -5375,9 +5375,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/184
   gh_pr_number: 184
   created_at: '2026-03-09T15:17:01.313859+00:00'
-  updated_at: '2026-05-03T11:57:41.026322+00:00'
+  updated_at: '2026-05-05T12:15:18.337503+00:00'
   started_at: '2026-05-03T11:57:41.026322+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-05T12:15:18.337503+00:00'
   merged_at: null
   notes:
   - id: note-85c3833
@@ -8130,7 +8130,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/156
   gh_pr_number: 156
   created_at: '2026-04-06T19:14:44.223134+00:00'
-  updated_at: '2026-05-04T16:36:04.770359+00:00'
+  updated_at: '2026-05-05T12:27:01.162703+00:00'
   started_at: '2026-04-06T19:17:16.583998+00:00'
   reviewed_at: '2026-04-07T13:30:18.816990+00:00'
   merged_at: null
@@ -8174,6 +8174,69 @@ prs:
       \ (push-proxy keyed only by container name)."
     created_at: '2026-05-04T16:33:36Z'
     last_edited: '2026-05-04T16:35:39Z'
+  - id: note-80159c9
+    text: 'Second incident, 2026-05-05 ~05:18 in project-manager-c5a1006b. Same family
+      of race, plus a new dimension that confirms the per-container-name lock needs
+      to be cross-process (OS flock), not in-process.
+
+
+      Sequence (master log + per-workdir log):
+
+      - 05:18:33 master log: review-loop iteration 2 for pr-18ac983. transcript symlink
+      + podman rm -f pm-review-pr-18ac983.
+
+      - 05:18:33-05:18:43: 10s wait loop in remove_container — confirms removed.
+
+      - 05:18:44 master log: podman run -d --name pm-review-pr-18ac983 → succeeds,
+      id=263f3e6c542c.
+
+      - 05:18:44 workdir log (pm-pr-18ac983-...-90100632.log): podman run -d --name
+      pm-review-pr-18ac983 → fails with ''name already in use by 263f3e6c542c'' (the
+      ID master just created).
+
+
+      The two invocations came from different pm_core installations:
+
+      - master pm_core: user''s zz d via the picker (post-fix wrapper now skip_local
+      for IPC, so picker uses host code).
+
+      - workdir pm_core: the loop''s own iteration-relauncher at review_loop.py:117-130
+      runs ''pm pr review --fresh --review-loop'' as a subprocess with cwd=pm_root
+      pointing into the workdir; wrapper cwd-walks for non-IPC commands, finds workdir''s
+      local pm_core, uses that.
+
+
+      Implication: in-process locks (Python-level) won''t help because the racers
+      are *separate processes from different pm_core installs*. The lock has to be
+      OS-level (fcntl.flock on a host file like /tmp/pm-locks/<container_name>.lock
+      or ~/.pm/locks/<container_name>.lock) so both processes see the same lock regardless
+      of which pm_core they imported.
+
+
+      Additional observed symptom: the popup spinner stays stuck open on top of the
+      affected window after the failed-launch race. The host''s _launch_review_window
+      apparently succeeded (container 263f3e6c exists, window created), but the workdir''s
+      failed launch may have left state that confuses the spinner''s exit logic. Worth
+      verifying whether the lock fix incidentally clears this, or whether spinner
+      state cleanup needs separate attention.
+
+
+      Suggested fix path:
+
+      1. host file at ~/.pm/locks/<container_name>.lock acquired via fcntl.flock LOCK_EX
+      with a short timeout (say 60s, generous because remove_container''s wait is
+      10s).
+
+      2. lock acquired BEFORE remove_container, released AFTER wrap_claude_cmd returns.
+      Both racers serialize on that lock; the second one re-checks ''is this container
+      still there or already created by the first racer'' after acquiring and either
+      no-ops or proceeds.
+
+      3. Inside the lock, an idempotent path: if the container with this name is already
+      running and matches our intended config, attach to it instead of recreating.
+      (Optional, but turns the race into a no-op rather than a wait.)'
+    created_at: '2026-05-05T12:27:00Z'
+    last_edited: '2026-05-05T12:27:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-f6381eb7
 - id: pr-177dec0
   plan: bugs
@@ -10467,7 +10530,7 @@ prs:
   plan: plan-ambient
   title: pm rc mobile voice document viewer and editor
   branch: pm/pr-4702a11-pm-rc-mobile-voice-document-viewer-and-editor
-  status: qa
+  status: in_review
   depends_on: []
   description: 'New `pm rc start <path> [--port N]` command (pm-session only) that
     lets a user review and edit a document by voice from a remote device while the
@@ -10715,9 +10778,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/170
   gh_pr_number: 170
   created_at: '2026-05-01T15:07:09.683797+00:00'
-  updated_at: '2026-05-03T23:01:20.123110+00:00'
+  updated_at: '2026-05-05T12:15:40.039649+00:00'
   started_at: '2026-05-01T15:21:01.117727+00:00'
-  reviewed_at: '2026-05-01T15:42:13.613594+00:00'
+  reviewed_at: '2026-05-05T12:15:40.039649+00:00'
   merged_at: null
   notes:
   - id: note-1404198
@@ -13458,7 +13521,7 @@ prs:
   title: 'Improvement: dedicated ''pr list'' tmux window that becomes the auto-target
     when other windows close'
   branch: pm/pr-f5b7eef-improvement-dedicated-pr-list-tmux-window-that-bec
-  status: qa
+  status: merged
   depends_on: []
   description: "## Goal\nProvide a long-lived tmux window that displays `pm pr list\
     \ -t --open` (most-recently-updated open PRs), and use it as the *destination*\
@@ -13527,11 +13590,16 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/193
   gh_pr_number: 193
   created_at: '2026-05-04T14:41:10.397036+00:00'
-  updated_at: '2026-05-04T15:27:23.137013+00:00'
+  updated_at: '2026-05-05T12:22:53.198212+00:00'
   started_at: '2026-05-04T14:43:46.387391+00:00'
   reviewed_at: '2026-05-04T15:27:23.137013+00:00'
-  merged_at: null
-  notes: []
+  merged_at: '2026-05-05T12:22:53.198212+00:00'
+  notes:
+  - id: note-9d72043
+    text: 'QA PASS: pm session home command, content, and idempotency: PASS; Auto-park
+      on kill across kill sites: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f5b7eef-bbe1d0d6cfda3c0e)'
+    created_at: '2026-05-05T12:21:59Z'
+    last_edited: '2026-05-05T12:21:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f5b7eef-improvement-dedicated-pr-list-tmux-w-0e2bc17a
 - id: pr-66bb520
   plan: improvements
@@ -13761,7 +13829,7 @@ prs:
   title: 'Bug: picker spinner exits immediately on stale terminal state when restarting
     a finished review-loop'
   branch: pm/pr-f27b882-bug-picker-spinner-exits-immediately-on-stale-term
-  status: in_progress
+  status: merged
   depends_on: []
   description: "## Symptom\nPressing zz d (or the picker review-loop action) on a\
     \ PR auto-switches the tmux window to the review window correctly in three of\
@@ -13844,11 +13912,118 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/201
   gh_pr_number: 201
   created_at: '2026-05-04T16:29:58.163771+00:00'
-  updated_at: '2026-05-05T12:13:00.262697+00:00'
+  updated_at: '2026-05-05T12:58:19.051476+00:00'
   started_at: '2026-05-05T12:13:00.262697+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  reviewed_at: '2026-05-05T12:50:14.879821+00:00'
+  merged_at: '2026-05-05T12:55:07.621126+00:00'
+  notes:
+  - id: note-d0138ec
+    text: 'Confirmed-in-the-wild repro on 2026-05-05 in project-manager-c5a1006b:
+      pressing zz d on pr-cb2a29d (#183) produced the silent-no-op failure mode that
+      this PR''s fix is targeting.
+
+
+      Evidence:
+
+      - ~/.pm/runtime/pr-cb2a29d.json: file does not exist (no review-loop state was
+      ever written for this PR).
+
+      - tmux list-windows: no review-#183 / review-pr-cb2a29d window exists.
+
+      - ~/.pm/debug/project-manager-c5a1006b.log: the only entry mentioning pr-cb2a29d
+      during the relevant window is one ''gh pr view pm/pr-cb2a29d-...'' lookup, no
+      review-loop activity, no container creation, no push proxy start.
+
+
+      So the loop never launched at all. This confirms the symptom in the PR description:
+      stale terminal state on disk → popup spinner short-circuits → exits before the
+      TUI drains the SIGUSR2 queue → no actual launch occurs. The user-visible result
+      is ''I pressed zz d and nothing happened'' — no window, no error, no signal
+      that the action did anything.
+
+
+      This makes the fix''s success criterion sharper:
+
+      - After fix, even when prior runtime_state for review-loop says ''done'' or
+      ''failed'' (or there''s no state at all but some other bookkeeping is stale),
+      pressing zz d MUST produce at least one of: a transition to ''queued''/''launching''/''running'',
+      a created tmux window, or a logged error. The current behavior of silently returning
+      ''✓ done'' and exiting with no side effects is the broken case.
+
+
+      Cross-reference: contemporaneous incident on pr-18ac983 (#184) hit the concurrent-launch
+      race documented in pr-fc6db6a''s note-80159c9; that''s separate from this stale-state
+      issue but shares the trigger (user re-firing zz d when the previous loop is
+      in some terminal state).'
+    created_at: '2026-05-05T12:27:18Z'
+    last_edited: '2026-05-05T12:27:18Z'
+  - id: note-21c157c
+    text: 'Second concrete repro on 2026-05-05 ~05:52 — different specific failure
+      mode than the stale-terminal-state case the PR description targets. Worth widening
+      the fix scope to cover this too.
+
+
+      Setup: zz d on pr-f27b882 (#201) for the FIRST time. No prior review window
+      or runtime state for review-loop. fresh=True, initial_window_ids=set().
+
+
+      Timeline (~/.pm/debug/project-manager-c5a1006b.log + ~/.pm/runtime/pr-f27b882.json):
+
+      - 05:50:12 UTC: loop start. runtime_state: state=running iteration=0.
+
+      - 05:52:41: iteration 1 launcher fires: ''transcript: symlink ... review-pr-f27b882-i1.jsonl''.
+      podman rm -f starts.
+
+      - 05:52:51: remove_container''s 10s wait loop confirms gone.
+
+      - 05:52:52: podman run succeeds (id=2eea93fc4067), tmux window @728 ''review-#201''
+      created, panes registered.
+
+      - 05:54:53: iteration 1 completes verdict=PASS, state=done.
+
+
+      User-visible: popup pane stayed showing ''review-loop: running…'' the whole
+      time, never switched the user''s client to the new review-#201 window. Spinner
+      appeared frozen on ''running'' until the loop completed and the popup eventually
+      went away on its own. The user sat on the impl window the entire time.
+
+
+      Why this isn''t covered by the PR''s stated fix: the stale-terminal-state short-circuit
+      only fires when cur_state in (''done'',''failed''). For this incident cur_state
+      was ''running'' all the way through. So the spinner skipped the short-circuit
+      but ALSO failed to detect the window-open transition that should have fired
+      its happy-path exit at session.py:1389-1412.
+
+
+      Diagnostic asks for the implementing session:
+
+      1. Confirm _find_target_window_ids() returns the new window id at the right
+      tick. Possible cause: name-comparison edge case when target_window contains
+      a literal ''#'' (e.g. ''review-#201'') vs whatever list_windows returns. Print
+      the returned names verbatim and compare bytes.
+
+      2. Confirm consume_suppress_switch isn''t returning True spuriously and silently
+      skipping select_window. (Even if it did, the spinner echoes and returns — popup
+      would close, not stay on ''running''. But still worth ruling out.)
+
+      3. Confirm the spinner loop is actually ticking after window creation. Add a
+      log statement at each tick recording (cur_state, window_open, len(cur_window_ids),
+      saw_disappear). If the loop stops ticking before the window appears, the bug
+      is elsewhere (some early-exit path, signal handling, blocked tmux call).
+
+      4. Verify the popup process is indeed the one producing the stuck ''running…''
+      display. ps -ef showed no live _popup-picker for #201 by the time we investigated;
+      either the process exited (and the popup is somehow held visible by tmux without
+      the controlling process) or it was running long enough to span the whole loop.
+
+
+      Suggested broadening: the fix should cover BOTH the stale-terminal-state symptom
+      (described in PR body) AND the failed-to-detect-fresh-window symptom (this note).
+      Both manifest as ''spinner did not switch user to the review window despite
+      the window existing''. They share the same observability gap and probably share
+      a fix surface (better state-snapshot + better window-appearance detection).'
+    created_at: '2026-05-05T12:58:18Z'
+    last_edited: '2026-05-05T12:58:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f27b882-bug-picker-spinner-exits-immediately-a70c31eb
 - id: pr-f17e22b
   plan: improvements
@@ -13947,7 +14122,7 @@ prs:
   title: 'Bug: plan subcommands launch Claude inline instead of switching to / creating
     a tmux window when run inside a pm session'
   branch: pm/pr-fcaa434-bug-plan-subcommands-launch-claude-inline-instead-
-  status: pending
+  status: in_progress
   depends_on: []
   description: '## Symptom
 
@@ -14050,15 +14225,16 @@ prs:
     created and Claude launched there.
 
     - Same for deps, fixes, fix, add, cluster, container build, guide.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/202
+  gh_pr_number: 202
   created_at: '2026-05-04T16:49:56.497186+00:00'
-  updated_at: '2026-05-04T16:49:56.497186+00:00'
-  started_at: null
+  updated_at: '2026-05-05T12:17:16.474249+00:00'
+  started_at: '2026-05-05T12:17:16.474249+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fcaa434-bug-plan-subcommands-launch-claude-i-e2eb17b8
 - id: pr-3526677
   plan: improvements
   title: 'Improvement: prefix+M command popup becomes a scrollable shell with persistent
@@ -14238,7 +14414,7 @@ prs:
   title: Remove popup-cmd carve-outs by giving 'pr qa' and 'review-loop start' real
     CLI window management
   branch: pm/pr-438028c-remove-popup-cmd-carve-outs-by-giving-pr-qa-and-re
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-fcaa434
   description: "## Goal\nEliminate the two special-case routing branches in `popup_cmd_cmd`\
@@ -14314,9 +14490,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/199
   gh_pr_number: 199
   created_at: '2026-05-04T16:53:21.828066+00:00'
-  updated_at: '2026-05-04T17:52:37.122779+00:00'
+  updated_at: '2026-05-05T12:16:09.540663+00:00'
   started_at: '2026-05-04T17:52:37.122779+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-05T12:16:09.540663+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-438028c-remove-popup-cmd-carve-outs-by-givin-1d7ca7a5
@@ -14674,3 +14850,328 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f74988c-improvement-pm-pr-start-auto-commits-203ee4e9
+- id: pr-23d97f8
+  plan: null
+  title: 'Bug: popup spinner becomes unresponsive to q/Esc/Ctrl+C dismissal in some
+    failure states, leaving the popup stuck open'
+  branch: pm/pr-23d97f8-bug-popup-spinner-becomes-unresponsive-to-q-esc-ct
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    The picker popup spinner (`_wait_for_tui_command` in pm_core/cli/session.py:1171-1457)
+    usually responds to q / Q / Esc keypresses to dismiss the popup without cancelling
+    the queued command (line 1434), and to Ctrl+C via the `KeyboardInterrupt` handler
+    (line 1449). In some states it becomes unresponsive to all of those — the popup
+    stays open on top of the affected window indefinitely until the user either kills
+    the pane externally or the underlying tmux session goes away.
+
+
+    Concretely observed on 2026-05-05: after the concurrent _launch_review_window
+    race for pr-18ac983 (#184) (documented in pr-fc6db6a''s note-80159c9), the popup
+    ended up stuck on top of #184 and could not be dismissed via q / Esc / Ctrl+C.
+
+
+    ## Hypotheses worth investigating
+
+
+    1. **cbreak mode setup silently failed.** session.py:1280-1289 wraps termios setup
+    in try/except. If `tcgetattr` or `tty.setcbreak` raises, `old_attrs` is set to
+    None. The select+read loop continues running, but stdin is now in canonical mode
+    — `sys.stdin.read(1)` won''t return a single character until Enter is pressed,
+    so q / Esc on their own do nothing. Reproduces if anything in the popup''s parent
+    shell environment changed termios state before the spinner''s setup ran.
+
+
+    2. **Spinner loop blocked on a slow tmux call.** Inside the loop, `tmux_mod.list_windows(session)`
+    and `_rs.get_action_state(pr_id, action)` each round-trip the tmux server / read
+    a JSON file. Under contention (e.g., another pm command holding a lock, tmux server
+    temporarily unresponsive), one of these can block past the 0.15s tick. While blocked,
+    the select+read for keypresses isn''t running, so keypresses queue in the kernel
+    buffer until the call returns. If the call hangs longer, the popup feels unresponsive.
+
+
+    3. **Race-induced state confusion.** Under the concurrent-launch race (pr-fc6db6a),
+    the window can flicker: master creates → workdir removes → workdir create fails.
+    Spinner ticks during this might see cur_window_ids empty (saw_disappear=True)
+    one tick, cur_state=running another tick, and never reach the terminal-state-and-no-window
+    condition that would short-circuit. The spinner keeps spinning. q/Esc should still
+    work in this case; it''s only stuck because nothing satisfies the exit conditions.
+
+
+    If (3) is the only issue, the popup is responsive but just doesn''t have an exit
+    condition to take. If q/Esc genuinely don''t work, (1) or (2) is in play.
+
+
+    ## Diagnostic ask
+
+
+    Add a temporary debug log in the spinner loop showing each tick''s: `cur_state`,
+    `window_open`, `saw_disappear`, `old_attrs is None`, and any keypress chars read.
+    Reproduce the stuck-popup case (easiest path: trigger the concurrent-launch race
+    in pr-fc6db6a). Confirm whether the loop is ticking and whether keypresses are
+    being received.
+
+
+    ## Fix candidates by hypothesis
+
+
+    - (1): if `old_attrs` is None after setup, log a warning and force the popup to
+    exit immediately rather than spinning unresponsively. The user''s keypress in
+    canonical mode would arrive only after Enter — at which point we should still
+    honor it, but defaulting to ''exit'' keeps the popup from getting stuck.
+
+    - (2): wrap the per-tick tmux + state calls with a short timeout (e.g. 1s); on
+    timeout, count the loop iteration but skip the call. After N consecutive timeouts,
+    exit the spinner with an error message.
+
+    - (3): add a ''spinner stuck'' detection — if N ticks (e.g. 100, ~15s) pass with
+    no state change *and* no window event, surface a message and offer Esc to dismiss
+    with explicit text. (User''s q/Esc would already work in this case — this is just
+    a UX hint.)
+
+
+    Most likely combined fix: log enough state per tick to root-cause the specific
+    case, then implement whichever cause the logs point to.
+
+
+    ## Out of scope
+
+    - The underlying race that triggered the stuck popup in the observed incident
+    (pr-fc6db6a). This PR is about the popup''s responsiveness when something goes
+    wrong, not preventing things from going wrong.
+
+
+    ## Test
+
+    Repro: trigger the concurrent-launch race in pr-fc6db6a (or simulate by manually
+    creating runtime_state in a stuck shape: state=running, no review window present,
+    fresh=True, initial_window_ids non-empty). Press q / Esc / Ctrl+C → expect the
+    popup to close. Currently does not.
+
+
+    Related:
+
+    - pr-fc6db6a (#156) — the race that triggered this in the wild.
+
+    - pr-f27b882 — adjacent spinner short-circuit issue (stale terminal state).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-05T12:29:53.361872+00:00'
+  updated_at: '2026-05-05T12:29:53.361872+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-813cc19
+  plan: improvements
+  title: 'Improvement: add structured observability for window/pane lifecycle, popup
+    spinner, runtime_state transitions, and wrapper code-path selection'
+  branch: pm/pr-813cc19-improvement-add-structured-observability-for-windo
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+    Several recent bugs were hard to diagnose because the relevant primitives don''t
+    log. Auditing the incidents from 2026-05-04 and 2026-05-05 surfaces a consistent
+    set of silent paths. This PR adds structured INFO-level logging at those spots
+    so the next incident is debuggable from `~/.pm/debug/<session-tag>.log` without
+    code reading.
+
+
+    The cost is a handful of `_log.info` lines plus one or two helpers; the benefit
+    is that every recurring class of bug we''ve hit recently leaves a trail.
+
+
+    ## Logging-level policy
+
+
+    Today: default INFO, DEBUG when `~/.pm/sessions/<tag>/debug` exists, rotated at
+    10MB with 1 backup. Most additions below are INFO and fire at human-event cadence
+    (a few per minute at most), so volume is fine.
+
+
+    The one volume-sensitive case is the popup spinner''s per-tick state at 0.15s
+    tick × ~5min iteration ≈ 2,000 ticks. Per-tick logs are only useful when reproducing
+    a stuck spinner; almost every tick is uneventful (cur_state=running for many seconds
+    in a row).
+
+
+    **Spinner approach: transition-only at INFO + opt-in per-tick under env var.**
+
+    - Log at INFO when something actually changes: cur_state flip, window_open flip,
+    saw_disappear flip, keypress received, exit. Expect ~10-50 lines per spinner instance,
+    not 2,000.
+
+    - Per-tick verbose state behind `PM_SPINNER_TRACE=1` env var (not a Python log
+    level). Off by default. Avoids polluting the level taxonomy for one diagnostic
+    and keeps the on/off knob obvious for users investigating.
+
+
+    ## Audit of silent primitives → why they matter
+
+
+    ### 1. Window / pane lifecycle (pm_core/tmux.py + pm_core/cli/helpers.py)
+
+    - `tmux.kill_window` — no log. Couldn''t tell whether the merge cleanup actually
+    killed #201''s windows or whether they died from pane-exit. Add INFO: ''kill_window:
+    session=<s> window=<id-or-name>''.
+
+    - `tmux.select_window` and `tmux.select_window_in_session` — no log. `switch_sessions_to_window`
+    logs but the underlying primitive doesn''t. Add INFO: ''select_window: target=<s>:<w>
+    rc=<rc>'' for both.
+
+    - `tmux.new_window` and `new_window_get_pane` — partial logging. Add post-creation
+    window id/name confirmation.
+
+    - `cli.helpers.kill_pr_windows` — silent. Add INFO entry/exit: ''kill_pr_windows:
+    pr=<id> windows_found=<list>'' / ''kill_pr_windows: pr=<id> killed=<list>''.
+
+    - `home_window.park_if_on` — silent on success. Already logs failures via except.
+    Add INFO when watching is non-empty: ''park_if_on: target_window=<id> watching=<sessions>
+    parked_to=<home>''.
+
+    - `home_window.ensure_home_window` — INFO: ''ensure_home_window: provider=<name>
+    created=<bool> name=<win>''.
+
+
+    All of these fire on user/automation events, low cadence.
+
+
+    ### 2. Popup spinner (pm_core/cli/session.py:_wait_for_tui_command)
+
+    The spinner has been the suspect in three recent incidents (pr-f27b882 stale-state,
+    pr-23d97f8 unresponsive-dismiss, pr-f27b882 second repro ''didn''t switch when
+    window appeared''). It runs in a popup process that doesn''t share the TUI''s
+    logger but does log to its own session-tag log.
+
+
+    INFO additions (transition-only — see policy above):
+
+    - Entry: `spinner: pr=<id> action=<a> fresh=<b> target_window=<w> initial_window_ids=<set>
+    initial_state=<s>`.
+
+    - State transitions only (not every tick): `spinner transition: <field> <old>
+    -> <new>`.
+
+    - Each select_window attempt and rc.
+
+    - Each consume_suppress_switch result.
+
+    - Each keypress received (small volume — only fires on user input).
+
+    - Exit: `spinner exit: reason=<window_open|terminal_state|keypress|kbinterrupt>`.
+
+
+    DEBUG (only under debug-mode marker file):
+
+    - cbreak-setup outcome: `spinner stdin: cbreak=<bool> reason=<...>`.
+
+
+    Opt-in (PM_SPINNER_TRACE=1):
+
+    - Per-tick: `tick i=<n> cur_state=<s> verdict=<v> cur_window_ids=<list> saw_disappear=<b>
+    window_open=<b>`.
+
+
+    ### 3. Runtime-state transitions (pm_core/runtime_state.py)
+
+    `set_action_state` and `consume_suppress_switch` are silent. Stale-state and missed-transition
+    bugs (pr-f27b882 family) are entirely about runtime_state contents and writers.
+
+    - INFO on transitions only (skip no-op writes): `set_action_state: pr=<id> action=<a>
+    from=<old> to=<new> verdict=<v>`.
+
+    - INFO: `consume_suppress_switch: pr=<id> action=<a> consumed=<bool>`. Skip when
+    consumed=False to avoid noise from picker callers — only log the True case.
+
+
+    ### 4. Wrapper code-path selection (pm_core/wrapper.py)
+
+    We hit two bugs caused by the wrapper loading the wrong pm_core (master vs. workdir,
+    IPC vs. non-IPC). Once per pm invocation, very low volume.
+
+    - INFO: `wrapper: argv0=<...> selected_root=<path> chosen_via=<override|pm_root|cwd_walk|installed>
+    is_ipc=<bool>`.
+
+
+    ### 5. TUI mount / unmount and trigger
+
+    TUI restarts at 05:55:08 (the #201 merge incident) and we don''t know what triggered
+    it.
+
+    - INFO mount: `TUI mount: pid=<n> session=<s> trigger=<initial|restart|signal>`.
+
+    - INFO unmount: `TUI unmount: reason=<...>`.
+
+    - The restart-self path records the reason it''s restarting.
+
+
+    Once per restart — negligible volume.
+
+
+    ### 6. Container launcher (pm_core/container.py)
+
+    Most container ops do log. Gaps:
+
+    - `wrap_claude_cmd`: log entry with label, workdir, container name. Already logs
+    creation; add the lock acquisition (when pr-fc6db6a''s flock lands) and the container-name
+    decision.
+
+    - `remove_container`: log entry param.
+
+
+    ### 7. Iteration relauncher (pm_core/review_loop.py:_launch_review_window)
+
+    The subprocess that fires `pm pr review --fresh --review-loop` is quiet. Per iteration,
+    low cadence.
+
+    - INFO: `relauncher: pr=<id> iteration=<n> loop_id=<id> cmd=<cmd>` on entry.
+
+    - INFO: `relauncher: pr=<id> rc=<rc> elapsed=<s>` on exit.
+
+
+    ### 8. SIGUSR2 command queue (pm_core/tui/app.py)
+
+    Currently logs queue drain at DEBUG. Lift the actual command-dispatch log to INFO:
+    `queue dispatch: cmd=<c> result=<ok|exc>`. One per command, low cadence.
+
+
+    ### 9. Picker action dispatch (pm_core/cli/session.py:popup_picker_cmd)
+
+    `_run_picker_command` doesn''t log which command was selected. Add INFO: `picker
+    dispatch: action=<lbl> cmd=<c> route=<tui|direct>`.
+
+
+    ## Out of scope
+
+    - Structured-log format change (move to JSON). Today''s log is human-readable
+    and grep-friendly; keep it.
+
+    - Span-style tracing (no opentelemetry).
+
+    - Adding a custom TRACE level — env-var-gated PM_SPINNER_TRACE is the only opt-in
+    we need.
+
+
+    ## Test
+
+    - After this PR, repro one of the recent incidents (e.g. concurrent _launch_review_window)
+    and confirm the log shows the full causal chain: wrapper code-path → kill_window
+    → park_if_on → kill_window → relauncher → container create → spinner entry → state
+    transitions → exit reason.
+
+    - Verify spinner logging stays under e.g. 100 lines per iteration with PM_SPINNER_TRACE
+    unset.
+
+    - Existing tests for tmux primitives should still pass; the new logs are additive.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-05T13:03:48.659670+00:00'
+  updated_at: '2026-05-05T13:05:53.247216+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
