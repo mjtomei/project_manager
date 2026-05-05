@@ -97,7 +97,10 @@ def ensure_home_window(session: str | None = None) -> str | None:
         return None
     try:
         provider = get_active_provider()
-        return provider.ensure_window(session)
+        name = provider.ensure_window(session)
+        _log.info("ensure_home_window: provider=%s name=%s session=%s",
+                  getattr(provider, "name", "?"), name, session)
+        return name
     except Exception:
         _log.exception("ensure_home_window: provider.ensure_window failed")
         return None
@@ -148,6 +151,8 @@ def park_if_on(session: str | None, target_window_id: str | None) -> list[str]:
         # if windows are added/removed concurrently.
         for sess in watching:
             tmux_mod.select_window_in_session(sess, home_win["id"])
+        _log.info("park_if_on: target_window=%s watching=%s parked_to=%s",
+                  target_window_id, watching, home)
         return watching
     except Exception:
         _log.exception("park_if_on failed")

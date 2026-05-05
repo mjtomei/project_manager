@@ -157,10 +157,12 @@ def main():
     is_ipc = _is_session_ipc_command(sys.argv)
 
     selected_root: str | None = None
+    chosen_via: str = "installed"
 
     override_root = _find_active_override()
     if override_root:
         selected_root = override_root
+        chosen_via = "override"
     else:
         # Resolve session tag — IPC commands carry it in argv, others
         # fall back to deriving it from cwd (same as the override path).
@@ -168,10 +170,22 @@ def main():
         pm_root_root = _pm_core_from_pm_root(tag)
         if pm_root_root:
             selected_root = pm_root_root
+            chosen_via = "pm_root"
         elif not is_ipc:
             local_root = find_local_pm_core()
             if local_root:
                 selected_root = local_root
+                chosen_via = "cwd_walk"
+
+    try:
+        from pm_core.paths import configure_logger
+        _log = configure_logger("pm.wrapper")
+        _log.info(
+            "wrapper: argv0=%s selected_root=%s chosen_via=%s is_ipc=%s",
+            sys.argv[0], selected_root, chosen_via, is_ipc,
+        )
+    except Exception:
+        pass
 
     if selected_root and selected_root not in sys.path:
         sys.path.insert(0, selected_root)

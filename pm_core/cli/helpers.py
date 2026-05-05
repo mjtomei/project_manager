@@ -309,6 +309,7 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
     killed = []
     display_id = _pr_display_id(pr)
     qa_prefix = f"qa-{display_id}-s"
+    _log.info("kill_pr_windows: pr=%s session=%s", display_id, session)
 
     # Park *every* grouped session whose active window is one of the
     # windows we're about to kill — covers cross-session kills where the
@@ -329,6 +330,7 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
             tmux_mod.kill_window(session, win["id"])
             killed.append(win["name"])
 
+    _log.info("kill_pr_windows: pr=%s killed=%s", display_id, killed)
     return killed
 
 
