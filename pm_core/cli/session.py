@@ -1386,26 +1386,27 @@ def _wait_for_action(session: str, pr_id: str, action: str, fresh: bool,
             cur_state = entry.get("state") if entry else None
             # Direct-subprocess picker caller: when the underlying child
             # exits without a tmux window having appeared, surface a
-            # terminal result instead of spinning forever.  Re-read the
-            # entry once more after a short pause to give the child's
-            # final set_action_state write a chance to land before we
-            # decide done vs. failed (the lock-acquire race is short).
-            if proc_done is not None and proc_done():
-                entry = _rs.get_action_state(pr_id, action)
-                cur_state = entry.get("state") if entry else None
-                if not _find_target_window_ids() and cur_state not in (
-                        "done", "failed"):
-                    _log.info("spinner exit: reason=proc_done state=%s",
-                              cur_state)
-                    if old_attrs is not None:
-                        try:
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-                        except termios.error:
-                            pass
-                        old_attrs = None
-                    click.echo(SHOW_CURSOR, nl=False)
-                    click.echo(f"\r✓ {action}: complete{CLR_EOL}")
-                    return
+            # terminal result instead of spinning forever.  The child's
+            # context manager writes done/failed on exit, so the regular
+            # terminal-state branch normally catches it on the next tick;
+            # this branch is the fallback for the rare case where the
+            # state write hasn't been observed yet.  Fall through to the
+            # regular logic so done/failed verdicts are surfaced
+            # consistently with the tui:-route path.
+            if (proc_done is not None and proc_done()
+                    and not _find_target_window_ids()
+                    and cur_state not in ("done", "failed")):
+                _log.info("spinner exit: reason=proc_done state=%s",
+                          cur_state)
+                if old_attrs is not None:
+                    try:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                    except termios.error:
+                        pass
+                    old_attrs = None
+                click.echo(SHOW_CURSOR, nl=False)
+                click.echo(f"\r✓ {action}: complete{CLR_EOL}")
+                return
             if fresh and not saw_state_change:
                 cur_key = (
                     (entry.get("state") if entry else None),
