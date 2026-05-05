@@ -126,8 +126,12 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     if transcript:
         cmd.extend(["--transcript", transcript])
     cmd.append(pr_id)
-    _log.info("review_loop: launching review window: %s", cmd)
+    import time as _time
+    _log.info("relauncher: pr=%s iteration=%s loop_id=%s cmd=%s",
+              pr_id, iteration, loop_id, cmd)
+    _t0 = _time.monotonic()
     result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=120)
+    elapsed = _time.monotonic() - _t0
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else ""
         stdout = result.stdout.strip() if result.stdout else ""
@@ -135,6 +139,8 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
                    result.returncode, stderr[:1000], stdout[:500])
         detail = stderr[:500] or stdout[:500]
         raise RuntimeError(f"Review window launch failed (rc={result.returncode}): {detail}")
+    _log.info("relauncher: pr=%s rc=%d elapsed=%.2fs",
+              pr_id, result.returncode, elapsed)
 
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:

@@ -125,6 +125,7 @@ def kill_session(name: str, socket_path: str | None = None) -> None:
 
 def kill_window(session: str, window: str) -> None:
     """Kill a tmux window by index or name."""
+    _log.info("kill_window: session=%s window=%s", session, window)
     _run(
         _tmux_cmd("kill-window", "-t", f"{session}:{window}"),
     )
@@ -147,14 +148,15 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
         _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
         check=True,
     )
-    if switch:
-        # Switch only the current grouped session to the new window
-        win = find_window_by_name(session, name)
-        if win:
-            current = current_or_base_session(session)
-            _run(
-                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-            )
+    win = find_window_by_name(session, name)
+    _log.info("new_window: session=%s name=%s id=%s index=%s switch=%s",
+              session, name,
+              (win or {}).get("id"), (win or {}).get("index"), switch)
+    if switch and win:
+        current = current_or_base_session(session)
+        _run(
+            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+        )
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
@@ -173,6 +175,9 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
         check=True,
     )
     win = find_window_by_name(session, name)
+    _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s switch=%s",
+              session, name,
+              (win or {}).get("id"), (win or {}).get("index"), switch)
     if not win:
         return None
     if switch:
@@ -403,6 +408,8 @@ def select_window(session: str, window: str) -> bool:
     result = _run(
         _tmux_cmd("select-window", "-t", f"{target}:{window}"),
     )
+    _log.info("select_window: target=%s:%s rc=%d",
+              target, window, result.returncode)
     return result.returncode == 0
 
 
@@ -415,6 +422,8 @@ def select_window_in_session(session: str, window: str) -> bool:
     result = _run(
         _tmux_cmd("select-window", "-t", f"{session}:{window}"),
     )
+    _log.info("select_window_in_session: target=%s:%s rc=%d",
+              session, window, result.returncode)
     return result.returncode == 0
 
 

@@ -1234,12 +1234,15 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
 
     pr_id, action, fresh = _parse_tui_action(tui_cmd)
     if not pr_id or not action:
+        _log.info("spinner exit: reason=not_pr_or_action tui_cmd=%r", tui_cmd)
         return
     # 'edit' opens in the current window — there's no window-appearance
     # signal to wait for and the launch is effectively instant.  Skip
     # the spinner entirely so the popup closes without a visible flash.
     if action == "edit":
+        _log.info("spinner exit: reason=edit_skip pr=%s", pr_id)
         return
+    _trace = os.environ.get("PM_SPINNER_TRACE") == "1"
     try:
         root = state_root()
         data = store.load(root)
@@ -1317,6 +1320,13 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         initial_state_key = (None, None)
     saw_state_change = False
 
+    _log.info(
+        "spinner: pr=%s action=%s fresh=%s target_window=%s "
+        "initial_window_ids=%s initial_state=%s",
+        pr_id, action, fresh, target_window,
+        sorted(initial_window_ids), initial_state_key[0],
+    )
+
     # Print a header line so the popup clearly shows what's happening
     # underneath the picker.  The spinner below uses \r to overwrite a
     # single line; this header stays put.
@@ -1343,15 +1353,27 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     # without waiting for Enter.  Restore in finally so the popup shell
     # isn't left in a broken state if anything raises.
     fd = sys.stdin.fileno()
+    cbreak_ok = False
+    cbreak_reason = ""
     try:
         old_attrs = termios.tcgetattr(fd)
-    except termios.error:
+    except termios.error as e:
         old_attrs = None
+        cbreak_reason = f"tcgetattr_failed:{e}"
     if old_attrs is not None:
         try:
             tty.setcbreak(fd)
-        except termios.error:
+            cbreak_ok = True
+        except termios.error as e:
             old_attrs = None
+            cbreak_reason = f"setcbreak_failed:{e}"
+    _log.debug("spinner stdin: cbreak=%s reason=%s",
+               cbreak_ok, cbreak_reason or "ok")
+
+    # Transition tracking — log only when these flip, not every tick.
+    prev_cur_state = None
+    prev_window_open = None
+    prev_saw_disappear = False
     try:
         while True:
             entry = _rs.get_action_state(pr_id, action)
@@ -1385,6 +1407,27 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             else:
                 window_open = bool(cur_window_ids)
                 cur_window_id = cur_window_ids[0] if cur_window_ids else None
+
+            if cur_state != prev_cur_state:
+                _log.info("spinner transition: cur_state %s -> %s",
+                          prev_cur_state, cur_state)
+                prev_cur_state = cur_state
+            if window_open != prev_window_open:
+                _log.info("spinner transition: window_open %s -> %s",
+                          prev_window_open, window_open)
+                prev_window_open = window_open
+            if saw_disappear != prev_saw_disappear:
+                _log.info("spinner transition: saw_disappear %s -> %s",
+                          prev_saw_disappear, saw_disappear)
+                prev_saw_disappear = saw_disappear
+            if _trace:
+                _log.info(
+                    "spinner tick i=%d cur_state=%s cur_window_ids=%s "
+                    "saw_disappear=%s window_open=%s",
+                    i, cur_state, cur_window_ids,
+                    saw_disappear, window_open,
+                )
+
             # Terminal-state short-circuit: if the action has reached a
             # terminal state (done/failed) without producing the expected
             # tmux window — review-loop in particular has no persistent
@@ -1403,6 +1446,8 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             if terminal and not window_open:
                 verdict = (entry.get("verdict") if entry else "") or ""
                 failed = cur_state == "failed" or verdict in ("ERROR", "KILLED")
+                _log.info("spinner exit: reason=terminal_state state=%s verdict=%s",
+                          cur_state, verdict)
                 # Restore terminal *before* writing final lines / waiting
                 # for keypress so cbreak/cursor state doesn't leak.
                 if old_attrs is not None:
@@ -1437,9 +1482,15 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                         suppressed = False
                     if not suppressed:
                         try:
-                            tmux_mod.select_window(session, target_window)
+                            rc = tmux_mod.select_window(session, target_window)
+                            _log.info(
+                                "spinner select_window: target=%s:%s ok=%s",
+                                session, target_window, rc,
+                            )
                         except Exception:
-                            pass
+                            _log.exception("spinner select_window failed")
+                _log.info("spinner exit: reason=window_open target=%s",
+                          target_window)
                 click.echo(
                     f"\r✓ {action}: window {target_window} is open"
                     f"{CLR_EOL}")
@@ -1466,6 +1517,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 except OSError:
                     ch = ""
                 if ch in ("q", "Q", "\x1b"):  # Esc
+                    _log.info("spinner keypress: ch=%r", ch)
                     # Tell the TUI to skip its window-switch for this
                     # action — the user explicitly dismissed; don't
                     # steal focus when the launch eventually completes.
@@ -1478,9 +1530,11 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                             termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
                         except termios.error:
                             pass
+                    _log.info("spinner exit: reason=keypress")
                     raise SystemExit(0)
             i += 1
     except KeyboardInterrupt:
+        _log.info("spinner exit: reason=kbinterrupt")
         return
     finally:
         if old_attrs is not None:
@@ -1531,6 +1585,8 @@ def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
     import sys
 
+    route = "tui" if cmd.startswith("tui:") else "direct"
+    _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
     if cmd.startswith("tui:"):
         # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
         # independent: doesn't depend on tmux send-keys timing, can't
