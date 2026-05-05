@@ -1244,7 +1244,8 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         return
     _trace = os.environ.get("PM_SPINNER_TRACE") == "1"
     try:
-        root = state_root()
+        saved_root = _resolve_root_from_session(session)
+        root = saved_root if saved_root is not None else state_root()
         data = store.load(root)
         from pm_core.cli.helpers import _pr_display_id
         display_id = None
