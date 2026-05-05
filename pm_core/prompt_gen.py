@@ -1505,12 +1505,16 @@ Otherwise pick the minimal action:
   ```
   or, if the CLI is showing a retry prompt, send the appropriate key.
 - **Wait** for usage limits: log "wait until <iso-ts>" and move on.
-- **Restart** for dead panes (process gone, OOM): use the existing pm
-  flows rather than spawning Claude directly.
-  - For implementation sessions: `pm pr restart <pr_id>` (if the PR is
-    in `in_progress`).
+- **Restart** for dead panes (process gone, OOM): never spawn Claude
+  sessions directly — pm pane lifecycle is owned by the TUI. Options:
   - For review/QA loops driven by auto-sequence: `pm pr auto-sequence
-    <pr_id>` will pick up where it left off.
+    <pr_id>` is the official watcher-callable entry point — it handles
+    pane bookkeeping and will pick up where it left off, including
+    relaunching a killed impl window when needed.
+  - For implementation sessions: navigate to the PR in the TUI via
+    `pm tui send` and trigger the restart from there. Do **not** invoke
+    `pm pr start` directly — it must go through the TUI so the pane is
+    tracked correctly.
 
 Always log the action with the target id and the symptom that triggered
 it.
