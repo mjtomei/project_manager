@@ -850,18 +850,30 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if not pr_committed:
         # Distinguish: does the PR exist in the current (working) project.yaml?
         if store.get_pr(data, pr_id):
-            click.echo(
-                f"PR {pr_id} is not committed on {base_branch} yet. "
-                f"Run `pm push` to commit project state before starting.",
-                err=True,
+            from pm_core.store_commit import commit_pr_entry_on_base
+            backend = data.get("project", {}).get("backend", "vanilla")
+            ok, reason = commit_pr_entry_on_base(
+                repo_root, yaml_path, base_branch, pr_id, backend
             )
+            if ok:
+                click.echo(
+                    f"Auto-committed {pr_id} entry on {base_branch}."
+                )
+                pr_committed = True
+            else:
+                click.echo(
+                    f"Auto-commit failed ({reason}); run `pm push` manually "
+                    f"to commit project state.",
+                    err=True,
+                )
+                raise SystemExit(1)
         else:
             click.echo(
                 f"PR {pr_id} was not found in project.yaml. "
                 f"Check that the PR ID is correct and has been added to the project.",
                 err=True,
             )
-        raise SystemExit(1)
+            raise SystemExit(1)
 
     if workdir:
         work_path = Path(workdir).resolve()
