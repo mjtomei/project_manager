@@ -1228,6 +1228,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     import select
     import sys
     import termios
+    import time
     import tty
 
     from pm_core import runtime_state as _rs
@@ -1367,15 +1368,56 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         except termios.error as e:
             old_attrs = None
             cbreak_reason = f"setcbreak_failed:{e}"
-    _log.debug("spinner stdin: cbreak=%s reason=%s",
-               cbreak_ok, cbreak_reason or "ok")
+    _log.info("spinner stdin: cbreak=%s reason=%s",
+              cbreak_ok, cbreak_reason or "ok")
+
+    # If cbreak setup failed *and* stdin is a real tty, q/Esc won't be
+    # readable per-character — the popup would spin unresponsively until
+    # the queued command finishes.  Bail out immediately with a visible
+    # hint; the queued command is unaffected (already on the TUI's
+    # SIGUSR2 queue).  If stdin isn't a tty (tests, piped input) cbreak
+    # is expected to fail and the loop's terminal-state short-circuit
+    # still works correctly — keep spinning in that case.
+    try:
+        _stdin_is_tty = sys.stdin.isatty() is True
+    except Exception:
+        _stdin_is_tty = False
+    if not cbreak_ok and _stdin_is_tty:
+        _log.warning(
+            "spinner exit: reason=cbreak_unavailable detail=%s — "
+            "input handling disabled, closing popup immediately",
+            cbreak_reason or "unknown",
+        )
+        try:
+            _rs.request_suppress_switch(pr_id, action)
+        except Exception:
+            pass
+        click.echo(SHOW_CURSOR, nl=False)
+        click.echo(
+            f"\r! {action}: queued (popup input unavailable, "
+            f"closing){CLR_EOL}"
+        )
+        return
 
     # Transition tracking — log only when these flip, not every tick.
     prev_cur_state = None
     prev_window_open = None
     prev_saw_disappear = False
+    # Watchdog: count consecutive ticks where the per-tick blocking calls
+    # (tmux list_windows + runtime_state read) exceed SLOW_TICK_S.  If
+    # WATCHDOG_LIMIT consecutive slow ticks pass, the spinner exits with
+    # an error rather than continuing to block keypress handling.
+    SLOW_TICK_S = 1.0
+    WATCHDOG_LIMIT = 5
+    slow_tick_streak = 0
+    # Stuck-spinner hint: count ticks since the last observed change to
+    # cur_state, window_open, or saw_disappear.  After STUCK_HINT_TICKS
+    # we append a 'press q/Esc to dismiss' hint to the spinner label.
+    STUCK_HINT_TICKS = 100  # ~15s at tick_s=0.15
+    ticks_since_change = 0
     try:
         while True:
+            tick_started = time.monotonic()
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
             if fresh and not saw_state_change:
@@ -1408,24 +1450,56 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 window_open = bool(cur_window_ids)
                 cur_window_id = cur_window_ids[0] if cur_window_ids else None
 
+            tick_elapsed = time.monotonic() - tick_started
+            if tick_elapsed > SLOW_TICK_S:
+                slow_tick_streak += 1
+                _log.warning(
+                    "spinner slow tick: elapsed=%.2fs streak=%d/%d "
+                    "(tmux/runtime_state blocking)",
+                    tick_elapsed, slow_tick_streak, WATCHDOG_LIMIT,
+                )
+            else:
+                slow_tick_streak = 0
+            if slow_tick_streak >= WATCHDOG_LIMIT:
+                _log.error(
+                    "spinner exit: reason=watchdog slow_streak=%d "
+                    "last_elapsed=%.2fs", slow_tick_streak, tick_elapsed,
+                )
+                click.echo(
+                    f"\r! {action}: backend unresponsive, closing popup"
+                    f"{CLR_EOL}"
+                )
+                try:
+                    _rs.request_suppress_switch(pr_id, action)
+                except Exception:
+                    pass
+                return
+
+            changed = False
             if cur_state != prev_cur_state:
                 _log.info("spinner transition: cur_state %s -> %s",
                           prev_cur_state, cur_state)
                 prev_cur_state = cur_state
+                changed = True
             if window_open != prev_window_open:
                 _log.info("spinner transition: window_open %s -> %s",
                           prev_window_open, window_open)
                 prev_window_open = window_open
+                changed = True
             if saw_disappear != prev_saw_disappear:
                 _log.info("spinner transition: saw_disappear %s -> %s",
                           prev_saw_disappear, saw_disappear)
                 prev_saw_disappear = saw_disappear
+                changed = True
+            ticks_since_change = 0 if changed else ticks_since_change + 1
             if _trace:
                 _log.info(
                     "spinner tick i=%d cur_state=%s cur_window_ids=%s "
-                    "saw_disappear=%s window_open=%s",
+                    "saw_disappear=%s window_open=%s cbreak_ok=%s "
+                    "tick_elapsed=%.3fs ticks_since_change=%d",
                     i, cur_state, cur_window_ids,
-                    saw_disappear, window_open,
+                    saw_disappear, window_open, cbreak_ok,
+                    tick_elapsed, ticks_since_change,
                 )
 
             # Terminal-state short-circuit: if the action has reached a
@@ -1503,6 +1577,8 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 label = f"failed ({v})" if v else "failed"
             else:
                 label = cur_state or "queued"
+            if ticks_since_change >= STUCK_HINT_TICKS:
+                label = f"{label} (no change — press q/Esc to dismiss)"
             click.echo(f"\r{spin} {action}: {label}…{CLR_EOL}", nl=False)
 
             # Wait up to tick_s for a keypress.  q/Esc → close the
@@ -1516,7 +1592,9 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     ch = sys.stdin.read(1)
                 except OSError:
                     ch = ""
-                if ch in ("q", "Q", "\x1b"):  # Esc
+                if _trace:
+                    _log.info("spinner keypress (trace): ch=%r", ch)
+                if ch in ("q", "Q", "\x1b", "\x03", "\x04"):  # Esc, Ctrl+C, Ctrl+D
                     _log.info("spinner keypress: ch=%r", ch)
                     # Tell the TUI to skip its window-switch for this
                     # action — the user explicitly dismissed; don't
