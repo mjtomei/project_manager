@@ -1235,18 +1235,24 @@ class TestPrStartSpecGate:
 class TestPrStartCommittedGate:
     """pr start should refuse if the PR is not in the committed project.yaml."""
 
-    def test_blocks_when_pr_not_committed(self, tmp_start_project):
-        """pr start should exit non-zero when PR is not in committed project.yaml."""
+    def test_blocks_when_pr_not_committed_and_autocommit_fails(self, tmp_start_project):
+        """pr start should exit non-zero with the auto-commit-failed message
+        when the PR is not in committed project.yaml and the auto-commit
+        helper also fails (the no-fallback path)."""
         runner = CliRunner()
         # git show returns the file content but without the PR
         git_show_result = MagicMock(returncode=0, stdout="project:\n  name: test\nprs: []\n")
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
              mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.store_commit.commit_pr_entry_on_base",
+                        return_value=(False, "synthetic failure")), \
              mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
             result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
 
         assert result.exit_code != 0
-        assert "not committed" in result.output
+        assert "Auto-commit failed" in result.output
+        assert "synthetic failure" in result.output
+        assert "pm push" in result.output
 
     def test_blocks_when_git_show_fails(self, tmp_start_project):
         """pr start should exit non-zero when git show fails (e.g. no commits)."""
@@ -1254,11 +1260,13 @@ class TestPrStartCommittedGate:
         git_show_result = MagicMock(returncode=128, stdout="", stderr="fatal: not a git repo")
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
              mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.store_commit.commit_pr_entry_on_base",
+                        return_value=(False, "no base")), \
              mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
             result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
 
         assert result.exit_code != 0
-        assert "not committed" in result.output
+        assert "Auto-commit failed" in result.output
 
     def test_blocks_when_committed_yaml_invalid(self, tmp_start_project):
         """pr start should exit non-zero when committed project.yaml is invalid YAML."""
@@ -1266,11 +1274,13 @@ class TestPrStartCommittedGate:
         git_show_result = MagicMock(returncode=0, stdout=": {invalid yaml\n  - [broken")
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
              mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.store_commit.commit_pr_entry_on_base",
+                        return_value=(False, "bad yaml")), \
              mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
             result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
 
         assert result.exit_code != 0
-        assert "not committed" in result.output
+        assert "Auto-commit failed" in result.output
 
     def test_blocks_when_committed_yaml_empty(self, tmp_start_project):
         """Empty committed project.yaml (yaml.safe_load returns None) should not crash."""
@@ -1278,12 +1288,42 @@ class TestPrStartCommittedGate:
         git_show_result = MagicMock(returncode=0, stdout="")
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
              mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.store_commit.commit_pr_entry_on_base",
+                        return_value=(False, "empty")), \
              mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
             result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
 
         assert result.exit_code != 0
-        assert "not committed" in result.output
+        assert "Auto-commit failed" in result.output
         assert "NoneType" not in (result.output + (result.stderr if hasattr(result, 'stderr') and result.stderr else ""))
+
+    def test_autocommit_success_lets_start_proceed(self, tmp_start_project, tmp_path):
+        """When auto-commit succeeds, pr start should proceed past the gate."""
+        runner = CliRunner()
+        # git show returns yaml without the PR (uncommitted) initially.
+        git_show_result = MagicMock(returncode=0, stdout="project:\n  name: test\nprs: []\n")
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
+             mock.patch("pm_core.cli.pr.git_ops") as mock_git, \
+             mock.patch("pm_core.store_commit.commit_pr_entry_on_base",
+                        return_value=(True, None)) as mock_helper, \
+             mock.patch("pm_core.cli.pr.find_claude", return_value=None), \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None), \
+             mock.patch("pm_core.cli.pr.store.locked_update"), \
+             mock.patch("pm_core.cli.pr.trigger_tui_refresh"), \
+             mock.patch("pm_core.cli.pr._resolve_repo_id"), \
+             mock.patch("pm_core.cli.pr.prompt_gen.generate_prompt", return_value="prompt"):
+            mock_git.run_git.side_effect = [
+                git_show_result,
+                MagicMock(returncode=0, stdout="abc12345\n"),
+            ]
+            mock_git.clone.return_value = None
+            mock_git.is_git_repo.return_value = False
+            mock_git.checkout_branch.return_value = None
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert mock_helper.called
+        assert "Auto-committed" in result.output
+        assert "Auto-commit failed" not in result.output
 
     def test_allows_start_when_pr_committed(self, tmp_start_project, tmp_path):
         """pr start should proceed when PR exists in committed project.yaml."""
@@ -1345,11 +1385,14 @@ class TestPrStartCommittedGate:
         git_show_result = MagicMock(returncode=0, stdout="project:\n  name: test\nprs: []\n")
         with mock.patch.object(pr_mod, "state_root", return_value=standalone), \
              mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result) as mock_run_git, \
+             mock.patch("pm_core.store_commit.commit_pr_entry_on_base",
+                        return_value=(False, "no remote")), \
              mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
             result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
 
         assert result.exit_code != 0
-        assert "not committed" in result.output
+        assert "Auto-commit failed" in result.output
+        # The committed-state probe still uses the standalone path with project.yaml.
         mock_run_git.assert_called_once_with(
             "show", "master:project.yaml", cwd=str(standalone), check=False
         )
