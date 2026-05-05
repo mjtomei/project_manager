@@ -1900,6 +1900,11 @@ def _run_qa(mode: str, pr_id: str | None, session_name: str | None) -> None:
         click.echo(str(e), err=True)
         raise SystemExit(1)
 
+    if pid <= 0:
+        click.echo(
+            f"Failed to spawn QA daemon for {pr_id} (no PID returned).",
+            err=True)
+        raise SystemExit(1)
     click.echo(f"Started QA daemon for {pr_id} (pid={pid}, mode={mode})")
 
 
@@ -2025,6 +2030,11 @@ def review_loop_start(pr_id: str | None, session_name: str | None):
         click.echo(str(e), err=True)
         raise SystemExit(1)
 
+    if pid <= 0:
+        click.echo(
+            f"Failed to spawn review-loop daemon for {pr_id} "
+            f"(no PID returned).", err=True)
+        raise SystemExit(1)
     click.echo(f"Started review-loop daemon for {pr_id} (pid={pid})")
 
 
