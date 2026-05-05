@@ -1859,8 +1859,8 @@ def popup_picker_cmd(session: str, window_name: str):
     _PANE_SHORTCUT_KEYS = {
         "c": "shell",
         "i": "impl-spec",
-        "Q": "qa-spec",
-        "D": "diff",
+        "u": "qa-spec",
+        "y": "diff",
     }
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]

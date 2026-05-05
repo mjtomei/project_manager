@@ -10,9 +10,9 @@ plus matching CLI commands so the same operations work from prefix+M
 1. **`c`** — shell pane in the PR's workdir. CLI: `pm pr shell <pr_id>`.
 2. **`i`** — view `pm/specs/<pr_id>/impl.md`.
    CLI: `pm pr view-spec <pr_id> [--kind impl]`.
-3. **`Q`** — view `pm/specs/<pr_id>/qa.md`.
+3. **`u`** — view `pm/specs/<pr_id>/qa.md`.
    CLI: `pm pr view-spec <pr_id> --kind qa`.
-4. **`D`** — view PR diff against base branch (same content the
+4. **`y`** — view PR diff against base branch (same content the
    review window's diff pane shows). CLI: `pm pr view-diff <pr_id>`.
 
 ### CLI parity
