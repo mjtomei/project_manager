@@ -102,15 +102,19 @@ function setStatus(label, cls) {
 // We render line-by-line so we can preserve a 1:1 mapping from source
 // line number to a DOM element, which selection highlighting requires.
 function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 function renderInline(s) {
   s = escapeHtml(s);
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^\*])\*([^*]+)\*/g, "$1<em>$2</em>");
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-                '<a href="$2" rel="noopener">$1</a>');
+  // Reject javascript:/data: URLs to prevent click-to-execute on local previews.
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, txt, url) => {
+    const safe = /^(https?:|mailto:|#|\/|\.\.?\/)/i.test(url) ? url : "#";
+    return '<a href="' + safe + '" rel="noopener">' + txt + '</a>';
+  });
   return s;
 }
 function renderDoc(text) {
