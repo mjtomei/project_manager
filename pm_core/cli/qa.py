@@ -12,19 +12,36 @@ from pm_core.cli import cli
 
 @cli.group()
 def qa():
-    """Manage QA instructions, regression tests, and mock definitions."""
+    """Manage QA instructions, regression tests, artifact recipes, and mocks."""
+
+
+_QA_LIST_CATEGORIES = [
+    ("instructions", "Instructions"),
+    ("regression", "Regression Tests"),
+    ("artifacts", "Artifact Recipes"),
+]
+
+
+def _resolve_qa_item(qa_instructions, root, instruction_id, category):
+    """Resolve a QA item across categories, with optional category hint."""
+    if category is not None:
+        return qa_instructions.get_instruction(root, instruction_id, category)
+    for cat, _ in _QA_LIST_CATEGORIES:
+        item = qa_instructions.get_instruction(root, instruction_id, cat)
+        if item is not None:
+            return item
+    return None
 
 
 @qa.command("list")
 def qa_list():
-    """List QA instructions and regression tests by category."""
+    """List QA instructions, regression tests, and artifact recipes."""
     from pm_core import qa_instructions
 
     root = state_root()
     all_items = qa_instructions.list_all(root)
 
-    for category, label in [("instructions", "Instructions"),
-                            ("regression", "Regression Tests")]:
+    for category, label in _QA_LIST_CATEGORIES:
         items = all_items[category]
         click.echo(f"\n{label} ({len(items)}):")
         if not items:
@@ -38,20 +55,14 @@ def qa_list():
 @qa.command("show")
 @click.argument("instruction_id")
 @click.option("--category", "-c", default=None,
-              help="Category: instructions or regression (auto-detected)")
+              help="Category: instructions, regression, or artifacts "
+                   "(auto-detected)")
 def qa_show(instruction_id: str, category: str | None):
-    """Print the full content of a QA instruction."""
+    """Print the full content of a QA instruction or artifact recipe."""
     from pm_core import qa_instructions
 
     root = state_root()
-
-    # Auto-detect category if not specified
-    if category is None:
-        item = qa_instructions.get_instruction(root, instruction_id, "instructions")
-        if item is None:
-            item = qa_instructions.get_instruction(root, instruction_id, "regression")
-    else:
-        item = qa_instructions.get_instruction(root, instruction_id, category)
+    item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
         click.echo(f"Instruction not found: {instruction_id}", err=True)
@@ -64,28 +75,8 @@ def qa_show(instruction_id: str, category: str | None):
     click.echo(item["body"])
 
 
-@qa.command("add")
-@click.argument("name")
-def qa_add(name: str):
-    """Create a new QA instruction and open it in $EDITOR."""
-    from pm_core import qa_instructions
-
-    root = state_root()
-    d = qa_instructions.instructions_dir(root)
-
-    # Sanitize name to filename
-    file_id = name.lower().replace(" ", "-")
-    # Remove non-alphanumeric chars except hyphens
-    file_id = "".join(c for c in file_id if c.isalnum() or c == "-")
-    filepath = d / f"{file_id}.md"
-
-    if filepath.exists():
-        click.echo(f"Instruction already exists: {filepath}", err=True)
-        raise SystemExit(1)
-
-    # Create template
-    title = name.replace("-", " ").title()
-    filepath.write_text(f"""\
+_ADD_TEMPLATES = {
+    "instructions": """\
 ---
 title: {title}
 description:
@@ -98,7 +89,50 @@ tags: []
 ## Expected Behavior
 
 ## Reporting
-""")
+""",
+    "artifacts": """\
+---
+title: {title}
+description:
+tags: [artifact]
+---
+## When to use
+
+## What this recipe produces
+
+## Capture
+
+## Manifest format
+""",
+}
+
+
+@qa.command("add")
+@click.argument("name")
+@click.option("--category", "-c",
+              type=click.Choice(["instructions", "artifacts"]),
+              default="instructions", show_default=True,
+              help="Which directory to create the file in.")
+def qa_add(name: str, category: str):
+    """Create a new QA instruction or artifact recipe and open in $EDITOR."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    if category == "artifacts":
+        d = qa_instructions.artifacts_dir(root)
+    else:
+        d = qa_instructions.instructions_dir(root)
+
+    file_id = name.lower().replace(" ", "-")
+    file_id = "".join(c for c in file_id if c.isalnum() or c == "-")
+    filepath = d / f"{file_id}.md"
+
+    if filepath.exists():
+        click.echo(f"Already exists: {filepath}", err=True)
+        raise SystemExit(1)
+
+    title = name.replace("-", " ").title()
+    filepath.write_text(_ADD_TEMPLATES[category].format(title=title))
 
     click.echo(f"Created: {filepath}")
 
@@ -109,19 +143,14 @@ tags: []
 @qa.command("edit")
 @click.argument("instruction_id")
 @click.option("--category", "-c", default=None,
-              help="Category: instructions or regression (auto-detected)")
+              help="Category: instructions, regression, or artifacts "
+                   "(auto-detected)")
 def qa_edit(instruction_id: str, category: str | None):
-    """Edit a QA instruction in $EDITOR."""
+    """Edit a QA instruction or artifact recipe in $EDITOR."""
     from pm_core import qa_instructions
 
     root = state_root()
-
-    if category is None:
-        item = qa_instructions.get_instruction(root, instruction_id, "instructions")
-        if item is None:
-            item = qa_instructions.get_instruction(root, instruction_id, "regression")
-    else:
-        item = qa_instructions.get_instruction(root, instruction_id, category)
+    item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
         click.echo(f"Instruction not found: {instruction_id}", err=True)
