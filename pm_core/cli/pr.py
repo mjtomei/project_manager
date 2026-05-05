@@ -1769,7 +1769,17 @@ def _run_qa(mode: str, pr_id: str | None, session_name: str | None) -> None:
     if pr_id is None:
         pr_id = _infer_pr_id(data, status_filter=("in_review", "qa"))
         if pr_id is None:
-            click.echo("No PR specified and no eligible PR found.", err=True)
+            prs = data.get("prs") or []
+            candidates = [p for p in prs
+                          if p.get("status") in ("in_review", "qa")]
+            if not candidates:
+                click.echo("No PRs in in_review or qa status.", err=True)
+            else:
+                click.echo("Multiple PRs eligible for QA. Specify one:",
+                           err=True)
+                for p in candidates:
+                    click.echo(f"  {_pr_display_id(p)}: "
+                               f"{p.get('title', '???')}", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -1835,10 +1845,10 @@ def _run_qa(mode: str, pr_id: str | None, session_name: str | None) -> None:
 
     extras: dict = {"loop_id": loop_id, "verdict": None}
     if mode == "loop":
-        from pm_core.tui.qa_loop_ui import _get_qa_pass_count
+        from pm_core.qa_loop import get_qa_pass_count
         extras["self_driving"] = {
             "pass_count": 0,
-            "required_passes": _get_qa_pass_count(),
+            "required_passes": get_qa_pass_count(),
         }
     _rs.set_action_state(pr_id, "qa", "launching", **extras)
 

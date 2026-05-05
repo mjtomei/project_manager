@@ -269,6 +269,15 @@ def spawn(
 
             # Grandchild — the daemon.
             os.close(w_fd)
+            # Drop the inherited lock fd so we don't carry an open
+            # descriptor for the lockfile through the daemon's
+            # lifetime.  The parent's `with` block still releases the
+            # OFD-level flock when it exits, so this is purely an fd
+            # hygiene fix.
+            try:
+                os.close(lock_fd.fileno())
+            except OSError:
+                pass
             _run_daemon(
                 pid_path=pid_path,
                 log_path=log_path,
