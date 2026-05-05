@@ -259,17 +259,6 @@ def _pr_display_id(pr: dict) -> str:
     return f"#{gh}" if gh else pr["id"]
 
 
-def _pr_path_segment(pr: dict) -> str:
-    """Filesystem-safe PR segment.
-
-    Same resolution as ``_pr_display_id`` (prefer GitHub PR number when
-    set), but renders ``pr-<num>`` instead of ``#<num>`` so it's safe in
-    filesystem paths and shell commands.
-    """
-    gh = pr.get("gh_pr_number")
-    return f"pr-{gh}" if gh else pr["id"]
-
-
 def kill_pr_windows(session: str, pr: dict) -> list[str]:
     """Kill tmux work, review, merge, and QA windows for a PR.
 

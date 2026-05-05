@@ -18,10 +18,9 @@ def _is_bug_pr(pr: dict) -> bool:
 
 
 def _bug_fix_flow_block(pr: dict) -> str:
-    """Bug-fix flow prompt block, with the captures dir resolved against
-    the PR's display segment (GH PR number when set, local id otherwise)."""
-    from pm_core.cli.helpers import _pr_path_segment
-    seg = _pr_path_segment(pr)
+    """Bug-fix flow prompt block, with the captures dir interpolated to
+    the PR's local id."""
+    seg = pr["id"]
     return f"""
 ## Bug Fix Flow
 
@@ -60,10 +59,9 @@ def _bug_fix_flow_block(pr: dict) -> str:
 
 
 def _bug_fix_review_block(pr: dict) -> str:
-    """Bug-fix review checklist, with the captures dir resolved against
-    the PR's display segment."""
-    from pm_core.cli.helpers import _pr_path_segment
-    seg = _pr_path_segment(pr)
+    """Bug-fix review checklist, with the captures dir interpolated to
+    the PR's local id."""
+    seg = pr["id"]
     return f"""
 
 ## Bug Fix Review Checklist
@@ -1397,8 +1395,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
 
-    from pm_core.cli.helpers import _pr_path_segment
-    pr_path_seg = _pr_path_segment(pr)
+    pr_path_seg = pr["id"]
 
     title = pr.get("title", "")
     description = pr.get("description", "").strip()

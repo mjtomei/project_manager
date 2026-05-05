@@ -102,19 +102,11 @@ def test_bug_review_points_at_captures_dir():
     assert "Pre-fix and post-fix" in r
 
 
-def test_bug_flow_uses_gh_pr_number_for_captures_dir():
+def test_bug_flow_uses_local_pr_id_for_captures_dir():
+    # GH PR number is intentionally ignored — local id only, since
+    # propagating gh_pr_number through project.yaml is unreliable.
     data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
                   "description": "broken", "gh_pr_number": 190})
     p = prompt_gen.generate_prompt(data, "pr-x")
-    assert "pm/qa/captures/pr-190/impl/pre-fix/" in p
-    assert "pm/qa/captures/pr-190/impl/post-fix/" in p
-    # Must not leak the local id where the segment now applies
-    assert "pm/qa/captures/pr-x/" not in p
-
-
-def test_bug_review_uses_gh_pr_number_for_captures_dir():
-    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
-                  "description": "broken", "gh_pr_number": 190})
-    r = prompt_gen.generate_review_prompt(data, "pr-x")
-    assert "pm/qa/captures/pr-190/impl/" in r
-    assert "pm/qa/captures/pr-x/" not in r
+    assert "pm/qa/captures/pr-x/impl/pre-fix/" in p
+    assert "pm/qa/captures/pr-190/" not in p
