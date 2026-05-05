@@ -28,10 +28,15 @@ _BUG_FIX_FLOW_BLOCK = """
    steps that produces the symptom, not a theory about what's wrong.
    - Look in `pm/qa/instructions/` for env-setup recipes that may help
      bring up a reproduction environment.
-   - If the repro is manual (no failing test), look in `pm/qa/artifacts/`
-     for recipes on capturing a screen recording / command log so a
-     reviewer can replay it. Save captures under
-     `pm/qa/captures/<pr-id>/`.
+   - If the repro is manual (no failing test), follow a recipe from
+     `pm/qa/artifacts/` to capture a replayable artifact. Save under
+     `pm/qa/captures/<pr-id>/impl/<short-name>/`, one subdir per
+     capture (e.g. `pre-fix/`, `post-fix/`, or `<behavior-name>/`).
+     Each capture must contain the recording itself plus a
+     `manifest.md` with: copy-pasteable commands run, the workdir
+     and commit they ran in, and one paragraph on what the recording
+     demonstrates. If you capture both pre-fix and post-fix state,
+     name them so a reviewer can tell at a glance.
 2. **Fix** — Change that addresses the root cause.
 3. **Verify** — Re-run the repro and any related suite.
 """
@@ -1484,7 +1489,11 @@ scenario demonstrates user-visible behavior a human reviewer should see
 (e.g. visual TUI changes, new CLI output). When a scenario benefits
 from such evidence, reference the recipe by filename in the
 INSTRUCTION field and have STEPS save captures under
-`pm/qa/captures/{pr_id}/`.
+`pm/qa/captures/{pr_id}/scenarios/<scenario-number>/` (one subdir per
+scenario; sub-subdirs only if the scenario produces multiple
+captures). Each capture must contain the recording plus a
+`manifest.md` with copy-pasteable commands, the workdir and commit
+they ran in, and one paragraph on what the recording shows.
 {mocks_library_section}
 ## Output Format
 

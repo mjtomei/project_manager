@@ -17,7 +17,7 @@ self-attach loop.
 
 ```
 PM_SESSION=pm-pm-test-1777985423-f08371ae
-CAPDIR=pm/qa/captures/pr-6be8ee6/tui-walkthrough-v3
+CAPDIR=pm/qa/captures/pr-6be8ee6/impl/tui-walkthrough-v3
 
 # 1. Scaffold tmux on its own socket — its only job is to host a pty
 #    that asciinema can record inside.

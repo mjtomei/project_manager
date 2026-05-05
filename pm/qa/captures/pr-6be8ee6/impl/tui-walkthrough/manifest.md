@@ -31,7 +31,7 @@ Capture (per `pm/qa/artifacts/tmux-screen-recording.md`):
 
 ```
 SESSION=pm-pm-test-1777985423-f08371ae
-CAPDIR=pm/qa/captures/pr-6be8ee6/tui-walkthrough
+CAPDIR=pm/qa/captures/pr-6be8ee6/impl/tui-walkthrough
 mkdir -p "$CAPDIR/screens"
 
 # transcript of the TUI pane
