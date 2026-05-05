@@ -20,25 +20,37 @@ def _is_bug_pr(pr: dict) -> bool:
 _BUG_FIX_FLOW_BLOCK = """
 ## Bug Fix Flow
 
-1. **Reproduce on pre-fix code** — Produce a failing test, or a concrete
-   manual repro if the bug is untestable in code. Confirm it shows the
-   reported symptom against the pre-fix code (stash any in-progress
-   changes first). If you can't reproduce, stop and ask the user — don't
-   write a fix on top of an unreproduced bug. A repro is a sequence of
-   steps that produces the symptom, not a theory about what's wrong.
+1. **Manual repro on pre-fix code** — Reproduce the bug by hand against
+   the pre-fix code (stash in-progress changes first). This confirms
+   the bug exists and that you understand its surface; a failing test
+   alone can mislead, since it's easy to write a test that fails for
+   a different reason than the reported symptom. A repro is a sequence
+   of steps that produces the symptom — not a theory about what's wrong.
    - Look in `pm/qa/instructions/` for env-setup recipes that may help
      bring up a reproduction environment.
-   - If the repro is manual (no failing test), follow a recipe from
-     `pm/qa/artifacts/` to capture a replayable artifact. Save under
-     `pm/qa/captures/<pr-id>/impl/<short-name>/`, one subdir per
-     capture (e.g. `pre-fix/`, `post-fix/`, or `<behavior-name>/`).
-     Each capture must contain the recording itself plus a
-     `manifest.md` with: copy-pasteable commands run, the workdir
-     and commit they ran in, and one paragraph on what the recording
-     demonstrates. If you capture both pre-fix and post-fix state,
-     name them so a reviewer can tell at a glance.
-2. **Fix** — Change that addresses the root cause.
-3. **Verify** — Re-run the repro and any related suite.
+   - Follow a recipe from `pm/qa/artifacts/` to capture a replayable
+     artifact. Save under `pm/qa/captures/<pr-id>/impl/pre-fix/`. Each
+     capture must contain the recording plus a `manifest.md` with
+     copy-pasteable commands, the workdir and commit they ran in, and
+     one paragraph on what the recording demonstrates.
+   - If you can't reproduce, stop and ask the user — don't write a fix
+     on top of an unreproduced bug.
+
+2. **Write a failing test** — Codify the manual repro as a test that
+   fails on pre-fix code for the same reason as the manual repro. If
+   the bug is genuinely untestable in code (e.g. a visual rendering
+   regression), skip this step and note it in a PR note — the
+   step-1 capture is your reproduction artifact.
+
+3. **Fix** — Change that addresses the root cause.
+
+4. **Verify with the test** — Confirm the failing test now passes.
+   Run any related suite to check for regressions.
+
+5. **Verify manually** — Re-run the step-1 repro against the post-fix
+   code and confirm the symptom is gone. Capture the post-fix run
+   under `pm/qa/captures/<pr-id>/impl/post-fix/`. A passing test is
+   not sufficient on its own.
 """
 
 
@@ -46,10 +58,14 @@ _BUG_FIX_REVIEW_BLOCK = """
 
 ## Bug Fix Review Checklist
 
-- A reproduction artifact exists (test or manual repro note). No artifact = **NEEDS_WORK**.
-- The repro fails for the right reason — it would have caught the original bug.
+- Pre-fix and post-fix manual-repro captures exist under
+  `pm/qa/captures/<pr-id>/impl/` (or a PR-note explanation if the bug
+  is genuinely uncapturable). No pre-fix capture = **NEEDS_WORK**.
+- A failing-then-passing test accompanies the fix unless the bug is
+  genuinely untestable in code (and that's noted in a PR note).
+- The test fails for the right reason — it would have caught the
+  original bug, not just any change in the area.
 - Scope is the bug; flag drive-by refactors.
-- If the PR has captures under `pm/qa/captures/<pr-id>/`, replay or read them as part of the review.
 """
 
 
