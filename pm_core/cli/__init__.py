@@ -598,10 +598,10 @@ COMMANDS
   pm cluster auto               Discover feature clusters automatically
   pm cluster explore            Interactively explore code clusters with Claude
 
-  pm qa list                     List QA instructions and regression tests
-  pm qa add <name>               Create a new QA instruction
-  pm qa edit <id>                Edit a QA instruction
-  pm qa show <id>                Show full content of a QA instruction
+  pm qa list                     List QA instructions, regression tests, and artifact recipes
+  pm qa add <name>               Create a new QA instruction (use -c artifacts for an artifact recipe)
+  pm qa edit <id>                Edit a QA instruction or artifact recipe
+  pm qa show <id>                Show full content of a QA instruction or artifact recipe
   pm qa run <id> --pr <pr-id>    Run a QA instruction against a PR
   pm qa standalone <id>          Run a QA instruction against master
 

@@ -1219,7 +1219,9 @@ class ProjectManagerApp(App):
         from pm_core import qa_instructions
         if self._root:
             all_items = qa_instructions.list_all(self._root)
-            total = len(all_items.get("instructions", [])) + len(all_items.get("regression", []))
+            total = (len(all_items.get("instructions", []))
+                     + len(all_items.get("regression", []))
+                     + len(all_items.get("artifacts", [])))
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
@@ -1232,7 +1234,7 @@ class ProjectManagerApp(App):
         if self._root:
             all_items = qa_instructions.list_all(self._root)
         else:
-            all_items = {"instructions": [], "regression": []}
+            all_items = {"instructions": [], "regression": [], "artifacts": []}
         qa_pane = self.query_one("#qa-pane", QAPane)
         qa_pane.update_items(all_items)
 

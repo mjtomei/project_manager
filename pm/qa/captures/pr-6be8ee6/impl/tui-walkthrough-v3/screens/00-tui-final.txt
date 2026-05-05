@@ -1,0 +1,31 @@
+[Session: pm-pm-test-1777985423-f08371ae, Pane: %0]
+
+  Project: pm-test-1777985423    4 PRs    filter: hide closed    repo:
+
+
+    ┌──────────────────────┐      ┌──────────────────────┐      ┌──────────────────────┐
+    │ pr-95325c4           │─────▶│ pr-6cd925d           │      │ pr-9c40675           │
+    │ Add login feature    │      │ Fix database migrat… │─────▶│ Refactor auth module │
+    │ ○ pending            │──────│ ○ pending            │─────▶│ ○ pending            │
+    └──────────────────────┘      └──────────────────────┘      └──────────────────────┘
+
+
+    ╔══════════════════════╗
+    ║ pr-d17fe55           ║
+    ║ Add unit tests       ║
+    ║ ○ pending            ║
+    ╚══════════════════════╝
+
+
+
+
+
+
+
+
+
+                                                                                                   ▇
+  Selected: pr-d17fe55
+  press / to type a command
+
+

@@ -1,0 +1,26 @@
+[Session: pm-pm-test-1777985423-f08371ae, Pane: %0]
+
+  Project: pm-test-1777985423    4 PRs
+┌──────────────────────────────────────
+│
+│  Keyboard Shortcuts
+│
+│  Tree Navigation
+│    ↑↓←→ or hjkl  Move selection
+│    J/K  Jump to next/prev plan
+│    x  Hide/show plan group
+│    X  Toggle merged PRs
+│    f  Cycle status filter
+│    F  Cycle sort field
+│
+│  PR Actions
+│    s  Start selected PR
+│    d  Review (zz d: loop)
+│    g  Merge PR
+│    e / Enter  Edit selected PR
+│
+└──────────────────────────────────────
+  Selected: pr-95325c4
+  press / to type a command
+
+

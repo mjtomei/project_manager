@@ -1,0 +1,59 @@
+(venv) pm@23754388932a:/workspace/pm-te
+st-1777985423$ source /tmp/pm-venv/bin/
+activate && export PYTHONPATH=/workspac
+e && cd /workspace/pm-test-1777985423
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ pm pr list
+  ⏳ pr-d17fe55: Add unit tests
+      [pending]
+  ⏳ pr-9c40675: Refactor auth module
+      [pending] <- [pr-95325c4,
+      pr-6cd925d]
+  ⏳ pr-95325c4: Add login feature
+      [pending] *
+  ⏳ pr-6cd925d: Fix database migration
+      [pending] <- [pr-95325c4]
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ pm pr show pr-95325c4
+Usage: pm pr [OPTIONS] COMMAND [ARGS]..
+.
+Try 'pm pr -h' for help.
+
+Error: No such command 'show'.
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ pm pr note add pr-953
+25c4 'demo note from artifact recipe'
+Added note note-b3581d4 to pr-95325c4
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ pm pr show pr-95325c4
+Usage: pm pr [OPTIONS] COMMAND [ARGS]..
+.
+Try 'pm pr -h' for help.
+
+Error: No such command 'show'.
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ clear
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ pm pr list
+  ⏳ pr-d17fe55: Add unit tests
+      [pending]
+  ⏳ pr-9c40675: Refactor auth module
+      [pending] <- [pr-95325c4,
+      pr-6cd925d]
+  ⏳ pr-95325c4: Add login feature
+      [pending] *
+  ⏳ pr-6cd925d: Fix database migration
+      [pending] <- [pr-95325c4]
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ pm pr note list pr-95
+325c4
+  note-b3581d4 (2026-05-05T12:51:51Z):
+demo note from artifact recipe
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$ pm plan list
+No plans.
+(pm-venv) pm@23754388932a:/workspace/pm
+-test-1777985423$
+
+
+

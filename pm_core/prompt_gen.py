@@ -17,71 +17,66 @@ def _is_bug_pr(pr: dict) -> bool:
     return pr.get("plan") == "bugs" or pr.get("type") == "bug"
 
 
-_BUG_FIX_FLOW_BLOCK = """
-## Bug Fix Flow (reproduce → fix → verify → reconcile)
+def _bug_fix_flow_block(pr: dict) -> str:
+    """Bug-fix flow prompt block, with the captures dir interpolated to
+    the PR's local id."""
+    seg = pr["id"]
+    return f"""
+## Bug Fix Flow
 
-This PR is a bug fix. Follow this sequence rather than a feature-style
-implementation:
+1. **Manual repro on pre-fix code** — Reproduce the bug by hand against
+   the pre-fix code (stash in-progress changes first). This confirms
+   the bug exists and that you understand its surface; a failing test
+   alone can mislead, since it's easy to write a test that fails for
+   a different reason than the reported symptom. A repro is a sequence
+   of steps that produces the symptom — not a theory about what's wrong.
+   - Look in `pm/qa/instructions/` for env-setup recipes that may help
+     bring up a reproduction environment.
+   - Follow a recipe from `pm/qa/artifacts/` to capture replayable
+     artifacts. Save under `pm/qa/captures/{seg}/impl/pre-fix/` — single
+     capture's files can go directly there, or use sub-subdirs
+     (`pre-fix/<short-name>/`) when you need more than one capture for
+     this phase. Each capture must contain its recording plus a
+     `manifest.md` with copy-pasteable commands, the workdir and commit
+     they ran in, and one paragraph on what the recording demonstrates.
+   - If you can't reproduce, stop and ask the user — don't write a fix
+     on top of an unreproduced bug.
 
-1. **Reproduce** — Write or identify a failing test that demonstrates the
-   bug. The test must fail *for the right reason* (matching the reported
-   symptom) before you change any product code.
-   - If the bug involves Claude session behavior, prefer a Claude-guided
-     integration test using `FakeClaudeSession` (or the `fake-claude`
-     binary) so the reproduction is deterministic.
-   - For non-Claude bugs, a plain unit or integration test is fine.
-   - If the bug is genuinely untestable in code (e.g. a visual TUI
-     regression), record a manual repro in a PR note and, if appropriate,
-     a regression instruction file under `pm/qa/regression/`. The reviewer
-     will accept that as a substitute, but the substitute must exist.
+2. **Write a failing test** — Codify the manual repro as a test that
+   fails on pre-fix code for the same reason as the manual repro. If
+   the bug is genuinely untestable in code (e.g. a visual rendering
+   regression), skip this step and note it in a PR note — the
+   step-1 capture is your reproduction artifact.
 
-2. **Fix** — Implement the smallest change that addresses the root cause.
-   Avoid drive-by refactors.
+3. **Fix** — Change that addresses the root cause.
 
-3. **Verify** — Re-run the reproduction test to confirm it now passes.
+4. **Verify with the test** — Confirm the failing test now passes.
    Run any related suite to check for regressions.
 
-4. **Reconcile** (verification-only, at session end) — Scan this PR's notes
-   (`pm pr note list <pr-id>` or read the PR Notes section above) for
-   cross-references the discovery supervisor (`pr-271cb3a`) may have filed
-   linking overlapping bug PRs. For each linked overlap:
-   - Check whether the linked bug still reproduces against the current code.
-   - If it's *also* resolved by your fix, append a confirmation note:
-     ```
-     pm pr note add <this-pr-id> 'confirmed-overlap: <other-pr-id>'
-     ```
-   - If you independently notice an overlap that the supervisor did **not**
-     link, append a pointer note:
-     ```
-     pm pr note add <this-pr-id> 'noticed-overlap: <other-pr-id> — <one-line reason>'
-     ```
-   If the PR has no cross-references and you noticed no overlaps, do
-   nothing for this step — it's a backstop, not the primary dedup
-   mechanism. The discovery supervisor handles dedup at file time with
-   work-log context the session does not have.
+5. **Verify manually** — Re-run the step-1 repro against the post-fix
+   code and confirm the symptom is gone. Capture under
+   `pm/qa/captures/{seg}/impl/post-fix/` (sub-subdirs allowed if you
+   need more than one capture, mirroring the pre-fix layout). A passing
+   test is not sufficient on its own.
 """
 
 
-_BUG_FIX_REVIEW_BLOCK = """
+def _bug_fix_review_block(pr: dict) -> str:
+    """Bug-fix review checklist, with the captures dir interpolated to
+    the PR's local id."""
+    seg = pr["id"]
+    return f"""
 
 ## Bug Fix Review Checklist
 
-This PR is a bug fix. In addition to the generic checks above, verify:
-
-- **Reproduction test exists** — the diff includes a new (or modified)
-  test that fails without the fix and passes with it. Prefer tests that
-  exercise the same surface a user hits (Claude-guided via
-  `FakeClaudeSession` for session bugs, plain unit/integration tests
-  otherwise).
-- **The test fails for the right reason** — read the test and confirm
-  it would have caught the original bug, not just any change in the
-  area.
-- **Acceptable substitute** — if no automated reproduction is possible
-  (e.g. visual TUI regression), the PR should include a manual repro
-  PR note and ideally a regression instruction file. A bug fix with no
-  reproduction artifact at all is **NEEDS_WORK**.
-- **Scope discipline** — the diff should be focused on the bug. Flag
-  drive-by refactors that aren't part of the fix.
+- Pre-fix and post-fix manual-repro captures exist under
+  `pm/qa/captures/{seg}/impl/` (or a PR-note explanation if the bug
+  is genuinely uncapturable). No pre-fix capture = **NEEDS_WORK**.
+- A failing-then-passing test accompanies the fix unless the bug is
+  genuinely untestable in code (and that's noted in a PR note).
+- The test fails for the right reason — it would have caught the
+  original bug, not just any change in the area.
+- Scope is the bug; flag drive-by refactors.
 """
 
 
@@ -233,7 +228,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     impl_spec_block = format_spec_for_prompt(pr, "impl")
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
-    bug_fix_block = _BUG_FIX_FLOW_BLOCK if _is_bug_pr(pr) else ""
+    bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -379,7 +374,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
     base = prompt.strip()
     if _is_bug_pr(pr):
-        base += _BUG_FIX_REVIEW_BLOCK
+        base += _bug_fix_review_block(pr)
     base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     base += review_specific_block
     base += _beginner_addendum()
@@ -1403,6 +1398,8 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
 
+    pr_path_seg = pr["id"]
+
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
     branch = pr.get("branch", f"pm/{pr_id}")
@@ -1476,9 +1473,10 @@ adjacent regressions the fix could have introduced.
 
 ## Task
 
-Analyze this PR's changes and the available QA instruction library to generate
-a structured test plan. Your goal is to fully exercise the impacted code
-to verify this PR works correctly.
+Analyze this PR's changes and the available QA library (instructions,
+regression tests, and artifact recipes) to generate a structured test plan.
+Your goal is to fully exercise the impacted code to verify this PR works
+correctly.
 {bug_fix_qa_block}
 
 Each scenario runs in its own isolated container — scenarios cannot share
@@ -1514,6 +1512,18 @@ at the paths shown below.
 Instructions tell scenario agents how to set up a test environment.  Without
 one, agents fall back to reading code and auto-passing.  Try to assign an instruction
 to every scenario.
+
+Artifact Recipes (if any are listed above) tell scenario agents how to
+capture reviewable evidence — screen recordings, command logs — when a
+scenario demonstrates user-visible behavior a human reviewer should see
+(e.g. visual TUI changes, new CLI output). When a scenario benefits
+from such evidence, reference the recipe by filename in the
+INSTRUCTION field and have STEPS save captures under
+`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/` (one subdir per
+scenario; sub-subdirs only if the scenario produces multiple
+captures). Each capture must contain the recording plus a
+`manifest.md` with copy-pasteable commands, the workdir and commit
+they ran in, and one paragraph on what the recording shows.
 {mocks_library_section}
 ## Output Format
 
@@ -1586,7 +1596,8 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Get instruction library summary for Scenario 0 (instructions only, not regression)
+    # QA library summary for Scenario 0 (instructions + artifact recipes;
+    # regression is excluded by default in instruction_summary_for_prompt).
     instruction_library_block = ""
     try:
         root = store.find_project_root()
@@ -1594,11 +1605,11 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
         if library_summary and "No QA instructions" not in library_summary:
             instruction_library_block = f"""
-## QA Instruction Library
+## QA Library
 
-The project has user-defined QA instructions and regression tests that the
-automated scenarios may be running.  You can read any of these files to
-understand what's being tested:
+The project has user-defined QA instructions and artifact recipes that the
+automated scenarios may be running or referencing.  Read any of these
+files to understand what's being tested or how to capture evidence:
 
 {library_summary}
 """

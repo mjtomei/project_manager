@@ -1,0 +1,26 @@
+[Session: pm-pm-test-1777985423-f08371ae, Pane: %0]
+
+  Project: pm-test-1777985423    4 PRs
+    │ pr-d17fe55           │
+    │ Add unit tests       │
+    │ ○ pending            │          ▇
+    └──────────────────────┘
+
+
+    ╔══════════════════════╗      ┌───
+    ║ pr-95325c4           ║─────▶│ pr
+    ║ Add login feature    ║      │ Fi
+    ║ ○ pending            ║──────│ ○
+    ╚══════════════════════╝      └───
+
+
+
+
+                                      ▇
+
+
+               ▍
+  Selected: pr-95325c4
+  Type command (e.g. pr start
+
+

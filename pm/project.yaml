@@ -13182,7 +13182,17 @@ prs:
   started_at: '2026-05-04T14:15:15.348715+00:00'
   reviewed_at: '2026-05-04T16:00:20.045289+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a3ed531
+    text: 'scope: extended to add pm/qa/artifacts/ category (recipes for capturing
+      TUI/tmux screen recordings + command logs) and integrate it into both the bug-fix
+      flow prompt and QA scenario prompts. Bug fix: surface pm/qa/instructions/ as
+      a place to look for env-setup recipes when reproducing, and pm/qa/artifacts/
+      for capture recipes when an automated test is not feasible. QA: surface artifact
+      recipes alongside mocks/instructions so QA sessions know how to produce reviewable
+      evidence.'
+    created_at: '2026-05-05T12:42:08Z'
+    last_edited: '2026-05-05T12:42:08Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-in-e802a472
 - id: pr-cfe24ea
   plan: improvements

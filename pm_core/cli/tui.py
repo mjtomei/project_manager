@@ -251,7 +251,7 @@ PR Actions:
 
 Views:
   p                Toggle plans view
-  q                Toggle QA instructions view
+  q                Toggle QA library view
   n                Open notes
   c                Launch Claude session
   L                View TUI log
