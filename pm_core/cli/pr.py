@@ -1849,8 +1849,15 @@ def _run_qa(mode: str, pr_id: str | None, session_name: str | None) -> None:
     # references across fork.
     captured_pr_id = pr_id
     captured_root = root
+    captured_session = target_session
 
     def loop_main():
+        # Propagate the resolved target session into the daemon — the
+        # double-forked child may not share $TMUX with the original
+        # caller, so loop_shared.get_pm_session() needs PM_SESSION to
+        # find the right tmux session.
+        os.environ["PM_SESSION"] = captured_session
+
         from pm_core import store as _store
         from pm_core import runtime_state as __rs
         from pm_core.qa_loop import QALoopState as _QAState
@@ -1966,8 +1973,15 @@ def review_loop_start(pr_id: str | None, session_name: str | None):
     captured_pr_id = pr_id
     captured_root = root
     captured_tdir = str(tdir)
+    captured_session = target_session
 
     def loop_main():
+        # Propagate the resolved target session into the daemon — the
+        # double-forked child may not share $TMUX with the original
+        # caller, so loop_shared.get_pm_session() needs PM_SESSION to
+        # find the right tmux session.
+        os.environ["PM_SESSION"] = captured_session
+
         from pm_core import store as _store
         from pm_core import runtime_state as __rs
         from pm_core.review_loop import (
