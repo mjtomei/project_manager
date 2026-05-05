@@ -10,7 +10,7 @@ import click
 
 from pm_core import store
 from pm_core import tmux as tmux_mod
-from pm_core.claude_launcher import find_claude, launch_claude, clear_session
+from pm_core.claude_launcher import find_claude
 from pm_core.cli._window_launch import launch_claude_in_window
 from pm_core.prompt_gen import tui_section
 

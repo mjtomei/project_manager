@@ -3,18 +3,13 @@
 Registers the ``guide`` command and the ``notes`` command.
 """
 
-import os
 from pathlib import Path
 
 import click
 
 from pm_core import store, notes
-from pm_core import tmux as tmux_mod
 from pm_core import guide as guide_mod
-from pm_core.claude_launcher import (
-    find_claude, find_editor, launch_claude, load_session, save_session,
-    clear_session, build_claude_shell_cmd,
-)
+from pm_core.claude_launcher import find_claude, launch_claude
 from pm_core.cli._window_launch import launch_claude_in_window
 
 from pm_core.cli import cli
@@ -23,14 +18,6 @@ from pm_core.cli.helpers import (
     state_root,
     trigger_tui_refresh,
 )
-
-
-def _in_pm_tmux_session() -> bool:
-    """Check if we're in a tmux session created by pm (named pm-*)."""
-    if not tmux_mod.in_tmux():
-        return False
-    session_name = tmux_mod.get_session_name()
-    return session_name.startswith("pm-")
 
 
 @cli.command("guide")
