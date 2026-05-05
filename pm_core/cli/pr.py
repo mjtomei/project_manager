@@ -1759,10 +1759,8 @@ def _run_qa(mode: str, pr_id: str | None, session_name: str | None) -> None:
     from pm_core import loop_daemon
     from pm_core import runtime_state as _rs
     from pm_core.qa_loop import (
-        QALoopState,
         _compute_qa_window_name,
         _cleanup_stale_scenario_windows,
-        run_qa_sync,
     )
 
     root = state_root()
@@ -1925,7 +1923,6 @@ def review_loop_start(pr_id: str | None, session_name: str | None):
     from pm_core.cli._session_target import resolve_target_session
     from pm_core import loop_daemon
     from pm_core import runtime_state as _rs
-    from pm_core.review_loop import ReviewLoopState, run_review_loop_sync
 
     root = state_root()
     data = store.load(root)
