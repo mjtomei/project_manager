@@ -26,7 +26,13 @@ _BUG_FIX_FLOW_BLOCK = """
    changes first). If you can't reproduce, stop and ask the user — don't
    write a fix on top of an unreproduced bug. A repro is a sequence of
    steps that produces the symptom, not a theory about what's wrong.
-2. **Fix** — Smallest change that addresses the root cause.
+   - Look in `pm/qa/instructions/` for env-setup recipes that may help
+     bring up a reproduction environment.
+   - If the repro is manual (no failing test), look in `pm/qa/artifacts/`
+     for recipes on capturing a screen recording / command log so a
+     reviewer can replay it. Save captures under
+     `pm/qa/captures/<pr-id>/`.
+2. **Fix** — Change that addresses the root cause.
 3. **Verify** — Re-run the repro and any related suite.
 """
 
@@ -38,6 +44,7 @@ _BUG_FIX_REVIEW_BLOCK = """
 - A reproduction artifact exists (test or manual repro note). No artifact = **NEEDS_WORK**.
 - The repro fails for the right reason — it would have caught the original bug.
 - Scope is the bug; flag drive-by refactors.
+- If the PR has captures under `pm/qa/captures/<pr-id>/`, replay or read them as part of the review.
 """
 
 
@@ -1470,6 +1477,14 @@ at the paths shown below.
 Instructions tell scenario agents how to set up a test environment.  Without
 one, agents fall back to reading code and auto-passing.  Try to assign an instruction
 to every scenario.
+
+Artifact Recipes (if any are listed above) tell scenario agents how to
+capture reviewable evidence — screen recordings, command logs — when a
+scenario demonstrates user-visible behavior a human reviewer should see
+(e.g. visual TUI changes, new CLI output). When a scenario benefits
+from such evidence, reference the recipe by filename in the
+INSTRUCTION field and have STEPS save captures under
+`pm/qa/captures/{pr_id}/`.
 {mocks_library_section}
 ## Output Format
 

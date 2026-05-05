@@ -80,3 +80,19 @@ def test_bug_flow_warns_against_theory_only_repros():
                   "description": "broken"})
     p = prompt_gen.generate_prompt(data, "pr-x")
     assert "not a theory" in p
+
+
+def test_bug_flow_points_at_qa_dirs():
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken"})
+    p = prompt_gen.generate_prompt(data, "pr-x")
+    assert "pm/qa/instructions/" in p
+    assert "pm/qa/artifacts/" in p
+    assert "pm/qa/captures/" in p
+
+
+def test_bug_review_points_at_captures_dir():
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken"})
+    r = prompt_gen.generate_review_prompt(data, "pr-x")
+    assert "pm/qa/captures/" in r

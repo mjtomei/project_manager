@@ -43,6 +43,20 @@ def mocks_dir(pm_root: Path) -> Path:
     return d
 
 
+def artifacts_dir(pm_root: Path) -> Path:
+    """Return pm/qa/artifacts/.
+
+    Holds recipes for capturing reviewable evidence — screen recordings,
+    command logs, screenshots — that demonstrate either a bug or new PR
+    behavior to a human reviewer.  The captures themselves land in
+    pm/qa/captures/<pr-id>/ (a convention referenced from recipes, not
+    enforced here).
+    """
+    d = qa_dir(pm_root) / "artifacts"
+    d.mkdir(exist_ok=True)
+    return d
+
+
 # ---------------------------------------------------------------------------
 # Frontmatter parsing
 # ---------------------------------------------------------------------------
@@ -117,15 +131,18 @@ def list_mocks(pm_root: Path) -> list[dict]:
     return _list_dir(mocks_dir(pm_root))
 
 
-def list_all(pm_root: Path) -> dict:
-    """Return all QA items by category.
+def list_artifacts(pm_root: Path) -> list[dict]:
+    """List artifact-capture recipes from pm/qa/artifacts/."""
+    return _list_dir(artifacts_dir(pm_root))
 
-    Returns {"instructions": [...], "regression": [...], "mocks": [...]}.
-    """
+
+def list_all(pm_root: Path) -> dict:
+    """Return all QA items by category."""
     return {
         "instructions": list_instructions(pm_root),
         "regression": list_regression_tests(pm_root),
         "mocks": list_mocks(pm_root),
+        "artifacts": list_artifacts(pm_root),
     }
 
 
@@ -150,7 +167,7 @@ def resolve_instruction_ref(pm_root: Path, ref: str) -> tuple[str, str] | None:
     all_items = list_all(pm_root)
     # Build a flat lookup: filename -> category
     known: dict[str, str] = {}
-    for category in ("instructions", "regression"):
+    for category in ("instructions", "regression", "artifacts"):
         for item in all_items[category]:
             fname = Path(item["path"]).name
             known[fname] = category
@@ -202,6 +219,8 @@ def get_instruction(pm_root: Path, instruction_id: str,
     """
     if category == "regression":
         base = regression_dir(pm_root)
+    elif category == "artifacts":
+        base = artifacts_dir(pm_root)
     else:
         base = instructions_dir(pm_root)
 
@@ -262,6 +281,7 @@ def instruction_summary_for_prompt(pm_root: Path,
     categories = [("instructions", "Instructions")]
     if include_regression:
         categories.append(("regression", "Regression Tests"))
+    categories.append(("artifacts", "Artifact Recipes"))
 
     lines: list[str] = []
     for category, label in categories:
