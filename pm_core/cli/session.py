@@ -1216,14 +1216,25 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
 
 def _wait_for_tui_command(session: str, tui_cmd: str,
                           tick_s: float = 0.15) -> None:
-    """Show a spinner while a queued TUI command transitions states.
+    """Show a spinner while a queued TUI command transitions states."""
+    pr_id, action, fresh = _parse_tui_action(tui_cmd)
+    if not pr_id or not action:
+        _log.info("spinner exit: reason=not_pr_or_action tui_cmd=%r", tui_cmd)
+        return
+    _wait_for_action(session, pr_id, action, fresh, tick_s=tick_s)
 
-    Polls the shared runtime-state file and the tmux window list and
-    exits when the target window appears.  No timeout — long-running
-    launches stay visible until they complete.  The user can press
-    ``q`` or ``Esc`` at any time to dismiss the spinner *without*
-    cancelling the queued command (the TUI continues to handle it
-    once it picks the entry up off the queue).
+
+def _wait_for_action(session: str, pr_id: str, action: str, fresh: bool,
+                     tick_s: float = 0.15,
+                     proc_done: "callable | None" = None) -> None:
+    """Spinner that polls runtime_state + tmux window list for an action.
+
+    Exits when the target window appears, when runtime_state reaches a
+    terminal state without a window, or — for direct-subprocess picker
+    callers — when ``proc_done()`` returns True.  No timeout otherwise:
+    long-running launches stay visible until they complete.  The user
+    can press ``q`` or ``Esc`` at any time to dismiss the spinner
+    *without* cancelling the underlying command.
     """
     import select
     import sys
@@ -1231,11 +1242,6 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     import tty
 
     from pm_core import runtime_state as _rs
-
-    pr_id, action, fresh = _parse_tui_action(tui_cmd)
-    if not pr_id or not action:
-        _log.info("spinner exit: reason=not_pr_or_action tui_cmd=%r", tui_cmd)
-        return
     # 'edit' opens in the current window — there's no window-appearance
     # signal to wait for and the launch is effectively instant.  Skip
     # the spinner entirely so the popup closes without a visible flash.
@@ -1378,6 +1384,28 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         while True:
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
+            # Direct-subprocess picker caller: when the underlying child
+            # exits without a tmux window having appeared, surface a
+            # terminal result instead of spinning forever.  Re-read the
+            # entry once more after a short pause to give the child's
+            # final set_action_state write a chance to land before we
+            # decide done vs. failed (the lock-acquire race is short).
+            if proc_done is not None and proc_done():
+                entry = _rs.get_action_state(pr_id, action)
+                cur_state = entry.get("state") if entry else None
+                if not _find_target_window_ids() and cur_state not in (
+                        "done", "failed"):
+                    _log.info("spinner exit: reason=proc_done state=%s",
+                              cur_state)
+                    if old_attrs is not None:
+                        try:
+                            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                        except termios.error:
+                            pass
+                        old_attrs = None
+                    click.echo(SHOW_CURSOR, nl=False)
+                    click.echo(f"\r✓ {action}: complete{CLR_EOL}")
+                    return
             if fresh and not saw_state_change:
                 cur_key = (
                     (entry.get("state") if entry else None),
@@ -1607,20 +1635,92 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # Run pm command directly. Capture stdout/stderr so we can re-emit
         # them ourselves — display-popup -E's raw-mode TTY mangles bytes
         # streamed by the child, leaving the user staring at an empty
-        # popup when something fails.
+        # popup when something fails.  While the child runs, drive the
+        # same runtime_state-driven spinner used by the tui: route so the
+        # popup pane shows live progress instead of blanking out.
+        import threading
         full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
-        result = subprocess.run(full_cmd, text=True, capture_output=True)
-        if result.stdout:
-            click.echo(result.stdout, nl=False)
-        if result.returncode != 0:
-            err = (result.stderr or "").strip()
+        proc = subprocess.Popen(
+            full_cmd, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        # Drain pipes in background so the child never blocks on a
+        # full pipe buffer while the spinner is running.
+        out_buf: list[str] = []
+        err_buf: list[str] = []
+
+        def _drain(stream, buf):
+            try:
+                for chunk in iter(lambda: stream.read(4096), ""):
+                    buf.append(chunk)
+            except Exception:
+                pass
+
+        t_out = threading.Thread(target=_drain, args=(proc.stdout, out_buf),
+                                 daemon=True)
+        t_err = threading.Thread(target=_drain, args=(proc.stderr, err_buf),
+                                 daemon=True)
+        t_out.start()
+        t_err.start()
+
+        pr_id, action, fresh = _parse_picker_action(cmd)
+        if pr_id and action:
+            base = pane_registry.base_session_name(session)
+            try:
+                _wait_for_action(
+                    base, pr_id, action, fresh,
+                    proc_done=lambda p=proc: p.poll() is not None,
+                )
+            except Exception:
+                _log.exception("picker spinner failed")
+        proc.wait()
+        t_out.join(timeout=1.0)
+        t_err.join(timeout=1.0)
+        stdout = "".join(out_buf)
+        stderr = "".join(err_buf)
+        if stdout:
+            click.echo(stdout, nl=False)
+        if proc.returncode != 0:
+            err = (stderr or "").strip()
             if err:
                 click.echo(f"pm error: {err}", err=True)
             _wait_dismiss()
-        elif result.stderr:
+        elif stderr:
             # Even on success some commands print informational lines to
             # stderr; surface them so they don't vanish.
-            click.echo(result.stderr, nl=False, err=True)
+            click.echo(stderr, nl=False, err=True)
+
+
+def _parse_picker_action(cmd: str) -> tuple[str | None, str | None, bool]:
+    """Best-effort: extract (pr_id, action, fresh) from a direct picker cmd.
+
+    Mirrors :func:`_parse_tui_action` but for the non-``tui:`` templates
+    in :data:`_ALL_ACTIONS` / :data:`_MODIFIED_ACTION_CMDS`.  Skips any
+    ``--flag`` tokens; the PR id is the first non-flag positional after
+    the subcommand (and the leading ``pr`` group, when present).
+    """
+    try:
+        parts = shlex.split(cmd) if cmd else []
+    except ValueError:
+        return None, None, False
+    if not parts:
+        return None, None, False
+    fresh = "--fresh" in parts
+    positionals = [t for t in parts if not t.startswith("--")]
+    if not positionals:
+        return None, None, False
+    if positionals[0] == "pr" and len(positionals) >= 2:
+        sub = positionals[1]
+        rest = positionals[2:]
+    else:
+        sub = positionals[0]
+        rest = positionals[1:]
+    action_map = {"start": "start", "review": "review", "merge": "merge"}
+    action = action_map.get(sub)
+    if not action:
+        return None, None, False
+    pr_id = rest[0] if rest else None
+    return pr_id, action, fresh
 
 
 def _resolve_root_from_session(session: str) -> Path | None:

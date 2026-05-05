@@ -243,16 +243,36 @@ class TestPickerMergeDispatch:
         """Direct-CLI dispatch from the popup must capture stderr and
         re-emit it on non-zero exit so the user sees the failure
         instead of an empty popup."""
-        fake_result = MagicMock(returncode=1, stdout="", stderr="boom: branch protected")
-        with patch("pm_core.cli.session.subprocess.run", return_value=fake_result) as run_mock, \
+        fake_proc = MagicMock()
+        fake_proc.returncode = 1
+        fake_proc.poll.return_value = 1
+        fake_proc.wait.return_value = 1
+        # Drainer threads read until EOF; return "" right away.
+        fake_proc.stdout.read.return_value = ""
+        fake_proc.stderr.read.return_value = "boom: branch protected"
+        # Track drained stderr by patching the drainer to set buf directly:
+        # easier to bypass the read loop by using communicate-like read of all.
+        reads = {"stdout": [""], "stderr": ["boom: branch protected", ""]}
+
+        def _read_stdout(_n):
+            return reads["stdout"].pop(0) if reads["stdout"] else ""
+
+        def _read_stderr(_n):
+            return reads["stderr"].pop(0) if reads["stderr"] else ""
+
+        fake_proc.stdout.read.side_effect = _read_stdout
+        fake_proc.stderr.read.side_effect = _read_stderr
+        with patch("pm_core.cli.session.subprocess.Popen", return_value=fake_proc) as popen_mock, \
+             patch("pm_core.cli.session._wait_for_action"), \
              patch("pm_core.cli.session._wait_dismiss") as wait_mock, \
              patch("pm_core.cli.session.click.echo") as echo_mock:
             _run_picker_command("pr merge --resolve-window pr-123", "sess")
 
-        assert run_mock.called
-        # stderr must be captured (capture_output or stderr=PIPE)
-        kwargs = run_mock.call_args.kwargs
-        assert kwargs.get("capture_output") or kwargs.get("stderr") is not None
+        assert popen_mock.called
+        # stderr must be captured via PIPE
+        kwargs = popen_mock.call_args.kwargs
+        import subprocess as _sp
+        assert kwargs.get("stderr") == _sp.PIPE
         # Some echo call must include the captured stderr text
         echoed = " ".join(
             str(c.args[0]) if c.args else "" for c in echo_mock.call_args_list
@@ -263,8 +283,14 @@ class TestPickerMergeDispatch:
     def test_run_picker_command_silent_on_success(self):
         """Successful direct-CLI dispatch should not block waiting for a
         keypress (popup closes promptly)."""
-        fake_result = MagicMock(returncode=0, stdout="", stderr="")
-        with patch("pm_core.cli.session.subprocess.run", return_value=fake_result), \
+        fake_proc = MagicMock()
+        fake_proc.returncode = 0
+        fake_proc.poll.return_value = 0
+        fake_proc.wait.return_value = 0
+        fake_proc.stdout.read.return_value = ""
+        fake_proc.stderr.read.return_value = ""
+        with patch("pm_core.cli.session.subprocess.Popen", return_value=fake_proc), \
+             patch("pm_core.cli.session._wait_for_action"), \
              patch("pm_core.cli.session._wait_dismiss") as wait_mock:
             _run_picker_command("pr start pr-123", "sess")
         assert not wait_mock.called
