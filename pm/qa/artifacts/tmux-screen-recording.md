@@ -43,6 +43,16 @@ asciinema rec pm/qa/captures/<pr-id>/<short-name>/recording.cast \
 `asciinema rec` requires a TTY. If your shell has one (you're running
 this from a terminal), the line above is all you need.
 
+**What to record.** asciinema records whatever the wrapped command
+draws to its stdout. To capture a TUI, the wrapped command must be the
+program that renders the TUI — *not* a shell into which you'll type
+later. For a tmux-hosted TUI, the right wrapper is usually
+`tmux attach -t <session>`: asciinema records the attach client's
+render of the TUI, while you (or an external script) drive input via
+`tmux send-keys` / `pm tui send` against the same session. Wrapping
+`bash` and then running CLI commands inside it produces a recording of
+those CLI commands, not of the TUI.
+
 #### No-TTY environments (e.g. automated agents)
 
 If you're running in a no-TTY environment — typical for Claude sessions
