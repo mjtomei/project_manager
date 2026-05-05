@@ -1375,6 +1375,175 @@ IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watc
     return prompt.strip()
 
 
+def generate_session_health_prompt(data: dict, session_name: str | None = None,
+                                   iteration: int = 0, loop_id: str = "",
+                                   meta_pm_root: str | None = None) -> str:
+    """Generate a prompt for one tick of the session health watcher.
+
+    Detects stuck/dead Claude sessions across the pm tmux session (API
+    errors, 500s, usage limits, OOM, output stalls) and applies recovery
+    actions within a per-target retry-count limit. Escalates via
+    INPUT_REQUIRED when recovery is exhausted.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    project_name = data.get("project", {}).get("name", "unknown")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    general_notes_block = ""
+    watcher_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
+    except FileNotFoundError:
+        pass
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    work_log = f"{meta_pm_root}/watchers/session-health.log"
+    session_ref = session_name or "<pm-session>"
+
+    prompt = f"""This is one tick of the **Session Health Watcher** for project "{project_name}".{iteration_label}
+
+## Role
+
+You monitor every Claude session running in the pm tmux session for
+health issues — stuck or dead sessions caused by API errors, HTTP 500s,
+Claude usage-limit blocks, OOM kills, or simple output stalls — and
+apply minimal recovery actions when safe. You never touch your own pane
+or any other watcher pane.
+
+This is an unattended loop. Each tick is short. Do the minimum work
+needed this tick, append a one-line work-log entry, then emit a verdict.
+{tui_block}{general_notes_block}
+## Work Log
+
+The persistent work log lives at `{work_log}` (relative to the project
+root). It is the source of truth for what this watcher has detected and
+recovered across ticks — per-pane retry counts, usage-limit
+retry-after timestamps, and INPUT_REQUIRED escalations.
+
+**Step 1.** Ensure the log directory exists, then read the last ~40 lines:
+```
+mkdir -p {meta_pm_root}/watchers
+touch {work_log}
+tail -n 40 {work_log}
+```
+
+Use it to count consecutive recoveries per target (pr_id or pane id) and
+to honour any "wait until <ts>" entries from prior ticks.
+
+## Per-Tick Procedure
+
+### 1. Enumerate target panes
+
+List windows in the pm tmux session and capture the tail of every Claude
+pane:
+
+```
+tmux list-windows -t {session_ref} -F "#{{window_id}} #{{window_name}}"
+```
+
+**Skip** these windows — they belong to watchers (including this one)
+and to the user's main shell:
+- `session-health` (this watcher)
+- `watcher` (auto-start)
+- `discovery`, `bug-fix-impl`, `improvement-fix-impl` (regression-loop)
+- The user's main window (window index 0)
+
+For each remaining window, list its panes and capture the last ~120
+lines of each:
+
+```
+tmux list-panes -t {session_ref}:<window_id> -F "#{{pane_id}} #{{pane_current_command}}"
+tmux capture-pane -p -t <pane_id> -S -120
+```
+
+Map each pane to its pr_id when possible by inspecting the window name
+(pm windows are typically named `<pr-id>-...`).
+
+### 2. Detect health issues
+
+For each captured tail, look for:
+
+- **Transient API error / HTTP 500** — error text from the Claude CLI
+  ("API Error", "Internal Server Error", "500"). Recoverable by nudging.
+- **Usage limit** — a Claude CLI message naming a retry-after time
+  (absolute timestamp or duration). Parse the time; record it.
+- **OOM / killed** — pane shows "Killed", "out of memory", segfault, or
+  the pane's `pane_current_command` is gone (process died). Cross-check
+  with `dmesg | tail -n 50` if you have permission.
+- **Output stall** — the pane has produced no new output for **≥ 5
+  minutes** AND has not emitted an `idle_prompt` hook (check the
+  transcript JSONL under `transcripts/`; if its mtime is fresh or the
+  last event is `idle_prompt`, the pane is *waiting*, not *stuck*).
+
+If nothing is wrong with any pane, skip to step 5.
+
+### 3. Honour usage-limit retry-after timestamps
+
+For any pane whose log entry says `wait until <iso-ts>`:
+- If `<iso-ts>` is in the future, **do not** attempt recovery this tick;
+  log "skipping <pr_id>: waiting until <iso-ts>".
+- If `<iso-ts>` is in the past, treat the wait as expired and proceed.
+
+### 4. Recovery actions (within retry limits)
+
+Count consecutive recovery entries for the same target (pr_id or
+pane_id) in the work log. **Threshold: 3 consecutive recoveries** →
+do not attempt another recovery; emit INPUT_REQUIRED instead.
+
+Otherwise pick the minimal action:
+
+- **Nudge** for transient API/500 errors:
+  ```
+  tmux send-keys -t <pane_id> Enter
+  ```
+  or, if the CLI is showing a retry prompt, send the appropriate key.
+- **Wait** for usage limits: log "wait until <iso-ts>" and move on.
+- **Restart** for dead panes (process gone, OOM): never spawn Claude
+  sessions directly — pm pane lifecycle is owned by the TUI. Options:
+  - For review/QA loops driven by auto-sequence: `pm pr auto-sequence
+    <pr_id>` is the official watcher-callable entry point — it handles
+    pane bookkeeping and will pick up where it left off, including
+    relaunching a killed impl window when needed.
+  - For implementation sessions: navigate to the PR in the TUI via
+    `pm tui send` and trigger the restart from there. Do **not** invoke
+    `pm pr start` directly — it must go through the TUI so the pane is
+    tracked correctly.
+
+Always log the action with the target id and the symptom that triggered
+it.
+
+### 5. Append a work-log entry
+
+One line per tick, ISO timestamp + concise summary, e.g.:
+
+```
+echo "$(date -Iseconds) tick {iteration}: scanned=4 healthy=3 nudged=pr-aaa(api500) wait=pr-bbb(until 2026-05-03T18:00:00Z); READY" \\
+  >> {work_log}
+```
+
+Always include: total panes scanned, any recovery actions taken, any
+waits recorded, and the verdict keyword you are about to emit.
+
+## Verdict
+
+End your response with the verdict on its own line:
+
+- **READY** — tick complete, continue watching on the next interval.
+- **INPUT_REQUIRED** — a target has hit the retry threshold (3
+  consecutive recoveries) or shows a symptom you cannot recover from
+  safely. Describe the target and symptom clearly and wait for follow-up.
+
+IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watcher_specific_block}"""
+
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 
