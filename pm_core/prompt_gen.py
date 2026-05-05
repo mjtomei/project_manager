@@ -17,7 +17,12 @@ def _is_bug_pr(pr: dict) -> bool:
     return pr.get("plan") == "bugs" or pr.get("type") == "bug"
 
 
-_BUG_FIX_FLOW_BLOCK = """
+def _bug_fix_flow_block(pr: dict) -> str:
+    """Bug-fix flow prompt block, with the captures dir resolved against
+    the PR's display segment (GH PR number when set, local id otherwise)."""
+    from pm_core.cli.helpers import _pr_path_segment
+    seg = _pr_path_segment(pr)
+    return f"""
 ## Bug Fix Flow
 
 1. **Manual repro on pre-fix code** — Reproduce the bug by hand against
@@ -29,7 +34,7 @@ _BUG_FIX_FLOW_BLOCK = """
    - Look in `pm/qa/instructions/` for env-setup recipes that may help
      bring up a reproduction environment.
    - Follow a recipe from `pm/qa/artifacts/` to capture a replayable
-     artifact. Save under `pm/qa/captures/<pr-id>/impl/pre-fix/`. Each
+     artifact. Save under `pm/qa/captures/{seg}/impl/pre-fix/`. Each
      capture must contain the recording plus a `manifest.md` with
      copy-pasteable commands, the workdir and commit they ran in, and
      one paragraph on what the recording demonstrates.
@@ -49,17 +54,22 @@ _BUG_FIX_FLOW_BLOCK = """
 
 5. **Verify manually** — Re-run the step-1 repro against the post-fix
    code and confirm the symptom is gone. Capture the post-fix run
-   under `pm/qa/captures/<pr-id>/impl/post-fix/`. A passing test is
+   under `pm/qa/captures/{seg}/impl/post-fix/`. A passing test is
    not sufficient on its own.
 """
 
 
-_BUG_FIX_REVIEW_BLOCK = """
+def _bug_fix_review_block(pr: dict) -> str:
+    """Bug-fix review checklist, with the captures dir resolved against
+    the PR's display segment."""
+    from pm_core.cli.helpers import _pr_path_segment
+    seg = _pr_path_segment(pr)
+    return f"""
 
 ## Bug Fix Review Checklist
 
 - Pre-fix and post-fix manual-repro captures exist under
-  `pm/qa/captures/<pr-id>/impl/` (or a PR-note explanation if the bug
+  `pm/qa/captures/{seg}/impl/` (or a PR-note explanation if the bug
   is genuinely uncapturable). No pre-fix capture = **NEEDS_WORK**.
 - A failing-then-passing test accompanies the fix unless the bug is
   genuinely untestable in code (and that's noted in a PR note).
@@ -217,7 +227,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     impl_spec_block = format_spec_for_prompt(pr, "impl")
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
-    bug_fix_block = _BUG_FIX_FLOW_BLOCK if _is_bug_pr(pr) else ""
+    bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -363,7 +373,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
     base = prompt.strip()
     if _is_bug_pr(pr):
-        base += _BUG_FIX_REVIEW_BLOCK
+        base += _bug_fix_review_block(pr)
     base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     base += review_specific_block
     base += _beginner_addendum()
@@ -1387,6 +1397,9 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
 
+    from pm_core.cli.helpers import _pr_path_segment
+    pr_path_seg = _pr_path_segment(pr)
+
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
     branch = pr.get("branch", f"pm/{pr_id}")
@@ -1505,7 +1518,7 @@ scenario demonstrates user-visible behavior a human reviewer should see
 (e.g. visual TUI changes, new CLI output). When a scenario benefits
 from such evidence, reference the recipe by filename in the
 INSTRUCTION field and have STEPS save captures under
-`pm/qa/captures/{pr_id}/scenarios/<scenario-number>/` (one subdir per
+`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/` (one subdir per
 scenario; sub-subdirs only if the scenario produces multiple
 captures). Each capture must contain the recording plus a
 `manifest.md` with copy-pasteable commands, the workdir and commit
