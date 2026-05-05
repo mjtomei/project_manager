@@ -18,59 +18,42 @@ def _is_bug_pr(pr: dict) -> bool:
 
 
 _BUG_FIX_FLOW_BLOCK = """
-## Bug Fix Flow (reproduce → confirm-on-pre-fix → fix → verify → reconcile)
+## Bug Fix Flow
 
 This PR is a bug fix. Follow this sequence rather than a feature-style
 implementation:
 
-1. **Reproduce** — Write or identify a failing test that demonstrates the
-   bug. The test must fail *for the right reason* (matching the reported
-   symptom) before you change any product code.
-   - If the bug involves Claude session behavior, prefer a Claude-guided
-     integration test using `FakeClaudeSession` (or the `fake-claude`
-     binary) so the reproduction is deterministic.
-   - For non-Claude bugs, a plain unit or integration test is fine.
-   - If the bug is genuinely untestable in code (e.g. a visual TUI
-     regression), record a manual repro in a PR note and, if appropriate,
-     a regression instruction file under `pm/qa/regression/`. The reviewer
-     will accept that as a substitute, but the substitute must exist. A
-     manual repro must be a concrete sequence of steps that produces the
-     symptom — not a theory about what's wrong. If you can only describe
-     the bug in terms of internal mechanics you haven't observed, you do
-     not yet have a reproduction.
+1. **Reproduce** — Produce a failing test (or, if the bug is genuinely
+   untestable in code, a concrete manual repro recorded in a PR note)
+   that demonstrates the symptom. The reproduction must fail for the
+   right reason — matching the reported symptom — before you change any
+   product code. A manual repro is a sequence of steps that produces
+   the symptom; it is not a theory about what's wrong.
 
 2. **Confirm on pre-fix code** — Before applying any fix, verify the
-   reproduction *fails on the pre-fix code*. Concretely: `git stash` your
-   in-progress changes (or `git checkout <parent> -- <touched-files>`),
-   re-run the repro, and confirm it shows the reported symptom. If you
-   cannot reproduce on pre-fix code, **stop and ask the user** — say so
-   explicitly. Do not write a fix on top of an unreproduced bug.
+   reproduction fails on the pre-fix code (`git stash` any in-progress
+   changes, or `git checkout <parent> -- <touched-files>`). If you
+   cannot reproduce, **stop and ask the user** — do not write a fix on
+   top of an unreproduced bug.
 
-3. **Fix** — Implement the smallest change that addresses the root cause.
-   Avoid drive-by refactors.
+3. **Fix** — Smallest change that addresses the root cause. No drive-by
+   refactors.
 
-4. **Verify** — Re-run the reproduction to confirm it now passes (or, for
-   manual TUI repros, that the symptom is gone). Run any related suite
-   to check for regressions.
+4. **Verify** — Re-run the reproduction to confirm the symptom is gone,
+   plus any related suite for regressions.
 
-5. **Reconcile** (verification-only, at session end) — Scan this PR's notes
-   (`pm pr note list <pr-id>` or read the PR Notes section above) for
-   cross-references the discovery supervisor (`pr-271cb3a`) may have filed
-   linking overlapping bug PRs. For each linked overlap:
-   - Check whether the linked bug still reproduces against the current code.
-   - If it's *also* resolved by your fix, append a confirmation note:
+5. **Reconcile** (at session end) — Scan this PR's notes for cross-refs
+   linking overlapping bug PRs. For each linked overlap, check whether
+   it still reproduces against the current code; if your fix also
+   resolves it, append:
      ```
      pm pr note add <this-pr-id> 'confirmed-overlap: <other-pr-id>'
      ```
-   - If you independently notice an overlap that the supervisor did **not**
-     link, append a pointer note:
+   If you independently notice an overlap that wasn't linked, append:
      ```
-     pm pr note add <this-pr-id> 'noticed-overlap: <other-pr-id> — <one-line reason>'
+     pm pr note add <this-pr-id> 'noticed-overlap: <other-pr-id> — <reason>'
      ```
-   If the PR has no cross-references and you noticed no overlaps, do
-   nothing for this step — it's a backstop, not the primary dedup
-   mechanism. The discovery supervisor handles dedup at file time with
-   work-log context the session does not have.
+   No cross-refs and no overlaps noticed? Skip this step.
 """
 
 
@@ -78,22 +61,16 @@ _BUG_FIX_REVIEW_BLOCK = """
 
 ## Bug Fix Review Checklist
 
-This PR is a bug fix. In addition to the generic checks above, verify:
+In addition to the generic checks above:
 
-- **Reproduction test exists** — the diff includes a new (or modified)
-  test that fails without the fix and passes with it. Prefer tests that
-  exercise the same surface a user hits (Claude-guided via
-  `FakeClaudeSession` for session bugs, plain unit/integration tests
-  otherwise).
-- **The test fails for the right reason** — read the test and confirm
-  it would have caught the original bug, not just any change in the
-  area.
-- **Acceptable substitute** — if no automated reproduction is possible
-  (e.g. visual TUI regression), the PR should include a manual repro
-  PR note and ideally a regression instruction file. A bug fix with no
+- **Reproduction artifact exists** — the diff includes a test that
+  fails without the fix and passes with it, or (for bugs untestable in
+  code) a manual repro recorded in a PR note. A bug fix with no
   reproduction artifact at all is **NEEDS_WORK**.
-- **Scope discipline** — the diff should be focused on the bug. Flag
-  drive-by refactors that aren't part of the fix.
+- **Fails for the right reason** — the test would have caught the
+  original bug, not just any change in the area.
+- **Scope discipline** — diff is focused on the bug. Flag drive-by
+  refactors.
 """
 
 
