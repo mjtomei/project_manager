@@ -494,6 +494,55 @@ def pr_cd(identifier: str):
     os.execvp(shell, [shell])
 
 
+@pr.command("shell")
+@click.argument("pr_id")
+def pr_shell(pr_id: str):
+    """Open a shell in a PR's workdir.
+
+    Inside a pm tmux session, splits a pane in the current window
+    landing in the PR's workdir.  Outside tmux, replaces the current
+    process with a shell at the workdir (same as ``pm pr cd``).
+
+    PR_ID accepts pm IDs (``pr-001``), GitHub display IDs (``#42``),
+    or bare GitHub numbers (``42``).
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    _open_pane_for_pr_cli(pr_entry, "shell", data, root)
+
+
+@pr.command("view-spec")
+@click.argument("pr_id")
+@click.option("--kind", type=click.Choice(["impl", "qa"]), default="impl",
+              show_default=True, help="Which spec to view.")
+def pr_view_spec(pr_id: str, kind: str):
+    """View a PR's impl or QA spec.
+
+    Inside a pm tmux session, opens a split pane rendering the spec
+    via ``glow`` (or ``less``).  Outside tmux, prints the spec to stdout.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    _open_pane_for_pr_cli(pr_entry, f"{kind}-spec", data, root)
+
+
+@pr.command("view-diff")
+@click.argument("pr_id")
+def pr_view_diff(pr_id: str):
+    """View a PR's diff against its base branch.
+
+    Same content the review window's diff pane shows.  Inside a pm
+    tmux session, opens a split pane piped through ``less -R``.
+    Outside tmux, prints the diff to stdout.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    _open_pane_for_pr_cli(pr_entry, "diff", data, root)
+
+
 @pr.command("list")
 @click.option("--workdirs", is_flag=True, default=False, help="Show workdir paths and their git status")
 @click.option("-t", "--timestamps", is_flag=True, default=False, help="Show updated_at timestamp and sort by most recently updated")
@@ -1102,6 +1151,193 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     click.echo("Added companion pane.")
 
 
+def _build_diff_cmd(workdir: str, display_id: str, title: str,
+                    base_branch: str, backend_name: str,
+                    shell: str | None = None,
+                    pipe_to_less: bool = True,
+                    keep_pane_open: bool = True) -> str:
+    """Build the shell command for the review/view-diff pane.
+
+    Single source of truth for the diff pane content used by
+    ``_launch_review_window`` and ``pm pr view-diff``.
+
+    *backend_name* selects the diff base ref: ``local`` uses the bare
+    base branch (no remote), everything else uses ``origin/<base>``.
+
+    When *keep_pane_open* is True, ``exec $shell`` is appended so the pane
+    survives after the user quits less.  When *pipe_to_less* is False,
+    output goes to stdout (suitable for shell-pipe invocations).
+    """
+    import shlex as _shlex
+    shell = shell or os.environ.get("SHELL", "/bin/bash")
+    diff_ref = base_branch if backend_name == "local" else f"origin/{base_branch}"
+    header = f"=== Review: {display_id} — {title} ==="
+    body = (
+        f"cd {_shlex.quote(workdir)}"
+        f" && {{ echo {_shlex.quote(header)}"
+        f" && echo ''"
+        f" && git status"
+        f" && echo ''"
+        f" && echo '--- Change summary ---'"
+        f" && git --no-pager diff --stat {diff_ref}...HEAD"
+        f" && echo ''"
+        f" && echo '--- Full diff ---'"
+        f" && git --no-pager diff {diff_ref}...HEAD"
+        f"; }}"
+    )
+    if pipe_to_less:
+        body += " | less -R"
+    if keep_pane_open:
+        body += f"; exec {shell}"
+    return body
+
+
+def _resolve_spec_path(pr_entry: dict, root: Path, phase: str) -> Path | None:
+    """Find the spec file for a PR phase.
+
+    Mirrors ``spec_gen.get_spec`` lookup order: workdir copy first
+    (most up-to-date while the PR is in flight), then the canonical
+    pm-root copy (where specs land after merge-back).
+    """
+    pr_id = pr_entry.get("id", "")
+    workdir = pr_entry.get("workdir")
+    if workdir:
+        p = Path(workdir) / "pm" / "specs" / pr_id / f"{phase}.md"
+        if p.is_file():
+            return p
+    canon = spec_gen.spec_file_path(root, pr_id, phase)
+    return canon if canon.is_file() else None
+
+
+def _build_spec_viewer_cmd(spec_path: Path) -> str:
+    """Pager fall-through: glow → less -R → cat+read."""
+    import shlex as _shlex
+    q = _shlex.quote(str(spec_path))
+    viewer = (
+        f"(command -v glow >/dev/null && glow -p {q}) || "
+        f"less -R {q} || {{ cat {q}; read -n 1 -s; }}"
+    )
+    return f"bash -c {_shlex.quote(viewer)}"
+
+
+def _build_shell_at_workdir_cmd(workdir: str) -> str:
+    """Shell command that lands in *workdir* and exec's the user's shell."""
+    import shlex as _shlex
+    inner = f"cd {_shlex.quote(workdir)}; exec ${{SHELL:-/bin/bash}}"
+    return f"bash -c {_shlex.quote(inner)}"
+
+
+def _current_tmux_window_id(pm_session: str) -> str | None:
+    """Return the tmux window id the caller is currently in, or None.
+
+    Resolves via $TMUX_PANE so we get the calling pane's window even
+    when invoked from a popup overlay (popups inherit the calling
+    client's TMUX context).
+    """
+    pane = os.environ.get("TMUX_PANE")
+    try:
+        if pane:
+            r = subprocess.run(
+                tmux_mod._tmux_cmd("display-message", "-p", "-t", pane,
+                                   "#{window_id}"),
+                capture_output=True, text=True, check=True,
+            )
+        else:
+            r = subprocess.run(
+                tmux_mod._tmux_cmd("display-message", "-t", f"{pm_session}:",
+                                   "-p", "#{window_id}"),
+                capture_output=True, text=True, check=True,
+            )
+    except subprocess.CalledProcessError:
+        return None
+    wid = r.stdout.strip()
+    return wid or None
+
+
+def _open_pane_for_pr_cli(pr_entry: dict, kind: str, data: dict,
+                          root: Path) -> None:
+    """CLI dispatch for shell / view-spec / view-diff.
+
+    Inside a pm tmux session, splits a pane in the caller's current
+    window targeting the PR.  Outside tmux, prints the content to
+    stdout (cats specs, runs git diff).
+
+    *kind* is one of: ``shell``, ``impl-spec``, ``qa-spec``, ``diff``.
+    """
+    pr_id = pr_entry.get("id", "")
+    display_id = _pr_display_id(pr_entry)
+    pm_session = _get_pm_session()
+    in_pm_tmux = (
+        pm_session is not None
+        and tmux_mod.in_tmux()
+        and tmux_mod.session_exists(pm_session)
+    )
+
+    if kind == "shell":
+        workdir = pr_entry.get("workdir")
+        if not workdir or not Path(workdir).is_dir():
+            click.echo(f"PR {pr_id} has no workdir; start it first.", err=True)
+            raise SystemExit(1)
+        if not in_pm_tmux:
+            # Outside tmux: just exec a shell at the workdir, like pm pr cd.
+            shell = os.environ.get("SHELL", "/bin/sh")
+            os.chdir(workdir)
+            os.execvp(shell, [shell])
+            return
+        cmd = _build_shell_at_workdir_cmd(workdir)
+        role = "pr-shell"
+    elif kind in ("impl-spec", "qa-spec"):
+        phase = "impl" if kind == "impl-spec" else "qa"
+        spec_path = _resolve_spec_path(pr_entry, root, phase)
+        if spec_path is None:
+            click.echo(
+                f"No {phase} spec for {pr_id} — "
+                f"run 'pm pr spec {pr_id} {phase}' first.",
+                err=True,
+            )
+            raise SystemExit(1)
+        if not in_pm_tmux:
+            click.echo(spec_path.read_text(), nl=False)
+            return
+        cmd = _build_spec_viewer_cmd(spec_path)
+        role = f"pr-{kind}"
+    elif kind == "diff":
+        workdir = pr_entry.get("workdir")
+        if not workdir or not Path(workdir).is_dir():
+            click.echo(f"PR {pr_id} has no workdir; start it first.", err=True)
+            raise SystemExit(1)
+        title = pr_entry.get("title", "")
+        base_branch = data.get("project", {}).get("base_branch", "master")
+        backend_name = data.get("project", {}).get("backend", "vanilla")
+        if not in_pm_tmux:
+            stdout_cmd = _build_diff_cmd(
+                workdir, display_id, title, base_branch, backend_name,
+                pipe_to_less=False, keep_pane_open=False,
+            )
+            subprocess.run(["/bin/bash", "-c", stdout_cmd])
+            return
+        cmd = _build_diff_cmd(workdir, display_id, title, base_branch,
+                              backend_name)
+        role = "pr-diff"
+    else:
+        click.echo(f"Unknown pane kind: {kind}", err=True)
+        raise SystemExit(1)
+
+    # In-tmux split.
+    win_id = _current_tmux_window_id(pm_session)
+    target = win_id or None
+    try:
+        pane_id = tmux_mod.split_pane(pm_session, "h", cmd, window=target)
+    except subprocess.CalledProcessError as e:
+        click.echo(f"split-window failed: {e}", err=True)
+        raise SystemExit(1)
+    if win_id:
+        try:
+            pane_registry.register_pane(pm_session, win_id, pane_id, role, cmd)
+        except Exception:
+            pass
+
+
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           background: bool = False,
                           review_loop: bool = False, review_iteration: int = 0,
@@ -1216,38 +1452,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     switch = not review_loop and not background
 
     try:
-        # Build the diff pane command first.  We use git --no-pager
-        # and pipe through less ourselves so that quitting the pager
-        # doesn't kill the pane (git's built-in pager can cause SIGPIPE
-        # exit codes that break && chains).
-        shell = os.environ.get("SHELL", "/bin/bash")
-        header = f"=== Review: {display_id} — {title} ==="
-        # Use backend-appropriate diff base:
-        #   local:   merge-base between base_branch and HEAD (no remote)
-        #   vanilla/github: origin/{base_branch}...HEAD
+        # Build the diff pane command using the shared helper so
+        # `pm pr view-diff` and the review window stay in sync.  We use
+        # git --no-pager and pipe through less ourselves so that
+        # quitting the pager doesn't kill the pane (git's built-in pager
+        # can cause SIGPIPE exit codes that break && chains).
         backend_name = data.get("project", {}).get("backend", "vanilla")
-        if backend_name == "local":
-            diff_ref = base_branch
-        else:
-            diff_ref = f"origin/{base_branch}"
-        # User-controlled values (workdir, title via header) MUST be
-        # shell_quote'd. An apostrophe in a PR title would otherwise
-        # break the surrounding single-quote and turn the rest of the
-        # title into shell tokens, killing the pane shell before tmux
-        # can register the new window.
-        diff_cmd = (
-            f"cd {shell_quote(workdir)}"
-            f" && {{ echo {shell_quote(header)}"
-            f" && echo ''"
-            f" && git status"
-            f" && echo ''"
-            f" && echo '--- Change summary ---'"
-            f" && git --no-pager diff --stat {diff_ref}...HEAD"
-            f" && echo ''"
-            f" && echo '--- Full diff ---'"
-            f" && git --no-pager diff {diff_ref}...HEAD"
-            f"; }} | less -R"
-            f"; exec {shell}"
+        diff_cmd = _build_diff_cmd(
+            workdir, display_id, title, base_branch, backend_name,
         )
 
         # Create the window with the diff pane first, then split to add

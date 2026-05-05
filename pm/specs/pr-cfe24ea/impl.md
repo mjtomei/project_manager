@@ -2,12 +2,36 @@
 
 ## Requirements
 
-Add three picker shortcuts that open a split pane in the *launching window*
-of the prefix+P picker, each acting on the highlighted PR:
+Add four picker shortcuts that open a split pane in the *launching
+window* of the prefix+P picker, each acting on the highlighted PR,
+plus matching CLI commands so the same operations work from prefix+M
+(popup-cmd) and a typed shell:
 
-1. **`c`** — shell pane in the PR's workdir.
+1. **`c`** — shell pane in the PR's workdir. CLI: `pm pr shell <pr_id>`.
 2. **`i`** — view `pm/specs/<pr_id>/impl.md`.
+   CLI: `pm pr view-spec <pr_id> [--kind impl]`.
 3. **`Q`** — view `pm/specs/<pr_id>/qa.md`.
+   CLI: `pm pr view-spec <pr_id> --kind qa`.
+4. **`D`** — view PR diff against base branch (same content the
+   review window's diff pane shows). CLI: `pm pr view-diff <pr_id>`.
+
+### CLI parity
+
+Each CLI command accepts pm IDs (`pr-001`), GitHub display IDs
+(`#42`), and bare GitHub numbers (`42`) via the existing
+`_resolve_pr_id` / `_require_pr` helpers. Inside a pm tmux session
+(detected via `_get_pm_session()` + `tmux_mod.in_tmux()`), a split
+pane is opened in the *current* window of the calling client
+(resolved from `$TMUX_PANE`). Outside tmux, content prints to
+stdout — `view-spec` cats the file, `view-diff` runs git diff without
+paging, `shell` execs a shell at the workdir (matches `pm pr cd`).
+
+The picker calls the in-process `_open_pane_for_pr` helper directly
+with already-loaded PR data; CLI commands route through
+`_open_pane_for_pr_cli` in `pm_core/cli/pr.py`. Both use the shared
+diff-command builder `_build_diff_cmd`, which `_launch_review_window`
+also calls — keeping the review window's diff pane and
+`pm pr view-diff` byte-identical.
 
 The picker dispatches via `pm_core/cli/session.py::popup_picker_cmd`, which
 already routes existing shortcuts (`s/e/d/t/g`) through

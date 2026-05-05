@@ -1587,14 +1587,16 @@ def _open_pane_for_pr(
     pr: dict,
     kind: str,
     root: Path,
+    data: dict | None = None,
 ) -> None:
     """Open a split pane in *window_name* for the given PR.
 
-    *kind* is one of 'shell', 'impl-spec', 'qa-spec'.  Returns silently
-    after dispatching; on user-facing errors prints a message and waits
-    for dismiss so the popup stays visible.
+    *kind* is one of 'shell', 'impl-spec', 'qa-spec', 'diff'.  Returns
+    silently after dispatching; on user-facing errors prints a message
+    and waits for dismiss so the popup stays visible.
     """
     from pm_core import spec_gen
+    from pm_core.cli.pr import _build_diff_cmd
 
     pr_id = pr.get("id", "")
 
@@ -1632,6 +1634,28 @@ def _open_pane_for_pr(
         )
         cmd = f"bash -c {shlex.quote(viewer)}"
         role = f"pr-{kind}"
+    elif kind == "diff":
+        workdir = pr.get("workdir")
+        if not workdir or not Path(workdir).is_dir():
+            click.echo(f"PR {pr_id} has no workdir; start it first.")
+            _wait_dismiss()
+            return
+        # Reuse review window's diff command builder so picker D, CLI
+        # view-diff, and review pane all show identical content.
+        from pm_core.cli.helpers import _pr_display_id, state_root
+        if data is None:
+            try:
+                from pm_core import store
+                data = store.load(state_root())
+            except Exception:
+                data = {}
+        display_id = _pr_display_id(pr)
+        title = pr.get("title", "")
+        base_branch = (data.get("project", {}) or {}).get("base_branch", "master")
+        backend_name = (data.get("project", {}) or {}).get("backend", "vanilla")
+        cmd = _build_diff_cmd(workdir, display_id, title, base_branch,
+                              backend_name)
+        role = "pr-diff"
     else:
         return
 
@@ -1836,6 +1860,7 @@ def popup_picker_cmd(session: str, window_name: str):
         "c": "shell",
         "i": "impl-spec",
         "Q": "qa-spec",
+        "D": "diff",
     }
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
@@ -1977,7 +2002,8 @@ def popup_picker_cmd(session: str, window_name: str):
                         # the popup runs in a transient overlay.
                         _open_pane_for_pr(
                             base, window_name, _picked_pr,
-                            _PANE_SHORTCUT_KEYS[pressed_key], Path(root))
+                            _PANE_SHORTCUT_KEYS[pressed_key], Path(root),
+                            data=data)
                     raise SystemExit(0)
                 if pressed_key in _SHORTCUT_KEYS:
                     cmd_to_run = _label_to_cmd.get(

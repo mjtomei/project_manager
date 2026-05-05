@@ -348,3 +348,121 @@ class TestOpenPaneForPr:
                               "qa-spec", tmp_path)
         cmd = split_mock.call_args.args[2]
         assert str(wd_spec) in cmd
+
+    def test_diff_no_workdir_errors(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        find, split, reg, dismiss = self._patches()
+        with find, split as split_mock, reg, dismiss as dismiss_mock:
+            _open_pane_for_pr("sess", "main",
+                              {"id": "pr-001", "workdir": None},
+                              "diff", tmp_path,
+                              data={"project": {"base_branch": "master"}})
+        assert not split_mock.called
+        assert dismiss_mock.called
+
+    def test_diff_present_opens_pane(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        wd = tmp_path / "work"
+        wd.mkdir()
+        find, split, reg, dismiss = self._patches()
+        data = {"project": {"base_branch": "main", "backend": "github"}}
+        with find, split as split_mock, reg as reg_mock, dismiss:
+            _open_pane_for_pr("sess", "main",
+                              {"id": "pr-001", "workdir": str(wd),
+                               "title": "x"},
+                              "diff", tmp_path, data=data)
+        cmd = split_mock.call_args.args[2]
+        assert "git --no-pager diff" in cmd
+        assert "origin/main...HEAD" in cmd
+        assert "less -R" in cmd
+        assert reg_mock.call_args.args[3] == "pr-diff"
+
+    def test_diff_local_backend_uses_bare_base(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        wd = tmp_path / "work"
+        wd.mkdir()
+        find, split, reg, dismiss = self._patches()
+        data = {"project": {"base_branch": "master", "backend": "local"}}
+        with find, split as split_mock, reg, dismiss:
+            _open_pane_for_pr("sess", "main",
+                              {"id": "pr-001", "workdir": str(wd),
+                               "title": "t"},
+                              "diff", tmp_path, data=data)
+        cmd = split_mock.call_args.args[2]
+        assert "master...HEAD" in cmd
+        assert "origin/master" not in cmd
+
+
+class TestPrCliPaneCommands:
+    """CLI parity for pr shell / view-spec / view-diff."""
+
+    def test_view_spec_outside_tmux_prints_to_stdout(self, tmp_path, capsys):
+        from pm_core.cli.pr import _open_pane_for_pr_cli
+        spec_dir = tmp_path / "specs" / "pr-001"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("# the spec\n")
+        with patch("pm_core.cli.pr._get_pm_session", return_value=None):
+            _open_pane_for_pr_cli({"id": "pr-001", "title": "t"},
+                                  "impl-spec", {}, tmp_path)
+        out = capsys.readouterr().out
+        assert "# the spec" in out
+
+    def test_view_spec_missing_errors(self, tmp_path):
+        from pm_core.cli.pr import _open_pane_for_pr_cli
+        with patch("pm_core.cli.pr._get_pm_session", return_value=None):
+            try:
+                _open_pane_for_pr_cli({"id": "pr-001"}, "impl-spec", {},
+                                      tmp_path)
+            except SystemExit as e:
+                assert e.code == 1
+            else:
+                assert False, "expected SystemExit"
+
+    def test_view_diff_outside_tmux_runs_subprocess(self, tmp_path):
+        from pm_core.cli.pr import _open_pane_for_pr_cli
+        wd = tmp_path / "work"
+        wd.mkdir()
+        data = {"project": {"base_branch": "main", "backend": "github"}}
+        with patch("pm_core.cli.pr._get_pm_session", return_value=None), \
+             patch("pm_core.cli.pr.subprocess.run") as run_mock:
+            _open_pane_for_pr_cli({"id": "pr-001", "workdir": str(wd),
+                                   "title": "x"},
+                                  "diff", data, tmp_path)
+        assert run_mock.called
+        cmd = run_mock.call_args.args[0]
+        assert cmd[0] == "/bin/bash"
+        # No piping to less for stdout invocation.
+        assert "less -R" not in cmd[2]
+        assert "origin/main...HEAD" in cmd[2]
+
+    def test_shell_in_pm_tmux_splits_pane(self, tmp_path):
+        from pm_core.cli.pr import _open_pane_for_pr_cli
+        wd = tmp_path / "work"
+        wd.mkdir()
+        with patch("pm_core.cli.pr._get_pm_session", return_value="pm-x"), \
+             patch("pm_core.cli.pr.tmux_mod.in_tmux", return_value=True), \
+             patch("pm_core.cli.pr.tmux_mod.session_exists", return_value=True), \
+             patch("pm_core.cli.pr._current_tmux_window_id", return_value="@5"), \
+             patch("pm_core.cli.pr.tmux_mod.split_pane",
+                   return_value="%9") as split_mock, \
+             patch("pm_core.cli.pr.pane_registry.register_pane") as reg_mock:
+            _open_pane_for_pr_cli({"id": "pr-001", "workdir": str(wd)},
+                                  "shell", {}, tmp_path)
+        assert split_mock.called
+        assert split_mock.call_args.kwargs.get("window") == "@5"
+        assert str(wd) in split_mock.call_args.args[2]
+        assert reg_mock.call_args.args[3] == "pr-shell"
+
+    def test_build_diff_cmd_keep_pane_open_appends_exec_shell(self):
+        from pm_core.cli.pr import _build_diff_cmd
+        cmd = _build_diff_cmd("/tmp/wd", "#1", "title", "main", "github",
+                              shell="/bin/zsh")
+        assert cmd.endswith("; exec /bin/zsh")
+        assert "| less -R" in cmd
+
+    def test_build_diff_cmd_stdout_variant_no_less_no_exec(self):
+        from pm_core.cli.pr import _build_diff_cmd
+        cmd = _build_diff_cmd("/tmp/wd", "#1", "t", "main", "github",
+                              pipe_to_less=False, keep_pane_open=False)
+        assert "less" not in cmd
+        assert "exec" not in cmd
