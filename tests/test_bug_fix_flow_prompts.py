@@ -30,8 +30,6 @@ def test_impl_prompt_includes_bug_fix_flow_for_bug_pr():
     p = prompt_gen.generate_prompt(data, "pr-x")
     assert "Bug Fix Flow" in p
     assert "Reproduce" in p
-    assert "Reconcile" in p
-    assert "confirmed-overlap" in p
 
 
 def test_impl_prompt_omits_bug_flow_for_feature_pr():
@@ -45,7 +43,7 @@ def test_review_prompt_includes_bug_checklist_for_bug_pr():
                   "description": "broken"})
     r = prompt_gen.generate_review_prompt(data, "pr-x")
     assert "Bug Fix Review Checklist" in r
-    assert "Reproduction artifact exists" in r
+    assert "reproduction artifact exists" in r
 
 
 def test_review_prompt_omits_bug_checklist_for_feature_pr():
@@ -74,12 +72,11 @@ def test_bug_flow_includes_pre_fix_repro_gate():
     data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
                   "description": "broken"})
     p = prompt_gen.generate_prompt(data, "pr-x")
-    assert "Confirm on pre-fix code" in p
-    assert "git stash" in p
+    assert "Reproduce on pre-fix code" in p
 
 
 def test_bug_flow_warns_against_theory_only_repros():
     data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
                   "description": "broken"})
     p = prompt_gen.generate_prompt(data, "pr-x")
-    assert "not a theory" in p or "not a theory about what's wrong" in p
+    assert "not a theory" in p

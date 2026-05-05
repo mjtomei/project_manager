@@ -20,40 +20,14 @@ def _is_bug_pr(pr: dict) -> bool:
 _BUG_FIX_FLOW_BLOCK = """
 ## Bug Fix Flow
 
-This PR is a bug fix. Follow this sequence rather than a feature-style
-implementation:
-
-1. **Reproduce** — Produce a failing test (or, if the bug is genuinely
-   untestable in code, a concrete manual repro recorded in a PR note)
-   that demonstrates the symptom. The reproduction must fail for the
-   right reason — matching the reported symptom — before you change any
-   product code. A manual repro is a sequence of steps that produces
-   the symptom; it is not a theory about what's wrong.
-
-2. **Confirm on pre-fix code** — Before applying any fix, verify the
-   reproduction fails on the pre-fix code (`git stash` any in-progress
-   changes, or `git checkout <parent> -- <touched-files>`). If you
-   cannot reproduce, **stop and ask the user** — do not write a fix on
-   top of an unreproduced bug.
-
-3. **Fix** — Smallest change that addresses the root cause. No drive-by
-   refactors.
-
-4. **Verify** — Re-run the reproduction to confirm the symptom is gone,
-   plus any related suite for regressions.
-
-5. **Reconcile** (at session end) — Scan this PR's notes for cross-refs
-   linking overlapping bug PRs. For each linked overlap, check whether
-   it still reproduces against the current code; if your fix also
-   resolves it, append:
-     ```
-     pm pr note add <this-pr-id> 'confirmed-overlap: <other-pr-id>'
-     ```
-   If you independently notice an overlap that wasn't linked, append:
-     ```
-     pm pr note add <this-pr-id> 'noticed-overlap: <other-pr-id> — <reason>'
-     ```
-   No cross-refs and no overlaps noticed? Skip this step.
+1. **Reproduce on pre-fix code** — Produce a failing test, or a concrete
+   manual repro if the bug is untestable in code. Confirm it shows the
+   reported symptom against the pre-fix code (stash any in-progress
+   changes first). If you can't reproduce, stop and ask the user — don't
+   write a fix on top of an unreproduced bug. A repro is a sequence of
+   steps that produces the symptom, not a theory about what's wrong.
+2. **Fix** — Smallest change that addresses the root cause.
+3. **Verify** — Re-run the repro and any related suite.
 """
 
 
@@ -61,16 +35,9 @@ _BUG_FIX_REVIEW_BLOCK = """
 
 ## Bug Fix Review Checklist
 
-In addition to the generic checks above:
-
-- **Reproduction artifact exists** — the diff includes a test that
-  fails without the fix and passes with it, or (for bugs untestable in
-  code) a manual repro recorded in a PR note. A bug fix with no
-  reproduction artifact at all is **NEEDS_WORK**.
-- **Fails for the right reason** — the test would have caught the
-  original bug, not just any change in the area.
-- **Scope discipline** — diff is focused on the bug. Flag drive-by
-  refactors.
+- A reproduction artifact exists (test or manual repro note). No artifact = **NEEDS_WORK**.
+- The repro fails for the right reason — it would have caught the original bug.
+- Scope is the bug; flag drive-by refactors.
 """
 
 
