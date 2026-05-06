@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-23d97f8
+  active_pr: pr-e2b7fdf
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9389,11 +9389,11 @@ prs:
     \ PRs with new branches work fine\n- Plan markdown reconciliation happens naturally\
     \ via 'pm plan review' since the review prompt pulls PRs from project.yaml not\
     \ the markdown"
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/165
   gh_pr_number: 165
   created_at: '2026-04-10T11:34:57.339723+00:00'
-  updated_at: '2026-05-03T18:09:08.514764+00:00'
+  updated_at: '2026-05-05T17:59:28.595607+00:00'
   started_at: '2026-04-10T14:17:39.293056+00:00'
   reviewed_at: '2026-05-03T18:09:08.514764+00:00'
   merged_at: null
@@ -13191,53 +13191,156 @@ prs:
   branch: pm/pr-cfe24ea-picker-action-open-shell-pane-in-current-window-cd
   status: in_review
   depends_on: []
-  description: "Add three new action keys to the prefix+P picker, each opening a new\
-    \ tmux pane *in the current window* targeting the highlighted PR. The shell shortcut\
-    \ was the original ask; the spec viewers are a natural extension since the same\
-    \ plumbing (split pane, run a command, register for cleanup) covers all three.\n\
-    \n## Shortcuts\n\n(1) Shell pane — `c` for 'cd' (or 's' for 'shell'). Opens a\
-    \ split-window pane with a shell pre-run via 'pm pr cd <pr_id>' so the shell lands\
-    \ in the PR's workdir. Use case: ad-hoc git / file inspection / running test commands\
-    \ without leaving the current window.\n\n(2) Implementation spec viewer — `i`\
-    \ (for 'impl'). Opens a split-window pane that displays `pm/specs/<pr_id>/impl.md`\
-    \ (path resolved via the analog of `pm pr spec-path`) using `glow -p` if available,\
-    \ falling back to `less` otherwise. Use case: quickly read the implementation\
-    \ spec while working on review / QA without bouncing through file pickers.\n\n\
-    (3) QA spec viewer — `Q` or similar (avoid collision with `q` = picker quit, `a`/`t`\
-    \ = qa actions). Same shape as (2) but for `pm/specs/<pr_id>/qa.md` (or whatever\
-    \ the QA spec convention resolves to — the impl is keyed on whatever `pm pr spec`\
-    \ already produces).\n\n## Common dispatch\n\nA new ACTIONS-table category for\
-    \ 'open a pane in the current window' that runs:\n\n    tmux split-window -t <current-window>\
-    \ -h <command>\n\nwith the command per shortcut:\n\n- shell: `bash -c 'cd <workdir>;\
-    \ exec /bin/bash'` (or `pm pr cd <pr_id>; exec /bin/bash`)\n- impl spec: `(command\
-    \ -v glow >/dev/null && glow -p <path>) || less <path>`\n- qa spec: same as impl-spec\
-    \ with the QA path\n\nPane registered with the pane-registry under roles `pr-shell`\
-    \ / `pr-impl-spec` / `pr-qa-spec` so cleanup tracks it.\n\nSplit direction (-h\
-    \ vs -v): horizontal when the current pane is wider than tall, vertical otherwise.\
-    \ Tmux's default split is acceptable too.\n\nWorks whether the picker was opened\
-    \ from an impl window, review window, QA window, or the main TUI window — same\
-    \ pane gets created in whichever window the picker fired in.\n\n## Edge cases\n\
-    \n- PR has no workdir yet (pending status): for the shell shortcut, surface 'PR\
-    \ has no workdir; start it first'. For the spec viewers the workdir isn't required\
-    \ (specs live in pm/specs/<pr_id>/, not in the workdir).\n- Spec file missing:\
-    \ show 'No impl spec for <pr_id> — run \\\"pm pr spec <pr_id>\\\" first' (or equivalent)\
-    \ in the popup briefly instead of opening an empty pager.\n- glow not installed:\
-    \ silently fall through to `less` — no warning.\n- less not installed (rare):\
-    \ fall back to `cat <path>; read` so the pane stays up long enough to read.\n\n\
-    ## Files\n\n- pm_core/cli/session.py — ACTIONS table additions and dispatch handler\
-    \ for the three new actions.\n- pm_core/cli/pr.py — if a 'spec-path' helper doesn't\
-    \ already exist, expose one used by both the spec subcommand and these shortcuts.\n\
-    \n## Tests\n\n- Press the shell shortcut on a PR with a workdir → split pane in\
-    \ current window with cwd = workdir.\n- Press the impl-spec shortcut on a PR with\
-    \ a spec → split pane shows glow-rendered markdown (or less).\n- Press the impl-spec\
-    \ shortcut on a PR with no spec → clear error in popup; no empty pane created.\n\
-    - glow absent → less used; specs still display.\n- Pane registered for cleanup;\
-    \ closing the parent window kills the spec/shell pane."
+  description: 'Add picker actions and matching CLI commands so the same pane operations
+    work from prefix+P, prefix+M, and a shell inside a pm session. Each action opens
+    a pane in the *current* window targeting the selected PR.
+
+
+    ## Pane actions (each with picker shortcut + CLI command)
+
+
+    (1) **Shell at workdir** — picker key `c` (cd) / CLI `pm pr shell <pr_id>`. Opens
+    a split-window pane with a shell pre-run via `pm pr cd <pr_id>` so the shell lands
+    in the PR''s workdir. Use case: ad-hoc git / file inspection / running test commands
+    without leaving the current window.
+
+
+    (2) **Implementation spec viewer** — picker key `i` (impl) / CLI `pm pr view-spec
+    <pr_id> [--kind impl]`. Opens a split-window pane that displays the impl spec
+    at `pm/specs/<pr_id>/impl.md` (path resolved via the same helper `pm pr spec-path`
+    already exposes) using `glow -p` if available, falling back to `less` otherwise.
+
+
+    (3) **QA spec viewer** — picker key (avoid collision with `q` = picker quit, `a`/`t`
+    = qa actions; use e.g. `Q` shifted) / CLI `pm pr view-spec <pr_id> --kind qa`.
+    Same shape as (2) but for the QA spec.
+
+
+    (4) **Diff viewer** — picker key `D` (or similar; bikeshed) / CLI `pm pr view-diff
+    <pr_id>`. The same diff pane content the review window currently shows in its
+    left half (`git --no-pager diff <base>...HEAD` piped through `less -R`, with status
+    + change summary headers — see `_launch_review_window` in pm_core/cli/pr.py for
+    the existing template). This also lets review windows construct their diff pane
+    by *invoking* this CLI command instead of duplicating the shell pipeline inline.
+    Reduces the live shell-quoting surface in `_launch_review_window`.
+
+
+    ## CLI parity contract
+
+
+    For each picker action the CLI must:
+
+    - Be invokable as a regular `pm pr <subcmd> <pr_id>` from any shell.
+
+    - Accept the **same PR-id forms existing commands accept**: pm internal id (`pr-f5b7eef`),
+    GitHub display id (`#193`), or bare GitHub number (`193`). Use the existing `_resolve_pr_id`
+    helper at `pm_core/cli/helpers.py:337` (and `_require_pr` for not-found errors)
+    — same as `pm pr review`, `pm pr merge`, etc. Don''t roll a new resolver.
+
+    - Detect when running inside a pm tmux session (via `_get_pm_session()`); if so,
+    open the pane in the current window the same way the picker does. Otherwise (run
+    from a non-pm shell), print the content to stdout (e.g. `view-spec` cats the file,
+    `view-diff` runs `git diff` directly).
+
+    - This way, prefix+M (popup-cmd, runs CLI subprocess directly), prefix+P + key
+    (picker, dispatches via `_run_picker_command`), and a typed shell command (`pm
+    pr view-spec ...`) all converge on the same behavior.
+
+
+    The picker dispatches the resolved pm-id when known (since the picker has the
+    loaded data). The CLI accepts whatever the user typed. Both end up at `_resolve_pr_id`
+    → `_require_pr`.
+
+
+    ## Common dispatch (refactor)
+
+
+    A single helper in `pm_core/cli/pr.py` (e.g. `_open_pane_for_pr(pr_id, role, command,
+    target_window)`) used by all four. Builds the tmux split-window invocation with
+    role-based pane-registry registration (`pr-shell`, `pr-impl-spec`, `pr-qa-spec`,
+    `pr-diff`) so the layout manager and cleanup track each pane.
+
+
+    Split direction: horizontal when the current pane is wider than tall, vertical
+    otherwise.
+
+
+    ## Edge cases
+
+    - PR has no workdir (pending status): only the shell action requires it; spec/diff
+    viewers don''t.
+
+    - Spec file missing: surface a clear error (`No impl spec for <pr_id> — run "pm
+    pr spec <pr_id>" first`) instead of opening an empty pager.
+
+    - `glow` not installed: silent fall-through to `less`.
+
+    - `less` not installed (rare): final fall-through to `cat <path>; read` so the
+    pane stays up long enough to read.
+
+    - Diff against a base branch the workdir doesn''t have a remote ref for: same
+    backend-aware logic that `_launch_review_window` already uses (`origin/<base>`
+    for github/vanilla, plain `<base>` for local).
+
+    - PR id not resolvable: `_require_pr` already raises with a clear error; surface
+    it.
+
+
+    ## Files
+
+    - `pm_core/cli/pr.py` — new commands `pr shell`, `pr view-spec`, `pr view-diff`;
+    new helper `_open_pane_for_pr`; refactor `_launch_review_window` to call `view-diff`
+    for its diff pane (or share the helper).
+
+    - `pm_core/cli/session.py` — ACTIONS table additions and dispatch handler for
+    the four new picker keys.
+
+    - `pm_core/cli/__init__.py` — register the new subcommands so they show in `pm
+    pr --help`.
+
+
+    ## Tests
+
+    - `pm pr shell <pr-with-workdir>` from a pm tmux pane → split pane with cwd =
+    workdir.
+
+    - `pm pr shell #193` and `pm pr shell pr-f5b7eef` and `pm pr shell 193` all resolve
+    to the same PR.
+
+    - `pm pr view-spec <pr-with-spec>` from a pm tmux pane → split pane shows glow-rendered
+    markdown (or less).
+
+    - `pm pr view-spec <pr-without-spec>` → clear error, no empty pane created.
+
+    - `pm pr view-diff <pr>` from a pm tmux pane → split pane shows the same diff
+    content review windows use.
+
+    - All four invoked from prefix+M (popup-cmd) → same behavior as prefix+P + the
+    corresponding key.
+
+    - All four invoked from a non-tmux shell → content printed to stdout instead of
+    opening a pane.
+
+    - `pm pr review` (review window) creates its diff pane via the same code path
+    as `pm pr view-diff`.
+
+    - `glow` absent → less used; specs/diff still display.
+
+    - Pane registered for cleanup; closing the parent window kills the spec/shell/diff
+    pane.
+
+
+    ## Out of scope
+
+    - Live-refresh of the diff pane when the workdir changes (today review''s diff
+    is one-shot).
+
+    - Spec editor mode (write/edit). View-only here.'
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/195
   gh_pr_number: 195
   created_at: '2026-05-04T14:20:49.261555+00:00'
-  updated_at: '2026-05-04T19:01:36.956517+00:00'
+  updated_at: '2026-05-05T20:46:31.254553+00:00'
   started_at: '2026-05-04T17:51:45.692159+00:00'
   reviewed_at: '2026-05-04T19:01:36.956517+00:00'
   merged_at: null
@@ -14855,7 +14958,7 @@ prs:
   title: 'Bug: popup spinner becomes unresponsive to q/Esc/Ctrl+C dismissal in some
     failure states, leaving the popup stuck open'
   branch: pm/pr-23d97f8-bug-popup-spinner-becomes-unresponsive-to-q-esc-ct
-  status: in_progress
+  status: in_review
   depends_on: []
   description: '## Symptom
 
@@ -14959,9 +15062,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/204
   gh_pr_number: 204
   created_at: '2026-05-05T12:29:53.361872+00:00'
-  updated_at: '2026-05-05T17:43:53.544531+00:00'
+  updated_at: '2026-05-05T17:54:25.494063+00:00'
   started_at: '2026-05-05T17:43:53.544531+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-05T17:54:25.494063+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-23d97f8-bug-popup-spinner-becomes-unresponsi-3e8b2538
@@ -15182,7 +15285,7 @@ prs:
   title: 'Improvement: home window redraws only on actual content change, not on a
     5s timer'
   branch: pm/pr-28bda5d-improvement-home-window-redraws-only-on-actual-con
-  status: pending
+  status: in_review
   depends_on: []
   description: '## Goal
 
@@ -15342,21 +15445,22 @@ prs:
 
     Related: pr-813cc19 (observability — once landed, the per-redraw log will only
     fire on actual changes, which is itself useful telemetry).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/207
+  gh_pr_number: 207
   created_at: '2026-05-05T13:29:33.145323+00:00'
-  updated_at: '2026-05-05T17:30:17.574182+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-05T17:54:24.906576+00:00'
+  started_at: '2026-05-05T17:44:35.482235+00:00'
+  reviewed_at: '2026-05-05T17:54:24.906576+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-28bda5d-improvement-home-window-redraws-only-a288d60a
 - id: pr-6f542a2
   plan: improvements
   title: 'Bug: action pane shows nothing while picker-dispatched commands are running;
     audit all actions for silent-pane and missing window paths'
   branch: pm/pr-6f542a2-bug-action-pane-shows-nothing-while-waiting-on-a-m
-  status: pending
+  status: in_review
   depends_on: []
   description: '## Symptom
 
@@ -15562,21 +15666,22 @@ prs:
     - pr-813cc19 (observability — merged) — the spinner / runtime_state / window logs
     made this diagnosable. Once the runtime_state writes from this PR land, the per-action
     lifecycle becomes visible in logs too.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/205
+  gh_pr_number: 205
   created_at: '2026-05-05T17:29:21.143691+00:00'
-  updated_at: '2026-05-05T17:38:52.897286+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-05T17:58:37.173678+00:00'
+  started_at: '2026-05-05T17:44:14.996116+00:00'
+  reviewed_at: '2026-05-05T17:58:37.173678+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6f542a2-bug-action-pane-shows-nothing-while--a288d60a
 - id: pr-c1f8086
   plan: null
   title: 'Bug: popup spinner watches wrong window because _wait_for_tui_command reads
     project.yaml via cwd-walk, hits stale workdir yaml'
   branch: pm/pr-c1f8086-bug-popup-spinner-watches-wrong-window-because-wai
-  status: pending
+  status: in_review
   depends_on: []
   description: "## Symptom\nPressing zz d (or any picker action) from a pane whose\
     \ cwd is inside a PR workdir produces a popup spinner that watches a window name\
@@ -15631,11 +15736,202 @@ prs:
     \ bug here is distinct: even with no stale terminal state, the spinner would never\
     \ switch because the window name it's watching for doesn't exist.\n- pr-813cc19\
     \ — the spinner logging that made this diagnosable in two log lines."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/206
+  gh_pr_number: 206
+  created_at: '2026-05-05T17:36:02.098878+00:00'
+  updated_at: '2026-05-05T17:54:24.349561+00:00'
+  started_at: '2026-05-05T17:44:27.098417+00:00'
+  reviewed_at: '2026-05-05T17:54:24.349561+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c1f8086-bug-popup-spinner-watches-wrong-wind-a288d60a
+- id: pr-ca6859f
+  plan: plan-regression
+  title: Watcher self-recovery audit
+  branch: pm/pr-ca6859f-watcher-self-recovery-audit
+  status: pending
+  depends_on: []
+  description: 'Audit every escalation path in the watcher prompts and surrounding
+    code (generate_bug_fix_impl_prompt, generate_improvement_fix_impl_prompt, generate_discovery_supervisor_prompt,
+    the review and QA prompts) and add explicit recovery playbooks instead of INPUT_REQUIRED
+    for technical issues that have a clear correct response.
+
+
+    Examples: container creation failure → retry with backoff, missing dep → install,
+    stuck loop → cap iterations + mark failed + move on, spec ambiguity → record assumption
+    and proceed, push failure → retry then re-fetch and rebase. INPUT_REQUIRED stays
+    available for genuinely human-judgment-required cases (e.g. the watcher review
+    session adding notes); but the bar to escalate moves from "anything unexpected"
+    to "no plausible automatic recovery."
+
+
+    Land first in Phase 9 — gates the headless/benchmark mode PR (which removes INPUT_REQUIRED
+    from prompts entirely) since stripping interactive language is only safe once
+    recovery playbooks exist.
+
+
+    Manual testing: synthesize each failure mode in a controlled run and confirm the
+    playbook fires. INPUT_REQUIRED rate on a representative bug-fix corpus should
+    drop measurably.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-05T17:36:02.098878+00:00'
-  updated_at: '2026-05-05T17:36:02.098878+00:00'
+  created_at: '2026-05-06T03:28:42.921822+00:00'
+  updated_at: '2026-05-06T03:28:42.921822+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6f9301e
+  plan: plan-regression
+  title: Headless / benchmark mode for autonomous loops
+  branch: pm/pr-6f9301e-headless-benchmark-mode-for-autonomous-loops
+  status: pending
+  depends_on:
+  - pr-ca6859f
+  - pr-438028c
+  - pr-f17e22b
+  description: 'Single benchmark_mode flag covering the runtime and prompt layers
+    so pm can run autonomous loops end-to-end without a TUI or human-reachable surface.
+
+
+    Runtime: pm operates without a visible TUI (no picker, no popup, hooks bypassed
+    where they assume a TUI surface). All session activity captured in a single structured
+    log file. Builds on pr-438028c (CLI window management for review-loop / QA) and
+    what is left after it lands.
+
+
+    Prompt layer: extends pr-f17e22b''s TUI-section gate to a project-wide flag that
+    strips "ask the user" / interactive language from every prompt builder — generate_prompt,
+    generate_review_prompt, generate_merge_prompt, the QA planner / refinement / scenario
+    prompts, and the watcher prompts.
+
+
+    Coupling rationale: removing INPUT_REQUIRED from prompts is only safe once self-recovery
+    playbooks exist. Sequenced after pr-ca6859f (watcher self-recovery audit) for
+    that reason.
+
+
+    Driven by the ProgramBench submission as a forcing function — the cleanroom image
+    has no human and no human-reachable surface — but the headless runtime is generally
+    useful for unattended operation.
+
+
+    Manual testing: a representative bug-fix run completes end-to-end with benchmark_mode
+    on, no TUI launched, structured log captures the full session, and no INPUT_REQUIRED
+    is emitted.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-06T03:28:55.716780+00:00'
+  updated_at: '2026-05-06T03:28:55.716780+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ed10ac4
+  plan: plan-regression
+  title: No-progress safety stop on review/QA loops
+  branch: pm/pr-ed10ac4-no-progress-safety-stop-on-review-qa-loops
+  status: pending
+  depends_on: []
+  description: 'Detect "same diff, same verdict, no real change" between iterations
+    of the review or QA loop and short-circuit before max-iterations.
+
+
+    Today max-iterations is the only ceiling and is loose (60 minutes per pr-860969d);
+    a no-progress detector catches the cheap-to-detect case where the loop is spinning.
+    Approach: hash the diff + verdict + relevant prompt snippets across iterations;
+    on N consecutive identical hashes (default 2), short-circuit with a NEEDS_WORK
+    verdict and a structured reason that the watcher can route to retry-once or mark-failed
+    (per pr-ca6859f''s playbooks).
+
+
+    Useful in normal mode too — a stuck review loop today wastes the full iteration
+    budget.
+
+
+    Manual testing: synthesize a review loop where the implementation does not change
+    between iterations (e.g. a NEEDS_WORK that the impl session cannot address), confirm
+    the safety stop fires within N iterations rather than hitting max-iterations.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-06T03:29:05.967029+00:00'
+  updated_at: '2026-05-06T03:29:05.967029+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e2b7fdf
+  plan: plan-regression
+  title: ProgramBench submission scaffolding
+  branch: pm/pr-e2b7fdf-programbench-submission-scaffolding
+  status: pending
+  depends_on:
+  - pr-ca6859f
+  - pr-6f9301e
+  - pr-ed10ac4
+  description: 'Bundle four pieces as one deliverable, demonstrating the autonomous
+    loop end-to-end on an external benchmark rather than starting a parallel benchmark
+    plan. Single PR is justified because each piece is small and they are tightly
+    coupled by the submission shape.
+
+
+    Context. ProgramBench (https://programbench.com) is a 200-task benchmark where
+    the agent gets only a compiled binary + docs and must reproduce a working codebase.
+    Per-task cleanroom Docker images provide ubuntu 22.04 + git + tmux + python3 +
+    pytest + libtmux + Rust + Go + build-essential, with the binary at /workspace/executable
+    chmod 111. No internet during inference; the submission is the produced /workspace
+    as a tarball. Top score on the current leaderboard is Claude Opus 4.7 at 0% Resolved
+    / 3.0% Almost-Resolved using mini-swe-agent. A pm submission would be a different
+    agent at the same model.
+
+
+    Architecture: layer pm on top of the per-task cleanroom image and run a leader
+    Claude session that uses pm itself as its orchestration tool. backend=local, container-mode=off
+    (the cleanroom IS the container — no per-PR podman). When the leader is done,
+    /workspace is the submission.
+
+
+    Pieces:
+
+
+    1. Leader prompt template — new prompt builder (sibling of generate_prompt, generate_review_prompt)
+    framing pm as the leader''s tool. Lists relevant CLI commands, delegates QA-instruction
+    authoring to the leader (writes pm/qa/instructions/binary-comparison.md based
+    on its probe of /workspace/executable), files plan + PRs, drives them through
+    start/review/QA/merge.
+
+
+    2. Adapter CLI — pm bench programbench --task <id> drops the task into a workdir,
+    generates the leader prompt, spawns the leader session in benchmark_mode, extracts
+    /workspace as the submission tarball when the leader finishes.
+
+
+    3. Reproducibility Dockerfile — FROM programbench/<task>:task_cleanroom layered
+    with pm + Claude Code + pinned deps. The submission asset.
+
+
+    4. Egress-allowlist firewall harness — iptables / network namespace at the sandbox
+    boundary allowing only the model API endpoint. Defense-in-depth against incidental
+    network use during benchmark runs.
+
+
+    Depends on the rest of Phase 9 (self-recovery audit, headless/benchmark mode,
+    no-progress safety stop) — the scaffolding only exercises functionality those
+    provide.
+
+
+    Manual testing: run the adapter against a held-back ProgramBench task and inspect
+    the produced /workspace tarball before submission. Compare the leader''s session
+    log against the structured-log expectations from the headless-mode PR.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-06T03:29:28.294226+00:00'
+  updated_at: '2026-05-06T03:29:28.294226+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
