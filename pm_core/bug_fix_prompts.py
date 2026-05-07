@@ -27,17 +27,18 @@ def _bug_fix_flow_block(pr: dict) -> str:
     return f"""
 ## Bug Fix Flow
 
-1. **Manual repro on pre-fix code** — Reproduce by hand (stash
-   in-progress changes). A repro is a sequence of steps producing the
-   symptom, not a theory. If you can't reproduce, stop and ask the user.
-   - `pm/qa/instructions/` may have env-setup recipes that help.
-   - Follow a recipe from `pm/qa/artifacts/` to capture; save under
+1. **Manual repro on pre-fix code** — Reproduce by hand against
+   pre-fix code (stash in-progress changes first). A repro is a
+   concrete sequence of steps. If reproduction doesn't work, check in
+   with the user before continuing.
+   - `pm/qa/instructions/` may have env-setup recipes worth checking.
+   - Use a recipe from `pm/qa/artifacts/` to capture; save under
      `pm/qa/captures/{seg}/impl/pre-fix/` (sub-subdirs for multiple
      captures).
 
-2. **Write a failing test** — Codify the manual repro as a test that
-   fails on pre-fix code for the same reason. If the bug is genuinely
-   untestable in code, skip and note it in a PR note.
+2. **Write a failing test** — Codify the repro as a test that fails
+   on pre-fix code for the same reason. For bugs that aren't testable
+   in code, note that in a PR note instead.
 
 3. **Fix** — Change that addresses the root cause.
 
@@ -45,9 +46,8 @@ def _bug_fix_flow_block(pr: dict) -> str:
    for regressions.
 
 5. **Verify manually** — Re-run the step-1 repro against post-fix
-   code; confirm the symptom is gone. Capture under
-   `pm/qa/captures/{seg}/impl/post-fix/`. A passing test alone isn't
-   sufficient.
+   code and confirm the symptom is gone. Capture under
+   `pm/qa/captures/{seg}/impl/post-fix/`.
 """
 
 

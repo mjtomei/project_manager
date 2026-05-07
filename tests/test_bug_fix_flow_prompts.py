@@ -78,13 +78,6 @@ def test_bug_flow_includes_pre_fix_repro_gate():
     assert "Manual repro on pre-fix code" in p
 
 
-def test_bug_flow_warns_against_theory_only_repros():
-    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
-                  "description": "broken"})
-    p = prompt_gen.generate_prompt(data, "pr-x")
-    assert "not a theory" in p
-
-
 def test_bug_flow_points_at_qa_dirs():
     data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
                   "description": "broken"})
