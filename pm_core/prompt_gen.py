@@ -1408,17 +1408,16 @@ adjacent regressions the fix could have introduced.
     if has_artifact_recipes:
         artifact_recipes_block = f"""
 
-Artifact Recipes tell scenario agents how to capture reviewable
-evidence — screen recordings, command logs — when a scenario
-demonstrates user-visible behavior a human reviewer should see
-(e.g. visual TUI changes, new CLI output). When a scenario benefits
-from such evidence, reference the recipe by filename in the
-INSTRUCTION field and have STEPS save captures under
-`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/` (one subdir
-per scenario; named subdirectories under that for multiple captures).
-Each capture must contain the recording plus a `manifest.md` with
-copy-pasteable commands, the workdir and commit they ran in, and one
-paragraph on what the recording shows."""
+Artifact Recipes describe how to capture replayable evidence of a
+scenario's behavior — recordings, logs, screenshots a reviewer can
+read or play back later. Default to producing a capture for any
+scenario whose value is showing a behavior end-to-end; captures
+sharply improve review quality and give reviewers something concrete
+to engage with rather than re-deriving from code. Reference the
+recipe by filename in the INSTRUCTION field and have STEPS save
+captures under
+`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`, one
+subdirectory per scenario."""
 
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
