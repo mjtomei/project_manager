@@ -27,13 +27,18 @@ def _bug_fix_flow_block(pr: dict) -> str:
     return f"""
 ## Bug Fix Flow
 
-1. **Manual repro on pre-fix code** — Reproduce by hand against
-   pre-fix code. If the fix is uncommitted, stash it; if it's already
-   committed (e.g. resuming work, or reviewing an existing fix),
-   check out the parent commit or revert the fix files temporarily,
-   capture, then restore. A repro is a concrete sequence of steps.
-   If reproduction doesn't work, check in with the user before
-   continuing.
+If artifacts from a prior session already satisfy a step (existing
+pre-fix capture, failing test, fix, post-fix capture), reuse them and
+skip that step. Re-do work only when this session's changes make the
+prior artifact stale.
+
+1. **Manual repro on pre-fix code** — If `pm/qa/captures/{seg}/impl/pre-fix/`
+   already has a valid capture, reuse it. Otherwise, reproduce by hand
+   against pre-fix code: stash uncommitted changes, or if the fix is
+   already committed, check out the parent commit or revert fix files
+   temporarily, capture, then restore. A repro is a concrete sequence
+   of steps. If reproduction doesn't work, check in with the user
+   before continuing.
    - `pm/qa/instructions/` may have env-setup recipes worth checking.
    - Use a recipe from `pm/qa/artifacts/` to capture; save under
      `pm/qa/captures/{seg}/impl/pre-fix/` (sub-subdirs for multiple
@@ -43,14 +48,18 @@ def _bug_fix_flow_block(pr: dict) -> str:
    on pre-fix code for the same reason. For bugs that aren't testable
    in code, note that in a PR note instead.
 
-3. **Fix** — Change that addresses the root cause.
+3. **Fix** — Change that addresses the root cause. If a working fix
+   already exists and this session has no reason to change it (e.g.
+   no new PR notes asking for changes), skip.
 
 4. **Verify with the test** — Confirm it passes; run related suites
    for regressions.
 
 5. **Verify manually** — Re-run the step-1 repro against post-fix
-   code and confirm the symptom is gone. Capture under
-   `pm/qa/captures/{seg}/impl/post-fix/`.
+   code and confirm the symptom is gone. If this session changed the
+   fix, capture the new post-fix behavior under
+   `pm/qa/captures/{seg}/impl/post-fix/`; if the fix is unchanged,
+   the existing post-fix capture is still valid.
 """
 
 
@@ -66,7 +75,6 @@ def _bug_fix_review_block(pr: dict) -> str:
   the primary evidence the fix addresses the reported bug. If they're
   missing or unconvincing, surface it as **INPUT_REQUIRED** — the user
   decides whether to require capture or accept the fix without one.
-  Don't NEEDS_WORK this; the review loop can't create captures.
 - A failing-then-passing test accompanies the fix, unless skipped via
   a PR note.
 - The test fails for the right reason — would have caught the original
