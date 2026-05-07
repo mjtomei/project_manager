@@ -17,18 +17,13 @@ def qa_library_doc() -> str:
 
 _CATEGORY_BLURB = {
     "instructions": (
-        "A QA instruction is a reusable test-environment procedure — "
-        "the setup steps a QA scenario references in its INSTRUCTION: "
-        "field so it can bring up a clean state before exercising the "
-        "code (seeding fixtures, starting services, logging in a test "
-        "user, etc.)."
+        "A QA instruction is a reusable setup procedure scenarios "
+        "reference to bring a project into a clean state for testing."
     ),
     "artifacts": (
-        "An artifact recipe describes how to capture reviewable "
-        "evidence — screen recordings, command logs, screenshots — that "
-        "demonstrate either a bug or new PR behavior to a human "
-        "reviewer. Recipes are followed by sessions; the captures they "
-        "produce land under pm/qa/captures/<pr-id>/."
+        "An artifact recipe is a procedure for capturing reviewable "
+        "evidence — recordings, logs, screenshots — that demonstrates "
+        "a bug or new PR behavior."
     ),
 }
 
