@@ -1344,10 +1344,12 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     mocks_summary = ""
     general_notes_block = ""
     qa_specific_block = ""
+    has_artifact_recipes = False
     root = None
     try:
         root = store.find_project_root()
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
+        has_artifact_recipes = bool(qa_instructions.list_artifacts(root))
         mocks_list = qa_instructions.list_mocks(root)
         if mocks_list:
             mocks_lines = []
@@ -1402,6 +1404,22 @@ user-visible surface that triggered it. Other scenarios should cover
 adjacent regressions the fix could have introduced.
 """
 
+    artifact_recipes_block = ""
+    if has_artifact_recipes:
+        artifact_recipes_block = f"""
+
+Artifact Recipes tell scenario agents how to capture reviewable
+evidence — screen recordings, command logs — when a scenario
+demonstrates user-visible behavior a human reviewer should see
+(e.g. visual TUI changes, new CLI output). When a scenario benefits
+from such evidence, reference the recipe by filename in the
+INSTRUCTION field and have STEPS save captures under
+`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/` (one subdir
+per scenario; named subdirectories under that for multiple captures).
+Each capture must contain the recording plus a `manifest.md` with
+copy-pasteable commands, the workdir and commit they ran in, and one
+paragraph on what the recording shows."""
+
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
@@ -1445,18 +1463,7 @@ at the paths shown below.
 Instructions tell scenario agents how to set up a test environment.  Without
 one, agents fall back to reading code and auto-passing.  Try to assign an instruction
 to every scenario.
-
-Artifact Recipes (if any are listed above) tell scenario agents how to
-capture reviewable evidence — screen recordings, command logs — when a
-scenario demonstrates user-visible behavior a human reviewer should see
-(e.g. visual TUI changes, new CLI output). When a scenario benefits
-from such evidence, reference the recipe by filename in the
-INSTRUCTION field and have STEPS save captures under
-`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/` (one subdir per
-scenario; sub-subdirs only if the scenario produces multiple
-captures). Each capture must contain the recording plus a
-`manifest.md` with copy-pasteable commands, the workdir and commit
-they ran in, and one paragraph on what the recording shows.
+{artifact_recipes_block}
 {mocks_library_section}
 ## Output Format
 
@@ -1537,12 +1544,16 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
         from pm_core import qa_instructions
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
         if library_summary and "No QA instructions" not in library_summary:
+            has_artifacts = bool(qa_instructions.list_artifacts(root))
+            kinds = "QA instructions and artifact recipes" if has_artifacts else "QA instructions"
+            purpose = ("Read any of these files to understand what's being "
+                       "tested or how to capture evidence.") if has_artifacts else \
+                      "Read any of these files to understand what's being tested."
             instruction_library_block = f"""
 ## QA Library
 
-The project has user-defined QA instructions and artifact recipes that the
-automated scenarios may be running or referencing.  Read any of these
-files to understand what's being tested or how to capture evidence:
+The project has user-defined {kinds} that the automated scenarios may
+be running or referencing. {purpose}
 
 {library_summary}
 """
