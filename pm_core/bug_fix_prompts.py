@@ -42,8 +42,7 @@ prior artifact stale.
    - `pm/qa/instructions/` may have env-setup recipes worth checking.
    - Use a recipe from `pm/qa/artifacts/` to capture; save under
      `pm/qa/captures/{seg}/impl/pre-fix/`. If the phase needs more
-     than one capture, give each a named subdirectory there
-     (e.g. `pre-fix/<short-name>/`).
+     than one capture, give each a named subdirectory there.
 
 2. **Write a failing test** — Codify the repro as a test that fails
    on pre-fix code for the same reason. For bugs that aren't testable
