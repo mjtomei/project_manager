@@ -28,9 +28,12 @@ def _bug_fix_flow_block(pr: dict) -> str:
 ## Bug Fix Flow
 
 1. **Manual repro on pre-fix code** — Reproduce by hand against
-   pre-fix code (stash in-progress changes first). A repro is a
-   concrete sequence of steps. If reproduction doesn't work, check in
-   with the user before continuing.
+   pre-fix code. If the fix is uncommitted, stash it; if it's already
+   committed (e.g. resuming work, or reviewing an existing fix),
+   check out the parent commit or revert the fix files temporarily,
+   capture, then restore. A repro is a concrete sequence of steps.
+   If reproduction doesn't work, check in with the user before
+   continuing.
    - `pm/qa/instructions/` may have env-setup recipes worth checking.
    - Use a recipe from `pm/qa/artifacts/` to capture; save under
      `pm/qa/captures/{seg}/impl/pre-fix/` (sub-subdirs for multiple
@@ -59,8 +62,11 @@ def _bug_fix_review_block(pr: dict) -> str:
 
 ## Bug Fix Review Checklist
 
-- Pre-fix and post-fix captures exist under `pm/qa/captures/{seg}/impl/`.
-  No pre-fix capture = **NEEDS_WORK**.
+- Pre-fix and post-fix captures under `pm/qa/captures/{seg}/impl/` are
+  the primary evidence the fix addresses the reported bug. If they're
+  missing or unconvincing, surface it as **INPUT_REQUIRED** — the user
+  decides whether to require capture or accept the fix without one.
+  Don't NEEDS_WORK this; the review loop can't create captures.
 - A failing-then-passing test accompanies the fix, unless skipped via
   a PR note.
 - The test fails for the right reason — would have caught the original

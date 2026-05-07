@@ -46,7 +46,8 @@ def test_review_prompt_includes_bug_checklist_for_bug_pr():
                   "description": "broken"})
     r = prompt_gen.generate_review_prompt(data, "pr-x")
     assert "Bug Fix Review Checklist" in r
-    assert "Pre-fix and post-fix captures exist" in r
+    assert "Pre-fix and post-fix captures" in r
+    assert "INPUT_REQUIRED" in r
 
 
 def test_review_prompt_omits_bug_checklist_for_feature_pr():
