@@ -6,14 +6,6 @@ the TUI, and the CLI; nothing here is project-internal magic — drop a
 file in the right directory and `pm` picks it up the next time it
 generates a prompt or refreshes the QA pane.
 
-> **This document is generic on purpose** — it ships inside `pm` and
-> describes the shared schema. **Your QA files are not.** They live in
-> *your* repo's `pm/qa/`, and they should be as project-specific as
-> they need to be: name your services, reference your code paths, hard-
-> code your test fixtures, point at your project's tooling. Generic
-> examples below (a "login flow", a "test database") are illustrations
-> of the *shape* of a recipe, not a style guide for what to put in it.
-
 ## The four directories
 
 | Directory | Purpose |
