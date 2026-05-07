@@ -15,6 +15,24 @@ def qa_library_doc() -> str:
     return _DOC_PATH.read_text()
 
 
+_CATEGORY_BLURB = {
+    "instructions": (
+        "A QA instruction is a reusable test-environment procedure — "
+        "the setup steps a QA scenario references in its INSTRUCTION: "
+        "field so it can bring up a clean state before exercising the "
+        "code (seeding fixtures, starting services, logging in a test "
+        "user, etc.)."
+    ),
+    "artifacts": (
+        "An artifact recipe describes how to capture reviewable "
+        "evidence — screen recordings, command logs, screenshots — that "
+        "demonstrate either a bug or new PR behavior to a human "
+        "reviewer. Recipes are followed by sessions; the captures they "
+        "produce land under pm/qa/captures/<pr-id>/."
+    ),
+}
+
+
 def build_authoring_prompt(name: str, category: str, target_path: Path) -> str:
     """Build a Claude prompt that interviews the user to draft a new file.
 
@@ -25,34 +43,20 @@ def build_authoring_prompt(name: str, category: str, target_path: Path) -> str:
         raise ValueError(f"unsupported category: {category}")
 
     label = "QA instruction" if category == "instructions" else "artifact recipe"
+    blurb = _CATEGORY_BLURB[category]
     doc = qa_library_doc()
 
-    return f"""You are helping the user author a new {label} for the pm QA
-library. The file should be written to:
+    return f"""Work with the user to author a new {label} for the pm QA
+library at:
 
     {target_path}
 
-Use the reference document below as ground truth for the schema, where
-each field surfaces, and the conventions for {category}/. Look at
-existing files in the same directory (or close ones) for style.
+{blurb}
 
-## Your job
-
-1. Ask the user a few short, targeted questions to learn what this
-   {label} is for. At minimum:
-   - One-line `description` (≤ 80 chars).
-   - The shape of the body (Setup / Test Steps / etc. for instructions;
-     When to use / What this recipe produces / Capture / Manifest format
-     for artifacts).
-   - Any tags worth setting.
-2. Draft the file content with frontmatter + body. Show it to the user
-   and let them iterate.
-3. When the user confirms, write the file at the target path.
-4. Mention that they can re-open it later with
-   `pm qa edit {name.lower().replace(" ", "-")}`.
-
-Keep questions short. One at a time. Don't lecture; do show working
-drafts.
+The reference document below is the ground truth for the schema and
+conventions. Existing files in the same directory are good style
+references. Use your judgment on how to interview the user, what to
+draft, and when to write the file.
 
 ## Reference: pm QA library
 
