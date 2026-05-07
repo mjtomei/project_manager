@@ -18,8 +18,7 @@ def qa_library_doc() -> str:
 _CATEGORY_BLURB = {
     "instructions": (
         "A QA instruction is a reusable procedure referenced by QA "
-        "scenarios or implementation sessions (e.g. for bug "
-        "reproduction)."
+        "scenarios or implementation sessions."
     ),
     "artifacts": (
         "An artifact recipe is a procedure for capturing reviewable "
