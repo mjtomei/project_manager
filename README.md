@@ -27,7 +27,7 @@ boring, repetitive parts so they can focus on what matters.
 - **Smart mobile mode** — auto-zooms the active pane on narrow terminals, usable over SSH from phones and tablets
 - **Guided setup** — step-by-step guide for new users to initialize projects, create plans, and start working
 - **Meta-development** — open a Claude session targeting the pm codebase itself, to fix pain points as you encounter them
-- **QA library** — per-project Markdown library of test instructions, regression tests, mock contracts, and artifact-capture recipes that feed the QA planner, the bug-fix flow, and the TUI QA pane (`q`); see [pm_core/docs/qa_library.md](pm_core/docs/qa_library.md). Author new files with `pm qa author-instruction <name>` / `pm qa author-artifact <name>` for a guided Claude session, or with `pm qa add-instruction` / `pm qa add-artifact` to drop straight into `$EDITOR`.
+- **QA library** — write reusable test recipes, regression tests, mock contracts, and evidence-capture procedures as Markdown files; agents pick them up automatically. See [pm_core/docs/qa_library.md](pm_core/docs/qa_library.md).
 
 ## Demo
 
