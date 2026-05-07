@@ -20,5 +20,8 @@ test = ["pytest>=8.0"]
 [tool.setuptools]
 packages = ["pm_core", "pm_core.tui", "pm_core.cluster", "pm_core.cli", "pm_core.bench"]
 
+[tool.setuptools.package-data]
+pm_core = ["docs/*.md"]
+
 [project.scripts]
 pm = "pm_core.wrapper:main"

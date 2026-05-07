@@ -6,7 +6,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from pm_core.cli.qa import (
-    qa_list, qa_show, qa_edit, qa_add_instruction, qa_add_artifact,
+    qa_list, qa_show, qa_edit, qa_add_instruction, qa_add_artifact, qa_docs,
 )
 
 
@@ -69,6 +69,26 @@ def test_qa_add_artifact_creates_in_artifacts_dir(tmp_path):
     assert result.exit_code == 0
     assert (tmp_path / "qa" / "artifacts" / "my-recipe.md").exists()
     assert not (tmp_path / "qa" / "instructions" / "my-recipe.md").exists()
+
+
+def test_qa_docs_prints_reference():
+    result = CliRunner().invoke(qa_docs, [])
+    assert result.exit_code == 0
+    # Spot-check the doc actually loaded
+    assert "pm QA library" in result.output
+    assert "pm/qa/instructions/" in result.output
+    assert "pm/qa/artifacts/" in result.output
+    assert "Manifest" in result.output
+
+
+def test_authoring_prompt_includes_doc_and_target_path(tmp_path):
+    from pm_core import qa_authoring
+    target = tmp_path / "qa" / "artifacts" / "demo.md"
+    prompt = qa_authoring.build_authoring_prompt("demo", "artifacts", target)
+    assert str(target) in prompt
+    assert "artifact recipe" in prompt
+    # Ground-truth section embedded
+    assert "## File format" in prompt or "pm QA library" in prompt
 
 
 def test_qa_add_instruction_creates_in_instructions_dir(tmp_path):

@@ -148,6 +148,54 @@ def qa_add_artifact(name: str):
     _qa_add(name, "artifacts")
 
 
+def _author_path(category: str, name: str) -> Path:
+    from pm_core import qa_instructions
+    root = state_root()
+    d = (qa_instructions.artifacts_dir(root) if category == "artifacts"
+         else qa_instructions.instructions_dir(root))
+    file_id = "".join(c for c in name.lower().replace(" ", "-")
+                      if c.isalnum() or c == "-")
+    return d / f"{file_id}.md"
+
+
+def _qa_author(name: str, category: str) -> None:
+    """Launch a Claude session that walks the user through authoring."""
+    from pm_core import qa_authoring
+    from pm_core.claude_launcher import launch_claude
+
+    target = _author_path(category, name)
+    if target.exists():
+        click.echo(f"Already exists: {target}", err=True)
+        raise SystemExit(1)
+
+    root = state_root()
+    prompt = qa_authoring.build_authoring_prompt(name, category, target)
+    rc = launch_claude(prompt, session_key=f"qa-author:{category}:{name}",
+                       pm_root=root, resume=False)
+    raise SystemExit(rc)
+
+
+@qa.command("author-instruction")
+@click.argument("name")
+def qa_author_instruction(name: str):
+    """Author a new QA instruction with a guided Claude session."""
+    _qa_author(name, "instructions")
+
+
+@qa.command("author-artifact")
+@click.argument("name")
+def qa_author_artifact(name: str):
+    """Author a new artifact recipe with a guided Claude session."""
+    _qa_author(name, "artifacts")
+
+
+@qa.command("docs")
+def qa_docs():
+    """Print the QA library reference (schema, conventions, surfaces)."""
+    from pm_core import qa_authoring
+    click.echo(qa_authoring.qa_library_doc())
+
+
 @qa.command("edit")
 @click.argument("instruction_id")
 @click.option("--category", "-c", default=None,
