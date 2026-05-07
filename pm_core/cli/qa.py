@@ -107,14 +107,8 @@ tags: [artifact]
 }
 
 
-@qa.command("add")
-@click.argument("name")
-@click.option("--category", "-c",
-              type=click.Choice(["instructions", "artifacts"]),
-              default="instructions", show_default=True,
-              help="Which directory to create the file in.")
-def qa_add(name: str, category: str):
-    """Create a new QA instruction or artifact recipe and open in $EDITOR."""
+def _qa_add(name: str, category: str) -> None:
+    """Shared implementation for add-instruction and add-artifact."""
     from pm_core import qa_instructions
 
     root = state_root()
@@ -138,6 +132,20 @@ def qa_add(name: str, category: str):
 
     editor = os.environ.get("EDITOR", "vim")
     subprocess.run([editor, str(filepath)])
+
+
+@qa.command("add-instruction")
+@click.argument("name")
+def qa_add_instruction(name: str):
+    """Create a new QA instruction in pm/qa/instructions/ and open in $EDITOR."""
+    _qa_add(name, "instructions")
+
+
+@qa.command("add-artifact")
+@click.argument("name")
+def qa_add_artifact(name: str):
+    """Create a new artifact recipe in pm/qa/artifacts/ and open in $EDITOR."""
+    _qa_add(name, "artifacts")
 
 
 @qa.command("edit")

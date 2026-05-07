@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from pm_core.cli.qa import qa_list, qa_show, qa_edit, qa_add
+from pm_core.cli.qa import (
+    qa_list, qa_show, qa_edit, qa_add_instruction, qa_add_artifact,
+)
 
 
 def _seed(pm_root: Path) -> None:
@@ -58,22 +60,23 @@ def test_qa_edit_resolves_artifact(tmp_path):
     assert str(tmp_path / "qa" / "artifacts" / "tmux-rec.md") in args
 
 
-def test_qa_add_artifacts_category_creates_in_artifacts_dir(tmp_path):
+def test_qa_add_artifact_creates_in_artifacts_dir(tmp_path):
     (tmp_path / "qa" / "artifacts").mkdir(parents=True)
     (tmp_path / "qa" / "instructions").mkdir(parents=True)
     with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
          patch("subprocess.run"):
-        result = CliRunner().invoke(qa_add, ["My Recipe", "-c", "artifacts"])
+        result = CliRunner().invoke(qa_add_artifact, ["My Recipe"])
     assert result.exit_code == 0
     assert (tmp_path / "qa" / "artifacts" / "my-recipe.md").exists()
     assert not (tmp_path / "qa" / "instructions" / "my-recipe.md").exists()
 
 
-def test_qa_add_default_still_instructions(tmp_path):
+def test_qa_add_instruction_creates_in_instructions_dir(tmp_path):
     (tmp_path / "qa" / "artifacts").mkdir(parents=True)
     (tmp_path / "qa" / "instructions").mkdir(parents=True)
     with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
          patch("subprocess.run"):
-        result = CliRunner().invoke(qa_add, ["My Test"])
+        result = CliRunner().invoke(qa_add_instruction, ["My Test"])
     assert result.exit_code == 0
     assert (tmp_path / "qa" / "instructions" / "my-test.md").exists()
+    assert not (tmp_path / "qa" / "artifacts" / "my-test.md").exists()

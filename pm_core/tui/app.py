@@ -1280,7 +1280,7 @@ class ProjectManagerApp(App):
         message.stop()
         _log.info("qa action: %s (item=%s)", message.action, message.item_id)
         if message.action == "add":
-            pane_ops.launch_pane(self, "pm qa add new-instruction", "qa-add")
+            pane_ops.launch_pane(self, "pm qa add-instruction new-instruction", "qa-add")
         elif message.action == "edit":
             if message.item_id:
                 parts = message.item_id.split(":", 1)
