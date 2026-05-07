@@ -59,9 +59,8 @@ def _bug_fix_review_block(pr: dict) -> str:
 
 ## Bug Fix Review Checklist
 
-- Pre-fix and post-fix captures exist under `pm/qa/captures/{seg}/impl/`,
-  or a PR note explains why the bug was uncapturable. No pre-fix
-  capture = **NEEDS_WORK**.
+- Pre-fix and post-fix captures exist under `pm/qa/captures/{seg}/impl/`.
+  No pre-fix capture = **NEEDS_WORK**.
 - A failing-then-passing test accompanies the fix, unless skipped via
   a PR note.
 - The test fails for the right reason — would have caught the original
