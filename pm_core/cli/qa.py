@@ -253,9 +253,10 @@ def qa_edit(instruction_id: str, category: str | None):
 @qa.command("regression")
 @click.argument("test_id")
 @click.option("--session", "-s", default=None, help="Specify pm session name")
-@click.option("--file-bugs", is_flag=True, default=False,
-              help="File PRs (bugs and improvements) for any findings")
-def qa_regression(test_id: str, session: str | None, file_bugs: bool):
+@click.option("--file-prs", "file_prs", is_flag=True, default=False,
+              help="File PRs (bugs --plan bugs, improvements --plan ux) for any findings")
+@click.option("--file-bugs", "file_prs", is_flag=True, default=False, hidden=True)
+def qa_regression(test_id: str, session: str | None, file_prs: bool):
     """Run a regression test from pm/qa/regression/.
 
     Each test is a Claude prompt; the runner assembles a Session
@@ -294,7 +295,7 @@ def qa_regression(test_id: str, session: str | None, file_bugs: bool):
         pane_id=pane_id,
         title=title,
         body=body,
-        file_findings=file_bugs,
+        file_findings=file_prs,
     )
 
     click.echo(f"Running regression: {title}")
