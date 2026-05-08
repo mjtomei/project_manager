@@ -34,8 +34,7 @@ prior artifact stale.
 
 1. **Manual repro on pre-fix code** — If
    `pm/qa/captures/{seg}/impl/pre-fix/` already has a valid capture,
-   reuse it and skip the rest of this step; you don't need to
-   reproduce again. Otherwise, produce one: reproduce the bug by hand
+   reuse it and skip this step. Otherwise, reproduce the bug by hand
    against pre-fix code (stash uncommitted changes, or if the fix is
    already committed, check out the parent commit or revert fix files
    temporarily, capture, then restore). A repro is a concrete
