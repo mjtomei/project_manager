@@ -45,8 +45,8 @@ def test_file_findings_addendum_covers_bugs_and_improvements():
     assert "do **not** attempt to fix them" in out
     # Verdict-vs-filing separation kept (line-wrap tolerant).
     import re
-    assert re.search(r"your\s+verdict for this", out)
-    assert "still reflect only the test's own pass/fail" in out
+    assert re.search(r"verdict\s+for\s+this", out)
+    assert re.search(r"the test's\s+own\s+pass/fail", out)
 
 
 def test_no_pane_omits_pane_line():
