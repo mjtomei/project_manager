@@ -1,5 +1,6 @@
 """Textual TUI App for Project Manager."""
 
+import shlex
 from pathlib import Path
 
 from pm_core.paths import configure_logger
@@ -25,6 +26,7 @@ from pm_core.plan_parser import extract_plan_intro
 from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (
     ConnectScreen, HelpScreen, MergeLockScreen, PlanPickerScreen, PlanAddScreen,
+    QACreatePickerScreen,
 )
 from pm_core.tui import pane_ops
 from pm_core.tui import frame_capture
@@ -1280,7 +1282,10 @@ class ProjectManagerApp(App):
         message.stop()
         _log.info("qa action: %s (item=%s)", message.action, message.item_id)
         if message.action == "add":
-            pane_ops.launch_pane(self, "pm qa add-instruction new-instruction", "qa-add")
+            self.push_screen(
+                QACreatePickerScreen(),
+                callback=lambda r: self._on_qa_create_picker(r),
+            )
         elif message.action == "edit":
             if message.item_id:
                 parts = message.item_id.split(":", 1)
@@ -1301,4 +1306,23 @@ class ProjectManagerApp(App):
                     )
             else:
                 self.log_message("No QA item selected")
+
+    def _on_qa_create_picker(self, result) -> None:
+        """Callback for QACreatePickerScreen.
+
+        result is None on cancel, or (category, mode, name) on confirm.
+        Maps the (category, mode) pair to the matching pm qa subcommand.
+        """
+        if not result:
+            return
+        category, mode, name = result
+        # category: "instructions" / "regression" / "artifacts"
+        # mode:     "author" or "add"
+        suffix = {
+            "instructions": "instruction",
+            "regression":   "regression",
+            "artifacts":    "artifact",
+        }[category]
+        cmd = f"pm qa {mode}-{suffix} {shlex.quote(name)}"
+        pane_ops.launch_pane(self, cmd, f"qa-{mode}")
 
