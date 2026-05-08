@@ -18,7 +18,7 @@ QA, and regression sessions — see [Captures](#captures) below.
 
 ## Authoring
 
-The expected flow for adding a new file is a guided Claude session:
+There are commands available for authoring new files in Claude sessions:
 
 ```
 pm qa author-instruction <name>     # new instruction
@@ -73,10 +73,7 @@ Files under `pm/qa/instructions/` are reusable procedures referenced
 by QA scenarios (and by impl sessions for bug reproduction). Typical
 body shape:
 
-- Setup steps the agent follows to bring up the environment. Concrete
-  commands are nice when they're stable, but feel free to describe
-  steps narratively when env or code drift would otherwise rot a
-  hardcoded snippet.
+- Setup steps the agent follows to bring up the environment. 
 - Optional Test Steps / Expected Behavior / Reporting sections when
   the instruction also prescribes what the scenario should do once
   the environment is up.
@@ -250,24 +247,10 @@ repeatedly over time; the timestamp keeps a history.
 
 ### Version control for regression captures
 
-Regression captures are checked into git the same way recipes are.
-Their value compounds over time: comparing a fresh capture against
-the previous one is the easiest way to spot a behavior change. Some
-guidance:
-
-- Commit each new run as part of the change that produced it (a fix
-  PR, a refactor, etc.) so reviewers can diff the behavioral effect
-  alongside the code diff.
-- Keep at least the most recent passing run for each test; trim
-  older runs as they become noise. Don't squash everything into a
-  single "latest" directory — losing the timestamped history
-  defeats the diff workflow.
-- For large recordings (long sessions, video output), consider
-  `git-lfs` or a `.gitattributes` rule. Plain-text transcripts
-  diff well in regular git and are usually the cheaper bar.
-- A regression test that produces capture diffs across runs is the
-  signal you want; investigating those diffs is a normal part of
-  triaging a failing run.
+Regression captures are checked into git so behavior diffs are
+visible across runs. Large files may eventually need a different
+storage strategy (e.g. `git-lfs`); for now, treat that as future
+work and just commit.
 
 When a phase needs more than one capture (two distinct pre-fix
 demonstrations, multiple captures within one scenario), give each its

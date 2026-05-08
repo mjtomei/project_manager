@@ -569,6 +569,11 @@ To interact with this session, use commands like:
 - tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
 - cat ~/.pm/pane-registry/{sess}.json
 
+## Captures
+
+Any capture you produce should land under `pm/qa/captures/regression/<test-id>/<timestamp>/`
+and be committed to git so future runs can diff against this one.
+
 ## QA Regression Test: {title}
 
 {prompt}
