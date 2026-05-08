@@ -209,9 +209,10 @@ Run the command with redirected output:
 
 ## Manifest format
 
-Use the standard manifest layout, with a `command:` field in the
-frontmatter naming the exact invocation, and a `## What this
-demonstrates` section explaining what to look for.
+Standard manifest frontmatter — `pr`, `workdir`, `captured_at`,
+`recipe` — plus a `command:` field naming the exact invocation. Body
+has `## Commands` (the wrapped command) and `## What this
+demonstrates` (what to look for in `output.log`).
 ```
 
 ## Captures
