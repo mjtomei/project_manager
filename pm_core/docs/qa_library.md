@@ -91,6 +91,12 @@ navigation and one action keybinding for the area you're testing.
 
 ## Regression tests
 
+> [!CAUTION]
+> This section describes the runner's behavior **after pr-7d5d036
+> lands**. Until then, the runner hardcodes "testing against the pm
+> tmux session" into every prompt and bails out if no `pm` session is
+> running — see pr-7d5d036 for the actual current state.
+
 Files under `pm/qa/regression/` are Claude-driven regression tests.
 The body of each `.md` file is **literally a Claude prompt**. The
 runner reads it, optionally appends a bug-filing or bug-fixing
