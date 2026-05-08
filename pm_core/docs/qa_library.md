@@ -2,16 +2,14 @@
 
 Every project that uses `pm` gets a `pm/qa/` directory with four
 subdirectories of Markdown-with-frontmatter files. They feed prompts,
-the TUI, and the CLI; nothing here is project-internal magic — drop a
-file in the right directory and `pm` picks it up the next time it
-generates a prompt or refreshes the QA pane.
+the TUI, and the CLI.
 
 ## The four directories
 
 | Directory | Purpose |
 |---|---|
 | `pm/qa/instructions/` | Reusable test-environment procedures — anything a QA scenario needs to set up before it can exercise the code (seed a database, start a dev server, prepare fixture data, log in a test user, etc.). Referenced by QA scenarios in their `INSTRUCTION:` field. |
-| `pm/qa/regression/`   | Tests run by `pm tui test <id>` — Claude-driven scenarios written as natural-language prompts. The runner targets a running `pm` tmux session and is best suited to exercising whatever the session is currently displaying; in practice that's typically a project's own TUI or CLI flow. |
+| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm tui test <id>`. Each file is a natural-language prompt; the runner launches Claude against a running `pm` tmux session to exercise it. |
 | `pm/qa/artifacts/`    | *Recipes for capturing reviewable evidence* — screen recordings, command logs, screenshots — that demonstrate either a bug or new PR behavior to a human reviewer. |
 | `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all scenarios use the same contracts for external dependencies. |
 
