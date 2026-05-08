@@ -6,7 +6,8 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from pm_core.cli.qa import (
-    qa_list, qa_show, qa_edit, qa_add_instruction, qa_add_artifact, qa_docs,
+    qa_list, qa_show, qa_edit, qa_add_instruction, qa_add_artifact,
+    qa_add_regression, qa_docs,
 )
 
 
@@ -89,6 +90,26 @@ def test_authoring_prompt_includes_doc_and_target_path(tmp_path):
     assert "artifact recipe" in prompt
     # Ground-truth section embedded
     assert "## File format" in prompt or "pm QA library" in prompt
+
+
+def test_qa_add_regression_creates_in_regression_dir(tmp_path):
+    (tmp_path / "qa" / "artifacts").mkdir(parents=True)
+    (tmp_path / "qa" / "instructions").mkdir(parents=True)
+    (tmp_path / "qa" / "regression").mkdir(parents=True)
+    with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
+         patch("subprocess.run"):
+        result = CliRunner().invoke(qa_add_regression, ["TUI startup smoke"])
+    assert result.exit_code == 0
+    assert (tmp_path / "qa" / "regression" / "tui-startup-smoke.md").exists()
+    assert not (tmp_path / "qa" / "instructions" / "tui-startup-smoke.md").exists()
+
+
+def test_authoring_prompt_supports_regression(tmp_path):
+    from pm_core import qa_authoring
+    target = tmp_path / "qa" / "regression" / "demo.md"
+    prompt = qa_authoring.build_authoring_prompt("demo", "regression", target)
+    assert str(target) in prompt
+    assert "regression test" in prompt
 
 
 def test_qa_add_instruction_creates_in_instructions_dir(tmp_path):

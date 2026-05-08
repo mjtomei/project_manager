@@ -80,7 +80,6 @@ _ADD_TEMPLATES = {
 ---
 title: {title}
 description:
-tags: []
 ---
 ## Setup
 
@@ -90,11 +89,28 @@ tags: []
 
 ## Reporting
 """,
+    "regression": """\
+---
+title: {title}
+description:
+---
+You are a careful tester. Bring up the surface this test exercises
+(spawn a pane, start a server, invoke a CLI — whatever fits), drive
+it through the scenarios below, and report results.
+
+## Scenarios
+
+- Scenario 1: <what to verify>
+
+## Reporting
+
+For each scenario, report PASS or FAIL with one line of evidence.
+End with an overall PASS/FAIL.
+""",
     "artifacts": """\
 ---
 title: {title}
 description:
-tags: [artifact]
 ---
 ## When to use
 
@@ -107,15 +123,20 @@ tags: [artifact]
 }
 
 
+def _category_dir(qa_instructions, root, category):
+    if category == "artifacts":
+        return qa_instructions.artifacts_dir(root)
+    if category == "regression":
+        return qa_instructions.regression_dir(root)
+    return qa_instructions.instructions_dir(root)
+
+
 def _qa_add(name: str, category: str) -> None:
-    """Shared implementation for add-instruction and add-artifact."""
+    """Shared implementation for add-instruction / add-regression / add-artifact."""
     from pm_core import qa_instructions
 
     root = state_root()
-    if category == "artifacts":
-        d = qa_instructions.artifacts_dir(root)
-    else:
-        d = qa_instructions.instructions_dir(root)
+    d = _category_dir(qa_instructions, root, category)
 
     file_id = name.lower().replace(" ", "-")
     file_id = "".join(c for c in file_id if c.isalnum() or c == "-")
@@ -141,6 +162,13 @@ def qa_add_instruction(name: str):
     _qa_add(name, "instructions")
 
 
+@qa.command("add-regression")
+@click.argument("name")
+def qa_add_regression(name: str):
+    """Create a new regression test in pm/qa/regression/ and open in $EDITOR."""
+    _qa_add(name, "regression")
+
+
 @qa.command("add-artifact")
 @click.argument("name")
 def qa_add_artifact(name: str):
@@ -151,8 +179,7 @@ def qa_add_artifact(name: str):
 def _author_path(category: str, name: str) -> Path:
     from pm_core import qa_instructions
     root = state_root()
-    d = (qa_instructions.artifacts_dir(root) if category == "artifacts"
-         else qa_instructions.instructions_dir(root))
+    d = _category_dir(qa_instructions, root, category)
     file_id = "".join(c for c in name.lower().replace(" ", "-")
                       if c.isalnum() or c == "-")
     return d / f"{file_id}.md"
@@ -180,6 +207,13 @@ def _qa_author(name: str, category: str) -> None:
 def qa_author_instruction(name: str):
     """Author a new QA instruction with a guided Claude session."""
     _qa_author(name, "instructions")
+
+
+@qa.command("author-regression")
+@click.argument("name")
+def qa_author_regression(name: str):
+    """Author a new regression test with a guided Claude session."""
+    _qa_author(name, "regression")
 
 
 @qa.command("author-artifact")

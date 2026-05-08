@@ -128,10 +128,8 @@ bug-fix PR session.
 
 ### Authoring a regression test
 
-1. `pm qa add-instruction <name>` creates a stub in
-   `pm/qa/instructions/`. **Move it to `pm/qa/regression/`** if it's
-   meant for the regression runner. (Regression tests share the same
-   file format as instructions; there's no separate scaffold.)
+1. Scaffold with `pm qa add-regression <name>` (drops into `$EDITOR`)
+   or `pm qa author-regression <name>` for a guided Claude session.
 2. Lead the body with the tester's role and goal — what behavior the
    test exercises, and from whose perspective.
 3. Bring up the surface explicitly: spawn the pane, start the server,
@@ -346,8 +344,10 @@ Reference a mock from a QA scenario by its filename stem in the
 | `pm qa show <id>` | Full body of one file; auto-detects category. |
 | `pm qa edit <id>` | Opens the file in `$EDITOR`; auto-detects category. |
 | `pm qa add-instruction <name>` | Scaffolds a stub in `pm/qa/instructions/`. |
+| `pm qa add-regression <name>` | Scaffolds a stub in `pm/qa/regression/`. |
 | `pm qa add-artifact <name>` | Scaffolds a stub in `pm/qa/artifacts/`. |
-| `pm qa author-instruction <name>` | Same as above, but launches a guided Claude session that uses this document to interview the author. |
+| `pm qa author-instruction <name>` | Same as add-instruction, but launches a guided Claude session that uses this document to interview the author. |
+| `pm qa author-regression <name>` | Guided authoring for a regression test. |
 | `pm qa author-artifact <name>` | Guided authoring for an artifact recipe. |
 | `pm qa docs` | Prints this document. |
 | QA planner prompt | `instruction_summary_for_prompt` renders `### Instructions` and `### Artifact Recipes`. Recipes are referenced by filename in the scenario `INSTRUCTION:` field. |

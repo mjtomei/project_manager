@@ -20,6 +20,12 @@ _CATEGORY_BLURB = {
         "A QA instruction is a reusable procedure referenced by QA "
         "scenarios or implementation sessions."
     ),
+    "regression": (
+        "A regression test is a Claude prompt under "
+        "pm/qa/regression/ run by pm tui test. The body is the "
+        "prompt itself: the test brings up a surface, exercises it, "
+        "and reports back."
+    ),
     "artifacts": (
         "An artifact recipe is a procedure for capturing concrete "
         "evidence of behavior — recordings, logs, screenshots — "
@@ -29,16 +35,23 @@ _CATEGORY_BLURB = {
 }
 
 
+_CATEGORY_LABEL = {
+    "instructions": "QA instruction",
+    "regression": "regression test",
+    "artifacts": "artifact recipe",
+}
+
+
 def build_authoring_prompt(name: str, category: str, target_path: Path) -> str:
     """Build a Claude prompt that interviews the user to draft a new file.
 
-    *category* is "instructions" or "artifacts". *target_path* is the
-    file the session should ultimately write.
+    *category* is one of "instructions", "regression", or "artifacts".
+    *target_path* is the file the session should ultimately write.
     """
-    if category not in ("instructions", "artifacts"):
+    if category not in _CATEGORY_LABEL:
         raise ValueError(f"unsupported category: {category}")
 
-    label = "QA instruction" if category == "instructions" else "artifact recipe"
+    label = _CATEGORY_LABEL[category]
     blurb = _CATEGORY_BLURB[category]
     doc = qa_library_doc()
 

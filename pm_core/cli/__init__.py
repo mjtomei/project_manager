@@ -601,8 +601,10 @@ COMMANDS
   pm qa list                       List QA instructions, regression tests, and artifact recipes
   pm qa docs                       Print the QA library reference (schema, conventions)
   pm qa add-instruction <name>     Scaffold a new QA instruction (drops into $EDITOR)
+  pm qa add-regression <name>      Scaffold a new regression test
   pm qa add-artifact <name>        Scaffold a new artifact recipe
   pm qa author-instruction <name>  Author a new QA instruction with a guided Claude session
+  pm qa author-regression <name>   Author a new regression test with a guided Claude session
   pm qa author-artifact <name>     Author a new artifact recipe with a guided Claude session
   pm qa edit <id>                  Edit a QA instruction or artifact recipe
   pm qa show <id>                  Show full content of a QA instruction or artifact recipe
