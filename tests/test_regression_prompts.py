@@ -43,9 +43,10 @@ def test_file_findings_addendum_covers_bugs_and_improvements():
     assert "this applies to both bug and improvement filings" in out
     # The "no fixes here" prohibition is preserved.
     assert "do **not** attempt to fix them" in out
-    # Verdict-vs-filing separation kept (allow line wrap).
-    assert "your verdict for this" in out
-    assert "regression test must still reflect only the test's own pass/fail" in out
+    # Verdict-vs-filing separation kept (line-wrap tolerant).
+    import re
+    assert re.search(r"your\s+verdict for this", out)
+    assert "still reflect only the test's own pass/fail" in out
 
 
 def test_no_pane_omits_pane_line():
