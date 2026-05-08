@@ -35,7 +35,7 @@ scaffold a stub and open `$EDITOR`.
 
 Each `.md` file is YAML frontmatter followed by Markdown body:
 
-```markdown
+```text
 ---
 title: Login flow setup
 description: Seed a test user and log them in before scenarios run
@@ -83,7 +83,7 @@ the `INSTRUCTION:` field.
 
 A minimal example:
 
-```markdown
+```text
 ---
 title: Throwaway pm test project
 description: Spin up a scratch project with a few PRs to drive the TUI against
@@ -141,7 +141,7 @@ PR session.
 
 A minimal example:
 
-```markdown
+```text
 ---
 title: TUI startup renders PR tree
 description: Verify the TUI comes up and the dependency tree displays
@@ -182,7 +182,7 @@ to confirm what happened.
 
 A minimal example:
 
-```markdown
+```text
 ---
 title: stdout transcript
 description: Capture a copy of a command's stdout/stderr alongside its exit code
@@ -263,7 +263,7 @@ own named subdirectory under the phase, e.g.
 `manifest.md` rides alongside each capture and records what produced
 the capture, so the capture isn't just an opaque blob. The convention:
 
-```markdown
+```text
 ---
 pr: <pr-id, or "regression" for regression captures>
 workdir: <absolute path the capture came from>
