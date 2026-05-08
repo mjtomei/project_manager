@@ -16,6 +16,21 @@ the TUI, and the CLI.
 There is also a runtime sibling, `pm/qa/captures/`, written by impl,
 QA, and regression sessions — see [Captures](#captures) below.
 
+## Authoring
+
+The expected flow for adding a new file is a guided Claude session:
+
+```
+pm qa author-instruction <name>     # new instruction
+pm qa author-regression <name>      # new regression test
+pm qa author-artifact <name>        # new artifact recipe
+```
+
+Each loads this document and walks the user through drafting the file
+at the right path. If you'd rather just edit a stub yourself, the
+`pm qa add-instruction` / `add-regression` / `add-artifact` siblings
+scaffold a stub and open `$EDITOR`.
+
 ## File format (instructions / regression / artifacts)
 
 Each `.md` file is YAML frontmatter followed by Markdown body:
@@ -125,25 +140,6 @@ asks Claude to file a PR per bug with reproduction steps and a
 pointer to the relevant capture (under
 `pm/qa/captures/regression/...`); the actual fix is left to a normal
 bug-fix PR session.
-
-### Authoring a regression test
-
-1. Scaffold with `pm qa add-regression <name>` (drops into `$EDITOR`)
-   or `pm qa author-regression <name>` for a guided Claude session.
-2. Lead the body with the tester's role and goal — what behavior the
-   test exercises, and from whose perspective.
-3. Bring up the surface explicitly: spawn the pane, start the server,
-   invoke the CLI, etc. Do not assume any environment beyond a clean
-   ephemeral workspace. If the setup is shared across tests, factor
-   it into a `pm/qa/instructions/` recipe and reference that instead.
-4. Drive the surface using whatever primitives suit it — `tmux
-   send-keys`, HTTP requests, direct CLI invocation, language-specific
-   harnesses, etc.
-5. End with a reporting section describing what Claude should output
-   — typically a structured pass/fail per sub-scenario plus any
-   observations.
-6. Iterate by running the test and reading the report; refine the
-   prompt until reports are crisp and accurate.
 
 A minimal example:
 
