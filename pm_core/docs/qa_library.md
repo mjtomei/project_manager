@@ -247,13 +247,6 @@ PR-scoped captures group runs by phase (`impl/pre-fix`, `impl/post-fix`,
 layout because regression tests aren't bound to a PR and may run
 repeatedly over time; the timestamp keeps a history.
 
-### Version control for regression captures
-
-Regression captures are checked into git so behavior diffs are
-visible across runs. Large files may eventually need a different
-storage strategy (e.g. `git-lfs`); for now, treat that as future
-work and just commit.
-
 When a phase needs more than one capture (two distinct pre-fix
 demonstrations, multiple captures within one scenario), give each its
 own named subdirectory under the phase, e.g.
