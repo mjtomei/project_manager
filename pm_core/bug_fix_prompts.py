@@ -32,13 +32,15 @@ pre-fix capture, failing test, fix, post-fix capture), reuse them and
 skip that step. Re-do work only when this session's changes make the
 prior artifact stale.
 
-1. **Manual repro on pre-fix code** — If `pm/qa/captures/{seg}/impl/pre-fix/`
-   already has a valid capture, reuse it. Otherwise, reproduce by hand
-   against pre-fix code: stash uncommitted changes, or if the fix is
+1. **Manual repro on pre-fix code** — If
+   `pm/qa/captures/{seg}/impl/pre-fix/` already has a valid capture,
+   reuse it and skip the rest of this step; you don't need to
+   reproduce again. Otherwise, produce one: reproduce the bug by hand
+   against pre-fix code (stash uncommitted changes, or if the fix is
    already committed, check out the parent commit or revert fix files
-   temporarily, capture, then restore. A repro is a concrete sequence
-   of steps. If reproduction doesn't work, check in with the user
-   before continuing.
+   temporarily, capture, then restore). A repro is a concrete
+   sequence of steps. If reproduction doesn't work, check in with the
+   user before continuing.
    - `pm/qa/instructions/` may have env-setup recipes worth checking.
    - Use a recipe from `pm/qa/artifacts/` to capture; save under
      `pm/qa/captures/{seg}/impl/pre-fix/`. If the phase needs more
@@ -56,10 +58,11 @@ prior artifact stale.
    for regressions.
 
 5. **Verify manually** — Re-run the step-1 repro against post-fix
-   code and confirm the symptom is gone. If this session changed the
-   fix, capture the new post-fix behavior under
-   `pm/qa/captures/{seg}/impl/post-fix/`; if the fix is unchanged,
-   the existing post-fix capture is still valid.
+   code and confirm the symptom is gone. Capture the post-fix
+   behavior under `pm/qa/captures/{seg}/impl/post-fix/` if no valid
+   capture is there yet, or if this session changed the fix. If a
+   valid post-fix capture is already there and the fix is unchanged,
+   reuse it.
 """
 
 
