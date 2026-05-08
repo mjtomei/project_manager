@@ -65,7 +65,7 @@ def qa_show(instruction_id: str, category: str | None):
     item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
-        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        click.echo(f"QA item not found: {instruction_id}", err=True)
         raise SystemExit(1)
 
     click.echo(f"# {item['title']}")
@@ -243,7 +243,7 @@ def qa_edit(instruction_id: str, category: str | None):
     item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
-        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        click.echo(f"QA item not found: {instruction_id}", err=True)
         raise SystemExit(1)
 
     editor = os.environ.get("EDITOR", "vim")

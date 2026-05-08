@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-23d97f8
+  active_pr: pr-3d1055c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -7032,7 +7032,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-05T17:35:32.693345+00:00'
+  updated_at: '2026-05-08T19:44:20.547485+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
@@ -7047,6 +7047,20 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:34Z'
     last_edited: '2026-04-24T17:09:34Z'
+  - id: note-436c808
+    text: When implementing FakeClaudeSession, also establish a real, code-level mock
+      library — somewhere like pm_core/testing/ — and house FakeClaudeSession there
+      as the first inhabitant. The library should share pieces of code (Python classes,
+      fixtures, fakes) that scenarios import, not pieces of prose pasted into prompts.
+      The existing pm/qa/mocks/ markdown library is the wrong abstraction (zero adoption,
+      unverifiable contracts that scenarios re-implement from prose); plan to retire
+      it as part of this work, including the qa_loop MOCKS-field plumbing and the
+      pm qa mocks CLI group. The pm qa mocks commands should be re-pointed at (or
+      replaced by) tooling that lists/inspects code-level mocks in the new library
+      — e.g. discoverable fixtures or a registry — so the CLI surface keeps making
+      sense after the markdown library is gone.
+    created_at: '2026-05-08T19:44:20Z'
+    last_edited: '2026-05-08T19:44:20Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
@@ -13139,7 +13153,7 @@ prs:
   spec_impl: /workspace/pm/specs/pr-177dec0/impl.md
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b423bfd-bug-picker-spinner-shows-review-loop-e802a472
 - id: pr-6be8ee6
-  plan: improvements
+  plan: plan-regression
   title: 'Bug-fix flow: surface TUI QA repro instructions in session prompt'
   branch: pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-
   status: in_review
@@ -13178,7 +13192,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/190
   gh_pr_number: 190
   created_at: '2026-05-04T12:22:33.932646+00:00'
-  updated_at: '2026-05-04T16:00:20.045289+00:00'
+  updated_at: '2026-05-08T23:01:57.735826+00:00'
   started_at: '2026-05-04T14:15:15.348715+00:00'
   reviewed_at: '2026-05-04T16:00:20.045289+00:00'
   merged_at: null
@@ -13193,6 +13207,141 @@ prs:
       evidence.'
     created_at: '2026-05-05T12:42:08Z'
     last_edited: '2026-05-05T12:42:08Z'
+  - id: note-fd27d87
+    text: 'QA notes for things added beyond the original description:
+
+
+      ## CLI surface changes
+
+
+      - New: `pm qa add-instruction|add-regression|add-artifact <name>` (scaffold
+      + $EDITOR), `pm qa author-instruction|author-regression|author-artifact <name>`
+      (Claude-driven), `pm qa docs` (prints the packaged reference doc).
+
+      - Removed: `pm qa add` (replaced by the three add-* commands). Also removed:
+      `pm tui test --fix-bugs` flag (regression tests are read-only-ish; fixes belong
+      in a bug-fix PR session).
+
+      - Extended: `pm qa list / show / edit` now cover the new artifacts category
+      alongside instructions and regression.
+
+      - Behavior change: `pm tui test --file-bugs` now files BOTH bugs (`--plan bugs`)
+      and improvements (`--plan ux`), not just bugs. The flag name is unchanged for
+      now but the addendum is unified.
+
+
+      ## TUI changes
+
+
+      - The QA pane (`q` key) renders a third section "Artifact Recipes" sourced from
+      pm/qa/artifacts/. Status-bar counter includes artifacts.
+
+      - The `a` key in the QA pane no longer hardcodes `pm qa add-instruction new-instruction`.
+      It now opens a small modal picker (QACreatePickerScreen) asking for name + kind
+      (instruction/regression/artifact) + mode (guided author-* vs scaffold add-*).
+
+      - TUI Enter on a regression item still launches via `launch_qa_item` but now
+      goes through `build_regression_test_prompt`; behavior should match prior runs
+      except that the filing addendum is the unified one.
+
+
+      ## New on-disk surfaces
+
+
+      - `pm/qa/artifacts/` — new directory category. Two recipes ship: `tmux-screen-recording.md`,
+      `cli-recording.md`.
+
+      - `pm/qa/captures/<pr-id>/impl/{pre-fix,post-fix}/` and `pm/qa/captures/<pr-id>/scenarios/<n>/`
+      — capture layout consumed by the bug-fix flow and QA scenario prompts.
+
+      - `pm/qa/captures/regression/<test-id>/<timestamp>/` — capture layout for regression
+      tests (no PR scope).
+
+      - `pm_core/docs/qa_library.md` — packaged reference doc shipped via setuptools.package-data;
+      readable by `pm qa docs` regardless of the project pm is run against.
+
+
+      ## Bug-fix flow prompt: behavior changes
+
+
+      - Restructured from 3 steps to 5: manual repro on pre-fix → failing test → fix
+      → verify with test → verify manually. Steps now reuse prior-session artifacts
+      when valid, skip re-implementing fixes that are already committed, and only
+      produce a fresh post-fix capture when this session changed the fix.
+
+      - Step 1 now handles already-committed fixes: stash uncommitted, or checkout
+      parent / revert files temporarily for committed fixes.
+
+      - Bug-fix review checklist now flags missing captures as INPUT_REQUIRED (not
+      NEEDS_WORK) to avoid infinite review loops.
+
+
+      ## Forward-looking docs
+
+
+      - Regression tests section in `pm_core/docs/qa_library.md` carries a `> [!CAUTION]`
+      callout flagging that the section describes post-pr-7d5d036 behavior. Until
+      that PR lands, the runner still hardcodes "testing against pm tmux session".
+      A note on pr-7d5d036 reminds the implementer to drop the callout when their
+      fix lands.
+
+      - Containment model for the runner rewrite is pinned in pr-7d5d036 (note-a870561):
+      captures and bug PRs leak to master; everything else stays in the ephemeral
+      env.
+
+
+      ## Cross-PR notes filed
+
+
+      - pr-7d5d036: bug PR for runner isolation (containment model spec; doc-callout-removal
+      reminder).
+
+      - pr-f4dc8a2: QA library auditor feature (depends on this PR + pr-7d5d036).
+
+      - pr-abcf70f (FakeClaudeSession, in_review): note urging that PR to establish
+      a real code-level mock library and retire `pm/qa/mocks/` markdown contracts
+      + the `pm qa mocks` CLI group.
+
+
+      ## Captures committed in this PR
+
+
+      - `pm/qa/captures/pr-6be8ee6/impl/tui-walkthrough/` and `…/tui-walkthrough-v3/`
+      are real captures of dogfooding the artifact recipes against a throwaway pm
+      test project. v3 is a real asciinema .cast file produced via the no-TTY workaround
+      documented in `tmux-screen-recording.md`. Worth a manual eyeball to confirm
+      the manifest format and replay the cast.
+
+
+      ## Things to watch for in QA
+
+
+      - Frontmatter schema enforcement: doc declares `title` and `description` required;
+      `tags` is not used and was removed from the schema. Loader still tolerates missing
+      values (no validation step in this PR) — manifest behavior should still resolve,
+      but worth confirming nothing surfaces a stack trace on a frontmatter-less file.
+
+      - The packaged doc must be present after `pip install`. `pyproject.toml` lists
+      `pm_core/docs/*.md` under `[tool.setuptools.package-data]`. Worth a sanity install
+      + `pm qa docs` to confirm.
+
+      - `_pr_path_segment`-style resolution against gh_pr_number was tried and reverted;
+      captures dir uses the local pr id only. project.yaml propagation issues that
+      motivated the revert may still surface.'
+    created_at: '2026-05-08T20:29:05Z'
+    last_edited: '2026-05-08T20:29:05Z'
+  - id: note-570224d
+    text: 'Removed the old bug-fix Reconcile step (confirmed-overlap / noticed-overlap
+      notes) intentionally. Audit found the discovery supervisor prompt (generate_discovery_supervisor_prompt)
+      never instructed the watcher to file notes in that format — its step 5 just
+      says "merge useful detail with pm pr note" in generic prose. So the Reconcile
+      step was reading a note shape nothing was guaranteed to produce. Dedup falls
+      out naturally from the new step 1 (manual repro on pre-fix code): if the bug
+      is already fixed upstream, the session fails to reproduce and checks in with
+      the user, which surfaces the duplicate. Note-based reconciliation was a fragile
+      substitute for that.'
+    created_at: '2026-05-08T23:01:57Z'
+    last_edited: '2026-05-08T23:01:57Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-in-e802a472
 - id: pr-cfe24ea
   plan: improvements
@@ -15646,6 +15795,181 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-05T17:36:02.098878+00:00'
   updated_at: '2026-05-05T17:36:02.098878+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7d5d036
+  plan: plan-regression
+  title: 'Bug: pm tui test hardcodes "testing against the pm tmux session" — wrong
+    for containers and for non-pm targets'
+  branch: pm/pr-7d5d036-bug-pm-tui-test-hardcodes-testing-against-the-pm-t
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\n`pm tui test <id>` always prepends a Session Context\
+    \ that says:\n\n    You are testing against tmux session: <pm-session>\n\n   \
+    \ To interact with this session, use commands like:\n    - pm tui view -s <pm-session>\n\
+    \    - pm tui send <keys> -s <pm-session>\n    - tmux list-panes -t <pm-session>\
+    \ ...\n    - cat ~/.pm/pane-registry/<pm-session>.json\n\nThat framing assumes\
+    \ (a) every regression test drives a tmux session,\nand (b) that session is the\
+    \ user's running pm session.\n\nBoth assumptions are wrong:\n\n- A regression\
+    \ test running inside a container has no tmux session\n  to target (there isn't\
+    \ one in the container).\n- Even outside a container, pointing the test at the\
+    \ user's main pm\n  session is the wrong default — it pollutes the user's actual\
+    \ work\n  state, can race with whatever the user is doing, and isn't isolated\n\
+    \  from one test run to the next.\n\n## Diagnosis\n\n`pm_core/cli/tui.py:574-583`\
+    \ builds `full_prompt` with the session\nname interpolated as a hard \"you are\
+    \ testing against this session\"\npreamble, plus pm-flavored helpers. `pm_core/cli/helpers.py:_find_tui_pane`\n\
+    also forces the runner to bail out if the user doesn't have a pm\nsession up.\n\
+    \n## Proposed direction\n\nRegression tests should be like QA scenarios: run in\
+    \ their own\nephemeral environment (container or scratch dir) and let the test\n\
+    body set up whatever surface it needs.\n\nConcretely:\n- Drop the hardcoded \"\
+    testing against tmux session: X\" preamble.\n- Remove the requirement that a pm\
+    \ session is running. The test runs\n  wherever the runner is invoked.\n- If a\
+    \ test wants to drive a tmux session, it spins one up itself in\n  its body (or\
+    \ via an `INSTRUCTION:` reference). Same for any other\n  surface — server, CLI,\
+    \ web app.\n- Keep `pm tui send` / `pm tui view` available as helpers for tests\n\
+    \  that DO want to drive a pm TUI, but don't bake them into the\n  Session Context\
+    \ for every test.\n\n## Out of scope\n\n- Changing the QA scenario runner.\n-\
+    \ Adding new driving primitives."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-08T00:33:33.593694+00:00'
+  updated_at: '2026-05-08T20:14:09.773947+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-7f64d92
+    text: When this PR lands, remove the `> [!CAUTION]` forward-looking note at the
+      top of the "Regression tests" section in pm_core/docs/qa_library.md (added by
+      pr-6be8ee6). The body text in that section is already written for the post-fix
+      behavior; the callout is the only thing acknowledging the gap.
+    created_at: '2026-05-08T19:51:43Z'
+    last_edited: '2026-05-08T19:51:43Z'
+  - id: note-a870561
+    text: 'Containment model — intentional vs leakage:
+
+
+      INTENDED OUTPUTS (these still propagate out of the run, even with isolation):
+
+      1. Bug PRs from --file-bugs write directly to the user''s pm/project.yaml on
+      master via `pm pr add`. This is the cheapest path for the user (PR shows up
+      in their list immediately) and the regression runner is trusted to file accurately.
+
+      2. Captures under pm/qa/captures/regression/<test-id>/<timestamp>/ are committed
+      to git on master alongside the run that produced them. This is what makes behavior
+      diffs across runs work; without it, the captures never get reviewed.
+
+      3. The run report (stdout). Same as today.
+
+
+      CONTAINED (must NOT leak from the ephemeral env):
+
+      4. Anything Claude does to the project working tree outside pm/qa/captures/regression/...
+      or pm/project.yaml — file edits, commits, branches, stashes, pushes.
+
+      5. Spawned processes (servers, daemons, watchers). Reap on run end.
+
+      6. Filesystem writes outside the ephemeral env''s scratch space.
+
+      7. Tmux state — any pane/window the test creates is in the ephemeral env, vanishes
+      at end. The user''s live pm session is never touched.
+
+
+      Network: out of scope to block by default. Tests that hit real services do real
+      calls. Optional --no-network for tests that want to assert offline behavior
+      is a nice-to-have, not a blocker.
+
+
+      These boundaries should be implemented at the runner level (sandbox the working
+      tree to captures + project.yaml; ephemeral container or scratch dir for everything
+      else) rather than asked of the test prompt.'
+    created_at: '2026-05-08T20:14:09Z'
+    last_edited: '2026-05-08T20:14:09Z'
+- id: pr-f4dc8a2
+  plan: plan-regression
+  title: 'QA library auditor: scan a project and suggest fills for missing instructions,
+    regression tests, artifact recipes, and mocks'
+  branch: pm/pr-f4dc8a2-qa-library-auditor-scan-a-project-and-suggest-fill
+  status: pending
+  depends_on:
+  - pr-6be8ee6
+  - pr-7d5d036
+  description: "## Goal\n\nAdd a high-level flow that analyzes a project and suggests\
+    \ (or\nscaffolds) fills for gaps in its QA library — `pm/qa/instructions/`,\n\
+    `pm/qa/regression/`, `pm/qa/artifacts/`, and `pm/qa/mocks/` — based on\nwhat the\
+    \ codebase actually exposes.\n\nToday, authoring is per-file and entirely on the\
+    \ human: `pm qa\nadd-instruction`, `pm qa author-artifact`, etc. Projects with\
+    \ no QA\ncollaterals get nothing for free; even projects with some have no way\n\
+    to know which obvious surfaces are uncovered.\n\n## Proposed shape\n\n`pm qa audit`\
+    \ (or similar) launches a Claude session that:\n\n1. Inspects the project — surfaces\
+    \ (CLIs, TUIs, services), entry\n   points, dependency graph, existing `pm/qa/*`\
+    \ files.\n2. Builds a coverage map: for each visible surface, which categories\n\
+    \   of QA collateral exist and which are missing (e.g. \"the\n   `pm session`\
+    \ flow has no env-setup instruction; the auth flow has\n   no mock contract for\
+    \ the IdP it talks to\").\n3. Reports the gaps to the user, ranked by surface\
+    \ importance / change\n   frequency / blast radius.\n4. For each gap the user\
+    \ accepts, either scaffolds a stub via the\n   existing `pm qa add-*` / `mocks\
+    \ add` commands, or launches the\n   guided `pm qa author-*` flow to draft the\
+    \ file with the user.\n\n## Out of scope\n\n- Running the suggested tests/scenarios\
+    \ — this is purely about\n  filling library gaps.\n- Merging or modifying mocks\
+    \ against actual fakes/stubs in the\n  codebase. The mock file is the contract;\
+    \ implementations stay the\n  scenario's job.\n- Replacing per-category authoring;\
+    \ this composes the existing CLI\n  rather than supplanting it.\n\n## Notes\n\n\
+    - Belongs after pr-7d5d036 lands (regression-runner isolation), so\n  any audit-suggested\
+    \ regression test inherits the new isolation\n  semantics by default.\n- The audit\
+    \ prompt should load `pm_core/docs/qa_library.md` so the\n  Claude session has\
+    \ the same ground truth as the per-category\n  author flows."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-08T17:14:58.761363+00:00'
+  updated_at: '2026-05-08T19:03:14.282100+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3d1055c
+  plan: bugs
+  title: 'Bug: watcher prompts say --plan ux but the project plan is named "improvements"'
+  branch: pm/pr-3d1055c-bug-watcher-prompts-say-plan-ux-but-the-project-pl
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\nSeveral merged watcher prompts in pm_core/prompt_gen.py\
+    \ instruct\nsessions to file improvement PRs with `--plan ux` and to query\nexisting\
+    \ PRs with `pm pr list --plan ux`. But the actual project plan\nin pm/project.yaml\
+    \ is named `improvements`, not `ux`. Today the\nproject has 37 PRs in `improvements`\
+    \ and 0 in `ux`.\n\nConcrete spots (line numbers as of this PR's branch):\n- pm_core/prompt_gen.py:790\
+    \ — \"bugs.md and improvements.md\" file\n  names, but…\n- pm_core/prompt_gen.py:848\
+    \ — \"the bugs and ux plans\"\n- pm_core/prompt_gen.py:946-950 — \"any new PRs\
+    \ in the bugs and ux\n  plans\" / \"pm pr list --plan ux\"\n- pm_core/prompt_gen.py:1158\
+    \ — \"Picks a candidate from plan=ux\"\n  (improvement-fix watcher)\n- pm_core/prompt_gen.py:1188-1223\
+    \ — full prompt body referring to\n  the `ux` plan\n- pm_core/prompt_gen.py:1861\
+    \ — \"open PRs in the bugs / ux plans\"\n- pm_core/prompt_gen.py:1880 / 1905 —\
+    \ `pm pr list --plan ux`\n- pm_core/watchers/improvement_fix_impl_watcher.py:3,\
+    \ 23 —\n  docstrings say \"UX-plan\" / \"plan=ux\"\n\n## Impact\n\nAny session\
+    \ driven by these prompts files improvement PRs with\n`plan: ux`. `pm pr add --plan\
+    \ ux` doesn't validate plan existence,\nso the PR is created with a stale plan\
+    \ name and the\nimprovement-fix-implementation watcher (which targets `plan=ux`\n\
+    per its docstring) never picks anything up. Pipeline silently\nbroken for improvement\
+    \ filings via these surfaces.\n\n## Suspected origin\n\nThe plan was likely renamed\
+    \ from `ux` to `improvements` after the\nmerged watcher PRs (pr-d39a7fb, pr-271cb3a,\
+    \ pr-47940bc) landed. The\nprompts and watcher target plan name didn't get updated.\n\
+    \n## Proposed fix\n\nMechanical search-and-replace of `ux` → `improvements` in\
+    \ the listed\nsites in pm_core/prompt_gen.py and pm_core/watchers/improvement_fix_impl_watcher.py.\n\
+    Verify the watcher's actual filter logic targets `plan == 'improvements'`\nafter\
+    \ the change. No new code structure needed.\n\n## Notes\n\n- pr-6be8ee6 already\
+    \ uses `--plan improvements` in its new\n  regression-prompt addendum; this bug\
+    \ only applies to the older\n  watcher infrastructure.\n- Also worth checking\
+    \ `bugs.md` / `improvements.md` filenames in\n  meta-watcher dirs match what's\
+    \ expected."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-08T20:50:25.310435+00:00'
+  updated_at: '2026-05-08T20:50:25.310435+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
