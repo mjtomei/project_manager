@@ -1,7 +1,6 @@
 ---
 title: tmux Screen Recording
 description: Capture a tmux pane transcript and an asciinema replay
-tags: [artifact, tmux, recording]
 ---
 
 ## When to use

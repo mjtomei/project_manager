@@ -1,7 +1,6 @@
 ---
 title: CLI Recording
 description: Capture an asciinema replay of one or more CLI commands
-tags: [artifact, cli, recording]
 ---
 
 ## When to use
