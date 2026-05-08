@@ -482,9 +482,8 @@ def tui_clear_frames(session: str | None):
 @click.option("--list", "list_tests_flag", is_flag=True, help="List available tests")
 @click.option("--session", "-s", default=None, help="Specify pm session name")
 @click.option("--file-bugs", is_flag=True, default=False, help="Create PRs for any bugs found")
-@click.option("--fix-bugs", is_flag=True, default=False, help="Fix bugs found during testing")
 def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
-             file_bugs: bool, fix_bugs: bool):
+             file_bugs: bool):
     """Run TUI regression tests using Claude as the test executor.
 
     Tests are stored as QA instruction files in pm/qa/regression/.
@@ -535,38 +534,26 @@ def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
         click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
         raise SystemExit(1)
 
-    # Build bug-handling addendum
+    # Build bug-filing addendum
     bug_addendum = ""
     if file_bugs:
         bug_addendum = """
 
 ## Bug Filing
 
-After completing all test scenarios, if you found ANY bugs or unexpected behavior:
+After completing all test scenarios, file a PR for each bug or
+unexpected behavior you observed (do **not** attempt to fix them
+here — regression tests should remain non-mutating):
 
-1. For each bug, create a PR entry using: `pm pr add --title "<short bug title>" --description "<what's wrong and how to reproduce>" --plan plan-001`
-2. Use clear, actionable titles like "Fix zoom not applied after rebalance in mobile mode"
-3. Include reproduction steps in the description
-4. After creating all bug PRs, list them in your report under a "Filed PRs" section
-5. If no bugs were found, note "No bugs found, no PRs filed"
-"""
-    elif fix_bugs:
-        bug_addendum = """
-
-## Bug Fixing
-
-After completing all test scenarios, if you found ANY bugs or unexpected behavior:
-
-1. First, complete your full test report as described above
-2. Then, for each bug you found, fix it:
-   a. Identify the source file and the root cause
-   b. Edit the file to fix the bug
-   c. Re-run the relevant test scenario to verify the fix
-   d. Note what you changed in a "Fixes Applied" section of your report
-3. Work through bugs one at a time, verifying each fix before moving to the next
-4. If a fix is unclear or risky, skip it and note why
-5. After all fixes, run `python3 -m pytest tests/ -x -q` to check for regressions
-6. If no bugs were found, note "No bugs found, no fixes needed"
+1. Create a PR with `pm pr add --title "<short bug title>" --description "<what's wrong; concrete reproduction steps>" --plan bugs`.
+2. The description must include concrete reproduction steps that a
+   future session can follow. If a capture from this run demonstrates
+   the bug, add a pointer to it (path under
+   `pm/qa/captures/regression/...`) in the description.
+3. Use clear, actionable titles.
+4. After filing, list the new PRs in your report under a "Filed PRs"
+   section.
+5. If no bugs were found, note "No bugs found, no PRs filed".
 """
 
     # Add session context to the prompt

@@ -90,8 +90,14 @@ the end.
 pm tui test --list                # list available tests
 pm tui test <id>                  # run one
 pm tui test <id> --file-bugs      # run + open bug PRs for any failures
-pm tui test <id> --fix-bugs       # run + attempt fixes for any failures
 ```
+
+Regression tests are read-only by design — they observe and report,
+they don't mutate the project. When `--file-bugs` is set the runner
+asks Claude to file a PR per bug with reproduction steps and a
+pointer to the relevant capture (under
+`pm/qa/captures/regression/...`); the actual fix is left to a normal
+bug-fix PR session.
 
 ### Authoring a regression test
 
@@ -162,6 +168,27 @@ PR-scoped captures group runs by phase (`impl/pre-fix`, `impl/post-fix`,
 `scenarios/<n>`). Regression captures use a `<test-id>/<run-timestamp>/`
 layout because regression tests aren't bound to a PR and may run
 repeatedly over time; the timestamp keeps a history.
+
+### Version control for regression captures
+
+Regression captures are checked into git the same way recipes are.
+Their value compounds over time: comparing a fresh capture against
+the previous one is the easiest way to spot a behavior change. Some
+guidance:
+
+- Commit each new run as part of the change that produced it (a fix
+  PR, a refactor, etc.) so reviewers can diff the behavioral effect
+  alongside the code diff.
+- Keep at least the most recent passing run for each test; trim
+  older runs as they become noise. Don't squash everything into a
+  single "latest" directory — losing the timestamped history
+  defeats the diff workflow.
+- For large recordings (long sessions, video output), consider
+  `git-lfs` or a `.gitattributes` rule. Plain-text transcripts
+  diff well in regular git and are usually the cheaper bar.
+- A regression test that produces capture diffs across runs is the
+  signal you want; investigating those diffs is a normal part of
+  triaging a failing run.
 
 When a phase needs more than one capture (two distinct pre-fix
 demonstrations, multiple captures within one scenario), give each its
