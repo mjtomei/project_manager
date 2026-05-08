@@ -6,23 +6,31 @@ prompts instead of inline in `pm_core/cli/tui.py`.
 """
 
 
-_BUG_FILING_ADDENDUM = """
+_FILING_ADDENDUM = """
 
-## Bug Filing
+## Filing Findings
 
-After completing all test scenarios, file a PR for each bug or
-unexpected behavior you observed (do **not** attempt to fix them
-here — fixes belong in a separate bug-fix PR session):
+After completing all test scenarios, file a PR for each issue you
+observed (do **not** attempt to fix them here — fixes belong in a
+separate PR session):
 
-1. Create a PR with `pm pr add --title "<short bug title>" --description "<what's wrong; concrete reproduction steps>" --plan bugs`.
-2. The description must include concrete reproduction steps that a
-   future session can follow. If a capture from this run demonstrates
-   the bug, add a pointer to it (path under
-   `pm/qa/captures/regression/...`) in the description.
-3. Use clear, actionable titles.
-4. After filing, list the new PRs in your report under a "Filed PRs"
-   section.
-5. If no bugs were found, note "No bugs found, no PRs filed".
+- **Bug** (failing assertion, incorrect behavior, regression):
+  ```
+  pm pr add '<short imperative title>' --plan bugs \\
+    --description '<location, repro, expected vs actual; if a capture under pm/qa/captures/regression/... demonstrates it, point at the path>'
+  ```
+- **Improvement** (UX/quality issue surfaced incidentally — not a bug,
+  but something that would make the product better):
+  ```
+  pm pr add '<short imperative title>' --plan ux \\
+    --description '<what you noticed and why it matters>'
+  ```
+
+Skim `pm pr list --plan bugs` (or `--plan ux`) before filing to avoid
+duplicates. After filing, list the new PRs in your report under a
+"Filed PRs" section. If nothing was found, note "No findings filed".
+Filing is a side effect — your verdict for this regression test must
+still reflect only the test's own pass/fail state.
 """
 
 
@@ -32,7 +40,7 @@ def build_regression_test_prompt(
     pane_id: str | None,
     title: str,
     body: str,
-    file_bugs: bool,
+    file_findings: bool,
 ) -> str:
     """Assemble the full prompt the regression runner hands to Claude.
 
@@ -40,10 +48,11 @@ def build_regression_test_prompt(
       - Session Context (which tmux session/pane to drive and how)
       - Captures (where to save artifacts and to commit them)
       - The test body itself (a free-form Claude prompt)
-      - Optional Bug Filing addendum when ``file_bugs`` is set
+      - Optional Filing Findings addendum when ``file_findings`` is set
+        (covers both bugs and improvements)
     """
     pane_line = f"\nThe TUI pane ID is: {pane_id}" if pane_id else ""
-    bug_addendum = _BUG_FILING_ADDENDUM if file_bugs else ""
+    addendum = _FILING_ADDENDUM if file_findings else ""
     return f"""\
 ## Session Context
 
@@ -63,5 +72,5 @@ and be committed to git so future runs can diff against this one.
 ## QA Regression Test: {title}
 
 {body}
-{bug_addendum}
+{addendum}
 """

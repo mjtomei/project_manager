@@ -3,13 +3,13 @@
 from pm_core.regression_prompts import build_regression_test_prompt
 
 
-def test_basic_assembly_no_file_bugs():
+def test_basic_assembly_no_findings():
     out = build_regression_test_prompt(
         session="pm-test-abc",
         pane_id="%5",
         title="TUI startup smoke",
         body="check that the TUI renders.",
-        file_bugs=False,
+        file_findings=False,
     )
     # Session Context block carries the session and pane id.
     assert "## Session Context" in out
@@ -21,26 +21,29 @@ def test_basic_assembly_no_file_bugs():
     # Test body interpolated.
     assert "## QA Regression Test: TUI startup smoke" in out
     assert "check that the TUI renders." in out
-    # No bug-filing addendum without file_bugs.
-    assert "Bug Filing" not in out
+    # No findings addendum without file_findings.
+    assert "Filing Findings" not in out
 
 
-def test_file_bugs_adds_addendum():
+def test_file_findings_addendum_covers_bugs_and_improvements():
     out = build_regression_test_prompt(
         session="pm-test-abc",
         pane_id=None,
         title="t",
         body="b",
-        file_bugs=True,
+        file_findings=True,
     )
-    assert "## Bug Filing" in out
-    assert "pm pr add" in out
+    assert "## Filing Findings" in out
+    # Bug filing path.
     assert "--plan bugs" in out
-    # Pointer to capture, not just commands.
+    # Improvement filing path.
+    assert "--plan ux" in out
+    # Pointer to capture is part of the bug guidance.
     assert "pm/qa/captures/regression/" in out
     # The "no fixes here" prohibition is preserved.
     assert "do **not** attempt to fix them" in out
-    assert "fixes belong in a separate bug-fix PR session" in out
+    # Verdict-vs-filing separation kept.
+    assert "your verdict for this regression test must" in out
 
 
 def test_no_pane_omits_pane_line():
@@ -49,6 +52,6 @@ def test_no_pane_omits_pane_line():
         pane_id=None,
         title="t",
         body="b",
-        file_bugs=False,
+        file_findings=False,
     )
     assert "The TUI pane ID is" not in out

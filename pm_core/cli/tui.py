@@ -540,7 +540,7 @@ def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
         pane_id=pane_id,
         title=title,
         body=prompt,
-        file_bugs=file_bugs,
+        file_findings=file_bugs,
     )
 
     click.echo(f"Running test: {title}")
