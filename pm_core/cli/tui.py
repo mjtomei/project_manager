@@ -534,51 +534,14 @@ def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
         click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
         raise SystemExit(1)
 
-    # Build bug-filing addendum
-    bug_addendum = ""
-    if file_bugs:
-        bug_addendum = """
-
-## Bug Filing
-
-After completing all test scenarios, file a PR for each bug or
-unexpected behavior you observed (do **not** attempt to fix them
-here — fixes belong in a separate bug-fix PR session):
-
-1. Create a PR with `pm pr add --title "<short bug title>" --description "<what's wrong; concrete reproduction steps>" --plan bugs`.
-2. The description must include concrete reproduction steps that a
-   future session can follow. If a capture from this run demonstrates
-   the bug, add a pointer to it (path under
-   `pm/qa/captures/regression/...`) in the description.
-3. Use clear, actionable titles.
-4. After filing, list the new PRs in your report under a "Filed PRs"
-   section.
-5. If no bugs were found, note "No bugs found, no PRs filed".
-"""
-
-    # Add session context to the prompt
-    pane_line = f"\nThe TUI pane ID is: {pane_id}" if pane_id else ""
-    full_prompt = f"""\
-## Session Context
-
-You are testing against tmux session: {sess}{pane_line}
-
-To interact with this session, use commands like:
-- pm tui view -s {sess}
-- pm tui send <keys> -s {sess}
-- tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm/pane-registry/{sess}.json
-
-## Captures
-
-Any capture you produce should land under `pm/qa/captures/regression/<test-id>/<timestamp>/`
-and be committed to git so future runs can diff against this one.
-
-## QA Regression Test: {title}
-
-{prompt}
-{bug_addendum}
-"""
+    from pm_core.regression_prompts import build_regression_test_prompt
+    full_prompt = build_regression_test_prompt(
+        session=sess,
+        pane_id=pane_id,
+        title=title,
+        body=prompt,
+        file_bugs=file_bugs,
+    )
 
     click.echo(f"Running test: {title}")
     click.echo(f"Session: {sess}")
