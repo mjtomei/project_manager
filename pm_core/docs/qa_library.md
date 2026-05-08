@@ -9,7 +9,7 @@ the TUI, and the CLI.
 | Directory | Purpose |
 |---|---|
 | `pm/qa/instructions/` | Reusable test-environment procedures — anything a QA scenario needs to set up before it can exercise the code (seed a database, start a dev server, prepare fixture data, log in a test user, etc.). Referenced by QA scenarios in their `INSTRUCTION:` field. |
-| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm tui test <id>`. Each file is a natural-language prompt; the runner launches Claude against a running `pm` tmux session to exercise it. |
+| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm tui test <id>`. Each file is a natural-language prompt; the runner launches Claude with the prompt to exercise an interactive surface and report back. |
 | `pm/qa/artifacts/`    | *Recipes for capturing concrete evidence of behavior* — recordings, logs, screenshots — that unambiguously confirm what happened. Captures are designed to be consumable by both humans (replay/read) and downstream agents (parse/diff). |
 | `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all scenarios use the same contracts for external dependencies. |
 
@@ -69,13 +69,17 @@ optionally appends a bug-filing or bug-fixing addendum, and launches
 Claude with the assembled prompt. Claude then exercises whatever the
 test prescribes and reports back.
 
-`pm tui test` requires an already-running `pm` tmux session, and the
-prepended context teaches Claude to use `pm tui view` and `pm tui send`
-to interact. That makes this category most natural for tests that
-exercise something inside that session — e.g. a TUI your project ships,
-a CLI flow run inside a pane, or any interactive surface reachable via
-tmux. If your project has no such surface, you can usually express
-your scenarios as plain `pm/qa/instructions/` recipes instead.
+The category fits any project that has an interactive surface to
+drive end-to-end. The body of the regression test should describe how
+to bring up the surface (or reference an instruction that does), how
+to drive it, and what to verify. If your project has no such surface,
+plain `pm/qa/instructions/` recipes typically cover the same ground.
+
+Note: as of this writing the `pm tui test` runner is hardwired to find
+a running `pm` tmux session and uses `pm tui view` / `pm tui send` as
+the driving primitives — practical only when the surface under test is
+inside the pm session itself. Generalizing the runner so projects can
+target their own contexts is tracked separately.
 
 ### Running
 
