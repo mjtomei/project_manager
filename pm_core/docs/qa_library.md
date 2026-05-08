@@ -75,13 +75,13 @@ to bring up the surface (or reference an instruction that does), how
 to drive it, and what to verify. If your project has no such surface,
 plain `pm/qa/instructions/` recipes typically cover the same ground.
 
-Note: the runner needs a running `pm` tmux session to attach to and
-prepends `pm tui view` / `pm tui send` as example primitives. Tests
-aren't restricted to driving the pm TUI, though — a test body can
-`tmux split-window` a pane, bring up the project's own surface there,
-and drive it with raw tmux primitives. Use the pm-flavored helpers
-when the surface is the pm TUI itself; reach for `tmux send-keys` and
-friends otherwise.
+Note: the current runner hardcodes "testing against the pm tmux
+session" into every prompt and bails out if no pm session is running
+— wrong both for tests that want their own ephemeral environment
+(e.g. inside a container) and for tests that shouldn't be polluting
+the user's live pm session. Tracked as pr-7d5d036; expect the runner
+to evolve toward the QA-scenario model (per-test isolation, no
+implicit target).
 
 ### Running
 
