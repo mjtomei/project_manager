@@ -10,38 +10,19 @@ _FILING_ADDENDUM = """
 
 ## Filing Findings
 
-After completing all test scenarios, file a PR for each issue you
-observed (do **not** attempt to fix them here — fixes belong in a
-separate PR session):
+For each issue you observed, file a PR — don't fix it here.
 
-- **Bug** (failing assertion, incorrect behavior, regression):
-  ```
-  pm pr add '<short imperative title>' --plan bugs \\
-    --description '<location, repro, expected vs actual>'
-  ```
-- **Improvement** (UX/quality issue surfaced incidentally — not a bug,
-  but something that would make the product better):
-  ```
-  pm pr add '<short imperative title>' --plan improvements \\
-    --description '<what you noticed and why it matters>'
-  ```
+- **Bug**: `pm pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'`
+- **Improvement**: `pm pr add '<title>' --plan improvements --description '<what you noticed and why>'`
 
-If a capture from this run under `pm/qa/captures/regression/...`
-demonstrates the finding, point at the path in the description —
-this applies to both bug and improvement filings.
+If a capture under `pm/qa/captures/regression/...` demonstrates the
+finding, point at the path in the description.
 
-Skim `pm pr list --plan bugs` (or `--plan improvements`) before
-filing to avoid duplicates. If you find an existing PR for the same
-issue, append a note to it instead of filing a new one — point at
-your capture there too:
-  ```
-  pm pr note add <existing-pr-id> '<short observation>; capture: pm/qa/captures/regression/<...>'
-  ```
-After filing, list the new PRs (and any notes you appended to
-existing PRs) in your report under a "Filed PRs" section. If nothing
-was found, note "No findings filed". Filing is a side effect — your
-verdict for this regression test must still reflect only the test's
-own pass/fail state.
+Skim `pm pr list --plan bugs` / `--plan improvements` first. If a PR
+for the same issue exists, append a note instead of filing a
+duplicate: `pm pr note add <pr-id> '<short observation>; capture: <path>'`.
+
+Filing is independent of your verdict for the test.
 """
 
 

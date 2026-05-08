@@ -38,15 +38,12 @@ def test_file_findings_addendum_covers_bugs_and_improvements():
     assert "--plan bugs" in out
     # Improvement filing path.
     assert "--plan improvements" in out
-    # Pointer-to-capture guidance applies to both kinds of finding.
+    # Pointer-to-capture guidance present.
     assert "pm/qa/captures/regression/" in out
-    assert "this applies to both bug and improvement filings" in out
-    # The "no fixes here" prohibition is preserved.
-    assert "do **not** attempt to fix them" in out
-    # Verdict-vs-filing separation kept (line-wrap tolerant).
-    import re
-    assert re.search(r"verdict\s+for\s+this", out)
-    assert re.search(r"the test's\s+own\s+pass/fail", out)
+    # No-fixes-here prohibition preserved.
+    assert "don't fix it here" in out
+    # Verdict-vs-filing separation kept.
+    assert "Filing is independent of your verdict" in out
 
 
 def test_no_pane_omits_pane_line():
