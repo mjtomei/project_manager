@@ -98,10 +98,9 @@ addendum, and launches Claude in an isolated environment to exercise
 whatever the test prescribes and report back.
 
 Each test runs in its own ephemeral environment, the same way QA
-scenarios do — no implicit dependency on the user's live `pm` session,
-nothing the test does affects unrelated state, and runs are
-reproducible across machines and containers. The test body is
-responsible for bringing up whatever surface it needs to exercise
+scenarios do — nothing the test does affects unrelated state, and
+runs are reproducible across machines and containers. The test body
+is responsible for bringing up whatever surface it needs to exercise
 (spawning a pane, starting a server, invoking a CLI, etc.) and for
 tearing down or simply letting the ephemeral environment vanish at
 the end.
