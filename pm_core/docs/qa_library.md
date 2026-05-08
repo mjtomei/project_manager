@@ -9,7 +9,7 @@ the TUI, and the CLI.
 | Directory | Purpose |
 |---|---|
 | `pm/qa/instructions/` | Reusable test-environment procedures — anything a QA scenario needs to set up before it can exercise the code (seed a database, start a dev server, prepare fixture data, log in a test user, etc.). Referenced by QA scenarios in their `INSTRUCTION:` field. |
-| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm tui test <id>`. Each file is a natural-language prompt; the runner launches Claude with the prompt to exercise the project end-to-end and report back. |
+| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm qa regression <id>`. Each file is a natural-language prompt; the runner launches Claude with the prompt to exercise the project end-to-end and report back. |
 | `pm/qa/artifacts/`    | Recipes for capturing concrete evidence of behavior — recordings, logs, screenshots — that unambiguously confirm what happened. |
 | `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all scenarios use the same contracts for external dependencies. |
 
@@ -126,9 +126,9 @@ the end.
 ### Running
 
 ```
-pm tui test --list                # list available tests
-pm tui test <id>                  # run one
-pm tui test <id> --file-bugs      # run + open bug PRs for any failures
+pm qa list                          # list available tests
+pm qa regression <id>               # run one
+pm qa regression <id> --file-bugs   # run + open PRs for any findings
 ```
 
 Regression tests don't fix bugs themselves and don't mutate the

@@ -1,4 +1,4 @@
-"""Prompts for the regression test runner (`pm tui test`).
+"""Prompts for the regression test runner (`pm qa regression`).
 
 Mirrors `bug_fix_prompts.py` / `qa_authoring.py` — pulls the prompt
 assembly out of the CLI surface so it lives next to the other session

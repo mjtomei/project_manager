@@ -22,7 +22,7 @@ _CATEGORY_BLURB = {
     ),
     "regression": (
         "A regression test is a Claude prompt under "
-        "pm/qa/regression/ run by pm tui test. The body is the "
+        "pm/qa/regression/ run by pm qa regression. The body is the "
         "prompt itself: the test brings up a surface, exercises it, "
         "and reports back."
     ),

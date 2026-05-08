@@ -250,6 +250,62 @@ def qa_edit(instruction_id: str, category: str | None):
     subprocess.run([editor, item["path"]])
 
 
+@qa.command("regression")
+@click.argument("test_id")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+@click.option("--file-bugs", is_flag=True, default=False,
+              help="File PRs (bugs and improvements) for any findings")
+def qa_regression(test_id: str, session: str | None, file_bugs: bool):
+    """Run a regression test from pm/qa/regression/.
+
+    Each test is a Claude prompt; the runner assembles a Session
+    Context, optional findings-filing addendum, and the test body, then
+    launches Claude to exercise the project and report back.
+
+    Use `pm qa list` to see available regression tests.
+    """
+    from pathlib import Path
+    from pm_core import qa_instructions
+    from pm_core.cli.helpers import _find_tui_pane
+    from pm_core.regression_prompts import build_regression_test_prompt
+    from pm_core.claude_launcher import launch_claude
+
+    try:
+        root = state_root()
+    except FileNotFoundError:
+        root = Path.home() / ".pm"
+
+    item = qa_instructions.get_instruction(root, test_id, category="regression")
+    if not item:
+        click.echo(f"Unknown regression test: {test_id}", err=True)
+        click.echo("Run 'pm qa list' to see available tests.")
+        raise SystemExit(1)
+
+    body = item.get("body", "")
+    title = item.get("title", test_id)
+
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
+        raise SystemExit(1)
+
+    full_prompt = build_regression_test_prompt(
+        session=sess,
+        pane_id=pane_id,
+        title=title,
+        body=body,
+        file_findings=file_bugs,
+    )
+
+    click.echo(f"Running regression: {title}")
+    click.echo(f"Session: {sess}")
+    click.echo("-" * 60)
+
+    rc = launch_claude(full_prompt, session_key=f"qa-regression:{test_id}",
+                       pm_root=root, cwd=None, resume=False)
+    raise SystemExit(rc)
+
+
 @qa.command("run")
 @click.argument("instruction_id")
 @click.option("--pr", "pr_id", default=None, help="PR to run QA against")
