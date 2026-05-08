@@ -31,11 +31,17 @@ demonstrates the finding, point at the path in the description —
 this applies to both bug and improvement filings.
 
 Skim `pm pr list --plan bugs` (or `--plan improvements`) before
-filing to avoid duplicates. After filing, list the new PRs in your
-report under a "Filed PRs" section. If nothing was found, note "No
-findings filed". Filing is a side effect — your verdict for this
-regression test must still reflect only the test's own pass/fail
-state.
+filing to avoid duplicates. If you find an existing PR for the same
+issue, append a note to it instead of filing a new one — point at
+your capture there too:
+  ```
+  pm pr note add <existing-pr-id> '<short observation>; capture: pm/qa/captures/regression/<...>'
+  ```
+After filing, list the new PRs (and any notes you appended to
+existing PRs) in your report under a "Filed PRs" section. If nothing
+was found, note "No findings filed". Filing is a side effect — your
+verdict for this regression test must still reflect only the test's
+own pass/fail state.
 """
 
 
