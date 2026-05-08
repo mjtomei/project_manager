@@ -17,20 +17,25 @@ separate PR session):
 - **Bug** (failing assertion, incorrect behavior, regression):
   ```
   pm pr add '<short imperative title>' --plan bugs \\
-    --description '<location, repro, expected vs actual; if a capture under pm/qa/captures/regression/... demonstrates it, point at the path>'
+    --description '<location, repro, expected vs actual>'
   ```
 - **Improvement** (UX/quality issue surfaced incidentally — not a bug,
   but something that would make the product better):
   ```
-  pm pr add '<short imperative title>' --plan ux \\
+  pm pr add '<short imperative title>' --plan improvements \\
     --description '<what you noticed and why it matters>'
   ```
 
-Skim `pm pr list --plan bugs` (or `--plan ux`) before filing to avoid
-duplicates. After filing, list the new PRs in your report under a
-"Filed PRs" section. If nothing was found, note "No findings filed".
-Filing is a side effect — your verdict for this regression test must
-still reflect only the test's own pass/fail state.
+If a capture from this run under `pm/qa/captures/regression/...`
+demonstrates the finding, point at the path in the description —
+this applies to both bug and improvement filings.
+
+Skim `pm pr list --plan bugs` (or `--plan improvements`) before
+filing to avoid duplicates. After filing, list the new PRs in your
+report under a "Filed PRs" section. If nothing was found, note "No
+findings filed". Filing is a side effect — your verdict for this
+regression test must still reflect only the test's own pass/fail
+state.
 """
 
 

@@ -135,8 +135,8 @@ Regression tests don't fix bugs themselves and don't mutate the
 project's source. The only writes that escape the ephemeral env are
 the captures committed under `pm/qa/captures/regression/...` and, when
 `--file-prs` is set, PRs filed via `pm pr add` for any findings (bugs
-go to `--plan bugs`, improvements to `--plan ux`). The actual fix is
-left to a normal bug-fix PR session.
+go to `--plan bugs`, improvements to `--plan improvements`). The
+actual fix is left to a normal bug-fix PR session.
 
 A minimal example:
 

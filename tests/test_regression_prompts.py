@@ -37,13 +37,15 @@ def test_file_findings_addendum_covers_bugs_and_improvements():
     # Bug filing path.
     assert "--plan bugs" in out
     # Improvement filing path.
-    assert "--plan ux" in out
-    # Pointer to capture is part of the bug guidance.
+    assert "--plan improvements" in out
+    # Pointer-to-capture guidance applies to both kinds of finding.
     assert "pm/qa/captures/regression/" in out
+    assert "this applies to both bug and improvement filings" in out
     # The "no fixes here" prohibition is preserved.
     assert "do **not** attempt to fix them" in out
-    # Verdict-vs-filing separation kept.
-    assert "your verdict for this regression test must" in out
+    # Verdict-vs-filing separation kept (allow line wrap).
+    assert "your verdict for this" in out
+    assert "regression test must still reflect only the test's own pass/fail" in out
 
 
 def test_no_pane_omits_pane_line():

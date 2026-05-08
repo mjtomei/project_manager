@@ -254,7 +254,7 @@ def qa_edit(instruction_id: str, category: str | None):
 @click.argument("test_id")
 @click.option("--session", "-s", default=None, help="Specify pm session name")
 @click.option("--file-prs", "file_prs", is_flag=True, default=False,
-              help="File PRs (bugs --plan bugs, improvements --plan ux) for any findings")
+              help="File PRs (--plan bugs, --plan improvements) for any findings")
 @click.option("--file-bugs", "file_prs", is_flag=True, default=False, hidden=True)
 def qa_regression(test_id: str, session: str | None, file_prs: bool):
     """Run a regression test from pm/qa/regression/.
