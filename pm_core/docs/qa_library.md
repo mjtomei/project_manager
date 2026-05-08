@@ -10,7 +10,7 @@ the TUI, and the CLI.
 |---|---|
 | `pm/qa/instructions/` | Reusable test-environment procedures — anything a QA scenario needs to set up before it can exercise the code (seed a database, start a dev server, prepare fixture data, log in a test user, etc.). Referenced by QA scenarios in their `INSTRUCTION:` field. |
 | `pm/qa/regression/`   | Claude-driven test scenarios run via `pm tui test <id>`. Each file is a natural-language prompt; the runner launches Claude against a running `pm` tmux session to exercise it. |
-| `pm/qa/artifacts/`    | *Recipes for capturing reviewable evidence* — screen recordings, command logs, screenshots — that demonstrate either a bug or new PR behavior to a human reviewer. |
+| `pm/qa/artifacts/`    | *Recipes for capturing concrete evidence of behavior* — recordings, logs, screenshots — that unambiguously confirm what happened. Captures are designed to be consumable by both humans (replay/read) and downstream agents (parse/diff). |
 | `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all scenarios use the same contracts for external dependencies. |
 
 There is also a runtime sibling, `pm/qa/captures/<pr-id>/`, which is
@@ -128,7 +128,8 @@ evidence*. The recipe explains:
 
 A recipe is *not* a test that runs automatically. It's a procedure a
 session follows to produce a `pm/qa/captures/<pr-id>/...` artifact
-that a human reviewer can replay or read.
+that downstream consumers (humans replaying, agents parsing) can use
+to confirm what happened.
 
 ## Captures
 
@@ -156,9 +157,11 @@ demonstrations), use sub-subdirs: `impl/pre-fix/<short-name>/`.
 
 ### Manifest
 
-`manifest.md` rides alongside each capture so a reviewer can read what
-they're looking at without replaying. **Nothing in pm reads
-manifests** — they're purely human-facing. The convention:
+`manifest.md` rides alongside each capture so a consumer (human or
+agent) can know what they're looking at without replaying. **Nothing
+in pm reads manifests automatically** — they're plain Markdown,
+written for whoever (or whatever) needs to interpret the capture.
+The convention:
 
 ```markdown
 ---

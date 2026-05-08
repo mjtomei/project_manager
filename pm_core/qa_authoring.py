@@ -21,9 +21,10 @@ _CATEGORY_BLURB = {
         "scenarios or implementation sessions."
     ),
     "artifacts": (
-        "An artifact recipe is a procedure for capturing reviewable "
-        "evidence — recordings, logs, screenshots — that demonstrates "
-        "a bug or new PR behavior."
+        "An artifact recipe is a procedure for capturing concrete "
+        "evidence of behavior — recordings, logs, screenshots — "
+        "consumable by humans (replay/read) and downstream agents "
+        "(parse/diff)."
     ),
 }
 

@@ -1408,13 +1408,13 @@ adjacent regressions the fix could have introduced.
     if has_artifact_recipes:
         artifact_recipes_block = f"""
 
-Artifact Recipes describe how to capture replayable evidence of a
-scenario's behavior — recordings, logs, screenshots a reviewer can
-read or play back later. Default to producing a capture for any
-scenario whose value is showing a behavior end-to-end; captures
-sharply improve review quality and give reviewers something concrete
-to engage with rather than re-deriving from code. Reference the
-recipe by filename in the INSTRUCTION field and have STEPS save
+Artifact Recipes describe how to capture concrete evidence of a
+scenario's behavior — recordings, logs, screenshots — consumable by
+both humans and downstream agents. Default to producing a capture
+for any scenario whose value is showing a behavior end-to-end;
+captures unambiguously confirm what happened and give later consumers
+something to engage with rather than re-deriving from code. Reference
+the recipe by filename in the INSTRUCTION field and have STEPS save
 captures under
 `pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`, one
 subdirectory per scenario."""

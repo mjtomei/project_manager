@@ -7,8 +7,9 @@ tags: [artifact, cli, recording]
 ## When to use
 
 A scenario demonstrates a command-line interaction — argument
-handling, stdout/stderr, multi-step CLI sequences — that's worth
-showing as an animation rather than a static log. Use this recipe
+handling, stdout/stderr, multi-step CLI sequences — and you want
+unambiguous evidence of what happened, consumable by humans (replay)
+and downstream agents (parse the cast or transcript). Use this recipe
 when there's no TUI involved; for tmux-hosted TUIs, use
 `tmux-screen-recording.md`.
 
@@ -20,8 +21,8 @@ Write into `pm/qa/captures/<pr-id>/<short-name>/`:
 - `manifest.md` — frontmatter + prose: workdir, the exact command(s)
   recorded, what the recording demonstrates, pre/post-fix state if
   relevant.
-- (optional) `transcript.log` — plain-text version, if a reviewer
-  can't run asciinema.
+- (optional) `transcript.log` — plain-text version, useful when a
+  consumer can't run asciinema or wants to grep/diff the output.
 
 ## Capture
 
@@ -52,8 +53,9 @@ asciinema rec pm/qa/captures/<pr-id>/<short-name>/recording.cast \
     -c 'bash -c "set -x; cmd-one; cmd-two; cmd-three"'
 ```
 
-`set -x` echoes each command before it runs so a reviewer can read
-along. No shell prompt, no manual driving.
+`set -x` echoes each command before it runs so the recording (and
+any downstream parser) sees each command alongside its output. No
+shell prompt, no manual driving.
 
 ### No-TTY environments (e.g. automated agents)
 

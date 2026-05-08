@@ -5,8 +5,9 @@ frontmatter:
 
 - pm/qa/instructions/ — reusable test-environment procedures
 - pm/qa/regression/   — migrated TUI tests
-- pm/qa/artifacts/    — recipes for capturing reviewable evidence
-                        (screen recordings, command logs)
+- pm/qa/artifacts/    — recipes for capturing concrete evidence of
+                        behavior (recordings, logs) consumable by
+                        humans or downstream agents
 - pm/qa/mocks/        — shared mock definitions injected into every QA
                         scenario prompt
 """
@@ -51,9 +52,9 @@ def mocks_dir(pm_root: Path) -> Path:
 def artifacts_dir(pm_root: Path) -> Path:
     """Return pm/qa/artifacts/.
 
-    Holds recipes for capturing reviewable evidence — screen recordings,
-    command logs, screenshots — that demonstrate either a bug or new PR
-    behavior to a human reviewer.  The captures themselves land in
+    Holds recipes for capturing concrete evidence of behavior —
+    recordings, logs, screenshots — designed to be consumable by both
+    humans and downstream agents.  The captures themselves land in
     pm/qa/captures/<pr-id>/ (a convention referenced from recipes, not
     enforced here).
     """

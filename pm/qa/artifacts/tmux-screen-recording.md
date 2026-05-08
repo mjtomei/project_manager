@@ -1,14 +1,15 @@
 ---
 title: tmux Screen Recording
-description: Capture a tmux pane transcript and an asciinema replay for review
+description: Capture a tmux pane transcript and an asciinema replay
 tags: [artifact, tmux, recording]
 ---
 
 ## When to use
 
-A scenario produces user-visible behavior a reviewer needs to see —
-visual TUI changes, new CLI output, an interactive flow — and you can't
-fully express it in a unit test.
+A scenario produces behavior worth confirming end-to-end — a TUI
+interaction, a CLI session, an interactive flow — and you want
+unambiguous evidence of what happened, consumable by humans (replay)
+and downstream agents (parse the transcript or cast).
 
 ## What this recipe produces
 
