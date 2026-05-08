@@ -35,7 +35,7 @@ description: Seed a test user and log them in before scenarios run
 | Field | Type | Required | Used by |
 |---|---|---|---|
 | `title` | string | yes | `pm` TUI QA pane, `pm qa list`, planner prompts. |
-| `description` | string | yes | Same surfaces as `title`; rendered as a one-liner under the entry. Keep it ≤ 80 chars so list views stay scannable. |
+| `description` | string | yes | Same surfaces as `title`; rendered as a one-liner under the entry. |
 
 The filename stem (`login-flow-setup.md` → `login-flow-setup`) is the
 ID. References in scenarios use the bare stem or `<dir>/<stem>.md`;
@@ -54,18 +54,40 @@ category are described in the dedicated sections:
 
 ## Instructions
 
-Files under `pm/qa/instructions/` are concrete copy-pasteable
-procedures referenced by QA scenarios (and by impl sessions for bug
-reproduction). Typical body shape:
+Files under `pm/qa/instructions/` are reusable procedures referenced
+by QA scenarios (and by impl sessions for bug reproduction). Typical
+body shape:
 
-- Setup steps — exact commands the agent can run to bring up the
-  environment.
+- Setup steps the agent follows to bring up the environment. Concrete
+  commands are nice when they're stable, but feel free to describe
+  steps narratively when env or code drift would otherwise rot a
+  hardcoded snippet.
 - Optional Test Steps / Expected Behavior / Reporting sections when
   the instruction also prescribes what the scenario should do once
   the environment is up.
 
 Reference an instruction from a QA scenario by its filename stem in
 the `INSTRUCTION:` field.
+
+A minimal example:
+
+```markdown
+---
+title: Throwaway pm test project
+description: Spin up a scratch project with a few PRs to drive the TUI against
+---
+## Setup
+
+1. Create a fresh scratch directory and `git init` it.
+2. Run `pm init --backend local --no-import`.
+3. Add a few PRs with `pm pr add` so the tree has something to render.
+4. Start a session with `pm session` from the scratch directory.
+
+## Test Steps
+
+Use `pm tui send` / `pm tui view` to drive the TUI. Cover at least one
+navigation and one action keybinding for the area you're testing.
+```
 
 ## Regression tests
 
@@ -120,6 +142,30 @@ bug-fix PR session.
 6. Iterate by running the test and reading the report; refine the
    prompt until reports are crisp and accurate.
 
+A minimal example:
+
+```markdown
+---
+title: TUI startup renders PR tree
+description: Verify the TUI comes up and the dependency tree displays
+---
+You are a careful tester. Open a fresh scratch project (see the
+`throwaway-pm-test-project` instruction), start a `pm session`, and
+verify:
+
+- The TUI renders without error.
+- All PRs you added appear, with dependency edges in the right
+  direction.
+- Pressing `j` / `k` moves the selection between PR cards.
+- Pressing `?` opens the help screen and `escape` closes it.
+
+## Reporting
+
+For each check, report PASS or FAIL with one line of evidence (a
+keystroke sequence, a quoted line of output). End with an overall
+PASS/FAIL.
+```
+
 ## Artifact recipes
 
 Each file under `pm/qa/artifacts/` is a *recipe for capturing
@@ -136,6 +182,40 @@ A recipe is *not* a test that runs automatically. It's a procedure a
 session follows to produce a `pm/qa/captures/<pr-id>/...` artifact
 that downstream consumers (humans replaying, agents parsing) can use
 to confirm what happened.
+
+A minimal example:
+
+```markdown
+---
+title: stdout transcript
+description: Capture a copy of a command's stdout/stderr alongside its exit code
+---
+## When to use
+
+A scenario runs a single command end-to-end and the value is the
+exact bytes it wrote, not an animation of the run. Common case:
+exercising a CLI flag and proving the output line-for-line.
+
+## What this recipe produces
+
+In `<capture-dir>/`:
+- `output.log` — combined stdout/stderr of the command.
+- `exit-code` — single line, the command's exit status.
+- `manifest.md` — the usual frontmatter + commands + what it shows.
+
+## Capture
+
+Run the command with redirected output:
+
+    {cmd} > output.log 2>&1
+    echo $? > exit-code
+
+## Manifest format
+
+Use the standard manifest layout, with a `command:` field in the
+frontmatter naming the exact invocation, and a `## What this
+demonstrates` section explaining what to look for.
+```
 
 ## Captures
 
