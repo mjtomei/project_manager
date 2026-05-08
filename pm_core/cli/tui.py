@@ -543,7 +543,7 @@ def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
 
 After completing all test scenarios, file a PR for each bug or
 unexpected behavior you observed (do **not** attempt to fix them
-here — regression tests should remain non-mutating):
+here — fixes belong in a separate bug-fix PR session):
 
 1. Create a PR with `pm pr add --title "<short bug title>" --description "<what's wrong; concrete reproduction steps>" --plan bugs`.
 2. The description must include concrete reproduction steps that a

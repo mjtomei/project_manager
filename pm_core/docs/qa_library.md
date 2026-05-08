@@ -131,12 +131,13 @@ pm tui test <id>                  # run one
 pm tui test <id> --file-bugs      # run + open bug PRs for any failures
 ```
 
-Regression tests are read-only by design — they observe and report,
-they don't mutate the project. When `--file-bugs` is set the runner
-asks Claude to file a PR per bug with reproduction steps and a
-pointer to the relevant capture (under
-`pm/qa/captures/regression/...`); the actual fix is left to a normal
-bug-fix PR session.
+Regression tests don't fix bugs themselves and don't mutate the
+project's source. The only writes that escape the ephemeral env are
+the captures committed under `pm/qa/captures/regression/...` and, when
+`--file-bugs` is set, bug PRs filed via `pm pr add` (which lands them
+in `pm/project.yaml` on master with reproduction steps and a pointer
+to the relevant capture). The actual fix is left to a normal bug-fix
+PR session.
 
 A minimal example:
 
