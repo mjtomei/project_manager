@@ -72,4 +72,15 @@ End with a short, structured summary — one line per scenario plus
 one line for the workdir. Clear enough that a reader can see at a
 glance whether everything landed and whether anything needs the
 user's attention.
+
+After the summary, on its own line, emit exactly one of:
+
+- `FINALIZE_DONE` — both goals reached (or you reached them with a
+  reasonable workaround).
+- `FINALIZE_BLOCKED` — something prevented you from completing
+  (persistent push failure, diverged history, etc.). Your summary
+  above should explain.
+
+The QA loop is waiting on this line before it returns. Don't omit
+it.
 """

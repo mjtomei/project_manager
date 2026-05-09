@@ -164,6 +164,10 @@ class QALoopState:
     scenario_verdicts: dict[int, str] = field(default_factory=dict)
     latest_verdict: str = ""
     latest_output: str = ""
+    # Result of the post-QA finalize pane: "FINALIZE_DONE",
+    # "FINALIZE_BLOCKED", or None if it didn't run (no workdir,
+    # missing pm session, polling timed out).
+    finalize_verdict: str | None = None
     qa_workdir: str | None = None
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
@@ -345,28 +349,39 @@ def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
 # Status file management
 # ---------------------------------------------------------------------------
 
-def _spawn_qa_finalize_pane(state: "QALoopState", pr_data: dict,
-                             session: str, window_name: str,
-                             workdir_path: str | None) -> None:
-    """Spawn the post-QA finalize pane in the main QA window.
+_FINALIZE_VERDICTS = ("FINALIZE_DONE", "FINALIZE_BLOCKED")
 
-    Runs a Claude session that confirms scenario pushes reached
-    origin/<branch> and fast-forwards the user's PR workdir. Best-effort:
-    a missing pm session, missing window, or claude binary just logs
-    and returns.
+
+def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
+                          session: str, window_name: str,
+                          workdir_path: str | None,
+                          stop_check: Callable[[], bool] | None = None,
+                          ) -> str | None:
+    """Run the post-QA finalize pane synchronously.
+
+    Spawns a pane in the main QA window, runs a Claude session that
+    confirms scenario pushes reached origin/<branch> and fast-forwards
+    the user's PR workdir, and **blocks** until the session emits
+    ``FINALIZE_DONE`` or ``FINALIZE_BLOCKED``. Returns the verdict or
+    ``None`` when the pane disappears / a missing prerequisite makes
+    the run impossible.
+
+    Reuses the same pane-polling infrastructure the verification step
+    uses (`build_claude_shell_cmd` + `transcript_path_for` +
+    `poll_for_verdict`).
     """
     if not workdir_path:
-        return
+        return None
     win = tmux_mod.find_window_by_name(session, window_name)
     if not win:
-        return
+        return None
     panes = tmux_mod.get_pane_indices(session, win["index"])
     if not panes:
-        return
+        return None
     anchor_pane = panes[0][0]
 
     from pm_core.qa_finalize_prompt import build_qa_finalize_prompt
-    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.claude_launcher import build_claude_shell_cmd, transcript_path_for
 
     branch = pr_data.get("branch", "")
     pr_title = pr_data.get("title", "")
@@ -383,15 +398,22 @@ def _spawn_qa_finalize_pane(state: "QALoopState", pr_data: dict,
         scenario_worktrees=scenario_worktrees,
         overall_verdict=state.latest_verdict or "",
     )
-    finalize_cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir_path,
-                                          write_dir=workdir_path)
+
+    import uuid as _uuid
+    finalize_session_id = str(_uuid.uuid4())
+    finalize_cmd = build_claude_shell_cmd(
+        prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
+        session_id=finalize_session_id,
+    )
+
     try:
         finalize_pane = tmux_mod.split_pane_at(
             anchor_pane, "v", finalize_cmd, background=True,
+            cwd=workdir_path,
         )
     except Exception:
         _log.exception("split_pane_at failed for finalize pane")
-        return
+        return None
 
     try:
         from pm_core import pane_layout
@@ -402,6 +424,26 @@ def _spawn_qa_finalize_pane(state: "QALoopState", pr_data: dict,
             ])
     except Exception:
         _log.exception("Failed to register finalize pane")
+
+    finalize_transcript = str(transcript_path_for(workdir_path, finalize_session_id))
+    _log.info("QA finalize: polling pane=%s transcript=%s",
+              finalize_pane, finalize_transcript)
+    try:
+        content = poll_for_verdict(
+            finalize_pane, finalize_transcript,
+            verdicts=_FINALIZE_VERDICTS,
+            grace_period=_VERDICT_GRACE_PERIOD,
+            stop_check=stop_check,
+            log_prefix="qa-finalize",
+        )
+    except Exception:
+        _log.warning("QA finalize: polling failed", exc_info=True)
+        return None
+
+    if not content:
+        _log.warning("QA finalize: pane vanished or stop_check fired")
+        return None
+    return extract_verdict_from_transcript(finalize_transcript, _FINALIZE_VERDICTS)
 
 
 def _write_status_file(status_path: Path, pr_id: str,
@@ -2725,23 +2767,34 @@ def run_qa_sync(
                        state.scenario_verdicts, overall=state.latest_verdict,
                        scenario_0=state.scenario_0, error=state._error)
 
-    # Spawn the finalize pane in the main QA window. Best-effort —
-    # don't fail the QA loop if pane creation hiccups.
+    # Run the post-QA finalize pane synchronously: it verifies scenario
+    # pushes reached origin/<branch> and fast-forwards the user's PR
+    # workdir. Blocks here until the pane emits FINALIZE_DONE or
+    # FINALIZE_BLOCKED. Reuses the same pane-polling pattern used for
+    # scenario verdict verification.
     try:
-        _spawn_qa_finalize_pane(state, pr_data, session, window_name,
-                                workdir_path)
+        state.finalize_verdict = _run_qa_finalize_pane(
+            state, pr_data, session, window_name, workdir_path,
+            stop_check=lambda: state.stop_requested,
+        )
     except Exception:
-        _log.exception("Failed to spawn QA finalize pane")
+        _log.exception("Failed to run QA finalize pane")
 
     state.running = False
     summary_parts = []
     for s in state.scenarios:
         v = state.scenario_verdicts.get(s.index, "?")
         summary_parts.append(f"{s.title}: {v}")
-    state.latest_output = f"QA complete: {state.latest_verdict} — " + "; ".join(summary_parts)
+    finalize_suffix = ""
+    if state.finalize_verdict:
+        finalize_suffix = f" [finalize: {state.finalize_verdict}]"
+    state.latest_output = (
+        f"QA complete: {state.latest_verdict}{finalize_suffix} — "
+        + "; ".join(summary_parts)
+    )
 
-    _log.info("QA complete for %s: %s",
-              state.pr_id, state.latest_verdict)
+    _log.info("QA complete for %s: %s (finalize=%s)",
+              state.pr_id, state.latest_verdict, state.finalize_verdict)
     _notify()
     return state
 
