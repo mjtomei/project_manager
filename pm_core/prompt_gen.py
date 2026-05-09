@@ -1664,9 +1664,9 @@ Read the recipe(s) and follow their capture commands to produce
 evidence of this scenario's behavior. Save resulting captures under
 `pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (each recipe's
 manifest format applies; if more than one recipe is listed, use a
-named subdirectory per capture). Captures are how reviewers — human
-or agent — confirm what the test demonstrated, so produce one even
-if the scenario itself passes.
+named subdirectory per capture). Captures are how reviewers confirm
+what the test demonstrated, so produce one even if the scenario itself
+passes.
 
 After producing each capture, commit it and push so it lands on the
 PR branch:
