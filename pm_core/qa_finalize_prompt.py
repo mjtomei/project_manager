@@ -71,10 +71,14 @@ For each scenario worktree above (skip ones with no path):
 
 - `cd {pr_workdir}`
 - `git fetch origin {branch}`
-- `git status -s` — if dirty, **do not** clobber. Report DIRTY and
-  stop here, listing the files in the way.
-- Otherwise, `git merge --ff-only origin/{branch}`. If the merge isn't
-  fast-forwardable (history diverged), report that and stop.
+- `git status -s` — if dirty, `git stash push -u -m "qa-finalize"`
+  before merging; pop it back when done. The expectation is that the
+  workdir is clean or only has changes unrelated to QA, so a stash
+  round-trip is safe. If the pop conflicts (rare), leave the stash
+  on the stack and report it so the user can resolve manually.
+- `git merge --ff-only origin/{branch}`. If the merge isn't
+  fast-forwardable (history diverged), report that and stop —
+  pop the stash before exiting.
 
 ## Output
 
@@ -87,6 +91,7 @@ End with a structured summary, one line per check, e.g.:
 [workdir] fast-forwarded 4 commits
 ```
 
-If the workdir was dirty: `[workdir] DIRTY — files: …`.
+If a stash was used: `[workdir] stashed N files, fast-forwarded, popped`.
+If the stash pop conflicted: `[workdir] stashed but pop conflicted — stash left on stack, resolve manually`.
 If a scenario worktree didn't exist on disk anymore: `[scenario n] worktree gone, skipped`.
 """
