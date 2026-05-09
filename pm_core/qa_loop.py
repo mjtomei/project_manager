@@ -130,7 +130,7 @@ class QAScenario:
     title: str
     focus: str
     instruction_path: str | None = None
-    artifact_path: str | None = None
+    artifact_paths: list[str] = field(default_factory=list)
     mock_ids: list[str] = field(default_factory=list)
     steps: str = ""
     window_name: str | None = None
@@ -456,7 +456,7 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
 
         focus = ""
         instruction_path = None
-        artifact_path = None
+        artifact_paths: list[str] = []
         steps = ""
 
         rest = "\n".join(lines[1:])
@@ -490,33 +490,37 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
                     # No pm_root for resolution — store raw value
                     instruction_path = raw_ref
 
-        # ARTIFACT: optional artifact-recipe filename. Resolved against
-        # pm/qa/artifacts/ via the same resolver as INSTRUCTION.
+        # ARTIFACT: optional comma-separated artifact-recipe filenames.
+        # Resolved against pm/qa/artifacts/ via the same resolver as
+        # INSTRUCTION; each is stored as ``artifacts/<filename>.md``.
         art_m = re.search(r'^[ \t]*ARTIFACT:\s*(.+)', rest, re.MULTILINE)
         if art_m:
-            raw_ref = art_m.group(1).strip()
-            if raw_ref.lower() not in ("none", "n/a", "-"):
-                if pm_root is not None:
-                    resolved = qa_instructions.resolve_instruction_ref(
-                        pm_root, raw_ref)
-                    if resolved:
-                        category, fname = resolved
-                        if category == "artifacts":
-                            artifact_path = f"{category}/{fname}"
+            raw_field = art_m.group(1).strip()
+            if raw_field.lower() not in ("none", "n/a", "-"):
+                for raw_ref in (r.strip() for r in raw_field.split(",")):
+                    if not raw_ref:
+                        continue
+                    if pm_root is not None:
+                        resolved = qa_instructions.resolve_instruction_ref(
+                            pm_root, raw_ref)
+                        if resolved:
+                            category, fname = resolved
+                            if category == "artifacts":
+                                artifact_paths.append(f"{category}/{fname}")
+                            else:
+                                _log.warning(
+                                    "Scenario %d ARTIFACT %r resolved to non-"
+                                    "artifact category %r — ignoring",
+                                    index, raw_ref, category,
+                                )
                         else:
                             _log.warning(
-                                "Scenario %d ARTIFACT %r resolved to non-"
-                                "artifact category %r — ignoring",
-                                index, raw_ref, category,
+                                "Scenario %d references unknown artifact "
+                                "recipe %r — ignoring",
+                                index, raw_ref,
                             )
                     else:
-                        _log.warning(
-                            "Scenario %d references unknown artifact "
-                            "recipe %r — ignoring ARTIFACT field",
-                            index, raw_ref,
-                        )
-                else:
-                    artifact_path = raw_ref
+                        artifact_paths.append(raw_ref)
 
         # MOCKS: comma-separated list of mock IDs this scenario uses
         mock_ids: list[str] = []
@@ -544,7 +548,7 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
             title=title,
             focus=focus or title,
             instruction_path=instruction_path,
-            artifact_path=artifact_path,
+            artifact_paths=artifact_paths,
             mock_ids=mock_ids,
             steps=steps,
         ))
@@ -968,35 +972,39 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
     _log.info("Copied instruction %s -> %s", src, dest)
 
 
-def _install_artifact_file(pm_root: Path, scenario: QAScenario,
-                           scratch_path: Path,
-                           scratch_dir: str | None = None) -> None:
-    """Copy a referenced artifact recipe into the scenario's scratch dir.
+def _install_artifact_files(pm_root: Path, scenario: QAScenario,
+                            scratch_path: Path,
+                            scratch_dir: str | None = None) -> None:
+    """Copy referenced artifact recipes into the scenario's scratch dir.
 
-    Parallel to ``_install_instruction_file`` but for artifact recipes.
-    The recipe is *not* inlined into the steps — it stays a file the
-    worker reads at execution time, so the scenario prompt surfaces a
-    path rather than the recipe body.
+    Parallel to ``_install_instruction_file`` but for artifact recipes
+    and supports multiple recipes per scenario. Recipes are *not*
+    inlined into the steps — they stay files the worker reads at
+    execution time, so the scenario prompt surfaces paths rather than
+    bodies.
 
-    Sets ``scenario.artifact_path`` to the absolute path the agent sees
-    (``{scratch_dir}/qa-artifacts/{filename}``).
+    Rewrites ``scenario.artifact_paths`` to absolute paths the agent
+    sees (``{scratch_dir}/qa-artifacts/{filename}``). Recipes that
+    can't be located on disk are dropped from the list with a warning.
     """
-    if not scenario.artifact_path:
+    if not scenario.artifact_paths:
         return
-    # artifact_path is e.g. "artifacts/tmux-screen-recording.md"
-    src = pm_root / "qa" / scenario.artifact_path
-    if not src.is_file():
-        _log.warning("Artifact recipe %s not found — clearing artifact_path",
-                      src)
-        scenario.artifact_path = None
-        return
+    import shutil
     dest_dir = scratch_path / "qa-artifacts"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / src.name
-    import shutil
-    shutil.copy2(src, dest)
-    scenario.artifact_path = f"{scratch_dir}/qa-artifacts/{src.name}"
-    _log.info("Copied artifact recipe %s -> %s", src, dest)
+    new_paths: list[str] = []
+    for rel in scenario.artifact_paths:
+        # rel is e.g. "artifacts/tmux-screen-recording.md"
+        src = pm_root / "qa" / rel
+        if not src.is_file():
+            _log.warning("Artifact recipe %s not found — dropping from scenario",
+                          src)
+            continue
+        dest = dest_dir / src.name
+        shutil.copy2(src, dest)
+        new_paths.append(f"{scratch_dir}/qa-artifacts/{src.name}")
+        _log.info("Copied artifact recipe %s -> %s", src, dest)
+    scenario.artifact_paths = new_paths
 
 
 def _launch_scenarios_in_tmux(
@@ -1060,11 +1068,11 @@ def _launch_scenarios_in_tmux(
             # Steps will be inlined by concretizer — worker doesn't need the file ref
             scenario.instruction_path = None
 
-        # Artifact recipes get copied into scratch but the path stays on
-        # the scenario so the worker sees it.
-        if pm_root and scenario.artifact_path:
-            _install_artifact_file(pm_root, scenario, scratch_path,
-                                   scratch_dir=str(scratch_path))
+        # Artifact recipes get copied into scratch but their paths stay on
+        # the scenario so the worker sees them.
+        if pm_root and scenario.artifact_paths:
+            _install_artifact_files(pm_root, scenario, scratch_path,
+                                    scratch_dir=str(scratch_path))
 
         scenario_cwd = str(clone_path) if repo_root else workdir_path
         transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
@@ -1264,11 +1272,11 @@ def _launch_scenarios_in_containers(
             # Steps will be inlined by concretizer — worker doesn't need the file ref
             scenario.instruction_path = None
 
-        # Artifact recipes get copied into scratch but the path stays on
-        # the scenario so the worker sees it.
-        if pm_root and scenario.artifact_path:
-            _install_artifact_file(pm_root, scenario, scratch_path,
-                                   scratch_dir=container_scratch)
+        # Artifact recipes get copied into scratch but their paths stay on
+        # the scenario so the worker sees them.
+        if pm_root and scenario.artifact_paths:
+            _install_artifact_files(pm_root, scenario, scratch_path,
+                                    scratch_dir=container_scratch)
 
         transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
 

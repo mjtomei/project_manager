@@ -1485,14 +1485,14 @@ QA_PLAN_START
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
-ARTIFACT: <artifact-recipe filename from the library above, or "none">
+ARTIFACT: <comma-separated artifact-recipe filenames from the library above, or "none">
 MOCKS: <comma-separated mock IDs this scenario uses, or "none">
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">
-ARTIFACT: <recipe filename or "none">
+ARTIFACT: <recipe filenames or "none">
 MOCKS: <mock IDs or "none">
 STEPS: <concrete test steps>
 
@@ -1648,21 +1648,25 @@ If a setup step fails or a required tool is unavailable, report
 """
 
     artifact_block = ""
-    artifact_path = getattr(scenario, "artifact_path", None)
-    if artifact_path:
-        # artifact_path is the path the agent will see (set by
-        # _install_artifact_file during launch).
+    artifact_paths = getattr(scenario, "artifact_paths", None) or []
+    if artifact_paths:
+        # Each path is what the agent will see (set by
+        # _install_artifact_files during launch).
+        bullets = "\n".join(f"- `{p}`" for p in artifact_paths)
+        heading = "Capture Recipe" if len(artifact_paths) == 1 else "Capture Recipes"
         artifact_block = f"""
-## Artifact Recipe
+## Artifact {heading}
 
-A capture recipe is available at: `{artifact_path}`
+Available at:
+{bullets}
 
-Read the recipe and follow its capture commands to produce evidence
-of this scenario's behavior. Save the resulting capture under
-`pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (the recipe's
-manifest format applies). Captures are how reviewers — human or
-agent — confirm what the test demonstrated, so produce one even if
-the scenario itself passes.
+Read the recipe(s) and follow their capture commands to produce
+evidence of this scenario's behavior. Save resulting captures under
+`pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (each recipe's
+manifest format applies; if more than one recipe is listed, use a
+named subdirectory per capture). Captures are how reviewers — human
+or agent — confirm what the test demonstrated, so produce one even
+if the scenario itself passes.
 """
 
     # Include PR notes (prior QA results, addendums)

@@ -151,7 +151,7 @@ QA_PLAN_END
 """
         scenarios = parse_qa_plan(output)
         assert len(scenarios) == 1
-        assert scenarios[0].artifact_path == "tmux-screen-recording.md"
+        assert scenarios[0].artifact_paths == ["tmux-screen-recording.md"]
         assert scenarios[0].steps == "Drive the TUI and capture."
 
     def test_artifact_field_none_clears(self):
@@ -165,7 +165,7 @@ QA_PLAN_END
 """
         scenarios = parse_qa_plan(output)
         assert len(scenarios) == 1
-        assert scenarios[0].artifact_path is None
+        assert scenarios[0].artifact_paths == []
 
     def test_artifact_field_resolves_against_pm_root(self, tmp_path):
         # Set up a fake pm/qa/artifacts/ with one recipe
@@ -183,7 +183,27 @@ QA_PLAN_END
 """
         scenarios = parse_qa_plan(output, pm_root=tmp_path)
         assert len(scenarios) == 1
-        assert scenarios[0].artifact_path == "artifacts/tmux-screen-recording.md"
+        assert scenarios[0].artifact_paths == ["artifacts/tmux-screen-recording.md"]
+
+    def test_artifact_field_supports_multiple(self, tmp_path):
+        art = tmp_path / "qa" / "artifacts"
+        art.mkdir(parents=True)
+        (art / "tmux-screen-recording.md").write_text("---\ntitle: t\n---\nbody")
+        (art / "cli-recording.md").write_text("---\ntitle: c\n---\nbody")
+        output = """
+QA_PLAN_START
+SCENARIO 1: T
+FOCUS: x
+ARTIFACT: tmux-screen-recording, cli-recording
+STEPS: do.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output, pm_root=tmp_path)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == [
+            "artifacts/tmux-screen-recording.md",
+            "artifacts/cli-recording.md",
+        ]
 
     def test_malformed_heading(self):
         output = """
