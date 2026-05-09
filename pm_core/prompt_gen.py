@@ -1414,10 +1414,11 @@ both humans and downstream agents. Default to producing a capture
 for any scenario whose value is showing a behavior end-to-end;
 captures unambiguously confirm what happened and give later consumers
 something to engage with rather than re-deriving from code. Reference
-the recipe by filename in the INSTRUCTION field and have STEPS save
+the recipe by filename in the **ARTIFACT** field. The runner copies
+the recipe into the scenario's scratch dir and surfaces a path to it
+in the worker's prompt; the worker reads the recipe and saves
 captures under
-`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`, one
-subdirectory per scenario."""
+`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`."""
 
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
@@ -1484,12 +1485,14 @@ QA_PLAN_START
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
+ARTIFACT: <artifact-recipe filename from the library above, or "none">
 MOCKS: <comma-separated mock IDs this scenario uses, or "none">
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">
+ARTIFACT: <recipe filename or "none">
 MOCKS: <mock IDs or "none">
 STEPS: <concrete test steps>
 
@@ -1641,7 +1644,25 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 Test setup instructions are available at: `{instr_display}`
 
 If a setup step fails or a required tool is unavailable, report
-**INPUT_REQUIRED** with an explanation of what blocked you. 
+**INPUT_REQUIRED** with an explanation of what blocked you.
+"""
+
+    artifact_block = ""
+    artifact_path = getattr(scenario, "artifact_path", None)
+    if artifact_path:
+        # artifact_path is the path the agent will see (set by
+        # _install_artifact_file during launch).
+        artifact_block = f"""
+## Artifact Recipe
+
+A capture recipe is available at: `{artifact_path}`
+
+Read the recipe and follow its capture commands to produce evidence
+of this scenario's behavior. Save the resulting capture under
+`pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (the recipe's
+manifest format applies). Captures are how reviewers — human or
+agent — confirm what the test demonstrated, so produce one even if
+the scenario itself passes.
 """
 
     # Include PR notes (prior QA results, addendums)
@@ -1737,7 +1758,7 @@ final verdict.
 
 **Steps**:
 {scenario.steps}
-{instruction_block}
+{instruction_block}{artifact_block}
 ## Execution
 
 {execution_block}

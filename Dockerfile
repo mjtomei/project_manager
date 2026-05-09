@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     slirp4netns \
     uidmap \
     libcap2-bin \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Nested rootless podman: replace setuid bit on newuidmap/newgidmap with
@@ -79,7 +80,8 @@ RUN git --version && python3 --version && pip3 --version \
 # without a per-container install step.  Keep this list in sync with
 # ``[project.dependencies]`` in pyproject.toml.
 RUN pip3 install \
-    'click>=8.0' 'pyyaml>=6.0' 'textual>=0.40' 'pyperclip>=1.8'
+    'click>=8.0' 'pyyaml>=6.0' 'textual>=0.40' 'pyperclip>=1.8' \
+    'asciinema>=2.4'
 
 # pm shim: invoke the wrapper with the system python, which finds pm_core
 # via PYTHONPATH.  No venv, no per-container install — the bind-mounted
