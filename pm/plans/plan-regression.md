@@ -39,6 +39,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - ✅ Merged (11): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185)
 - 🔨 In progress (1): `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, tracked under improvements but listed here as Phase 7 prerequisite)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
+- 📋 Phase 9 (4 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-e2b7fdf` (ProgramBench submission scaffolding)
 
 ## Prerequisites
 
@@ -165,6 +166,41 @@ Adds a per-plan `auto_merge` setting (default true) so plans that need human rev
 `pr-2c060b2` (pending)
 
 Extends the regression corpus consumed by the discovery supervisor (`pr-271cb3a`). New scenario at `pm/qa/regression/cli-output-widths.md` resizes a tmux pane to randomly-chosen widths, captures `pm pr list` / `pm pr ready` / `pm plan list` output, and asks Claude to flag layout bugs (overflow, mid-word breaks, miscounted wide-char icons). Findings file as bugs or improvements via the existing addendum from `pr-47940bc`. Manual testing: review the rendered output across the seeded widths to confirm the verdict logic flags real layout bugs and ignores acceptable wrapping — INPUT_REQUIRED is appropriate for the visual-judgment portion.
+
+## Phase 9: Headless and unsupervised hardening
+
+Push the loop from "autonomous with a human in reserve via INPUT_REQUIRED" to "autonomous and recoverable with no human in the path." Driven by the ProgramBench submission as a concrete forcing function — the cleanroom image has no human and no human-reachable surface — but the hardening (self-recovery playbooks, no-progress detection, headless runtime) is generally useful for unattended operation.
+
+### PR: Watcher self-recovery audit
+`pr-ca6859f` (pending). **Land first** — gates the headless/benchmark mode below.
+
+Audit every escalation path in the watcher prompts and surrounding code (`generate_bug_fix_impl_prompt`, `generate_improvement_fix_impl_prompt`, `generate_discovery_supervisor_prompt`, the review and QA prompts) and add explicit recovery playbooks instead of INPUT_REQUIRED for technical issues that have a clear correct response. Examples: container creation failure → retry with backoff, missing dep → install, stuck loop → cap iterations, mark failed, move on, spec ambiguity → record assumption and proceed, push failure → retry then re-fetch and rebase. INPUT_REQUIRED stays available for genuinely human-judgment-required cases (e.g. the watcher review session adding notes); but the bar to escalate moves from "anything unexpected" to "no plausible automatic recovery." Manual testing: synthesize each failure mode in a controlled run and confirm the playbook fires; INPUT_REQUIRED rate on a representative bug-fix corpus should drop measurably.
+
+### PR: Headless / benchmark mode for autonomous loops
+`pr-6f9301e` (depends on: pr-ca6859f, pr-438028c, pr-f17e22b).
+
+Single `benchmark_mode` flag covering the runtime and prompt layers:
+- **Runtime**: pm operates without a visible TUI (no picker, no popup, hooks bypassed where they assume a TUI surface), all session activity captured in a single structured log file. Builds on `pr-438028c` (CLI window management for review-loop / QA) and what's left after it lands.
+- **Prompt layer**: extends `pr-f17e22b`'s TUI-section gate to a project-wide flag that strips "ask the user" / interactive language from every prompt builder (`generate_prompt`, `generate_review_prompt`, `generate_merge_prompt`, the QA planner / refinement / scenario prompts, the watcher prompts).
+
+Coupling rationale: removing INPUT_REQUIRED from prompts is only safe once the self-recovery playbooks exist. Sequencing this PR after the self-recovery audit makes that explicit.
+
+### PR: No-progress safety stop on review/QA loops
+`pr-ed10ac4` (pending).
+
+Detect "same diff, same verdict, no real change" between iterations and short-circuit before max-iterations. Today max-iterations is the only ceiling and is loose (60 minutes per `pr-860969d`); a no-progress detector catches the cheap-to-detect case where the loop is spinning. Hashes diff + verdict + relevant prompt snippets across iterations; on N consecutive identical hashes (default 2), short-circuits with a NEEDS_WORK verdict and a structured reason that the watcher can route to retry-once or mark-failed. Useful in normal mode too — a stuck review loop today wastes the full iteration budget.
+
+### PR: ProgramBench submission scaffolding
+`pr-e2b7fdf` (depends on: pr-ca6859f, pr-6f9301e, pr-ed10ac4).
+
+Bundle four pieces as one deliverable, demonstrating the autonomous loop end-to-end on an external benchmark rather than starting a parallel benchmark plan.
+
+- **Leader prompt template**: a new prompt builder (sibling of `generate_prompt`, `generate_review_prompt`) framing pm as the leader's tool. Lists relevant CLI commands, delegates QA-instruction authoring to the leader (writes `pm/qa/instructions/binary-comparison.md` based on its probe of `/workspace/executable`), files plan + PRs, drives them through start/review/QA/merge.
+- **Adapter CLI**: `pm bench programbench --task <id>` drops the task into a workdir, generates the leader prompt, spawns the leader session in `benchmark_mode`, extracts `/workspace` as the submission tarball when the leader finishes.
+- **Reproducibility Dockerfile**: `FROM programbench/<task>:task_cleanroom` layered with pm + Claude Code + pinned deps. The submission asset.
+- **Egress-allowlist firewall harness**: iptables / network namespace at the sandbox boundary allowing only the model API endpoint. Defense-in-depth against incidental network use during benchmark runs; `backend=local`, `container-mode=off` (the cleanroom is the container).
+
+Single PR is justified because each piece is small and they are tightly coupled by the submission shape. Manual testing: run the adapter against a held-back ProgramBench task and inspect the produced `/workspace` tarball before submission.
 
 ## Success criteria
 

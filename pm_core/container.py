@@ -158,6 +158,20 @@ def _get_dockerfile_path() -> Path:
     return Path(__file__).resolve().parent.parent / "Dockerfile"
 
 
+def _host_git_identity() -> tuple[str, str]:
+    """Return (name, email) from the host's global git config, or empty strings."""
+    def _read(key: str) -> str:
+        try:
+            r = subprocess.run(
+                ["git", "config", "--global", key],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return ""
+    return _read("user.name"), _read("user.email")
+
+
 def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
     """Build the pm developer base image from the bundled Dockerfile.
 
@@ -170,7 +184,13 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
         raise FileNotFoundError(f"Dockerfile not found: {dockerfile}")
 
     runtime = _get_runtime()
-    cmd = [runtime, "build", "-t", tag, "-f", str(dockerfile), str(dockerfile.parent)]
+    git_name, git_email = _host_git_identity()
+    cmd = [
+        runtime, "build", "-t", tag,
+        "--build-arg", f"GIT_USER_NAME={git_name}",
+        "--build-arg", f"GIT_USER_EMAIL={git_email}",
+        "-f", str(dockerfile), str(dockerfile.parent),
+    ]
     _log.info("Building image %s from %s", tag, dockerfile)
     result = subprocess.run(
         cmd,
