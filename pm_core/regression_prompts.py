@@ -59,7 +59,9 @@ To interact with this session, use commands like:
 ## Captures
 
 Any capture you produce should land under `pm/qa/captures/regression/<test-id>/<timestamp>/`
-and be committed to git so future runs can diff against this one.
+and be committed (and pushed, if there's a remote) so future runs can
+diff against this one. Use `git add pm/qa/captures/regression/.../`,
+`git commit -m "qa: regression capture <test-id>"`, then push.
 
 ## QA Regression Test: {title}
 

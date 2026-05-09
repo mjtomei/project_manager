@@ -345,6 +345,65 @@ def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
 # Status file management
 # ---------------------------------------------------------------------------
 
+def _spawn_qa_finalize_pane(state: "QALoopState", pr_data: dict,
+                             session: str, window_name: str,
+                             workdir_path: str | None) -> None:
+    """Spawn the post-QA finalize pane in the main QA window.
+
+    Runs a Claude session that confirms scenario pushes reached
+    origin/<branch> and fast-forwards the user's PR workdir. Best-effort:
+    a missing pm session, missing window, or claude binary just logs
+    and returns.
+    """
+    if not workdir_path:
+        return
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if not win:
+        return
+    panes = tmux_mod.get_pane_indices(session, win["index"])
+    if not panes:
+        return
+    anchor_pane = panes[0][0]
+
+    from pm_core.qa_finalize_prompt import build_qa_finalize_prompt
+    from pm_core.claude_launcher import build_claude_shell_cmd
+
+    branch = pr_data.get("branch", "")
+    pr_title = pr_data.get("title", "")
+    scenario_worktrees = [
+        (s.index, state.scenario_verdicts.get(s.index), s.worktree_path)
+        for s in state.scenarios
+    ]
+
+    prompt = build_qa_finalize_prompt(
+        pr_id=state.pr_id,
+        pr_title=pr_title,
+        branch=branch,
+        pr_workdir=workdir_path,
+        scenario_worktrees=scenario_worktrees,
+        overall_verdict=state.latest_verdict or "",
+    )
+    finalize_cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir_path,
+                                          write_dir=workdir_path)
+    try:
+        finalize_pane = tmux_mod.split_pane_at(
+            anchor_pane, "v", finalize_cmd, background=True,
+        )
+    except Exception:
+        _log.exception("split_pane_at failed for finalize pane")
+        return
+
+    try:
+        from pm_core import pane_layout
+        qa_win_id = tmux_mod.pane_window_id(anchor_pane)
+        if qa_win_id:
+            pane_layout.register_and_rebalance(session, qa_win_id, [
+                (finalize_pane, "qa-finalize", "finalize"),
+            ])
+    except Exception:
+        _log.exception("Failed to register finalize pane")
+
+
 def _write_status_file(status_path: Path, pr_id: str,
                        scenarios: list[QAScenario],
                        scenario_verdicts: dict[int, str],
@@ -2665,6 +2724,14 @@ def run_qa_sync(
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts, overall=state.latest_verdict,
                        scenario_0=state.scenario_0, error=state._error)
+
+    # Spawn the finalize pane in the main QA window. Best-effort —
+    # don't fail the QA loop if pane creation hiccups.
+    try:
+        _spawn_qa_finalize_pane(state, pr_data, session, window_name,
+                                workdir_path)
+    except Exception:
+        _log.exception("Failed to spawn QA finalize pane")
 
     state.running = False
     summary_parts = []

@@ -1667,6 +1667,15 @@ manifest format applies; if more than one recipe is listed, use a
 named subdirectory per capture). Captures are how reviewers — human
 or agent — confirm what the test demonstrated, so produce one even
 if the scenario itself passes.
+
+After producing each capture, commit it and push so it lands on the
+PR branch:
+- `git add pm/qa/captures/{pr_id}/scenarios/{scenario.index}/`
+- `git commit -m "qa: capture for scenario {scenario.index}"`
+- `git push origin {branch}`
+
+If the push is rejected (another scenario raced you), `git pull --rebase
+origin {branch} && git push origin {branch}`.
 """
 
     # Include PR notes (prior QA results, addendums)
