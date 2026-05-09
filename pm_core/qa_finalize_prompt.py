@@ -49,22 +49,15 @@ Scenarios that ran:
 
 ## Goals
 
-Two outcomes; pick whatever commands you want to reach them.
-
 1. **Every scenario worktree's commits are on `origin/{branch}`.**
    Scenarios were instructed to push their captures and any `qa:`
-   fixes via the push proxy. We have history with the proxy quietly
-   failing, so verify here rather than trusting it. If a worktree
-   has uncommitted captures or unpushed commits, push them; if a
-   push fails persistently, surface it in your report — don't paper
-   over it.
+   fixes via the push proxy. If a worktree has uncommitted captures or 
+   unpushed commits, push them.
 
-2. **The PR workdir is up to date with `origin/{branch}`.** Bring
-   it forward via fast-forward. The workdir is expected to be clean
-   or to have only changes unrelated to the QA run, so getting
-   around any local state is fine — handle it however you'd like.
-   If the local branch has actually diverged from origin (history
-   doesn't fast-forward), stop and report that.
+2. **The PR workdir is up to date with `origin/{branch}`.** Pull from origin
+   and perform a merge if required. Block on any conflicts you aren't
+   comfortable resolving yourself.
+
 
 ## Output
 
@@ -78,9 +71,5 @@ After the summary, on its own line, emit exactly one of:
 - `FINALIZE_DONE` — both goals reached (or you reached them with a
   reasonable workaround).
 - `FINALIZE_BLOCKED` — something prevented you from completing
-  (persistent push failure, diverged history, etc.). Your summary
-  above should explain.
-
-The QA loop is waiting on this line before it returns. Don't omit
-it.
+  (persistent push failure, diverged history, etc.). 
 """
