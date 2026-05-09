@@ -41,57 +41,35 @@ def build_qa_finalize_prompt(
 ## Context
 
 - PR branch: `{branch}`
-- PR workdir (the user's local clone): `{pr_workdir}`
+- PR workdir (the user's local clone of the PR branch): `{pr_workdir}`
 - Overall QA verdict: **{overall_verdict}**
 
 Scenarios that ran:
 {scenario_lines}
 
-## Your job
+## Goals
 
-Two things, in order. Do them yourself with shell commands; report a
-clear summary at the end.
+Two outcomes; pick whatever commands you want to reach them.
 
-### 1. Verify scenario pushes reached `origin/{branch}`
+1. **Every scenario worktree's commits are on `origin/{branch}`.**
+   Scenarios were instructed to push their captures and any `qa:`
+   fixes via the push proxy. We have history with the proxy quietly
+   failing, so verify here rather than trusting it. If a worktree
+   has uncommitted captures or unpushed commits, push them; if a
+   push fails persistently, surface it in your report — don't paper
+   over it.
 
-For each scenario worktree above (skip ones with no path):
-
-- `cd <worktree>`
-- `git status -s` — anything uncommitted? Any unstaged capture files
-  under `pm/qa/captures/`? If so, the scenario didn't follow through;
-  commit it (`qa: capture for scenario <n>`) and push.
-- `git fetch origin {branch}` then
-  `git log origin/{branch}..HEAD --oneline` — anything unpushed?
-  Push it. If push is rejected, `git pull --rebase origin {branch}`
-  and retry once. Surface persistent failures rather than masking them
-  (we have a known history of push-proxy bugs; this pane is the
-  safety net).
-
-### 2. Fast-forward the PR workdir
-
-- `cd {pr_workdir}`
-- `git fetch origin {branch}`
-- `git status -s` — if dirty, `git stash push -u -m "qa-finalize"`
-  before merging; pop it back when done. The expectation is that the
-  workdir is clean or only has changes unrelated to QA, so a stash
-  round-trip is safe. If the pop conflicts (rare), leave the stash
-  on the stack and report it so the user can resolve manually.
-- `git merge --ff-only origin/{branch}`. If the merge isn't
-  fast-forwardable (history diverged), report that and stop —
-  pop the stash before exiting.
+2. **The PR workdir is up to date with `origin/{branch}`.** Bring
+   it forward via fast-forward. The workdir is expected to be clean
+   or to have only changes unrelated to the QA run, so getting
+   around any local state is fine — handle it however you'd like.
+   If the local branch has actually diverged from origin (history
+   doesn't fast-forward), stop and report that.
 
 ## Output
 
-End with a structured summary, one line per check, e.g.:
-
-```
-[scenario 1] clean, up-to-date with origin/{branch}
-[scenario 2] pushed 1 missing commit
-[scenario 3] FAILED to push (rebase rejected) — investigate push proxy
-[workdir] fast-forwarded 4 commits
-```
-
-If a stash was used: `[workdir] stashed N files, fast-forwarded, popped`.
-If the stash pop conflicted: `[workdir] stashed but pop conflicted — stash left on stack, resolve manually`.
-If a scenario worktree didn't exist on disk anymore: `[scenario n] worktree gone, skipped`.
+End with a short, structured summary — one line per scenario plus
+one line for the workdir. Clear enough that a reader can see at a
+glance whether everything landed and whether anything needs the
+user's attention.
 """
