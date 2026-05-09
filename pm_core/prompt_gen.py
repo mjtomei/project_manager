@@ -1412,14 +1412,13 @@ Artifact Recipes describe how to capture concrete evidence of a
 scenario's behavior — recordings, logs, screenshots — consumable by
 both humans and downstream agents. **Every scenario should produce
 every applicable artifact.** Set the **ARTIFACT** field to any
-recipe(s) from the library above that match the surface the scenario
-drives (e.g. a CLI flow → CLI Recording; a TUI keypress flow →
-tmux Screen Recording; multiple recipes welcome, comma-separated).
-`ARTIFACT: none` is only for scenarios that exercise pure code-level
-or library-internal behavior with no observable surface. The runner
-copies each recipe into the scenario's scratch dir and surfaces a
-path to it in the worker's prompt; the worker reads the recipe and
-saves captures under
+recipe(s) from the library above whose description matches the
+surface the scenario drives. Multiple recipes are welcome, comma-
+separated. `ARTIFACT: none` is only for scenarios that exercise pure
+code-level or library-internal behavior with no observable surface.
+The runner copies each recipe into the scenario's scratch dir and
+surfaces a path to it in the worker's prompt; the worker reads the
+recipe and saves captures under
 `pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`."""
 
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
