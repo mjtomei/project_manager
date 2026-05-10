@@ -1421,6 +1421,15 @@ surfaces a path to it in the worker's prompt; the worker reads the
 recipe and saves captures under
 `pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`."""
 
+    artifact_field_1 = (
+        '\nARTIFACT: <comma-separated artifact-recipe filenames from the library above, or "none">'
+        if has_artifact_recipes else ""
+    )
+    artifact_field_2 = (
+        '\nARTIFACT: <recipe filenames or "none">'
+        if has_artifact_recipes else ""
+    )
+
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
@@ -1485,15 +1494,13 @@ QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
-ARTIFACT: <comma-separated artifact-recipe filenames from the library above, or "none">
+INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>{artifact_field_1}
 MOCKS: <comma-separated mock IDs this scenario uses, or "none">
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <filename or "none">
-ARTIFACT: <recipe filenames or "none">
+INSTRUCTION: <filename or "none">{artifact_field_2}
 MOCKS: <mock IDs or "none">
 STEPS: <concrete test steps>
 

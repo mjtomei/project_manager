@@ -372,6 +372,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     """
     if not workdir_path:
         return None
+    from pm_core import tmux as tmux_mod
     win = tmux_mod.find_window_by_name(session, window_name)
     if not win:
         return None
