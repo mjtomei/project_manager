@@ -1,0 +1,53 @@
+item title: Sample Regression
+---PROMPT---
+## Session Context
+
+You are testing against tmux session: pm-pm-test-1778437815-87492253
+
+To interact with this session, use commands like:
+- pm tui view -s pm-pm-test-1778437815-87492253
+- pm tui send <keys> -s pm-pm-test-1778437815-87492253
+- tmux list-panes -t pm-pm-test-1778437815-87492253 -F "#{pane_id} #{pane_width}x#{pane_height} #{pane_current_command}"
+- cat ~/.pm/pane-registry/pm-pm-test-1778437815-87492253.json
+
+## Captures
+
+Any capture you produce should land under `pm/qa/captures/regression/<test-id>/<timestamp>/`
+and be committed (and pushed, if there's a remote) so future runs can
+diff against this one. Use `git add pm/qa/captures/regression/.../`,
+`git commit -m "qa: regression capture <test-id>"`, then push.
+
+## QA Regression Test: Sample Regression
+
+You are a careful tester. Bring up the surface this test exercises
+(spawn a pane, start a server, invoke a CLI — whatever fits), drive
+it through the scenarios below, and report results.
+
+## Scenarios
+
+- Scenario 1: <what to verify>
+
+## Reporting
+
+For each scenario, report PASS or FAIL with one line of evidence.
+End with an overall PASS/FAIL.
+
+
+
+## Filing Findings
+
+For each issue you observed, file a PR — don't fix it here.
+
+- **Bug**: `pm pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'`
+- **Improvement**: `pm pr add '<title>' --plan improvements --description '<what you noticed and why>'`
+
+If a capture under `pm/qa/captures/regression/...` demonstrates the
+finding, point at the path in the description.
+
+Skim `pm pr list --plan bugs` / `--plan improvements` first. If a PR
+for the same issue exists, append a note instead of filing a
+duplicate: `pm pr note add <pr-id> '<short observation>; capture: <path>'`.
+
+Filing is independent of your verdict for the test.
+
+
