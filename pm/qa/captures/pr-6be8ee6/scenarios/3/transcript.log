@@ -1,0 +1,143 @@
++ source /tmp/pm-venv-qa3/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/tmp/pm-venv-qa3
+++ export VIRTUAL_ENV
+++ _OLD_VIRTUAL_PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/tmp/pm-venv-qa3/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(pm-venv-qa3) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(pm-venv-qa3) '
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
++ source /tmp/qa3-env
+++ TEST_DIR=/workspace/pm-test-qa3-1778437800
++ cd /workspace/pm-test-qa3-1778437800
++ pm qa list
+
+Instructions (2):
+  my-new-inst: My New Inst
+  tui-manual-test: TUI Manual Testing — Test TUI changes against a throwaway project in the workdir
+
+Regression Tests (21):
+  command-dedup: Command Deduplication — Test that PR actions block concurrent/duplicate execution
+  guide-progress: Guide Progress Widget — Test that guide progress widget displays correct step indicators
+  help-keybindings: Help Screen & Keybindings — Open help screen with ? and verify all documented keybindings work
+  init-empty: Init: Empty Repo — Test pm init with an empty repo (no commits) -- verifies backend, commands, TUI
+  init-github: Init: GitHub Repo — Test pm init with a GitHub remote -- verifies backend, commands, TUI
+  init-local: Init: Local Repo — Test pm init with a local repo (no remote) -- verifies backend, commands, TUI
+  launch-dedup: Pane Launch Deduplication — Test that pane launch keys (g, n) don't create duplicates
+  log-viewer: TUI Log Viewer — Test L key opens log pane, verify content and pane lifecycle
+  meta-launch: Meta Session Launch — Test m key launches meta pane with correct role and context
+  mobile-mode: Mobile Mode — Test mobile mode auto-zoom, force flag, pane switching, and status command
+  multi-window-registry: Multi-Window Registry — Test multi-window pane registry, review window isolation, and heal on restart
+  my-reg: My Reg
+  pane-layout: Pane Layout Refresh — Test that pane kill/relaunch properly refreshes layout
+  plans-pane: Plans Pane — Test plans view toggle, navigation, actions, and refresh persistence
+  pr-interaction: PR Interaction — Test PR navigation, selection, status changes, and actions
+  restart-dedup: TUI Restart Pane Deduplication — Test that restarting TUI doesn't create duplicate panes
+  session-resume: Cluster Session Resume — Test that cluster explore sessions are saved and resumed correctly
+  status-filter: Status Filter & Merged Toggle — Test F key status filter cycling and X key merged PR toggle
+  sync-refresh: Sync Refresh — Test r key sync, log line updates, and PR status changes
+  tech-tree-visual: Tech Tree Visual Review — Review tech tree appearance for visual issues and improvements
+  window-resize: Window Resize Rebalance — Test that layout auto-rebalances on window resize (portrait vs landscape)
+
+Artifact Recipes (3):
+  cli-recording: CLI Recording — Capture an asciinema replay of one or more CLI commands
+  my-art: My Art
+  tmux-screen-recording: tmux Screen Recording — Capture a tmux pane transcript and an asciinema replay
+
++ pm qa show tui-manual-test
++ head -5
+# TUI Manual Testing
+Test TUI changes against a throwaway project in the workdir
+[/workspace/pm-test-qa3-1778437800/pm/qa/instructions/tui-manual-test.md]
+
+## Setup
++ pm qa show tmux-screen-recording
++ head -5
+# tmux Screen Recording
+Capture a tmux pane transcript and an asciinema replay
+[/workspace/pm-test-qa3-1778437800/pm/qa/artifacts/tmux-screen-recording.md]
+
+## When to use
++ pm qa show cli-recording --category artifacts
++ head -5
+# CLI Recording
+Capture an asciinema replay of one or more CLI commands
+[/workspace/pm-test-qa3-1778437800/pm/qa/artifacts/cli-recording.md]
+
+## When to use
++ pm qa show does-not-exist
+QA item not found: does-not-exist
++ echo exit=1
+exit=1
++ EDITOR=true
++ pm qa add-instruction my-new-inst
+Already exists: /workspace/pm-test-qa3-1778437800/pm/qa/instructions/my-new-inst.md
++ echo exit=1
+exit=1
++ pm qa --help
++ grep author
+  author-artifact     Author a new artifact recipe with a guided Claude...
+  author-instruction  Author a new QA instruction with a guided Claude...
+  author-regression   Author a new regression test with a guided Claude...
++ pm qa author-instruction my-new-inst
+Already exists: /workspace/pm-test-qa3-1778437800/pm/qa/instructions/my-new-inst.md
++ echo exit=1
+exit=1
++ pm qa regression nonexistent-id
+Unknown regression test: nonexistent-id
+Run 'pm qa list' to see available tests.
++ echo exit=1
+exit=1
++ pm qa regression --help
++ grep file-prs
+  --file-prs          File PRs (--plan bugs, --plan improvements) for any
++ pm tui --help
++ head -20
+Usage: pm tui [OPTIONS] COMMAND [ARGS]...
+
+  Launch the interactive TUI (alias for ``pm session``).
+
+  Subcommands control and monitor a running TUI from the command line.
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  capture        Configure frame capture settings.
+  clear-frames   Clear captured frames for a session.
+  clear-history  Clear the TUI frame history for a session.
+  frames         View captured TUI frames.
+  history        View recent TUI frames from history.
+  keys           Show available TUI keybindings.
+  restart        Restart the TUI.
+  send           Send keys to the TUI.
+  view           View current TUI output.
++ pm tui test
+Usage: pm tui [OPTIONS] COMMAND [ARGS]...
+Try 'pm tui -h' for help.
+
+Error: No such command 'test'.
++ echo exit=2
+exit=2
++ pm qa docs
++ head -3
+# pm QA library
+
+Every project that uses `pm` gets a `pm/qa/` directory with four
