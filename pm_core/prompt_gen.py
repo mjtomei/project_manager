@@ -15,6 +15,9 @@ from pm_core.bug_fix_prompts import (
 # TEMPORARY: diagnostics for tracing which prompt_gen.py is actually loaded
 # during QA. Remove once we've confirmed the right code is running.
 _log = configure_logger("pm.prompt_gen")
+# Fires once per Python process at module import — tells us which file
+# is on the import path when the TUI starts up.
+_log.info("QA-PROMPT-DEBUG: prompt_gen IMPORTED from %s", __file__)
 
 
 _OUT_OF_SCOPE_BUGS_BLOCK = """
