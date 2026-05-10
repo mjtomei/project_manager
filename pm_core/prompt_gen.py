@@ -2,7 +2,7 @@
 
 from pm_core import store, notes
 from pm_core.backend import get_backend
-from pm_core.paths import configure_logger, get_global_setting
+from pm_core.paths import get_global_setting
 from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
                                get_spec_mocks_section)
 # Bug-fix prompt blocks live in their own module; re-exported here so
@@ -11,14 +11,6 @@ from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
 from pm_core.bug_fix_prompts import (
     _is_bug_pr, _bug_fix_flow_block, _bug_fix_review_block,
 )
-
-# TEMPORARY: diagnostics for tracing which prompt_gen.py is actually loaded
-# during QA. Remove once we've confirmed the right code is running.
-_log = configure_logger("pm.prompt_gen")
-# Fires once per Python process at module import — tells us which file
-# is on the import path when the TUI starts up.
-_log.info("QA-PROMPT-DEBUG: prompt_gen IMPORTED from %s", __file__)
-
 
 _OUT_OF_SCOPE_BUGS_BLOCK = """
 ## Incidental Bugs
@@ -1353,21 +1345,11 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     qa_specific_block = ""
     has_artifact_recipes = False
     root = None
-    # TEMPORARY: log which file/version of prompt_gen is generating the
-    # planner prompt so we can confirm the live code matches what's on disk.
-    _log.info(
-        "QA-PROMPT-DEBUG: generate_qa_planner_prompt loaded from %s for pr=%s",
-        __file__, pr_id,
-    )
     try:
         root = store.find_project_root()
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
         artifacts = qa_instructions.list_artifacts(root)
         has_artifact_recipes = bool(artifacts)
-        _log.info(
-            "QA-PROMPT-DEBUG: root=%s artifacts=%s has_artifact_recipes=%s",
-            root, [a.get("id") for a in artifacts], has_artifact_recipes,
-        )
         mocks_list = qa_instructions.list_mocks(root)
         if mocks_list:
             mocks_lines = []

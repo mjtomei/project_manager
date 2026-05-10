@@ -112,6 +112,24 @@ def _ipc_session_tag(argv: list[str]) -> str | None:
     return None
 
 
+def _session_tag(argv: list[str], is_ipc: bool) -> str | None:
+    """Resolve the session tag from argv (IPC) or cwd (everything else).
+
+    For IPC commands invoked from tmux key bindings the launching pane's
+    cwd is unreliable, so we prefer the session name carried in argv.
+    But not every IPC command takes a session arg (e.g. ``pm _tui``,
+    ``pm rebalance``) — for those, and for all non-IPC commands, fall
+    back to deriving the tag from the current git root.
+
+    Returns None only when neither path yields a tag (e.g. ``pm`` run
+    outside any git repo). Callers must handle that case explicitly.
+    """
+    tag = _ipc_session_tag(argv) if is_ipc else None
+    if tag is None:
+        tag = _get_session_tag()
+    return tag
+
+
 def _pm_core_from_pm_root(session_tag: str | None) -> str | None:
     """Resolve the pm_core source dir from a session's persisted pm_root.
 
@@ -164,9 +182,7 @@ def main():
         selected_root = override_root
         chosen_via = "override"
     else:
-        # Resolve session tag — IPC commands carry it in argv, others
-        # fall back to deriving it from cwd (same as the override path).
-        tag = _ipc_session_tag(sys.argv) if is_ipc else _get_session_tag()
+        tag = _session_tag(sys.argv, is_ipc)
         pm_root_root = _pm_core_from_pm_root(tag)
         if pm_root_root:
             selected_root = pm_root_root
