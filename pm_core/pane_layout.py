@@ -458,6 +458,24 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
 
     body = _layout_node(pane_nums, 0, 0, width, height)
     layout_str = f"{_checksum(body)},{body}"
+
+    # Idempotence + zoom-preservation guard: skip the select-layout call
+    # when applying it would be a no-op or would clobber the user's zoom.
+    # Without this, applying a layout fires tmux's window-resized hook,
+    # which re-triggers rebalance, which re-applies the same layout — a
+    # tight feedback loop that pegs CPU, spams the log, and clobbers any
+    # manual prefix+z zoom within a second of the user pressing it.
+    current_layout = tmux_mod.get_window_layout(qs, window)
+    if current_layout == layout_str:
+        _logger.info("rebalance: layout unchanged, skipping apply: %s",
+                     layout_str)
+        return True
+    if tmux_mod.get_window_zoomed(qs, window):
+        _logger.info(
+            "rebalance: window is zoomed, skipping apply to preserve "
+            "user zoom: current=%s target=%s", current_layout, layout_str)
+        return True
+
     _logger.info("rebalance: applying layout: %s", layout_str)
 
     ok = tmux_mod.apply_layout(qs, window, layout_str)
