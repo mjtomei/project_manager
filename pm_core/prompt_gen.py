@@ -1478,9 +1478,10 @@ planning, list those subdirs and read each `verdict.md` so the new plan
 accounts for what already happened:
 
 - **PASS / VERIFIED**: prior coverage counts toward fully exercising
-  impacted features, but a new run usually comes with new changes — if
-  the diff since that prior run touches the same surface, re-run the
-  scenario. Don't blindly skip it just because it passed before.
+  impacted features. Re-run when the diff since that run touches the
+  same surface, or when re-running (optionally with small tweaks to
+  STEPS) would meaningfully increase confidence in the behavior.
+  Don't blindly skip a scenario just because it passed before.
 - **NEEDS_WORK**: re-run — the implementation may have changed and the
   scenario needs to be re-validated against the new code.
 - **INPUT_REQUIRED**: re-run, and if the prior `prompt.md` or
