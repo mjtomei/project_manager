@@ -1481,7 +1481,6 @@ accounts for what already happened:
   impacted features. Re-run when the diff since that run touches the
   same surface, or when re-running (optionally with small tweaks to
   STEPS) would meaningfully increase confidence in the behavior.
-  Don't blindly skip a scenario just because it passed before.
 - **NEEDS_WORK**: re-run — the implementation may have changed and the
   scenario needs to be re-validated against the new code.
 - **INPUT_REQUIRED**: re-run, and if the prior `prompt.md` or
