@@ -2138,6 +2138,7 @@ Mark each step as:
 - **Substituted methodology**: The scenario can't run the prescribed steps (e.g., a CLI tool isn't available), so it writes its own unit tests or mocks instead. Even if those tests pass, the scenario did not follow its steps.
 - **Partial execution**: The scenario runs some steps but skips the hard ones (e.g., sets up a project but never starts the actual process under test).
 - **Tests pass but wrong tests**: The scenario runs a pre-existing test suite and reports PASS, but the existing tests don't cover the specific behavior the scenario steps describe.
+- **Performed capture instead of real exercise**: If the scenario produced a capture (transcript/cast), check that it looks like a real user exercising the feature. Watch for status strings printed unconditionally rather than derived from the actual command result, and for narration of steps in place of driving them. A capture that performs the exercise instead of recording it does not justify PASS.
 
 ## Response Format
 
