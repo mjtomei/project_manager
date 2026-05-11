@@ -1074,6 +1074,71 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
     _log.info("Copied instruction %s -> %s", src, dest)
 
 
+def _write_scenario_capture_file(host_clone: str, pr_id: str,
+                                  scenario_index: int, name: str,
+                                  content: str) -> Path | None:
+    """Write ``<host_clone>/pm/qa/captures/<pr_id>/scenarios/<n>/<name>``.
+
+    Used to persist the scenario's full prompt and final verdict alongside
+    the worker's captures so they end up on the PR branch with the rest.
+    Returns the written path or ``None`` on failure.
+    """
+    try:
+        dest_dir = Path(host_clone) / "pm" / "qa" / "captures" / pr_id / \
+            "scenarios" / str(scenario_index)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / name
+        dest.write_text(content)
+        return dest
+    except Exception:
+        _log.warning("Failed to write %s for scenario %d under %s",
+                     name, scenario_index, host_clone, exc_info=True)
+        return None
+
+
+def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
+    """Write each scenario's final verdict to its worktree's capture dir.
+
+    Commits and pushes the verdict files from each worktree so they reach
+    origin/<branch> before the finalize pane fast-forwards the user's PR
+    workdir. Best-effort — failures are logged and skipped.
+    """
+    import subprocess
+    for s in state.scenarios:
+        wt = s.worktree_path
+        if not wt:
+            continue
+        verdict = state.scenario_verdicts.get(s.index, "")
+        if not verdict:
+            continue
+        path = _write_scenario_capture_file(
+            wt, state.pr_id, s.index, "verdict.md",
+            f"# Scenario {s.index}: {s.title}\n\n{verdict}\n",
+        )
+        if not path:
+            continue
+        rel = str(path.relative_to(Path(wt)))
+        try:
+            subprocess.run(["git", "-C", wt, "add", rel], check=True)
+            res = subprocess.run(
+                ["git", "-C", wt, "commit", "-m",
+                 f"qa: verdict for scenario {s.index}"],
+                capture_output=True, text=True,
+            )
+            if res.returncode != 0 and "nothing to commit" not in res.stdout + res.stderr:
+                _log.warning("verdict commit failed for scenario %d: %s",
+                             s.index, res.stderr.strip())
+                continue
+            if branch:
+                subprocess.run(
+                    ["git", "-C", wt, "push", "origin", branch],
+                    capture_output=True, text=True,
+                )
+        except Exception:
+            _log.warning("Failed to commit/push verdict for scenario %d",
+                         s.index, exc_info=True)
+
+
 def _install_artifact_files(pm_root: Path, scenario: QAScenario,
                             scratch_path: Path,
                             scratch_dir: str | None = None) -> None:
@@ -1568,6 +1633,9 @@ def _build_scenario_run_cmd(
         session_name=sess_for_prompt,
         worktree_mode=bool(scenario.worktree_path),
         scratch_dir=scratch,
+    )
+    _write_scenario_capture_file(
+        host_clone, state.pr_id, scenario.index, "prompt.md", child_prompt,
     )
     claude_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
@@ -2774,6 +2842,11 @@ def run_qa_sync(
     # workdir. Blocks here until the pane emits FINALIZE_DONE or
     # FINALIZE_BLOCKED. Reuses the same pane-polling pattern used for
     # scenario verdict verification.
+    try:
+        _persist_scenario_verdicts(state, pr_data.get("branch", ""))
+    except Exception:
+        _log.exception("Failed to persist scenario verdicts")
+
     try:
         state.finalize_verdict = _run_qa_finalize_pane(
             state, pr_data, session, window_name, workdir_path,
