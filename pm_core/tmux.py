@@ -280,40 +280,6 @@ def get_window_size(session: str, window: str = "0") -> tuple[int, int]:
     return (int(parts[0]), int(parts[1]))
 
 
-def get_window_layout(session: str, window: str) -> str | None:
-    """Return the current tmux layout string for a window, or None on failure.
-
-    Includes the checksum prefix (e.g. ``"abcd,190x54,0,0{..."``), so it can
-    be compared directly to a layout string computed for select-layout.
-    """
-    result = _run(
-        _tmux_cmd("display", "-t", f"{session}:{window}", "-p",
-                  "#{window_layout}"),
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    layout = result.stdout.strip()
-    return layout or None
-
-
-def get_window_zoomed(session: str, window: str) -> bool:
-    """Return True if any pane in the window is currently zoomed.
-
-    Used by rebalance to skip layout reapply when the user has explicitly
-    zoomed — select-layout clobbers zoom state, so an idempotent rebalance
-    must not fire when zoom is in effect.
-    """
-    result = _run(
-        _tmux_cmd("display", "-t", f"{session}:{window}", "-p",
-                  "#{window_zoomed_flag}"),
-        text=True,
-    )
-    if result.returncode != 0:
-        return False
-    return result.stdout.strip() == "1"
-
-
 def apply_layout(session: str, window: str, layout_string: str) -> bool:
     """Apply a custom layout string via tmux select-layout. Returns True on success."""
     result = _run(
