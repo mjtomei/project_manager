@@ -1676,6 +1676,14 @@ named subdirectory per capture). Captures are how reviewers confirm
 what the test demonstrated, so produce one even if the scenario itself
 passes.
 
+Aim for the capture to look as close as possible to a user actually
+exercising the feature. A couple of things to watch out for: status
+strings that read like real results but don't depend on one (printed
+unconditionally rather than derived from the command), and narration
+of steps in place of driving them. If a step is hard to reproduce,
+note that in the manifest rather than working around it in the
+recording.
+
 **If you identify and fix a bug during this scenario, capture both
 states.** Save the pre-fix recording under
 `pm/qa/captures/{pr_id}/scenarios/{scenario.index}/pre-fix/` and the
