@@ -1,37 +1,61 @@
+11:59:57 INFO  [claude] claude '## Session Context
 
-───────────────────
- Accessing
- workspace:
+You are testing against tmux session: pm-pm-test-scn9-1778500751-dda6ed41
+The TUI pane ID is: %0
 
- /tmp/pm-test-scn9
- -1778500751
+To interact with this session, use commands like:
+- pm tui view -s pm-pm-test-scn9-1778500751-dda6ed41
+- pm tui send <keys> -s pm-pm-test-scn9-1778500751-dda6ed41
+- tmux list-panes -t pm-pm-test-scn9-1778500751-dda6ed41 -F "#{pane_id} #{pane_width}x#{pane_height} #{pane_current_command}"
+- cat ~/.pm/pane-registry/pm-pm-test-scn9-1778500751-dda6ed41.json
 
- Quick safety
- check: Is this a
- project you
- created or one
- you trust? (Like
+## Captures
 
-────────────────────────────────────────
- Accessing workspace:
+Any capture you produce should land under `pm/qa/captures/regression/<test-id>/<timestamp>/`
+and be committed (and pushed, if there'\''s a remote) so future runs can
+diff against this one. Use `git add pm/qa/captures/regression/.../`,
+`git commit -m "qa: regression capture <test-id>"`, then push.
 
- /tmp/pm-test-scn9-1778500751
+## QA Regression Test: Reg One
 
- Quick safety check: Is this a project
- you created or one you trust? (Like
- your own code, a well-known open
- source project, or work from your
- team). If not, take a moment to review
-  what's in this folder first.
+You are a careful tester. Bring up the surface this test exercises
+(spawn a pane, start a server, invoke a CLI — whatever fits), drive
+it through the scenarios below, and report results.
 
- Claude Code'll be able to read, edit,
- and execute files here.
+## Scenarios
 
- Security guide
+- Scenario 1: <what to verify>
 
- ❯ 1. Yes, I trust this folder
-   2. No, exit
+## Reporting
 
- Enter to confirm · Esc to cancel
+For each scenario, report PASS or FAIL with one line of evidence.
+End with an overall PASS/FAIL.
 
 
+
+## Filing Findings
+
+For each issue you observed, file a PR — don'\''t fix it here.
+
+- **Bug**: `pm pr add '\''<title>'\'' --plan bugs --description '\''<location, repro, expected vs actual>'\''`
+- **Improvement**: `pm pr add '\''<title>'\'' --plan improvements --description '\''<what you noticed and why>'\''`
+
+If a capture under `pm/qa/captures/regression/...` demonstrates the
+finding, point at the path in the description.
+
+Skim `pm pr list --plan bugs` / `--plan improvements` first. If a PR
+for the same issue exists, append a note instead of filing a
+duplicate: `pm pr note add <pr-id> '\''<short observation>; capture: <path>'\''`.
+
+Filing is independent of your verdict for the test.
+
+'
+11:59:57 INFO  [tui.pane_ops] launch_pane: session=pm-pm-test-scn9-1778500751-dda6ed41~1 window=@0 role=qa-item fresh=False
+11:59:57 INFO  [pane_registry] find_live_pane_by_role: qa-item -> None
+11:59:57 INFO  [tui.pane_ops] launch_pane: find_live_pane_by_role returned None
+11:59:57 INFO  [wrapper] wrapper: argv0=/tmp/pm-venv/bin/pm selected_root=None chosen_via=installed is_ipc=True
+11:59:57 INFO  [pane_layout] handle_pane_opened called: session=pm-pm-test-scn9-1778500751-dda6ed41~1 window=@0 pane_id=%3
+11:59:57 INFO  [pane_layout] handle_pane_opened: unknown pane %3 in window @0, setting user_modified
+11:59:57 INFO  [pane_registry] register_pane: %3 role=qa-item window=@0 order=2 (total=3)
+11:59:57 INFO  [pane_layout] rebalance: window @0 size=80x24, 3 panes
+11:59:57 INFO  [pane_layout] rebalance: layout for 3 panes (registered=3, total_tmux=3)

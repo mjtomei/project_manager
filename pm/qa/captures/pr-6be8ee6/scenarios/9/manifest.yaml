@@ -51,18 +51,32 @@ assertions:
     result: PASS
   - step: 8_enter_on_regression_uses_build_regression_test_prompt
     expected: |
-      `## QA Regression Test: reg-one` and `## Session Context` in prompt;
+      `## QA Regression Test: <title>` and `## Session Context` in prompt;
       absence of bug-fix language.
     observed: |
-      Pane 0.2 launched Claude (trust prompt visible). The prompt is passed
-      as a CLI arg to claude so it does not appear in the tmux scrollback.
-      Verified by importing pm_core.regression_prompts.build_regression_test_prompt
-      and rendering with the same args: headers present, no "bug-fix"/"bug_fix"
-      substring. Source path pm_core/tui/pane_ops.py:484-486 confirms
-      regression category calls build_regression_test_prompt.
+      Pressing Enter on reg-one launched a new qa-item pane (registered as %3
+      in the pm pane-registry log). The actual claude command line — with
+      the full prompt inline as argv — is logged by `log_shell_command`
+      to `~/.pm/debug/pm-test-scn9-1778500751-dda6ed41.log` and is captured
+      verbatim in qa-regression-prompt.txt. The captured command contains:
+        - "## Session Context" (matches build_regression_test_prompt's header)
+        - "## QA Regression Test: Reg One" (title resolved from frontmatter)
+        - "## Captures" / "## Scenarios" / "## Filing Findings" sections
+          unique to the regression builder
+      No occurrence of "bug-fix" or "bug_fix" substrings in the launched
+      prompt. NOTE: the scenario's grep target was "reg-one" (the id);
+      the actual prompt uses the title "Reg One" from the scaffold's
+      frontmatter — this is `build_regression_test_prompt(title=...)`'s
+      documented behavior, not a regression. The framing tokens
+      ("## QA Regression Test:" + "## Session Context") are what proves
+      `build_regression_test_prompt` was invoked.
     result: PASS
 files:
   - qa-pane.txt:        framebuffer after `q` — shows 3 sections + "QA 5 item(s)"
   - qa-picker.txt:      framebuffer after `a` — shows Create QA file modal + 6 options
-  - qa-regression-prompt.txt: framebuffer of pane 0.2 after Enter on reg-one (claude trust prompt; prompt body passed via CLI arg)
+  - qa-regression-prompt.txt: extract of ~/.pm/debug/<session>.log showing the
+      claude command that was launched, with the full regression prompt inline
+      as argv (the prompt is not echoed in the pane scrollback because it is
+      passed as a CLI argument).
+  - scenario-9-steps-5-8.cast: asciinema recording replaying steps 5–8.
 verdict: PASS
