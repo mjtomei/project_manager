@@ -1477,9 +1477,10 @@ verdicts — are persisted under
 planning, list those subdirs and read each `verdict.md` so the new plan
 accounts for what already happened:
 
-- **PASS / VERIFIED**: don't re-run the exact same scenario, but its
-  coverage still counts toward the goal of fully exercising impacted
-  features.
+- **PASS / VERIFIED**: prior coverage counts toward fully exercising
+  impacted features, but a new run usually comes with new changes — if
+  the diff since that prior run touches the same surface, re-run the
+  scenario. Don't blindly skip it just because it passed before.
 - **NEEDS_WORK**: re-run — the implementation may have changed and the
   scenario needs to be re-validated against the new code.
 - **INPUT_REQUIRED**: re-run, and if the prior `prompt.md` or
