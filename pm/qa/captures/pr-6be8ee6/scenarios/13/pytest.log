@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.3, pluggy-1.6.0 -- /home/pm/.local/share/pm/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /tmp
+collecting ... collected 5 items
+
+../tmp/test_qa_artifact_e2e.py::test_planner_prompt_has_artifact_block PASSED
+../tmp/test_qa_artifact_e2e.py::test_planner_prompt_omits_artifact_block_when_empty PASSED
+../tmp/test_qa_artifact_e2e.py::test_parse_qa_plan_artifact_field PASSED
+../tmp/test_qa_artifact_e2e.py::test_install_artifact_files_copies_and_rewrites PASSED
+../tmp/test_qa_artifact_e2e.py::test_child_prompt_renders_artifact_section PASSED
+
+============================== 5 passed in 0.05s ===============================
