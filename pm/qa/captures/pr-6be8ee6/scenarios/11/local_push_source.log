@@ -1,0 +1,87 @@
+    def _local_push(self, target_repo: str, branch: str,
+                    caller_workdir: str | None = None) -> dict:
+        """Push scenario commits directly to the real upstream when possible.
+
+        Scenario clones have ``origin`` set to a local path (the PR workdir)
+        for fast clone setup, not the real GitHub remote. A naive forward —
+        update the PR workdir's branch ref via ``git fetch --update-head-ok``
+        and then ``git push origin`` from inside it — does get commits to
+        the real remote, but mutates the PR workdir's branch ref as a side
+        effect. Because ``git fetch`` doesn't touch the index or worktree,
+        that leaves the PR workdir desynced from HEAD: ``git status`` shows
+        phantom staged deletions/modifications matching the new commits'
+        diff, and any real divergence (a user commit during QA) becomes
+        indistinguishable from the proxy's writes.
+
+        Instead, when the target repo's remote chain ends at a real
+        upstream URL, push the source ref directly there from the caller's
+        clone — the PR workdir stays completely untouched, so a normal
+        ``git fetch origin && git merge origin/<branch>`` in the PR workdir
+        is a proper merge with real conflict detection.
+
+        Fall back to the old fetch-into-target behavior only when there is
+        no real upstream (truly local-only repo with no remote to forward
+        to).
+        """
+        source = caller_workdir or self.workdir
+
+        # Prefer the explicit branch ref; fall back to HEAD when the source
+        # clone doesn't have a local branch by that name (e.g. legacy requests
+        # where self.workdir is on a differently-named default branch).
+        src_ref = f"refs/heads/{branch}"
+        try:
+            _check = subprocess.run(
+                ["git", "rev-parse", "--verify", src_ref],
+                cwd=source, capture_output=True, timeout=5,
+            )
+            if _check.returncode != 0:
+                src_ref = "HEAD"
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            src_ref = "HEAD"
+
+        refspec = f"{src_ref}:refs/heads/{branch}"
+
+        # Resolve the real upstream by walking the target's remote chain.
+        # When found, push the source ref directly there, bypassing the
+        # PR workdir entirely.
+        real_url = resolve_real_origin(target_repo)
+        if real_url:
+            cmd = ["git", "-C", source, "push", real_url, refspec]
+            _log.info("Push proxy direct upstream push: %s", cmd)
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=120,
+                )
+                return {
+                    "exit_code": result.returncode,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                }
+            except subprocess.TimeoutExpired:
+                return {"exit_code": 1, "stdout": "",
+                        "stderr": "git-proxy: upstream push timed out after 120s\n"}
+            except Exception as exc:
+                return {"exit_code": 1, "stdout": "",
+                        "stderr": f"git-proxy: upstream push failed: {exc}\n"}
+
+        # No real upstream — fall back to updating the local target's
+        # branch ref via fetch. --update-head-ok is needed because the
+        # target typically has the branch checked out.
+        cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
+               source, refspec]
+        _log.info("Push proxy local-only update (no upstream): %s", cmd)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120,
+            )
+            return {
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+        except subprocess.TimeoutExpired:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": "git-proxy: local push timed out after 120s\n"}
+        except Exception as exc:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": f"git-proxy: local push failed: {exc}\n"}

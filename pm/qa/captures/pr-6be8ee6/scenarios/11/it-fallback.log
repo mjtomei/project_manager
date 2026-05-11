@@ -1,0 +1,6 @@
+== base: /tmp/proxy-it-fb-1778521495-oti1sg8y
+== caller new commit sha: c56c1f3e1932ba61b725eb5d932b0d23e0aa29e6
+== _local_push result: {'exit_code': 0, 'stdout': '', 'stderr': 'From /tmp/proxy-it-fb-1778521495-oti1sg8y/caller2\n   13c100b..c56c1f3  pm/pr-test-feature -> pm/pr-test-feature\n'}
+== pr_workdir branch sha (fallback path): c56c1f3e1932ba61b725eb5d932b0d23e0aa29e6
+== pr_workdir status (worktree stale is OK): ''
+== FALLBACK ASSERTIONS PASSED ==
