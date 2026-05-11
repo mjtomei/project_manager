@@ -54,7 +54,6 @@ _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
 _SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
 _DEFAULT_VERIFICATION_MAX_RETRIES = 3
-_VERIFICATION_TIMEOUT = 900  # seconds before a hung verification thread gives up
 
 
 def _get_max_scenarios() -> int:
@@ -140,6 +139,13 @@ class QAScenario:
     transcript_path: str | None = None
     session_id: str | None = None
     concretize_session_id: str | None = None
+    # Per-scenario shared verifier pane: created on first verification,
+    # reused (via tmux send-keys follow-up) on every subsequent
+    # verification of this scenario.
+    verifier_pane_id: str | None = None
+    verifier_session_id: str | None = None
+    verifier_transcript: str | None = None
+    verifier_cwd: str | None = None
 
 
 @dataclass
@@ -172,12 +178,6 @@ class QALoopState:
     # Scenarios whose PASS verdict has been confirmed by the verifier.
     # Finalize waits until every PASS in scenario_verdicts is in this set.
     verified_scenarios: set[int] = field(default_factory=set)
-    # Shared verifier pane (single Claude session that handles every
-    # scenario's verification serially). Populated on first verification.
-    verifier_pane_id: str | None = None
-    verifier_session_id: str | None = None
-    verifier_transcript: str | None = None
-    verifier_cwd: str | None = None
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
     # Error message for status display (e.g. missing spec, no scenarios)
@@ -1755,7 +1755,6 @@ def _poll_tmux_verdicts(
     use_containers: bool = False,
     repo_root: Path | None = None,
     pm_root: Path | None = None,
-    window_name: str | None = None,
 ) -> None:
     """Poll tmux scenario windows for verdicts.
 
@@ -1785,17 +1784,11 @@ def _poll_tmux_verdicts(
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
     # Track how many verification failures each scenario has had
     verification_failures: dict[int, int] = {}
-    # Scenarios currently being verified (queued or actively verified by
-    # the single shared verifier worker)
+    # Scenarios currently being verified (in a background thread)
     verifying: set[int] = set()
-    # Results from the verification worker
+    # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
-    # Serialized verification: one worker thread consumes this queue so
-    # exactly one verifier session is active at a time across all scenarios.
-    import queue as _queue
-    verify_queue: "_queue.Queue[tuple[QAScenario, str, str] | None]" = _queue.Queue()
-    verify_worker_stop = threading.Event()
     # Idle-reminder state: when we last sent a reminder, keyed by scenario index.
     _reminder_timeout = _get_verdict_reminder_timeout()
     _last_reminder_sent: dict[int, float] = {}
@@ -1822,52 +1815,37 @@ def _poll_tmux_verdicts(
 
     grace_start = time.monotonic()
 
-    def _verification_worker():
-        """Single worker thread: drains verify_queue serially.
+    def _run_verification(scenario: QAScenario, verdict: str, content: str):
+        """Background thread: run verification in this scenario's
+        dedicated verifier pane (created on first call, reused after).
 
-        Each scenario is verified in the shared verifier pane (created on
-        the first call, reused thereafter). Exactly one verification is
-        in flight at a time, so the user only ever sees one verifier
-        pane and one verifier prompt active.
+        No time limit — the user wants verifier failures to block
+        finalize rather than silently trust-original after a timeout.
         """
-        while not verify_worker_stop.is_set():
-            try:
-                item = verify_queue.get(timeout=0.5)
-            except _queue.Empty:
-                continue
-            if item is None:
-                return
-            scenario, verdict, content = item
-            _log.info("Verifier worker picked up scenario %d (%s)",
-                      scenario.index, scenario.title)
-            deadline = time.monotonic() + _VERIFICATION_TIMEOUT
+        _log.info("Verification thread started for scenario %d (%s)",
+                  scenario.index, scenario.title)
 
-            def _stop() -> bool:
-                return state.stop_requested or time.monotonic() > deadline
+        def _stop() -> bool:
+            return state.stop_requested
 
-            try:
-                passed, reason, _vpane = _verify_single_scenario(
-                    scenario, verdict, content, pr_data, data,
-                    session=session, stop_check=_stop,
-                    qa_workdir=state.qa_workdir,
-                    state=state, window_name=window_name,
-                )
-            except Exception:
-                _log.warning("Verifier worker crashed for scenario %d",
-                             scenario.index, exc_info=True)
-                passed, reason = True, ""  # trust original on failure
-            with verification_lock:
-                verification_results[scenario.index] = (passed, reason)
-                # NOTE: do NOT discard from ``verifying`` here — the main
-                # loop must process the result first.  If we discard now
-                # and ``pending`` is also empty the loop exits before it
-                # sees the result (race condition).
-
-    verify_worker_thread = threading.Thread(
-        target=_verification_worker, daemon=True,
-        name=f"qa-verify-worker-{state.pr_id}",
-    )
-    verify_worker_thread.start()
+        try:
+            passed, reason, _vpane = _verify_single_scenario(
+                scenario, verdict, content, pr_data, data,
+                session=session, stop_check=_stop,
+                qa_workdir=state.qa_workdir,
+            )
+        except Exception:
+            _log.warning("Verification thread crashed for scenario %d — "
+                         "leaving unverified so finalize blocks",
+                         scenario.index, exc_info=True)
+            # Do NOT trust-original on crash; leave unverified.
+            passed, reason = False, "verification thread crashed"
+        with verification_lock:
+            verification_results[scenario.index] = (passed, reason)
+            # NOTE: do NOT discard from ``verifying`` here — the main
+            # loop must process the result first.  If we discard now
+            # and ``pending`` is also empty the loop exits before it
+            # sees the result (race condition).
 
     def _launch_next_queued():
         """Launch the next queued scenario if concurrency allows."""
@@ -2129,10 +2107,16 @@ def _poll_tmux_verdicts(
                     # pane_output fallback is only consulted when the
                     # transcript is missing — which it never is in the
                     # hook-driven path — so pass "" here instead of
-                    # scraping the pane.  The verification worker
-                    # processes scenarios one at a time in the shared
-                    # verifier pane.
-                    verify_queue.put((scenario, verdict, ""))
+                    # scraping the pane.  Each scenario's verifier pane
+                    # is created once and reused across re-verifications
+                    # by _verify_single_scenario.
+                    t = threading.Thread(
+                        target=_run_verification,
+                        args=(scenario, verdict, ""),
+                        daemon=True,
+                        name=f"qa-verify-{state.pr_id}-{scenario.index}",
+                    )
+                    t.start()
                 else:
                     state.latest_output = (
                         f"Scenario {scenario.index} ({scenario.title}): "
@@ -2155,11 +2139,6 @@ def _poll_tmux_verdicts(
                                verifying_scenarios=verifying_snapshot,
                                queued_scenarios=_queued_indices,
                                verification_failures=verification_failures)
-
-    # Loop done — shut the verification worker down cleanly.
-    verify_worker_stop.set()
-    verify_queue.put(None)
-    verify_worker_thread.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -2301,16 +2280,14 @@ def _verify_single_scenario(
     session: str | None = None,
     stop_check: Callable[[], bool] | None = None,
     qa_workdir: str | None = None,
-    state: "QALoopState | None" = None,
-    window_name: str | None = None,
 ) -> tuple[bool, str, str | None]:
-    """Verify a single scenario's verdict in the shared verifier pane.
+    """Verify a single scenario's verdict in its dedicated verifier pane.
 
-    The first verification creates a single Claude session in a pane
-    split off the main QA window. Every subsequent verification reuses
-    that pane and session by sending a new message pointing at the
-    next scenario's prompt file. Polls the shared transcript for the
-    next VERIFIED/FLAGGED verdict.
+    The first verification of a given scenario splits its window to
+    create a verifier pane and starts a Claude session with the
+    verification prompt. Re-verifications (after a FLAGGED follow-up
+    causes the scenario to re-run) reuse the same pane and session
+    by sending a follow-up message that points at the new prompt file.
 
     Returns (passed, reason, verifier_pane_id). ``passed`` is True if
     the scenario was VERIFIED; ``reason`` is the FLAGGED explanation
@@ -2322,9 +2299,9 @@ def _verify_single_scenario(
     )
     from pm_core.loop_shared import wait_for_follow_up_verdict
 
-    if state is None or not session or not window_name:
-        _log.warning("Verification: missing state/session/window_name for "
-                     "scenario %d, trusting original verdict", scenario.index)
+    if not session:
+        _log.warning("Verification: missing session for scenario %d, "
+                     "trusting original verdict", scenario.index)
         return True, "", None
 
     resolution = _resolve_qa_model(pr_data, project_data,
@@ -2356,20 +2333,31 @@ def _verify_single_scenario(
         pane_output=pane_output if not transcript_path else None,
     )
 
-    # First call sets up the shared pane; subsequent calls reuse it.
-    pane_alive = bool(state.verifier_pane_id) and tmux_mod.pane_exists(
-        state.verifier_pane_id)
+    pane_alive = bool(scenario.verifier_pane_id) and tmux_mod.pane_exists(
+        scenario.verifier_pane_id)
     if not pane_alive:
-        # Reset stale handles, then create the pane with this scenario's
-        # prompt as the initial Claude turn.
-        state.verifier_pane_id = None
-        state.verifier_session_id = None
-        state.verifier_transcript = None
-        verify_cwd = qa_workdir or state.qa_workdir
+        # First verification of this scenario — split its window and
+        # start a Claude session with the verification prompt.
+        scenario.verifier_pane_id = None
+        scenario.verifier_session_id = None
+        scenario.verifier_transcript = None
+        scenario_pane = scenario.pane_id or _get_scenario_pane(
+            session, scenario.window_name)
+        if not scenario_pane:
+            _log.warning("Verification: cannot find scenario %d pane, "
+                         "marking unverified", scenario.index)
+            return False, "scenario pane not found", None
+        verify_cwd: str | None = None
+        if scenario.transcript_path:
+            verify_cwd = str(Path(scenario.transcript_path).parent)
+        elif scenario.worktree_path:
+            verify_cwd = str(Path(scenario.worktree_path).parent.parent)
+        elif qa_workdir:
+            verify_cwd = qa_workdir
         if not verify_cwd:
-            _log.warning("Verification: no qa_workdir for scenario %d, "
-                         "trusting original verdict", scenario.index)
-            return True, "", None
+            _log.warning("Verification: no cwd available for scenario %d, "
+                         "marking unverified", scenario.index)
+            return False, "no verification cwd", None
         import uuid as _uuid
         verify_session_id = str(_uuid.uuid4())
         verify_cmd = build_claude_shell_cmd(
@@ -2378,45 +2366,37 @@ def _verify_single_scenario(
             effort=resolution.effort,
             cwd=verify_cwd, session_id=verify_session_id,
         )
-        win = tmux_mod.find_window_by_name(session, window_name)
-        if not win:
-            _log.warning("Verification: main QA window %s not found, "
-                         "trusting original verdict", window_name)
-            return True, "", None
-        panes = tmux_mod.get_pane_indices(session, win["index"])
-        if not panes:
-            return True, "", None
-        anchor_pane = panes[0][0]
         try:
             verify_pane = tmux_mod.split_pane_at(
-                anchor_pane, "v", verify_cmd, background=True, cwd=verify_cwd,
+                scenario_pane, "v", verify_cmd, background=True, cwd=verify_cwd,
             )
         except Exception:
             _log.warning("Verification: split_pane_at failed for scenario %d",
                          scenario.index, exc_info=True)
-            return True, "", None
+            return False, "split_pane_at failed", None
         try:
             from pm_core import pane_layout
-            win_id = tmux_mod.pane_window_id(anchor_pane)
+            win_id = tmux_mod.pane_window_id(scenario_pane)
             if win_id:
+                tmux_mod.set_shared_window_size(session, win_id)
                 pane_layout.register_and_rebalance(session, win_id, [
-                    (verify_pane, "qa-verifier", "verifier"),
+                    (verify_pane, f"qa-verify-s{scenario.index}", "verifier"),
                 ])
         except Exception:
-            _log.debug("Verification: pane_layout registration failed",
-                       exc_info=True)
-        state.verifier_pane_id = verify_pane
-        state.verifier_session_id = verify_session_id
-        state.verifier_cwd = verify_cwd
-        state.verifier_transcript = str(
+            _log.debug("Verification: pane_layout registration failed for "
+                       "scenario %d", scenario.index, exc_info=True)
+        scenario.verifier_pane_id = verify_pane
+        scenario.verifier_session_id = verify_session_id
+        scenario.verifier_cwd = verify_cwd
+        scenario.verifier_transcript = str(
             transcript_path_for(verify_cwd, verify_session_id))
-        _log.info("Verification: created shared verifier pane=%s session=%s "
-                  "transcript=%s (first scenario=%d)",
-                  verify_pane, verify_session_id, state.verifier_transcript,
-                  scenario.index)
+        _log.info("Verification: created verifier pane=%s for scenario %d "
+                  "(session=%s, transcript=%s)",
+                  verify_pane, scenario.index, verify_session_id,
+                  scenario.verifier_transcript)
         try:
             content = poll_for_verdict(
-                state.verifier_pane_id, state.verifier_transcript,
+                scenario.verifier_pane_id, scenario.verifier_transcript,
                 verdicts=_VERIFICATION_VERDICTS,
                 grace_period=_VERDICT_GRACE_PERIOD,
                 stop_check=stop_check,
@@ -2427,33 +2407,39 @@ def _verify_single_scenario(
                          scenario.index, exc_info=True)
             content = None
     else:
-        # Send the next scenario's prompt as a follow-up message into the
-        # existing pane. The prompt itself can be several KB, so write it
-        # to a file and tell the agent to read it.
-        prompt_dir = Path(state.verifier_cwd or qa_workdir or state.qa_workdir)
-        prompt_dir.mkdir(parents=True, exist_ok=True)
-        prompt_file = prompt_dir / f"verify-s{scenario.index}.md"
+        # Re-verification: write the new prompt to a file and send a
+        # follow-up message into the existing verifier pane. The prompt
+        # itself is multi-KB, so don't send it inline.
+        prompt_dir = Path(scenario.verifier_cwd or qa_workdir or "")
+        try:
+            prompt_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            _log.warning("Verification: cannot prepare prompt dir %s for "
+                         "scenario %d", prompt_dir, scenario.index, exc_info=True)
+            return False, "prompt dir setup failed", scenario.verifier_pane_id
+        prompt_file = prompt_dir / f"verify-s{scenario.index}-followup.md"
         try:
             prompt_file.write_text(prompt)
         except Exception:
-            _log.warning("Verification: failed to write prompt file for "
+            _log.warning("Verification: failed to write follow-up prompt for "
                          "scenario %d", scenario.index, exc_info=True)
-            return True, "", state.verifier_pane_id
+            return False, "prompt file write failed", scenario.verifier_pane_id
         msg = (
-            f"Next verification task — scenario {scenario.index}. "
+            f"The scenario has been re-evaluated and produced a new verdict. "
             f"Read {prompt_file} and follow its instructions. End with "
             f"VERIFIED on its own line, or wrap an explanation in "
             f"FLAGGED_START / FLAGGED_END markers."
         )
-        tmux_mod.send_keys(state.verifier_pane_id, msg)
+        tmux_mod.send_keys(scenario.verifier_pane_id, msg)
         for _ in range(2):
             time.sleep(1)
-            tmux_mod.send_keys(state.verifier_pane_id, "")
-        _log.info("Verification: sent follow-up to shared verifier pane=%s "
-                  "for scenario %d", state.verifier_pane_id, scenario.index)
+            tmux_mod.send_keys(scenario.verifier_pane_id, "")
+        _log.info("Verification: sent follow-up to scenario %d verifier pane=%s",
+                  scenario.index, scenario.verifier_pane_id)
         try:
             content = wait_for_follow_up_verdict(
-                session, window_name, state.verifier_transcript,
+                session, scenario.window_name or "",
+                scenario.verifier_transcript,
                 verdicts=_VERIFICATION_VERDICTS,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
@@ -2463,26 +2449,29 @@ def _verify_single_scenario(
                          scenario.index, exc_info=True)
             content = None
 
-    passed, reason = True, ""
+    passed, reason = False, "verifier produced no verdict"
     if content:
         v = extract_verdict_from_transcript(
-            state.verifier_transcript, _VERIFICATION_VERDICTS,
+            scenario.verifier_transcript, _VERIFICATION_VERDICTS,
         )
         if v == "VERIFIED":
             _log.info("Verification: scenario %d VERIFIED", scenario.index)
+            passed, reason = True, ""
         elif v == "FLAGGED_END":
             reason = _extract_flagged_reason(content)
             _log.info("Verification: scenario %d FLAGGED: %s",
                       scenario.index, reason)
             passed = False
         else:
-            _log.warning("Verification: unexpected verdict %r for scenario %d, "
-                         "trusting original", v, scenario.index)
+            _log.warning("Verification: unexpected verdict %r for scenario %d",
+                         v, scenario.index)
+            reason = f"verifier returned unexpected verdict {v!r}"
     else:
-        _log.warning("Verification: pane disappeared or timed out for "
-                     "scenario %d, trusting original", scenario.index)
+        _log.warning("Verification: pane disappeared for scenario %d",
+                     scenario.index)
+        reason = "verifier pane disappeared"
 
-    return passed, reason, state.verifier_pane_id
+    return passed, reason, scenario.verifier_pane_id
 
 
 # ---------------------------------------------------------------------------
@@ -2881,8 +2870,7 @@ def run_qa_sync(
                         concurrency_cap=concurrency_cap,
                         use_containers=use_containers,
                         repo_root=repo_root,
-                        pm_root=pm_root,
-                        window_name=window_name)
+                        pm_root=pm_root)
 
     # --- Cleanup ---
     # Keep scenario windows AND containers alive so users can inspect
