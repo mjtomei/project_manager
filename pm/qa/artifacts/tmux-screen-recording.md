@@ -15,11 +15,17 @@ and downstream agents (parse the transcript or cast).
 For each capture, write three files into
 `pm/qa/captures/<pr-id>/<short-name>/`:
 
-- `transcript.log` — plain-text scrollback of the pane.
-- `recording.cast` — asciinema replay (optional but preferred for TUIs).
+- `transcript.log` — plain-text scrollback of the pane (**required** —
+  the load-bearing artifact for grep/diff and for consumers without
+  asciinema).
+- `recording.cast` — asciinema replay (**required** when `asciinema`
+  is available; for TUIs the timing is invaluable).
 - `manifest.md` — frontmatter + short prose: workdir path the capture
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.
+  Include a `## Files` section listing every non-default file the
+  capture produced with a one-line description each (the manifest is
+  the index a reader uses to find what they're looking at).
 
 ## Capture commands
 
@@ -53,12 +59,55 @@ render of the TUI, while you (or an external script) drive input via
 `bash` and then running CLI commands inside it produces a recording of
 those CLI commands, not of the TUI.
 
+> **Trap: don't `tmux attach` to a session from inside that session.**
+> If your recorder pane lives in `<session>` and you wrap
+> `tmux attach -t <session>`, the inner attach client renders all of
+> `<session>` — including the recorder pane itself, which is showing
+> the attach client, which renders the recorder pane, and so on.
+> Every redraw fan-outs through that recursion and asciinema records
+> every escape sequence; expect tens of MB of nested-render churn,
+> not signal. Driver keystrokes (`pm tui send` to the TUI pane) can
+> also surface in the recorder pane's scrollback as the inner client
+> echoes them. **Run the recorder pane in a *different* tmux server**
+> (separate `-L` socket or `tmux new-session -d -s rec-$$`) **when
+> the wrapped command is `tmux attach` to your target session.** For
+> non-attach wrappers — recording a CLI directly inside the recorder
+> pane — staying in the same session is fine.
+
 #### No-TTY environments (e.g. automated agents)
 
 If you're running in a no-TTY environment — typical for Claude sessions
 driving the recipe via a non-interactive Bash tool — `asciinema rec`
 will refuse to start. Work around it by recording **inside a tmux
-pane**, since each tmux pane is backed by its own pty:
+pane**, since each tmux pane is backed by its own pty. Mind the
+self-attach trap above: pick the variant that fits.
+
+**Variant A — wrapping `tmux attach` (TUI capture).** Run the recorder
+in a *separate* tmux server so the inner attach isn't recursive:
+
+```
+# 1. Start a scratch tmux server on its own socket for the recorder.
+tmux -L rec new-session -d -s recorder
+
+# 2. Inside that recorder server, start asciinema wrapping a tmux
+#    attach into the target session on the default socket.
+tmux -L rec send-keys -t recorder:0 \
+    "asciinema rec <capture-dir>/recording.cast \
+        -c 'tmux attach -t <target-session>'" Enter
+
+# 3. Drive the target session from outside (the same way you would
+#    from anywhere) — keys reach the TUI pane via the default-socket
+#    tmux, and the attach client in the recorder records the render.
+pm tui send j -s <target-session>
+# ... etc ...
+
+# 4. End the recording by detaching the attach client (the recorder
+#    pane's command exits and asciinema flushes the cast).
+tmux -L rec send-keys -t recorder:0 'C-b d'
+```
+
+**Variant B — wrapping a non-attach command (CLI / scripted capture).**
+Same session is fine; no recursion possible:
 
 ```
 # 1. Open a fresh pane in the existing tmux session and start recording
@@ -68,8 +117,8 @@ tmux send-keys   -t <session>:<window>.<recorder-pane> \
         -c '<command-to-record>'" Enter
 
 # 2. Drive the recorded program from outside (no TTY needed for the driver)
-#    For a TUI under tmux, this is `tmux send-keys` to the recorded pane,
-#    or any equivalent IPC the program exposes.
+#    — `tmux send-keys` to the recorder pane, or any IPC the program
+#    exposes.
 
 # 3. End the recording: have the recorded command exit, e.g.
 tmux send-keys -t <session>:<window>.<recorder-pane> "exit" Enter
@@ -102,6 +151,12 @@ captured_at: <ISO date>
 ## Pre-fix vs post-fix
 
 <note which state the capture is from; if both, name both files>
+
+## Files
+
+- `transcript.log` — <one-line description>
+- `recording.cast` — <one-line description>
+- `<any extra file>` — <one-line description>
 ```
 
 ## Reviewing a capture

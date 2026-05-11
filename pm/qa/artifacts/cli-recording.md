@@ -17,11 +17,13 @@ when there's no TUI involved; for tmux-hosted TUIs, use
 Write into `pm/qa/captures/<pr-id>/<short-name>/`:
 
 - `recording.cast` — asciinema replay (`asciinema play recording.cast`).
+- `transcript.log` — plain-text version of the same run (**required** —
+  the load-bearing artifact for grep/diff and for consumers without
+  asciinema; the cast is supplementary).
 - `manifest.md` — frontmatter + prose: workdir, the exact command(s)
   recorded, what the recording demonstrates, pre/post-fix state if
-  relevant.
-- (optional) `transcript.log` — plain-text version, useful when a
-  consumer can't run asciinema or wants to grep/diff the output.
+  relevant. Include a `## Files` section listing every non-default
+  file the capture produced with a one-line description each.
 
 ## Capture
 
@@ -109,6 +111,12 @@ recipe: pm/qa/artifacts/cli-recording.md
 ## Pre-fix vs post-fix
 
 <which state the capture is from; if both, name both files>
+
+## Files
+
+- `recording.cast` — <one-line description>
+- `transcript.log` — <one-line description>
+- `<any extra file>` — <one-line description>
 ```
 
 ## Reviewing
