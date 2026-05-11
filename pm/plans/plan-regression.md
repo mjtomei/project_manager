@@ -39,7 +39,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - ✅ Merged (11): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185)
 - 🔨 In progress (1): `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, tracked under improvements but listed here as Phase 7 prerequisite)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
-- 📋 Phase 9 (4 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-e2b7fdf` (ProgramBench submission scaffolding)
+- 📋 Phase 9 (5 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
 
 ## Prerequisites
 
@@ -190,8 +190,17 @@ Coupling rationale: removing INPUT_REQUIRED from prompts is only safe once the s
 
 Detect "same diff, same verdict, no real change" between iterations and short-circuit before max-iterations. Today max-iterations is the only ceiling and is loose (60 minutes per `pr-860969d`); a no-progress detector catches the cheap-to-detect case where the loop is spinning. Hashes diff + verdict + relevant prompt snippets across iterations; on N consecutive identical hashes (default 2), short-circuits with a NEEDS_WORK verdict and a structured reason that the watcher can route to retry-once or mark-failed. Useful in normal mode too — a stuck review loop today wastes the full iteration budget.
 
+### PR: QA instruction auto-synthesis at project setup
+`pr-b3b8df0` (pending). Independent of the other Phase 9 PRs.
+
+A setup-time leader pass that takes a project task envelope (binary + docs, repo + task description, generic project root) and emits `pm/qa/instructions/*.md` files the existing QA loop already knows how to consume. Per-task-type logic plugs in as backends behind a shared interface. ProgramBench is one consumer (its backend lives in `pr-e2b7fdf` below); GAIA-style benchmarks would be another; a generic-pm-project backend is a follow-up improvement that lowers activation energy for users who today author QA instructions by hand.
+
+The probe-and-write shape is the same across consumers — only the per-type heuristics differ. Pulling this primitive out of the ProgramBench scaffolding keeps each consumer to a backend registration rather than a fork of the synthesis logic.
+
 ### PR: ProgramBench submission scaffolding
-`pr-e2b7fdf` (depends on: pr-ca6859f, pr-6f9301e, pr-ed10ac4).
+`pr-e2b7fdf` (depends on: pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0).
+
+Now consumes the auto-synthesis primitive — registers a ProgramBench backend that probes `/workspace/executable` + docs and emits `pm/qa/instructions/binary-comparison.md`. The synthesis driver lives in `pr-b3b8df0`; this PR contributes the per-task-type backend, the leader prompt, the adapter CLI, the reproducibility Dockerfile, and the egress-allowlist firewall harness.
 
 Bundle four pieces as one deliverable, demonstrating the autonomous loop end-to-end on an external benchmark rather than starting a parallel benchmark plan.
 

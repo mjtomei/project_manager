@@ -570,7 +570,7 @@ def create_container(
         raise ContainerError(
             f"Image '{config.image}' not found in {runtime}. "
             f"Run 'pm container build' to rebuild it, or "
-            f"'pm container build-image' for the base image."
+            f"'pm container build-base' for the base image."
         )
 
     runtime = _get_runtime()

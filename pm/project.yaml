@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e2b7fdf
+  active_pr: pr-b3b8df0
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -12237,11 +12237,48 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T22:26:33.724496+00:00'
-  updated_at: '2026-05-03T22:26:33.724496+00:00'
+  updated_at: '2026-05-10T17:03:50.335501+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8a406b6
+    text: "Two concrete symptoms observed 2026-05-10 in project-manager-c5a1006b:\n\
+      \n1. _window-resized firing every 1-2 seconds in a tight feedback loop. Log\
+      \ evidence (~/.pm/debug/project-manager-c5a1006b.log):\n\n  09:59:24 _window-resized:\
+      \ ENTERED session=pm-project_manager-c5a1006b~4 window=@0\n  09:59:24 _window-resized:\
+      \ debounce won, rebalancing\n  09:59:24 rebalance: window @0 size=153x44, 2\
+      \ panes\n  09:59:24 rebalance: applying layout: 2abd,153x44,0,0{76x44,0,0,1095,76x44,77,0,710}\n\
+      \  09:59:24 _window-resized: rebalance returned True\n  09:59:25 _window-resized:\
+      \ ENTERED ... (same window, same size)\n  09:59:25 rebalance: applying layout:\
+      \ 2abd,153x44,0,0{76x44,0,0,1095,76x44,77,0,710}\n  ...\n  09:59:30 (still firing\
+      \ every 1-2s, identical layout each time)\n\nSame window, same dimensions, same\
+      \ panes, same computed layout output every iteration. Debounce reports 'debounce\
+      \ won' each time — debouncing isn't the bug. The pattern is self-perpetuating:\
+      \ rebalance calls tmux select-layout → tmux fires window-resized because layout\
+      \ change counts as a resize → _window-resized triggers rebalance → tmux fires\
+      \ window-resized → ...\n\n2. Manual zoom (prefix+z) gets undone within ~1-2\
+      \ seconds. The user zooms a pane; rebalance from the loop above (or a fresh\
+      \ window-resized hook fired by the zoom event itself) calls tmux select-layout,\
+      \ which clobbers the zoom state. The user can't keep a pane zoomed because something\
+      \ always unzooms them shortly after. Likely a different surface of the same\
+      \ root cause: rebalance doesn't preserve manual zoom across a select-layout\
+      \ call, and with the feedback loop running rebalance fires constantly enough\
+      \ that any zoom is short-lived.\n\nSuggested fix path:\n\na. **Idempotence check\
+      \ in rebalance**: before tmux_mod.set_window_layout (the select-layout call),\
+      \ fetch the current tmux layout string and compare. If equal to the computed\
+      \ target, skip the apply. This breaks the feedback loop directly — a no-op rebalance\
+      \ doesn't fire window-resized.\n\nb. **Preserve zoom across rebalance**: detect\
+      \ whether the active pane in the target window is zoomed before applying the\
+      \ layout (tmux 'list-panes -F #{window_zoomed_flag}'). If zoomed, either skip\
+      \ the apply entirely or re-zoom after applying. Likely the simplest fix is:\
+      \ if zoomed, skip — the user has explicitly chosen a non-default state, respect\
+      \ it until they exit zoom.\n\n(a) and (b) are independent fixes that compound:\
+      \ (a) stops the noise, (b) makes the rare legitimate rebalance not fight user-driven\
+      \ zoom. Both are small.\n\nBoth symptoms are user-visible right now and the\
+      \ second (zoom-fights-rebalance) is the more annoying day-to-day. Worth prioritizing."
+    created_at: '2026-05-10T17:03:50Z'
+    last_edited: '2026-05-10T17:03:50Z'
 - id: pr-c2397e2
   plan: plan-regression
   title: 'QA: refinement prompt asks for additional steps that would improve coverage'
@@ -13156,7 +13193,7 @@ prs:
   plan: plan-regression
   title: 'Bug-fix flow: surface TUI QA repro instructions in session prompt'
   branch: pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-
-  status: in_review
+  status: qa
   depends_on: []
   description: "The bug-fix flow prompt (pm_core/prompt_gen.py:_BUG_FIX_FLOW_BLOCK)\
     \ tells sessions to write a failing test or fall back to a \"manual repro note\"\
@@ -13342,6 +13379,10 @@ prs:
       substitute for that.'
     created_at: '2026-05-08T23:01:57Z'
     last_edited: '2026-05-08T23:01:57Z'
+  - id: note-1caa724
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-bbce993ad40dfe10)'
+    created_at: '2026-05-09T12:24:47Z'
+    last_edited: '2026-05-09T12:24:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-in-e802a472
 - id: pr-cfe24ea
   plan: improvements
@@ -16032,10 +16073,10 @@ prs:
   - pr-ca6859f
   - pr-6f9301e
   - pr-ed10ac4
+  - pr-b3b8df0
   description: 'Bundle four pieces as one deliverable, demonstrating the autonomous
-    loop end-to-end on an external benchmark rather than starting a parallel benchmark
-    plan. Single PR is justified because each piece is small and they are tightly
-    coupled by the submission shape.
+    loop end-to-end on an external benchmark. Single PR is justified because each
+    piece is small and they are tightly coupled by the submission shape.
 
 
     Context. ProgramBench (https://programbench.com) is a 200-task benchmark where
@@ -16057,30 +16098,36 @@ prs:
     Pieces:
 
 
-    1. Leader prompt template — new prompt builder (sibling of generate_prompt, generate_review_prompt)
-    framing pm as the leader''s tool. Lists relevant CLI commands, delegates QA-instruction
-    authoring to the leader (writes pm/qa/instructions/binary-comparison.md based
-    on its probe of /workspace/executable), files plan + PRs, drives them through
-    start/review/QA/merge.
+    1. ProgramBench backend for the auto-synthesis primitive (pr-b3b8df0). Registers
+    a backend that probes /workspace/executable + docs and emits pm/qa/instructions/binary-comparison.md
+    describing how candidate builds are compared to the reference binary''s behavior.
+    The synthesis logic lives in the primitive; this PR just registers the per-task-type
+    heuristics.
 
 
-    2. Adapter CLI — pm bench programbench --task <id> drops the task into a workdir,
+    2. Leader prompt template — new prompt builder (sibling of generate_prompt, generate_review_prompt)
+    framing pm as the leader''s tool. Lists relevant CLI commands, calls into the
+    auto-synthesis primitive at session start to populate pm/qa/instructions/, then
+    files plan + PRs and drives them through start/review/QA/merge.
+
+
+    3. Adapter CLI — pm bench programbench --task <id> drops the task into a workdir,
     generates the leader prompt, spawns the leader session in benchmark_mode, extracts
     /workspace as the submission tarball when the leader finishes.
 
 
-    3. Reproducibility Dockerfile — FROM programbench/<task>:task_cleanroom layered
+    4. Reproducibility Dockerfile — FROM programbench/<task>:task_cleanroom layered
     with pm + Claude Code + pinned deps. The submission asset.
 
 
-    4. Egress-allowlist firewall harness — iptables / network namespace at the sandbox
+    5. Egress-allowlist firewall harness — iptables / network namespace at the sandbox
     boundary allowing only the model API endpoint. Defense-in-depth against incidental
     network use during benchmark runs.
 
 
     Depends on the rest of Phase 9 (self-recovery audit, headless/benchmark mode,
-    no-progress safety stop) — the scaffolding only exercises functionality those
-    provide.
+    no-progress safety stop, auto-synthesis primitive) — the scaffolding only exercises
+    functionality those provide.
 
 
     Manual testing: run the adapter against a held-back ProgramBench task and inspect
@@ -16090,7 +16137,418 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-06T03:29:28.294226+00:00'
-  updated_at: '2026-05-06T03:29:28.294226+00:00'
+  updated_at: '2026-05-10T17:22:15.954021+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-66bf1b6
+  plan: improvements
+  title: 'Improvement: spec template adds Acceptance Criteria, Invariants, Edge Cases,
+    and Verification sections'
+  branch: pm/pr-66bf1b6-improvement-spec-template-adds-acceptance-criteria
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+    Update the spec-generation prompt at `pm_core/spec_gen.py` (and the equivalent
+    block at line ~504) to ask for four sections beyond what''s there today, grounded
+    in standard software-spec patterns adapted for our agent-driven flow.
+
+
+    The current template asks for:
+
+    1. Requirements
+
+    2. Implicit Requirements
+
+    3. Ambiguities
+
+    4. Edge Cases
+
+
+    Change to:
+
+    1. Requirements (unchanged)
+
+    2. Acceptance Criteria *(new)*
+
+    3. Implicit Requirements (rename to Invariants — see below)
+
+    4. Edge Cases (refined — see below)
+
+    5. Verification *(new)*
+
+    6. Ambiguities (unchanged, kept last so resolutions sit near the top of the impl
+    context)
+
+
+    ## New / changed sections
+
+
+    ### Acceptance Criteria *(new, after Requirements)*
+
+    Concise prose summary of the full set of functionality that should be working
+    at the end. Not a test-case list — a paragraph or short bullet list answering
+    ''what does the user observe / can the user do that they couldn''t before?'' Used
+    as:
+
+    - QA''s source of truth for what to verify.
+
+    - A human-readable spec summary for fast review.
+
+    - The implementer''s end-of-iteration self-check.
+
+
+    Should be readable in 10-30 seconds and complete (anything not in here is not
+    promised).
+
+
+    ### Invariants (rename of Implicit Requirements)
+
+    Contracts that must hold. The ''all logs must tolerate missing fields'' / ''logs
+    must not raise'' / ''state writes go through the existing flock'' class of statement.
+    Reads as a checklist of things the implementation cannot violate. Renamed from
+    ''Implicit Requirements'' because that name reads as ''implied requirements''
+    which gets confused with implicit acceptance criteria.
+
+
+    ### Edge Cases (refined)
+
+    Scenarios and concerns to think about during implementation, distinct from invariants.
+    Reads as a list of test situations: ''what if the loop ends with KILLED?'', ''what
+    if get_action_state returns None initially then a populated entry?''. The output
+    of this section often becomes pytest cases or QA scenarios.
+
+
+    The split (Invariants = contracts that hold, Edge Cases = scenarios to test) makes
+    both more useful than the current blended Implicit Requirements / Edge Cases pair.
+
+
+    ### Verification *(new, after Edge Cases)*
+
+    Exact commands and expected outputs to confirm the spec is met. The end-of-iteration
+    check the implementer and reviewer share. Format:
+
+    - Command(s) to run.
+
+    - Expected stdout shape, log lines to grep for, or assertions to confirm.
+
+    - Negative checks (what should NOT appear).
+
+
+    Lines up with SWE-bench''s FAIL_TO_PASS / PASS_TO_PASS pattern: the spec defines
+    the verification harness, not just the goal.
+
+
+    ## Sections explicitly NOT changed
+
+    - Code-path grounding (file:line refs) stays — it works.
+
+    - Cross-references to related PRs at the bottom stay.
+
+    - Imperative tone stays (no RFC 2119 keywords — pm uses Claude as the implementer;
+    the precision tax for MUST/SHOULD/MAY doesn''t earn its keep).
+
+    - No ''Non-goals'' section. With Claude as implementer, agents already err toward
+    narrower scope, not wider; encouraging narrower hurts when verification is the
+    bottleneck and the implementer could have solved more with the same verification
+    work.
+
+    - No ''Lessons'' section. PR notes (`pm pr note add`) cover this well enough.
+
+
+    ## Code paths
+
+    - pm_core/spec_gen.py:228-238 — main template.
+
+    - pm_core/spec_gen.py:504-507 — secondary template (purpose unclear at read time;
+    verify whether it''s a duplicate or a different phase).
+
+    - Existing specs do not need backfill — new specs from now on inherit the structure.
+
+
+    ## Acceptance Criteria
+
+    After this PR, every newly-generated impl spec contains the six sections in the
+    order listed, with the new sections (Acceptance Criteria, Verification) populated.
+    The Invariants section reads as a checklist of contracts; Edge Cases reads as
+    a list of scenarios. The QA loop and the reviewer can both find the verification
+    command in a known place.
+
+
+    ## Invariants
+
+    - Existing specs render unchanged (no migration script).
+
+    - The spec generator continues to run via `launch_claude_print` — no change to
+    invocation.
+
+    - Format stays markdown; downstream consumers (`format_spec_for_prompt`) need
+    no changes.
+
+
+    ## Edge Cases
+
+    - Spec for a trivial PR (one-line fix): Acceptance Criteria and Verification might
+    collapse to one line each. That''s fine — short specs are good. The template should
+    not force volume.
+
+    - QA-phase spec vs. impl-phase spec (the second template at line 504+ is QA-specific):
+    the section list may differ — QA specs already focus on scenarios. Either apply
+    the same six-section template uniformly or keep two phase-specific templates.
+    Decide during impl.
+
+    - Cross-references to related PRs: keep at the bottom as today.
+
+
+    ## Verification
+
+    - Generate a spec for any in-flight PR after the change. Confirm the markdown
+    contains all six section headings in the new order, with non-empty Acceptance
+    Criteria and Verification sections.
+
+    - Cross-check a manually-written spec (e.g. one of pr-813cc19 / pr-26ca427 / pr-f27b882)
+    against the new template — what fields would change? The result should be: more
+    structure, no information loss.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-07T13:45:01.644055+00:00'
+  updated_at: '2026-05-07T13:45:01.644055+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5cdec87
+  plan: null
+  title: 'Bug: pr edit from prefix+M popup opens vim in the popup pane and dismisses
+    on exit; should open in a new tmux pane like the TUI does'
+  branch: pm/pr-5cdec87-bug-pr-edit-from-prefix-m-popup-opens-vim-in-the-p
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    Running `pr edit <pr_id>` (or any field-edit variant) from the prefix+M command
+    popup opens vim *inside the popup pane*. When vim exits, the popup closes, taking
+    the open editor with it. If the user backgrounds vim or quits early, they lose
+    the popup and any half-saved buffer state.
+
+
+    The TUI''s edit action (Enter on a PR row, or pressing `e`) does the right thing:
+    `pane_ops.launch_pane(app, f"pm pr edit {pr_id}", "pr-edit", ...)` at pm_core/tui/pane_ops.py:239
+    opens vim in a new tmux pane that persists. The popup-cmd dispatch (session.py:1909-1918)
+    skips that and just runs `pm pr edit` as a subprocess inside the popup, which
+    inherits the popup''s TTY.
+
+
+    ## Expected behavior
+
+
+    - **Prefix+M popup running `pr edit`** → open vim in a *new tmux pane* (split-window
+    in the current window), same as the TUI edit action.
+
+    - **Regular shell running `pm pr edit`** (whether inside or outside the pm tmux
+    session) → keep current behavior, open vim in that shell. The user is already
+    in a persistent pane and chose to invoke from there; they want vim there, not
+    in a new split.
+
+
+    The distinction is between *popup-dispatched* invocation and *user-shell* invocation,
+    not between in-tmux vs. out-of-tmux.
+
+
+    ## Root cause + fix
+
+
+    `pm_core/cli/session.py:popup_cmd_cmd` runs the dispatched command via `_run_with_abort_keys(full_cmd,
+    ...)` — a plain subprocess in the popup. `pm pr edit` then runs vim against the
+    popup''s TTY.
+
+
+    Two ways to fix; recommend (B):
+
+
+    **(A) Route `pr edit` through the TUI carve-out** like `pr qa` and `review-loop`
+    (session.py:1903-1907). The TUI already handles edit via the launch_pane code
+    path. Cheap to add; widens the popup-cmd carve-out list, which pr-438028c is trying
+    to *eliminate*.
+
+
+    **(B) Have `pm pr edit` decide for itself when to spawn a new pane vs. run inline.**
+    Pass a signal from the popup that says ''I''m a transient popup, open elsewhere.''
+    Concretely: `popup_cmd_cmd` sets `PM_IN_POPUP=1` in the subprocess env (it already
+    sets `PM_PROJECT`). `pr_edit` checks for `PM_IN_POPUP`; if set + in-tmux + pm
+    session detected, mimic the TUI''s launch_pane behavior (split-window with the
+    editor). Otherwise (PM_IN_POPUP unset, or no tmux session), run inline as today.
+
+
+    (B) follows the same direction pr-fcaa434 and pr-438028c go: window-management
+    decisions live in the command itself, not in popup-cmd routing rules. Adds one
+    env var but no carve-out growth.
+
+
+    ## Implicit requirements
+
+
+    - The subprocess that opens vim in the new pane must inherit the user''s editor
+    preference (`$EDITOR`/`$VISUAL`/falls back to vim). Already handled by pr_edit;
+    no change needed beyond making sure the launched pane invokes the same path.
+
+    - The new pane registers with the pane-registry under role `pr-edit` for cleanup,
+    matching what `launch_pane` does today.
+
+    - When PM_IN_POPUP is set but the tmux session can''t be detected (edge case),
+    fall through to inline behavior — better to have a mildly awkward UX than a broken
+    command.
+
+
+    ## Edge cases
+
+
+    - User runs `pm pr edit` from a shell pane that happens to be inside the popup
+    process tree (e.g. they typed into the popup''s bash). Same handling as direct
+    popup invocation — PM_IN_POPUP is set; the new pane opens. Acceptable.
+
+    - User runs `pm pr edit` from a regular shell-pane inside the pm session. PM_IN_POPUP
+    not set; vim opens inline. Matches today.
+
+    - User runs `pm pr edit` from a non-tmux shell. PM_IN_POPUP not set, no tmux session;
+    inline.
+
+    - pr-edit invoked with `--title` / `--status` / etc. flags (non-interactive edits)
+    shouldn''t spawn a pane at all — only the interactive description-edit path opens
+    vim. Verify the env-var check is gated on ''this invocation will spawn an editor''
+    rather than fired unconditionally.
+
+
+    ## Verification
+
+
+    - From prefix+M popup, run `pr edit <pr-id>`. Expected: a new tmux pane appears
+    in the current window with vim open; the popup remains visible (or dismisses cleanly
+    while the pane stays open).
+
+    - From a regular shell pane inside the pm session, run `pm pr edit <pr-id>`. Expected:
+    vim opens in the same pane (current behavior).
+
+    - From outside any tmux session, run `pm pr edit <pr-id>`. Expected: vim opens
+    in the current terminal (current behavior).
+
+    - Run `pm pr edit <pr-id> --status in_review` (non-interactive flag-only edit)
+    from any of the three contexts. Expected: no pane spawned, no vim — the field
+    is updated and the command exits normally.
+
+
+    ## Code paths
+
+    - pm_core/cli/session.py:1857+ `popup_cmd_cmd` — set `PM_IN_POPUP=1` in the subprocess
+    env (or pass through `_run_with_abort_keys`).
+
+    - pm_core/cli/pr.py:317 `pr_edit` — check for `PM_IN_POPUP`; if set + tmux session
+    + interactive editor path, route via the same helper `pane_ops.launch_pane` uses
+    (or its CLI-side equivalent — see pr-fcaa434''s shared helper for plan commands).
+
+    - pm_core/tui/pane_ops.py:239 `launch_pane` for `pr-edit` role — reference for
+    the pane-registry registration pattern.
+
+
+    ## Related
+
+    - pr-438028c (#199) — removing popup-cmd carve-outs by giving commands their own
+    window management. This bug fits exactly that pattern.
+
+    - pr-fcaa434 (#202) — same fix shape applied to plan subcommands. The shared helper
+    that lands there is the natural place for pr_edit''s pane-spawn path.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-07T13:54:53.397098+00:00'
+  updated_at: '2026-05-07T13:54:53.397098+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b3b8df0
+  plan: plan-regression
+  title: QA instruction auto-synthesis at project setup
+  branch: pm/pr-b3b8df0-qa-instruction-auto-synthesis-at-project-setup
+  status: pending
+  depends_on: []
+  description: 'A setup-time pass run by a leader Claude session that takes a project
+    task envelope (binary + docs, repo + task description, or a generic project root)
+    and emits pm/qa/instructions/*.md files the existing QA loop already knows how
+    to consume. Per-task-type logic plugs in as backends behind a shared interface
+    — same probe-and-write shape across consumers, only the per-type heuristics differ.
+
+
+    ## Why a primitive
+
+
+    Three concrete consumers of the same shape:
+
+
+    1. ProgramBench: leader probes /workspace/executable (chmod 111) and the docs
+    in the cleanroom, writes pm/qa/instructions/binary-comparison.md describing how
+    to compare candidate-build outputs against the reference binary''s behavior.
+
+    2. GAIA-style benchmarks (later): leader reads the task question + attachments,
+    writes per-sub-question verification instructions that the QA loop applies to
+    candidate answers.
+
+    3. Generic pm projects: leader probes the repo (test framework, conventions, language),
+    proposes QA instructions based on what it finds. Lowers activation energy for
+    users who today have to author pm/qa/instructions/*.md by hand.
+
+
+    Pulling the primitive out of the ProgramBench scaffolding PR means each consumer
+    is a backend registration, not a fork of the synthesis logic.
+
+
+    ## Shape
+
+
+    - Module like pm_core/qa_setup/ with a Protocol that backends implement: probe(envelope)
+    -> dict of inferred-context, synthesize(context) -> list of (filename, markdown_body).
+
+    - A registry keyed by envelope type (programbench-task, generic-pm-project, etc.).
+
+    - A driver that loads the right backend, runs probe + synthesize via a leader
+    Claude session, writes the markdown files into pm/qa/instructions/.
+
+    - Idempotent: re-running on a project that already has hand-authored instructions
+    does not overwrite them; produces a diff for the user.
+
+
+    Out of scope for this PR — left for follow-ups that consume the primitive:
+
+    - pm init / first-run UX integration that offers auto-proposed instructions to
+    the user.
+
+    - Backends for any specific task type (ProgramBench backend lands in pr-e2b7fdf;
+    generic-pm-project backend lands as a follow-up improvement; GAIA-style backend
+    lands when GAIA work begins).
+
+
+    ## Sequencing
+
+
+    Independent of the other Phase 9 PRs (does not depend on self-recovery audit,
+    headless mode, or no-progress stop). Can land any time before pr-e2b7fdf (ProgramBench
+    scaffolding) which consumes it.
+
+
+    ## Manual testing
+
+
+    Stub a backend that probes a known fixture and synthesizes a fixed instruction
+    file. Confirm the driver writes the file correctly, registry routing works, idempotency
+    check skips overwriting hand-authored files.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-10T17:21:46.282881+00:00'
+  updated_at: '2026-05-10T17:21:46.282881+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

@@ -87,9 +87,9 @@ def container_set(key: str, value: str):
     click.echo(f"Set {key} = {value}")
 
 
-@container_group.command("build-image")
+@container_group.command("build-base")
 @click.option("--tag", default=None, help="Image tag (default: pm-dev:latest)")
-def container_build_image(tag: str | None):
+def container_build_base(tag: str | None):
     """Build the pm developer base image with pre-installed tools.
 
     The image includes git, python3, pip, node/npm, curl, jq, and
@@ -110,7 +110,7 @@ def container_build_image(tag: str | None):
 
 @container_group.command("build")
 @click.option("--tag", default=None, help="Image tag (default: pm-project-<name>:latest)")
-@click.option("--base", default=None, help="Base image (default: current container image)")
+@click.option("--base", default=None, help="Base image (default: pm-dev:latest)")
 def container_build(tag: str | None, base: str | None):
     """Launch a Claude session to build a project-specific Docker image.
 
@@ -123,7 +123,7 @@ def container_build(tag: str | None, base: str | None):
     """
     from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-    from pm_core.container import load_container_config
+    from pm_core.container import DEFAULT_IMAGE, load_container_config
 
     root = state_root()
 
@@ -140,7 +140,7 @@ def container_build(tag: str | None, base: str | None):
         project_dir = root
 
     config = load_container_config()
-    base_image = base or config.image
+    base_image = base or DEFAULT_IMAGE
     image_tag = tag or f"pm-project-{project_name}:latest"
 
     prompt = _build_container_build_prompt(
