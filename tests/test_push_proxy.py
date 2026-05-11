@@ -426,10 +426,10 @@ class TestCallerWorkdir:
            return_value="/some/pr-workdir")
     def test_local_push_uses_caller_workdir(self, _mock_resolve, mock_run,
                                             proxy, sock_path):
-        """_local_push fetches FROM the caller's clone, not self.workdir."""
+        """_local_push fallback (no upstream) fetches FROM the caller's clone."""
         def side_effect(cmd, **kwargs):
             if cmd[:2] == ["git", "-C"]:
-                # The fetch step in _local_push
+                # The fallback fetch step in _local_push
                 return MagicMock(returncode=0, stdout="", stderr="")
             # resolve_real_origin follow-up (no real upstream)
             return MagicMock(returncode=1, stdout="", stderr="")
@@ -449,6 +449,46 @@ class TestCallerWorkdir:
         # Source must be the caller's clone, not the proxy default workdir
         assert "/caller-clone" in fetch_cmd
         assert "/proxy-default-workdir" not in fetch_cmd
+
+    @patch("subprocess.run")
+    @patch("pm_core.push_proxy._resolve_local_remote_url",
+           return_value="/some/pr-workdir")
+    @patch("pm_core.push_proxy.resolve_real_origin",
+           return_value="git@github.com:org/repo.git")
+    def test_local_push_with_upstream_bypasses_pr_workdir(
+            self, _mock_real, _mock_resolve, mock_run, proxy, sock_path):
+        """When a real upstream exists, push directly from caller to upstream.
+
+        The PR workdir (target) must NOT be touched — no `git -C <target>`
+        fetch — so its branch ref, index, and worktree stay in sync.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": "/caller-clone",
+        })
+        assert resp["exit_code"] == 0
+
+        # Find the direct push: git -C <source> push <real-url> <refspec>
+        push_calls = [c for c in mock_run.call_args_list
+                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert len(push_calls) == 1, \
+            f"expected one direct push, got {push_calls}"
+        push_cmd = push_calls[0][0][0]
+        assert push_cmd[2] == "/caller-clone", \
+            "push must run from the caller's clone, not the PR workdir"
+        assert "git@github.com:org/repo.git" in push_cmd
+        assert "pm/pr-123-feature" in push_cmd[-1]
+
+        # The PR workdir target must NOT be the cwd / -C of any call —
+        # bypassing it is the whole point of the new design.
+        for c in mock_run.call_args_list:
+            argv = c[0][0]
+            if argv[:2] == ["git", "-C"]:
+                assert argv[2] != "/some/pr-workdir", \
+                    f"PR workdir must not be touched, but call was: {argv}"
 
     @patch("subprocess.run")
     def test_fetch_uses_caller_workdir(self, mock_run, proxy, sock_path):
