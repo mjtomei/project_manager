@@ -145,29 +145,26 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
             check=False)
-    # Also rebalance on window switch.  With aggressive-resize on (or when
-    # different windows have different pane layouts), tmux defers the
-    # resize until the next input event after a switch — panes appear
-    # stale until the user presses a key.  Hooking after-select-window
-    # forces a rebalance immediately so the new window renders at the
-    # current client size.  The _window-resized handler is debounced and
-    # no-ops when the size hasn't actually changed, so this is cheap on
-    # plain window switches.
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-select-window",
-             "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
-            check=False)
-    # Client-level hooks for the same staleness symptom on cross-session
-    # switches and on attach/detach (which can change the smallest-client
-    # window size when window-size=smallest is set).  Same handler — the
-    # debounce keeps it cheap when nothing actually changed.
-    for client_hook in ("client-session-changed", "client-attached",
-                        "client-detached"):
-        subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", client_hook,
-                 "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
+    # Clean up stale hooks from earlier versions:
+    # - after-resize-window: never the right hook name; only fired after the
+    #   resize-window command.
+    # - after-select-window + client-attached/detached/session-changed: added
+    #   on 2026-05-03 as defensive companions to window-resized for cases
+    #   where window-resized alone misses (aggressive-resize deferral,
+    #   smallest-client recompute). In practice they formed a feedback loop —
+    #   pm's _window-resized handler ended up re-triggering one of them and
+    #   the cycle fired every 1-2s, pegging the session. Removed; the bare
+    #   window-resized hook + prefix+R manual rebalance cover the remaining
+    #   edge cases.
+    for stale_hook, scope in (
+        ("after-resize-window", "-gu"),
+        ("after-select-window", "-guw"),
+        ("client-session-changed", "-gu"),
+        ("client-attached", "-gu"),
+        ("client-detached", "-gu"),
+    ):
+        subprocess.run(tmux_mod._tmux_cmd("set-hook", scope, stale_hook),
                 check=False)
-    # Clean up stale hook from earlier versions that used the wrong name
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
-            check=False)
 
     # Popup bindings: PR action picker (prefix+P) and pm command runner
     # (prefix+M).  Width is resolved dynamically by ``pm _popup-show``
