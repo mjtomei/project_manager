@@ -13,20 +13,32 @@ from pm_core.bug_fix_prompts import (
 )
 
 _OUT_OF_SCOPE_BUGS_BLOCK = """
-## Incidental Bugs
+## Incidental Bugs and UX Issues
 
-If you spot a bug or quality issue that isn't part of this PR's stated
-scope, try to fix it if the fix doesn't require separate planning or user
-input. If you do decide to fix it, then record what you did with:
-  ```
-  pm pr note add <pr-id> '<short summary of the incidental fix>'
-  ```
+If you spot a bug, quality issue, or UX discrepancy that isn't part
+of this PR's stated scope, **always file a PR for it** — don't just
+note it in a capture manifest or your report. Filing is mandatory;
+fixing is optional. File even if you're not sure it's a real bug
+(better to have an issue surfaced for review than lost): include
+your uncertainty in the description.
 
-If you don't, file a separate bug PR so it doesn't get lost:
-  ```
-  pm pr add '<title>' --plan bugs --description '<location, repro>'
-  ```
-  Skim `pm pr list --plan bugs` first to avoid duplicates.
+```
+pm pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'
+pm pr add '<title>' --plan improvements --description '<UX issue and why it matters>'
+```
+
+Skim `pm pr list --plan bugs` (or `--plan improvements`) first to
+avoid duplicates. If a PR for the same issue already exists, append
+a note to it rather than filing a new one:
+
+```
+pm pr note add <existing-pr-id> '<short observation; capture: <path> if applicable>'
+```
+
+If you also chose to fix the issue in this session, note that with:
+```
+pm pr note add <pr-id> '<short summary of the incidental fix>'
+```
 """
 
 
@@ -1676,8 +1688,16 @@ named subdirectory per capture). Captures are how reviewers confirm
 what the test demonstrated, so produce one even if the scenario itself
 passes.
 
+**If you identify and fix a bug during this scenario, capture both
+states.** Save the pre-fix recording under
+`pm/qa/captures/{pr_id}/scenarios/{scenario.index}/pre-fix/` and the
+post-fix recording under `.../post-fix/`. Cross-link the two in each
+manifest's `## Files` section, and (per Incidental Bugs above) still
+file a PR for the bug.
+
 After producing each capture, commit it and push so it lands on the
-PR branch:
+PR branch. Limit the `git add` to the scenario's own subdir so
+unrelated paths don't ride along:
 - `git add pm/qa/captures/{pr_id}/scenarios/{scenario.index}/`
 - `git commit -m "qa: capture for scenario {scenario.index}"`
 - `git push origin {branch}`

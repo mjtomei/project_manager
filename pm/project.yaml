@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-b3b8df0
+  active_pr: pr-001
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -16724,6 +16724,67 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-08T20:50:25.310435+00:00'
   updated_at: '2026-05-08T20:50:25.310435+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-be00809
+  plan: bugs
+  title: 'Bug: QA result PR notes render empty scenario summary even when scenarios
+    ran'
+  branch: pm/pr-be00809-bug-qa-result-pr-notes-render-empty-scenario-summa
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\n`_record_qa_note` (`pm_core/tui/qa_loop_ui.py:498`)\
+    \ appends a PR note\nshaped like:\n\n```\nQA <verdict>: <s1 title>: <v1>; <s2\
+    \ title>: <v2>; ... (workdir: ...)\n```\n\nWe have a real instance on master that\
+    \ reads:\n\n```\nQA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-bbce993ad40dfe10)\n\
+    ```\n\n— note the double space and missing summary. The QA run that produced\n\
+    it did have scenarios, so the empty summary doesn't reflect reality.\n\nThe note\
+    \ lives at `pr-6be8ee6.notes` as `note-1caa724` (created\n2026-05-09).\n\n## Diagnosis\n\
+    \nIn `_record_qa_note`:\n\n```python\nsummary_parts = []\nfor s in state.scenarios:\n\
+    \    v = state.scenario_verdicts.get(s.index, \"?\")\n    summary_parts.append(f\"\
+    {s.title}: {v}\")\nnote_text = f\"QA {state.latest_verdict}: \" + \"; \".join(summary_parts)\n\
+    ```\n\nFor the empty join, `state.scenarios` must be `[]` at the moment the\n\
+    note is recorded. Two code paths in `run_qa_sync` set\n`state.latest_verdict =\
+    \ VERDICT_INPUT_REQUIRED` while leaving\n`state.scenarios` empty:\n\n1. `pm_core/qa_loop.py:2579-2589`\
+    \ — `parse_qa_plan` returned no\n   scenarios. `state.scenarios = []`. Loop continues,\
+    \ eventually\n   completes, note fires with empty summary.\n2. `pm_core/qa_loop.py:2618-2637`\
+    \ — QA spec missing; returns early\n   without populating scenarios.\n\nNeither\
+    \ matches the reported case (user confirmed scenarios were\nrunning). A third\
+    \ path is suspected: somewhere between launch and\nthe completion callback `_on_qa_complete`\
+    \ (which calls\n`_record_qa_note`), `state.scenarios` is being mutated or replaced.\n\
+    Candidates worth checking:\n\n- `pm_core/qa_loop.py:1769-1784` — `state.scenarios`\
+    \ is temporarily\n  swapped to `[scenario]` while launching a queued scenario,\
+    \ restored\n  in `finally`. If completion runs while the swap is active, the note\n\
+    \  sees the wrong list. But that path swaps to `[scenario]`, not\n  `[]`, so it\
+    \ can't explain a pure empty join unless there's an\n  uncaught exception between\
+    \ the swap and the restore that drops\n  `state.scenarios = []` (the dataclass\
+    \ default would not be re-\n  invoked though, so this is unlikely).\n- The QALoopState\
+    \ instance recorded against `_on_qa_complete` may\n  differ from the one that\
+    \ ran scenarios — e.g. start_qa_background\n  is called twice (`zz t` fresh restart),\
+    \ the first state's\n  scenarios got populated, the second state's didn't, but\
+    \ the\n  completion callback fires against the second.\n\n## Proposed fix\n\n\
+    Two complementary changes:\n\n1. **Make the note legible when summary is empty.**\
+    \ Replace the empty\n   join with a sentinel so the note always carries signal:\n\
+    \   ```python\n   summary = \"; \".join(summary_parts) if summary_parts else \"\
+    (no scenarios recorded)\"\n   ```\n   Mechanical; doesn't fix the root cause but\
+    \ stops the silent\n   misinformation.\n\n2. **Diagnose the root cause.** Add\
+    \ temporary debug logging at the\n   completion callback to record:\n   - `len(state.scenarios)`\
+    \ and `state.scenario_verdicts`\n   - `state.qa_workdir`\n   - whether `state`\
+    \ matches what the launch path saw (e.g. compare\n     id(state) at launch vs\
+    \ at completion)\n\n   With that, the offending path is one log line away.\n\n\
+    ## Out of scope\n\n- Whether the QA-INPUT_REQUIRED-only-scenarios path should\
+    \ auto-\n  retry or escalate differently. Separate decision.\n- Whether the note\
+    \ should even be written for empty-scenarios runs\n  (arguably it's noise — the\
+    \ status file already records the\n  outcome).\n\n## Tracking\n\n- Discovered\
+    \ while reviewing the merge of `pr-6be8ee6` into master;\n  `pr-6be8ee6:note-1caa724`\
+    \ is the surviving instance."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-11T10:42:16.762276+00:00'
+  updated_at: '2026-05-11T10:42:16.762276+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

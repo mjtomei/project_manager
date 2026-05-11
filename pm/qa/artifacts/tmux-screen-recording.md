@@ -148,16 +148,18 @@ captured_at: <ISO date>
 
 <one paragraph>
 
-## Pre-fix vs post-fix
-
-<note which state the capture is from; if both, name both files>
-
 ## Files
 
 - `transcript.log` — <one-line description>
 - `recording.cast` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```
+
+When a single scenario captures **both** pre-fix and post-fix states
+(it found and fixed a bug along the way), use sub-subdirs
+`pre-fix/` and `post-fix/` under the scenario's capture dir, each
+with its own `transcript.log` + `recording.cast` + `manifest.md`.
+Cross-link them in the `## Files` section of each manifest.
 
 ## Reviewing a capture
 

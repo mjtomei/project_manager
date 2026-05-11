@@ -108,16 +108,18 @@ recipe: pm/qa/artifacts/cli-recording.md
 
 <one paragraph: which behavior is shown, what to look for in playback>
 
-## Pre-fix vs post-fix
-
-<which state the capture is from; if both, name both files>
-
 ## Files
 
 - `recording.cast` — <one-line description>
 - `transcript.log` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```
+
+When a single scenario captures **both** pre-fix and post-fix states
+(it found and fixed a bug along the way), use sub-subdirs
+`pre-fix/` and `post-fix/` under the scenario's capture dir, each
+with its own `recording.cast` + `transcript.log` + `manifest.md`.
+Cross-link them in the `## Files` section of each manifest.
 
 ## Reviewing
 
