@@ -1,0 +1,57 @@
+You're working on PR pr-xyz: "t"
+
+This session is managed by `pm`. Run `pm help` to see available commands.
+
+## Context
+Standalone PR (not part of a plan).
+
+
+## Task
+
+
+## How This Session Works
+
+This session has two phases:
+
+1. **Spec generation** — First, you will analyze the PR description and the
+   codebase to produce a structured spec.  The spec grounds the requirements
+   in actual code paths and surfaces implicit requirements.
+2. **Implementation** — Then, working from the spec you generated, you will
+   carry out the implementation work described in the Task section above.
+
+Start with Step 0 below.  Once the spec is saved, proceed to the main task.
+
+## Step 0: Generate Implementation Spec
+
+Analyze the codebase to understand the relevant code, then write a spec covering:
+1. **Requirements** — Restate each requirement grounded in the codebase (specific files, functions, modules)
+2. **Implicit Requirements** — What must also be true for stated requirements to hold
+3. **Ambiguities** — Identified ambiguities with your proposed resolutions
+4. **Edge Cases** — Interactions with existing behavior not addressed in the description
+
+Use your best judgement to resolve ambiguities where you can confidently do so.
+If you encounter a genuinely unresolvable ambiguity — multiple valid
+interpretations with materially different outcomes — include it in the spec's
+"Ambiguities" section marked **[UNRESOLVED]** with a clear question.
+
+Save the spec to `pm/specs/pr-xyz/impl.md`.
+
+If the spec contains any **[UNRESOLVED]** ambiguities, present them to the
+user and wait for their response before proceeding.  Update the spec with
+their answers, re-save, then continue.  If there are no unresolved
+ambiguities, proceed with the implementation work below.
+
+---
+
+## Tips
+- This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
+- Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
+- This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for pr-xyz is already running.
+
+
+
+## Workflow
+- You're on branch `pm/pr-xyz`
+- Commit as you go
+- When ready for review: press `d` in the TUI or run `pm pr review pr-xyz` from the base pm directory (not from this workdir)
+- To merge: run `pm pr merge pr-xyz` from the base pm directory
