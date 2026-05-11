@@ -1451,6 +1451,12 @@ cases that may expose bugs. Split scenarios only when code paths are
 unrelated or setup differs materially enough that combining them would
 bloat the steps.
 
+Make sure each impacted feature is exercised the way a user would actually
+use it — driven through its real entry point end-to-end, not just probed at
+the unit level. Inspecting outputs, calling internals, or confirming a flag
+is wired up is not a substitute for running the feature through a complete
+user-facing flow at least once.
+
 ## PR Context
 
 - **Title**: {title}
