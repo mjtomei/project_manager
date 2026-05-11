@@ -1,0 +1,68 @@
+pr_id: pr-6be8ee6
+scenario_id: 9
+focus: |
+  q pane renders three labeled sections including Artifact Recipes (even when 0);
+  status-bar QA counter includes artifact count; `a` key pushes QACreatePickerScreen
+  (modal), not a hardcoded add-instruction.
+seeded_counts:
+  instructions: 2
+  regression: 1
+  artifacts: 2
+  total: 5
+session: pm-pm-test-scn9-1778500751-dda6ed41
+commands_run:
+  - pm qa add-instruction inst-one
+  - pm qa add-instruction inst-two
+  - pm qa add-regression  reg-one
+  - pm qa add-artifact    art-one
+  - pm qa add-artifact    art-two
+  - pm session  (creates tmux session)
+  - pm tui send q       (open QA pane)
+  - pm tui view         (capture framebuffer -> qa-pane.txt)
+  - pm tui send a       (open QACreatePickerScreen)
+  - pm tui view         (capture modal -> qa-picker.txt)
+  - pm tui send Escape  (dismiss modal)
+  - pm tui send Down x3 / Up x1  (navigate to reg-one)
+  - pm tui send Enter   (launch regression)
+  - tmux capture-pane   (-> qa-regression-prompt.txt)
+assertions:
+  - step: 5_three_section_headers
+    expected: lines "Instructions", "Regression Tests", "Artifact Recipes"
+    observed: all three present in qa-pane.txt; art-one/art-two visible under Artifact Recipes
+    result: PASS
+  - step: 6_status_counter_sums_all_three
+    expected: "QA    5 item(s)"
+    observed: "QA    5 item(s)    Enter=run  e=edit" in qa-pane.txt
+    result: PASS
+  - step: 7a_a_key_pushes_modal_picker
+    expected: modal titled "Create QA file" with 6 kind/mode options
+    observed: |
+      qa-picker.txt shows "Create QA file" + Name field + Kind list with
+      Instruction/Regression test/Artifact recipe each in (guided ...) and
+      (scaffold ...) variants. (Right-truncated in 40-col pane.)
+    result: PASS
+  - step: 7b_no_legacy_hardcoded_file
+    expected: pm/qa/instructions/ contains only inst-one.md, inst-two.md
+    observed: same; no new-instruction.md created
+    result: PASS
+  - step: 7c_escape_returns_to_qa_pane
+    expected: "Artifact Recipes" visible again after Escape
+    observed: present in pm tui view
+    result: PASS
+  - step: 8_enter_on_regression_uses_build_regression_test_prompt
+    expected: |
+      `## QA Regression Test: reg-one` and `## Session Context` in prompt;
+      absence of bug-fix language.
+    observed: |
+      Pane 0.2 launched Claude (trust prompt visible). The prompt is passed
+      as a CLI arg to claude so it does not appear in the tmux scrollback.
+      Verified by importing pm_core.regression_prompts.build_regression_test_prompt
+      and rendering with the same args: headers present, no "bug-fix"/"bug_fix"
+      substring. Source path pm_core/tui/pane_ops.py:484-486 confirms
+      regression category calls build_regression_test_prompt.
+    result: PASS
+files:
+  - qa-pane.txt:        framebuffer after `q` — shows 3 sections + "QA 5 item(s)"
+  - qa-picker.txt:      framebuffer after `a` — shows Create QA file modal + 6 options
+  - qa-regression-prompt.txt: framebuffer of pane 0.2 after Enter on reg-one (claude trust prompt; prompt body passed via CLI arg)
+verdict: PASS

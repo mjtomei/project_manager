@@ -1,0 +1,26 @@
+[Session: pm-pm-test-scn9-1778500751-dda6ed41, Pane: %0]
+
+  QA    5 item(s)    Enter=run  e=edit
+
+
+    Instructions (2)
+    ───────────────────────────
+  ▶ inst-one: Inst One
+
+    inst-two: Inst Two
+
+
+    Regression Tests (1)
+    ───────────────────────────
+    reg-one: Reg One
+
+
+    Artifact Recipes (2)
+    ───────────────────────────
+    art-one: Art One                 ▄▄
+
+    art-two: Art Two
+
+  press / to type a command
+
+
