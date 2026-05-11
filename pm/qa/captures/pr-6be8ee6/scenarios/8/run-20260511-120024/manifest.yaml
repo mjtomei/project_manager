@@ -1,0 +1,35 @@
+---
+pr: pr-6be8ee6
+scenario: 8
+workdir: /workspace
+captured_at: 2026-05-11
+recipe: pm/qa/artifacts/cli-recording.md
+---
+
+## Commands
+
+Recorded via `bash /tmp/s8-script.sh` driving scenario 8 steps 3–16
+end to end: `pm qa list` from /workspace and from an empty test
+project; `pm qa show foo` collision (instructions wins) + `--category
+artifacts` override; `pm qa add-{instruction,regression,artifact}`
+scaffolds + re-run "Already exists" exit=1; `pm qa author-*` refuse
+on existing without spawning Claude; `pm qa docs` keyword + length;
+`pm qa regression no-such-id` error; `build_regression_test_prompt`
+assertions for `file_findings=True/False`; `pm tui --help` subcommand
+list; `pm tui test` no-such-command.
+
+## What this demonstrates
+
+All scenario 8 steps pass. Three-section `pm qa list` (incl. empty
+`Artifact Recipes (0):` header), instructions-first auto-detect on
+collision, `--category` override, scaffold templates carry the
+expected section headers, scaffold/author refuse on existing,
+packaged `pm qa docs` works independent of cwd, regression prompt
+unifies bugs+improvements (no `--plan ux`), `pm tui test` removed.
+
+## Files
+
+- `recording.cast` — asciinema replay of the scripted run, captured
+  inside a scaffold tmux pane (no-TTY workaround per recipe).
+- `transcript.log` — plain-text `set -x` transcript of the same
+  script for grep/diff.
