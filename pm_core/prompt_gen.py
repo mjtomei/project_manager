@@ -1461,8 +1461,8 @@ Plan along three axes: nominal use, error / edge cases, and concurrent use
 (two or more actors invoking the surface at once). Before listing scenarios,
 inventory the shared resources the diff touches — filesystem paths, sockets,
 daemons, network endpoints, on-disk state, anything with a single name
-accessed from multiple callers. For each, plan a concurrent-use scenario
-unless you can justify in one sentence why one isn't needed.
+accessed from multiple callers. Make sure each is exercised by a
+concurrent-use scenario.
 
 Ignore any prior captures or `verdict.md` files under
 `pm/qa/captures/{pr_path_seg}/scenarios/` — for this run, treat the
