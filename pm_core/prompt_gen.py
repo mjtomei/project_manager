@@ -1457,13 +1457,20 @@ the unit level. Inspecting outputs, calling internals, or confirming a flag
 is wired up is not a substitute for running the feature through a complete
 user-facing flow at least once.
 
-FOCUS and STEPS must describe **user actions and observations**, not the
-behavior of the underlying methods. "Verify that helper X returns Y when
-given Z" describes internal mechanics; reframe it as the user-facing
-flow that exercises helper X, with an observation about what the user
-sees. If you can't write FOCUS/STEPS without naming a private function
-or class, that's a signal you're planning a unit test, not a QA
-scenario — drop it and pick a surface a user can drive instead.
+Frame FOCUS and STEPS around **user actions and observations** rather
+than the behavior of the underlying methods. Even when the changes
+are narrow and could be covered by unit tests, this phase is looking
+for issues in how the new code integrates with everything around it,
+and for problems in either the new or the existing code that only
+surface when something is exercised the way a user would. A
+description like "verify helper X returns Y given Z" tends to keep
+the scenario inside that function and miss those classes of bug;
+reframing it as a user-facing flow that ends up calling X gives the
+scenario a chance to catch them. If FOCUS/STEPS can't be written
+without naming a private function or class, that's usually a sign
+the surface isn't user-observable — fold the check into another
+scenario whose user flow happens to exercise it, or leave it to the
+unit test suite.
 
 ## PR Context
 
