@@ -57,24 +57,18 @@ different *sessions*, not different sockets.
 ## Capture
 
 ```
-PRID=<pr-id>
-SHORT=<short-name>
-mkdir -p pm/qa/captures/$PRID/$SHORT
-CAP=pm/qa/captures/$PRID/$SHORT
-
 # 1. Start the target session running pm tui (or whichever pm command
 #    the scenario drives). -d detaches so this shell returns.
 tmux new-session -d -s pm-target -x 120 -y 40 'pm tui'
 
-# 2. Stream the target pane's scrollback to transcript.log for the
-#    whole capture window.
-tmux pipe-pane -t pm-target -o "cat >> $CAP/transcript.log"
+# 2. Stream the target pane's scrollback to transcript.log.
+tmux pipe-pane -t pm-target -o "cat >> <capture-dir>/transcript.log"
 
 # 3. Start a *separate* recorder session whose pane runs asciinema
 #    wrapping `tmux attach -t pm-target`. Same tmux server, different
 #    session — so the attach isn't recursive.
 tmux new-session -d -s pm-recorder -x 120 -y 40 \
-    "asciinema rec --quiet $CAP/recording.cast \
+    "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t pm-target'"
 
 # 4. Drive the TUI from outside via pm tui send (or tmux send-keys
@@ -93,11 +87,8 @@ tmux kill-session -t pm-recorder 2>/dev/null
 tmux kill-session -t pm-target 2>/dev/null
 ```
 
-If `asciinema` isn't installed and can't be installed, or the
-recorder session can't be created in this environment, note it in
-the manifest and skip the `.cast` — `transcript.log` is the
-minimum bar. **Do not** wrap `tmux capture-pane` with `asciinema rec -c`
-as a fallback: that records a one-shot static snapshot of the final
+**Do not** wrap `tmux capture-pane` with `asciinema rec -c` as a
+fallback: that records a one-shot static snapshot of the final
 buffer, not the interaction, and a stub cast is worse than no cast.
 
 ## Manifest format
