@@ -39,11 +39,11 @@ pane — endless recursion and a useless cast. Different sessions on
 the same tmux server is enough to break that recursion.
 
 ```
-# 1. Start the canonical pm session detached. `pm session` (no
-#    subcommand) creates the project's pm session and would attach
-#    interactively if it had a tty; wrapped in a detached tmux pane
-#    it just creates the session as a side effect.
-tmux new-session -d -s pm-launcher 'pm session'
+# 1. Start the canonical pm session. `pm session` (no subcommand)
+#    creates the project's pm session and attaches; with no tty the
+#    attach fails noisily but the session is created either way, so
+#    swallow the output.
+pm session >/dev/null 2>&1 || true
 TARGET=$(pm session name)             # canonical pm session name
 
 # 2. Stream the home pane's scrollback to transcript.log.
@@ -69,7 +69,6 @@ pm tui send a -s "$TARGET"            # open the picker
 tmux send-keys -t pm-recorder C-b d
 tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
 tmux kill-session -t pm-recorder 2>/dev/null
-tmux kill-session -t pm-launcher 2>/dev/null
 ```
 
 ## Manifest format
