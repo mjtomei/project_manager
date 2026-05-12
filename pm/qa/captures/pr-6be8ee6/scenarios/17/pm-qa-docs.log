@@ -340,4 +340,3 @@ Reference a mock from a QA scenario by its filename stem in the
 - `pm qa list` shows existing recipes; `pm qa show <id>` prints any
   one of them. Browse a few before authoring something new — the
   fastest way to learn the shape is to read what's already there.
-

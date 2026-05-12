@@ -227,7 +227,7 @@ def qa_author_artifact(name: str):
 def qa_docs():
     """Print the QA library reference (schema, conventions, surfaces)."""
     from pm_core import qa_authoring
-    click.echo(qa_authoring.qa_library_doc())
+    click.echo(qa_authoring.qa_library_doc(), nl=False)
 
 
 @qa.command("edit")
