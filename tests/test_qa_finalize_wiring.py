@@ -120,29 +120,39 @@ def test_run_qa_finalize_pane_returns_none_when_pass_unverified(tmp_path):
 # _get_qa_spec, plus state/scenarios pre-population) and would still
 # touch tmux/subprocess paths that can't be cleanly patched. Per the
 # scenario instructions, downgrade to a textual assertion on the wiring
-# slice of run_qa_sync (qa_loop.py:2908-2927).
+# in run_qa_sync. Search the whole file rather than a hardcoded line
+# slice so the tests survive cosmetic shifts in qa_loop.py.
 
 _QA_LOOP_PATH = Path(__file__).resolve().parent.parent / "pm_core" / "qa_loop.py"
 
 
+def _qa_loop_src() -> str:
+    return _QA_LOOP_PATH.read_text()
+
+
 def test_run_qa_sync_finalize_suffix_in_latest_output():
-    src = _QA_LOOP_PATH.read_text().splitlines()
-    slice_text = "\n".join(src[2907:2927])
-    assert "state.finalize_verdict = _run_qa_finalize_pane(" in slice_text, \
+    src = _qa_loop_src()
+    assert "state.finalize_verdict = _run_qa_finalize_pane(" in src, \
         "expected run_qa_sync to assign state.finalize_verdict"
-    assert 'f" [finalize: {state.finalize_verdict}]"' in slice_text, \
+    assert 'f" [finalize: {state.finalize_verdict}]"' in src, \
         "expected [finalize: …] suffix wired into latest_output"
     # Suffix is only added when verdict truthy.
-    assert "if state.finalize_verdict:" in slice_text
+    assert "if state.finalize_verdict:" in src
 
 
 # --- (i) exception-swallowing wiring, textual fallback -------------------
 
 def test_run_qa_sync_swallows_finalize_exception():
-    src = _QA_LOOP_PATH.read_text().splitlines()
-    slice_text = "\n".join(src[2902:2915])
-    assert "try:" in slice_text
-    assert "_run_qa_finalize_pane(" in slice_text
-    assert "except Exception:" in slice_text
-    assert "_log.exception(" in slice_text, \
+    """The finalize-pane call must be wrapped in try/except so a crash
+    there doesn't sink the whole QA loop. Find the assignment, then
+    verify a try/except logs the exception nearby."""
+    lines = _qa_loop_src().splitlines()
+    target = "state.finalize_verdict = _run_qa_finalize_pane("
+    idx = next((i for i, ln in enumerate(lines) if target in ln), None)
+    assert idx is not None, f"could not find {target!r} in qa_loop.py"
+    # Look in a small window around the call for try/except/log.
+    window = "\n".join(lines[max(0, idx - 5):idx + 10])
+    assert "try:" in window
+    assert "except Exception:" in window
+    assert "_log.exception(" in window, \
         "finalize-pane exception should be logged via _log.exception"
