@@ -585,7 +585,20 @@ def qa_launch(item_id: str, target_window: str | None):
     sess_label = os.environ.get("PM_SESSION") or session
     title = item.get("title", qa_id)
     body = item.get("body", "")
-    full_prompt = f"""\
+
+    if category == "regression":
+        # Route regression launches through the unified builder so headless
+        # and TUI launches produce identical prompts.
+        from pm_core.regression_prompts import build_regression_test_prompt
+        full_prompt = build_regression_test_prompt(
+            session=sess_label,
+            pane_id=None,
+            title=title,
+            body=body,
+            file_findings=True,
+        )
+    else:
+        full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess_label}
@@ -600,12 +613,6 @@ To interact with this session, use commands like:
 
 {body}
 """
-
-    if category == "regression":
-        # Mirror the TUI's regression filing addendum so headless launches
-        # produce filings consistent with TUI launches.
-        from pm_core.tui.pane_ops import _REGRESSION_FILING_ADDENDUM
-        full_prompt += _REGRESSION_FILING_ADDENDUM
 
     cmd = build_claude_shell_cmd(prompt=full_prompt)
     cwd = str(root.parent) if root.name == "pm" else str(root)
