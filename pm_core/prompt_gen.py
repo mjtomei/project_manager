@@ -1445,15 +1445,24 @@ surface when something is exercised the way a user would.
 {bug_fix_qa_block}
 
 Each scenario runs in its own isolated container — scenarios cannot share
-state or depend on each other's side effects. STEPS must include all setup
-the scenario needs; do not reference other scenarios' projects, PRs, or
-side effects.
+state or depend on **another scenario's** side effects, and STEPS must
+include all setup the scenario needs. Within a single scenario you *can*
+spawn nested containers, background processes, or parallel actors to drive
+the system under test from multiple contexts at once — use that capability
+whenever the surface being tested is shared across users or workers.
 
 Prefer fewer, broader scenarios over many narrow ones. Group related checks
 that share setup into one scenario with multi-step STEPS, including edge
 cases that may expose bugs. Split scenarios only when code paths are
 unrelated or setup differs materially enough that combining them would
 bloat the steps.
+
+Plan along three axes: nominal use, error / edge cases, and concurrent use
+(two or more actors invoking the surface at once). Before listing scenarios,
+inventory the shared resources the diff touches — filesystem paths, sockets,
+daemons, network endpoints, on-disk state, anything with a single name
+accessed from multiple callers. For each, plan a concurrent-use scenario
+unless you can justify in one sentence why one isn't needed.
 
 Ignore any prior captures or `verdict.md` files under
 `pm/qa/captures/{pr_path_seg}/scenarios/` — for this run, treat the
