@@ -455,12 +455,13 @@ class PlanAddScreen(ModalScreen):
 
 
 class QACreatePickerScreen(ModalScreen):
-    """Modal for picking which kind of QA file to create and how.
+    """Modal for picking which kind of QA file to author.
 
     Returns ``(category, mode, name)`` on confirm, where category is one
-    of ``"instructions" / "regression" / "artifacts"``, mode is
-    ``"author"`` (guided Claude session) or ``"add"`` (stub + $EDITOR),
-    and name is the file name the user typed. Returns ``None`` on cancel.
+    of ``"instructions" / "regression" / "artifacts"``, mode is always
+    ``"author"`` (guided Claude session — the TUI does not expose the
+    scaffold-stub flow; use ``pm qa add-*`` from the CLI for that), and
+    name is the file name the user typed. Returns ``None`` on cancel.
     """
 
     BINDINGS = [
@@ -498,12 +499,9 @@ class QACreatePickerScreen(ModalScreen):
     """
 
     _OPTIONS = [
-        ("instructions", "author", "Instruction (guided Claude session)"),
-        ("instructions", "add",    "Instruction (scaffold stub in $EDITOR)"),
-        ("regression",   "author", "Regression test (guided Claude session)"),
-        ("regression",   "add",    "Regression test (scaffold stub in $EDITOR)"),
-        ("artifacts",    "author", "Artifact recipe (guided Claude session)"),
-        ("artifacts",    "add",    "Artifact recipe (scaffold stub in $EDITOR)"),
+        ("instructions", "author", "Instruction"),
+        ("regression",   "author", "Regression test"),
+        ("artifacts",    "author", "Artifact recipe"),
     ]
 
     def __init__(self):

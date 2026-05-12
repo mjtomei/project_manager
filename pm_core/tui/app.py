@@ -1330,7 +1330,9 @@ class ProjectManagerApp(App):
             return
         category, mode, name = result
         # category: "instructions" / "regression" / "artifacts"
-        # mode:     "author" or "add"
+        # mode:     always "author" — the TUI picker only exposes the
+        #           guided authoring flow; use `pm qa add-*` from the
+        #           CLI for the scaffold-stub flow.
         suffix = {
             "instructions": "instruction",
             "regression":   "regression",
