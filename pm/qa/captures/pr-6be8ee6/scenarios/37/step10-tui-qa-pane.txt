@@ -1,0 +1,26 @@
+[Session: pm-pm-test-1778627455-abe15ec0, Pane: %0]
+
+  Project: pm-test-1778627455    1 PRs    filter: hide closed    repo:
+
+
+    ╔══════════════════════╗
+    ║ pr-4a4388f           ║
+    ║ Seed PR for QA scen… ║
+    ║ ○ pending            ║
+    ╚══════════════════════╝
+
+
+
+
+
+
+
+
+
+
+
+
+
+  press / to type a command
+
+

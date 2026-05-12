@@ -1,0 +1,13 @@
+# Step 2: pm qa docs from /tmp
+# pm QA library
+
+Every project that uses `pm` gets a `pm/qa/` directory with four
+subdirectories of Markdown-with-frontmatter files. They feed prompts,
+the TUI, and the CLI.
+
+## The four directories
+
+| Directory | Purpose |
+|---|---|
+
+exit: 0

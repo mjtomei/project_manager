@@ -1,0 +1,51 @@
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
++ cd /tmp/pm-test-1778627455
++ pm qa list
+
+Instructions (1):
+  no-frontmatter: No Frontmatter
+
+Regression Tests (1):
+  legacy-tags: Legacy tags regression — Has obsolete tags field
+
+Artifact Recipes (1):
+  no-description: Artifact without description
+
++ echo ---
+---
++ pm qa show no-frontmatter
+# No Frontmatter
+[/tmp/pm-test-1778627455/pm/qa/instructions/no-frontmatter.md]
+
+# Plain body, no frontmatter
+
+Just markdown content without any YAML header.
+
++ echo ---
+---
++ pm qa show legacy-tags
+# Legacy tags regression
+Has obsolete tags field
+[/tmp/pm-test-1778627455/pm/qa/regression/legacy-tags.md]
+
+Body of the legacy-tags regression test.
+
++ echo ---
+---
++ pm qa show no-description
+# Artifact without description
+[/tmp/pm-test-1778627455/pm/qa/artifacts/no-description.md]
+
+Capture recipe body.
+
++ echo ---
+---
++ cd /tmp
++ pm qa docs
++ head -5
+# pm QA library
+
+Every project that uses `pm` gets a `pm/qa/` directory with four
+subdirectories of Markdown-with-frontmatter files. They feed prompts,
+the TUI, and the CLI.

@@ -1,0 +1,13 @@
+{"version": 2, "width": 80, "height": 24, "timestamp": 1778627527, "env": {"SHELL": "/bin/bash", "TERM": "xterm"}}
+[0.003506, "o", "+ export PYTHONPATH=/workspace\r\n+ PYTHONPATH=/workspace\r\n+ cd /tmp/pm-test-1778627455\r\n+ pm qa list\r\n"]
+[0.076391, "o", "\r\nInstructions (1):\r\n  no-frontmatter: No Frontmatter\r\n\r\nRegression Tests (1):\r\n  legacy-tags: Legacy tags regression — Has obsolete tags field\r\n\r\nArtifact Recipes (1):\r\n  no-description: Artifact without description\r\n\r\n"]
+[0.085587, "o", "+ echo ---\r\n---\r\n+ pm qa show no-frontmatter\r\n"]
+[0.138684, "o", "# No Frontmatter\r\n[/tmp/pm-test-1778627455/pm/qa/instructions/no-frontmatter.md]\r\n\r\n# Plain body, no frontmatter\r\n\r\nJust markdown content without any YAML header.\r\n\r\n"]
+[0.146767, "o", "+ echo ---\r\n---\r\n+ pm qa show legacy-tags\r\n"]
+[0.205538, "o", "# Legacy tags regression\r\nHas obsolete tags field\r\n[/tmp/pm-test-1778627455/pm/qa/regression/legacy-tags.md]\r\n\r\nBody of the legacy-tags regression test.\r\n\r\n"]
+[0.213404, "o", "+ echo ---\r\n---\r\n+ pm qa show no-description\r\n"]
+[0.255093, "o", "# Artifact without description\r\n[/tmp/pm-test-1778627455/pm/qa/artifacts/no-description.md]\r\n\r\nCapture recipe body.\r\n\r\n"]
+[0.262413, "o", "+ echo ---\r\n---\r\n+ cd /tmp\r\n"]
+[0.262793, "o", "+ pm qa docs\r\n"]
+[0.263019, "o", "+ head -5\r\n"]
+[0.313939, "o", "# pm QA library\r\n\r\nEvery project that uses `pm` gets a `pm/qa/` directory with four\r\nsubdirectories of Markdown-with-frontmatter files. They feed prompts,\r\nthe TUI, and the CLI.\r\n"]
