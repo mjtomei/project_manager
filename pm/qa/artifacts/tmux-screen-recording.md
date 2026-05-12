@@ -13,8 +13,7 @@ cast).
 
 ## What this recipe produces
 
-For each capture, write three files into
-`pm/qa/captures/<pr-id>/<short-name>/`:
+Three files per capture:
 
 - `transcript.log` — plain-text scrollback of the pane (**required** —
   the load-bearing artifact for grep/diff and for consumers without
