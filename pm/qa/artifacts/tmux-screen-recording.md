@@ -27,69 +27,51 @@ For each capture, write three files into
   Include a `## Files` section listing every non-default file the
   capture produced with a one-line description each.
 
-## Why two tmux sessions
-
-`asciinema rec` needs a pty. The shell driving this recipe usually has
-no tty (Claude's non-interactive Bash tool, CI runners, etc.), so
-running asciinema there fails. Every tmux pane *does* have a pty, so
-the workaround is to run asciinema inside a tmux pane.
-
-That gives us two sessions, not one:
-
-- **target session** — runs `pm tui` (or whichever pm command the
-  scenario exercises). This is the thing being recorded.
-- **recorder session** — runs `asciinema rec` wrapping
-  `tmux attach -t <target>`. Its only job is to host the attach
-  client whose render asciinema captures.
-
-Why a *separate* session for the recorder? Because if the recorder
-pane lives in the target session and you wrap `tmux attach -t <target>`
-inside it, the attach client renders the whole target session —
-including the recorder pane, which is showing the attach client, which
-renders the recorder pane, and so on. asciinema records the runaway
-nested redraw and you get tens of MB of noise.
-
-Putting the recorder in its own session breaks the recursion: the
-attach renders only the target session's panes, which doesn't contain
-the recorder. A single tmux server is fine; the constraint is
-different *sessions*, not different sockets.
-
 ## Capture
 
+`asciinema rec` needs a pty and the shell driving this recipe has
+none, so we run asciinema inside a tmux pane (panes have ptys). We
+also need two separate tmux sessions: a **target** session running
+the pm TUI, and a **recorder** session whose pane wraps
+`tmux attach -t <target>` under asciinema. If the recorder lived
+inside the target session, the attach client would render the
+recorder pane rendering the attach client rendering the recorder
+pane — endless recursion and a useless cast. Different sessions on
+the same tmux server is enough to break that recursion.
+
 ```
-# 1. Start the target session running pm tui (or whichever pm command
-#    the scenario drives). -d detaches so this shell returns.
-tmux new-session -d -s pm-target -x 120 -y 40 'pm tui'
+# 1. Start the canonical pm session detached. `pm session` (no
+#    subcommand) creates the project's pm session and would attach
+#    interactively if it had a tty; wrapped in a detached tmux pane
+#    it just creates the session as a side effect.
+tmux new-session -d -s pm-launcher 'pm session'
+TARGET=$(pm session name)             # canonical pm session name
 
-# 2. Stream the target pane's scrollback to transcript.log.
-tmux pipe-pane -t pm-target -o "cat >> <capture-dir>/transcript.log"
+# 2. Stream the home pane's scrollback to transcript.log.
+tmux pipe-pane -t "$TARGET:0.0" -o "cat >> <capture-dir>/transcript.log"
 
-# 3. Start a *separate* recorder session whose pane runs asciinema
-#    wrapping `tmux attach -t pm-target`. Same tmux server, different
-#    session — so the attach isn't recursive.
-tmux new-session -d -s pm-recorder -x 120 -y 40 \
+# 3. Start the recorder session — a separate session on the same
+#    tmux server whose pane runs asciinema wrapping `tmux attach -t
+#    $TARGET`.
+tmux new-session -d -s pm-recorder \
     "asciinema rec --quiet <capture-dir>/recording.cast \
-        -c 'tmux attach -t pm-target'"
+        -c 'tmux attach -t $TARGET'"
 
-# 4. Drive the TUI from outside via pm tui send (or tmux send-keys
-#    against pm-target). Keys reach pm tui via the same tmux server;
-#    the recorder's attach client renders the redraws; asciinema
-#    captures them.
-pm tui send q -s pm-target            # navigate to the QA pane
-pm tui send a -s pm-target            # open the picker
+# 4. Drive the TUI from outside via pm tui send. Keys reach the TUI
+#    via the same tmux server; the recorder's attach client renders
+#    the redraws; asciinema captures them.
+pm tui send q -s "$TARGET"            # e.g. navigate to the QA pane
+pm tui send a -s "$TARGET"            # open the picker
 # ... and so on for the scenario steps ...
 
-# 5. End the recording. Quit pm tui (or detach the recorder's attach
-#    client). The attach exits, asciinema flushes the cast.
-pm tui send :q -s pm-target           # or whichever quit command
-tmux pipe-pane -t pm-target           # stop the transcript pipe
+# 5. End the recording by detaching the recorder's attach client.
+#    The attach exits, the recorded command exits, asciinema flushes
+#    the cast.
+tmux send-keys -t pm-recorder C-b d
+tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
 tmux kill-session -t pm-recorder 2>/dev/null
-tmux kill-session -t pm-target 2>/dev/null
+tmux kill-session -t pm-launcher 2>/dev/null
 ```
-
-**Do not** wrap `tmux capture-pane` with `asciinema rec -c` as a
-fallback: that records a one-shot static snapshot of the final
-buffer, not the interaction, and a stub cast is worse than no cast.
 
 ## Manifest format
 
