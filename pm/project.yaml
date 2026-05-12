@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-b3b8df0
+  active_pr: pr-98f670e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -100,6 +100,11 @@ plans:
 - id: plan-self-improve
   name: Recursive pm tournament across targets
   file: plans/plan-self-improve.md
+  status: draft
+  parent: null
+- id: plan-66d430f
+  name: user-modeling
+  file: plans/plan-66d430f.md
   status: draft
   parent: null
 prs:
@@ -16390,6 +16395,1150 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-10T17:21:46.282881+00:00'
   updated_at: '2026-05-10T17:21:46.282881+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ca19555
+  plan: improvements
+  title: 'Improvement: containerize whole pm session + safer dangerously-skip-permissions
+    enrollment flow with risk-aware popup gate'
+  branch: pm/pr-ca19555-improvement-containerize-whole-pm-session-safer-da
+  status: pending
+  depends_on: []
+  description: "## Goal\nTwo coupled improvements to pm's safety posture:\n\n1. **Run\
+    \ the entire pm session inside a container by default after this PR lands**, not\
+    \ just impl/review/QA sub-sessions. The skip-permissions blast radius is bounded\
+    \ by the container; host-side keys + filesystem stay isolated from anything the\
+    \ agent does.\n2. **Add a risk-reminder popup at session start when dangerously-skip-permissions\
+    \ is not enabled.** Enrollment remains exactly as today — the user must manually\
+    \ write the literal text `true` into `~/.pm/sessions/<tag>/dangerously-skip-permissions`.\
+    \ There is no pm CLI command that does this for them. The popup explains the risks\
+    \ and describes (in English, not as a copy-pasteable command) how to enable if\
+    \ the user wants to. The friction of having to translate prose-instruction into\
+    \ the actual file write IS the confirmation that the user understood what they're\
+    \ doing.\n\n## Background\n\nToday: `~/.pm/sessions/<tag>/dangerously-skip-permissions`\
+    \ containing `true` enables Claude's `--dangerously-skip-permissions` flag for\
+    \ spawned sessions (pm_core/paths.py:163-188, pm_core/claude_launcher.py:106).\
+    \ Skipping permissions means the agent can run any shell command, read/write any\
+    \ file, exfil any data, push to any remote, hit any API the host can reach. With\
+    \ API keys mounted into spawned containers, a misbehaving session could write\
+    \ code that uses those keys against arbitrary infrastructure.\n\nThe pm session\
+    \ itself currently runs on the host. tmux, the TUI, the watchers, and the leader\
+    \ process all have host-level access. Only impl/review/QA sub-sessions are containerized.\
+    \ So skip-permissions protects the bounded sub-sessions but the host-side pm process\
+    \ is just as exposed to anything that escapes those bounds.\n\n## Part 1 — containerize\
+    \ the whole pm session (default after this PR)\n\n`pm session` runs inside a long-lived\
+    \ host container with the pm repo bind-mounted; tmux, TUI, watchers, leader all\
+    \ live inside. Sub-session impl/review/QA containers become nested-podman containers\
+    \ inside the host one. The bundled Dockerfile already has nested-podman scaffolding\
+    \ (fuse-overlayfs + slirp4netns + uidmap + subuid/subgid; Dockerfile lines 60-65,\
+    \ 34-58).\n\nBehavior:\n- After this PR lands, **the default is containerized**.\
+    \ `pm session` containerizes. An opt-out flag `--no-containerize` (or setting\
+    \ `session-container-mode = off`) lets users revert to host mode if they need\
+    \ to.\n- Pre-existing host-mode `pm session` invocations transparently switch\
+    \ to containerized mode on next start. Document this in the release notes.\n-\
+    \ The container is the same pm-project base image flavor extended with tmux +\
+    \ Claude Code + a python venv, all of which already work in the bundled Dockerfile.\n\
+    - Network: by default the container has internet access (model API + git remote).\
+    \ Network restriction lives in the follow-up safety-config PR (pr-726757e); this\
+    \ PR only handles the structural containerization.\n\n## Part 2 — risk-reminder\
+    \ popup, file-write as the enrollment\n\n**Enrollment stays as today.** No pm\
+    \ CLI command writes the dangerously-skip-permissions file. The user enables it\
+    \ by manually placing the literal text `true` into the appropriate session-config\
+    \ file. This is the existing mechanism; we keep it deliberately because the friction\
+    \ of doing it by hand is exactly the confirmation that the user understands what\
+    \ they're enabling. Adding a `pm session enable-skip-permissions` convenience\
+    \ command would erase that friction.\n\n**The popup is informational.** On every\
+    \ `pm session` start where dangerously-skip-permissions is NOT enabled AND the\
+    \ user hasn't permanently dismissed the popup, a tmux display-popup appears containing:\n\
+    \n- A clear statement that skip-permissions is currently OFF for this session-tag.\n\
+    - The risks of enabling it (described concretely, in plain language):\n  - Claude\
+    \ will run shell commands without confirmation, including destructive ones.\n\
+    \  - Full filesystem read/write within the session's reach.\n  - Internet access\
+    \ — anything the network policy lets through (default: open).\n  - ANTHROPIC_API_KEY\
+    \ and any other env-var keys are reachable from agent code that runs in this session.\n\
+    \  - Without containerization, agent code has the same access as your user account\
+    \ on the host.\n  - With containerization (the new default), the blast radius\
+    \ is bounded by the container — but bind-mounted paths (the repo, ~/.claude config)\
+    \ are still reachable.\n- A short English description of how to enable it if the\
+    \ user wants to. Something like: \"If you've decided you want to skip permissions\
+    \ for this session, write the literal text `true` into the dangerously-skip-permissions\
+    \ file in this session's pm config directory. The pm docs describe where session\
+    \ config lives.\" Do NOT print the full path. Do NOT offer to do it for them.\
+    \ The user looks up the path, decides if they want to, and edits the file. That\
+    \ sequence is the confirmation.\n\n**Two actions** in the popup:\n\n- `[Enter\
+    \ / Esc / q]` — dismiss for this session, continue starting. Popup will appear\
+    \ again on next start.\n- `[d]` — permanently disable the popup for this session-tag.\
+    \ Writes a `skip-permissions-popup-disabled` marker. Does not affect skip-permissions\
+    \ itself; just stops the reminder. For users who've decided they don't want skip-permissions\
+    \ and don't want the popup to keep nagging.\n\nNo \"enable from popup\" action.\
+    \ No copy-pasteable command in the popup text.\n\n## States at `~/.pm/sessions/<tag>/`\n\
+    \n- `dangerously-skip-permissions` (existing) — contains `true` means skip-permissions\
+    \ is enabled. Set only by the user writing the file by hand; no pm command writes\
+    \ it.\n- `skip-permissions-popup-disabled` (new) — exists when user pressed `d`\
+    \ in the popup. Suppresses the reminder. No effect on skip-permissions itself.\n\
+    \n## Popup-display logic\n\nShow the popup when ALL of:\n- `dangerously-skip-permissions`\
+    \ file does NOT exist or doesn't contain `true` (skip-permissions is off).\n-\
+    \ `skip-permissions-popup-disabled` file does NOT exist (user hasn't suppressed\
+    \ the reminder).\n\nSkip the popup when ANY of:\n- `dangerously-skip-permissions=true`\
+    \ — user has already opted in via the file, no reminder needed.\n- `skip-permissions-popup-disabled`\
+    \ exists — user has explicitly muted the reminder.\n\n## Acceptance criteria\n\
+    - `pm session` on a session-tag with no prior decision → popup appears, lists\
+    \ risks, describes enrollment in English, two actions.\n- User manually writes\
+    \ `true` to the dangerously-skip-permissions file → next `pm session` start picks\
+    \ it up; popup does not appear; skip-permissions is active.\n- Pressing `d` in\
+    \ the popup writes the popup-disabled marker. Subsequent starts skip the popup.\
+    \ Skip-permissions stays OFF.\n- `pm session` runs containerized by default. `--no-containerize`\
+    \ reverts to host mode.\n- Existing `dangerously-skip-permissions=true` files\
+    \ continue to work without prompting.\n- No pm CLI command writes the dangerously-skip-permissions\
+    \ file.\n\n## Invariants\n- Popup MUST appear before any agent is spawned. No\
+    \ \"show popup after we already opened the impl pane.\"\n- Popup MUST be modal\
+    \ — blocking session start until a choice is made.\n- Popup MUST NOT enable skip-permissions\
+    \ under any user action. Enrollment is exclusively user-side file-write.\n- Popup\
+    \ MUST NOT print the literal file path or command. English description only —\
+    \ the user looks it up.\n- Risk text MUST be loaded from a versioned file. Risk-text\
+    \ bug-fixes don't force re-display; adding NEW risk categories bumps the version\
+    \ and invalidates `popup-disabled` markers so users see the new risk and reconfirm\
+    \ their dismissal.\n\n## Edge cases\n- User runs `pm session` over SSH from a\
+    \ mobile client → popup is keyboard-only; each action is a single keypress; works\
+    \ on phones.\n- Multiple concurrent `pm session` invocations on the same tag →\
+    \ file reads are idempotent. No contention.\n- Container startup fails → fall\
+    \ back with a clear error and a hint about `--no-containerize`; don't silently\
+    \ proceed.\n- User dismisses the popup with Esc, then writes the file from inside\
+    \ the session → the next session start picks it up correctly.\n\n## Verification\n\
+    - Manual: fresh tag, `pm session` → popup appears. Press Esc → session starts,\
+    \ no files written; second `pm session` shows popup again.\n- Manual: from a shell,\
+    \ `echo true > ~/.pm/sessions/<tag>/dangerously-skip-permissions` → next `pm session`\
+    \ start shows no popup; skip-permissions active.\n- Manual: fresh tag, `pm session`\
+    \ → popup, press `d` → popup-disabled marker written. Subsequent `pm session`\
+    \ → no popup, skip-permissions still off.\n- Manual: `pm session` on a tag with\
+    \ a pre-existing dangerously-skip-permissions file → no popup, skip-permissions\
+    \ active.\n- Manual: `ps` / container inspection during a `pm session` → tmux\
+    \ server and TUI run inside a container.\n- Manual: `pm session --no-containerize`\
+    \ → host mode, same as before this PR.\n- Audit: grep the pm codebase for any\
+    \ path that writes the dangerously-skip-permissions file. Should be zero hits\
+    \ (set_skip_permissions in paths.py is the existing helper; it should be removed\
+    \ or restricted to test/dev use only).\n\n## Out of scope\n- Network egress restriction,\
+    \ filesystem isolation, env-var redaction — these are pr-726757e (the follow-up\
+    \ safety-config PR).\n- Per-command (rather than per-session) permission gates.\n\
+    - Cross-host attestation of the confirmation.\n- A CLI convenience command for\
+    \ enabling skip-permissions. Intentionally rejected — manual file-write is the\
+    \ confirmation barrier.\n\n## Related\n- pm_core/paths.py:163-188 — current skip-permissions\
+    \ get/set; extend with popup-disabled marker. Consider removing or test-restricting\
+    \ `set_skip_permissions` so production code can't write the file.\n- pm_core/claude_launcher.py:106\
+    \ — current consumer; unchanged.\n- pm_core/container.py — wrap_claude_cmd, container\
+    \ build, env injection — touch points for whole-session containerization.\n- Dockerfile\
+    \ — nested-podman setup; the session-container is the same image with tmux + Claude\
+    \ Code + python venv added.\n- pr-726757e — follow-up safety-config PR that adds\
+    \ firewall, filesystem-isolation, env-var-redaction profiles on top of this PR's\
+    \ containerization."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-10T21:16:23.545562+00:00'
+  updated_at: '2026-05-10T21:25:26.587212+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-726757e
+  plan: improvements
+  title: 'Improvement: per-session container safety config — egress allowlist, filesystem
+    isolation, env-var redaction, default profiles'
+  branch: pm/pr-726757e-improvement-per-session-container-safety-config-eg
+  status: pending
+  depends_on:
+  - pr-ca19555
+  description: "## Goal\nFollow-up to pr-ca19555 (whole-session containerization +\
+    \ popup gate). Once the pm session can run inside a container, define explicit\
+    \ safety-configuration knobs so the container's blast radius is bounded by policy,\
+    \ not just by being-in-a-container.\n\nThree orthogonal axes; per-profile defaults;\
+    \ one profile selected per session-tag.\n\n## Axes\n\n### 1. Network egress\n\
+    - `open` — current behavior, no firewall (full internet from inside the container).\n\
+    - `allowlist` — outbound traffic permitted only to a configured list of endpoints.\
+    \ Sensible default list: model API (`api.anthropic.com`), git remote (configured\
+    \ `origin` hostname), package mirrors if any.\n- `model-only` — outbound permitted\
+    \ only to the model API endpoint. No git push/fetch, no package downloads. Used\
+    \ for benchmark conformance (matches ProgramBench's no-internet rule when paired\
+    \ with a local-mirror for git).\n- `offline` — no outbound network. Local-backend\
+    \ mode only; any code that tries to reach out fails fast.\n\nImplementation: iptables\
+    \ / netns rules applied to the session container at start. The egress-allowlist\
+    \ firewall harness from Phase 9 of plan-regression is the shared primitive; this\
+    \ PR makes it user-selectable per session.\n\n### 2. Filesystem exposure\n- Which\
+    \ host paths are bind-mounted into the container, and at what mode (RO / RW).\n\
+    - Defaults:\n  - The pm repo / target repo: RW (work needs to happen).\n  - `~/.claude`\
+    \ config: RO (let the agent use it, don't let it modify).\n  - `~/.gitconfig`,\
+    \ SSH keys, anything credential-shaped: NOT bind-mounted by default.\n  - Per-session\
+    \ writable scratch under `~/.pm/sessions/<tag>/scratch/`.\n- Profile knobs:\n\
+    \  - `default` — the above.\n  - `strict` — everything RO except the workdir and\
+    \ scratch. `.claude` not even mounted; user logs in via a per-container token\
+    \ if needed.\n  - `open` — current bind-mount set (matches today's behavior).\n\
+    \n### 3. Env-var redaction\n- Default-deny: ANTHROPIC_API_KEY and a handful of\
+    \ model API keys are passed in (needed for the agent to function); everything\
+    \ else is dropped.\n- Today many env vars (PATH, PM_PROJECT, PM_HOST_HOME, etc.)\
+    \ are passed in or computed; that stays.\n- Knobs:\n  - `pass` — list of additional\
+    \ env vars to pass through.\n  - `redact` — list of env vars to explicitly drop\
+    \ even if they'd otherwise pass.\n- A warning in the popup when env-var redaction\
+    \ would *not* fire (e.g. AWS_ACCESS_KEY_ID or GH_TOKEN is in env and the profile\
+    \ says to pass it).\n\n## Profiles\n\nThree named profiles a user selects per\
+    \ session-tag, configurable via setting `session-safety-profile`:\n\n- `open`\
+    \ — egress=open, fs=open, env=permissive. Current behavior of `pm session`. Default\
+    \ for now.\n- `bounded` — egress=allowlist (model + configured git remote), fs=default,\
+    \ env=default-deny. The recommended safe profile for trusted work. Default after\
+    \ pr-ca19555 lands.\n- `hardened` — egress=model-only, fs=strict, env=minimal.\
+    \ For untrusted code, benchmark runs, or first-time use of dangerously-skip-permissions\
+    \ on a new tag.\n\nProfile + dangerously-skip-permissions interact: the popup\
+    \ from pr-ca19555 names the active profile and notes that `hardened` constrains\
+    \ what skip-permissions can actually reach. If the user is enrolling skip-permissions\
+    \ on a tag with profile=open, the popup MUST surface that combination as a high-risk\
+    \ configuration and recommend switching to bounded.\n\n## Storage\n\nPer-session\
+    \ profile config at `~/.pm/sessions/<tag>/safety-profile.yaml`:\n\n```yaml\nprofile:\
+    \ bounded  # or 'open' / 'hardened' / 'custom'\noverrides:\n  egress: allowlist\n\
+    \  egress_allowlist:\n    - api.anthropic.com\n    - github.com\n  fs_extra_mounts:\
+    \ []\n  env_pass: []\n  env_redact: []\n```\n\nGlobal default at `~/.pm/safety-profile-default.yaml`.\
+    \ A new profile-edit CLI: `pm session safety [show|set <profile>|edit]`.\n\n##\
+    \ Acceptance criteria\n- New `pm session` on a tag with no explicit profile uses\
+    \ the global default. If the global default is `bounded`, network egress is firewall-restricted\
+    \ to the model API + configured git remote within ~1s of session start.\n- `pm\
+    \ session safety set hardened` on a tag flips the profile; next `pm session` start\
+    \ enforces hardened isolation.\n- Bind-mounted credential paths (SSH keys, gitconfig\
+    \ with credential helpers) are absent under `bounded` and `hardened` profiles.\n\
+    - Env-vars not in the pass-list are redacted from the container's environment;\
+    \ verified via `docker exec <container> env` or equivalent.\n- The pr-ca19555\
+    \ popup names the active profile and warns when `open` is combined with skip-permissions.\n\
+    \n## Invariants\n- Profile choice MUST be visible — the TUI status bar / a startup\
+    \ log line / the pr-ca19555 popup all show the active profile name.\n- Profile\
+    \ changes MUST require an explicit user action (CLI command or popup choice).\
+    \ Drive-by edits to project.yaml or other state never change the profile.\n- The\
+    \ default profile stays `open` until `bounded` is well-tested. We don't silently\
+    \ break existing workflows.\n\n## Edge cases\n- `hardened` egress (model-only)\
+    \ combined with a non-local git backend → `pm push` fails. Surface clearly. User\
+    \ must either switch profile or use local backend.\n- Per-session profile config\
+    \ under `~/.pm/sessions/<tag>/` lives alongside the dangerously-skip-permissions\
+    \ file; both are state about the same session-tag and should be inspected together\
+    \ by debug tooling.\n- Profile YAML schema versioning — start with v1, plan for\
+    \ migrations.\n\n## Verification\n- `pm session` with profile=bounded → `curl\
+    \ https://google.com` from inside the container should fail; `curl https://api.anthropic.com`\
+    \ should succeed.\n- `pm session` with profile=hardened → `ls -la ~` inside container\
+    \ shows no SSH keys, no .gitconfig, no .claude.json (only the per-container token\
+    \ if one is provisioned).\n- Switch profile via `pm session safety set hardened`\
+    \ mid-session → does it apply on next session start (yes, expected) or immediately\
+    \ (no, document that re-start is required).\n\n## Out of scope\n- Per-PR profile\
+    \ overrides. One profile per session-tag; PRs within a session inherit. Adding\
+    \ per-PR overrides is a separate idea if it ever matters.\n- Cross-host attestation\
+    \ of profile state. Local-only.\n- Real-time profile enforcement audit (intrusion\
+    \ detection inside the container). Out of scope; firewalls + bind-mount config\
+    \ are the enforcement surface.\n\n## Related\n- pr-ca19555 — whole-session containerization\
+    \ + dangerously-skip-permissions popup. Direct dependency.\n- Phase 9 of plan-regression\
+    \ — egress-allowlist firewall harness (item 9 originally). This PR makes the same\
+    \ primitive user-facing via profiles.\n- pm_core/container.py — wrap_claude_cmd's\
+    \ env injection + bind-mount choices are the touch points for the fs and env-var\
+    \ axes.\n- pm_core/paths.py — sessions dir is where the profile file lives."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-10T21:17:20.429756+00:00'
+  updated_at: '2026-05-10T21:17:20.429756+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5612e43
+  plan: improvements
+  title: 'Improvement: new ''github-queued'' backend — container is fully isolated
+    from GitHub, ops queue up for out-of-container review and execution'
+  branch: pm/pr-5612e43-improvement-new-github-queued-backend-container-is
+  status: pending
+  depends_on:
+  - pr-726757e
+  description: "## Goal\nA new pm backend that fully isolates the containerized pm\
+    \ session from GitHub. The container cannot push, cannot fetch from origin, cannot\
+    \ call gh, cannot reach any GitHub endpoint at the network layer. Any operation\
+    \ that would normally hit GitHub (git push origin, gh pr create, gh pr merge,\
+    \ gh pr ready, pr status sync) is captured by pm's existing push-proxy infrastructure\
+    \ and written to a queue. The user reviews and executes queued ops from outside\
+    \ the container using new CLI commands.\n\nA defensive firewall layer enforces\
+    \ the isolation in case any code path bypasses the queue stubs — egress to github.com,\
+    \ api.github.com, ssh-host github.com, etc. is blocked at the network layer.\n\
+    \nThis is the natural endpoint of the safety story started in pr-ca19555 (whole-session\
+    \ containerization + popup) and pr-726757e (safety profiles with egress allowlists).\
+    \ With this backend, even dangerously-skip-permissions running on misbehaving\
+    \ code can only poison your local workdir — nothing leaves until you sign off.\n\
+    \n## Architecture\n\n### New backend: github-queued\n\nSibling of the existing\
+    \ github backend. Selected via `pm init --backend github-queued` or by setting\
+    \ `project.backend = github-queued` in project.yaml.\n\nIn-container, every git\
+    \ remote operation and every gh call:\n\n1. Captured by the existing push-proxy\
+    \ infrastructure (`pm_core/push_proxy.py` — already intercepts git push/fetch/pull/ls-remote\
+    \ via the wrapper at `/home/pm/.local/bin/git` inside containers).\n2. Instead\
+    \ of forwarding to the host's git, the proxy writes the operation to a queue at\
+    \ `~/.pm/queues/<session-tag>/ops.jsonl`. Each entry: op-id (uuid), kind (`git_push`\
+    \ / `gh_pr_create` / `gh_pr_merge` / `gh_pr_ready` / `gh_pr_view` / `git_fetch_origin`\
+    \ / etc.), the original argv, the PR-id and pm context, timestamp, the in-container\
+    \ working directory.\n3. The proxy returns a synthesized success response to the\
+    \ agent so it can continue. For reads (gh pr view, git fetch), the proxy may return\
+    \ cached or empty results — or the queue can include a `read_request` entry that\
+    \ the user fulfills out-of-container by writing the result back.\n\n### Out-of-container\
+    \ CLI\n\n- `pm queue list [--session <tag>]` — show pending ops with op-id, kind,\
+    \ summary, PR context, timestamp.\n- `pm queue show <op-id>` — full detail: full\
+    \ argv, env, in-container workdir, PR's status, what the agent did right before\
+    \ queuing.\n- `pm queue execute <op-id>` — run the op against actual GitHub. Confirms\
+    \ before destructive ops (push, pr-merge, pr-create). Records the result back\
+    \ into the queue entry as executed_at + outcome.\n- `pm queue execute --all` —\
+    \ batch-execute pending ops in order, with one combined confirm.\n- `pm queue\
+    \ clear <op-id>` — drop without executing.\n- `pm queue diff <op-id>` — for git_push,\
+    \ show the diff that would be pushed.\n- `pm queue tui` — TUI surface listing\
+    \ pending ops by session/PR, with key bindings for execute/clear/diff.\n\nRead-class\
+    \ ops (gh pr view, git fetch) can be auto-executed by a separate daemon outside\
+    \ the container if the user trusts read-only as a class — a `pm queue auto-execute\
+    \ reads` setting. Writes (push, pr-merge, pr-create) always require explicit user\
+    \ action.\n\n### Defensive firewall\n\nEven with the queue mechanism, a misbehaving\
+    \ agent might try to call GitHub directly (a raw https request to api.github.com,\
+    \ bypassing the proxied git/gh wrappers). Block at the network layer:\n\n- iptables\
+    \ / netns rules at session-container start.\n- Egress denied to github.com, api.github.com,\
+    \ raw.githubusercontent.com, ssh-github (port 22 to known GH IPs), and any other\
+    \ GH-owned endpoints (resolvable list maintained in pm).\n- Egress to the model\
+    \ API endpoint stays open (the agent needs to talk to Claude).\n- Egress to git\
+    \ mirror / package index hosts allowed if configured in the safety profile.\n\n\
+    The firewall composes with pr-726757e's egress-allowlist profiles: github-queued\
+    \ backend implies an egress profile that excludes GitHub (a new profile or a flag\
+    \ on the existing bounded profile).\n\nThe firewall is the second line of defense.\
+    \ The queue stubs are the first. Together: if a code path skips the queue, the\
+    \ network refuses the connection; if a code path skips both (impossible in correct\
+    \ code, but defending against bugs), nothing reaches the network without the kernel-level\
+    \ rule being changed.\n\n### Firewall-setup command with Claude-driven app review\n\
+    \nThe firewall is the load-bearing security primitive. Misconfiguration (a forgotten\
+    \ allow rule, a wildcard that resolves to too much) silently nullifies the isolation.\
+    \ Don't let it be configured by a single command-line flag. Instead, ship an interactive\
+    \ setup where Claude reviews the actual project to determine what can be defensively\
+    \ blocked.\n\n- New CLI: `pm session firewall setup`. Required before the github-queued\
+    \ backend can be activated for the first time on a session-tag. Recommended for\
+    \ any non-permissive safety profile.\n- The command launches a Claude session\
+    \ (in a dedicated tmux pane, not a one-shot) that:\n  1. **Reviews the app itself**\
+    \ — reads the project's code, dependency manifest, test fixtures, CI config, scripts,\
+    \ and documentation to identify every network resource the app actually needs.\
+    \ Examples: a Python project's `requirements.txt` may pull from `pypi.org` and\
+    \ `files.pythonhosted.org`; a Node project needs `registry.npmjs.org`; a project\
+    \ that calls a third-party API needs that specific endpoint; tests may hit a local\
+    \ DB on a loopback address.\n  2. **Proposes a tight allowlist** scoped to what\
+    \ the app demonstrably needs. Everything else is denied. The proposal is presented\
+    \ to the user as a structured list: each entry has the source code reference (file:line\
+    \ where the dependency on that resource was found), the resource, why it's needed,\
+    \ and what category it falls into (package mirror / model API / user-configured\
+    \ external API / data source).\n  3. **Identifies things that can be safely blocked**\
+    \ — GitHub endpoints (covered by the queued backend), miscellaneous CDNs, telemetry\
+    \ endpoints, anything not justified by a code reference.\n  4. **Flags risky configurations**\
+    \ before the user accepts: an allowlist that includes `*.github.io` or any wildcard\
+    \ that matches GitHub assets; an env-var allow that leaks GH_TOKEN; a dependency\
+    \ that pulls from a CDN with no integrity check; a forgotten deny for ssh ports.\n\
+    \  5. **Asks the user to confirm each non-trivial rule** with full context (what\
+    \ code triggered the allow, what gets through, what gets denied).\n  6. After\
+    \ the user confirms, writes the firewall config to `~/.pm/sessions/<tag>/firewall.yaml`\
+    \ AND a hash/digest of the config to `~/.pm/sessions/<tag>/firewall.confirmed`.\
+    \ The runtime refuses to apply a firewall config whose hash doesn't match the\
+    \ confirmed digest — so silent edits to firewall.yaml without re-running the setup\
+    \ don't take effect.\n\n- A stale firewall is worse than no firewall, because\
+    \ the user assumes protection that isn't there. By gating activation on Claude-reviewed-and-user-confirmed\
+    \ config with a digest, drift is caught.\n- Re-running `pm session firewall setup`\
+    \ is required after any meaningful change to the app's network surface (new dependency,\
+    \ new external API call, new manifest entry) — the review naturally surfaces these\
+    \ because step 1 re-scans the project. Also required after a pm release that changes\
+    \ the default firewall categories.\n\nThis command is also a natural place to\
+    \ re-show the risk text from pr-ca19555's popup — but with explicit confirmation\
+    \ of each rule rather than a single dismiss-or-mute action. The popup is a \"\
+    you haven't enabled this\" reminder; the firewall setup is \"you're about to enable\
+    \ a load-bearing isolation primitive, and here is the exact surface it's protecting\
+    \ based on what your code actually needs.\"\n\n## Acceptance criteria\n- `pm init\
+    \ --backend github-queued` creates a project that uses the new backend.\n- Activating\
+    \ github-queued on a session-tag refuses to start the session until `pm session\
+    \ firewall setup` has been completed and `firewall.confirmed` matches the current\
+    \ `firewall.yaml` digest.\n- After successful setup, inside a containerized session\
+    \ for such a project, `git push origin <branch>` returns success quickly and writes\
+    \ a git_push entry to the queue. No network packets leave the container to a GitHub\
+    \ endpoint.\n- `gh pr create` inside the container similarly queues, doesn't reach\
+    \ GitHub.\n- `pm queue list` from outside the container shows the queued ops.\n\
+    - `pm queue execute <op-id>` performs the actual GitHub operation and records\
+    \ the result.\n- The defensive firewall blocks a direct `curl https://api.github.com/`\
+    \ from inside the container even when the queue mechanism is bypassed.\n- Editing\
+    \ `firewall.yaml` without re-running setup → session refuses to start until setup\
+    \ is re-run.\n\n## Invariants\n- A queued op MUST NOT mutate any GitHub state.\
+    \ Mutation happens only when the user runs pm queue execute.\n- The queue MUST\
+    \ be append-only on the write side. Editing a queued op requires pm queue clear\
+    \ + re-trigger from inside.\n- The firewall MUST deny by default for GitHub endpoints;\
+    \ explicit allowlist for model API + configured non-GH remotes.\n- The queue MUST\
+    \ capture enough context to make pm queue show understandable without rejoining\
+    \ the in-container session.\n- The queue file format MUST be append-only JSONL.\n\
+    - The firewall config MUST be activation-gated by a hash match against the confirmed\
+    \ digest. No silent drift.\n\n## Edge cases\n- Container is destroyed (host crash,\
+    \ manual kill) with pending ops → ops remain on host disk and can still be executed.\n\
+    - Agent runs gh pr view <unrelated-pr> for context → queued as a read request.\
+    \ User decides whether to fulfill or stub.\n- pm release upgrades the default\
+    \ firewall categories → the digest no longer matches; user must re-run setup.\
+    \ Annoying but correct.\n- Multiple session-tags on the same host → each has its\
+    \ own firewall.yaml + confirmed digest.\n\n## Verification\n- Inside container:\
+    \ `git push origin HEAD` → returns success quickly (queued); tcpdump observes\
+    \ no packets egressing to github.com.\n- Inside container: `gh pr create --title\
+    \ 'x' --body 'y'` → queued; firewall rule on GH endpoints unreached.\n- Inside\
+    \ container: `curl -v https://api.github.com/user` → connection refused by firewall.\n\
+    - Inside container: `curl -v https://api.anthropic.com/...` → succeeds.\n- Outside\
+    \ container: `pm queue list` shows both ops with full context. `pm queue execute\
+    \ <op-id>` for the push → push lands on origin.\n- Tamper check: edit firewall.yaml\
+    \ manually, start session → refuses to start; setup must be re-run.\n\n## Out\
+    \ of scope\n- A queued backend for non-GitHub git hosts (Gitea, GitLab). The pattern\
+    \ is the same; this PR is GitHub-specific. A queued-gitlab or queued-gitea can\
+    \ be a follow-up.\n- Operational sandboxing of model-API calls.\n- Cross-host\
+    \ coordination of the queue.\n\n## Related\n- pr-ca19555 — whole-session containerization.\
+    \ Required.\n- pr-726757e — safety profiles with egress allowlists. This PR adds\
+    \ a new effective profile on top of the same firewall primitive.\n- pm_core/push_proxy.py\
+    \ — existing infrastructure that already intercepts git remote ops. This PR extends\
+    \ it with a queueing mode for the new backend.\n- pm_core/backends/ — where the\
+    \ new github-queued backend lives, alongside local, vanilla, github."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-10T23:37:52.486065+00:00'
+  updated_at: '2026-05-10T23:39:12.388924+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-cfa6b00
+  plan: improvements
+  title: 'Improvement: pm which reports the pm_core path for the three IPC contexts
+    where drift has mattered (host CLI, TUI in-process, popup IPC)'
+  branch: pm/pr-cfa6b00-improvement-pm-which-reports-the-pm-core-path-for-
+  status: pending
+  depends_on: []
+  description: "## Goal\nToday `pm which` (`cli/__init__.py:252-256`) reports a single\
+    \ `pm_core` path — the one resolved in the host-CLI invocation context. After\
+    \ the recent IPC-resolution work (pr-26ca427, the wrapper code-path-selection\
+    \ fix, the IPC session-tag fallback in fce4593), there are multiple paths `pm_core`\
+    \ can take depending on invocation context, and the actual chosen path can differ\
+    \ between them. The user-visible failure mode was \"the popup IPC ran old code\
+    \ while the host pm ran new code, and nothing said so.\"\n\nMake `pm which` report\
+    \ the paths for the three invocation contexts where drift has actually mattered,\
+    \ so this kind of mismatch is diagnosable in one command. Each row reflects **actual\
+    \ execution in that context**, not a snapshot or simulation.\n\n## Contexts\n\n\
+    ### 1. Host CLI\nThe path the wrapper picks when invoked from the current shell.\
+    \ Same as today's `pm which`. Reports cwd, `chosen_via`, `selected_root`, `is_ipc`,\
+    \ derived session tag.\n\n### 2. TUI in-process — actual IPC roundtrip\nThe pm_core\
+    \ that the running TUI would resolve **right now**, not what it loaded at mount.\n\
+    \nMechanism: file-based request/response, extending the existing SIGUSR2 + queue\
+    \ + sentinel pattern with a return channel.\n\n- `pm which` writes a request marker\
+    \ file at `~/.pm/sessions/<tag>/which-request-<reqid>` and signals the TUI (SIGUSR2\
+    \ with a `which` kind, or a dedicated SIGUSR3).\n- The TUI's handler runs `pm_core_path()`\
+    \ inside its own process, writes the result to `~/.pm/sessions/<tag>/which-response-<reqid>`,\
+    \ deletes the request marker.\n- `pm which` polls the response file with a short\
+    \ timeout (~500ms). On timeout, reports `(no TUI session detected)`.\n\nWhy not\
+    \ a sidecar-on-mount: a snapshot file written at TUI start lies if anything changes\
+    \ the TUI's loaded code afterward (hot-reload, lazy imports, `importlib.reload`).\
+    \ Today the TUI doesn't reload, but the correctness shouldn't depend on that staying\
+    \ true. More importantly, the diagnostic should reflect what `pm_core_path()`\
+    \ returns when called in the TUI's process **now**, not what was true at startup.\n\
+    \nWhat this catches: TUI running stale code after a pm upgrade or override change\
+    \ while the user hasn't restarted; cwd-or-env-driven drift between the shell running\
+    \ `pm which` and the TUI's own context.\n\n### 3. Popup IPC — actual popup subprocess\
+    \ roundtrip\nThe pm_core that a real popup-IPC subprocess would load.\n\nMechanism:\
+    \ `pm which` forks an actual popup subprocess via the same `tmux display-popup`\
+    \ invocation the picker uses, with a hidden `which-probe` kind. That subprocess\
+    \ goes through the wrapper's full resolution path, writes the result to `~/.pm/sessions/<tag>/which-popup-response-<reqid>`,\
+    \ and exits. `pm which` reads the file.\n\nWhy not simulation: the wrapper's behavior\
+    \ depends on argv, env subset, cwd at exec time — all of which can differ between\
+    \ the simulating process and a real popup-IPC subprocess. `_ipc_session_tag`'s\
+    \ argv parsing has been the source of bugs already; simulating it from pm-which's\
+    \ process is not the same as exec'ing the real thing. By construction, the probe\
+    \ matches the real popup invocation.\n\nWhat this catches: the exact class of\
+    \ bug the user previously hit — popup-IPC silently loading the workdir's `pm_core`\
+    \ while the rest of pm was on master. Load-bearing for that incident; the other\
+    \ rows would have agreed and hidden the divergence.\n\n## Output\n\n```\n$ pm\
+    \ which\nhost cli:        /home/matt/claude-work/project-manager/pm_core\n   \
+    \              chosen_via=pm_root  session_tag=project_manager-c5a1006b  is_ipc=False\n\
+    tui in-process:  /home/matt/claude-work/project-manager/pm_core\n            \
+    \     session=pm-project_manager-c5a1006b  via=IPC roundtrip (380ms)\npopup ipc:\
+    \       /home/matt/claude-work/project-manager/pm_core\n                 chosen_via=pm_root\
+    \  argv-session=pm-project_manager-c5a1006b  via=real popup subprocess\n\nall\
+    \ paths match ✓\n```\n\nWhen paths disagree:\n\n```\nhost cli:        /home/matt/claude-work/project-manager/pm_core\n\
+    popup ipc:       /home/matt/.pm/workdirs/.../pm-pr-XXX/pm_core    ⚠ different\n\
+    \                 chosen_via=cwd_walk  (find_local_pm_core hit the workdir clone)\n\
+    ```\n\n`--json` flag for scripting / regression tests.\n\n## Acceptance criteria\n\
+    \n- `pm which` from any shell inside a pm session reports the three rows above\
+    \ with attribution.\n- All three rows reflect actual execution in their context,\
+    \ not snapshots or simulations.\n- Context 2 fires a real IPC to the TUI and waits\
+    \ up to 500ms; falls back to `(no TUI session detected)` on timeout or no TUI\
+    \ present.\n- Context 3 forks an actual popup-IPC subprocess via `display-popup`\
+    \ with a `which-probe` kind; reads the response file the probe writes.\n- When\
+    \ all paths match, output ends with `all paths match ✓`. When any diverges, the\
+    \ divergent row is visually highlighted.\n- `pm which --json` emits a structured\
+    \ form.\n- Exit code is 0 in all cases — this is a diagnostic, not a check.\n\n\
+    ## Invariants\n\n- `pm which` MUST NOT mutate state. Read-only diagnostic.\n-\
+    \ `pm which` MUST NOT fail when the TUI isn't running. That row reads `(no TUI\
+    \ session detected)`.\n- The popup `which-probe` kind MUST exit cleanly without\
+    \ rendering a visible overlay (display-popup with `-E` + a no-output command;\
+    \ the probe writes its file and exits before tmux paints).\n- The TUI's IPC handler\
+    \ for `which` MUST run `pm_core_path()` synchronously from the same process the\
+    \ TUI was already using; not via a subprocess.\n\n## Edge cases\n\n- Concurrent\
+    \ `pm which` invocations: each request marker uses a unique `<reqid>` (uuid) so\
+    \ responses don't collide.\n- TUI process is alive but unresponsive (blocked on\
+    \ something): 500ms timeout fires; row reports `(TUI timeout)` rather than blocking\
+    \ the command.\n- Popup subprocess fails to launch (e.g. not inside a tmux session):\
+    \ row reports `(not in tmux — popup context unavailable)`.\n- User runs `pm which`\
+    \ from a shell pane that is itself inside the pm session: host-cli row reflects\
+    \ that shell's cwd; tui row reflects the TUI's pm_core. Useful when these differ.\n\
+    - `--json` output still includes the same context rows, with `null` for any row\
+    \ that couldn't be resolved.\n\n## Verification\n\n- Run from host shell inside\
+    \ a pm session → three rows, all matching the master `pm_core`, `all paths match\
+    \ ✓`.\n- Run from a shell whose cwd is inside a workdir clone → host-cli row shows\
+    \ the workdir's `pm_core` (via `find_local_pm_core`); tui row still shows master;\
+    \ visible divergence flagged.\n- Kill the TUI, run `pm which` → tui row reads\
+    \ `(no TUI session detected)`; other rows unchanged.\n- Outside tmux entirely\
+    \ → popup row reads `(not in tmux — popup context unavailable)`; tui row also\
+    \ unavailable; host-cli row reflects pure cwd resolution.\n- Stress: 10 concurrent\
+    \ `pm which` invocations → each gets its own reqid, no response-file mixing.\n\
+    \n## Out of scope\n\n- Container-subprocess context. Containers run pm via the\
+    \ bind-mounted source at `/opt/pm-src`; checking bind-mount drift is a different\
+    \ concern and can ship as a separate `pm doctor`-style command if it ever bites.\n\
+    - Watcher-subprocess context. Watchers spawn `pm` from their own cwd; their resolution\
+    \ is \"host CLI from that cwd,\" already covered by context 1 in principle.\n\
+    - A `pm doctor` style multi-check command. `pm which` is one diagnostic; `pm doctor`\
+    \ could compose it with others (registry health, runtime_state sanity, queue inspection\
+    \ from pr-5612e43) — separate idea.\n- Live-watching for path changes. Snapshot\
+    \ at invocation time only.\n\n## Related\n\n- pr-26ca427 — popup project root\
+    \ resolution via session metadata.\n- fce4593 — IPC session-tag fallback for argless\
+    \ IPC commands.\n- pr-813cc19 — wrapper logging (`chosen_via`, `selected_root`,\
+    \ `is_ipc`) which this command surfaces as a user-facing command.\n- pm_core/wrapper.py\
+    \ — the resolution logic. `pm which` is the user-visible projection of what's\
+    \ in the log.\n- pm_core/cli/helpers.py — `trigger_tui_command` and the SIGUSR2\
+    \ + queue + sentinel pattern, which the context-2 IPC extends with a response\
+    \ channel.\n- pm_core/cli/session.py — `_popup-show` / `display-popup` invocation;\
+    \ the context-3 probe reuses this."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-11T09:45:44.547677+00:00'
+  updated_at: '2026-05-11T10:03:21.600767+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0af4723
+  plan: plan-ambient
+  title: Audio cues for PR state transitions (start, review verdict, QA verdict, merge,
+    INPUT_REQUIRED, failure)
+  branch: pm/pr-0af4723-audio-cues-for-pr-state-transitions-start-review-v
+  status: pending
+  depends_on: []
+  description: 'Discrete short sounds (chimes, tones, beeps — NOT speech) tied to
+    PR-state changes so the user gets ambient awareness of what''s happening across
+    many parallel PRs without watching the TUI. Fits Phase 2 alongside the TTS audio
+    surface — same audio output infrastructure, different signal class. The TTS PR
+    (pr-?) covers speech for content; this PR covers tones for events.
+
+
+    ## Design
+
+
+    The state transitions worth a cue (initial set; tunable per user):
+
+
+    - **PR started** (start: pending → in_progress) — a short rising 2-note tone.
+
+    - **Review PASS** — a clear positive chime.
+
+    - **Review NEEDS_WORK** — a soft neutral tone (not punishing; this is normal).
+
+    - **Review INPUT_REQUIRED** — distinct attention tone, since the user needs to
+    act.
+
+    - **QA PASS** — slightly different chime from review PASS (so the user can tell
+    apart by ear).
+
+    - **QA FAIL / verdict ERROR or KILLED** — descending tone, clearly different from
+    NEEDS_WORK.
+
+    - **Merge succeeded** — completion chime, distinct from PASS chimes.
+
+    - **Merge conflict** — attention tone, different from INPUT_REQUIRED so the user
+    can tell the two apart.
+
+    - **Watcher escalation** — distinct attention tone (these are rarer and worth
+    catching).
+
+
+    Each cue is ~200-500ms. Total alphabet is small enough to learn by ear within
+    a day of use.
+
+
+    ## Sources of state changes pm can hook into
+
+
+    - `pm_core/runtime_state.py:set_action_state` — central choke point for action
+    transitions. Hook on transitions to terminal states with verdict, dispatch the
+    appropriate cue.
+
+    - `pm_core/pr_sync.py` for status changes (merged, closed) detected from gh.
+
+    - The review-loop / QA-loop completion callbacks.
+
+    - The watcher framework''s escalation path.
+
+
+    Probably one new helper, e.g. `pm_core/audio_cues.py`, exposing `emit(event_kind,
+    pr_id=..., verdict=...)`. Called from the existing transition sites; no other
+    consumer needs to know about it.
+
+
+    ## Backend
+
+
+    Reuse the same playback abstraction as the TTS audio surface PR (`pm tts`):
+
+    - macOS: `afplay` (or `say -v <voice>` with a short word like ''done'' if afplay-with-file
+    feels heavy).
+
+    - Linux: `paplay` / `aplay` / `piper` already wired for TTS.
+
+    - Container hosts: no audio device by default → silently no-op. The cue infrastructure
+    must tolerate ''no audio device'' without crashing.
+
+
+    Sound files vendored under `pm_core/audio_cues/sounds/`. Short, copyright-clean
+    (use `sox` to synthesize tones, or vendor from CC0 sound libraries). 9 cues ×
+    ~10KB each = trivial repo overhead.
+
+
+    ## Per-session toggle
+
+
+    `pm session audio-cues on/off` and a global setting `audio-cues = on/off/severity-only`.
+    `severity-only` plays cues only for INPUT_REQUIRED / merge conflict / watcher
+    escalation — the ones that genuinely want attention. Default is `on` after this
+    PR lands; can flip to `severity-only` based on user feedback.
+
+
+    Suppression while the user is actively typing in any pm pane (`pm tui send` evidence,
+    or recent stdin activity in any tracked pane) to avoid the cue overlapping their
+    keystrokes. Resume after a short idle.
+
+
+    ## Acceptance criteria
+
+
+    - Each of the listed PR-state transitions emits the appropriate cue on macOS and
+    Linux hosts with audio devices.
+
+    - Container / no-audio hosts log the would-be cue but don''t crash.
+
+    - The cue alphabet is small (~9 sounds), distinguishable by ear, and the mapping
+    is documented in a single source of truth file (so contributors can add new cues
+    consistently).
+
+    - Per-session toggle works; settings persist across pm session restarts.
+
+    - No cue fires for the same (pr_id, event_kind, verdict) tuple within 2 seconds
+    — debounce against rapid duplicate transitions.
+
+
+    ## Invariants
+
+
+    - Cues MUST NOT block the calling thread for more than ~5ms. Playback happens
+    in a background thread / subprocess.
+
+    - Cues MUST NOT depend on the TUI being focused or even running. The audio-cues
+    helper is callable from CLI subprocesses (e.g. the daemonized review-loop from
+    pr-438028c).
+
+    - Cue dispatch MUST log the (event, pr, verdict, dispatched/suppressed) at INFO
+    level so users can audit which cues fired and why.
+
+
+    ## Edge cases
+
+
+    - Many simultaneous PRs landing terminal verdicts within a few seconds — debounce
+    per-(pr, event) but don''t cap globally; the point is to surface concurrent activity.
+
+    - Watcher in a tight retry loop hitting INPUT_REQUIRED repeatedly — the dedupe
+    window catches this. Watchers that produce many escalations in a row will only
+    sound once until the user clears.
+
+    - Audio device hot-plugged out (laptop screen closed, headphones unplugged) —
+    let the OS handle, fail silently.
+
+    - User on remote SSH with no local audio — same as container case, log but don''t
+    play.
+
+
+    ## Why in plan-ambient and not improvements
+
+
+    The plan''s Vision section emphasizes "surfaces should inform without demanding
+    focus" and explicitly notes Active Badge''s lesson about "low-bandwidth ambient
+    indicators (someone is in the room, the build is green, the user is idle)." Audio
+    cues are exactly that — presence-without-attention signals that don''t pull focus
+    the way a popup does. Filing here keeps the audio output surface (cues + TTS)
+    coherent: same backend, same toggle pattern, same calm-tech philosophy.
+
+
+    ## Out of scope
+
+
+    - TTS-style speech for events. The TTS surface PR handles content speech; this
+    PR is event tones only. They can coexist (different volume / different channel
+    if needed).
+
+    - Cue customization per user (user-uploaded sounds). v1 ships the default alphabet;
+    customization can land later if anyone asks.
+
+    - Cross-host audio routing (your PR completes on a remote server, plays cue on
+    your laptop). Local-only.
+
+    - Visual companion cues (status bar flash etc.). The TUI already has its own visual
+    signaling.
+
+
+    ## Related
+
+
+    - TTS audio surface PR in this plan — shares the playback backend.
+
+    - pr-438028c (daemonized loops) — daemon must be able to fire cues without the
+    TUI process. The audio-cues helper being callable from any pm subprocess covers
+    this.
+
+    - pr-813cc19 (observability) — the cue dispatch log integrates naturally with
+    the existing structured-log story.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-11T19:14:01.066941+00:00'
+  updated_at: '2026-05-11T19:26:11.582502+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-93a0dd7
+    text: "Updating the 'where do the tones come from' question with literature anchor\
+      \ and concrete sourcing options.\n\n## Research lineage to draw from\n\n**Earcons**\
+      \ (Brewster, Blattner & Sumikawa, 1989+). Abstract musical tones with structured\
+      \ parameters (pitch, timbre, rhythm, register) learned like a small vocabulary.\
+      \ **Hierarchical earcons** — shared motifs grouped into families that vary by\
+      \ suffix — are the right primitive for an event-class alphabet. Empirical finding\
+      \ from Brewster's work: ~7 earcons reliably distinguished and learned within\
+      \ an hour; beyond ~12 confusion rises. pm's planned ~9 cues is right at the\
+      \ upper edge — design must enforce hierarchical structure to stay learnable.\
+      \ Brewster 1994 PhD thesis at https://www.dcs.gla.ac.uk/~stephen/research/earcons/.\
+      \ Blattner, Sumikawa & Greenberg 1989 'Earcons and Icons: Their Structure and\
+      \ Common Design Principles' for the original framework.\n\n**Auditory icons**\
+      \ (Gaver, 1986+). Alternative: everyday-sound metaphors. Easier to learn without\
+      \ training but harder to design as a coherent alphabet. Most production systems\
+      \ are a hybrid — auditory-icon-flavored but stylized to abstract tones. Reference:\
+      \ Slack's three-tone alphabet, Discord, macOS Funk/Glass/Hero/Pop/Ping/Submarine.\n\
+      \n**Material Design Sound** (Apache 2.0, https://m2.material.io/design/sound/sound-resources.html).\
+      \ Designer-curated, three tonal families (positive / neutral / negative) with\
+      \ documented design rationale. Maps cleanly onto pm's verdict alphabet.\n\n\
+      ## Concrete sourcing options for pm\n\nThree viable paths, in order of preference:\n\
+      \n1. **Vendor Material Design Sound under Apache 2.0.** Pre-built, designer-curated,\
+      \ three-family structure. Map our cues onto the positive/neutral/negative families:\
+      \ PASS verdicts → positive, NEEDS_WORK → neutral, FAIL / merge-conflict / INPUT_REQUIRED\
+      \ → negative variations. Bundle under `pm_core/audio_cues/sounds/material/`\
+      \ with the Apache 2.0 LICENSE notice. Zero design work; ships today; coherent\
+      \ by construction.\n\n2. **Synthesize hierarchical earcons via `sox` at install\
+      \ time.** Each cue is a 2-note motif: note 1 identifies the *category* (review\
+      \ / QA / merge / watcher / lifecycle), note 2 identifies the *verdict* or *valence*\
+      \ (PASS / FAIL / IN-PROGRESS / NEEDS-INPUT). Categories share a base motif;\
+      \ verdicts share an interval pattern (rising for positive, falling for negative).\
+      \ ~50 lines of code generates the full alphabet at install. Zero vendored binaries,\
+      \ zero licensing concerns, hierarchical by construction (which is the Brewster-validated\
+      \ learnability property). Concrete sketch:\n\n   - Category base notes (timbre/register\
+      \ groups):\n     - review → mid sine\n     - qa → mid triangle\n     - merge\
+      \ → low sine\n     - watcher → high sine\n     - lifecycle (start/cleanup) →\
+      \ mid square\n   - Verdict suffix intervals:\n     - PASS → +4 semitones (major\
+      \ third rising)\n     - NEEDS_WORK → 0 (held tone)\n     - FAIL / KILLED → -4\
+      \ semitones (descending)\n     - INPUT_REQUIRED → +7 then -7 (attention oscillation)\n\
+      \     - SUCCESS-TERMINAL (merge-merged) → +4, +7 (rising arpeggio)\n     - CONFLICT\
+      \ → minor-second tritone (intentional dissonance)\n   - sox invocation per cue:\
+      \ `sox -n cue.wav synth 0.15 <category> 0.15 <verdict-target> fade 0 0.3 0.05`\
+      \ with appropriate frequencies.\n\n3. **Hand-pick clips from freesound.org under\
+      \ CC0.** Most flexible but most curation work. Skip unless 1 and 2 don't fit\
+      \ (e.g. licensing concerns with Material Design's broader Apache-2.0 conditions,\
+      \ or sox not available on the target platform).\n\n## Recommendation\n\nDefault\
+      \ to option 2 (sox-synthesized hierarchical earcons). Reasons:\n\n- Grounds\
+      \ the design in the empirically-validated hierarchical-earcon literature, not\
+      \ in someone's taste.\n- Zero external assets, zero licensing footprint, deterministic\
+      \ and reproducible.\n- The hierarchy doubles as documentation — the design rationale\
+      \ IS the synthesis spec.\n- sox is on most Linux installs and trivially installable\
+      \ on macOS via brew.\n- If sox is missing on a host, fall back to silent operation\
+      \ (no cue played) with a clear log warning — same fallback as 'no audio device.'\n\
+      \nOption 1 (Material Design vendoring) as the backup if sox isn't reliably available\
+      \ across pm's target platforms.\n\nThe earcon literature also gives the user\
+      \ a sharp objective measure for whether the design works: a small user-study\
+      \ (10 minutes per participant, 3-5 participants) where users listen to randomly-played\
+      \ cues and identify the event. Brewster's bar is 'reliably distinguished after\
+      \ one hour of use' — we should hit that. If we don't, we re-tune the synthesis\
+      \ parameters before adding cues to the alphabet rather than shipping a confusing\
+      \ set."
+    created_at: '2026-05-11T19:26:11Z'
+    last_edited: '2026-05-11T19:26:11Z'
+- id: pr-612d556
+  plan: improvements
+  title: 'Improvement: pm session agents command opens a tmux window running ''claude
+    agents'' for live multi-session view'
+  branch: pm/pr-612d556-improvement-pm-session-agents-command-opens-a-tmux
+  status: pending
+  depends_on: []
+  description: "Add a new pm CLI: `pm session agents` (or `pm agents` — bikeshed during\
+    \ impl) that opens a dedicated tmux window in the current pm session showing the\
+    \ live output of Claude Code's `claude agents` command. The window is long-lived,\
+    \ refreshes the view periodically, and is the natural place to glance for 'which\
+    \ Claude sessions are working / needs input / done' across all in-flight PRs.\n\
+    \n## Why\nClaude Code 2.1.139+ shipped an 'agent view' feature (https://code.claude.com/docs/en/agent-view)\
+    \ that shows a table of all background Claude sessions with state icons (working\
+    \ / needs input / idle / completed / failed / stopped). That info is genuinely\
+    \ useful for pm — it answers 'which of my many running PRs is currently blocked\
+    \ on me' at a glance, the question pm watchers approximate today via tmux pane\
+    \ scraping.\n\nThere's no programmatic API for the data yet (verified separately).\
+    \ The CLI `claude agents` is what's available. Wrapping it in a pm tmux window\
+    \ is the simplest integration that gets us most of the value today and picks up\
+    \ improvements as Claude Code's CLI evolves.\n\nThis is parallel to pr-f5b7eef's\
+    \ home-window pattern — a long-lived pm-managed window that runs a poll-and-refresh\
+    \ display. Same infrastructure (window naming, layout management, content-change-only\
+    \ redraw idea from pr-28bda5d), different content.\n\n## Behavior\n\n- `pm session\
+    \ agents` from inside a pm tmux session:\n  - First invocation: creates a tmux\
+    \ window named `agents` (or similar) running a small Python loop that calls `claude\
+    \ agents` every ~3-5s, clears the pane, prints the table. Same loop pattern as\
+    \ the pr-list home window.\n  - Subsequent invocations: refreshes immediately\
+    \ and switches the calling client to the window.\n- Outside a pm tmux session:\
+    \ prints `claude agents` output to stdout once (since there's no window to manage).\n\
+    - Refresh cadence: configurable via `pm set agents-refresh-interval <seconds>`.\
+    \ Default 3s. Same content-change-only redraw idea from pr-28bda5d so a quiet\
+    \ pm produces a quiet agents window.\n\n## Integration with pr-id mapping (optional\
+    \ Phase 2 in the same PR scope)\n\nClaude Code's `claude agents` shows sessions\
+    \ by Claude's own session-id. pm knows which PR each session is working on (via\
+    \ the PR-id → workdir → spawned-claude-session mapping). A pm-flavored variant\
+    \ that augments the table with the pm PR-id, plan, and status would be much more\
+    \ useful than the raw `claude agents` output.\n\nTwo ways to do this:\n1. **Wrap\
+    \ and re-render**: parse `claude agents` output, look up each Claude session-id\
+    \ in pm's pane registry / PR-id mapping, render an augmented table with PR-id,\
+    \ title, plan, agent state side-by-side.\n2. **Embed in pr list**: surface the\
+    \ agent-state column in `pm pr list -t` itself. The agents window then becomes\
+    \ pure `pm pr list -t --with-agent-state` and we get this functionality everywhere\
+    \ PRs are listed without a separate window.\n\nOption 2 is the better long-term\
+    \ integration. Option 1 is the cheapest near-term ship. Recommend option 2 as\
+    \ the goal, option 1 as the v1 if option 2's parse-and-correlate logic is more\
+    \ work than the rest combined.\n\n## Acceptance criteria\n\n- `pm session agents`\
+    \ from a pm tmux session opens a window with live `claude agents` output.\n- Window\
+    \ refreshes on a configurable interval; quiet pm produces no flicker (content-change-only\
+    \ redraw).\n- Window survives pm restarts (window persists in tmux even if the\
+    \ TUI restarts; the refresh loop re-attaches).\n- Outside a pm tmux session, the\
+    \ command prints once to stdout — no error, no window-creation attempt.\n- If\
+    \ `claude agents` is unavailable (older Claude Code version), the window shows\
+    \ a clear 'requires Claude Code 2.1.139+' message instead of crashing.\n\n## Invariants\n\
+    \n- Window content MUST NOT depend on the TUI being focused or running. Same standalone\
+    \ pattern as the home window.\n- Refresh loop MUST NOT log to the project debug\
+    \ log on every tick (would be log spam). Log only on errors and on user-facing\
+    \ events (window created, window refresh interval changed).\n- The CLI command\
+    \ MUST be idempotent — running it when the window already exists refreshes content\
+    \ and focuses, does not error or create a duplicate.\n\n## Edge cases\n\n- `claude`\
+    \ binary not on PATH → display a fallback message and exit cleanly (don't poll-loop\
+    \ hitting a missing command).\n- Many concurrent agents (~50+) → `claude agents`\
+    \ output may overflow the pane height; the window should let the user scroll.\
+    \ tmux's pane scrollback covers this for free.\n- pm running on a host without\
+    \ an interactive Claude install (e.g., a CI runner or a container) — show empty\
+    \ / 'no Claude Code agents detected' state.\n\n## Verification\n\n- From a pm\
+    \ tmux session, run `pm session agents`. Confirm a window named `agents` appears\
+    \ with the `claude agents` table.\n- Run again. Confirm the existing window is\
+    \ reused and focused, not duplicated.\n- Resize the window. Confirm the table\
+    \ re-renders for the new width (Claude Code's `claude agents` handles this; pm\
+    \ just needs to not interfere).\n- Wait 30s with no agent state changes; confirm\
+    \ no flicker / no redraws happen.\n- Trigger a Claude session into 'needs input'\
+    \ state (background a Claude session and let it stall on a permission prompt).\
+    \ Confirm the agents window shows the state transition within the refresh interval.\n\
+    \n## Related\n\n- pr-f5b7eef (#193, merged) — home window. Same long-lived-tmux-window-with-periodic-refresh\
+    \ pattern; reuse the abstractions.\n- pr-28bda5d — content-change-only redraw\
+    \ for the home window. The agents window should adopt the same pattern.\n- Claude\
+    \ Code agent view docs: https://code.claude.com/docs/en/agent-view\n- A parallel\
+    \ improvement (separate PR worth filing): subscribe pm's watcher to Claude Code's\
+    \ `Notification` hook for cleaner 'needs input' detection than pane scraping."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-11T21:26:22.689853+00:00'
+  updated_at: '2026-05-11T21:26:22.689853+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3a8111d
+  plan: improvements
+  title: 'Improvement: pass --name to spawned Claude sessions so the Claude phone/iPad
+    apps'' code section shows legible session names tied to pm session-tag + tmux
+    window + pane role'
+  branch: pm/pr-3a8111d-improvement-pass-name-to-spawned-claude-sessions-s
+  status: pending
+  depends_on: []
+  description: 'Today pm spawns Claude sessions without passing the `--name` flag,
+    so the Claude desktop / phone / iPad apps (and `claude agents`) show auto-generated
+    summaries or UUIDs. When a user has many Claude sessions in flight across multiple
+    pm PRs and uses `/rc` (remote-control alias, https://code.claude.com/docs/en/commands.md)
+    to access them from the Claude mobile app''s code section, the listing is unreadable
+    — they can''t tell which session is the impl for #193 vs the review for #190 vs
+    the QA scenario 2 for #170.
+
+
+    Fix: pass `--name` at every Claude-launch site with a deterministic format that
+    encodes the pm context.
+
+
+    ## Naming format
+
+
+    `<session-tag>/<tmux-window-name>/<pane-role>`
+
+
+    Examples:
+
+
+    - `project_manager-c5a1006b/#193/impl` — impl Claude session for PR #193.
+
+    - `project_manager-c5a1006b/review-#190/claude` — review Claude session for PR
+    #190. The role is `claude` to distinguish from the diff pane (which doesn''t run
+    Claude but still has a role in pm''s pane registry).
+
+    - `project_manager-c5a1006b/qa-#170-s2/claude` — QA Claude for scenario 2 of PR
+    #170.
+
+    - `project_manager-c5a1006b/merge-#202/claude` — merge-resolve Claude.
+
+    - `project_manager-c5a1006b/plan-regression/claude` — plan-review Claude.
+
+    - `project_manager-c5a1006b/meta/claude` — pm meta Claude.
+
+
+    The pane-role component MUST be included even when only one pane in the window
+    currently runs Claude. Reasons: (a) windows can grow extra Claude panes (companion
+    patterns, side discussions); (b) consistent naming format is easier than two formats;
+    (c) the role tag is what tells the user ''this is the impl, that''s the review''
+    on mobile where the window name alone may be cropped.
+
+
+    The pane role is the same string already registered with pm''s pane-registry (e.g.,
+    `impl`, `review-claude`, `review-diff`, `qa-claude`, `plan-edit`, `plan-review`,
+    `meta`). For pm''s --name purposes we drop the `-claude` suffix where it''s redundant
+    — a name ending in `/review-claude` is uglier than ending in `/review`.
+
+
+    ## Implementation
+
+
+    A single helper `pm_core/claude_launcher.py::format_session_name(session_tag,
+    window_name, pane_role) -> str` that returns the formatted name. Called from every
+    Claude-spawn site:
+
+
+    - `launch_claude` (pm_core/claude_launcher.py:127) — main interactive launch path.
+    Add `--name <formatted>` to the assembled `cmd` list.
+
+    - `launch_claude_print` (line 217) — one-shot non-interactive print mode. Less
+    important here (the apps don''t track these as agents) but still worth tagging
+    for consistency in transcripts.
+
+    - `launch_claude_print_background` — same as launch_claude_print.
+
+    - `build_claude_shell_cmd` (line 304) — the helper that produces the docker-exec-wrapped
+    command for containerized sessions. Inject `--name` here so the container''s claude
+    binary picks it up.
+
+    - Inline subprocess launches in cli/pr.py / cli/plan.py / cli/meta.py / review_loop.py
+    / qa_loop.py — audit for any `subprocess.Popen([..., ''claude'', ...])` patterns
+    that bypass the launcher helpers and add `--name` to those too.
+
+
+    The caller knows session_tag (from `pm_core.paths.get_session_tag()`), window_name
+    (it''s about to create the window — already in scope), and pane_role (already
+    passed to pane_registry.register_pane). All three pieces are already available
+    at each launch site — this PR just plumbs them through to `--name`.
+
+
+    ## Acceptance criteria
+
+
+    - Every Claude session pm spawns has a `--name` set in the launch command.
+
+    - The name follows the format `<session-tag>/<window-name>/<pane-role>` (with
+    the `-claude` suffix stripped from role when redundant).
+
+    - Running `claude agents` lists pm-spawned sessions with these names visible.
+
+    - Opening the Claude mobile / iPad app''s code section shows the same names, making
+    it easy to distinguish parallel sessions.
+
+
+    ## Invariants
+
+
+    - Names MUST NOT contain characters Claude Code rejects in --name. Verify the
+    allowed character set; sanitize the formatted string if needed (likely just /
+    and #-prefixed numbers; if Claude restricts /, use a different separator like
+    `-` or `:`).
+
+    - Name length MUST stay under whatever cap Claude Code enforces (mobile apps often
+    crop at ~30-40 chars). Truncate the session-tag if too long, never the role.
+
+    - If `format_session_name` can''t build a valid name (missing session_tag, missing
+    window_name), fall back to no `--name` flag rather than spawning with a broken
+    arg.
+
+
+    ## Edge cases
+
+
+    - pm running outside tmux (CLI invocations from a bare shell) — no window name.
+    Format becomes `<session-tag>/<pane-role>` (two parts). Document this in the helper.
+
+    - Containerized sessions — the wrapped `claude` inside the container sees the
+    --name and registers under that name in its own state. Should be transparent.
+
+    - Renames after spawn (the user manually renaming via /rename or claude agents
+    Ctrl+R) — pm doesn''t override these. Subsequent `pm pr review` etc. re-spawn
+    fresh sessions with the original format.
+
+
+    ## Verification
+
+
+    - pm pr start <pr-id> → claude agents shows the new session with name `<tag>/<window>/<role>`.
+
+    - pm pr review <pr-id> → analogous for review session.
+
+    - Same for qa, merge, meta, plan-review.
+
+    - `/rc` from inside a session → the Claude mobile app''s code section lists by
+    the new names.
+
+
+    ## Out of scope
+
+
+    - Backfilling names for already-running sessions. Restart applies the new names.
+
+    - Configurable naming format. Single deterministic format is enough; if users
+    want custom, they can /rename post-hoc.
+
+    - Names that encode runtime state (iteration count, etc.). Names are spawn-time
+    identifiers, not status displays — pm''s own TUI / agents-window handle that.
+
+
+    ## Related
+
+
+    - pr-612d556 (agents window) — once names are pm-meaningful at spawn time, the
+    agents window''s pm-PR correlation logic gets much simpler. The ''Option 2'' in
+    pr-612d556 (parse claude agents output and correlate to pm PR-id) collapses to
+    ''just parse the name field'' once this PR lands.
+
+    - pane_registry — source of truth for pane-role strings. Reuse the same strings.
+
+    - Claude Code CLI reference: https://code.claude.com/docs/en/cli-reference.md
+    (--name flag).
+
+    - /rc / /remote-control alias: https://code.claude.com/docs/en/commands.md.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-11T21:30:04.638089+00:00'
+  updated_at: '2026-05-11T21:30:04.638089+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-98f670e
+  plan: plan-regression
+  title: 'QA scenario quality supervisor: judge artifact depth and amend before next
+    run'
+  branch: pm/pr-98f670e-qa-artifact-replay-supervisor-detect-and-route-art
+  status: pending
+  depends_on:
+  - pr-b3b8df0
+  - pr-6f9301e
+  description: "Automated supervisory step inserted between scenario completion and\
+    \ the verdict-emit. Judges whether each scenario's produced artifacts (captures,\
+    \ logs, test outputs, assertions) actually constitute evidence that the functionality\
+    \ works, or whether the scenario took a shortcut. When evidence is shallow, the\
+    \ supervisor queries the scenario session about what it did and didn't do, then\
+    \ amends instructions / artifact requirements / planner prompts so the next run\
+    \ produces real evidence. The verdict does not propagate until the supervisor\
+    \ is satisfied or escalates.\n\n## Problem\n\nScenarios reliably produce artifacts\
+    \ that work in the session that wrote them but don't actually exercise the functionality.\
+    \ The scenario nominally passes because its (thin) assertions hold; the QA verdict\
+    \ says PASS; the bug-fix loop moves on; the bug is still there. This is false-PASS,\
+    \ not false-NEEDS_WORK, and it is invisible from raw verdicts alone. In supervised\
+    \ mode a human reading the artifacts sees \"oh, you just printed the help text\
+    \ — that doesn't test the feature.\" In headless mode (pr-6f9301e) nobody catches\
+    \ it.\n\n## Shape\n\n- New module hooked into the QA verdict path, before verdict\
+    \ propagates to the bug-fix or improvement-fix watchers.\n- Inputs: scenario's\
+    \ produced artifacts, scenario instruction text, the diff of the PR under test,\
+    \ the QA planner output that generated the scenarios (so the supervisor can amend\
+    \ the planner prompt for repeat failure modes).\n- A leader Claude session judges\
+    \ artifact depth: did the scenario actually invoke the changed code path? Did\
+    \ it observe the side effect it claimed to verify? Are assertions tied to the\
+    \ behavior the PR changes, or to incidental output? Does the captured evidence\
+    \ distinguish a correct implementation from common wrong implementations?\n- **Scenario\
+    \ session interaction**: scenarios remain queryable after their verdict via Claude\
+    \ Code --resume (held in the supervisor's working set until release or TTL). The\
+    \ supervisor probes for shortcuts: \"what did you actually verify?\", \"what state\
+    \ did you check after the action?\", \"did you confirm the change happened or\
+    \ only that the command ran?\", \"what could you have asserted that you didn't?\"\
+    . Multi-turn allowed.\n- After probing, the supervisor decides:\n  - **Genuinely\
+    \ PASS** — verdict propagates as-is.\n  - **Shallow PASS, amendable in place**\
+    \ — edit the scenario instruction to require deeper checks; re-run the scenario;\
+    \ verdict propagates only after the re-run.\n  - **Shallow PASS, planner-level\
+    \ fix needed** — edit the QA planner prompt or the synthesis primitive's instruction\
+    \ so future scenarios for similar PRs do not repeat the shortcut. File the planner\
+    \ edit as an improvement PR if confidence is below threshold.\n  - **NEEDS_WORK,\
+    \ but for the wrong reason** — the scenario noticed something but mis-attributed\
+    \ it; amend the assertion and re-run.\n- Per-scenario amendment cap (default 2)\
+    \ prevents the supervisor from looping on its own edits.\n\n## Design decisions\
+    \ to pin in the PR\n\n1. Coverage: run on every PASS verdict (catch shallow PASS\
+    \ — the load-bearing case). Optionally on NEEDS_WORK too (catch shallow NEEDS_WORK\
+    \ that should have been INPUT_REQUIRED or PASS). Default: PASS-only initially,\
+    \ NEEDS_WORK if real runs show mis-attributed failures.\n\n2. Amendment cap: 2\
+    \ per scenario per cycle. After cap, escalate via self-recovery playbook — mark\
+    \ the scenario as needs-human-attention, file an improvement PR, do not block\
+    \ the verdict indefinitely.\n\n3. Scenario session lifecycle: kept queryable until\
+    \ supervisor release or TTL (default 1 hour). Holds container and tmux resources;\
+    \ cap total queryable sessions and evict oldest on overflow.\n\n4. Re-run vs descriptive-only:\
+    \ when the supervisor amends a scenario, it should re-run the amended scenario\
+    \ before propagating verdict. Cost is real (doubles or triples scenario cost on\
+    \ amended cases) but the alternative — propagating a verdict from the original\
+    \ shallow run — defeats the supervisor. Default: re-run after amend.\n\n5. Planner-prompt\
+    \ edits: the supervisor can propose edits to the QA planner prompt (or the synthesis\
+    \ primitive's per-task-type instruction in pr-b3b8df0) so future scenarios don't\
+    \ repeat the shortcut. These edits are higher-leverage but riskier than per-scenario\
+    \ amendments. Default: planner edits go through the improvement-fix watcher (gated\
+    \ merge) rather than applying in-place.\n\n## Sequencing\n\nDepends on pr-b3b8df0\
+    \ (synthesis primitive — the supervisor's planner-level fixes target the per-task-type\
+    \ instructions there) and pr-6f9301e (headless mode is what makes shallow-PASS\
+    \ invisible without this supervisor). Independent of pr-ed10ac4 and pr-ca6859f.\n\
+    \nThe bug-fix watcher (pr-e3a711c) and improvement-fix watcher (pr-d39a7fb) only\
+    \ see verdicts after the supervisor releases them. Shallow-PASS scenarios that\
+    \ were amended and re-run produce a verdict the watchers can trust; shallow-PASS\
+    \ scenarios that hit the amendment cap produce an improvement PR rather than a\
+    \ PASS.\n\n## Manual testing\n\nConstruct a PR whose change is \"make function\
+    \ X return the corrected value Y\" and a scenario that only checks \"function\
+    \ X is callable without crashing.\" Run the scenario; supervisor should:\n- judge\
+    \ the artifact as shallow (no observation of return value),\n- query the session\
+    \ about what it checked,\n- amend the instruction to require asserting the return\
+    \ value equals Y,\n- re-run the scenario,\n- propagate the resulting verdict.\n\
+    Confirm that a deeper scenario (one that actually checks the return value) passes\
+    \ the supervisor without amendment. Confirm amendment-cap escalation: a scenario\
+    \ that resists amendment 2 times is marked for human attention with an improvement\
+    \ PR filed, and the supervisor does not block indefinitely."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-12T13:14:57.292205+00:00'
+  updated_at: '2026-05-12T13:16:30.263716+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

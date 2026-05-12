@@ -39,7 +39,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - ✅ Merged (11): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185)
 - 🔨 In progress (1): `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, tracked under improvements but listed here as Phase 7 prerequisite)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
-- 📋 Phase 9 (5 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
+- 📋 Phase 9 (6 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-98f670e` (QA scenario quality supervisor with queryable scenario sessions), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
 
 ## Prerequisites
 
@@ -196,6 +196,18 @@ Detect "same diff, same verdict, no real change" between iterations and short-ci
 A setup-time leader pass that takes a project task envelope (binary + docs, repo + task description, generic project root) and emits `pm/qa/instructions/*.md` files the existing QA loop already knows how to consume. Per-task-type logic plugs in as backends behind a shared interface. ProgramBench is one consumer (its backend lives in `pr-e2b7fdf` below); GAIA-style benchmarks would be another; a generic-pm-project backend is a follow-up improvement that lowers activation energy for users who today author QA instructions by hand.
 
 The probe-and-write shape is the same across consumers — only the per-type heuristics differ. Pulling this primitive out of the ProgramBench scaffolding keeps each consumer to a backend registration rather than a fork of the synthesis logic.
+
+### PR: QA scenario quality supervisor
+`pr-98f670e` (depends on: pr-b3b8df0, pr-6f9301e).
+
+Inserts a supervisory step between scenario completion and verdict-emit that judges whether each scenario's produced artifacts (captures, logs, assertions) actually constitute evidence the functionality works, or whether the scenario took a shortcut. The load-bearing failure mode is **false PASS**: scenarios reliably produce thin artifacts that nominally pass while not exercising what they claim to verify. In supervised mode a human catches this; in headless mode (`pr-6f9301e`) nobody does.
+
+Scenario sessions stay queryable after their verdict via `--resume`; the supervisor probes for shortcuts ("what did you actually verify?", "what state did you check after the action?", "what could you have asserted that you didn't?"). Then:
+- Genuinely deep PASS → verdict propagates.
+- Shallow PASS → amend the scenario instruction to require deeper checks, re-run, propagate the re-run's verdict.
+- Repeated shortcut pattern → propose a planner-prompt edit so future scenarios don't repeat it (gated through the improvement-fix watcher).
+
+Per-scenario amendment cap (default 2) prevents supervisor loops; cap-exceeding cases escalate via the self-recovery playbook. Distinct from `pr-ca6859f` (technical retry) and `pr-ed10ac4` (spinning-loop detection): this one is about verdict trust, not loop dynamics.
 
 ### PR: ProgramBench submission scaffolding
 `pr-e2b7fdf` (depends on: pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0).
