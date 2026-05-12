@@ -270,10 +270,19 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
         clone_args.extend(["--branch", branch])
     git_ops.run_git(*clone_args)
 
-    # The clone's origin points to the PR workdir (repo_root).  The push
-    # proxy handles local-path origins: it fetches into the PR workdir
-    # (updating its branch ref) and then forwards to the real upstream.
-    # This keeps all local copies in sync.
+    # The clone got `origin = <repo_root>` from the local clone.  Swap it
+    # to the *real* upstream so push/fetch/pull from inside the scenario
+    # container target GitHub directly instead of hopping through the PR
+    # workdir.  The host-side push proxy still mediates every remote op
+    # (validating branch and flags), but it no longer has to chain-walk
+    # to figure out where bytes should actually go.  Falls back to the
+    # local origin when the source repo has no real upstream (truly
+    # local-only test setup).
+    from pm_core.push_proxy import resolve_real_origin
+    real_url = resolve_real_origin(str(repo_root))
+    if real_url:
+        git_ops.run_git("-C", str(clone_path), "remote", "set-url",
+                        "origin", real_url)
 
     return clone_path, scratch
 

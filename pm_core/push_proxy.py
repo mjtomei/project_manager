@@ -302,26 +302,38 @@ class PushProxy:
                          target_branch, self.allowed_branch)
             return {"exit_code": 1, "stdout": "", "stderr": msg}
 
-        # Check if origin is a local path.  QA clones should have their
-        # origin set to the real remote at clone time, but local-only repos
-        # (no upstream) still have a local-path origin.  For those, we
-        # can't ``git push`` (fails with receive.denyCurrentBranch on
-        # non-bare repos), so we fetch from the clone into the target repo
-        # instead — the proxy can see both paths on the host.
+        # Origin is normally a real upstream URL (scenario clones run
+        # `git remote set-url origin <real-url>` after the initial local
+        # clone). For local-only test setups with no upstream, origin is
+        # still a local path; pushing direct to a non-bare local repo
+        # would fail with receive.denyCurrentBranch, so we fall back to
+        # fetching the source ref into the local target.
         workdir = caller_workdir or self.workdir
         remote = self._extract_remote_name(push_args)
         local_target = _resolve_local_remote_url(workdir, remote)
 
         if local_target is not None:
-            return self._local_push(local_target, target_branch,
-                                    caller_workdir=workdir)
+            return self._fetch_into_local_target(local_target, target_branch,
+                                                  caller_workdir=workdir)
 
-        cmd = ["git", "push"] + push_args
-        _log.info("Push proxy executing: %s (in %s)", cmd, workdir)
+        return self._local_push(push_args, caller_workdir=workdir)
+
+    def _local_push(self, push_args: list[str],
+                    caller_workdir: str | None = None) -> dict:
+        """Execute the validated push from the caller's clone.
+
+        Scenario clones have ``origin`` set to the real upstream URL,
+        so the proxy just runs the literal push from the caller's clone
+        — the upstream resolves on its own.  All security checks
+        (allowed branch, dangerous flags) ran in ``_execute_push``
+        before this is called.
+        """
+        source = caller_workdir or self.workdir
+        cmd = ["git", "-C", source, "push"] + push_args
+        _log.info("Push proxy push: %s", cmd)
         try:
             result = subprocess.run(
-                cmd, cwd=workdir,
-                capture_output=True, text=True, timeout=120,
+                cmd, capture_output=True, text=True, timeout=120,
             )
             return {
                 "exit_code": result.returncode,
@@ -330,41 +342,22 @@ class PushProxy:
             }
         except subprocess.TimeoutExpired:
             return {"exit_code": 1, "stdout": "",
-                    "stderr": "push-proxy: git push timed out after 120s\n"}
+                    "stderr": "git-proxy: push timed out after 120s\n"}
         except Exception as exc:
             return {"exit_code": 1, "stdout": "",
-                    "stderr": f"push-proxy: {exc}\n"}
+                    "stderr": f"git-proxy: push failed: {exc}\n"}
 
-    def _local_push(self, target_repo: str, branch: str,
-                    caller_workdir: str | None = None) -> dict:
-        """Push scenario commits directly to the real upstream when possible.
+    def _fetch_into_local_target(self, target_repo: str, branch: str,
+                                  caller_workdir: str | None = None) -> dict:
+        """Forward a push to a local target by fetching the source ref.
 
-        Scenario clones have ``origin`` set to a local path (the PR workdir)
-        for fast clone setup, not the real GitHub remote. A naive forward —
-        update the PR workdir's branch ref via ``git fetch --update-head-ok``
-        and then ``git push origin`` from inside it — does get commits to
-        the real remote, but mutates the PR workdir's branch ref as a side
-        effect. Because ``git fetch`` doesn't touch the index or worktree,
-        that leaves the PR workdir desynced from HEAD: ``git status`` shows
-        phantom staged deletions/modifications matching the new commits'
-        diff, and any real divergence (a user commit during QA) becomes
-        indistinguishable from the proxy's writes.
-
-        Instead, when the target repo's remote chain ends at a real
-        upstream URL, push the source ref directly there from the caller's
-        clone — the PR workdir stays completely untouched, so a normal
-        ``git fetch origin && git merge origin/<branch>`` in the PR workdir
-        is a proper merge with real conflict detection.
-
-        Fall back to the old fetch-into-target behavior only when there is
-        no real upstream (truly local-only repo with no remote to forward
-        to).
+        Only used when the caller's ``origin`` is still a local path —
+        a truly local-only test setup with no real upstream.  Pushing
+        direct into a checked-out non-bare repo fails with
+        ``receive.denyCurrentBranch``; ``git fetch --update-head-ok``
+        from the local target sidesteps that.
         """
         source = caller_workdir or self.workdir
-
-        # Prefer the explicit branch ref; fall back to HEAD when the source
-        # clone doesn't have a local branch by that name (e.g. legacy requests
-        # where self.workdir is on a differently-named default branch).
         src_ref = f"refs/heads/{branch}"
         try:
             _check = subprocess.run(
@@ -375,35 +368,7 @@ class PushProxy:
                 src_ref = "HEAD"
         except (subprocess.TimeoutExpired, FileNotFoundError):
             src_ref = "HEAD"
-
         refspec = f"{src_ref}:refs/heads/{branch}"
-
-        # Resolve the real upstream by walking the target's remote chain.
-        # When found, push the source ref directly there, bypassing the
-        # PR workdir entirely.
-        real_url = resolve_real_origin(target_repo)
-        if real_url:
-            cmd = ["git", "-C", source, "push", real_url, refspec]
-            _log.info("Push proxy direct upstream push: %s", cmd)
-            try:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=120,
-                )
-                return {
-                    "exit_code": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                }
-            except subprocess.TimeoutExpired:
-                return {"exit_code": 1, "stdout": "",
-                        "stderr": "git-proxy: upstream push timed out after 120s\n"}
-            except Exception as exc:
-                return {"exit_code": 1, "stdout": "",
-                        "stderr": f"git-proxy: upstream push failed: {exc}\n"}
-
-        # No real upstream — fall back to updating the local target's
-        # branch ref via fetch. --update-head-ok is needed because the
-        # target typically has the branch checked out.
         cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
                source, refspec]
         _log.info("Push proxy local-only update (no upstream): %s", cmd)
@@ -428,12 +393,9 @@ class PushProxy:
         """Execute a read-only git remote command (fetch, pull, ls-remote).
 
         These run from the caller's workdir with no branch restriction.
-        Pushes go direct to the real upstream via _local_push, bypassing
-        the PR workdir, so reads must follow the same chain — otherwise
-        the caller fetches from a stale local mirror and never sees
-        commits another scenario pushed.  Rewrite the remote argument
-        to the real upstream URL when the caller's remote chain ends at
-        a real URL; fall through to the literal args otherwise.
+        The caller's origin already points at the real upstream URL
+        (set up at scenario clone time), so the proxy just runs the
+        literal args — no remote-chain walking needed.
 
         Falls back to self.workdir for legacy requests without a workdir field.
         """
@@ -443,7 +405,6 @@ class PushProxy:
             return danger
 
         workdir = caller_workdir or self.workdir
-        args = self._rewrite_read_args_for_upstream(git_cmd, args, workdir)
         cmd = ["git", git_cmd] + args
         _log.info("Git proxy executing read cmd: %s (in %s)", cmd, workdir)
         try:
@@ -462,96 +423,6 @@ class PushProxy:
         except Exception as exc:
             return {"exit_code": 1, "stdout": "",
                     "stderr": f"git-proxy: {exc}\n"}
-
-    def _rewrite_read_args_for_upstream(self, git_cmd: str,
-                                         args: list[str],
-                                         workdir: str) -> list[str]:
-        """Rewrite the remote argument of a read command to the real URL.
-
-        If args' first positional is a remote name whose chain resolves
-        to a real upstream URL, replace it with that URL.  For pull, also
-        ensure a refspec is present (default to the caller's current
-        branch) so ``git pull <url>`` doesn't fall back to FETCH_HEAD
-        on a remote head we can't guarantee matches the caller's branch.
-
-        Returns args unchanged when:
-        - No positional repository arg (caller relied on tracking — leave
-          git to its default behaviour);
-        - First positional already looks like a URL or path;
-        - The chain doesn't end at a real URL (truly local-only setup).
-        """
-        if not args:
-            return args
-        # Find the first positional (skipping flag-with-value pairs).
-        skip_next = False
-        first_pos_idx: int | None = None
-        for i, arg in enumerate(args):
-            if skip_next:
-                skip_next = False
-                continue
-            if arg.startswith("-"):
-                if arg in ("--upload-pack", "--receive-pack",
-                           "--exec", "--depth", "--shallow-since",
-                           "--shallow-exclude", "-o", "--server-option"):
-                    skip_next = True
-                continue
-            first_pos_idx = i
-            break
-        if first_pos_idx is None:
-            return args
-
-        remote_name = args[first_pos_idx]
-        # If it already looks like a URL or path, don't rewrite.
-        if (remote_name.startswith(("http://", "https://", "ssh://",
-                                     "git://", "git@", "file://",
-                                     "/", "."))
-                or ":" in remote_name and "/" in remote_name.split(":", 1)[0]):
-            return args
-
-        real_url = resolve_real_origin(workdir, remote=remote_name)
-        if not real_url:
-            return args
-
-        new_args = list(args)
-        new_args[first_pos_idx] = real_url
-
-        if git_cmd == "pull":
-            # Ensure a refspec is present so the merge step has a defined
-            # source. If there's already a second positional, leave it.
-            has_refspec = False
-            saw_pos = 0
-            skip_next = False
-            for arg in new_args:
-                if skip_next:
-                    skip_next = False
-                    continue
-                if arg.startswith("-"):
-                    if arg in ("--upload-pack", "--receive-pack",
-                               "--exec", "--depth", "--shallow-since",
-                               "--shallow-exclude", "-o",
-                               "--server-option"):
-                        skip_next = True
-                    continue
-                saw_pos += 1
-                if saw_pos >= 2:
-                    has_refspec = True
-                    break
-            if not has_refspec:
-                try:
-                    res = subprocess.run(
-                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                        cwd=workdir, capture_output=True, text=True,
-                        timeout=5,
-                    )
-                    branch = res.stdout.strip() if res.returncode == 0 else ""
-                except Exception:
-                    branch = ""
-                if branch and branch != "HEAD":
-                    new_args.append(branch)
-
-        _log.info("Push proxy rewriting %s remote %s -> %s",
-                  git_cmd, remote_name, real_url)
-        return new_args
 
     @staticmethod
     def _extract_remote_name(push_args: list[str]) -> str:
