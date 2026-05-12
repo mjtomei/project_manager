@@ -1,0 +1,137 @@
++ source /tmp/pm-venv/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/tmp/pm-venv
+++ export VIRTUAL_ENV
+++ _OLD_VIRTUAL_PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(pm-venv) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(pm-venv) '
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
++ source /tmp/qa22-stub
+++ STUB_DIR=/tmp/tmp.YeVASGoyb2
+++ PROMPTS_DIR=/tmp/tmp.YeVASGoyb2/prompts
++ export PATH=/tmp/tmp.YeVASGoyb2:/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
++ PATH=/tmp/tmp.YeVASGoyb2:/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
++ TEST_DIR=/tmp/pm-test-1778622668
++ cd /tmp/pm-test-1778622668
++ rm -f '/tmp/tmp.YeVASGoyb2/prompts/*.txt'
++ pm qa regression smoke
+Running regression: Smoke
+Session: pm-pm-test-1778622668-29ae6d6e
+------------------------------------------------------------
++ echo exit=0
+exit=0
++ ls /tmp/tmp.YeVASGoyb2/prompts
+argv-1778622746047651771.txt  prompt-1778622746047651771.txt
++ echo '----- prompt (no flag) -----'
+----- prompt (no flag) -----
++ cat /tmp/tmp.YeVASGoyb2/prompts/prompt-1778622746047651771.txt
+## Session Context
+
+You are testing against tmux session: pm-pm-test-1778622668-29ae6d6e
+The TUI pane ID is: %0
+
+To interact with this session, use commands like:
+- pm tui view -s pm-pm-test-1778622668-29ae6d6e
+- pm tui send <keys> -s pm-pm-test-1778622668-29ae6d6e
+- tmux list-panes -t pm-pm-test-1778622668-29ae6d6e -F "#{pane_id} #{pane_width}x#{pane_height} #{pane_current_command}"
+- cat ~/.pm/pane-registry/pm-pm-test-1778622668-29ae6d6e.json
+
+## Captures
+
+Any capture you produce should land under `pm/qa/captures/regression/<test-id>/<timestamp>/`
+and be committed (and pushed, if there's a remote) so future runs can
+diff against this one. Use `git add pm/qa/captures/regression/.../`,
+`git commit -m "qa: regression capture <test-id>"`, then push.
+
+## QA Regression Test: Smoke
+
+Bring up TUI and report PASS.
+
+
++ echo
+
++ echo '----- /step5 -----'
+----- /step5 -----
++ rm -f /tmp/tmp.YeVASGoyb2/prompts/argv-1778622746047651771.txt /tmp/tmp.YeVASGoyb2/prompts/prompt-1778622746047651771.txt
++ pm qa regression smoke --file-prs
+Running regression: Smoke
+Session: pm-pm-test-1778622668-29ae6d6e
+------------------------------------------------------------
++ cp /tmp/tmp.YeVASGoyb2/prompts/prompt-1778622746126247415.txt /tmp/prompt-file-prs.txt
++ echo '----- prompt --file-prs (filing section excerpt) -----'
+----- prompt --file-prs (filing section excerpt) -----
++ grep -A 100 '^## Filing Findings' /tmp/prompt-file-prs.txt
+## Filing Findings
+
+For each issue you observed, file a PR — don't fix it here.
+
+- **Bug**: `pm pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'`
+- **Improvement**: `pm pr add '<title>' --plan improvements --description '<what you noticed and why>'`
+
+If a capture under `pm/qa/captures/regression/...` demonstrates the
+finding, point at the path in the description.
+
+Skim `pm pr list --plan bugs` / `--plan improvements` first. If a PR
+for the same issue exists, append a note instead of filing a
+duplicate: `pm pr note add <pr-id> '<short observation>; capture: <path>'`.
+
+Filing is independent of your verdict for the test.
+
++ echo '----- /step6 -----'
+----- /step6 -----
++ rm -f /tmp/tmp.YeVASGoyb2/prompts/argv-1778622746126247415.txt /tmp/tmp.YeVASGoyb2/prompts/prompt-1778622746126247415.txt
++ pm qa regression smoke --file-bugs
+Running regression: Smoke
+Session: pm-pm-test-1778622668-29ae6d6e
+------------------------------------------------------------
++ cp /tmp/tmp.YeVASGoyb2/prompts/prompt-1778622746189676984.txt /tmp/prompt-file-bugs.txt
++ diff -u /tmp/prompt-file-prs.txt /tmp/prompt-file-bugs.txt
++ echo IDENTICAL
+IDENTICAL
++ echo '----- regression --help (file-bugs hidden?) -----'
+----- regression --help (file-bugs hidden?) -----
++ pm qa regression --help
++ grep -E 'file-(bugs|prs)'
+  --file-prs          File PRs (--plan bugs, --plan improvements) for any
++ echo '----- /step7 -----'
+----- /step7 -----
++ rm -f /tmp/tmp.YeVASGoyb2/prompts/argv-1778622746189676984.txt /tmp/tmp.YeVASGoyb2/prompts/prompt-1778622746189676984.txt
++ pm qa regression no-such-test
+Unknown regression test: no-such-test
+Run 'pm qa list' to see available tests.
++ echo exit=1
+exit=1
++ echo stub-files-after:
+stub-files-after:
++ ls /tmp/tmp.YeVASGoyb2/prompts
++ echo '----- /step8 -----'
+----- /step8 -----
++ tmux kill-server
++ rm -f '/tmp/tmp.YeVASGoyb2/prompts/*.txt'
++ pm qa regression smoke
+No pm tmux session found. Start one with 'pm session'.
++ echo exit=1
+exit=1
++ echo stub-files-after:
+stub-files-after:
++ ls /tmp/tmp.YeVASGoyb2/prompts
++ echo '----- /step9 -----'
+----- /step9 -----
