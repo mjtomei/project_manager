@@ -606,6 +606,15 @@ class ProjectManagerApp(App):
         from pm_core.paths import get_global_setting
         if not self._data:
             return
+        # When a mode-specific view owns the status bar, don't overwrite it
+        # with the project status. Re-render the mode's bar instead so that
+        # refresh / background sync keeps counters in sync.
+        if self._qa_visible:
+            self._update_qa_status_bar()
+            return
+        if self._plans_visible:
+            self._update_plans_status_bar()
+            return
         project = self._data.get("project", {})
         prs = self._data.get("prs") or []
         tree = self.query_one("#tech-tree", TechTree)
@@ -1132,10 +1141,7 @@ class ProjectManagerApp(App):
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
         plans_pane.focus()
-        # Update status bar
-        plans = self._data.get("plans") or []
-        status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]p=back to tree[/dim]")
+        self._update_plans_status_bar()
         self.call_after_refresh(self._capture_frame, "show_plans_view")
 
     def _refresh_plans_pane(self) -> None:
@@ -1217,7 +1223,10 @@ class ProjectManagerApp(App):
         self._refresh_qa_pane()
         qa_pane = self.query_one("#qa-pane", QAPane)
         qa_pane.focus()
-        # Update status bar
+        self._update_qa_status_bar()
+        self.call_after_refresh(self._capture_frame, "show_qa_view")
+
+    def _update_qa_status_bar(self) -> None:
         from pm_core import qa_instructions
         if self._root:
             all_items = qa_instructions.list_all(self._root)
@@ -1228,7 +1237,11 @@ class ProjectManagerApp(App):
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  d=debug  a=add  q=back[/dim]")
-        self.call_after_refresh(self._capture_frame, "show_qa_view")
+
+    def _update_plans_status_bar(self) -> None:
+        plans = (self._data or {}).get("plans") or []
+        status_bar = self.query_one("#status-bar", StatusBar)
+        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]p=back to tree[/dim]")
 
     def _refresh_qa_pane(self) -> None:
         """Refresh the QA pane with current data."""
