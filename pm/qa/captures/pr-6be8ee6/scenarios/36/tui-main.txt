@@ -1,0 +1,24 @@
+   invalid option: window-resized
+  Project: pm-test-1778627480    1 PRs    repo: /tmp/pm-test-1778627480
+
+
+    ╔══════════════════════╗
+    ║ pr-561aa6c           ║
+    ║ Fix off-by-one in p… ║
+    ║ ◉ in_review ⟳1◓ e913 ║
+    ╚══════════════════════╝
+
+
+
+
+
+
+
+
+
+
+
+
+  Review loop started for pr-561aa6c loop=3a36
+  press / to type a command
+
