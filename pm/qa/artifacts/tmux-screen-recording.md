@@ -51,8 +51,11 @@ tmux pipe-pane -t "$TARGET:0.0" -o "cat >> <capture-dir>/transcript.log"
 
 # 3. Start the recorder session — a separate session on the same
 #    tmux server whose pane runs asciinema wrapping `tmux attach -t
-#    $TARGET`.
-tmux new-session -d -s pm-recorder \
+#    $TARGET`. tmux sizes the session group to the smallest attached
+#    client, so set -x and -y large enough to render the TUI legibly
+#    (the cast inherits this size). 200x50 fits a typical desktop
+#    layout; bump them up if your scenario needs more room.
+tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t $TARGET'"
 
