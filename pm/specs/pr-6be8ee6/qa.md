@@ -46,10 +46,27 @@ behaviors that scenarios need to exercise:
 6. **Packaged reference doc** — `pm_core/docs/qa_library.md` is
    shipped via `pyproject.toml [tool.setuptools.package-data]` so
    `pm qa docs` works from any cwd after `pip install`.
+7. **End-to-end QA + bug-fix flow integration** — the new captures
+   layout (`pm/qa/captures/<pr-id>/{impl,scenarios}/...`), the
+   restructured `qa_loop.py` (~640 lines changed, including the
+   duplicate-verification fix in commit e8fe399 and the
+   INPUT_REQUIRED-vs-NEEDS_WORK review-loop change), the
+   `qa_finalize_prompt.py` wiring, and the new 5-step bug-fix flow
+   are all designed to compose into one user-visible workflow:
+   author a bug PR → bug-fix session produces pre-fix and post-fix
+   captures → QA scenarios run against the fix and save under
+   `scenarios/<n>/` → review loop accepts INPUT_REQUIRED when
+   captures are missing → `qa_finalize` closes out. This integration
+   needs at least one scenario that runs the whole pipeline against
+   a tiny throwaway PR.
 
-Out of scope (not exercised by these scenarios): the QA scenario
-runner internals, the `pm/qa/captures/` review-loop verifier (covered
-elsewhere), the `qa_finalize` wiring.
+Out of scope (not exercised by these scenarios): none. Earlier
+drafts of this spec carved off "the QA scenario runner internals,
+the review-loop verifier, and `qa_finalize` wiring" as covered
+elsewhere — but those are exactly the pieces this PR rewrote, and
+their integration with the new captures layout and bug-fix prompt
+is only exercised by an end-to-end dogfood run (see requirement 7
+and the corresponding scenario below).
 
 ## Requirements (key behaviors)
 
@@ -115,6 +132,54 @@ elsewhere), the `qa_finalize` wiring.
 - After installing pm into a fresh venv (`./install.sh --local` from
   the pm repo), running `pm qa docs` from an unrelated directory
   prints the `qa_library.md` content with no missing-file error.
+
+### End-to-end QA + bug-fix flow integration
+- The next QA run MUST cover the whole pipeline against a throwaway
+  pm project, exercising the integration between the pieces this PR
+  rewrote. The planner MAY express this as one large scenario OR
+  split it into several independent scenarios that can run in
+  parallel — whichever fits the scenario-timeout budget better.
+  Splitting is encouraged for parallelism; the only hard rule is
+  that every checkpoint below is covered by *some* scenario in the
+  next run.
+- Required checkpoints (group as the planner sees fit; each group
+  must be self-contained — every scenario sets up its own
+  throwaway project, bug PR, and any precondition captures from
+  scratch, no cross-scenario state):
+  1. **Bug-fix session produces pre-fix + post-fix captures.**
+     Create a `plan == bugs` PR with a deterministic, reproducible
+     defect; drive the bug-fix flow (real `pm pr session <id>` or
+     by manually following the 5-step prompt) until
+     `pm/qa/captures/<pr-id>/impl/pre-fix/` and
+     `…/impl/post-fix/` both exist with valid manifests + the
+     committed fix passes its own failing test.
+  2. **QA scenarios save under the new captures layout.** Run at
+     least one `pm qa` scenario against the fix from checkpoint 1
+     (or a freshly minted equivalent) and confirm captures land
+     under `pm/qa/captures/<pr-id>/scenarios/<n>/` with manifest +
+     recording + transcript per `tmux-screen-recording.md` /
+     `cli-recording.md`.
+  3. **Review-loop INPUT_REQUIRED gate.** Trigger the review loop
+     on a bug PR with deliberately missing captures and confirm
+     the verdict is **INPUT_REQUIRED** (not NEEDS_WORK); add the
+     captures, re-run, and confirm it flips to PASS without an
+     infinite review loop.
+  4. **`qa_finalize` closes out cleanly.** Invoke whatever surface
+     runs `qa_finalize_prompt.py` against a PR with valid captures
+     and confirm it closes out without error.
+  5. **Duplicate-verifier guard (e8fe399).** Drive a scenario to
+     PASS, send a follow-up question to the scenario pane, and
+     confirm the verifier is NOT spawned a second time on the
+     stale idle prompt (i.e. `_last_scenario_hook_ts` is stamped
+     after the follow-up).
+- If the planner splits these checkpoints across scenarios, each
+  scenario's STEPS must include the setup it needs (no implicit
+  dependence on another scenario's captures or PR). Checkpoints 1
+  and 2 share enough setup that bundling them is reasonable;
+  checkpoints 3, 4, and 5 can each stand alone.
+- These checkpoints are the integration test for everything else
+  in this PR and must not be skipped on size grounds — split for
+  parallelism rather than dropping any of them.
 
 ### Frontmatter resilience
 - A QA file with no frontmatter, with the obsolete `tags:` field
