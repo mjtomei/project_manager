@@ -1,0 +1,128 @@
+asciinema rec --quiet --overwrite /workspace/pm/qa/captures/pr-6be8ee6/scenarios/25/recording.cast -c 'bash /tmp/qa25-script.sh' && echo DON
+E_REC
+(venv) pm@22955031bb86:/workspace$ asciinema rec --quiet --overwrite /workspace/pm/qa/captures/pr-6be8ee6/scenarios/25/recording.cast -c 'ba
+sh /tmp/qa25-script.sh' && echo DONE_REC
++ source /tmp/pm-venv/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/tmp/pm-venv
+++ export VIRTUAL_ENV
+++ _OLD_VIRTUAL_PATH=/home/pm/.local/bin:/home/pm/.local/share/pm/venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr
+/bin:/sbin:/bin
+++ PATH=/tmp/pm-venv/bin:/home/pm/.local/bin:/home/pm/.local/share/pm/venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:
+/usr/bin:/sbin:/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(pm-venv) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(pm-venv) '
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
++ source /tmp/testdir.env
+++ TEST_DIR=/tmp/pm-test-1778625687
++ cd /tmp/pm-test-1778625687
++ echo '=== bug impl prompt: checking Bug Fix Flow + 5 steps + paths ==='
+=== bug impl prompt: checking Bug Fix Flow + 5 steps + paths ===
++ grep -E '^## Bug Fix Flow|^[0-9]\. \*\*' /tmp/bug-impl-prompt.txt
+1. **Spec generation** — First, you will analyze the PR description and the
+2. **Implementation** — Then, working from the spec you generated, you will
+1. **Requirements** — Restate each requirement grounded in the codebase (specific files, functions, modules)
+2. **Implicit Requirements** — What must also be true for stated requirements to hold
+3. **Ambiguities** — Identified ambiguities with your proposed resolutions
+4. **Edge Cases** — Interactions with existing behavior not addressed in the description
+## Bug Fix Flow
+1. **Manual repro on pre-fix code** — If
+2. **Write a failing test** — Codify the repro as a test that fails
+3. **Fix** — Change that addresses the root cause. If a working fix
+4. **Verify with the test** — Confirm it passes; run related suites
+5. **Verify manually** — Re-run the step-1 repro against post-fix
++ echo
+
++ echo '=== step 1 substrings ==='
+=== step 1 substrings ===
++ grep -E 'pm/qa/instructions|pm/qa/artifacts|pre-fix|post-fix|check in with the user|parent commit|stash' /tmp/bug-impl-prompt.txt
+pre-fix capture, failing test, fix, post-fix capture), reuse them and
+1. **Manual repro on pre-fix code** — If
+   `pm/qa/captures/pr-538a3a0/impl/pre-fix/` already has a valid capture,
+   against pre-fix code (stash uncommitted changes, or if the fix is
+   already committed, check out the parent commit or revert fix files
+   - `pm/qa/instructions/` may have env-setup recipes worth checking.
+   - Use a recipe from `pm/qa/artifacts/` to capture; save under
+     `pm/qa/captures/pr-538a3a0/impl/pre-fix/`. If the phase needs more
+   on pre-fix code for the same reason. For bugs that aren't testable
+5. **Verify manually** — Re-run the step-1 repro against post-fix
+   code and confirm the symptom is gone. Capture the post-fix
+   behavior under `pm/qa/captures/pr-538a3a0/impl/post-fix/` if no valid
+   valid post-fix capture is already there and the fix is unchanged,
++ echo
+
++ echo '=== <seg> placeholder count (must be 0) ==='
+=== <seg> placeholder count (must be 0) ===
++ grep -c '<seg>' /tmp/bug-impl-prompt.txt
+0
++ true
++ echo
+
++ echo '=== captures path uses literal pr-538a3a0 ==='
+=== captures path uses literal pr-538a3a0 ===
++ grep -E 'pm/qa/captures/pr-538a3a0/impl/(pre|post)-fix' /tmp/bug-impl-prompt.txt
+   `pm/qa/captures/pr-538a3a0/impl/pre-fix/` already has a valid capture,
+     `pm/qa/captures/pr-538a3a0/impl/pre-fix/`. If the phase needs more
+   behavior under `pm/qa/captures/pr-538a3a0/impl/post-fix/` if no valid
++ echo
+
++ echo '=== feature impl: Bug Fix Flow count (expect 0) ==='
+=== feature impl: Bug Fix Flow count (expect 0) ===
++ grep -c 'Bug Fix Flow' /tmp/feat-impl-prompt.txt
+0
++ echo
+
++ echo '=== bug review checklist section ==='
+=== bug review checklist section ===
++ sed -n '/## Bug Fix Review Checklist/,/^## /p' /tmp/bug-review-prompt.txt
+## Bug Fix Review Checklist
+
+- Pre-fix and post-fix captures under `pm/qa/captures/pr-538a3a0/impl/` are
+  the primary evidence the fix addresses the reported bug. If they're
+  missing or unconvincing, surface it as **INPUT_REQUIRED** — the user
+  decides whether to require capture or accept the fix without one.
+- A failing-then-passing test accompanies the fix, unless skipped via
+  a PR note.
+- The test fails for the right reason — would have caught the original
+  bug, not any change in the area.
+- Scope is the bug; flag drive-by refactors.
+
+
+## Incidental Bugs
++ echo
+
++ echo '=== INPUT_REQUIRED count (expect >=1) ==='
+=== INPUT_REQUIRED count (expect >=1) ===
++ grep -c INPUT_REQUIRED /tmp/bug-review-prompt.txt
+2
++ echo '=== NEEDS_WORK in checklist block (expect 0) ==='
+=== NEEDS_WORK in checklist block (expect 0) ===
++ awk '/## Bug Fix Review Checklist/,/^## /' /tmp/bug-review-prompt.txt
++ grep -c NEEDS_WORK
+0
++ true
++ echo
+
++ echo '=== feat review: Bug Fix Review Checklist count (expect 0) ==='
+=== feat review: Bug Fix Review Checklist count (expect 0) ===
++ grep -c 'Bug Fix Review Checklist' /tmp/feat-review-prompt.txt
+0
+DONE_REC
+(venv) pm@22955031bb86:/workspace$
