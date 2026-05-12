@@ -1,0 +1,120 @@
++ export PATH=/home/pm/.local/bin:/home/pm/.local/bin:/home/pm/.local/share/pm/venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
++ PATH=/home/pm/.local/bin:/home/pm/.local/bin:/home/pm/.local/share/pm/venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
++ unset PYTHONPATH
++ which pm
+/home/pm/.local/bin/pm
++ pm which
+/workspace/pm_core
++ mkdir -p /tmp/pm-test-cap-1778625721
++ cd /tmp/pm-test-cap-1778625721
++ git init -q
++ pm init --backend local --no-import
+Created PM directory at /tmp/pm-test-cap-1778625721/pm
+  target repo: /tmp/pm-test-cap-1778625721
+  base branch: master
+  backend: local
+
+Run 'pm plan import' to bootstrap a PR graph from this repo.
++ pm pr add 'Test PR for scenario 29 capture'
+Created pr-9e65338: Test PR for scenario 29 capture (now active)
+  branch: pm/pr-9e65338-test-pr-for-scenario-29-capture
++ EDITOR=true
++ pm qa add-instruction inst-a
+Created: /tmp/pm-test-cap-1778625721/pm/qa/instructions/inst-a.md
++ EDITOR=true
++ pm qa add-regression reg-a
+Created: /tmp/pm-test-cap-1778625721/pm/qa/regression/reg-a.md
++ EDITOR=true
++ pm qa add-artifact art-a
+Created: /tmp/pm-test-cap-1778625721/pm/qa/artifacts/art-a.md
++ ls pm/qa/instructions pm/qa/regression pm/qa/artifacts
+pm/qa/artifacts:
+art-a.md
+
+pm/qa/instructions:
+inst-a.md
+
+pm/qa/regression:
+reg-a.md
++ pm qa list
+
+Instructions (1):
+  inst-a: Inst A
+
+Regression Tests (1):
+  reg-a: Reg A
+
+Artifact Recipes (1):
+  art-a: Art A
+
++ pm qa show inst-a
+# Inst A
+[/tmp/pm-test-cap-1778625721/pm/qa/instructions/inst-a.md]
+
+## Setup
+
+## Test Steps
+
+## Expected Behavior
+
+## Reporting
+
++ pm qa show reg-a
+# Reg A
+[/tmp/pm-test-cap-1778625721/pm/qa/regression/reg-a.md]
+
+You are a careful tester. Bring up the surface this test exercises
+(spawn a pane, start a server, invoke a CLI — whatever fits), drive
+it through the scenarios below, and report results.
+
+## Scenarios
+
+- Scenario 1: <what to verify>
+
+## Reporting
+
+For each scenario, report PASS or FAIL with one line of evidence.
+End with an overall PASS/FAIL.
+
++ pm qa show art-a
+# Art A
+[/tmp/pm-test-cap-1778625721/pm/qa/artifacts/art-a.md]
+
+## When to use
+
+## What this recipe produces
+
+## Capture
+
+## Manifest format
+
++ pm qa show does-not-exist
+QA item not found: does-not-exist
++ echo show-missing-rc=1
+show-missing-rc=1
++ EDITOR=true
++ pm qa edit inst-a
++ echo edit-inst-rc=0
+edit-inst-rc=0
++ EDITOR=true
++ pm qa edit reg-a
++ echo edit-reg-rc=0
+edit-reg-rc=0
++ EDITOR=true
++ pm qa edit art-a
++ echo edit-art-rc=0
+edit-art-rc=0
++ EDITOR=true
++ pm qa edit does-not-exist
+QA item not found: does-not-exist
++ echo edit-missing-rc=1
+edit-missing-rc=1
++ cd /tmp
++ pm qa docs
++ echo docs-rc=0
+docs-rc=0
++ diff -q /tmp/qa-docs-out2.md /workspace/pm_core/docs/qa_library.md
++ grep -E '^# pm QA library$|^## The four directories$|^## File format' /tmp/qa-docs-out2.md
+# pm QA library
+## The four directories
+## File format (instructions / regression / artifacts)
