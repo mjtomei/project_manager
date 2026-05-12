@@ -1,0 +1,5 @@
++ cd /workspace/pm-test-1778627512
++ PYTHONPATH=/workspace/pm-test-1778627512
++ python3 /tmp/repro.py
+last_index([10,20,30]) = 2
+xs[last_index(xs)] = 30

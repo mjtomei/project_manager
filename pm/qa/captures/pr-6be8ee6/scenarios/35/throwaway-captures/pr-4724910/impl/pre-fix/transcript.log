@@ -1,0 +1,8 @@
++ cd /workspace/pm-test-1778627512
++ PYTHONPATH=/workspace/pm-test-1778627512
++ python3 /tmp/repro.py
+last_index([10,20,30]) = 3
+Traceback (most recent call last):
+  File "/tmp/repro.py", line 4, in <module>
+    print("xs[last_index(xs)] =", xs[last_index(xs)])
+IndexError: list index out of range

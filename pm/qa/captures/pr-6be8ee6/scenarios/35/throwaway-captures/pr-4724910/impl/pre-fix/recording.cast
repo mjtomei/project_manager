@@ -1,0 +1,3 @@
+{"version": 2, "width": 100, "height": 30, "timestamp": 1778627540, "env": {"SHELL": "/bin/bash", "TERM": "screen"}}
+[0.002873, "o", "+ cd /workspace/pm-test-1778627512\r\n+ PYTHONPATH=/workspace/pm-test-1778627512\r\n+ python3 /tmp/repro.py\r\n"]
+[0.008645, "o", "last_index([10,20,30]) = 3\r\nTraceback (most recent call last):\r\n  File \"/tmp/repro.py\", line 4, in <module>\r\n    print(\"xs[last_index(xs)] =\", xs[last_index(xs)])\r\nIndexError: list index out of range\r\n"]
