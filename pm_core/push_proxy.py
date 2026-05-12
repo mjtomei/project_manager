@@ -318,9 +318,7 @@ class PushProxy:
                 f"local path ({local_target}). Scenario clones must have "
                 f"`origin` set to the real upstream URL before pushing "
                 f"(create_scenario_workdir runs `git remote set-url origin "
-                f"<real-url>` after the local clone).  If pm was started "
-                f"before that change landed, restart the orchestrator so "
-                f"new scenario clones pick up the rewrite.\n"
+                f"<real-url>` after the local clone).\n"
             )
             _log.warning("Push rejected: local-path origin %s -> %s",
                          remote, local_target)
