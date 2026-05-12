@@ -1,4 +1,4 @@
-You are running QA scenario 31: "Frontmatter resilience across CLI and TUI surfaces"
+You are running QA scenario 26: "pm qa add-* scaffolds the three categories with correct templates and refuses to clobber"
 
 ## Context
 
@@ -111,124 +111,103 @@ final verdict.
 
 ## Scenario
 
-**Focus**: Loader and surfaces tolerate (a) a file with NO --- delimiters, (b) a file with the legacy tags: field present, and (c) a file with missing description. No stack traces in pm qa list, pm qa show, or the
+**Focus**: add-instruction, add-regression, add-artifact create files under the right directories, the template includes title and description but no tags: field, $EDITOR is invoked, re-running on the same name
 
 **Steps**:
-## Setup (per tui-manual-test.md)
-
-1. Install pm into a venv and override PYTHONPATH:
+1. Install pm into a venv and ensure the editable clone shadows `/opt/pm-src`:
 ```
 python3 -m venv /tmp/pm-venv && source /tmp/pm-venv/bin/activate
 pip install -e /workspace
 export PYTHONPATH=/workspace
-pm which   # must print /workspace, not /opt/pm-src
+pm which   # must print /workspace, NOT /opt/pm-src
 ```
 
-2. Create a throwaway test project:
+2. Create a throwaway test project and initialize pm (no tmux/TUI needed for this scenario):
 ```
 TEST_DIR=/tmp/pm-test-$(date +%s)
 mkdir -p "$TEST_DIR" && cd "$TEST_DIR"
 git init
 pm init --backend local --no-import
-pm pr add "Add login feature"
-pm pr add "Add unit tests"
+```
+Confirm `pm/project.yaml` exists under `$TEST_DIR` — `pm qa` resolves directories relative to the project root containing `project.yaml`, which here is `$TEST_DIR/pm/`.
+
+3. Set `$EDITOR` to a no-op so add commands return immediately:
+```
+export EDITOR=true
 ```
 
-3. Start the tmux session (ignore the attach error — Bash has no TTY):
+4. Run all three add commands from `$TEST_DIR`:
 ```
-cd "$TEST_DIR" && pm session 2>/dev/null || true
+pm qa add-instruction repro-foo
+pm qa add-regression check-bar
+pm qa add-artifact capture-baz
+```
+Each must print `Created: <path>` and exit 0.
+
+5. Verify the files landed in the correct category directories:
+```
+test -f "$TEST_DIR/pm/qa/instructions/repro-foo.md"
+test -f "$TEST_DIR/pm/qa/regression/check-bar.md"
+test -f "$TEST_DIR/pm/qa/artifacts/capture-baz.md"
+```
+Also confirm no cross-contamination: `ls $TEST_DIR/pm/qa/instructions/` should only show `repro-foo.md`, etc.
+
+6. Inspect each scaffolded file's YAML frontmatter (lines between the leading `---` markers). For each of the three files, confirm:
+- `title:` line is present and populated (e.g. `title: Repro Foo`, `title: Check Bar`, `title: Capture Baz` — built via `name.replace("-", " ").title()`).
+- `description:` key is present (value is intentionally empty).
+- There is NO `tags:` key anywhere in the file.
+```
+for f in pm/qa/instructions/repro-foo.md pm/qa/regression/check-bar.md pm/qa/artifacts/capture-baz.md; do
+echo "=== $f ==="; cat "$f"; grep -q "^title:" "$f" && echo OK-title;
+grep -q "^description:" "$f" && echo OK-description;
+grep -q "^tags:" "$f" && echo "FAIL: tags present" || echo OK-no-tags;
+done
+```
+Also confirm category-specific body sections exist (instructions: `## Setup`, `## Test Steps`; regression: `## Scenarios`, `## Reporting`; artifacts: `## When to use`, `## Capture`).
+
+7. Confirm `$EDITOR` was actually invoked. Re-run one add with a tracing editor to prove the subprocess call happens:
+```
+EDITOR='sh -c "echo EDITOR_INVOKED:$1 >> /tmp/editor.log" --' pm qa add-instruction edit-probe
+cat /tmp/editor.log   # should contain EDITOR_INVOKED:<path to edit-probe.md>
 ```
 
-## Author the three artifact files
+8. Test the clobber-refusal path. Capture mtime, re-run, confirm non-zero exit and clear "already exists" message on stderr, and confirm file is unmodified:
+```
+MTIME_BEFORE=$(stat -c %Y pm/qa/instructions/repro-foo.md)
+SHA_BEFORE=$(sha256sum pm/qa/instructions/repro-foo.md)
+pm qa add-instruction repro-foo; echo "exit=$?"   # exit must be non-zero (1)
+pm qa add-instruction repro-foo 2>&1 1>/dev/null | grep -i "already exists"
+MTIME_AFTER=$(stat -c %Y pm/qa/instructions/repro-foo.md)
+SHA_AFTER=$(sha256sum pm/qa/instructions/repro-foo.md)
+[ "$MTIME_BEFORE" = "$MTIME_AFTER" ] && echo OK-mtime
+[ "$SHA_BEFORE" = "$SHA_AFTER" ] && echo OK-content
+```
+The error message comes from `_qa_add` in `pm_core/cli/qa.py:146` and reads `Already exists: <path>`.
 
-4. Create the artifacts dir and hand-author three files:
+9. Repeat the clobber check for the other two categories so add-regression and add-artifact both demonstrate the refusal:
 ```
-mkdir -p "$TEST_DIR/pm/qa/artifacts"
-```
-
-`pm/qa/artifacts/no-frontmatter.md` — body only, no `---` delimiters:
-```
-This artifact has no frontmatter at all.
-Just a plain markdown body to confirm the loader tolerates it.
-```
-
-`pm/qa/artifacts/legacy-tags.md` — full frontmatter including the obsolete `tags:` field:
-```
----
-title: Legacy Tags Artifact
-description: Artifact with the legacy tags field still present
-tags: [foo, bar]
----
-Body of the legacy-tags artifact.
+pm qa add-regression check-bar; echo "exit=$?"   # non-zero, stderr "Already exists: ..."
+pm qa add-artifact capture-baz; echo "exit=$?"   # non-zero, stderr "Already exists: ..."
 ```
 
-`pm/qa/artifacts/missing-desc.md` — frontmatter with `title:` only, no `description:`:
+10. Confirm `pm qa add` (no suffix) is not a real command — Click should report unknown command and exit non-zero:
 ```
----
-title: Missing Description Artifact
----
-Body of the missing-desc artifact.
+pm qa add 2>&1; echo "exit=$?"
 ```
+Expect `Error: No such command 'add'.` (or similar Click "no such command" text) and a non-zero exit.
 
-## CLI surface — pm qa list
+11. Record the full session with `cli-recording.md` conventions (asciinema or `script`), capturing the commands in steps 4–10 and the `cat`/`stat`/exit-code output that demonstrates each assertion. Save the recording alongside the QA report.
 
-5. From the test directory, run `pm qa list` inside a new pane of the test tmux session (do not run pm in your own shell):
-```
-tmux send-keys -t <session>:<window>.<pane> "cd $TEST_DIR && pm qa list" Enter
-tmux capture-pane -p -t <session>:<window>.<pane> -S -
-```
-Confirm under the `Artifact Recipes` section all three rows appear:
-- `no-frontmatter: No Frontmatter` (no `—` description suffix — fine)
-- `legacy-tags: Legacy Tags Artifact — Artifact with the legacy tags field still present`
-- `missing-desc: Missing Description Artifact` (no description suffix)
+12. Report PASS only if: (a) each file landed in its category directory, (b) every file has `title:` and `description:` and no `tags:`, (c) `$EDITOR` was invoked (step 7 log), (d) re-runs for all three categories exit non-zero with an "Already exists" stderr message and leave the file's mtime+sha unchanged, and (e) `pm qa add` errors as an unknown command. Any deviation is FAIL with the offending output as evidence.
 
-Confirm no Python traceback, no `YAMLError`, no `KeyError` in the captured output. Save the capture per `cli-recording.md`.
-
-## CLI surface — pm qa show
-
-6. Run `pm qa show` for each artifact and confirm each prints `# <title>` header, the `[path]` line, and the body without raising:
-```
-pm qa show no-frontmatter
-pm qa show legacy-tags
-pm qa show missing-desc
-```
-Capture each invocation per `cli-recording.md`. Expected:
-- `no-frontmatter`: title falls back to `No Frontmatter` (id-derived), no description line, body is the full file content.
-- `legacy-tags`: title `Legacy Tags Artifact`, description line printed, body after frontmatter; `tags: [foo, bar]` is ignored silently.
-- `missing-desc`: title `Missing Description Artifact`, no description line, body printed.
-
-No tracebacks in any of the three.
-
-## TUI surface — Q pane
-
-7. From the test tmux session, launch the TUI pane and open the QA overlay:
-```
-tmux send-keys -t <session>:<window>.<pane> "cd $TEST_DIR && pm tui" Enter
-sleep 2
-pm tui view   # or tmux capture-pane to confirm TUI is up
-tmux send-keys -t <session>:<window>.<pane> "q" ""
-sleep 1
-pm tui view
-```
-Confirm the QA pane renders with an `Artifact Recipes` section listing all three rows. The pane must not crash and must not show an error overlay. Tracebacks would appear either in the pane or printed on exit — verify neither.
-
-8. Arrow-down through the three artifact rows in the QA pane and confirm each row is selectable without error. Press `q` again (or Escape) to close the QA pane; confirm the TUI returns to its normal view.
-
-9. Capture the TUI session per `tmux-screen-recording.md` (full scrollback via `tmux capture-pane -p -S -`), and the CLI portions per `cli-recording.md`.
-
-## Verdict criteria
-
-10. Report PASS only if: (a) `pm qa list` shows all three rows with no traceback; (b) all three `pm qa show <id>` calls succeed and print the body; (c) the TUI QA pane renders all three rows and does not crash or show an error overlay. Report FAIL with the first stack trace or missing row otherwise.
-
-## Artifact Capture Recipes
+## Artifact Capture Recipe
 
 Available at:
-- `/scratch/qa-artifacts/tmux-screen-recording.md`
 - `/scratch/qa-artifacts/cli-recording.md`
 
 Read the recipe(s) and follow their capture commands to produce
 evidence of this scenario's behavior. Save resulting captures under
-`pm/qa/captures/pr-6be8ee6/scenarios/31/` (each recipe's
+`pm/qa/captures/pr-6be8ee6/scenarios/26/` (each recipe's
 manifest format applies; if more than one recipe is listed, use a
 named subdirectory per capture). Captures are how reviewers confirm
 what the test demonstrated, so produce one even if the scenario itself
@@ -244,15 +223,15 @@ recording.
 
 **If you identify and fix a bug during this scenario, capture both
 states.** Save the pre-fix recording under
-`pm/qa/captures/pr-6be8ee6/scenarios/31/pre-fix/` and the
+`pm/qa/captures/pr-6be8ee6/scenarios/26/pre-fix/` and the
 post-fix recording under `.../post-fix/`. Cross-link the two in each
 manifest's `## Files` section, and (per Incidental Bugs below) still
 file a PR for the bug.
 
 After producing each capture, commit it and push so it lands on the
 PR branch:
-- `git add pm/qa/captures/pr-6be8ee6/scenarios/31/`
-- `git commit -m "qa: capture for scenario 31"`
+- `git add pm/qa/captures/pr-6be8ee6/scenarios/26/`
+- `git commit -m "qa: capture for scenario 26"`
 - `git push origin pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-`
 
 If the push is rejected (another scenario raced you), `git pull --rebase

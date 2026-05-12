@@ -1,0 +1,149 @@
++ source /tmp/pm-venv/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/tmp/pm-venv
+++ export VIRTUAL_ENV
+++ _OLD_VIRTUAL_PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(pm-venv) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(pm-venv) '
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
+++ date +%s
++ TEST_DIR=/tmp/pm-test-cap-1778625681
++ mkdir -p /tmp/pm-test-cap-1778625681
++ cd /tmp/pm-test-cap-1778625681
++ git init -q
++ pm init --backend local --no-import
++ tail -3
+  backend: local
+
+Run 'pm plan import' to bootstrap a PR graph from this repo.
++ export EDITOR=true
++ EDITOR=true
++ pm qa add-instruction repro-foo
+Created: /tmp/pm-test-cap-1778625681/pm/qa/instructions/repro-foo.md
++ pm qa add-regression check-bar
+Created: /tmp/pm-test-cap-1778625681/pm/qa/regression/check-bar.md
++ pm qa add-artifact capture-baz
+Created: /tmp/pm-test-cap-1778625681/pm/qa/artifacts/capture-baz.md
++ ls pm/qa/instructions/ pm/qa/regression/ pm/qa/artifacts/
+pm/qa/artifacts/:
+capture-baz.md
+
+pm/qa/instructions/:
+repro-foo.md
+
+pm/qa/regression/:
+check-bar.md
++ echo '--- frontmatter checks ---'
+--- frontmatter checks ---
++ for f in pm/qa/instructions/repro-foo.md pm/qa/regression/check-bar.md pm/qa/artifacts/capture-baz.md
++ echo '=== pm/qa/instructions/repro-foo.md ==='
+=== pm/qa/instructions/repro-foo.md ===
++ head -5 pm/qa/instructions/repro-foo.md
+---
+title: Repro Foo
+description:
+---
+## Setup
++ grep -q '^title:' pm/qa/instructions/repro-foo.md
++ echo OK-title
+OK-title
++ grep -q '^description:' pm/qa/instructions/repro-foo.md
++ echo OK-description
+OK-description
++ grep -q '^tags:' pm/qa/instructions/repro-foo.md
++ echo OK-no-tags
+OK-no-tags
++ for f in pm/qa/instructions/repro-foo.md pm/qa/regression/check-bar.md pm/qa/artifacts/capture-baz.md
++ echo '=== pm/qa/regression/check-bar.md ==='
+=== pm/qa/regression/check-bar.md ===
++ head -5 pm/qa/regression/check-bar.md
+---
+title: Check Bar
+description:
+---
+You are a careful tester. Bring up the surface this test exercises
++ grep -q '^title:' pm/qa/regression/check-bar.md
++ echo OK-title
+OK-title
++ grep -q '^description:' pm/qa/regression/check-bar.md
++ echo OK-description
+OK-description
++ grep -q '^tags:' pm/qa/regression/check-bar.md
++ echo OK-no-tags
+OK-no-tags
++ for f in pm/qa/instructions/repro-foo.md pm/qa/regression/check-bar.md pm/qa/artifacts/capture-baz.md
++ echo '=== pm/qa/artifacts/capture-baz.md ==='
+=== pm/qa/artifacts/capture-baz.md ===
++ head -5 pm/qa/artifacts/capture-baz.md
+---
+title: Capture Baz
+description:
+---
+## When to use
++ grep -q '^title:' pm/qa/artifacts/capture-baz.md
++ echo OK-title
+OK-title
++ grep -q '^description:' pm/qa/artifacts/capture-baz.md
++ echo OK-description
+OK-description
++ grep -q '^tags:' pm/qa/artifacts/capture-baz.md
++ echo OK-no-tags
+OK-no-tags
++ echo '--- editor invocation ---'
+--- editor invocation ---
++ cat
++ chmod +x /tmp/myeditor.sh
++ rm -f /tmp/editor.log
++ EDITOR=/tmp/myeditor.sh
++ pm qa add-instruction edit-probe
+Created: /tmp/pm-test-cap-1778625681/pm/qa/instructions/edit-probe.md
++ cat /tmp/editor.log
+EDITOR_INVOKED:/tmp/pm-test-cap-1778625681/pm/qa/instructions/edit-probe.md
++ echo '--- clobber refusal ---'
+--- clobber refusal ---
+++ sha256sum pm/qa/instructions/repro-foo.md
++ SHA_BEFORE='943af492f572c9cd26774c4c229e5e959f88410aa9f959d9fed41358b9d63b9a  pm/qa/instructions/repro-foo.md'
++ pm qa add-instruction repro-foo
+Already exists: /tmp/pm-test-cap-1778625681/pm/qa/instructions/repro-foo.md
++ echo exit=1
+exit=1
++ pm qa add-regression check-bar
+Already exists: /tmp/pm-test-cap-1778625681/pm/qa/regression/check-bar.md
++ echo exit=1
+exit=1
++ pm qa add-artifact capture-baz
+Already exists: /tmp/pm-test-cap-1778625681/pm/qa/artifacts/capture-baz.md
++ echo exit=1
+exit=1
+++ sha256sum pm/qa/instructions/repro-foo.md
++ SHA_AFTER='943af492f572c9cd26774c4c229e5e959f88410aa9f959d9fed41358b9d63b9a  pm/qa/instructions/repro-foo.md'
++ '[' '943af492f572c9cd26774c4c229e5e959f88410aa9f959d9fed41358b9d63b9a  pm/qa/instructions/repro-foo.md' = '943af492f572c9cd26774c4c229e5e959f88410aa9f959d9fed41358b9d63b9a  pm/qa/instructions/repro-foo.md' ']'
++ echo OK-content-unchanged
+OK-content-unchanged
++ echo '--- unknown command ---'
+--- unknown command ---
++ pm qa add
+Usage: pm qa [OPTIONS] COMMAND [ARGS]...
+Try 'pm qa -h' for help.
+
+Error: No such command 'add'.
++ echo exit=2
+exit=2

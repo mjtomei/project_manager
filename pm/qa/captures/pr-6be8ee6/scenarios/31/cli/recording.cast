@@ -1,9 +1,0 @@
-{"version": 2, "width": 120, "height": 40, "timestamp": 1778625743, "env": {"SHELL": "/bin/bash", "TERM": "screen"}}
-[0.002135, "o", "+ pm qa list\r\n"]
-[0.065365, "o", "\r\nInstructions (0):\r\n  (none)\r\n\r\nRegression Tests (0):\r\n  (none)\r\n\r\nArtifact Recipes (3):\r\n  legacy-tags: Legacy Tags Artifact — Artifact with the legacy tags field still present\r\n  missing-desc: Missing Description Artifact\r\n  no-frontmatter: No Frontmatter\r\n\r\n"]
-[0.074579, "o", "+ pm qa show no-frontmatter\r\n"]
-[0.132854, "o", "# No Frontmatter\r\n[/tmp/pm-test-1778625633/pm/qa/artifacts/no-frontmatter.md]\r\n\r\nThis artifact has no frontmatter at all.\r\nJust a plain markdown body to confirm the loader tolerates it.\r\n\r\n"]
-[0.141475, "o", "+ pm qa show legacy-tags\r\n"]
-[0.199522, "o", "# Legacy Tags Artifact\r\nArtifact with the legacy tags field still present\r\n[/tmp/pm-test-1778625633/pm/qa/artifacts/legacy-tags.md]\r\n\r\nBody of the legacy-tags artifact.\r\n\r\n"]
-[0.207809, "o", "+ pm qa show missing-desc\r\n"]
-[0.254184, "o", "# Missing Description Artifact\r\n[/tmp/pm-test-1778625633/pm/qa/artifacts/missing-desc.md]\r\n\r\nBody of the missing-desc artifact.\r\n\r\n"]

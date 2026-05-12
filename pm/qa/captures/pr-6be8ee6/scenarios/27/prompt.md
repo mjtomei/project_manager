@@ -1,4 +1,4 @@
-You are running QA scenario 30: "TUI QA pane shows three sections, picker modal routes correctly, Enter launches regression"
+You are running QA scenario 27: "pm qa author-* resolves target paths, refuses to clobber, and embeds the packaged docs in the prompt"
 
 ## Context
 
@@ -111,104 +111,100 @@ final verdict.
 
 ## Scenario
 
-**Focus**: The q pane lists Instructions / Regression Tests / Artifact Recipes (each labeled even at zero), the status-bar counter sums all three, the a modal picker accepts a name and a kind×mode choice and
+**Focus**: The three author-* verbs assemble a Claude session whose prompt contains the qa_library.md reference content and points at the correct destination file; existing files are refused without launching
 
 **Steps**:
-## Setup (from tui-manual-test.md)
-
-1. Create a Python venv and install pm editable from this clone, then override PYTHONPATH so the editable install wins over `/opt/pm-src`:
+1. **Environment**: ensure editable pm clone takes priority.
 ```
 python3 -m venv /tmp/pm-venv && source /tmp/pm-venv/bin/activate
 pip install -e /workspace
 export PYTHONPATH=/workspace
-pm which   # verify it prints /workspace, not /opt/pm-src
+pm which   # should print /workspace, not /opt/pm-src
 ```
-2. Create a throwaway test project and init git:
+
+2. **Throwaway project**:
 ```
-TEST_DIR=/tmp/pm-test-$(date +%s)
+TEST_DIR=/tmp/pm-test-qa27-$(date +%s)
 mkdir -p "$TEST_DIR" && cd "$TEST_DIR"
 git init
 pm init --backend local --no-import
-pm pr add "Add login feature"
+pm pr add "Seed PR"   # any PR so the project is non-empty
 ```
-(One PR is enough — this scenario does not need a dependency chain.)
-3. Verify `pm/qa/` is empty (it will be auto-created on first use; confirm no `instructions/`, `regression/`, or `artifacts/` subdirs have content):
+
+3. **Install a `claude` shim that captures the prompt.** `launch_claude` resolves the CLI with `shutil.which("claude")` and invokes it with the prompt as the last positional argument (after `--session-id <uuid>` or other flags). Place a shim earlier on PATH that writes the final argv element to a file and exits 0:
 ```
-ls -la pm/qa/ 2>/dev/null || echo "no pm/qa yet — expected"
+SHIM_DIR=$TEST_DIR/.shim
+CAP_DIR=$TEST_DIR/.captures
+mkdir -p "$SHIM_DIR" "$CAP_DIR"
+cat > "$SHIM_DIR/claude" <<'EOF'
+#!/usr/bin/env bash
+# write entire argv (one per line) and the last arg (the prompt) separately
+ts=$(date +%s%N)
+printf '%s\n' "$@" > "$CAPTURE_DIR/argv-$ts.txt"
+# last positional arg is the prompt
+printf '%s' "${@: -1}" > "$CAPTURE_DIR/prompt-$ts.txt"
+exit 0
+EOF
+chmod +x "$SHIM_DIR/claude"
+export CAPTURE_DIR="$CAP_DIR"
+export PATH="$SHIM_DIR:$PATH"
+command -v claude   # must resolve to the shim
 ```
-4. Start the tmux session (ignore the attach error from the Bash tool's lack of TTY):
+
+4. **Author each of the three categories** and verify the captured prompt embeds qa_library.md and names the correct target path:
 ```
-cd "$TEST_DIR" && pm session 2>/dev/null || true
-tmux list-sessions   # confirm session exists
+pm qa author-instruction new-repro
+pm qa author-regression  new-check
+pm qa author-artifact    new-recipe
 ```
-5. Identify the TUI pane: `pm tui view` should render the tech tree. Use `pm tui send <keys>` to drive it and `pm tui view` to read the framebuffer.
-
-## Empty-QA pane sanity
-
-6. Open the QA pane: `pm tui send q`. Capture with `pm tui view`. Confirm:
-- Three section headers render in order: `Instructions (0)`, `Regression Tests (0)`, `Artifact Recipes (0)` — each followed by a dim divider line of `─` characters. Source: `pm_core/tui/qa_pane.py:46–48,104–106`.
-- Body text "No QA items available." is NOT shown (sections always render, even at zero).
-- The status bar at the bottom reads `QA    0 item(s)    Enter=run  e=edit  d=debug  a=add  q=back`. Source: `pm_core/tui/app.py:1229–1239`.
-
-## Picker modal — open, cancel, empty-submit
-
-7. Press `a`: `pm tui send a`. `pm tui view` should show the `QACreatePickerScreen` modal (`pm_core/tui/screens.py:457–560`) with:
-- Title `Create QA file`.
-- `Name` label and an empty input (focused).
-- `Kind` label followed by a 6-line list (▸ on the first entry):
-`Instruction (guided Claude session)`, `Instruction (scaffold stub in $EDITOR)`, `Regression test (guided Claude session)`, `Regression test (scaffold stub in $EDITOR)`, `Artifact recipe (guided Claude session)`, `Artifact recipe (scaffold stub in $EDITOR)`.
-- Hint line `↑↓ change kind · Enter create · Esc cancel`.
-8. Press `Escape`: `pm tui send Escape`. Confirm the modal closes, focus returns to the QA pane, and `pm/qa/` is still empty (`ls pm/qa/`).
-9. Re-open the modal with `a`. Submit empty: `pm tui send Enter`. Confirm the modal stays open (no dismissal) — `on_input_submitted` returns early when the name is blank (`screens.py:551–555`). Confirm no new pane launched (`tmux list-panes -t <session>`) and no QA files appeared.
-
-## Picker — scaffold an artifact
-
-10. With the modal still open, type a name: `pm tui send picker-smoke`. Move selection down to the `Artifact recipe (scaffold stub in $EDITOR)` row (index 5) — five down-presses: `pm tui send Down Down Down Down Down`. Verify with `pm tui view` that the ▸ is on the "Artifact recipe (scaffold stub in $EDITOR)" line.
-11. Submit: `pm tui send Enter`. Confirm:
-- Modal dismisses.
-- A new tmux pane launches running `pm qa add-artifact picker-smoke` — check with `tmux list-panes -t <session> -a -F "#{pane_id} #{pane_current_command} #{pane_start_command}"` and/or scrollback via `tmux capture-pane -p -t <pane> -S -`. (Mapping: `app.py:1325–1341` builds `pm qa <mode>-<suffix> <name>` where `artifacts` → `artifact`, `add` → `add`.)
-- A scaffold file appears at `pm/qa/artifacts/picker-smoke.md` (the `add` mode writes a stub then opens `$EDITOR`; in headless container EDITOR may be unset — the file should still be created by `_qa_add` in `pm_core/cli/qa.py:134`). Verify: `ls pm/qa/artifacts/` and `cat pm/qa/artifacts/picker-smoke.md`.
-
-## Picker — guided author for an instruction
-
-12. Re-focus the QA pane (`pm tui send q` to toggle back if needed, then `q` again to enter QA view; or close the spawned pane). Press `a`, type `author-smoke`, leave selection at the first row (`Instruction (guided Claude session)`), press `Enter`. Confirm:
-- A new pane launches with command line `pm qa author-instruction author-smoke` (mode=author, suffix=instruction).
-- The pane may sit at a Claude prompt — do not interact; just confirm the command line is correct via `tmux capture-pane -p -t <pane> -S -`.
-- Dismiss/kill that pane: `tmux kill-pane -t <pane>`.
-
-## Refresh shows new items + counter
-
-13. Refocus the TUI window and the QA pane. The pane refreshes on view-show (`_refresh_qa_pane` at `app.py:1223`); toggle out and back in with `pm tui send q q` to force a refresh. `pm tui view` should now show:
-- `Instructions (0)` still — the `author-instruction` flow only creates the file if Claude completes; the pane was killed, so likely still zero. If `pm/qa/instructions/author-smoke.md` exists from a partial write, count will be 1 — either is acceptable; check `ls pm/qa/instructions/` to confirm what state to expect.
-- `Artifact Recipes (1)` with `picker-smoke` listed (the item's id and title come from `qa_instructions.list_all`).
-- Status bar total equals sum of section counts (`app.py:1233–1235`).
-
-## Regression Enter launches regression prompt
-
-14. From the host shell in `$TEST_DIR`, create a regression file via the CLI (bypasses the picker):
+For each invocation:
+- A new `$CAP_DIR/prompt-*.txt` should appear and the corresponding `pm/qa/<category>/<name>.md` file should NOT have been created (the authoring command does not write the file; the Claude session would).
+- Grep each prompt for a distinctive qa_library.md sentence, e.g.:
 ```
-EDITOR=true pm qa add-regression smoke-reg
+grep -l "Every project that uses .pm. gets a .pm/qa/. directory" $CAP_DIR/prompt-*.txt
+grep -l "Reusable test-environment procedures" $CAP_DIR/prompt-*.txt
 ```
-Confirm `pm/qa/regression/smoke-reg.md` now exists.
-15. Refocus the TUI QA pane and force a refresh (`pm tui send q q`). Confirm `Regression Tests (1)` shows `smoke-reg`, and the status-bar total is now 2 (artifacts 1 + regression 1) or 3 if the instruction also persisted.
-16. Navigate down to the `smoke-reg` row: `pm tui send j` (repeat as needed; ▸ marker moves). Confirm with `pm tui view` that the cyan ▸ is on the regression row.
-17. Press `Enter`: `pm tui send Enter`. This fires `QAItemActivated` (`qa_pane.py:184–187`) → `launch_qa_item` (`pane_ops.py:450`), which for `category == "regression"` builds the regression prompt via `build_regression_test_prompt` (`pane_ops.py:484–492`). Confirm:
-- A new tmux pane launches Claude with the regression prompt.
-- `tmux capture-pane -p -t <pane> -S -` shows the prompt text including a reference to `pm/qa/captures/regression/smoke-reg/<timestamp>/` (template in `pm_core/regression_prompts.py:61`).
-- The launched pane is in the TUI's current tmux window (no `target_window` override; see docstring at `pane_ops.py:455–458`).
+All three captured prompts should match.
+- Verify each prompt names the correct destination path. Map category → directory:
+- `author-instruction new-repro`  → `pm/qa/instructions/new-repro.md`
+- `author-regression  new-check`  → `pm/qa/regression/new-check.md`
+- `author-artifact    new-recipe` → `pm/qa/artifacts/new-recipe.md`
+Confirm with:
+```
+grep -F "$TEST_DIR/pm/qa/instructions/new-repro.md" $CAP_DIR/prompt-*.txt
+grep -F "$TEST_DIR/pm/qa/regression/new-check.md"   $CAP_DIR/prompt-*.txt
+grep -F "$TEST_DIR/pm/qa/artifacts/new-recipe.md"   $CAP_DIR/prompt-*.txt
+```
+- Confirm the category-specific blurb appears, e.g. for the artifact prompt: `grep "artifact recipe is a procedure" $CAP_DIR/prompt-*.txt`.
 
-## Capture
+5. **Refuse-to-clobber check**: create a real artifact file via `pm qa add-artifact`, then attempt `author-artifact` on the same name. `add-artifact` opens `$EDITOR`, so suppress that:
+```
+EDITOR=true pm qa add-artifact dup        # writes pm/qa/artifacts/dup.md
+test -f "$TEST_DIR/pm/qa/artifacts/dup.md"   # precondition
+BEFORE=$(ls "$CAP_DIR" | wc -l)
+set +e
+pm qa author-artifact dup
+rc=$?
+set -e
+AFTER=$(ls "$CAP_DIR" | wc -l)
+```
+Expected:
+- `rc` is non-zero (exit 1).
+- Stderr contains `Already exists: <abs path>/pm/qa/artifacts/dup.md`.
+- `BEFORE == AFTER` — the claude shim was NOT invoked (no new capture files).
 
-18. Throughout the run, follow `pm/qa/artifacts/tmux-screen-recording.md` to capture before/after framebuffers (`pm tui view` and `tmux capture-pane -p -S -`) for: empty pane, modal open, modal after Escape, modal after empty submit, modal with name+selection, QA pane after refresh, regression pane launch. Store under `pm/qa/captures/regression/scenario-30/<timestamp>/`.
+6. **Recording**: wrap the whole run with cli-recording.md (asciinema or equivalent) so the transcript is replayable. Save the captured prompt files and recording alongside the QA verdict.
+
+7. **Cleanup**: `deactivate; rm -rf "$TEST_DIR" /tmp/pm-venv`.
 
 ## Artifact Capture Recipe
 
 Available at:
-- `/scratch/qa-artifacts/tmux-screen-recording.md`
+- `/scratch/qa-artifacts/cli-recording.md`
 
 Read the recipe(s) and follow their capture commands to produce
 evidence of this scenario's behavior. Save resulting captures under
-`pm/qa/captures/pr-6be8ee6/scenarios/30/` (each recipe's
+`pm/qa/captures/pr-6be8ee6/scenarios/27/` (each recipe's
 manifest format applies; if more than one recipe is listed, use a
 named subdirectory per capture). Captures are how reviewers confirm
 what the test demonstrated, so produce one even if the scenario itself
@@ -224,15 +220,15 @@ recording.
 
 **If you identify and fix a bug during this scenario, capture both
 states.** Save the pre-fix recording under
-`pm/qa/captures/pr-6be8ee6/scenarios/30/pre-fix/` and the
+`pm/qa/captures/pr-6be8ee6/scenarios/27/pre-fix/` and the
 post-fix recording under `.../post-fix/`. Cross-link the two in each
 manifest's `## Files` section, and (per Incidental Bugs below) still
 file a PR for the bug.
 
 After producing each capture, commit it and push so it lands on the
 PR branch:
-- `git add pm/qa/captures/pr-6be8ee6/scenarios/30/`
-- `git commit -m "qa: capture for scenario 30"`
+- `git add pm/qa/captures/pr-6be8ee6/scenarios/27/`
+- `git commit -m "qa: capture for scenario 27"`
 - `git push origin pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-`
 
 If the push is rejected (another scenario raced you), `git pull --rebase
