@@ -1442,7 +1442,6 @@ changes are narrow and could be covered by unit tests, this phase is looking
 for issues in how the new code integrates with everything around it,
 and for problems in either the new or the existing code that only
 surface when something is exercised the way a user would.
-
 {bug_fix_qa_block}
 
 Each scenario runs in its own isolated container — scenarios cannot share
@@ -1522,7 +1521,15 @@ QA_PLAN_END
 Number scenarios starting from {scenario_start}.
 
 {_OUT_OF_SCOPE_BUGS_BLOCK}
-{general_notes_block}{qa_specific_block}"""
+{general_notes_block}{qa_specific_block}
+
+Don't forget that the goal of these scenarios should not be to exercise
+individual methods or check for existence of blocks of text. It is to exercise
+the code in the same way it would be exercised by an end user consuming the
+project. Any step that does things a user wouldn't do, like directly
+importing sub-sections of code or searching for strings in code, is likely
+not accomplishing this goal.
+"""
     return prompt.strip()
 
 
