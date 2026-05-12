@@ -1,0 +1,26 @@
+[Session: pm-pm-test-1778627499-63589dae, Pane: %0]
+
+  QA    3 item(s)    Enter=run  e=edit  d=debug  a=add  q=back
+
+
+    Instructions (1)
+    ────────────────────────────────────────
+  ▶ setup-env: Setup test env
+      Reusable env bootstrap
+
+
+    Regression Tests (0)
+    ────────────────────────────────────────
+
+    Artifact Recipes (2)
+    ────────────────────────────────────────
+    db-log: DB log capture
+      Capture db log
+
+    login-cast: Login asciinema cast
+      Record login flow                                                       ▆▆
+
+
+  press / to type a command
+
+
