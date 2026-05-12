@@ -162,18 +162,33 @@ State what needs to be implemented in terms of specific code changes:
 
         "qa": """Generate a **QA spec** (spec_qa).
 
-State what to test and how, grounded in the actual implementation and
-the system's runtime behavior:
-- Key behaviors to exercise and expected outcomes
-- Setup requirements for testing
-- Edge cases and failure modes to probe
-- Integration points with other system components
-- What constitutes a passing vs failing test
-- Mocks: what external dependencies need mocking (e.g. Claude sessions, git
-  operations, tmux), the contract for each mock (what it simulates), and
-  what scripted responses they should return — this prevents each scenario
-  agent from independently deciding how to mock, which leads to
-  inconsistency""",
+Describe what to test in terms of **user-facing behaviors** — what a
+user does and what they observe — rather than function-level
+mechanics. The spec drives scenario planning, and scenarios should
+exercise the system the way a real user would.
+
+- Key user flows the PR's changes affect, and what the user should
+  observe at the end of each. Frame requirements as "running X from
+  the CLI produces Y" or "pressing key K in the TUI causes Z",
+  not "function F returns G".
+- Setup the user needs to reach each flow (a project, a session, a
+  PR in some state) — described as user steps, not fixtures.
+- Edge cases and failure modes from the user's perspective: what
+  inputs / states cause surprising or wrong behavior.
+- Integration points: which user-facing surfaces touch each other
+  (CLI ↔ TUI ↔ tmux, etc.) and what should remain consistent across
+  them.
+- What constitutes a passing vs failing test, again from the user's
+  point of view (the right output appears, the right pane shows up,
+  the right file is created).
+- Mocks: what external dependencies (Claude sessions, git network
+  ops, etc.) need a fake or stub for scenarios to run reliably, and
+  what each fake should simulate. Internal pm code should not be
+  mocked.
+
+If a behavior is only checkable at the function level with no
+user-observable surface, leave it to the unit test suite and don't
+include it in the QA spec.""",
     }
 
     diff_instruction = ""
@@ -226,8 +241,11 @@ The user will confirm, correct, or expand on your proposals.
 {diff_instruction}{ambiguity_instruction}
 ## Output Format
 
-Write a clear, structured spec.  Use markdown.  Be specific — reference
-actual code paths, function names, and file locations where possible.
+Write a clear, structured spec.  Use markdown.  Be specific — for an
+implementation spec that means concrete code paths, function names,
+and file locations; for a QA spec that means concrete user actions
+(exact commands, key sequences, observable outputs) rather than
+internal function references.
 Do NOT include preamble or meta-commentary — output only the spec content.
 
 The spec should contain:
