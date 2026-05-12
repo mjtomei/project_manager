@@ -1496,6 +1496,11 @@ accounts for what already happened:
   impacted features. Re-run when the diff since that run touches the
   same surface, or when re-running (optionally with small tweaks to
   STEPS) would meaningfully increase confidence in the behavior.
+  Also re-run if the prior scenario's FOCUS/STEPS framed the work in
+  method-level terms (checking helper return values, inspecting
+  internals) — even a PASS doesn't tell you the user-facing flow
+  works, so plan a replacement scenario that drives the same code
+  through a real user surface.
 - **NEEDS_WORK**: re-run — the implementation may have changed and the
   scenario needs to be re-validated against the new code.
 - **INPUT_REQUIRED**: re-run, and if the prior `prompt.md` or
