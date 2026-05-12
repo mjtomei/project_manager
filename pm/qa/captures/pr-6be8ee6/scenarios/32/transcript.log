@@ -1,0 +1,22 @@
+++ pm prompt pr-01511b4
+++ pm prompt pr-08d1fdc
+++ echo '-- bug grep --'
+-- bug grep --
+++ grep -c '## Bug Fix Flow' /tmp/cap-bug.txt
+++ local _cc_a
+++ for _cc_a in "$@"
+++ case "$_cc_a" in
+++ for _cc_a in "$@"
+++ case "$_cc_a" in
+++ for _cc_a in "$@"
+++ case "$_cc_a" in
+++ local _cc_bin=/home/pm/.local/share/claude/versions/2.1.140
+++ [[ -x /home/pm/.local/share/claude/versions/2.1.140 ]]
+++ [[ ! -x /home/pm/.local/share/claude/versions/2.1.140 ]]
+++ [[ -n '' ]]
+++ [[ linux-gnu == \m\s\y\s ]]
+++ [[ linux-gnu == \c\y\g\w\i\n ]]
+++ [[ linux-gnu == \w\i\n\3\2 ]]
+++ [[ 610 != 608 ]]
+++ exec -a ugrep /home/pm/.local/share/claude/versions/2.1.140 -G --ignore-files --hidden -I --exclude-dir=.git --exclude-dir=.svn --exclude-dir=.hg --exclude-dir=.bzr --exclude-dir=.jj --exclude-dir=.sl -c '## Bug Fix Flow' /tmp/cap-bug.txt
+1
