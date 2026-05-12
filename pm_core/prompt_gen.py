@@ -1483,37 +1483,14 @@ unit test suite.
 Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
 to see what changed.  Read source files as needed to understand the context.
 
-## Prior QA Runs
-
-Prior scenarios for this PR — including their full prompts and final
-verdicts — are persisted under
-`pm/qa/captures/{pr_path_seg}/scenarios/<n>/` (each subdir contains
-`prompt.md`, `verdict.md`, and any captures the worker produced). Before
-planning, list those subdirs and read each `verdict.md` so the new plan
-accounts for what already happened:
-
-- **PASS / VERIFIED**: prior coverage counts toward fully exercising
-  impacted features. Re-run when the diff since that run touches the
-  same surface, or when re-running (optionally with small tweaks to
-  STEPS) would meaningfully increase confidence in the behavior.
-  Also re-run if the prior scenario's FOCUS/STEPS framed the work in
-  method-level terms (checking helper return values, inspecting
-  internals) — even a PASS doesn't tell you the user-facing flow
-  works, so plan a replacement scenario that drives the same code
-  through a real user surface.
-- **NEEDS_WORK**: re-run — the implementation may have changed and the
-  scenario needs to be re-validated against the new code.
-- **INPUT_REQUIRED**: re-run, and if the prior `prompt.md` or
-  `verdict.md` shows the instruction/recipe was insufficient (missing
-  steps, ambiguous setup, dead command), iterate on the scenario
-  definition (clearer STEPS, better INSTRUCTION/ARTIFACT binding) so
-  this run can complete.
-
-Regardless of prior coverage, **every QA run must include at least one
-scenario that exercises a complete user-facing flow end-to-end** for
-this PR's impacted surface — pick the most representative one if there
-are several. This guards against regressions that only appear when the
-full flow runs together.
+Plan a fresh set of scenarios that exercises everything the diff
+touches, end-to-end, the way a user would. Ignore any prior captures
+or `verdict.md` files under
+`pm/qa/captures/{pr_path_seg}/scenarios/` — for this run, treat the
+PR as if it had never been QA'd before. Every QA run must also
+include at least one scenario that exercises a complete user-facing
+flow end-to-end for this PR's impacted surface — pick the most
+representative one if there are several.
 {pr_notes_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
