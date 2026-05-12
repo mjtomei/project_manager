@@ -78,9 +78,20 @@ those CLI commands, not of the TUI.
 
 If you're running in a no-TTY environment — typical for Claude sessions
 driving the recipe via a non-interactive Bash tool — `asciinema rec`
-will refuse to start. Work around it by recording **inside a tmux
-pane**, since each tmux pane is backed by its own pty. Mind the
-self-attach trap above: pick the variant that fits.
+will refuse to start in your own shell. **Do not work around that by
+wrapping `tmux capture-pane` with `asciinema rec -c ...`** — that
+records a one-shot static snapshot of the final pane buffer, not the
+interaction, and the resulting `.cast` is useless. The right workaround
+is to record **inside a tmux pane**, since each tmux pane is backed by
+its own pty. Mind the self-attach trap above: pick the variant that
+fits.
+
+Driving the recorded TUI from outside the recorder (via `pm tui send`
+or `tmux send-keys` against the target session) is correct and
+expected. The recording is of the attach client's *render*, so every
+keystroke's effect on the TUI appears in the cast — that's the same
+thing a human user typing into an attached client would produce.
+You're not losing anything by driving out-of-band.
 
 **Variant A — wrapping `tmux attach` (TUI capture).** Run the recorder
 in a *separate* tmux server so the inner attach isn't recursive:
@@ -125,9 +136,12 @@ tmux send-keys -t <session>:<window>.<recorder-pane> "exit" Enter
 # asciinema flushes recording.cast on the recorded process exiting.
 ```
 
-If `asciinema` isn't installed and can't be installed, note it in the
-manifest and skip the `.cast` file — the `transcript.log` from
-`pipe-pane` is the minimum bar.
+If `asciinema` isn't installed and can't be installed, or if neither
+variant above can run in the environment (e.g. the recorder pane
+can't be created), note it in the manifest and skip the `.cast`
+file — the `transcript.log` from `pipe-pane` is the minimum bar. A
+stub `.cast` containing only a static snapshot or the final pane
+buffer is worse than no `.cast` at all; do not produce one.
 
 ## Manifest format
 
