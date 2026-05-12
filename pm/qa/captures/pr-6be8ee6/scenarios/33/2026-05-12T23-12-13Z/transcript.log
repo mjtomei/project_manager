@@ -1,0 +1,80 @@
++ pm init --backend local --no-import
++ tail -3
+  backend: local
+
+Run 'pm plan import' to bootstrap a PR graph from this repo.
++ EDITOR=true
++ pm qa add-instruction my-inst
+Created: /tmp/pm-cap-1778627540/pm/qa/instructions/my-inst.md
++ EDITOR=true
++ pm qa add-regression my-reg
+Created: /tmp/pm-cap-1778627540/pm/qa/regression/my-reg.md
++ EDITOR=true
++ pm qa add-artifact my-art
+Created: /tmp/pm-cap-1778627540/pm/qa/artifacts/my-art.md
++ grep -E '^(title|description|tags):' pm/qa/instructions/my-inst.md pm/qa/regression/my-reg.md pm/qa/artifacts/my-art.md
+pm/qa/instructions/my-inst.md:title: My Inst
+pm/qa/instructions/my-inst.md:description:
+pm/qa/regression/my-reg.md:title: My Reg
+pm/qa/regression/my-reg.md:description:
+pm/qa/artifacts/my-art.md:title: My Art
+pm/qa/artifacts/my-art.md:description:
++ EDITOR=true
++ pm qa add-instruction my-inst
+Already exists: /tmp/pm-cap-1778627540/pm/qa/instructions/my-inst.md
++ echo rc=1
+rc=1
++ pm qa add foo
+Usage: pm qa [OPTIONS] COMMAND [ARGS]...
+Try 'pm qa -h' for help.
+
+Error: No such command 'add'.
++ echo rc=2
+rc=2
++ pm qa list
+
+Instructions (1):
+  my-inst: My Inst
+
+Regression Tests (1):
+  my-reg: My Reg
+
+Artifact Recipes (1):
+  my-art: My Art
+
++ pm qa show my-art
+# My Art
+[/tmp/pm-cap-1778627540/pm/qa/artifacts/my-art.md]
+
+## When to use
+
+## What this recipe produces
+
+## Capture
+
+## Manifest format
+
++ EDITOR=true
++ pm qa edit my-art
++ echo rc=0
+rc=0
++ cd /tmp
++ pm qa docs
++ head -5
+# pm QA library
+
+Every project that uses `pm` gets a `pm/qa/` directory with four
+subdirectories of Markdown-with-frontmatter files. They feed prompts,
+the TUI, and the CLI.
++ pm qa regression nonexistent-id
+Unknown regression test: nonexistent-id
+Run 'pm qa list' to see available tests.
++ echo rc=1
+rc=1
++ pm tui test
+Usage: pm tui [OPTIONS] COMMAND [ARGS]...
+Try 'pm tui -h' for help.
+
+Error: No such command 'test'.
++ echo rc=2
+rc=2
