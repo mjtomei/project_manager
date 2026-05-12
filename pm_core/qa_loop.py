@@ -1965,18 +1965,22 @@ def _poll_tmux_verdicts(
                             tmux_mod.send_keys(pane_id, "")
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
-                        # Clear verdict and put back in pending.  The next
-                        # idle_prompt event for this scenario re-triggers
-                        # JSONL extraction; only a genuinely new assistant
-                        # turn (written after the cleared hook timestamp)
-                        # will be accepted.
+                        # Clear verdict and put back in pending.  Stamp the
+                        # last-hook-ts to *now* — not 0 — so the next poll
+                        # only re-extracts the verdict after a fresh
+                        # idle_prompt event fires (i.e. the scenario has
+                        # actually responded to the follow-up).  Popping
+                        # the entry instead would accept the stale
+                        # idle_prompt left over from the first verdict and
+                        # re-trigger verification on the same (still PASS)
+                        # transcript turn.
                         state.scenario_verdicts.pop(scenario_idx, None)
                         if scenario_idx in state.verified_scenarios:
                             _log.warning("Scenario %d was in verified_scenarios "
                                          "when flagged — clearing defensively",
                                          scenario_idx)
                             state.verified_scenarios.discard(scenario_idx)
-                        _last_scenario_hook_ts.pop(scenario_idx, None)
+                        _last_scenario_hook_ts[scenario_idx] = time.time()
                         pending.add(scenario_idx)
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
