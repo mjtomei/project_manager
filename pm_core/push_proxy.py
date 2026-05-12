@@ -302,19 +302,29 @@ class PushProxy:
                          target_branch, self.allowed_branch)
             return {"exit_code": 1, "stdout": "", "stderr": msg}
 
-        # Origin is normally a real upstream URL (scenario clones run
-        # `git remote set-url origin <real-url>` after the initial local
-        # clone). For local-only test setups with no upstream, origin is
-        # still a local path; pushing direct to a non-bare local repo
-        # would fail with receive.denyCurrentBranch, so we fall back to
-        # fetching the source ref into the local target.
+        # Scenario clones have `origin` rewritten to the real upstream
+        # URL at clone time, so push runs directly from the caller's
+        # clone.  Local-path origins are explicitly rejected: the old
+        # fetch-into-target fallback advanced the target's branch ref
+        # without touching its worktree, which silently desynced any
+        # later commit made there.  Refuse instead of corrupting state.
         workdir = caller_workdir or self.workdir
         remote = self._extract_remote_name(push_args)
         local_target = _resolve_local_remote_url(workdir, remote)
 
         if local_target is not None:
-            return self._fetch_into_local_target(local_target, target_branch,
-                                                  caller_workdir=workdir)
+            msg = (
+                f"push-proxy: rejected — caller's '{remote}' resolves to a "
+                f"local path ({local_target}). Scenario clones must have "
+                f"`origin` set to the real upstream URL before pushing "
+                f"(create_scenario_workdir runs `git remote set-url origin "
+                f"<real-url>` after the local clone).  If pm was started "
+                f"before that change landed, restart the orchestrator so "
+                f"new scenario clones pick up the rewrite.\n"
+            )
+            _log.warning("Push rejected: local-path origin %s -> %s",
+                         remote, local_target)
+            return {"exit_code": 1, "stdout": "", "stderr": msg}
 
         return self._local_push(push_args, caller_workdir=workdir)
 
@@ -346,47 +356,6 @@ class PushProxy:
         except Exception as exc:
             return {"exit_code": 1, "stdout": "",
                     "stderr": f"git-proxy: push failed: {exc}\n"}
-
-    def _fetch_into_local_target(self, target_repo: str, branch: str,
-                                  caller_workdir: str | None = None) -> dict:
-        """Forward a push to a local target by fetching the source ref.
-
-        Only used when the caller's ``origin`` is still a local path —
-        a truly local-only test setup with no real upstream.  Pushing
-        direct into a checked-out non-bare repo fails with
-        ``receive.denyCurrentBranch``; ``git fetch --update-head-ok``
-        from the local target sidesteps that.
-        """
-        source = caller_workdir or self.workdir
-        src_ref = f"refs/heads/{branch}"
-        try:
-            _check = subprocess.run(
-                ["git", "rev-parse", "--verify", src_ref],
-                cwd=source, capture_output=True, timeout=5,
-            )
-            if _check.returncode != 0:
-                src_ref = "HEAD"
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            src_ref = "HEAD"
-        refspec = f"{src_ref}:refs/heads/{branch}"
-        cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
-               source, refspec]
-        _log.info("Push proxy local-only update (no upstream): %s", cmd)
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=120,
-            )
-            return {
-                "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            }
-        except subprocess.TimeoutExpired:
-            return {"exit_code": 1, "stdout": "",
-                    "stderr": "git-proxy: local push timed out after 120s\n"}
-        except Exception as exc:
-            return {"exit_code": 1, "stdout": "",
-                    "stderr": f"git-proxy: local push failed: {exc}\n"}
 
     def _execute_read_cmd(self, git_cmd: str, args: list[str],
                           caller_workdir: str | None = None) -> dict:
