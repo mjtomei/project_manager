@@ -1457,6 +1457,18 @@ the unit level. Inspecting outputs, calling internals, or confirming a flag
 is wired up is not a substitute for running the feature through a complete
 user-facing flow at least once.
 
+FOCUS and STEPS must describe **user actions and observations**, not the
+behavior of the underlying methods. A scenario that says "verify
+`_install_artifact_files` copies recipes into the scratch dir" is
+describing internal mechanics; reframe it as "run a QA scenario that
+binds an artifact recipe and confirm the recipe is available to the
+worker." A scenario that says "verify `_run_qa_finalize_pane` returns
+None when workdir is missing" is method-level; reframe it as "run QA
+on a PR with no workdir and confirm the user sees the right behavior."
+If you can't write FOCUS/STEPS without naming a private function or
+class, that's a signal you're planning a unit test, not a QA scenario —
+drop it and pick a surface a user can drive instead.
+
 ## PR Context
 
 - **Title**: {title}
