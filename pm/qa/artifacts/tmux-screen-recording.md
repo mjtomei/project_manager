@@ -19,129 +19,59 @@ For each capture, write three files into
   the load-bearing artifact for grep/diff and for consumers without
   asciinema).
 - `recording.cast` — asciinema replay (**required** when `asciinema`
-  is available; for TUIs the timing is invaluable).
+  is available).
 - `manifest.md` — frontmatter + short prose: workdir path the capture
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.
   Include a `## Files` section listing every non-default file the
-  capture produced with a one-line description each (the manifest is
-  the index a reader uses to find what they're looking at).
+  capture produced with a one-line description each.
 
-## Capture commands
+## Capture
 
-### tmux pipe-pane (always available if you have tmux)
+The recorder lives in its own tmux session and wraps `tmux attach`
+into the target session. You drive the target from outside via
+`tmux send-keys` (or `pm tui send`); the recording captures the
+attach client's render, so every keystroke's effect on the TUI
+appears in the cast just as if a human had typed into an attached
+client.
 
 ```
+# 1. Start the target session running the program under test (your
+#    TUI, your CLI, whatever the scenario exercises).
+tmux new-session -d -s target -x 80 -y 24 '<command-under-test>'
+
+# 2. Start a recorder session whose only job is to run asciinema
+#    wrapping `tmux attach` into the target. Same tmux server is fine
+#    — recorder and target are different sessions, so the attach
+#    isn't recursive.
 mkdir -p pm/qa/captures/<pr-id>/<short-name>
-tmux pipe-pane -t <session>:<window>.<pane> -o \
+tmux new-session -d -s recorder -x 80 -y 24 \
+    "asciinema rec --quiet pm/qa/captures/<pr-id>/<short-name>/recording.cast \
+        -c 'tmux attach -t target'"
+
+# 3. Drive the target from outside. Keys reach the program via the
+#    same tmux server; the recorder's attach client renders the
+#    redraws and asciinema records them.
+tmux send-keys -t target "j" Enter
+# ...
+
+# 4. End the recording: cause the target to exit (or detach the
+#    recorder's attach client with C-b d). The attach exits, the
+#    recorded command exits, asciinema flushes the cast.
+tmux send-keys -t target C-d
+
+# 5. Capture the plain-text transcript alongside (pipe-pane is the
+#    cheapest way; run it from step 1 if you want the full session).
+tmux pipe-pane -t target -o \
     'cat >> pm/qa/captures/<pr-id>/<short-name>/transcript.log'
-# ... reproduce the behavior in the pane ...
-tmux pipe-pane -t <session>:<window>.<pane>      # stop piping
 ```
 
-### asciinema (replayable)
-
-```
-asciinema rec pm/qa/captures/<pr-id>/<short-name>/recording.cast \
-    -c '<command-or-shell-that-reproduces-the-behavior>'
-```
-
-`asciinema rec` requires a TTY. If your shell has one (you're running
-this from a terminal), the line above is all you need.
-
-**What to record.** asciinema records whatever the wrapped command
-draws to its stdout. To capture a TUI, the wrapped command must be the
-program that renders the TUI — *not* a shell into which you'll type
-later. For a tmux-hosted TUI, the right wrapper is usually
-`tmux attach -t <session>`: asciinema records the attach client's
-render of the TUI, while you (or an external script) drive input via
-`tmux send-keys` / `pm tui send` against the same session. Wrapping
-`bash` and then running CLI commands inside it produces a recording of
-those CLI commands, not of the TUI.
-
-> **Trap: don't `tmux attach` to a session from inside that session.**
-> If your recorder pane lives in `<session>` and you wrap
-> `tmux attach -t <session>`, the inner attach client renders all of
-> `<session>` — including the recorder pane itself, which is showing
-> the attach client, which renders the recorder pane, and so on.
-> Every redraw fan-outs through that recursion and asciinema records
-> every escape sequence; expect tens of MB of nested-render churn,
-> not signal. Driver keystrokes (`pm tui send` to the TUI pane) can
-> also surface in the recorder pane's scrollback as the inner client
-> echoes them. **Run the recorder pane in a *different* tmux server**
-> (separate `-L` socket or `tmux new-session -d -s rec-$$`) **when
-> the wrapped command is `tmux attach` to your target session.** For
-> non-attach wrappers — recording a CLI directly inside the recorder
-> pane — staying in the same session is fine.
-
-#### No-TTY environments (e.g. automated agents)
-
-If you're running in a no-TTY environment — typical for Claude sessions
-driving the recipe via a non-interactive Bash tool — `asciinema rec`
-will refuse to start in your own shell. **Do not work around that by
-wrapping `tmux capture-pane` with `asciinema rec -c ...`** — that
-records a one-shot static snapshot of the final pane buffer, not the
-interaction, and the resulting `.cast` is useless. The right workaround
-is to record **inside a tmux pane**, since each tmux pane is backed by
-its own pty. Mind the self-attach trap above: pick the variant that
-fits.
-
-Driving the recorded TUI from outside the recorder (via `pm tui send`
-or `tmux send-keys` against the target session) is correct and
-expected. The recording is of the attach client's *render*, so every
-keystroke's effect on the TUI appears in the cast — that's the same
-thing a human user typing into an attached client would produce.
-You're not losing anything by driving out-of-band.
-
-**Variant A — wrapping `tmux attach` (TUI capture).** Run the recorder
-in a *separate* tmux server so the inner attach isn't recursive:
-
-```
-# 1. Start a scratch tmux server on its own socket for the recorder.
-tmux -L rec new-session -d -s recorder
-
-# 2. Inside that recorder server, start asciinema wrapping a tmux
-#    attach into the target session on the default socket.
-tmux -L rec send-keys -t recorder:0 \
-    "asciinema rec <capture-dir>/recording.cast \
-        -c 'tmux attach -t <target-session>'" Enter
-
-# 3. Drive the target session from outside (the same way you would
-#    from anywhere) — keys reach the TUI pane via the default-socket
-#    tmux, and the attach client in the recorder records the render.
-pm tui send j -s <target-session>
-# ... etc ...
-
-# 4. End the recording by detaching the attach client (the recorder
-#    pane's command exits and asciinema flushes the cast).
-tmux -L rec send-keys -t recorder:0 'C-b d'
-```
-
-**Variant B — wrapping a non-attach command (CLI / scripted capture).**
-Same session is fine; no recursion possible:
-
-```
-# 1. Open a fresh pane in the existing tmux session and start recording
-tmux split-window -t <session>:<window>
-tmux send-keys   -t <session>:<window>.<recorder-pane> \
-    "asciinema rec <capture-dir>/recording.cast \
-        -c '<command-to-record>'" Enter
-
-# 2. Drive the recorded program from outside (no TTY needed for the driver)
-#    — `tmux send-keys` to the recorder pane, or any IPC the program
-#    exposes.
-
-# 3. End the recording: have the recorded command exit, e.g.
-tmux send-keys -t <session>:<window>.<recorder-pane> "exit" Enter
-# asciinema flushes recording.cast on the recorded process exiting.
-```
-
-If `asciinema` isn't installed and can't be installed, or if neither
-variant above can run in the environment (e.g. the recorder pane
-can't be created), note it in the manifest and skip the `.cast`
-file — the `transcript.log` from `pipe-pane` is the minimum bar. A
-stub `.cast` containing only a static snapshot or the final pane
-buffer is worse than no `.cast` at all; do not produce one.
+If `asciinema` isn't installed and can't be installed, or the
+recorder session can't be created in this environment, note it in
+the manifest and skip the `.cast` — `transcript.log` is the
+minimum bar. **Do not** wrap `tmux capture-pane` with `asciinema rec -c`
+as a fallback: that records a one-shot static snapshot of the final
+buffer, not the interaction, and a stub cast is worse than no cast.
 
 ## Manifest format
 
@@ -169,7 +99,7 @@ captured_at: <ISO date>
 - `<any extra file>` — <one-line description>
 ```
 
-## Reviewing a capture
+## Reviewing
 
 Reviewers replay with `asciinema play <file>.cast` or read
 `transcript.log` directly. The manifest tells them what they're looking
