@@ -883,8 +883,8 @@ steps that also include steps from the instruction file if one is included.
 You can also add or remove steps.
 
 The goal of every scenario is to exercise the impacted feature end-to-end
-the way a user would. Reshape draft steps to drive the real user-facing
-entry point and observe the real surface.
+the way a user would. Reshape draft steps where needed so they drive the real
+user-facing entry point and observe the real surface.
 
 ## Output Format
 
