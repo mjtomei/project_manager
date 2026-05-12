@@ -427,8 +427,14 @@ class PushProxy:
                           caller_workdir: str | None = None) -> dict:
         """Execute a read-only git remote command (fetch, pull, ls-remote).
 
-        These run directly from the caller's workdir with no branch
-        restriction — containers have full read access to the remote.
+        These run from the caller's workdir with no branch restriction.
+        Pushes go direct to the real upstream via _local_push, bypassing
+        the PR workdir, so reads must follow the same chain — otherwise
+        the caller fetches from a stale local mirror and never sees
+        commits another scenario pushed.  Rewrite the remote argument
+        to the real upstream URL when the caller's remote chain ends at
+        a real URL; fall through to the literal args otherwise.
+
         Falls back to self.workdir for legacy requests without a workdir field.
         """
         # Reject flags that could execute arbitrary programs on the host
@@ -437,6 +443,7 @@ class PushProxy:
             return danger
 
         workdir = caller_workdir or self.workdir
+        args = self._rewrite_read_args_for_upstream(git_cmd, args, workdir)
         cmd = ["git", git_cmd] + args
         _log.info("Git proxy executing read cmd: %s (in %s)", cmd, workdir)
         try:
@@ -455,6 +462,96 @@ class PushProxy:
         except Exception as exc:
             return {"exit_code": 1, "stdout": "",
                     "stderr": f"git-proxy: {exc}\n"}
+
+    def _rewrite_read_args_for_upstream(self, git_cmd: str,
+                                         args: list[str],
+                                         workdir: str) -> list[str]:
+        """Rewrite the remote argument of a read command to the real URL.
+
+        If args' first positional is a remote name whose chain resolves
+        to a real upstream URL, replace it with that URL.  For pull, also
+        ensure a refspec is present (default to the caller's current
+        branch) so ``git pull <url>`` doesn't fall back to FETCH_HEAD
+        on a remote head we can't guarantee matches the caller's branch.
+
+        Returns args unchanged when:
+        - No positional repository arg (caller relied on tracking — leave
+          git to its default behaviour);
+        - First positional already looks like a URL or path;
+        - The chain doesn't end at a real URL (truly local-only setup).
+        """
+        if not args:
+            return args
+        # Find the first positional (skipping flag-with-value pairs).
+        skip_next = False
+        first_pos_idx: int | None = None
+        for i, arg in enumerate(args):
+            if skip_next:
+                skip_next = False
+                continue
+            if arg.startswith("-"):
+                if arg in ("--upload-pack", "--receive-pack",
+                           "--exec", "--depth", "--shallow-since",
+                           "--shallow-exclude", "-o", "--server-option"):
+                    skip_next = True
+                continue
+            first_pos_idx = i
+            break
+        if first_pos_idx is None:
+            return args
+
+        remote_name = args[first_pos_idx]
+        # If it already looks like a URL or path, don't rewrite.
+        if (remote_name.startswith(("http://", "https://", "ssh://",
+                                     "git://", "git@", "file://",
+                                     "/", "."))
+                or ":" in remote_name and "/" in remote_name.split(":", 1)[0]):
+            return args
+
+        real_url = resolve_real_origin(workdir, remote=remote_name)
+        if not real_url:
+            return args
+
+        new_args = list(args)
+        new_args[first_pos_idx] = real_url
+
+        if git_cmd == "pull":
+            # Ensure a refspec is present so the merge step has a defined
+            # source. If there's already a second positional, leave it.
+            has_refspec = False
+            saw_pos = 0
+            skip_next = False
+            for arg in new_args:
+                if skip_next:
+                    skip_next = False
+                    continue
+                if arg.startswith("-"):
+                    if arg in ("--upload-pack", "--receive-pack",
+                               "--exec", "--depth", "--shallow-since",
+                               "--shallow-exclude", "-o",
+                               "--server-option"):
+                        skip_next = True
+                    continue
+                saw_pos += 1
+                if saw_pos >= 2:
+                    has_refspec = True
+                    break
+            if not has_refspec:
+                try:
+                    res = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=workdir, capture_output=True, text=True,
+                        timeout=5,
+                    )
+                    branch = res.stdout.strip() if res.returncode == 0 else ""
+                except Exception:
+                    branch = ""
+                if branch and branch != "HEAD":
+                    new_args.append(branch)
+
+        _log.info("Push proxy rewriting %s remote %s -> %s",
+                  git_cmd, remote_name, real_url)
+        return new_args
 
     @staticmethod
     def _extract_remote_name(push_args: list[str]) -> str:
