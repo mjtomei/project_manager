@@ -1436,8 +1436,13 @@ recipe and saves captures under
 
 Analyze this PR's changes and the available QA library (instructions,
 regression tests, and artifact recipes) to generate a structured test plan.
-Your goal is to fully exercise the impacted code to verify this PR works
-correctly.
+Your goal is to generate scenarios in the style of user stories which
+fully exercise the impacted code as well as surrounding code. Even when the 
+changes are narrow and could be covered by unit tests, this phase is looking
+for issues in how the new code integrates with everything around it,
+and for problems in either the new or the existing code that only
+surface when something is exercised the way a user would.
+
 {bug_fix_qa_block}
 
 Each scenario runs in its own isolated container — scenarios cannot share
@@ -1451,26 +1456,9 @@ cases that may expose bugs. Split scenarios only when code paths are
 unrelated or setup differs materially enough that combining them would
 bloat the steps.
 
-Make sure each impacted feature is exercised the way a user would actually
-use it — driven through its real entry point end-to-end, not just probed at
-the unit level. Inspecting outputs, calling internals, or confirming a flag
-is wired up is not a substitute for running the feature through a complete
-user-facing flow at least once.
-
-Frame FOCUS and STEPS around **user actions and observations** rather
-than the behavior of the underlying methods. Even when the changes
-are narrow and could be covered by unit tests, this phase is looking
-for issues in how the new code integrates with everything around it,
-and for problems in either the new or the existing code that only
-surface when something is exercised the way a user would. A
-description like "verify helper X returns Y given Z" tends to keep
-the scenario inside that function and miss those classes of bug;
-reframing it as a user-facing flow that ends up calling X gives the
-scenario a chance to catch them. If FOCUS/STEPS can't be written
-without naming a private function or class, that's usually a sign
-the surface isn't user-observable — fold the check into another
-scenario whose user flow happens to exercise it, or leave it to the
-unit test suite.
+Ignore any prior captures or `verdict.md` files under
+`pm/qa/captures/{pr_path_seg}/scenarios/` — for this run, treat the
+PR as if it had never been QA'd before.
 
 ## PR Context
 
@@ -1482,15 +1470,9 @@ unit test suite.
 
 Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
 to see what changed.  Read source files as needed to understand the context.
+Make sure to not get bogged down too much in the details and method names. Try
+to abstract out user stories that exercise the changes.
 
-Plan a fresh set of scenarios that exercises everything the diff
-touches, end-to-end, the way a user would. Ignore any prior captures
-or `verdict.md` files under
-`pm/qa/captures/{pr_path_seg}/scenarios/` — for this run, treat the
-PR as if it had never been QA'd before. Every QA run must also
-include at least one scenario that exercises a complete user-facing
-flow end-to-end for this PR's impacted surface — pick the most
-representative one if there are several.
 {pr_notes_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
@@ -1502,7 +1484,8 @@ at the paths shown below.
 
 Instructions tell scenario agents how to set up a test environment.  Without
 one, agents fall back to reading code and auto-passing.  Try to assign an instruction
-to every scenario.
+to every scenario. Try to make sure functionality is exercised with every
+possible user facing surface (both CLI and GUI for example).
 {artifact_recipes_block}
 {mocks_library_section}
 ## Output Format
