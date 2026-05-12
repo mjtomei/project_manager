@@ -167,17 +167,17 @@ user does and what they observe — rather than function-level
 mechanics. The spec drives scenario planning, and scenarios should
 exercise the system the way a real user would.
 
-- Key user flows the PR's changes affect, and what the user should
-  observe at the end of each. Frame requirements as "running X from
-  the CLI produces Y" or "pressing key K in the TUI causes Z",
-  not "function F returns G".
-- Setup the user needs to reach each flow (a project, a session, a
-  PR in some state) — described as user steps, not fixtures.
+- All user flows the PR's changes affect, and what the user should
+  observe at the end of each. Frame requirements as high level stories
+  with specifics like "running X from the CLI produces Y" or "pressing
+  key K in the TUI causes Z", not "function F returns G".
+- Setup the user needs to reach each flow — 
+  described as user steps, not fixtures.
 - Edge cases and failure modes from the user's perspective: what
-  inputs / states cause surprising or wrong behavior.
-- Integration points: which user-facing surfaces touch each other
-  (CLI ↔ TUI ↔ tmux, etc.) and what should remain consistent across
-  them.
+  inputs / states may cause surprising or wrong behavior.
+- Surface coverage: which user-facing surfaces exist as alternatives
+  to exercise the modified functionality and how expectations differ
+  across them. All supported surfaces should be exercised (e.g., CLI vs GUI).
 - What constitutes a passing vs failing test, again from the user's
   point of view (the right output appears, the right pane shows up,
   the right file is created).
