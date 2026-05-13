@@ -177,9 +177,8 @@ be split into multiple requirements.
 
 - All user flows the PR's changes affect, each captured as one or
   more Given/When/Then behaviors. Frame the Then in user-observable
-  terms ("the QA pane shows three sections", "`pm qa docs` prints
-  the packaged content", "the bug-fix prompt includes the captures
-  path") rather than function-level claims.
+  terms — what appears on screen, what gets printed, what file is
+  created — rather than function-level claims.
 - Setup the user needs to reach each behavior — described as user
   steps, not as fixtures. This belongs in each behavior's Given,
   and downstream scenarios will lean on QA *instructions* (under
@@ -190,9 +189,8 @@ be split into multiple requirements.
   inputs / states cause surprising or wrong behavior. Each becomes
   its own Given/When/Then.
 - Surface coverage: which user-facing surfaces exist as alternatives
-  to exercise the same behavior (e.g. CLI vs TUI), and how
-  expectations differ across them. All supported surfaces should be
-  exercised.
+  to exercise the same behavior, and how expectations differ across
+  them. All supported surfaces should be exercised.
 - Pass/Fail criteria from the user's point of view — the Then clauses
   effectively answer this; restate any cross-cutting ones explicitly.
 

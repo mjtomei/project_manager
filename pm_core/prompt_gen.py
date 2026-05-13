@@ -1465,8 +1465,8 @@ at the paths shown below.
 describe the user steps to establish a starting state (set up a project,
 start a session, install fixtures). Without one, scenario workers fall
 back to reading code and auto-passing.  Try to assign an instruction to
-every scenario. Make sure functionality is exercised with every possible
-user-facing surface (e.g. CLI and TUI).
+every scenario. Make sure functionality is exercised with every
+supported user-facing surface.
 {artifact_recipes_block}
 
 ## Output Format
@@ -1489,10 +1489,10 @@ Structure each scenario as one Given / When / Then user story:
   error message, a status change.
 
 Describe what the user does and observes, not the exact keystrokes
-or commands — the worker decides how to drive. "User opens the QA
-pane" is better than "tmux send-keys q"; "the picker modal lists
-three kinds" is better than "the third row of `pm tui view` contains
-the string 'Artifact recipe'".
+or commands — the worker decides how to drive. "User opens the
+settings page" is better than naming the keystroke that opens it;
+"the form lists three options" is better than asserting a specific
+string appears at a specific row index in some captured output.
 
 QA_PLAN_START
 
@@ -1689,10 +1689,10 @@ Available at:
 {bullets}
 
 These recipes are the basis for performing the scenario's **When**
-action (the recipe describes how to drive the surface — CLI command,
-tmux/TUI keystrokes, etc.) and for capturing the **Then** evidence
-(transcripts, asciinema casts, screenshots). Read the recipe(s) and
-follow their driver + capture commands. Save resulting captures
+action — the recipe describes how to drive the surface — and for
+capturing the **Then** evidence (transcripts, recordings,
+screenshots, logs). Read the recipe(s) and follow their driver +
+capture commands. Save resulting captures
 under `pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (each
 recipe's manifest format applies; if more than one recipe is listed,
 use a named subdirectory per capture). Captures are how reviewers
@@ -1821,15 +1821,15 @@ The steps are framed as a Given / When / Then user story. Your job:
   (start a session, set up a project, open a pane) — not by
   hand-editing files or monkeypatching internals.
 - Perform the **When** action exactly once, the way a real user
-  would (run the command, press the key, push the PR). Use whatever
-  driver gets the keystroke or command to the right place
-  (`tmux send-keys`, `pm tui send`, plain shell) — that mechanic is
-  yours to choose, but the action itself must be the real user
-  action.
+  would (run the command, press the key, submit the form). Use
+  whatever driver gets the action to the right place — the
+  mechanic is yours to choose, but the action itself must be the
+  real user action.
 - Check each **Then** by observing the surface, not by inspecting
-  source or asserting strings in generated output. If the Then says
-  "the QA pane shows three sections," confirm by viewing the pane,
-  not by grepping the code that renders it.
+  source or asserting strings in generated output. If the Then is
+  about something visible on screen, confirm by viewing it; if it's
+  about a file or command output, confirm by reading that file or
+  command output — not by reading the code that produces it.
 
 If you can't drive the user surface in this environment, report
 INPUT_REQUIRED with a specific blocker instead of substituting a

@@ -2337,7 +2337,7 @@ Read the scenario definition above and pull out:
 For each of Given / When / Then, find **specific evidence** in the transcript:
 
 - **Given**: tool calls that actually set up the state (project init, file creation, session start, etc.) — not "we assumed the project exists" or "this would be set up in a real run."
-- **When**: a tool call that drove the real user surface (CLI invocation, `tmux send-keys` / `pm tui send`, `git push`) — not source inspection, monkeypatching, dependency stripping, or grepping generated output.
+- **When**: a tool call that drove the real user surface — a CLI invocation, keystroke driver, network call, or whatever the surface actually accepts — not source inspection, monkeypatching, dependency stripping, or grepping generated output.
 - **Then**: observation of the user-visible surface (pane render, command output, file presence, error message, status change) — not "the code that would render this looks correct."
 
 Mark each part as:
