@@ -1,0 +1,9 @@
+{"version": 2, "width": 120, "height": 40, "timestamp": 1778698979, "env": {"SHELL": "/bin/bash", "TERM": "screen"}}
+[0.003265, "o", "+ pm qa list\r\n"]
+[0.063889, "o", "\r\nInstructions (3):\r\n  bare: Bare\r\n  complete: Complete Instruction — A complete instruction with title and description\r\n  legacy: Legacy Instruction\r\n\r\nRegression Tests (0):\r\n  (none)\r\n\r\nArtifact Recipes (0):\r\n  (none)\r\n\r\n"]
+[0.072375, "o", "+ pm qa show complete\r\n"]
+[0.136204, "o", "# Complete Instruction\r\nA complete instruction with title and description\r\n[/scratch/pm-test-1778698926/pm/qa/instructions/complete.md]\r\n\r\nBody text for complete file.\r\n\r\n"]
+[0.143624, "o", "+ pm qa show legacy\r\n"]
+[0.185547, "o", "# Legacy Instruction\r\n[/scratch/pm-test-1778698926/pm/qa/instructions/legacy.md]\r\n\r\nBody text for legacy file.\r\n\r\n"]
+[0.19243, "o", "+ pm qa show bare\r\n"]
+[0.256095, "o", "# Bare\r\n[/scratch/pm-test-1778698926/pm/qa/instructions/bare.md]\r\n\r\n# Bare Heading\r\n\r\nNo frontmatter here, just body content.\r\n\r\n"]

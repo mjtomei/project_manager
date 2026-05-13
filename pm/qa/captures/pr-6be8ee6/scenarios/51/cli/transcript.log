@@ -1,0 +1,41 @@
+cd /scratch/pm-test-1778698926 && source /tmp/pm-venv/bin/activate && export PYTHONPATH=/workspace
+(venv) pm@bb6b56bec6bb:/scratch/pm-test-1778698926$ cd /scratch/pm-test-1778698926 && source /tmp/pm-venv/bin/activate &
+& export PYTHONPATH=/workspace
+(pm-venv) pm@bb6b56bec6bb:/scratch/pm-test-1778698926$ asciinema rec --quiet --overwrite /workspace/pm/qa/captures/pr-6b
+e8ee6/scenarios/51/cli/recording.cast -c 'bash -c "set -x; pm qa list; pm qa show complete; pm qa show legacy; pm qa sho
+w bare"'
++ pm qa list
+
+Instructions (3):
+  bare: Bare
+  complete: Complete Instruction — A complete instruction with title and description
+  legacy: Legacy Instruction
+
+Regression Tests (0):
+  (none)
+
+Artifact Recipes (0):
+  (none)
+
++ pm qa show complete
+# Complete Instruction
+A complete instruction with title and description
+[/scratch/pm-test-1778698926/pm/qa/instructions/complete.md]
+
+Body text for complete file.
+
++ pm qa show legacy
+# Legacy Instruction
+[/scratch/pm-test-1778698926/pm/qa/instructions/legacy.md]
+
+Body text for legacy file.
+
++ pm qa show bare
+# Bare
+[/scratch/pm-test-1778698926/pm/qa/instructions/bare.md]
+
+# Bare Heading
+
+No frontmatter here, just body content.
+
+(pm-venv) pm@bb6b56bec6bb:/scratch/pm-test-1778698926$
