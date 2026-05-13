@@ -1436,9 +1436,6 @@ daemons, network endpoints, on-disk state, anything with a single name
 accessed from multiple callers. Make sure each is exercised by a
 concurrent-use scenario.
 
-Ignore any prior captures or `verdict.md` files from earlier runs —
-for this run, treat the PR as if it had never been QA'd before.
-
 ## PR Context
 
 - **Title**: {title}

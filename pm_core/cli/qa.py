@@ -176,67 +176,6 @@ def qa_add_artifact(name: str):
     _qa_add(name, "artifacts")
 
 
-@qa.command("captures-migrate")
-@click.argument("pr_id")
-@click.option("--from", "src_dir", type=click.Path(exists=True, file_okay=False),
-              default=None,
-              help="Override the source directory (default: <repo>/pm/qa/captures/<pr-id>/).")
-@click.option("--keep-source", is_flag=True,
-              help="Don't delete the source after a successful copy.")
-def qa_captures_migrate(pr_id: str, src_dir: str | None, keep_source: bool):
-    """Move legacy in-repo captures to ~/.pm/sessions/.../captures/<pr-id>/.
-
-    For PRs whose captures predate the move out of git, copies the
-    files from ``<repo>/pm/qa/captures/<pr-id>/`` (or ``--from``) into
-    the canonical host location and removes the source unless
-    ``--keep-source`` is set. Safe to re-run — existing files at the
-    target are preserved; only missing files are copied.
-    """
-    import shutil
-    from pm_core import store
-    from pm_core.cli.helpers import _resolve_pr_id, state_root
-    from pm_core.paths import captures_dir
-
-    data = store.load(state_root())
-    pr_entry = _resolve_pr_id(data, pr_id)
-    if pr_entry is None:
-        click.echo(f"PR '{pr_id}' not found.", err=True)
-        raise click.exceptions.Exit(1)
-    resolved_id = pr_entry["id"]
-    target = captures_dir(resolved_id)
-    if target is None:
-        click.echo("Error: cannot resolve session tag (not inside a git repo?)",
-                   err=True)
-        raise click.exceptions.Exit(1)
-
-    if src_dir is None:
-        src = Path("pm") / "qa" / "captures" / resolved_id
-    else:
-        src = Path(src_dir)
-    if not src.exists():
-        click.echo(f"No captures found at {src} — nothing to migrate.")
-        return
-
-    copied = 0
-    skipped = 0
-    for sp in src.rglob("*"):
-        if sp.is_dir():
-            continue
-        rel = sp.relative_to(src)
-        dst = target / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if dst.exists():
-            skipped += 1
-            continue
-        shutil.copy2(sp, dst)
-        copied += 1
-
-    click.echo(f"Migrated {copied} file(s) to {target} ({skipped} already present).")
-    if not keep_source:
-        shutil.rmtree(src)
-        click.echo(f"Removed source {src}.")
-
-
 @qa.command("captures-path")
 @click.argument("pr_id")
 def qa_captures_path(pr_id: str):
