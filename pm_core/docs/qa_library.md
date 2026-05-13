@@ -180,9 +180,10 @@ evidence*. The recipe explains:
   the capture.
 
 A recipe is *not* a test that runs automatically. It's a procedure a
-session follows to produce a `pm/qa/captures/<pr-id>/...` artifact
-that downstream consumers (humans replaying, agents parsing) can use
-to confirm what happened.
+session follows to produce a capture under
+`~/.pm/sessions/<tag>/captures/<pr-id>/...` (resolve via
+`pm qa captures-path <pr-id>`) that downstream consumers (humans
+replaying, agents parsing) can use to confirm what happened.
 
 A minimal example:
 
@@ -221,11 +222,17 @@ demonstrates` (what to look for in `output.log`).
 
 ## Captures
 
-A *capture* is the artifact a recipe produces. Captures are organized
-by which kind of session produced them:
+A *capture* is the artifact a recipe produces. Captures live outside
+the project repo, under `~/.pm/sessions/<session-tag>/captures/` on
+the host — they are durable but **not** committed to git. Use
+`pm qa captures-path <pr-id>` to resolve the per-PR directory.
+Regression captures don't have a PR id; resolve their path yourself
+(the session-tag prefix is shared with any PR's captures dir).
+
+Captures are organized by which kind of session produced them:
 
 ```
-pm/qa/captures/
+~/.pm/sessions/<session-tag>/captures/
 ├── <pr-id>/                   # captures bound to a PR
 │   ├── impl/
 │   │   ├── pre-fix/
@@ -330,8 +337,8 @@ Reference a mock from a QA scenario by its filename stem in the
 | `pm qa docs` | Prints this document. |
 | QA planner prompt | `instruction_summary_for_prompt` renders `### Instructions` and `### Artifact Recipes`. Recipes are referenced by filename in the scenario `INSTRUCTION:` field. |
 | Scenario 0 prompt | Same library summary, scoped to the interactive session. |
-| Bug-fix flow prompt | Points sessions at `pm/qa/instructions/` and `pm/qa/artifacts/` by directory; sessions discover specific files themselves. Captures go under `pm/qa/captures/<pr-id>/impl/pre-fix/` and `…/post-fix/`. |
-| Bug-fix review checklist | Tells reviewers to read captures under `pm/qa/captures/<pr-id>/impl/`. |
+| Bug-fix flow prompt | Points sessions at `pm/qa/instructions/` and `pm/qa/artifacts/` by directory; sessions discover specific files themselves. Captures go under `$(pm qa captures-path <pr-id>)/impl/pre-fix/` and `…/post-fix/`. |
+| Bug-fix review checklist | Tells reviewers to read captures under `$(pm qa captures-path <pr-id>)/impl/`. |
 | `pm qa mocks list/show/add/edit` | CLI for `pm/qa/mocks/`. |
 | `pm qa mocks prompt` | Prints the block injected into every QA scenario prompt. |
 

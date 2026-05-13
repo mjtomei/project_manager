@@ -609,7 +609,9 @@ COMMANDS
   pm qa edit <id>                  Edit a QA instruction or artifact recipe
   pm qa show <id>                  Show full content of a QA instruction or artifact recipe
   pm qa run <id> --pr <pr-id>      Run a QA instruction against a PR
-  pm qa standalone <id>          Run a QA instruction against master
+  pm qa standalone <id>            Run a QA instruction against master
+  pm qa regression <test-id>       Run a regression test (replaces `pm tui test`)
+  pm qa captures-path <pr-id>      Print the host path of a PR's captures directory
 
   pm qa mocks list               List shared mock definitions
   pm qa mocks show <id>          Show a mock definition

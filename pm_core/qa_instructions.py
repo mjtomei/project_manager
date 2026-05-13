@@ -54,9 +54,10 @@ def artifacts_dir(pm_root: Path) -> Path:
 
     Holds recipes for capturing concrete evidence of behavior —
     recordings, logs, screenshots — designed to be consumable by both
-    humans and downstream agents.  The captures themselves land in
-    pm/qa/captures/<pr-id>/ (a convention referenced from recipes, not
-    enforced here).
+    humans and downstream agents.  The captures themselves land under
+    ~/.pm/sessions/<tag>/captures/<pr-id>/ on the host (resolve via
+    ``pm qa captures-path <pr-id>``) — a convention referenced from
+    recipes, not enforced here.
     """
     d = qa_dir(pm_root) / "artifacts"
     d.mkdir(exist_ok=True)
