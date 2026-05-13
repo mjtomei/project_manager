@@ -1,0 +1,24 @@
+  STEPS:
+    GIVEN: The repo is checked out at this PR; the user opens a Python session
+  at the repo root.
+    WHEN: The user calls last_index([]).
+    THEN:
+      - The call returns without raising any exception.
+      - The returned value is -1 (the natural len(xs) - 1 result), demonstrating
+   the function itself does not crash on empty input.
+
+  QA_PLAN_END
+
+  Spec saved to pm/specs/pr-9279294/qa.md and committed locally (remote push was
+   rejected by the workdir's push-proxy policy, which restricts pushes to a
+  different branch — that's an environment constraint, not a spec problem). QA
+  plan above covers the bug-fix reproduction, adjacent list sizes, the bundled
+  test run, and the empty-list edge case.
+
+✻ Brewed for 46s
+
+────────────────────────────────────────────────────────────────────────────────
+❯ run the QA scenarios
+────────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts
+
