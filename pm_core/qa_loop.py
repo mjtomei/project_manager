@@ -854,8 +854,9 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
 # Step concretization — verify planned steps against actual code
 # ---------------------------------------------------------------------------
 
-_CONCRETIZE_VERDICTS = ("REFINED_STEPS_END",)
-_CONCRETIZE_KEYWORDS = ("REFINED_STEPS_START", "REFINED_STEPS_END")
+_CONCRETIZE_VERDICTS = ("REFINED_STEPS_END", "REFINER_REJECT_END")
+_CONCRETIZE_KEYWORDS = ("REFINED_STEPS_START", "REFINED_STEPS_END",
+                        "REFINER_REJECT_START", "REFINER_REJECT_END")
 _CONCRETIZE_GRACE = 15
 
 
@@ -893,17 +894,37 @@ You can also add or remove steps.
 
 The goal of every scenario is to exercise the impacted feature end-to-end
 the way a user would. Reshape draft steps where needed so they drive the real
-user-facing entry point and observe the real surface.
+user-facing entry point and observe the real surface. If a step substitutes
+code-reading, source-grepping, or implementation-harness inspection (e.g.
+stripping a dependency from PATH to dump an internal string, monkeypatching
+a private function, or asserting a literal appears in generated output)
+for driving the real surface, reshape it.
+
+If the scenario genuinely cannot be driven from the user-facing surface
+in this run — an external dependency is unavailable, the flow needs
+multi-hour wall time, or the surface doesn't exist yet — reject the
+scenario rather than substituting a different methodology. A rejected
+scenario is deferred, not silently converted into a code-reading exercise.
 
 ## Output Format
 
-Output the refined steps between markers:
+Either output the refined steps between markers:
 
 REFINED_STEPS_START
 <your corrected steps here — numbered, concrete, executable>
 REFINED_STEPS_END
 
-IMPORTANT: Your response must end with REFINED_STEPS_END. Do not include any text after it."""
+OR reject the scenario between markers, with a short reason naming
+the specific blocker:
+
+REFINER_REJECT_START
+<one or two sentences explaining what prevents driving this from the
+user surface — be specific about which dependency, surface, or budget
+is missing>
+REFINER_REJECT_END
+
+IMPORTANT: Your response must end with one of those END markers. Do not
+include any text after it. Pick exactly one — either refine or reject."""
 
 
 def _build_concretize_cmd(
@@ -948,12 +969,17 @@ def _concretize_scenario(
     session_id: str,
     scenario_cwd: str,
     instruction_content: str | None = None,
-) -> str | None:
-    """Poll a concretization pane and return refined steps.
+) -> tuple[str | None, str | None]:
+    """Poll a concretization pane and return its outcome.
 
-    The concretizer command should already be running in *pane_id*.
-    Polls for REFINED_STEPS_END and extracts the refined steps.
-    Returns None if concretization failed/timed out.
+    Returns ``(refined_steps, reject_reason)``:
+      - ``(refined, None)`` — refiner produced refined steps.
+      - ``(None, reason)`` — refiner rejected the scenario; reason
+        names the specific blocker so the orchestrator can surface
+        it.
+      - ``(None, None)`` — concretization failed or timed out;
+        caller falls back to the planner's draft steps.
+
     The pane is left open for user review.
     """
     from pm_core.claude_launcher import transcript_path_for
@@ -972,21 +998,30 @@ def _concretize_scenario(
     if not content:
         _log.warning("Concretization timed out or pane died for scenario %d",
                      scenario.index)
-        return None
+        return None, None
 
-    # Parse refined steps — use extract_between_markers which finds the
-    # last START/END pair (skipping the prompt's example markers).
     from pm_core.loop_shared import extract_between_markers
+
+    # Rejection takes precedence — if the refiner emitted both blocks
+    # (shouldn't, but be defensive), the reject signal is the stronger
+    # of the two and we honor it.
+    reject = extract_between_markers(
+        content, "REFINER_REJECT_START", "REFINER_REJECT_END")
+    if reject:
+        _log.info("Concretization rejected scenario %d: %s",
+                  scenario.index, reject.strip())
+        return None, reject.strip()
+
     refined = extract_between_markers(
         content, "REFINED_STEPS_START", "REFINED_STEPS_END")
     if refined:
         _log.info("Concretization produced %d chars of refined steps "
                   "for scenario %d", len(refined), scenario.index)
-        return refined
+        return refined, None
 
-    _log.warning("Concretization output missing REFINED_STEPS markers "
-                 "for scenario %d", scenario.index)
-    return None
+    _log.warning("Concretization output missing REFINED_STEPS / REFINER_REJECT "
+                 "markers for scenario %d", scenario.index)
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -1336,12 +1371,21 @@ def _launch_scenarios_in_tmux(
             win_name: str,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(
+        refined_steps, reject_reason = _concretize_scenario(
             scenario, pr_data, data, concretize_pane,
             session_id=scenario.concretize_session_id,
             scenario_cwd=scenario_cwd,
             instruction_content=instruction_content,
         )
+        if reject_reason:
+            verdict = f"{VERDICT_INPUT_REQUIRED} (refiner rejected: {reject_reason})"
+            state.scenario_verdicts[scenario.index] = verdict
+            state.latest_output = (
+                f"Scenario {scenario.index} ({scenario.title}): {verdict}"
+            )
+            _log.info("Refiner rejected scenario %d — skipping worker launch",
+                      scenario.index)
+            return
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1559,12 +1603,21 @@ def _launch_scenarios_in_containers(
             clone_path: Path,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(
+        refined_steps, reject_reason = _concretize_scenario(
             scenario, pr_data, data, concretize_pane,
             session_id=scenario.concretize_session_id,
             scenario_cwd=container_workdir,
             instruction_content=instruction_content,
         )
+        if reject_reason:
+            verdict = f"{VERDICT_INPUT_REQUIRED} (refiner rejected: {reject_reason})"
+            state.scenario_verdicts[scenario.index] = verdict
+            state.latest_output = (
+                f"Scenario {scenario.index} ({scenario.title}): {verdict}"
+            )
+            _log.info("Refiner rejected scenario %d — skipping worker launch",
+                      scenario.index)
+            return
         if refined_steps:
             scenario.steps = refined_steps
 
