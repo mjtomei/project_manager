@@ -188,12 +188,24 @@ def qa_captures_path(pr_id: str):
     command to resolve the host path for tooling that needs to read
     captures (review sessions, sync to remote storage, etc.).
 
+    Accepts the canonical pm PR id (``pr-NNN``), a GitHub PR number
+    (``42``), or a #-prefixed GitHub number (``#42``) — same
+    resolution as ``pm pr cd``.
+
     Inside a scenario container the captures dir is at ``/captures``
     regardless of the host layout; this command always prints the
     host-side path.
     """
+    from pm_core import store
+    from pm_core.cli.helpers import _resolve_pr_id, state_root
     from pm_core.paths import captures_dir
-    path = captures_dir(pr_id)
+
+    data = store.load(state_root())
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if pr_entry is None:
+        click.echo(f"PR '{pr_id}' not found.", err=True)
+        raise click.exceptions.Exit(1)
+    path = captures_dir(pr_entry["id"])
     if path is None:
         click.echo(
             "Error: cannot resolve session tag (not inside a git repo?)",
