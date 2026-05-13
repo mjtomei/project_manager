@@ -168,6 +168,11 @@ class QALoopState:
     plan_output: str = ""
     scenarios: list[QAScenario] = field(default_factory=list)
     scenario_verdicts: dict[int, str] = field(default_factory=dict)
+    # Optional human-readable detail string per scenario (e.g. refiner
+    # rejection reason). The canonical verdict stays short so it
+    # colorizes correctly in the scenarios pane; the reason renders
+    # alongside it when present.
+    scenario_verdict_reasons: dict[int, str] = field(default_factory=dict)
     latest_verdict: str = ""
     latest_output: str = ""
     # Result of the post-QA finalize pane: "FINALIZE_DONE",
@@ -485,17 +490,20 @@ def _write_status_file(status_path: Path, pr_id: str,
                        verifying_scenarios: set[int] | None = None,
                        queued_scenarios: set[int] | None = None,
                        verification_failures: dict[int, int] | None = None,
-                       error: str = "") -> None:
+                       error: str = "",
+                       verdict_reasons: dict[int, str] | None = None) -> None:
     """Atomically write the qa_status.json file."""
     _verifying = verifying_scenarios or set()
     _queued = queued_scenarios or set()
     _verify_fails = verification_failures or {}
+    _reasons = verdict_reasons or {}
     all_scenarios = []
     if scenario_0 and scenario_0.window_name:
         all_scenarios.append({
             "index": 0,
             "title": scenario_0.title,
             "verdict": "interactive",
+            "verdict_reason": "",
             "window_name": scenario_0.window_name or "",
         })
     for s in scenarios:
@@ -515,6 +523,7 @@ def _write_status_file(status_path: Path, pr_id: str,
             "index": s.index,
             "title": s.title,
             "verdict": verdict,
+            "verdict_reason": _reasons.get(s.index, ""),
             "window_name": s.window_name or "",
         })
     data = {
@@ -1180,9 +1189,12 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
         verdict = state.scenario_verdicts.get(s.index, "")
         if not verdict:
             continue
+        reason = state.scenario_verdict_reasons.get(s.index, "")
+        body = f"# Scenario {s.index}: {s.title}\n\n{verdict}\n"
+        if reason:
+            body += f"\n{reason}\n"
         path = _write_scenario_capture_file(
-            wt, state.pr_id, s.index, "verdict.md",
-            f"# Scenario {s.index}: {s.title}\n\n{verdict}\n",
+            wt, state.pr_id, s.index, "verdict.md", body,
         )
         if not path:
             continue
@@ -1358,6 +1370,7 @@ def _launch_scenarios_in_tmux(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            verdict_reasons=state.scenario_verdict_reasons,
         )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
@@ -1378,13 +1391,16 @@ def _launch_scenarios_in_tmux(
             instruction_content=instruction_content,
         )
         if reject_reason:
-            verdict = f"{VERDICT_INPUT_REQUIRED} (refiner rejected: {reject_reason})"
-            state.scenario_verdicts[scenario.index] = verdict
-            state.latest_output = (
-                f"Scenario {scenario.index} ({scenario.title}): {verdict}"
+            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons[scenario.index] = (
+                f"refiner rejected: {reject_reason}"
             )
-            _log.info("Refiner rejected scenario %d — skipping worker launch",
-                      scenario.index)
+            state.latest_output = (
+                f"Scenario {scenario.index} ({scenario.title}): "
+                f"{VERDICT_INPUT_REQUIRED} — refiner rejected: {reject_reason}"
+            )
+            _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
+                      scenario.index, reject_reason)
             return
         if refined_steps:
             scenario.steps = refined_steps
@@ -1591,6 +1607,7 @@ def _launch_scenarios_in_containers(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            verdict_reasons=state.scenario_verdict_reasons,
         )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
@@ -1610,13 +1627,16 @@ def _launch_scenarios_in_containers(
             instruction_content=instruction_content,
         )
         if reject_reason:
-            verdict = f"{VERDICT_INPUT_REQUIRED} (refiner rejected: {reject_reason})"
-            state.scenario_verdicts[scenario.index] = verdict
-            state.latest_output = (
-                f"Scenario {scenario.index} ({scenario.title}): {verdict}"
+            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons[scenario.index] = (
+                f"refiner rejected: {reject_reason}"
             )
-            _log.info("Refiner rejected scenario %d — skipping worker launch",
-                      scenario.index)
+            state.latest_output = (
+                f"Scenario {scenario.index} ({scenario.title}): "
+                f"{VERDICT_INPUT_REQUIRED} — refiner rejected: {reject_reason}"
+            )
+            _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
+                      scenario.index, reject_reason)
             return
         if refined_steps:
             scenario.steps = refined_steps
@@ -1877,7 +1897,8 @@ def _poll_tmux_verdicts(
         _write_status_file(status_path, state.pr_id, state.scenarios,
                            state.scenario_verdicts,
                            scenario_0=state.scenario_0,
-                           queued_scenarios=_queued_indices)
+                           queued_scenarios=_queued_indices,
+                           verdict_reasons=state.scenario_verdict_reasons)
 
     grace_start = time.monotonic()
 
@@ -2208,7 +2229,8 @@ def _poll_tmux_verdicts(
                                scenario_0=state.scenario_0,
                                verifying_scenarios=verifying_snapshot,
                                queued_scenarios=_queued_indices,
-                               verification_failures=verification_failures)
+                               verification_failures=verification_failures,
+                               verdict_reasons=state.scenario_verdict_reasons)
 
 
 # ---------------------------------------------------------------------------
@@ -2682,7 +2704,8 @@ def run_qa_sync(
                 _notify()
                 _write_status_file(status_path, state.pr_id, state.scenarios,
                                    state.scenario_verdicts,
-                                   scenario_0=state.scenario_0)
+                                   scenario_0=state.scenario_0,
+                                   verdict_reasons=state.scenario_verdict_reasons)
 
         # Create QA window with planner pane (switch=False; we handle
         # session switching explicitly below to preserve focus)
@@ -2890,7 +2913,8 @@ def run_qa_sync(
                        state.scenario_verdicts,
                        scenario_0=state.scenario_0,
                        queued_scenarios=queued_indices,
-                       error=state._error)
+                       error=state._error,
+                       verdict_reasons=state.scenario_verdict_reasons)
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
@@ -2963,7 +2987,8 @@ def run_qa_sync(
     # Write final status file with overall verdict
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts, overall=state.latest_verdict,
-                       scenario_0=state.scenario_0, error=state._error)
+                       scenario_0=state.scenario_0, error=state._error,
+                       verdict_reasons=state.scenario_verdict_reasons)
 
     # Run the post-QA finalize pane synchronously: it verifies scenario
     # pushes reached origin/<branch> and fast-forwards the user's PR
