@@ -163,24 +163,34 @@ State what needs to be implemented in terms of specific code changes:
         "qa": """Generate a **QA spec** (spec_qa).
 
 Describe what to test in terms of **user-facing behaviors** — what a
-user does and what they observe — rather than function-level
-mechanics. The spec drives scenario planning, and scenarios should
-exercise the system the way a real user would.
+user does and what they observe. Each requirement should read like a
+user story with a Given / When / Then acceptance criterion:
 
-- All user flows the PR's changes affect, and what the user should
-  observe at the end of each. Frame requirements as high level stories
-  with specifics like "running X from the CLI produces Y" or "pressing
-  key K in the TUI causes Z", not "function F returns G".
-- Setup the user needs to reach each flow — 
-  described as user steps, not fixtures.
+  **Given** <starting state the user is in>
+  **When** <single concrete action the user takes>
+  **Then** <observable outcome from the user's surface>
+
+That structure forces three things the spec must answer: who is the
+user, what action triggers the behavior, and what should they see as
+a result. Multiple "When" actions for one requirement means it should
+be split into multiple requirements.
+
+- All user flows the PR's changes affect, each captured as one or
+  more Given/When/Then behaviors. Frame the Then in user-observable
+  terms ("the QA pane shows three sections", "`pm qa docs` prints
+  the packaged content", "the bug-fix prompt includes the captures
+  path") rather than function-level claims.
+- Setup the user needs to reach each behavior — described as user
+  steps, not as fixtures. This belongs in each behavior's Given.
 - Edge cases and failure modes from the user's perspective: what
-  inputs / states may cause surprising or wrong behavior.
+  inputs / states cause surprising or wrong behavior. Each becomes
+  its own Given/When/Then.
 - Surface coverage: which user-facing surfaces exist as alternatives
-  to exercise the modified functionality and how expectations differ
-  across them. All supported surfaces should be exercised (e.g., CLI vs GUI).
-- What constitutes a passing vs failing test, again from the user's
-  point of view (the right output appears, the right pane shows up,
-  the right file is created).
+  to exercise the same behavior (e.g. CLI vs TUI), and how
+  expectations differ across them. All supported surfaces should be
+  exercised.
+- Pass/Fail criteria from the user's point of view — the Then clauses
+  effectively answer this; restate any cross-cutting ones explicitly.
 
 If a behavior is only checkable at the function level with no
 user-observable surface, leave it to the unit test suite and don't
@@ -513,10 +523,17 @@ Analyze the codebase to understand the relevant code, then write a spec covering
 
         "qa": """\
 Review the implementation (run `git diff` and read source files), then write a spec covering:
-1. **Requirements** — Key behaviors to exercise and expected outcomes
-2. **Setup** — Setup requirements for testing
-3. **Edge Cases** — Edge cases and failure modes to probe
-4. **Pass/Fail Criteria** — What constitutes a passing vs failing test
+1. **Requirements** — Each user-facing behavior framed as a Given /
+   When / Then user story. Given = starting state, When = single user
+   action, Then = observable outcome from the user's surface. Split
+   multi-action behaviors into separate requirements.
+2. **Setup** — Setup requirements for testing, described as user
+   steps (this folds into each requirement's Given but cross-cutting
+   setup goes here).
+3. **Edge Cases** — Edge cases and failure modes framed the same way
+   (Given / When / Then).
+4. **Pass/Fail Criteria** — What constitutes a passing vs failing
+   test; the Then clauses largely answer this.
 5. **Ambiguities** — Any ambiguities you resolved and how""",
     }
 

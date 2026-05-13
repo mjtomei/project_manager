@@ -1471,17 +1471,42 @@ Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
 Do NOT use markdown headings or code fences — output the plain-text markers
 directly at the start of a line.
 
+Structure each scenario as one Given / When / Then user story:
+
+- **GIVEN**: the starting state the user is in — environment,
+  project state, prior actions — described as user-visible context,
+  not fixtures or mocks.
+- **WHEN**: the single user action that triggers the behavior under
+  test. **One When per scenario.** If you have two actions to test,
+  that's two scenarios.
+- **THEN**: one or more observable outcomes from the user's surface.
+  Each Then should be something a human watching the screen could
+  point at — a pane render, a command output, a created file, an
+  error message, a status change.
+
+Describe what the user does and observes, not the exact keystrokes
+or commands — the worker decides how to drive. "User opens the QA
+pane" is better than "tmux send-keys q"; "the picker modal lists
+three kinds" is better than "the third row of `pm tui view` contains
+the string 'Artifact recipe'".
+
 QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>{artifact_field_1}
-STEPS: <concrete test steps to perform>
+STEPS:
+  GIVEN: <starting state the user is in>
+  WHEN: <the single user action being tested>
+  THEN: <one or more observable outcomes; use sub-bullets if multiple>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">{artifact_field_2}
-STEPS: <concrete test steps>
+STEPS:
+  GIVEN: <starting state>
+  WHEN: <single user action>
+  THEN: <observable outcome(s)>
 
 QA_PLAN_END
 
@@ -1778,6 +1803,26 @@ final verdict.
 
 **Steps**:
 {scenario.steps}
+
+The steps are framed as a Given / When / Then user story. Your job:
+
+- Establish the **Given** state by driving the user-facing surface
+  (start a session, set up a project, open a pane) — not by
+  hand-editing files or monkeypatching internals.
+- Perform the **When** action exactly once, the way a real user
+  would (run the command, press the key, push the PR). Use whatever
+  driver gets the keystroke or command to the right place
+  (`tmux send-keys`, `pm tui send`, plain shell) — that mechanic is
+  yours to choose, but the action itself must be the real user
+  action.
+- Check each **Then** by observing the surface, not by inspecting
+  source or asserting strings in generated output. If the Then says
+  "the QA pane shows three sections," confirm by viewing the pane,
+  not by grepping the code that renders it.
+
+If you can't drive the user surface in this environment, report
+INPUT_REQUIRED with a specific blocker instead of substituting a
+different methodology.
 {instruction_block}{artifact_block}
 ## Execution
 
