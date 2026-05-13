@@ -1379,9 +1379,9 @@ adjacent regressions the fix could have introduced.
 
 **Artifact Recipes are the basis for driving the WHEN action and
 capturing the THEN evidence.** Each recipe spells out how to perform
-the user action on a surface (CLI invocation, tmux/TUI keystrokes,
-network call) and how to record the result — recordings, logs,
-screenshots — consumable by both humans and downstream agents.
+the user action on a surface and how to record the result —
+recordings, logs, screenshots — consumable by both humans and
+downstream agents.
 **Every scenario should produce every applicable artifact.** Set
 the **ARTIFACT** field to any recipe(s) from the library above
 whose description matches the surface the scenario drives. Multiple
