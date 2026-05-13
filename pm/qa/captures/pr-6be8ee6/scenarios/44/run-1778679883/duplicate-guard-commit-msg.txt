@@ -1,0 +1,23 @@
+commit e8fe399971e923023166c7f516113621df52d70f
+Author: Matthew Tomei <matthewtomei@gmail.com>
+Date:   Tue May 12 12:56:01 2026 +0000
+
+    qa: stop re-verifying scenarios on stale idle_prompt after follow-up
+    
+    When a verifier FLAGGED a PASS and we sent a follow-up message into
+    the scenario pane, we popped the scenario's last-hook-ts. The poll
+    gate then accepted any idle_prompt event newer than 0, but
+    hook_events.read_event returns the latest *cached* event — which is
+    still the old idle_prompt from the first verdict if the scenario
+    hasn't yet processed the follow-up keystrokes. extract_verdict
+    re-read the unchanged transcript turn (still PASS) and we spawned a
+    second verifier on the same verdict before the agent produced a new
+    one.
+    
+    Stamp last-hook-ts to time.time() after the follow-up so only events
+    that fire after the follow-up was sent pass the gate.
+    
+    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+ pm_core/qa_loop.py | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
