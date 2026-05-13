@@ -1,0 +1,43 @@
++ unset PYTHONPATH
++ cd /tmp
++ /tmp/pm-pkg-venv/bin/pm which
+/tmp/pm-pkg-venv/lib/python3.10/site-packages/pm_core
++ /tmp/pm-pkg-venv/bin/pm qa docs
++ head -20
+# pm QA library
+
+Every project that uses `pm` gets a `pm/qa/` directory with four
+subdirectories of Markdown-with-frontmatter files. They feed prompts,
+the TUI, and the CLI.
+
+## The four directories
+
+| Directory | Purpose |
+|---|---|
+| `pm/qa/instructions/` | Reusable test-environment procedures — anything a QA scenario needs to set up before it can exercise the code (seed a database, start a dev server, prepare fixture data, log in a test user, etc.). Referenced by QA scenarios in their `INSTRUCTION:` field. |
+| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm qa regression <id>`. Each file is a natural-language prompt; the runner launches Claude with the prompt to exercise the project end-to-end and report back. |
+| `pm/qa/artifacts/`    | Recipes for capturing concrete evidence of behavior — recordings, logs, screenshots — that unambiguously confirm what happened. |
+| `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all scenarios use the same contracts for external dependencies. |
+
+There is also a runtime sibling, `pm/qa/captures/`, written by impl,
+QA, and regression sessions — see [Captures](#captures) below.
+
+## Authoring
+
++ /tmp/pm-pkg-venv/bin/pm qa docs
++ wc -l
+342
++ /tmp/pm-pkg-venv/bin/pm qa docs
++ echo exit=0
+exit=0
++ grep -c '^# pm QA library' /tmp/qa-docs.out
+1
++ grep -c '^## Instructions' /tmp/qa-docs.out
+1
++ grep -c '^## Regression tests' /tmp/qa-docs.out
+1
++ grep -c '^## Artifact recipes' /tmp/qa-docs.out
+1
++ diff /tmp/qa-docs.out /workspace/pm_core/docs/qa_library.md
++ echo 'DIFF: identical'
+DIFF: identical
