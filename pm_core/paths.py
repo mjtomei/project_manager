@@ -69,34 +69,57 @@ def workdirs_base() -> Path:
 def captures_dir(pr_id: str,
                  session_tag: str | None = None,
                  start_path: Path | None = None) -> Path | None:
-    """Return ~/.pm/sessions/<session-tag>/captures/<pr-id>/.
+    """Return the captures directory for *pr_id*.
 
-    QA scenario captures, bug-fix flow pre/post-fix captures, and
-    regression-test captures live under the current pm session's
-    sessions dir, alongside that session's other ephemeral state.
+    Single source of truth for captures-path resolution across every
+    surface (host orchestrator, scenario container, bug-fix flow
+    session, review pane, CLI). Resolution:
 
-    The orchestrator bind-mounts this directory into scenario
-    containers at ``/captures/`` so workers there can write
-    without knowing the host path; on-host workers (bug-fix, tmux
-    scenarios) reference the full host path directly.
+    1. The host path ``~/.pm/sessions/<tag>/captures/<pr_id>/`` if it
+       already exists. ``tag`` is *session_tag* if supplied, else the
+       tmux-derived tag, else the cwd-derived tag.
+    2. Otherwise the container bind-mount at
+       :data:`CONTAINER_CAPTURES_MOUNT` if it exists (set up by
+       :func:`container.create_container`).
+    3. Otherwise create and return the host path.
 
-    If *session_tag* is not provided, derives it from the current
-    repo via :func:`get_session_tag`. Returns None when no session
-    tag can be derived (e.g. not in a git repo).
+    The ``~/.pm`` path takes precedence so on the host we always land
+    in the canonical location; inside a container the host path
+    doesn't exist and we fall through to the bind-mount.
+
+    Returns None when no tag can be derived AND the bind-mount isn't
+    present.
     """
     if session_tag is None:
-        session_tag = get_session_tag(start_path=start_path)
-    if not session_tag:
-        return None
-    d = sessions_dir() / session_tag / "captures" / pr_id
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
+        try:
+            from pm_core.cli.helpers import _get_pm_session
+            pm_sess = _get_pm_session()
+        except Exception:
+            pm_sess = None
+        if pm_sess:
+            session_tag = pm_sess.removeprefix("pm-")
+        else:
+            session_tag = get_session_tag(start_path=start_path)
+    host_path: Path | None = None
+    if session_tag:
+        host_path = sessions_dir() / session_tag / "captures" / pr_id
+        if host_path.is_dir():
+            return host_path
+    mount = Path(CONTAINER_CAPTURES_MOUNT)
+    if mount.is_dir():
+        return mount
+    if host_path is not None:
+        host_path.mkdir(parents=True, exist_ok=True)
+        return host_path
+    return None
 
 # Container-internal path where the host's captures_dir is bind-mounted
 # during container creation. Workers running in containers reference
 # this fixed path; the host filesystem path is invisible to them.
-CONTAINER_CAPTURES_MOUNT = "/captures"
+# Namespaced (``/pm-captures`` rather than ``/captures``) to reduce the
+# chance of colliding with anything the host repo might already have at
+# a top-level ``/captures`` path.
+CONTAINER_CAPTURES_MOUNT = "/pm-captures"
 
 
 def sessions_dir() -> Path:

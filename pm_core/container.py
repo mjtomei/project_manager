@@ -584,10 +584,12 @@ def create_container(
     ]
 
     # Captures bind-mount: ~/.pm/sessions/<tag>/captures/<pr_id>/ on host
-    # → /captures inside the container. Lets QA scenario workers (and any
-    # other in-container workers for the same PR) write recordings,
+    # → /pm-captures inside the container. Lets QA scenario workers (and
+    # any other in-container workers for the same PR) write recordings,
     # transcripts, manifests, and verdicts to a path that's durable on
-    # the host without committing them to the project repo.
+    # the host without committing them to the project repo. Workers
+    # resolve the path via :func:`paths.captures_dir`, which falls
+    # through to the mount when the host path isn't visible.
     if session_tag and pr_id:
         try:
             from pm_core.paths import captures_dir, CONTAINER_CAPTURES_MOUNT

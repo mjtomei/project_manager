@@ -180,6 +180,11 @@ class QALoopState:
     # missing pm session, polling timed out).
     finalize_verdict: str | None = None
     qa_workdir: str | None = None
+    # Session tag derived from the orchestrator's tmux session name
+    # (``session.removeprefix("pm-")``). Captured once so every caller
+    # that resolves a captures path uses the same tag — orchestrator
+    # cwd is a QA workdir whose own ``get_session_tag()`` would drift.
+    session_tag: str | None = None
     # Scenarios whose PASS verdict has been confirmed by the verifier.
     # Finalize waits until every PASS in scenario_verdicts is in this set.
     verified_scenarios: set[int] = field(default_factory=set)
@@ -1178,7 +1183,9 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
 
 
 def _write_scenario_capture_file(pr_id: str, scenario_index: int,
-                                  name: str, content: str) -> Path | None:
+                                  name: str, content: str,
+                                  session_tag: str | None = None,
+                                  ) -> Path | None:
     """Write a per-scenario capture file under the host captures dir.
 
     Path: ``~/.pm/sessions/<session-tag>/captures/<pr_id>/scenarios/<n>/<name>``.
@@ -1186,12 +1193,18 @@ def _write_scenario_capture_file(pr_id: str, scenario_index: int,
     Captures live under the active pm session's sessions dir so they
     don't bloat git history — they're ephemeral artifacts of pm's
     process, like workdirs. Scenario containers bind-mount this
-    directory to ``/captures/``. Returns the written path or
+    directory to ``/pm-captures/``. Returns the written path or
     ``None`` on failure.
+
+    *session_tag* should be the orchestrator's tmux-derived tag (from
+    ``QALoopState.session_tag``) so this lands in the same dir the
+    review pane's bind-mount and scenario containers' ``/pm-captures``
+    point at. Callers that don't supply one fall back to
+    :func:`captures_dir`'s tmux-then-cwd resolution.
     """
     try:
         from pm_core.paths import captures_dir
-        base = captures_dir(pr_id)
+        base = captures_dir(pr_id, session_tag=session_tag)
         if base is None:
             _log.warning("captures_dir unavailable for pr=%s (no session tag)",
                          pr_id)
@@ -1208,13 +1221,15 @@ def _write_scenario_capture_file(pr_id: str, scenario_index: int,
 
 
 def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
-    """Write each scenario's final verdict to ~/.pm/captures/.
+    """Write each scenario's final verdict under the host captures dir.
 
-    Captures are local-only now; the per-scenario verdict.md lives at
-    ``~/.pm/captures/<pr_id>/scenarios/<n>/verdict.md`` on the
-    orchestrator host. The ``branch`` arg is kept for signature
-    stability but no longer drives any git operation — workers don't
-    commit-and-push captures anymore.
+    Resolves to ``~/.pm/sessions/<tag>/captures/<pr_id>/scenarios/<n>/verdict.md``
+    via :func:`_write_scenario_capture_file`, which keys off
+    ``state.session_tag`` so the path matches what the review pane's
+    bind-mount and scenario containers' ``/pm-captures`` point at.
+    The ``branch`` arg is kept for signature stability but no longer
+    drives any git operation — workers don't commit-and-push captures
+    anymore.
     """
     _ = branch  # kept for caller compatibility
     for s in state.scenarios:
@@ -1227,6 +1242,7 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
             body += f"\n{reason}\n"
         _write_scenario_capture_file(
             state.pr_id, s.index, "verdict.md", body,
+            session_tag=state.session_tag,
         )
 
 
@@ -1498,9 +1514,11 @@ def _launch_scenarios_in_containers(
     config = container_mod.load_container_config()
     branch = pr_data.get("branch", "")
 
-    # Derive session tag from tmux session name for container naming and
-    # shared push proxies.
-    _session_tag = session.removeprefix("pm-") if session else None
+    # Session tag for container naming, shared push proxies, and the
+    # captures bind-mount. ``state.session_tag`` was captured in
+    # ``run_qa_sync`` from the same tmux session — reuse it so every
+    # caller agrees on the path.
+    _session_tag = state.session_tag
 
     # In container mode, paths inside the container are fixed
     container_workdir = container_mod._CONTAINER_WORKDIR
@@ -1735,7 +1753,7 @@ def _build_scenario_run_cmd(
     use_containers = bool(scenario.container_name)
     host_clone = scenario.worktree_path or workdir_path
 
-    # Captures dir: container workers see the bind-mounted /captures
+    # Captures dir: container workers see the bind-mounted /pm-captures
     # path; host workers see the full host path under
     # ~/.pm/sessions/<tag>/captures/<pr-id>/. The worker prompt
     # interpolates this as `{captures_root}/scenarios/<n>/...`.
@@ -1749,7 +1767,7 @@ def _build_scenario_run_cmd(
         wd_in = host_clone
         scratch = str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch")
         sess_for_prompt = session
-        host_captures = captures_dir(state.pr_id)
+        host_captures = captures_dir(state.pr_id, session_tag=state.session_tag)
         captures_root = str(host_captures) if host_captures else ""
 
     child_prompt = prompt_gen.generate_qa_child_prompt(
@@ -1762,6 +1780,7 @@ def _build_scenario_run_cmd(
     )
     _write_scenario_capture_file(
         state.pr_id, scenario.index, "prompt.md", child_prompt,
+        session_tag=state.session_tag,
     )
     claude_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
@@ -2633,6 +2652,13 @@ def run_qa_sync(
         state.latest_output = "No pm session found"
         return state
 
+    # Capture the session_tag once from the tmux session name. Every
+    # captures-path resolution downstream keys off this tag — keeps
+    # orchestrator-written artifacts (prompt.md, verdict.md) and
+    # container-written captures landing in the same dir the review
+    # pane's bind-mount also points at.
+    state.session_tag = session.removeprefix("pm-") if session else None
+
     window_name = _compute_qa_window_name(pr_data)
     data = store.load(pm_root)
 
@@ -2717,9 +2743,8 @@ def run_qa_sync(
         # windows no longer exist.
         if use_containers:
             from pm_core import container as container_mod
-            _stag = session.removeprefix("pm-") if session else None
             container_mod.cleanup_orphaned_qa_containers(
-                session, state.pr_id, session_tag=_stag)
+                session, state.pr_id, session_tag=state.session_tag)
 
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.

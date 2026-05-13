@@ -1203,8 +1203,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     if is_container_mode_enabled():
         remove_container(_make_container_name(f"review-{pr_id}"))
     # Resolve a session_tag for the captures bind-mount so the review
-    # container's /captures points at the same per-PR captures dir the
-    # impl and QA containers use (lets a reviewer read pre/post-fix
+    # container's /pm-captures points at the same per-PR captures dir
+    # the impl and QA containers use (lets a reviewer read pre/post-fix
     # captures and scenario captures from inside their pane).
     _review_pm_session = _get_pm_session()
     _review_stag = _review_pm_session.removeprefix("pm-") if _review_pm_session else None

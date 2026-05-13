@@ -16,7 +16,7 @@ the TUI, and the CLI.
 There is also a per-PR captures directory written by impl, QA, and
 regression sessions; it lives at
 `~/.pm/sessions/<session-tag>/captures/<pr-id>/` on the host (resolve
-via `pm qa captures-path <pr-id>`) and is bind-mounted to `/captures`
+via `pm qa captures-path <pr-id>`) and is bind-mounted to `/pm-captures`
 inside scenario containers. Captures are not part of the project
 repo — see [Captures](#captures) below.
 

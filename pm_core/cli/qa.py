@@ -184,7 +184,7 @@ def qa_captures_path(pr_id: str):
     Captures (QA recordings, transcripts, bug-fix pre/post-fix
     artifacts, regression captures) live under
     ``~/.pm/sessions/<session-tag>/captures/<pr-id>/`` and are bind-
-    mounted to ``/captures`` inside scenario containers. Use this
+    mounted to ``/pm-captures`` inside scenario containers. Use this
     command to resolve the host path for tooling that needs to read
     captures (review sessions, sync to remote storage, etc.).
 
@@ -192,9 +192,11 @@ def qa_captures_path(pr_id: str):
     (``42``), or a #-prefixed GitHub number (``#42``) — same
     resolution as ``pm pr cd``.
 
-    Inside a scenario container the captures dir is at ``/captures``
-    regardless of the host layout; this command always prints the
-    host-side path.
+    Inside a container the captures dir is bind-mounted at
+    ``/pm-captures``; this command prints that path (because the
+    host-side ``~/.pm`` location isn't visible from inside the
+    container) so a session can resolve its own captures path without
+    caring whether it runs on the host or inside a container.
     """
     from pm_core import store
     from pm_core.cli.helpers import _resolve_pr_id, state_root
