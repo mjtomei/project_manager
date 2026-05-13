@@ -1,0 +1,102 @@
++ cd /workspace/pm-test-1778698936
++ source /tmp/pm-venv/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/tmp/pm-venv
+++ export VIRTUAL_ENV
+++ _OLD_VIRTUAL_PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(pm-venv) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(pm-venv) '
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
++ export PATH=/tmp/stubs:/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
++ PATH=/tmp/stubs:/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
++ export CLAUDE_STUB_CAPTURE=/tmp/claude-capture.txt
++ CLAUDE_STUB_CAPTURE=/tmp/claude-capture.txt
++ echo '===== Triple 1: nonexistent id ====='
+===== Triple 1: nonexistent id =====
++ pm qa regression nonexistent-id
+Unknown regression test: nonexistent-id
+Run 'pm qa list' to see available tests.
++ echo exit=1
+exit=1
++ echo '===== Triple 2: echo-smoke no flags ====='
+===== Triple 2: echo-smoke no flags =====
++ rm -f /tmp/claude-capture.txt
++ pm qa regression echo-smoke
+Running regression: Echo Smoke
+Session: pm-pm-test-1778698936-9cc76270
+------------------------------------------------------------
++ echo exit=0
+exit=0
++ echo '-- claude stub argv last lines --'
+-- claude stub argv last lines --
++ head -10 /tmp/claude-capture.txt
+=== ARGV ===
+--session-id
+3aa3760f-656a-4f0d-a4a6-4261853af11f
+## Session Context
+
+You are testing against tmux session: pm-pm-test-1778698936-9cc76270
+The TUI pane ID is: %0
+
+To interact with this session, use commands like:
+- pm tui view -s pm-pm-test-1778698936-9cc76270
++ echo '-- search for --plan bugs/improvements (should be empty) --'
+-- search for --plan bugs/improvements (should be empty) --
++ grep -E 'plan bugs|plan improvements' /tmp/claude-capture.txt
++ echo '(no filing addendum)'
+(no filing addendum)
++ echo '===== Triple 3: --file-prs ====='
+===== Triple 3: --file-prs =====
++ rm -f /tmp/claude-capture.txt
++ pm qa regression echo-smoke --file-prs
+Running regression: Echo Smoke
+Session: pm-pm-test-1778698936-9cc76270
+------------------------------------------------------------
++ echo exit=0
+exit=0
++ echo '-- filing-findings text --'
+-- filing-findings text --
++ grep -E 'plan bugs|plan improvements' /tmp/claude-capture.txt
+- **Bug**: `pm pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'`
+- **Improvement**: `pm pr add '<title>' --plan improvements --description '<what you noticed and why>'`
+Skim `pm pr list --plan bugs` / `--plan improvements` first. If a PR
++ echo '===== Triple 4: --file-bugs alias ====='
+===== Triple 4: --file-bugs alias =====
++ rm -f /tmp/claude-capture.txt
++ pm qa regression echo-smoke --file-bugs
+Running regression: Echo Smoke
+Session: pm-pm-test-1778698936-9cc76270
+------------------------------------------------------------
++ echo exit=0
+exit=0
++ grep -E 'plan bugs|plan improvements' /tmp/claude-capture.txt
+- **Bug**: `pm pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'`
+- **Improvement**: `pm pr add '<title>' --plan improvements --description '<what you noticed and why>'`
+Skim `pm pr list --plan bugs` / `--plan improvements` first. If a PR
++ echo '===== Triple 5: pm tui test --list ====='
+===== Triple 5: pm tui test --list =====
++ pm tui test --list
+Usage: pm tui [OPTIONS] COMMAND [ARGS]...
+Try 'pm tui -h' for help.
+
+Error: No such command 'test'.
++ echo exit=2
+exit=2
