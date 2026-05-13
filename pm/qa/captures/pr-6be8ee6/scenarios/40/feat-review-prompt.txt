@@ -17,6 +17,14 @@ with `pm pr spec pr-e96508e impl` so it is available for QA.  If the
 implementation has significant gaps, consider requesting re-implementation
 with spec generation enabled.
 
+## Interacting with the TUI
+
+The base pm tmux session is `pm-pm-test-scen40-1778679559-14956796`. Use `-s pm-pm-test-scen40-1778679559-14956796` with pm tui commands so they target the correct session even from workdir clones:
+- `pm tui view -s pm-pm-test-scen40-1778679559-14956796` — capture and view the current TUI screen
+- `pm tui send <keys> -s pm-pm-test-scen40-1778679559-14956796` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+
 ## Steps
 1. Run `git diff master...HEAD` to see all changes
 2. **Generic checks** — things any codebase should get right:
@@ -49,4 +57,3 @@ If you don't, file a separate bug PR so it doesn't get lost:
   pm pr add '<title>' --plan bugs --description '<location, repro>'
   ```
   Skim `pm pr list --plan bugs` first to avoid duplicates.
-
