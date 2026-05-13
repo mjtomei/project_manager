@@ -1,0 +1,79 @@
++ source /tmp/pm-venv/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/tmp/pm-venv
+++ export VIRTUAL_ENV
+++ _OLD_VIRTUAL_PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(pm-venv) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(pm-venv) '
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
+++ cat /tmp/stub_dir.txt
++ export PATH=/tmp/tmp.h6QJjEBYPB:/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
++ PATH=/tmp/tmp.h6QJjEBYPB:/tmp/pm-venv/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ cat /tmp/test_dir.txt
++ TEST_DIR=/tmp/pm-test-1778679468
++ cd /tmp/pm-test-1778679468
++ rm -f /tmp/pm-qa-regression-prompt.txt
++ pm qa regression demo-reg --file-prs
+Running regression: Demo Reg
+Session: pm-pm-test-1778679468-ec0045a2
+------------------------------------------------------------
++ echo rc=0
+rc=0
++ echo '=== FilingHdr ==='
+=== FilingHdr ===
++ grep -c '## Filing Findings' /tmp/pm-qa-regression-prompt.txt
+1
++ echo '=== plan bugs ==='
+=== plan bugs ===
++ grep -c -- '--plan bugs' /tmp/pm-qa-regression-prompt.txt
+2
++ echo '=== plan improvements ==='
+=== plan improvements ===
++ grep -c -- '--plan improvements' /tmp/pm-qa-regression-prompt.txt
+2
++ echo '=== independent of verdict ==='
+=== independent of verdict ===
++ grep -c 'Filing is independent of your verdict' /tmp/pm-qa-regression-prompt.txt
+1
++ cp /tmp/pm-qa-regression-prompt.txt /tmp/prompt-prs.txt
++ rm -f /tmp/pm-qa-regression-prompt.txt
++ pm qa regression demo-reg --file-bugs
+Running regression: Demo Reg
+Session: pm-pm-test-1778679468-ec0045a2
+------------------------------------------------------------
++ echo rc=0
+rc=0
++ echo '=== diff prs vs bugs ==='
+=== diff prs vs bugs ===
++ diff /tmp/prompt-prs.txt /tmp/pm-qa-regression-prompt.txt
++ echo 'diff rc=0'
+diff rc=0
++ echo '=== help: --file-bugs hidden? ==='
+=== help: --file-bugs hidden? ===
++ pm qa regression --help
++ grep -- --file-bugs
++ echo '(hidden)'
+(hidden)
++ echo '=== help: --file-prs visible ==='
+=== help: --file-prs visible ===
++ pm qa regression --help
++ grep -- --file-prs
+  --file-prs          File PRs (--plan bugs, --plan improvements) for any
