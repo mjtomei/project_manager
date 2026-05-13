@@ -349,11 +349,18 @@ def qa_run(instruction_id: str, pr_id: str | None):
     # instruction_path is relative to pm/qa/
     filename = Path(item["path"]).name
     instr_rel = f"{category}/{filename}"
+    # Attach every available artifact recipe so the worker is told to
+    # produce evidence — without planning, no recipe is auto-selected.
+    artifact_paths = [
+        f"artifacts/{Path(a['path']).name}"
+        for a in qa_instructions.list_artifacts(root)
+    ]
     scenario = qa_loop.QAScenario(
         index=1,
         title=item["title"],
         focus=item["description"] or item["title"],
         instruction_path=instr_rel,
+        artifact_paths=artifact_paths,
         steps=f"Follow the instruction file {filename}",
     )
 
