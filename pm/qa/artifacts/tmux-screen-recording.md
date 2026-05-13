@@ -40,10 +40,14 @@ the same tmux server is enough to break that recursion.
 
 ```
 # 1. Start the canonical pm session. `pm session` (no subcommand)
-#    creates the project's pm session and attaches; with no tty the
-#    attach fails noisily but the session is created either way, so
-#    swallow the output.
-pm session >/dev/null 2>&1 || true
+#    creates the project's pm session and then attaches; the attach
+#    can stall when there's no tty (or when this recipe is itself
+#    running inside another tmux pane), so background the sub-shell
+#    — not `pm session` — and wait for the session to exist before
+#    moving on. The subshell form keeps job-control noise out of the
+#    recording.
+( pm session >/dev/null 2>&1 ) &
+until tmux ls 2>/dev/null | grep -q '^pm-'; do sleep 0.2; done
 TARGET=$(pm session name)             # canonical pm session name
 
 # 2. Stream the home pane's scrollback to transcript.log.
