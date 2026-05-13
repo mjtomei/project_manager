@@ -1475,18 +1475,22 @@ Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
 Do NOT use markdown headings or code fences — output the plain-text markers
 directly at the start of a line.
 
-Structure each scenario as one Given / When / Then user story:
+Structure each scenario as a Given / When / Then user story:
 
 - **GIVEN**: the starting state the user is in — environment,
   project state, prior actions — described as user-visible context,
   not fixtures or mocks.
-- **WHEN**: the single user action that triggers the behavior under
-  test. **One When per scenario.** If you have two actions to test,
-  that's two scenarios.
-- **THEN**: one or more observable outcomes from the user's surface.
-  Each Then should be something a human watching the screen could
-  point at — a pane render, a command output, a created file, an
-  error message, a status change.
+- **WHEN**: the user action(s) that trigger the behavior under test.
+  Each When must be a concrete user action with its own Then. A
+  single scenario can carry multiple When/Then pairs **when they
+  share the same Given** — that's how related actions on the same
+  setup get grouped without paying for a separate scenario each
+  time. Split into multiple scenarios when the Givens diverge.
+- **THEN**: one or more observable outcomes from the user's surface,
+  paired with the When that produced them. Each Then should be
+  something a human watching the screen could point at — a pane
+  render, a command output, a created file, an error message, a
+  status change.
 
 Describe what the user does and observes, not the exact keystrokes
 or commands — the worker decides how to drive. "User opens the
@@ -1501,15 +1505,16 @@ FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>{artifact_field_1}
 STEPS:
   GIVEN: <starting state the user is in>
-  WHEN: <the single user action being tested>
-  THEN: <one or more observable outcomes; use sub-bullets if multiple>
+  WHEN: <user action>
+  THEN: <observable outcome(s); use sub-bullets if multiple>
+  # Add more WHEN/THEN pairs that share the same GIVEN as needed.
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">{artifact_field_2}
 STEPS:
   GIVEN: <starting state>
-  WHEN: <single user action>
+  WHEN: <user action>
   THEN: <observable outcome(s)>
 
 QA_PLAN_END
@@ -1820,16 +1825,18 @@ The steps are framed as a Given / When / Then user story. Your job:
 - Establish the **Given** state by driving the user-facing surface
   (start a session, set up a project, open a pane) — not by
   hand-editing files or monkeypatching internals.
-- Perform the **When** action exactly once, the way a real user
-  would (run the command, press the key, submit the form). Use
-  whatever driver gets the action to the right place — the
-  mechanic is yours to choose, but the action itself must be the
-  real user action.
-- Check each **Then** by observing the surface, not by inspecting
-  source or asserting strings in generated output. If the Then is
-  about something visible on screen, confirm by viewing it; if it's
-  about a file or command output, confirm by reading that file or
-  command output — not by reading the code that produces it.
+- Perform each **When** action the way a real user would (run the
+  command, press the key, submit the form). Use whatever driver
+  gets the action to the right place — the mechanic is yours to
+  choose, but the action itself must be the real user action. A
+  scenario may have several When/Then pairs sharing the same Given;
+  drive each in turn.
+- Check the **Then** that follows each When by observing the
+  surface, not by inspecting source or asserting strings in
+  generated output. If the Then is about something visible on
+  screen, confirm by viewing it; if it's about a file or command
+  output, confirm by reading that file or command output — not by
+  reading the code that produces it.
 
 If you can't drive the user surface in this environment, report
 INPUT_REQUIRED with a specific blocker instead of substituting a

@@ -908,12 +908,12 @@ The scenario should be one Given / When / Then user story:
   steps should fold into the refined Given. Verify the named
   commands, files, and project state actually exist or can be
   created; correct anything that doesn't match the code.
-- **When** is the single user action the scenario tests. The
+- **When** is the user action(s) the scenario tests. The
   scenario's bound ARTIFACT recipe (if any) is the basis for driving
-  this and capturing the resulting Then. Verify the command, key,
-  or surface action exists and is the real user entry point. If the
-  draft has two or more When actions, that's a signal the scenario
-  should be split — flag it in the refined steps or reject.
+  each When and capturing its Then. Verify each named command, key,
+  or surface action exists and is the real user entry point.
+  Multiple When/Then pairs are fine when they share the same Given;
+  split only when the Given would change between actions.
 - **Then** is the observable outcome from the user's surface.
   Verify the predicted outcome matches what the code actually does
   when run.
@@ -939,8 +939,9 @@ Given / When / Then structure:
 
 REFINED_STEPS_START
 GIVEN: <verified starting state>
-WHEN: <verified single user action>
+WHEN: <verified user action>
 THEN: <verified observable outcome(s); use sub-bullets for multiple>
+# repeat WHEN/THEN as needed for additional actions on the same GIVEN
 REFINED_STEPS_END
 
 OR reject the scenario between markers, with a short reason naming
@@ -2324,17 +2325,16 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
 
 This scenario claimed **PASS**. Your job is to verify that the PASS is genuine — that the scenario actually established the Given state, performed the When action, and observed the Thens from the user's surface.
 
-### Step 1: Extract the Given / When / Then
+### Step 1: Extract the Given / When / Then pair(s)
 
 Read the scenario definition above and pull out:
 
 - The **Given** — what starting state the scenario was supposed to establish.
-- The **When** — the single user action the scenario was supposed to perform.
-- The **Then** — the observable outcome(s) the scenario was supposed to check.
+- The **When/Then pair(s)** — for each user action the scenario was supposed to perform, the action itself and the observable outcome(s) it was supposed to produce. A scenario can have one or several When/Then pairs sharing the same Given.
 
 ### Step 2: Match each part against the transcript
 
-For each of Given / When / Then, find **specific evidence** in the transcript:
+For each of Given and each When/Then pair, find **specific evidence** in the transcript:
 
 - **Given**: tool calls that actually set up the state (project init, file creation, session start, etc.) — not "we assumed the project exists" or "this would be set up in a real run."
 - **When**: a tool call that drove the real user surface — a CLI invocation, keystroke driver, network call, or whatever the surface actually accepts — not source inspection, monkeypatching, dependency stripping, or grepping generated output.
@@ -2348,18 +2348,17 @@ Mark each part as:
 
 ### Step 3: Make your judgment
 
-- If Given, When, or Then is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that worked around missing tools by substituting methodology (unit tests, code review, harnessed source dumps) has not exercised the behavior — it should have reported INPUT_REQUIRED instead of PASS.
-- If all parts are DONE but the Then's outcome was FAILED, the verdict is **FLAGGED**.
-- Only if Given, When, and every Then is DONE and matched is the verdict **VERIFIED**.
+- If Given, any When, or any Then is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that worked around missing tools by substituting methodology (unit tests, code review, harnessed source dumps) has not exercised the behavior — it should have reported INPUT_REQUIRED instead of PASS.
+- If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.
+- Only if Given, every When, and every Then is DONE and matched is the verdict **VERIFIED**.
 
 ### Common false-pass patterns to watch for
 
 - **Code reading as proof**: The scenario reads the source code, confirms the logic looks correct, and declares PASS — but never actually runs anything. Reading code is not driving the surface.
 - **Harness-dump as proof**: The scenario strips a dependency from PATH, monkeypatches a private function, or otherwise harnesses the implementation to dump an internal string, then asserts the string contains expected content. The user's surface wasn't exercised.
 - **Substituted methodology**: The scenario can't run the prescribed When (e.g., a CLI tool isn't available), so it writes its own unit tests or fakes instead. Even if those tests pass, the When wasn't performed.
-- **Partial execution**: The scenario establishes the Given but never performs the When, or performs the When but never observes the Then.
-- **Multiple Whens**: The scenario tries to test two distinct user actions under one verdict. Each behavior needs its own scenario; rolling them up loses the per-behavior signal.
-- **Tests pass but wrong tests**: The scenario runs a pre-existing test suite and reports PASS, but the existing tests don't cover the Then the scenario specifies.
+- **Partial execution**: The scenario establishes the Given but never performs the When(s), or performs a When but never observes its Then.
+- **Tests pass but wrong tests**: The scenario runs a pre-existing test suite and reports PASS, but the existing tests don't cover the Then(s) the scenario specifies.
 - **Performed capture instead of real exercise**: If the scenario produced a capture (transcript/cast), check that it looks like a real user exercising the feature. Watch for status strings printed unconditionally rather than derived from the actual command result, and for narration of steps in place of driving them. A capture that performs the exercise instead of recording it does not justify PASS.
 
 ## Response Format
