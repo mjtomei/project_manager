@@ -1175,7 +1175,7 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
 
 def _install_artifact_files(pm_root: Path, scenario: QAScenario,
                             scratch_path: Path,
-                            scratch_dir: str | None = None) -> None:
+                            scratch_dir: str) -> None:
     """Copy referenced artifact recipes into the scenario's scratch dir.
 
     Parallel to ``_install_instruction_file`` but for artifact recipes
