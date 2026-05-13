@@ -1475,22 +1475,25 @@ Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
 Do NOT use markdown headings or code fences — output the plain-text markers
 directly at the start of a line.
 
-Structure each scenario as a Given / When / Then user story:
+Structure each scenario as one or more Given / When / Then user
+stories. Each story is a complete triple:
 
 - **GIVEN**: the starting state the user is in — environment,
   project state, prior actions — described as user-visible context,
   not fixtures or mocks.
-- **WHEN**: the user action(s) that trigger the behavior under test.
-  Each When must be a concrete user action with its own Then. A
-  single scenario can carry multiple When/Then pairs **when they
-  share the same Given** — that's how related actions on the same
-  setup get grouped without paying for a separate scenario each
-  time. Split into multiple scenarios when the Givens diverge.
-- **THEN**: one or more observable outcomes from the user's surface,
-  paired with the When that produced them. Each Then should be
-  something a human watching the screen could point at — a pane
-  render, a command output, a created file, an error message, a
-  status change.
+- **WHEN**: the single user action that triggers the behavior under
+  test.
+- **THEN**: one or more observable outcomes from the user's surface.
+  Each Then should be something a human watching the screen could
+  point at — a pane render, a command output, a created file, an
+  error message, a status change.
+
+A scenario can carry several Given/When/Then triples back-to-back —
+that's how related stories get grouped under one scenario without
+paying for a separate scenario each time. The triples are
+independent: each can have its own Given, its own When, its own
+Then. Treat them as a small batch of user stories that happen to
+share a focus.
 
 Describe what the user does and observes, not the exact keystrokes
 or commands — the worker decides how to drive. "User opens the
@@ -1507,7 +1510,8 @@ STEPS:
   GIVEN: <starting state the user is in>
   WHEN: <user action>
   THEN: <observable outcome(s); use sub-bullets if multiple>
-  # Add more WHEN/THEN pairs that share the same GIVEN as needed.
+  # Add more GIVEN/WHEN/THEN triples below as needed; each is an
+  # independent user story. New GIVEN means a fresh starting state.
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
@@ -1820,23 +1824,24 @@ final verdict.
 **Steps**:
 {scenario.steps}
 
-The steps are framed as a Given / When / Then user story. Your job:
+The steps are framed as one or more Given / When / Then user
+stories. A scenario may bundle several triples that share a focus;
+drive each triple in turn. For each:
 
 - Establish the **Given** state by driving the user-facing surface
   (start a session, set up a project, open a pane) — not by
-  hand-editing files or monkeypatching internals.
-- Perform each **When** action the way a real user would (run the
+  hand-editing files or monkeypatching internals. If a later triple
+  needs a different starting state, reset to its Given before
+  performing the When.
+- Perform the **When** action the way a real user would (run the
   command, press the key, submit the form). Use whatever driver
   gets the action to the right place — the mechanic is yours to
-  choose, but the action itself must be the real user action. A
-  scenario may have several When/Then pairs sharing the same Given;
-  drive each in turn.
-- Check the **Then** that follows each When by observing the
-  surface, not by inspecting source or asserting strings in
-  generated output. If the Then is about something visible on
-  screen, confirm by viewing it; if it's about a file or command
-  output, confirm by reading that file or command output — not by
-  reading the code that produces it.
+  choose, but the action itself must be the real user action.
+- Check the **Then** by observing the surface, not by inspecting
+  source or asserting strings in generated output. If the Then is
+  about something visible on screen, confirm by viewing it; if it's
+  about a file or command output, confirm by reading that file or
+  command output — not by reading the code that produces it.
 
 If you can't drive the user surface in this environment, report
 INPUT_REQUIRED with a specific blocker instead of substituting a

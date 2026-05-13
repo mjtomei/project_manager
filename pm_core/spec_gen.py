@@ -172,9 +172,10 @@ user story with a Given / When / Then acceptance criterion:
 
 That structure forces three things the spec must answer: who is the
 user, what action triggers the behavior, and what should they see as
-a result. Related actions sharing the same Given can be grouped
-under one requirement with multiple When/Then pairs; split into
-separate requirements when the Givens diverge.
+a result. One requirement may bundle several Given/When/Then triples
+when the stories share a focus — downstream scenarios can batch
+related triples together for efficiency. Each triple still keeps its
+own Given, When, and Then.
 
 - All user flows the PR's changes affect, each captured as one or
   more Given/When/Then behaviors. Frame the Then in user-observable
