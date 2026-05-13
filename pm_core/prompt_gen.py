@@ -3,8 +3,8 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
-from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
-                               get_spec_mocks_section)
+from pm_core.spec_gen import (format_spec_for_prompt,
+                               spec_generation_preamble)
 # Bug-fix prompt blocks live in their own module; re-exported here so
 # existing call sites and tests (which use prompt_gen._is_bug_pr) keep
 # working without an import path change.
@@ -1338,9 +1338,8 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Get instruction library summary, mocks library, and notes
+    # Get instruction library summary and notes
     library_summary = "No instruction library found."
-    mocks_summary = ""
     general_notes_block = ""
     qa_specific_block = ""
     has_artifact_recipes = False
@@ -1350,13 +1349,6 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
         artifacts = qa_instructions.list_artifacts(root)
         has_artifact_recipes = bool(artifacts)
-        mocks_list = qa_instructions.list_mocks(root)
-        if mocks_list:
-            mocks_lines = []
-            for m in mocks_list:
-                desc = f" — {m['description']}" if m["description"] else ""
-                mocks_lines.append(f"- **{m['id']}**{desc}")
-            mocks_summary = "\n".join(mocks_lines)
         general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
     except FileNotFoundError:
         pass
@@ -1367,29 +1359,6 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     # Include QA spec if already generated, or preamble to generate one
     qa_spec_block = format_spec_for_prompt(pr, "qa")
     qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root)
-
-    mocks_library_section = ""
-    if mocks_summary:
-        mocks_library_section = f"""
-## Mock Library
-
-These shared mock definitions are available.  Reference them by ID in each
-scenario's MOCKS field.  Each mock is injected into the scenario prompt so
-all agents share the same contracts.
-
-{mocks_summary}
-
-If a scenario needs to mock an external dependency that is NOT listed above,
-declare it as a NEW_MOCK before the scenarios so it can be generated first.
-"""
-    else:
-        mocks_library_section = """
-## Mock Library
-
-No shared mocks are defined yet.  If any scenarios need to mock external
-dependencies (Claude sessions, git operations, tmux, network calls, etc.),
-declare them as NEW_MOCK blocks before the scenarios.
-"""
 
     bug_fix_qa_block = ""
     if _is_bug_pr(pr):
@@ -1495,34 +1464,23 @@ one, agents fall back to reading code and auto-passing.  Try to assign an instru
 to every scenario. Try to make sure functionality is exercised with every
 possible user facing surface (both CLI and GUI for example).
 {artifact_recipes_block}
-{mocks_library_section}
+
 ## Output Format
 
 Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
 Do NOT use markdown headings or code fences — output the plain-text markers
 directly at the start of a line.
 
-First declare any new mocks needed (omit this section if all needed mocks
-already exist in the Mock Library above):
-
-NEW_MOCK: <mock-id e.g. "claude-session">
-DEPENDENCY: <the external system being mocked e.g. "Anthropic Claude API">
-REASON: <why scenarios need this mocked rather than real>
-
-Then list the scenarios:
-
 QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>{artifact_field_1}
-MOCKS: <comma-separated mock IDs this scenario uses, or "none">
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">{artifact_field_2}
-MOCKS: <mock IDs or "none">
 STEPS: <concrete test steps>
 
 QA_PLAN_END
@@ -1733,9 +1691,6 @@ origin {branch} && git push origin {branch}`.
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
-    # Include mocks section from QA spec so every scenario uses the same strategy
-    mocks_block = get_spec_mocks_section(pr)
-
     # Workdir description and execution instructions differ by mode
     backend_name = data.get("project", {}).get("backend", "vanilla")
     has_remote = backend_name != "local"
@@ -1797,7 +1752,7 @@ the fix.
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
 {workdir_block}
-{pr_notes_block}{mocks_block}{bug_fix_scenario_block}
+{pr_notes_block}{bug_fix_scenario_block}
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own

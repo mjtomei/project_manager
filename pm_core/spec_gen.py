@@ -181,10 +181,6 @@ exercise the system the way a real user would.
 - What constitutes a passing vs failing test, again from the user's
   point of view (the right output appears, the right pane shows up,
   the right file is created).
-- Mocks: what external dependencies (Claude sessions, git network
-  ops, etc.) need a fake or stub for scenarios to run reliably, and
-  what each fake should simulate. Internal pm code should not be
-  mocked.
 
 If a behavior is only checkable at the function level with no
 user-observable surface, leave it to the unit test suite and don't
@@ -197,15 +193,6 @@ include it in the QA spec.""",
 Run `git diff {base_branch}...HEAD` in the workdir to see what changed.
 Read source files as needed to understand the implementation.
 """
-
-    # QA spec gets an extra section for mocks planning
-    mocks_section = ""
-    if phase == "qa":
-        mocks_section = """5. **Mocks** — For each external dependency that scenarios should mock \
-(e.g. Claude sessions, git operations, tmux): the contract (what it \
-simulates), the scripted responses it should return, and what remains \
-unmocked (uses the real implementation).  This section is included in \
-every scenario prompt so agents know exactly what is and isn't simulated.\n"""
 
     mode = pr_spec_mode(pr)
     ambiguity_instruction = ""
@@ -253,7 +240,7 @@ The spec should contain:
 2. **Implicit Requirements** — What must also be true for stated requirements to hold
 3. **Ambiguities** — Identified ambiguities with proposed resolutions
 4. **Edge Cases** — Interactions with existing behavior not addressed in the description
-{mocks_section}"""
+"""
     return prompt.strip()
 
 
@@ -530,12 +517,7 @@ Review the implementation (run `git diff` and read source files), then write a s
 2. **Setup** — Setup requirements for testing
 3. **Edge Cases** — Edge cases and failure modes to probe
 4. **Pass/Fail Criteria** — What constitutes a passing vs failing test
-5. **Ambiguities** — Any ambiguities you resolved and how
-6. **Mocks** — For each external dependency that scenarios should mock \
-(e.g. Claude sessions, git operations, tmux): the contract (what it simulates), \
-the scripted responses it should return, and what remains unmocked. \
-This section is included in every scenario prompt so all agents share the \
-same mocking strategy.""",
+5. **Ambiguities** — Any ambiguities you resolved and how""",
     }
 
     instructions = spec_instructions.get(phase, spec_instructions["impl"])
