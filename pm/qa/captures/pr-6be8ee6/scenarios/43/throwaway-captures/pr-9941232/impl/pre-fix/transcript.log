@@ -1,5 +1,0 @@
-+ python3 buggy.py
-Traceback (most recent call last):
-  File "/home/pm/.pm/workdirs/pm-test-1778679491-bca6d7c8/pm-pr-9941232-fix-defect-da44b97a/buggy.py", line 4, in <module>
-    assert add(2, 3) == 5, f"add(2,3) returned {add(2,3)}"
-AssertionError: add(2,3) returned -1

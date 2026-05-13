@@ -1,4 +1,0 @@
-{"version": 2, "width": 80, "height": 24, "timestamp": 1778679601, "env": {"SHELL": "/bin/bash", "TERM": "xterm"}}
-[0.002301, "o", "+ python3 buggy.py\r\n"]
-[0.010977, "o", "Traceback (most recent call last):\r\n  File \"/home/pm/.pm/workdirs/pm-test-1778679491-bca6d7c8/pm-pr-9941232-fix-defect-da44b97a/buggy.py\", line 4, in <module>\r\n    assert add(2, 3) == 5, f\"add(2,3) returned {add(2,3)}\"\r\nAssertionError: add(2,3) returned -1\r\n"]
-[0.012833, "o", "+ echo exit=0\r\nexit=0\r\n"]
