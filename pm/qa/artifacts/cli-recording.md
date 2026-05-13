@@ -88,6 +88,28 @@ If `asciinema` isn't installed and can't be installed, fall back to
 appending `| tee transcript.log` to the command line — you lose
 animation but keep the output. Note the fallback in the manifest.
 
+#### Gotcha: `pm session` inside the recorded pane
+
+If the scripted commands need to (re)start a pm tmux session — e.g.
+to exercise the missing-session error path and then resume normal
+flow — invoking `pm session` directly will hang the recording. `pm
+session` creates the session and then tries to attach; attaching from
+inside the scaffold pane stalls in a non-interactive context, and
+`2>/dev/null || true` only swallows the error, not the wait.
+
+Background the **sub-shell**, not `pm session` itself, so the attach
+detaches from the script's control flow and a short wait closes the
+race before the next command runs:
+
+```
+( pm session >/dev/null 2>&1 ) &
+until tmux ls 2>/dev/null | grep -q '^pm-'; do sleep 0.2; done
+```
+
+`pm session &` (without the subshell) also unblocks the script but
+leaves a foreground job-control marker in the recording; the subshell
+form keeps the cast clean.
+
 ## Manifest format
 
 ```
