@@ -1,0 +1,78 @@
++ source /tmp/pm-venv-scen40/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/tmp/pm-venv-scen40
+++ export VIRTUAL_ENV
+++ _OLD_VIRTUAL_PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/tmp/pm-venv-scen40/bin:/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(pm-venv-scen40) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(pm-venv-scen40) '
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -n /usr/bin/bash -o -n '' ']'
+++ hash -r
++ export PYTHONPATH=/workspace
++ PYTHONPATH=/workspace
++ source /tmp/scen40-env
+++ TEST_DIR=/tmp/pm-test-scen40-1778679559
+++ BUG_ID=pr-61c2679
+++ FEAT_ID=pr-e96508e
++ echo '--- BUG_ID=pr-61c2679 FEAT_ID=pr-e96508e ---'
+--- BUG_ID=pr-61c2679 FEAT_ID=pr-e96508e ---
++ echo '=== assertion: Bug Fix Flow heading in bug impl ==='
+=== assertion: Bug Fix Flow heading in bug impl ===
++ grep -c 'Bug Fix Flow' /tmp/scen40-bug-impl.txt
+1
++ echo '=== assertion: 5 numbered steps ==='
+=== assertion: 5 numbered steps ===
++ grep -cE '1\. \*\*Manual repro|2\. \*\*Write a failing test|3\. \*\*Fix|4\. \*\*Verify with the test|5\. \*\*Verify manually' /tmp/scen40-bug-impl.txt
+5
++ echo '=== assertion: pm/qa/instructions/ + pm/qa/artifacts/ mentioned ==='
+=== assertion: pm/qa/instructions/ + pm/qa/artifacts/ mentioned ===
++ grep -c pm/qa/instructions/ /tmp/scen40-bug-impl.txt
+1
++ grep -c pm/qa/artifacts/ /tmp/scen40-bug-impl.txt
+1
++ echo '=== assertion: captures paths interpolated with BUG_ID ==='
+=== assertion: captures paths interpolated with BUG_ID ===
++ grep -c pm/qa/captures/pr-61c2679/impl/pre-fix /tmp/scen40-bug-impl.txt
+2
++ grep -c pm/qa/captures/pr-61c2679/impl/post-fix /tmp/scen40-bug-impl.txt
+1
++ echo '=== assertion: step 1 mentions stash + parent commit + revert + check in with user ==='
+=== assertion: step 1 mentions stash + parent commit + revert + check in with user ===
++ grep -cE 'stash|parent commit|revert fix files' /tmp/scen40-bug-impl.txt
+2
++ grep -c 'check in with the' /tmp/scen40-bug-impl.txt
+1
++ echo '=== assertion: feature impl has NO Bug Fix Flow and NO captures interpolation ==='
+=== assertion: feature impl has NO Bug Fix Flow and NO captures interpolation ===
++ grep -c 'Bug Fix Flow' /tmp/scen40-feat-impl.txt
+0
++ grep -c pm/qa/captures/pr-e96508e/impl/ /tmp/scen40-feat-impl.txt
+0
++ echo '=== assertion: bug review has Bug Fix Review Checklist + INPUT_REQUIRED, captures path ==='
+=== assertion: bug review has Bug Fix Review Checklist + INPUT_REQUIRED, captures path ===
++ grep -c 'Bug Fix Review Checklist' /tmp/scen40-bug-review-full.txt
+1
++ grep -c pm/qa/captures/pr-61c2679/impl/ /tmp/scen40-bug-review-full.txt
+1
++ grep -c INPUT_REQUIRED /tmp/scen40-bug-review-full.txt
+2
++ echo '=== assertion: feature review has NO Bug Fix Review Checklist ==='
+=== assertion: feature review has NO Bug Fix Review Checklist ===
++ grep -c 'Bug Fix Review Checklist' /tmp/scen40-feat-review-full.txt
+0
++ echo '--- DONE ---'
+--- DONE ---
