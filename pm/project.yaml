@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-001
+  active_pr: pr-0b14f2c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13229,9 +13229,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/190
   gh_pr_number: 190
   created_at: '2026-05-04T12:22:33.932646+00:00'
-  updated_at: '2026-05-08T23:01:57.735826+00:00'
+  updated_at: '2026-05-13T21:12:52.617876+00:00'
   started_at: '2026-05-04T14:15:15.348715+00:00'
-  reviewed_at: '2026-05-04T16:00:20.045289+00:00'
+  reviewed_at: '2026-05-13T21:12:52.617876+00:00'
   merged_at: null
   notes:
   - id: note-a3ed531
@@ -13383,6 +13383,66 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-bbce993ad40dfe10)'
     created_at: '2026-05-09T12:24:47Z'
     last_edited: '2026-05-09T12:24:47Z'
+  - id: note-5a05678
+    text: 'Fixed duplicate-verification bug: when the verifier FLAGGED a PASS and
+      we sent a follow-up to the scenario pane, _last_scenario_hook_ts was popped,
+      so the poll gate accepted the stale idle_prompt from the original verdict and
+      re-extracted the unchanged PASS turn — spawning a second verifier before the
+      scenario had responded. Now stamp it to time.time() after the follow-up so only
+      events fired after the follow-up pass the gate. See commit e8fe399.'
+    created_at: '2026-05-12T12:58:19Z'
+    last_edited: '2026-05-12T12:58:19Z'
+  - id: note-c311734
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-6a87858569a89e07)'
+    created_at: '2026-05-12T14:06:46Z'
+    last_edited: '2026-05-12T14:06:46Z'
+  - id: note-2b42dc6
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-cb4de4c7f7048cd2)'
+    created_at: '2026-05-12T15:25:54Z'
+    last_edited: '2026-05-12T15:25:54Z'
+  - id: note-42f35c2
+    text: 'QA NEEDS_WORK: Bug-fix flow prompt rewrites for a bugs PR (impl + review):
+      PASS; pm qa CLI surface for the artifacts category and the rest of the new commands:
+      INPUT_REQUIRED; TUI QA pane shows three sections and the create-picker modal
+      routes correctly: NEEDS_WORK; pm qa regression replaces pm tui test, with unified
+      filing addendum for bugs + improvements: PASS; Packaged qa_library.md survives
+      pip install and pm qa docs works from any cwd: PASS; Frontmatter resilience
+      — loader and CLI/TUI surfaces tolerate missing or legacy fields: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-6be8ee6-4b86c9cea69d568c)'
+    created_at: '2026-05-12T22:06:18Z'
+    last_edited: '2026-05-12T22:06:18Z'
+  - id: note-7a59cd4
+    text: 'QA INPUT_REQUIRED: Bug-fix flow prompt is restructured for a bug PR and
+      absent for non-bug PRs: PASS; pm qa CLI surface — add-, author-, list/show/edit,
+      docs, regression: PASS; TUI QA pane shows three sections and the create-picker
+      modal routes correctly: PASS; End-to-end integration — bug-fix session produces
+      pre/post captures and QA scenarios save under new layout: INPUT_REQUIRED; Review-loop
+      INPUT_REQUIRED gate and duplicate-verifier guard: INPUT_REQUIRED; Packaging
+      — qa_library.md survives pip install; frontmatter resilience across CLI and
+      TUI: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-ba760724d2c7b159)'
+    created_at: '2026-05-12T23:28:10Z'
+    last_edited: '2026-05-12T23:28:10Z'
+  - id: note-9a47908
+    text: 'QA INPUT_REQUIRED: Bug-fix flow prompt structure for a bug PR vs non-bug
+      PR: PASS; pm qa CLI — add/author/list/show/edit/docs across three categories:
+      PASS; pm qa docs from outside the source tree (packaging): PASS; pm qa regression
+      — id resolution, filing addendum, and removed pm tui test: PASS; TUI QA pane
+      — three sections, status counter, and create-picker modal routing: PASS; End-to-end
+      bug-fix + QA captures pipeline: INPUT_REQUIRED; Frontmatter resilience across
+      CLI and TUI: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-60f01be41a9734aa)'
+    created_at: '2026-05-13T20:51:35Z'
+    last_edited: '2026-05-13T20:51:35Z'
+  - id: note-72ceda9
+    text: 'QA INPUT_REQUIRED: Bug-fix flow prompt structure varies by PR plan: PASS;
+      pm qa add-/author-/list/show/edit across three categories: PASS; pm qa regression
+      replaces pm tui test with unified filing addendum: PASS; TUI QA pane shows three
+      sections and create-picker modal routes correctly: PASS; Packaged qa_library.md
+      survives pip install and frontmatter resilience: PASS; End-to-end bug-fix session
+      produces pre-fix + post-fix captures and downstream QA scenarios save under
+      the new layout: INPUT_REQUIRED; Review-loop INPUT_REQUIRED gate and duplicate-verifier
+      guard: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-5b3236ea0e767f20)'
+    created_at: '2026-05-13T21:40:00Z'
+    last_edited: '2026-05-13T21:40:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-in-e802a472
 - id: pr-cfe24ea
   plan: improvements
@@ -16789,3 +16849,372 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-488b748
+  plan: bugs
+  title: Verdict polling stalls when transcript symlink slug differs from Claude pane
+    runtime cwd
+  branch: pm/pr-488b748-verdict-polling-stalls-when-transcript-symlink-slu
+  status: pending
+  depends_on: []
+  description: '## Repro / evidence
+
+
+    From pr-6be8ee6 scenario 36 (`pm/qa/captures/pr-6be8ee6/scenarios/36/MANIFEST.md`):
+
+
+    - Claude review pane''s actual cwd (per `tmux list-panes`): `/tmp/pm-test-1778627480/pm`
+
+    - Claude wrote its JSONL to: `~/.claude/projects/-tmp-pm-test-1778627480-pm/<sid>.jsonl`
+    (slug of the real cwd)
+
+    - `pm pr review --review-loop` had pre-created the transcript symlink pointing
+    at: `~/.claude/projects/-home-pm--pm-workdirs-pm-test-1778627480-...-c8b85d39/<sid>.jsonl`
+    (slug of the *registered workdir*)
+
+    - The two slugs never converge, so `loop_shared.poll_for_verdict` tails a symlink
+    whose target directory never comes into existence. The review loop sits on iteration
+    1 forever even though the pane plainly shows INPUT_REQUIRED.
+
+
+    Same symptom hit scenario 35''s CP2 (nested qa_loop stalled mid-execution).
+
+
+    ## Root cause
+
+
+    `build_claude_shell_cmd(cwd=X, transcript=Y)` writes a symlink at the slug derived
+    from X. Whether Claude later writes to that slug depends on its *runtime* cwd,
+    which is determined separately by `split_pane_at` / `new_window_get_pane` (or
+    by `docker exec -w` in container mode). Each launch site computes the two paths
+    independently and the discipline is enforced only by convention. When the registered
+    workdir and the actual pane cwd diverge — symlinks, throwaway-project layouts,
+    nested pm invocations — the slugs diverge and polling stalls indefinitely.
+
+
+    Affected launch sites (each picks an independent symlink-cwd + pane-cwd pair):
+
+    - pm_core/cli/pr.py:1180-1192 (review)
+
+    - pm_core/cli/pr.py:1017, 1501 (impl, merge)
+
+    - pm_core/qa_loop.py:1674 (scenario worker)
+
+    - pm_core/qa_loop.py:2380 (verifier)
+
+    - pm_core/cli/qa.py:516
+
+    - pm_core/cli/watcher.py:371
+
+
+    ## Proposed fix
+
+
+    Introduce a single `ClaudeLaunchCtx` dataclass in pm_core/claude_launcher.py that
+    captures `(pane_cwd, runtime_cwd, host_write_dir, session_id)` with `for_host(workdir)`
+    / `for_container(host_workdir)` factories. Make build_claude_shell_cmd, split_pane_at
+    callers, and transcript_path_for all consume the same ctx so the slug is derived
+    from runtime_cwd exactly once. In `for_host`, resolve workdir with `pwd -P` so
+    symlinked workdirs map to the same canonical slug Claude will use. Also: after
+    launch, the watcher should resolve the symlink and fail fast if the target directory
+    does not appear within a short grace window, rather than polling forever.
+
+
+    ## Out of scope
+
+
+    Whatever drove the divergence specifically in the scenario 36 case (throwaway-project
+    workdir vs. registered workdir) — fix the launcher-side discipline first; the
+    upstream layout bug becomes harmless if symlink-cwd and pane-cwd are guaranteed
+    equal.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-13T12:59:18.511929+00:00'
+  updated_at: '2026-05-13T13:02:50.142839+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-b6fb4c8
+    text: 'Band-aid landed in pr-6be8ee6 (commit 6829b6a): verdict_transcript._read_transcript_text
+      falls back to ~/.claude/projects/*/<session_id>.jsonl when the symlink target
+      is dangling, so verdict polling no longer stalls when the symlink slug and Claude
+      runtime-cwd slug diverge. Proper launcher refactor (ClaudeLaunchCtx) still TODO
+      under this PR.'
+    created_at: '2026-05-13T13:02:49Z'
+    last_edited: '2026-05-13T13:02:49Z'
+- id: pr-8efa789
+  plan: bugs
+  title: QA verdict detection misses verdict when /loop wakeup adds a no-verdict turn
+    after it
+  branch: pm/pr-8efa789-qa-verdict-detection-misses-verdict-when-loop-wake
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+
+    Scenario 44 of pr-6be8ee6 emitted `INPUT_REQUIRED` as its verdict line, then exited
+    the worker. A `/loop` wakeup fired afterwards and the model emitted one more turn
+    ("Scenario 44 is complete; verdict already submitted as INPUT_REQUIRED with captures
+    pushed. No further work to do — ending the loop.") plus a 4-task list (2 done,
+    2 open) at the bottom of the pane.
+
+
+    The QA verdict detector recorded `verdict: ""` for scenario 44 in `qa_status.json`,
+    even though the captures were committed and pushed and the prior turn explicitly
+    said `INPUT_REQUIRED`. Other scenarios (38–43) in the same run had verdicts captured
+    correctly.
+
+
+    ## Repro
+
+
+    - pr-6be8ee6, scenario 44, window `qa-#190-s44`, pane `%1553`.
+
+    - See `/home/matt/.pm/workdirs/qa/pr-6be8ee6-456f8f6d7c28edf5/qa_status.json`
+    — entry for index 44 has `"verdict": ""`.
+
+    - See pane scrollback: the verdict `INPUT_REQUIRED` is on its own line, followed
+    by `✻ Cooked for 9m 35s`, then `✻ Claude resuming /loop wakeup (May 13 1:49pm)`,
+    then a follow-up assistant turn, then a stale 4-task list with 2 open tasks.
+
+
+    ## Hypothesis
+
+
+    The verdict detector is keyed off the latest assistant turn (or the final pane
+    content). When `/loop` wakes the worker after the verdict has been emitted and
+    the worker emits a follow-up "nothing to do" turn that does not contain a verdict
+    line, the detector reads the post-wakeup tail and sees no verdict. Open tasks
+    at the bottom of the pane may further mask the prior verdict.
+
+
+    ## Expected
+
+
+    Once a worker emits a final-line verdict (PASS / NEEDS_WORK / INPUT_REQUIRED /
+    FAIL), the verdict should be sticky and not get cleared by subsequent `/loop`
+    wakeups or trailing turns. Either:
+
+    - snapshot the verdict at emission time, or
+
+    - detector should scan back through prior assistant turns rather than only the
+    latest, or
+
+    - /loop should not re-fire on a worker that has already emitted a terminal verdict.
+
+
+    ## Files to look at
+
+
+    - `pm_core/qa_loop.py` (verdict polling / extraction)
+
+    - `pm_core/verdict_transcript.py`
+
+    - Whatever drives `/loop` wakeups for QA scenario workers'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-13T14:15:50.184464+00:00'
+  updated_at: '2026-05-13T14:15:50.184464+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-06a96fa
+  plan: plan-regression
+  title: QA scenarios reuse regression tests as their flow driver
+  branch: pm/pr-06a96fa-qa-scenarios-reuse-regression-tests-as-their-flow-
+  status: pending
+  depends_on:
+  - pr-7d5d036
+  description: "## Goal\n\nSwitch QA scenarios from \"instruction (setup) + artifact\
+    \ recipe\n(drive + capture)\" pairs to binding directly to a **regression test**\n\
+    as the canonical flow driver, with per-scenario assertions layered\non top.\n\n\
+    ## Why\n\nToday every QA run reinvents how to drive a flow. The planner picks\n\
+    an instruction for setup and a recipe for capture, and the worker\nstitches them\
+    \ together. The flows get exercised once (during that\nQA run), captured, and\
+    \ then never re-run — every PR's scenarios\nstart from scratch.\n\nRegression\
+    \ tests are designed to be durable, reusable, recorded\nflows. If a QA scenario\
+    \ IS a regression-test run + per-scenario\nThens, then:\n\n- The library of \"\
+    exercised user flows\" grows by accumulation\n  rather than per-PR effort.\n-\
+    \ The same flow is driven the same way across PRs, so behavior\n  drift gets caught.\n\
+    - Captures from regression runs feed both the regression history\n  and the QA\
+    \ scenario's evidence.\n- The instruction/artifact-recipe split goes away — a\
+    \ regression\n  test already specifies the surface, the driver, and the capture.\n\
+    \n## After this PR\n\nQA scenario shape becomes (sketch):\n\n    SCENARIO N: <title>\n\
+    \    FOCUS: <area>\n    REGRESSION: <regression-test-id>\n    STEPS:\n      GIVEN:\
+    \ <starting state — usually established by the regression test's setup>\n    \
+    \  WHEN: <usually the regression test's user action>\n      THEN: <PR-specific\
+    \ observable outcomes the regression run should produce>\n\nINSTRUCTION and ARTIFACT\
+    \ fields can stay for scenarios where no\nregression test fits yet, but the planner\
+    \ is nudged toward\nREGRESSION first.\n\n## Why this depends on the prior PR\n\
+    \nThe prior PR cleans up the regression runner — drops surface-\nspecific framing\
+    \ assumptions and fixes the containment model so\nregression runs don't leak state\
+    \ into the caller's repo. That\ncleanup makes the runner safely reusable as a\
+    \ QA-scenario\nprimitive. Until it lands, binding QA to regression would inherit\n\
+    those bugs at scale.\n\n## Scope\n\n- Extend QA scenario parsing to recognize\
+    \ REGRESSION: <id>.\n- Concretizer verifies the regression test exists and its\n\
+    \  user-visible surface matches the scenario's Then.\n- Worker invokes the regression\
+    \ test's flow and overlays the\n  scenario's Then assertions on the resulting\
+    \ captures.\n- Planner prompt updated to prefer REGRESSION when a fitting test\n\
+    \  exists; falls back to INSTRUCTION + ARTIFACT otherwise.\n- Recipe library +\
+    \ instruction library remain for scaffolding;\n  the regression library becomes\
+    \ the primary durable surface\n  catalog.\n\n## Out of scope\n\n- Building any\
+    \ new regression tests in this PR.\n- Removing INSTRUCTION/ARTIFACT support (they\
+    \ remain as the\n  fallback path)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-13T17:59:03.725239+00:00'
+  updated_at: '2026-05-13T18:18:10.237652+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b59f0c7
+  plan: plan-regression
+  title: Capture reason strings for QA / review / watcher INPUT_REQUIRED and NEEDS_WORK
+    verdicts
+  branch: pm/pr-b59f0c7-capture-reason-strings-for-qa-review-watcher-input
+  status: pending
+  depends_on:
+  - pr-6be8ee6
+  description: "## Goal\n\nGeneralize the per-scenario \\`verdict_reason\\` field\
+    \ we added for the\nrefiner-rejection path to every place a non-PASS verdict comes\
+    \ out\nof an automated loop. Today only the refiner's INPUT_REQUIRED\ncarries\
+    \ a parsed reason; main scenario workers, review-loop runs,\nand the watcher all\
+    \ emit terminal verdicts whose reasons are\nburied in pane scrollback or only\
+    \ readable post-hoc by opening\nthe right transcript.\n\n## Why\n\nA verdict without\
+    \ a reason is hard to triage. Users see\n\"INPUT_REQUIRED\" or \"NEEDS_WORK\"\
+    \ in a list and have to dig through\npanes / logs / git history to figure out\
+    \ what the worker actually\nwanted. With reasons attached:\n\n- The scenarios\
+    \ pane (and any future review/watcher status pane)\n  can render a one-line \"\
+    ↳ <reason>\" continuation under each\n  non-PASS verdict, like it already does\
+    \ for refiner rejections.\n- The per-scenario \\`verdict.md\\` capture (and the\
+    \ analogous\n  artifacts review/watcher will gain) includes the reason in the\n\
+    \  durable record on the PR branch.\n- Tooling that aggregates verdicts (notes,\
+    \ dashboards, downstream\n  planners reading prior runs) has a structured handle\
+    \ rather\n  than free-form pane text.\n\n## Scope\n\nFor each loop, extract and\
+    \ store the reason at the same point the\nverdict is recognized, mirroring the\
+    \ refiner pattern:\n\n### Main scenario workers (qa_loop)\n\n- INPUT_REQUIRED\
+    \ from \\`_poll_tmux_verdicts\\`: the worker's tail\n  output already explains\
+    \ the blocker. Parse a leading reason from\n  the latest assistant turn after\
+    \ the verdict token.\n- NEEDS_WORK: same — the worker typically writes its findings\n\
+    \  before the verdict keyword.\n\nBoth should land in \\`state.scenario_verdict_reasons[idx]\\\
+    `, which\nalready flows into \\`qa_status.json\\` and \\`verdict.md\\`.\n\n###\
+    \ Review loop\n\n- INPUT_REQUIRED / NEEDS_WORK from the review session. Each\n\
+    \  iteration's verdict already has explanatory text in the pane;\n  capture it\
+    \ and surface alongside the verdict in PR notes and\n  whatever per-PR status\
+    \ the review loop writes.\n\n### Watcher\n\n- INPUT_REQUIRED escalations from\
+    \ the project watcher / discovery\n  supervisor. Same pattern — capture the reason\
+    \ text adjacent to\n  the verdict so the user sees both together.\n\n## Shape\n\
+    \nA small, structured marker convention so the parser can pull the\nreason out\
+    \ reliably without ambiguity. Two options to evaluate\nduring implementation:\n\
+    \n1. **Wrap reasons in markers** (e.g. \\`REASON_START / REASON_END\\`)\n   just\
+    \ before the verdict keyword. Robust but asks the prompt to\n   request a specific\
+    \ shape.\n2. **Take the assistant text immediately preceding the verdict\n   keyword**,\
+    \ up to the previous blank line or section heading.\n   Looser, no prompt change\
+    \ needed, more brittle.\n\n(1) is preferred for the user-visible reason; (2) can\
+    \ serve as a\nfallback when the marker is missing.\n\n## Out of scope\n\n- Refiner\
+    \ reasons (already done in pr-6be8ee6).\n- Reshaping the verdict-aggregation logic\
+    \ — verdicts themselves\n  stay short; reasons are parallel data.\n- New UI/TUI\
+    \ affordances beyond what the existing scenarios pane\n  already does for refiner\
+    \ rejections."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-13T20:52:10.037708+00:00'
+  updated_at: '2026-05-13T20:52:10.037708+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0b14f2c
+  plan: plan-regression
+  title: 'QA scenario planner: allow adding more scenarios mid-run or after initial
+    plan'
+  branch: pm/pr-0b14f2c-qa-scenario-planner-allow-adding-more-scenarios-mi
+  status: pending
+  depends_on:
+  - pr-6be8ee6
+  description: "## Goal\n\nLet the QA scenario planner add additional scenarios to\
+    \ a QA run\nbeyond the initial plan, **and let users re-run NEEDS_WORK scenarios\n\
+    or replace INPUT_REQUIRED ones**, so coverage gaps and earlier\nfailures can be\
+    \ resolved without restarting QA from scratch. The\noverall QA verdict can transition\
+    \ from INPUT_REQUIRED or NEEDS_WORK\nback to PASS as added/replaced scenarios\
+    \ settle.\n\n## Why\n\nToday the planner runs once, emits a fixed \\`QA_PLAN_START\
+    \ / END\\`\nblock, and the orchestrator launches exactly those scenarios. The\n\
+    overall verdict is whatever falls out of that single batch. What's\nmissing:\n\
+    \n- **Coverage gaps surfaced mid-run.** Watching scenarios execute\n  often reveals\
+    \ an angle the initial plan didn't cover (a surface\n  the planner didn't know\
+    \ about, an edge case implied by a worker's\n  INPUT_REQUIRED, a multi-actor variant\
+    \ prompted by what a single\n  scenario uncovered).\n- **NEEDS_WORK scenarios\
+    \ after a fix is committed.** A scenario\n  finds a bug, the fix gets committed\
+    \ during QA, and the scenario\n  needs to re-run against the fixed code to confirm.\
+    \ Today that\n  means a separate QA run.\n- **INPUT_REQUIRED scenarios after the\
+    \ blocker clears.** A scenario\n  stalled on a missing dependency, ambiguity,\
+    \ or refiner rejection;\n  once the user addresses it (installs the dep, clarifies\
+    \ the\n  spec, narrows the scenario), it should be re-pluggable as a\n  replacement\
+    \ scenario without losing the rest of the run's\n  progress.\n- **User-directed\
+    \ coverage.** A human watching the run may want to\n  request \"also exercise\
+    \ X\" without dropping current progress.\n\n## UX\n\nThe planner pane from the\
+    \ initial run sticks around. The user\niterates with it freely (refine the request,\
+    \ broaden/narrow,\nreject and re-emit) until a plan block they like is sitting\
+    \ at\nthe bottom of the planner pane's transcript.\n\nTwo actions in the scenarios\
+    \ pane:\n\n1. **Add scenarios** (e.g. \\`+\\` key) — pull in the latest plan\n\
+    \   block from the planner pane and append the new scenarios to\n   the running\
+    \ batch. New scenarios get fresh indices continuing\n   from \\`max(existing_index)\
+    \ + 1\\`.\n2. **Replace a scenario** (e.g. \\`r\\` key on the selected row) —\n\
+    \   the selected scenario, currently NEEDS_WORK or INPUT_REQUIRED,\n   is removed\
+    \ from the batch and the latest plan block from the\n   planner pane is spliced\
+    \ in as its replacement(s). Useful when\n   you want to refine a scenario whose\
+    \ initial framing didn't\n   work and re-run with a better one.\n\nRe-running\
+    \ an existing scenario (without replacement) — i.e. driving\nthe same scenario\
+    \ again against fresher code — is also exposed (e.g.\n\\`R\\` key) and routes\
+    \ through the same concretize → worker → verify\npipeline.\n\n\\\"Load latest\\\
+    \" in all cases means \\\"the most recent\n\\`QA_PLAN_START / END\\` block in\
+    \ the planner pane's transcript at\nthe moment the key is pressed.\\\" Intermediate\
+    \ drafts stay in the\ntranscript and don't affect the running batch.\n\n## Behind\
+    \ the scenes\n\n- Orchestrator API for adding, replacing, and re-running scenarios\n\
+    \  in a live \\`QALoopState\\`.\n- The scenarios pane keybindings trigger the\
+    \ splice/replace/re-run:\n  read the planner pane's transcript, run the existing\n\
+    \  \\`parse_qa_plan\\` on the latest plan block, hand the result to\n  the orchestrator.\n\
+    - New/replacement/re-run scenarios go through the same concretizer\n  + worker\
+    \ + verifier pipeline as the initial batch.\n- \\`qa_status.json\\` and the scenarios\
+    \ pane update in place.\n- **Overall verdict re-aggregation.** When a replacement\
+    \ or re-run\n  settles with a different outcome than its predecessor, the\n  aggregated\
+    \ overall verdict recomputes; \\`state.latest_verdict\\`\n  can transition INPUT_REQUIRED\
+    \ → PASS or NEEDS_WORK → PASS as a\n  result. The finalize pane gating updates\
+    \ accordingly: extends\n  \\`verified_scenarios\\` check to cover late additions\
+    \ and\n  recomputes when scenarios are replaced.\n- Replaced scenarios' prior\
+    \ \\`prompt.md\\` / \\`verdict.md\\` captures\n  are preserved (e.g. moved to\
+    \ a numbered subdir like\n  \\`scenarios/<n>/prior-1/\\`) so the run history isn't\
+    \ lost.\n\n## Scope\n\n- Live-state add / replace / re-run in \\`QALoopState\\\
+    ` + orchestrator.\n- Key bindings in the scenarios pane (\\`qa_status.py\\`) plus\
+    \ the\n  scraping/parsing logic.\n- Finalize gate covers late additions and recomputed\
+    \ verdicts.\n- Capture preservation when a scenario is replaced.\n\n## Out of\
+    \ scope\n\n- Removing scenarios from a running plan without replacement.\n- Editing\
+    \ existing scenario STEPS mid-run (would conflict with\n  concretizer output already\
+    \ in flight; replace-with-fresh-plan\n  is the supported path instead).\n- Auto-detecting\
+    \ new plan blocks the planner emits (the user\n  decides when to pull them in).\n\
+    - Persisting follow-up-addition provenance across runs.\n\n## Depends on\n\npr-6be8ee6\
+    \ — uses the \\`verdict_reasons\\` field and shared verdict\ninfrastructure that\
+    \ lands there."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-13T21:02:19.201672+00:00'
+  updated_at: '2026-05-13T21:37:27.608456+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-03c0141
+    text: 'UX nuance: the planner pane lets the user iterate freely (refine the request,
+      broaden/narrow, reject and re-emit) before the load-key is pressed. ''Load latest''
+      means the most recent QA_PLAN_START/END block in the planner pane''s transcript
+      at the moment the key is pressed; intermediate drafts stay in the transcript
+      and don''t affect the running batch.'
+    created_at: '2026-05-13T21:04:40Z'
+    last_edited: '2026-05-13T21:04:40Z'
