@@ -903,14 +903,17 @@ included. You can add or remove steps.
 
 The scenario should be one Given / When / Then user story:
 
-- **Given** establishes the starting state the user is in. Verify
-  the named commands, files, and project state actually exist or
-  can be created; correct anything that doesn't match the code.
-- **When** is the single user action the scenario tests. Verify the
-  command, key, or surface action exists and is the real user
-  entry point. If the draft has two or more When actions, that's a
-  signal the scenario should be split — flag it in the refined
-  steps or reject.
+- **Given** establishes the starting state the user is in. The
+  scenario's bound INSTRUCTION (if any) is the basis for this — its
+  steps should fold into the refined Given. Verify the named
+  commands, files, and project state actually exist or can be
+  created; correct anything that doesn't match the code.
+- **When** is the single user action the scenario tests. The
+  scenario's bound ARTIFACT recipe (if any) is the basis for driving
+  this and capturing the resulting Then. Verify the command, key,
+  or surface action exists and is the real user entry point. If the
+  draft has two or more When actions, that's a signal the scenario
+  should be split — flag it in the refined steps or reject.
 - **Then** is the observable outcome from the user's surface.
   Verify the predicted outcome matches what the code actually does
   when run.

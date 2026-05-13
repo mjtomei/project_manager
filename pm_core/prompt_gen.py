@@ -1377,18 +1377,20 @@ adjacent regressions the fix could have introduced.
     if has_artifact_recipes:
         artifact_recipes_block = f"""
 
-Artifact Recipes describe how to capture concrete evidence of a
-scenario's behavior — recordings, logs, screenshots — consumable by
-both humans and downstream agents. **Every scenario should produce
-every applicable artifact.** Set the **ARTIFACT** field to any
-recipe(s) from the library above whose description matches the
-surface the scenario drives. Multiple recipes are welcome, comma-
-separated. `ARTIFACT: none` is only for scenarios that exercise pure
-code-level or library-internal behavior with no observable surface.
-The runner copies each recipe into the scenario's scratch dir and
-surfaces a path to it in the worker's prompt; the worker reads the
-recipe and saves captures under
-`pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`."""
+**Artifact Recipes are the basis for driving the WHEN action and
+capturing the THEN evidence.** Each recipe spells out how to perform
+the user action on a surface (CLI invocation, tmux/TUI keystrokes,
+network call) and how to record the result — recordings, logs,
+screenshots — consumable by both humans and downstream agents.
+**Every scenario should produce every applicable artifact.** Set
+the **ARTIFACT** field to any recipe(s) from the library above
+whose description matches the surface the scenario drives. Multiple
+recipes are welcome, comma-separated. `ARTIFACT: none` is only for
+scenarios that exercise pure code-level or library-internal
+behavior with no observable surface. The runner copies each recipe
+into the scenario's scratch dir and surfaces a path to it in the
+worker's prompt; the worker reads the recipe and saves captures
+under `pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`."""
 
     artifact_field_1 = (
         '\nARTIFACT: <comma-separated artifact-recipe filenames from the library above, or "none">'
@@ -1459,10 +1461,12 @@ at the paths shown below.
 
 {library_summary}
 
-Instructions tell scenario agents how to set up a test environment.  Without
-one, agents fall back to reading code and auto-passing.  Try to assign an instruction
-to every scenario. Try to make sure functionality is exercised with every
-possible user facing surface (both CLI and GUI for example).
+**Instructions are the basis for a scenario's GIVEN clause** — they
+describe the user steps to establish a starting state (set up a project,
+start a session, install fixtures). Without one, scenario workers fall
+back to reading code and auto-passing.  Try to assign an instruction to
+every scenario. Make sure functionality is exercised with every possible
+user-facing surface (e.g. CLI and TUI).
 {artifact_recipes_block}
 
 ## Output Format
@@ -1659,9 +1663,13 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
         # (set by _install_instruction_file during launch).
         instr_display = scenario.instruction_path
         instruction_block = f"""
-## Instruction Reference
+## Instruction Reference (establishes the GIVEN)
 
 Test setup instructions are available at: `{instr_display}`
+
+This instruction is the basis for the scenario's **Given** state.
+Follow its steps to set up the environment the user is in before
+performing the When action.
 
 If a setup step fails or a required tool is unavailable, report
 **INPUT_REQUIRED** with an explanation of what blocked you.
@@ -1675,18 +1683,21 @@ If a setup step fails or a required tool is unavailable, report
         bullets = "\n".join(f"- `{p}`" for p in artifact_paths)
         heading = "Capture Recipe" if len(artifact_paths) == 1 else "Capture Recipes"
         artifact_block = f"""
-## Artifact {heading}
+## Artifact {heading} (drive the WHEN, capture the THEN)
 
 Available at:
 {bullets}
 
-Read the recipe(s) and follow their capture commands to produce
-evidence of this scenario's behavior. Save resulting captures under
-`pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (each recipe's
-manifest format applies; if more than one recipe is listed, use a
-named subdirectory per capture). Captures are how reviewers confirm
-what the test demonstrated, so produce one even if the scenario itself
-passes.
+These recipes are the basis for performing the scenario's **When**
+action (the recipe describes how to drive the surface — CLI command,
+tmux/TUI keystrokes, etc.) and for capturing the **Then** evidence
+(transcripts, asciinema casts, screenshots). Read the recipe(s) and
+follow their driver + capture commands. Save resulting captures
+under `pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (each
+recipe's manifest format applies; if more than one recipe is listed,
+use a named subdirectory per capture). Captures are how reviewers
+confirm what the test demonstrated, so produce one even if the
+scenario itself passes.
 
 Aim for the capture to look as close as possible to a user actually
 exercising the feature. A couple of things to watch out for: status

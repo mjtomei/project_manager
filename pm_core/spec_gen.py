@@ -181,7 +181,11 @@ be split into multiple requirements.
   the packaged content", "the bug-fix prompt includes the captures
   path") rather than function-level claims.
 - Setup the user needs to reach each behavior — described as user
-  steps, not as fixtures. This belongs in each behavior's Given.
+  steps, not as fixtures. This belongs in each behavior's Given,
+  and downstream scenarios will lean on QA *instructions* (under
+  `pm/qa/instructions/`) to perform that setup; if the spec implies
+  a Given that no existing instruction covers, note it so a new
+  instruction can be authored.
 - Edge cases and failure modes from the user's perspective: what
   inputs / states cause surprising or wrong behavior. Each becomes
   its own Given/When/Then.
@@ -191,6 +195,11 @@ be split into multiple requirements.
   exercised.
 - Pass/Fail criteria from the user's point of view — the Then clauses
   effectively answer this; restate any cross-cutting ones explicitly.
+
+Downstream scenarios will use *artifact recipes* (under
+`pm/qa/artifacts/`) to drive each When and capture each Then's
+evidence. If a behavior implies a surface no existing recipe covers,
+note it so a new recipe can be authored.
 
 If a behavior is only checkable at the function level with no
 user-observable surface, leave it to the unit test suite and don't
