@@ -60,9 +60,11 @@ To interact with this session, use commands like:
 
 Captures live outside the project repo, under
 `~/.pm/sessions/<session-tag>/captures/regression/<test-id>/<timestamp>/`
-(resolve via `pm qa captures-path regression` plus the test/timestamp
-subpath). Captures are durable on the host but **not** committed to
-git — don't `git add` them.
+on the host. `pm qa captures-path` only knows PR ids — regression
+captures don't have one, so resolve the path yourself (the session-tag
+prefix is shared with any PR's captures dir if you need to derive it).
+Captures are durable on the host but **not** committed to git — don't
+`git add` them.
 
 ## QA Regression Test: {title}
 
