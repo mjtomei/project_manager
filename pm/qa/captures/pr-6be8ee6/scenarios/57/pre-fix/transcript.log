@@ -1,4 +1,0 @@
-+ python3 -c 'from helper import last_index; xs=[10,20,30]; idx=last_index(xs); print(f'\''xs={xs}'\''); print(f'\''last_index returned: {idx}'\''); print(f'\''xs[idx]:'\'', xs[idx] if idx < len(xs) else '\''IndexError (BUG)'\'')'
-xs=[10, 20, 30]
-last_index returned: 3
-xs[idx]: IndexError (BUG)

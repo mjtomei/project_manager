@@ -1,9 +1,0 @@
-== base: /tmp/proxy-it-up-1778521475-10zousvp
-== pre pr_workdir HEAD: bd6f5ed66b81b83052c6eb1de46cf44cee55f88d
-== pre pr_workdir status (should be empty): ''
-== caller new commit sha: 4d120a1c29e1adb8d9b39f1435d20be7f6b1dede
-== _local_push result: {'exit_code': 0, 'stdout': '', 'stderr': 'To file:///tmp/proxy-it-up-1778521475-10zousvp/real-upstream.git\n * [new branch]      pm/pr-test-feature -> pm/pr-test-feature\n'}
-== post pr_workdir HEAD: bd6f5ed66b81b83052c6eb1de46cf44cee55f88d
-== post pr_workdir status: ''
-== upstream branch sha: 4d120a1c29e1adb8d9b39f1435d20be7f6b1dede
-== ALL ASSERTIONS PASSED ==

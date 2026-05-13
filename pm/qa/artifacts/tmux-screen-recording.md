@@ -13,7 +13,9 @@ cast).
 
 ## What this recipe produces
 
-Three files per capture:
+Three files per capture, written into `<capture-dir>/` (a
+subdirectory under the captures directory the scenario prompt
+names):
 
 - `transcript.log` — plain-text scrollback of the pane (**required** —
   the load-bearing artifact for grep/diff and for consumers without

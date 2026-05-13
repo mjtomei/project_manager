@@ -1,8 +1,0 @@
-{"version": 2, "width": 80, "height": 24, "timestamp": 1778627528, "env": {"SHELL": "/bin/bash", "TERM": "xterm"}}
-[0.002949, "o", "+ pm prompt pr-01511b4\r\n"]
-[0.080473, "o", "+ pm prompt pr-08d1fdc\r\n"]
-[0.147649, "o", "+ echo -- bug-impl Bug Fix Flow check --\r\n-- bug-impl Bug Fix Flow check --\r\n+ grep -c '## Bug Fix Flow' /tmp/cap-bug.txt\r\n"]
-[0.148781, "o", "1\r\n"]
-[0.148905, "o", "+ echo -- feat-impl Bug Fix Flow check --\r\n-- feat-impl Bug Fix Flow check --\r\n+ grep -c '## Bug Fix Flow' /tmp/cap-feat.txt\r\n"]
-[0.150062, "o", "0\r\n"]
-[0.150221, "o", "+ true\r\n"]

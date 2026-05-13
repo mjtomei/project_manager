@@ -27,23 +27,28 @@ def _bug_fix_flow_block(pr: dict) -> str:
     return f"""
 ## Bug Fix Flow
 
+The captures directory for this PR is at `$(pm qa captures-path {seg})`
+on the host (`~/.pm/sessions/<session-tag>/captures/{seg}/`). It is
+**not** part of the project repo — captures live there and never get
+committed. Use `$CAP=$(pm qa captures-path {seg})` to refer to it
+below.
+
 If artifacts from a prior session already satisfy a step (existing
 pre-fix capture, failing test, fix, post-fix capture), reuse them and
 skip that step. Re-do work only when this session's changes make the
 prior artifact stale.
 
-1. **Manual repro on pre-fix code** — If
-   `pm/qa/captures/{seg}/impl/pre-fix/` already has a valid capture,
-   reuse it and skip this step. Otherwise, reproduce the bug by hand
-   against pre-fix code (stash uncommitted changes, or if the fix is
-   already committed, check out the parent commit or revert fix files
-   temporarily, capture, then restore). A repro is a concrete
-   sequence of steps. If reproduction doesn't work, check in with the
-   user before continuing.
+1. **Manual repro on pre-fix code** — If `$CAP/impl/pre-fix/` already
+   has a valid capture, reuse it and skip this step. Otherwise,
+   reproduce the bug by hand against pre-fix code (stash uncommitted
+   changes, or if the fix is already committed, check out the parent
+   commit or revert fix files temporarily, capture, then restore). A
+   repro is a concrete sequence of steps. If reproduction doesn't
+   work, check in with the user before continuing.
    - `pm/qa/instructions/` may have env-setup recipes worth checking.
    - Use a recipe from `pm/qa/artifacts/` to capture; save under
-     `pm/qa/captures/{seg}/impl/pre-fix/`. If the phase needs more
-     than one capture, give each a named subdirectory there.
+     `$CAP/impl/pre-fix/`. If the phase needs more than one capture,
+     give each a named subdirectory there.
 
 2. **Write a failing test** — Codify the repro as a test that fails
    on pre-fix code for the same reason. For bugs that aren't testable
@@ -57,26 +62,26 @@ prior artifact stale.
    for regressions.
 
 5. **Verify manually** — Re-run the step-1 repro against post-fix
-   code and confirm the symptom is gone. Capture the post-fix
-   behavior under `pm/qa/captures/{seg}/impl/post-fix/` if no valid
-   capture is there yet, or if this session changed the fix. If a
-   valid post-fix capture is already there and the fix is unchanged,
-   reuse it.
+   code and confirm the symptom is gone. Capture the post-fix behavior
+   under `$CAP/impl/post-fix/` if no valid capture is there yet, or if
+   this session changed the fix. If a valid post-fix capture is
+   already there and the fix is unchanged, reuse it.
 """
 
 
 def _bug_fix_review_block(pr: dict) -> str:
-    """Bug-fix review checklist, with the captures dir interpolated to
-    the PR's local id."""
+    """Bug-fix review checklist, with the captures dir resolved via
+    `pm qa captures-path <pr-id>`."""
     seg = pr["id"]
     return f"""
 
 ## Bug Fix Review Checklist
 
-- Pre-fix and post-fix captures under `pm/qa/captures/{seg}/impl/` are
-  the primary evidence the fix addresses the reported bug. If they're
-  missing or unconvincing, surface it as **INPUT_REQUIRED** — the user
-  decides whether to require capture or accept the fix without one.
+- Pre-fix and post-fix captures under
+  `$(pm qa captures-path {seg})/impl/` are the primary evidence the
+  fix addresses the reported bug. If they're missing or unconvincing,
+  surface it as **INPUT_REQUIRED** — the user decides whether to
+  require capture or accept the fix without one.
 - A failing-then-passing test accompanies the fix, unless skipped via
   a PR note.
 - The test fails for the right reason — would have caught the original

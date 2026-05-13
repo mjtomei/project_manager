@@ -1,4 +1,0 @@
-{"version": 2, "width": 80, "height": 24, "timestamp": 1778679616, "env": {"SHELL": "/bin/bash", "TERM": "xterm"}}
-[0.003057, "o", "+ python3 buggy.py\r\n"]
-[0.008326, "o", "OK\r\n"]
-[0.010149, "o", "+ echo exit=0\r\nexit=0\r\n"]

@@ -1390,7 +1390,8 @@ scenarios that exercise pure code-level or library-internal
 behavior with no observable surface. The runner copies each recipe
 into the scenario's scratch dir and surfaces a path to it in the
 worker's prompt; the worker reads the recipe and saves captures
-under `pm/qa/captures/{pr_path_seg}/scenarios/<scenario-number>/`."""
+under a per-PR captures directory bind-mounted from the host (the
+worker's prompt names the exact path)."""
 
     artifact_field_1 = (
         '\nARTIFACT: <comma-separated artifact-recipe filenames from the library above, or "none">'
@@ -1435,9 +1436,8 @@ daemons, network endpoints, on-disk state, anything with a single name
 accessed from multiple callers. Make sure each is exercised by a
 concurrent-use scenario.
 
-Ignore any prior captures or `verdict.md` files under
-`pm/qa/captures/{pr_path_seg}/scenarios/` — for this run, treat the
-PR as if it had never been QA'd before.
+Ignore any prior captures or `verdict.md` files from earlier runs —
+for this run, treat the PR as if it had never been QA'd before.
 
 ## PR Context
 
@@ -1643,7 +1643,8 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
                              scenario, workdir: str,
                              session_name: str | None = None,
                              worktree_mode: bool = False,
-                             scratch_dir: str | None = None) -> str:
+                             scratch_dir: str | None = None,
+                             captures_root: str = "") -> str:
     """Generate a prompt for a QA child session executing one scenario.
 
     Args:
@@ -1697,16 +1698,19 @@ If a setup step fails or a required tool is unavailable, report
 Available at:
 {bullets}
 
+Captures-root (where to save all artifacts produced this run):
+`{captures_root}` (writable; bind-mounted from the host).
+
 These recipes are the basis for performing the scenario's **When**
 action — the recipe describes how to drive the surface — and for
 capturing the **Then** evidence (transcripts, recordings,
 screenshots, logs). Read the recipe(s) and follow their driver +
-capture commands. Save resulting captures
-under `pm/qa/captures/{pr_id}/scenarios/{scenario.index}/` (each
-recipe's manifest format applies; if more than one recipe is listed,
-use a named subdirectory per capture). Captures are how reviewers
-confirm what the test demonstrated, so produce one even if the
-scenario itself passes.
+capture commands. Save resulting captures under
+`{captures_root}/scenarios/{scenario.index}/` (each recipe's
+manifest format applies; if more than one recipe is listed, use a
+named subdirectory per capture). Captures are how reviewers confirm
+what the test demonstrated, so produce one even if the scenario
+itself passes.
 
 Aim for the capture to look as close as possible to a user actually
 exercising the feature. A couple of things to watch out for: status
@@ -1718,19 +1722,16 @@ recording.
 
 **If you identify and fix a bug during this scenario, capture both
 states.** Save the pre-fix recording under
-`pm/qa/captures/{pr_id}/scenarios/{scenario.index}/pre-fix/` and the
+`{captures_root}/scenarios/{scenario.index}/pre-fix/` and the
 post-fix recording under `.../post-fix/`. Cross-link the two in each
 manifest's `## Files` section, and (per Incidental Bugs below) still
 file a PR for the bug.
 
-After producing each capture, commit it and push so it lands on the
-PR branch:
-- `git add pm/qa/captures/{pr_id}/scenarios/{scenario.index}/`
-- `git commit -m "qa: capture for scenario {scenario.index}"`
-- `git push origin {branch}`
-
-If the push is rejected (another scenario raced you), `git pull --rebase
-origin {branch} && git push origin {branch}`.
+The captures directory above is bind-mounted from the host (a pm-
+managed location at `~/.pm/sessions/<session-tag>/captures/<pr-id>/`),
+so anything you write there is durable on the host without being
+committed to the project repo. You do **not** need to `git add` or
+push captures — they're not part of the PR branch.
 """
 
     # Include PR notes (prior QA results, addendums)

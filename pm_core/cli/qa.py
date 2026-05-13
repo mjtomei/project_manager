@@ -176,6 +176,33 @@ def qa_add_artifact(name: str):
     _qa_add(name, "artifacts")
 
 
+@qa.command("captures-path")
+@click.argument("pr_id")
+def qa_captures_path(pr_id: str):
+    """Print the host path of the captures directory for a PR.
+
+    Captures (QA recordings, transcripts, bug-fix pre/post-fix
+    artifacts, regression captures) live under
+    ``~/.pm/sessions/<session-tag>/captures/<pr-id>/`` and are bind-
+    mounted to ``/captures`` inside scenario containers. Use this
+    command to resolve the host path for tooling that needs to read
+    captures (review sessions, sync to remote storage, etc.).
+
+    Inside a scenario container the captures dir is at ``/captures``
+    regardless of the host layout; this command always prints the
+    host-side path.
+    """
+    from pm_core.paths import captures_dir
+    path = captures_dir(pr_id)
+    if path is None:
+        click.echo(
+            "Error: cannot resolve session tag (not inside a git repo?)",
+            err=True,
+        )
+        raise click.exceptions.Exit(1)
+    click.echo(str(path))
+
+
 def _author_path(category: str, name: str) -> Path:
     from pm_core import qa_instructions
     root = state_root()

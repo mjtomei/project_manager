@@ -13,8 +13,12 @@ the TUI, and the CLI.
 | `pm/qa/artifacts/`    | Recipes for capturing concrete evidence of behavior — recordings, logs, screenshots — that unambiguously confirm what happened. |
 | `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all scenarios use the same contracts for external dependencies. |
 
-There is also a runtime sibling, `pm/qa/captures/`, written by impl,
-QA, and regression sessions — see [Captures](#captures) below.
+There is also a per-PR captures directory written by impl, QA, and
+regression sessions; it lives at
+`~/.pm/sessions/<session-tag>/captures/<pr-id>/` on the host (resolve
+via `pm qa captures-path <pr-id>`) and is bind-mounted to `/captures`
+inside scenario containers. Captures are not part of the project
+repo — see [Captures](#captures) below.
 
 ## Authoring
 
@@ -133,10 +137,11 @@ pm qa regression <id> --file-prs    # run + open PRs for any findings
 
 Regression tests don't fix bugs themselves and don't mutate the
 project's source. The only writes that escape the ephemeral env are
-the captures committed under `pm/qa/captures/regression/...` and, when
-`--file-prs` is set, PRs filed via `pm pr add` for any findings (bugs
-go to `--plan bugs`, improvements to `--plan improvements`). The
-actual fix is left to a normal bug-fix PR session.
+captures (durable under `~/.pm/sessions/<tag>/captures/regression/...`
+on the host, not committed to the repo) and, when `--file-prs` is
+set, PRs filed via `pm pr add` for any findings (bugs go to
+`--plan bugs`, improvements to `--plan improvements`). The actual
+fix is left to a normal bug-fix PR session.
 
 A minimal example:
 

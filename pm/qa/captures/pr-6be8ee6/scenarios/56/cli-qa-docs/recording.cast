@@ -1,9 +1,0 @@
-{"version": 2, "width": 120, "height": 30, "timestamp": 1778707375, "env": {"SHELL": "/bin/bash", "TERM": "screen"}}
-[0.003688, "o", "+ pm qa docs\r\n"]
-[0.004451, "o", "+ head -20\r\n"]
-[0.082795, "o", "# pm QA library\r\n\r\nEvery project that uses `pm` gets a `pm/qa/` directory with four\r\nsubdirectories of Markdown-with-frontmatter files. They feed prompts,\r\nthe TUI, and the CLI.\r\n\r\n## The four directories\r\n\r\n| Directory | Purpose |\r\n|---|---|\r\n| `pm/qa/instructions/` | Reusable test-environment procedures — anything a QA scenario needs to set up before it can exercise the code (seed a database, start a dev server, prepare fixture data, log in a test user, etc.). Referenced by QA scenarios in their `INSTRUCTION:` field. |\r\n| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm qa regression <id>`. Each file is a natural-language prompt; the runner launches Claude with the prompt to exercise the project end-to-end and report back. |\r\n| `pm/qa/artifacts/`    | Recipes for capturing concrete evidence of behavior — recordings, logs, screenshots — that unambiguously confirm what happened. |\r\n| `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all sc"]
-[0.082874, "o", "enarios use the same contracts for external dependencies. |\r\n\r\nThere is also a runtime sibling, `pm/qa/captures/`, written by impl,\r\nQA, and regression sessions — see [Captures](#captures) below.\r\n\r\n## Authoring\r\n\r\n"]
-[0.090986, "o", "+ pm qa docs\r\n+ wc -l\r\n"]
-[0.145893, "o", "342\r\n"]
-[0.146309, "o", "+ diff /dev/fd/63 /workspace/pm_core/docs/qa_library.md\r\n++ pm qa docs\r\n"]
-[0.20036, "o", "+ echo DIFF_OK\r\nDIFF_OK\r\n"]

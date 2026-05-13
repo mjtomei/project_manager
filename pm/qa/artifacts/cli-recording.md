@@ -14,7 +14,8 @@ when there's no TUI involved; for tmux-hosted TUIs, use
 
 ## What this recipe produces
 
-Write into `pm/qa/captures/<pr-id>/<short-name>/`:
+Write into `<capture-dir>/<short-name>/` (the scenario prompt
+substitutes the actual captures directory for `<capture-dir>`):
 
 - `recording.cast` — asciinema replay (`asciinema play recording.cast`).
 - `transcript.log` — plain-text version of the same run (**required** —
@@ -30,7 +31,7 @@ Write into `pm/qa/captures/<pr-id>/<short-name>/`:
 ### One command, end-to-end
 
 ```
-asciinema rec pm/qa/captures/<pr-id>/<short-name>/recording.cast \
+asciinema rec <capture-dir>/<short-name>/recording.cast \
     -c '<the-cli-command-with-args>'
 ```
 
@@ -40,7 +41,7 @@ Cleanest shape — no shell prompt noise.
 ### Multiple commands, manually driven
 
 ```
-asciinema rec pm/qa/captures/<pr-id>/<short-name>/recording.cast -c bash
+asciinema rec <capture-dir>/<short-name>/recording.cast -c bash
 # at the prompt: type each command, then `exit` to stop
 ```
 
@@ -50,7 +51,7 @@ shell prompt and any typing pauses.
 ### Multiple commands, scripted
 
 ```
-asciinema rec pm/qa/captures/<pr-id>/<short-name>/recording.cast \
+asciinema rec <capture-dir>/<short-name>/recording.cast \
     -c 'bash -c "set -x; cmd-one; cmd-two; cmd-three"'
 ```
 

@@ -1,3 +1,0 @@
-# Step 3: packaged doc location
-/workspace/pm_core/docs/qa_library.md
-exists: True

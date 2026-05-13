@@ -15,8 +15,8 @@ For each issue you observed, file a PR — don't fix it here.
 - **Bug**: `pm pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'`
 - **Improvement**: `pm pr add '<title>' --plan improvements --description '<what you noticed and why>'`
 
-If a capture under `pm/qa/captures/regression/...` demonstrates the
-finding, point at the path in the description.
+If a capture from this run demonstrates the finding, point at its
+path in the description.
 
 Skim `pm pr list --plan bugs` / `--plan improvements` first. If a PR
 for the same issue exists, append a note instead of filing a
@@ -58,10 +58,11 @@ To interact with this session, use commands like:
 
 ## Captures
 
-Any capture you produce should land under `pm/qa/captures/regression/<test-id>/<timestamp>/`
-and be committed (and pushed, if there's a remote) so future runs can
-diff against this one. Use `git add pm/qa/captures/regression/.../`,
-`git commit -m "qa: regression capture <test-id>"`, then push.
+Captures live outside the project repo, under
+`~/.pm/sessions/<session-tag>/captures/regression/<test-id>/<timestamp>/`
+(resolve via `pm qa captures-path regression` plus the test/timestamp
+subpath). Captures are durable on the host but **not** committed to
+git — don't `git add` them.
 
 ## QA Regression Test: {title}
 

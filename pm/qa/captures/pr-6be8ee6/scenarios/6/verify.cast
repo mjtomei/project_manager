@@ -1,9 +1,0 @@
-{"version": 2, "width": 80, "height": 24, "timestamp": 1778500824, "env": {"SHELL": "/bin/bash", "TERM": "xterm"}}
-[0.060861, "o", "pm_root=/workspace/pm\r\n"]
-[0.492723, "o", "STEP 2 PASS\r\n"]
-[0.495314, "o", "STEP 3 PASS\r\n"]
-[0.509261, "o", "  Sc1: artifact_paths=['artifacts/tmux-screen-recording.md', 'artifacts/cli-recording.md']\r\n  Sc2: artifact_paths=['artifacts/tmux-screen-recording.md']\r\n  Sc3: artifact_paths=[]\r\n  Sc4: artifact_paths=[]\r\n  Sc5: artifact_paths=[]\r\nSTEP 4 PASS\r\nWARNINGS: [\"WARNING Scenario 2 references unknown artifact recipe 'bogus.md' — ignoring\", \"WARNING Scenario 2 ARTIFACT 'tui-manual-test.md' resolved to non-artifact category 'instructions' — ignoring\"]\r\n"]
-[0.509642, "o", "STEP 5 PASS\r\n"]
-[0.509805, "o", "STEP 6a PASS\r\n"]
-[0.509993, "o", "STEP 6b PASS\r\n"]
-[0.510079, "o", "\r\nALL STEPS PASS\r\n"]

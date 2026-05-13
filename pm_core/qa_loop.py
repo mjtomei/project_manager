@@ -1177,40 +1177,47 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
     _log.info("Copied instruction %s -> %s", src, dest)
 
 
-def _write_scenario_capture_file(host_clone: str, pr_id: str,
-                                  scenario_index: int, name: str,
-                                  content: str) -> Path | None:
-    """Write ``<host_clone>/pm/qa/captures/<pr_id>/scenarios/<n>/<name>``.
+def _write_scenario_capture_file(pr_id: str, scenario_index: int,
+                                  name: str, content: str) -> Path | None:
+    """Write a per-scenario capture file under the host captures dir.
 
-    Used to persist the scenario's full prompt and final verdict alongside
-    the worker's captures so they end up on the PR branch with the rest.
-    Returns the written path or ``None`` on failure.
+    Path: ``~/.pm/sessions/<session-tag>/captures/<pr_id>/scenarios/<n>/<name>``.
+
+    Captures live under the active pm session's sessions dir so they
+    don't bloat git history — they're ephemeral artifacts of pm's
+    process, like workdirs. Scenario containers bind-mount this
+    directory to ``/captures/``. Returns the written path or
+    ``None`` on failure.
     """
     try:
-        dest_dir = Path(host_clone) / "pm" / "qa" / "captures" / pr_id / \
-            "scenarios" / str(scenario_index)
+        from pm_core.paths import captures_dir
+        base = captures_dir(pr_id)
+        if base is None:
+            _log.warning("captures_dir unavailable for pr=%s (no session tag)",
+                         pr_id)
+            return None
+        dest_dir = base / "scenarios" / str(scenario_index)
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / name
         dest.write_text(content)
         return dest
     except Exception:
-        _log.warning("Failed to write %s for scenario %d under %s",
-                     name, scenario_index, host_clone, exc_info=True)
+        _log.warning("Failed to write %s for scenario %d (pr=%s)",
+                     name, scenario_index, pr_id, exc_info=True)
         return None
 
 
 def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
-    """Write each scenario's final verdict to its worktree's capture dir.
+    """Write each scenario's final verdict to ~/.pm/captures/.
 
-    Commits and pushes the verdict files from each worktree so they reach
-    origin/<branch> before the finalize pane fast-forwards the user's PR
-    workdir. Best-effort — failures are logged and skipped.
+    Captures are local-only now; the per-scenario verdict.md lives at
+    ``~/.pm/captures/<pr_id>/scenarios/<n>/verdict.md`` on the
+    orchestrator host. The ``branch`` arg is kept for signature
+    stability but no longer drives any git operation — workers don't
+    commit-and-push captures anymore.
     """
-    import subprocess
+    _ = branch  # kept for caller compatibility
     for s in state.scenarios:
-        wt = s.worktree_path
-        if not wt:
-            continue
         verdict = state.scenario_verdicts.get(s.index, "")
         if not verdict:
             continue
@@ -1218,31 +1225,9 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
         body = f"# Scenario {s.index}: {s.title}\n\n{verdict}\n"
         if reason:
             body += f"\n{reason}\n"
-        path = _write_scenario_capture_file(
-            wt, state.pr_id, s.index, "verdict.md", body,
+        _write_scenario_capture_file(
+            state.pr_id, s.index, "verdict.md", body,
         )
-        if not path:
-            continue
-        rel = str(path.relative_to(Path(wt)))
-        try:
-            subprocess.run(["git", "-C", wt, "add", rel], check=True)
-            res = subprocess.run(
-                ["git", "-C", wt, "commit", "-m",
-                 f"qa: verdict for scenario {s.index}"],
-                capture_output=True, text=True,
-            )
-            if res.returncode != 0 and "nothing to commit" not in res.stdout + res.stderr:
-                _log.warning("verdict commit failed for scenario %d: %s",
-                             s.index, res.stderr.strip())
-                continue
-            if branch:
-                subprocess.run(
-                    ["git", "-C", wt, "push", "origin", branch],
-                    capture_output=True, text=True,
-                )
-        except Exception:
-            _log.warning("Failed to commit/push verdict for scenario %d",
-                         s.index, exc_info=True)
 
 
 def _install_artifact_files(pm_root: Path, scenario: QAScenario,
@@ -1750,14 +1735,22 @@ def _build_scenario_run_cmd(
     use_containers = bool(scenario.container_name)
     host_clone = scenario.worktree_path or workdir_path
 
+    # Captures dir: container workers see the bind-mounted /captures
+    # path; host workers see the full host path under
+    # ~/.pm/sessions/<tag>/captures/<pr-id>/. The worker prompt
+    # interpolates this as `{captures_root}/scenarios/<n>/...`.
+    from pm_core.paths import captures_dir, CONTAINER_CAPTURES_MOUNT
     if use_containers:
         wd_in = container_mod._CONTAINER_WORKDIR
         scratch = container_mod._CONTAINER_SCRATCH
         sess_for_prompt = None
+        captures_root = CONTAINER_CAPTURES_MOUNT
     else:
         wd_in = host_clone
         scratch = str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch")
         sess_for_prompt = session
+        host_captures = captures_dir(state.pr_id)
+        captures_root = str(host_captures) if host_captures else ""
 
     child_prompt = prompt_gen.generate_qa_child_prompt(
         data, state.pr_id, scenario,
@@ -1765,9 +1758,10 @@ def _build_scenario_run_cmd(
         session_name=sess_for_prompt,
         worktree_mode=bool(scenario.worktree_path),
         scratch_dir=scratch,
+        captures_root=captures_root,
     )
     _write_scenario_capture_file(
-        host_clone, state.pr_id, scenario.index, "prompt.md", child_prompt,
+        state.pr_id, scenario.index, "prompt.md", child_prompt,
     )
     claude_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
