@@ -85,14 +85,18 @@ def test_bug_flow_points_at_qa_dirs():
     p = prompt_gen.generate_prompt(data, "pr-x")
     assert "pm/qa/instructions/" in p
     assert "pm/qa/artifacts/" in p
-    assert "pm/qa/captures/" in p
+    # Captures dir is now resolved via `pm qa captures-path <pr-id>`
+    # (host path under ~/.pm/sessions/<tag>/captures/<pr-id>/) rather
+    # than the legacy in-repo `pm/qa/captures/` path.
+    assert "pm qa captures-path pr-x" in p
 
 
 def test_bug_review_points_at_captures_dir():
     data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
                   "description": "broken"})
     r = prompt_gen.generate_review_prompt(data, "pr-x")
-    assert "pm/qa/captures/pr-x/impl/" in r
+    assert "pm qa captures-path pr-x" in r
+    assert "/impl/" in r
     assert "Pre-fix and post-fix" in r
 
 
@@ -102,5 +106,5 @@ def test_bug_flow_uses_local_pr_id_for_captures_dir():
     data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
                   "description": "broken", "gh_pr_number": 190})
     p = prompt_gen.generate_prompt(data, "pr-x")
-    assert "pm/qa/captures/pr-x/impl/pre-fix/" in p
-    assert "pm/qa/captures/pr-190/" not in p
+    assert "pm qa captures-path pr-x" in p
+    assert "pr-190" not in p

@@ -30,8 +30,8 @@ def _bug_fix_flow_block(pr: dict) -> str:
 The captures directory for this PR is at `$(pm qa captures-path {seg})`
 on the host (`~/.pm/sessions/<session-tag>/captures/{seg}/`). It is
 **not** part of the project repo — captures live there and never get
-committed. Use `$CAP=$(pm qa captures-path {seg})` to refer to it
-below.
+committed. Set `CAP=$(pm qa captures-path {seg})` once and reference
+`$CAP` below.
 
 If artifacts from a prior session already satisfy a step (existing
 pre-fix capture, failing test, fix, post-fix capture), reuse them and

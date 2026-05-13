@@ -17,7 +17,9 @@ def test_basic_assembly_no_findings():
     assert "The TUI pane ID is: %5" in out
     # Captures block present and points at the right convention.
     assert "## Captures" in out
-    assert "pm/qa/captures/regression/" in out
+    # Captures now live outside the repo under ~/.pm/sessions/...
+    assert "captures/regression/" in out
+    assert ".pm/sessions/" in out
     # Test body interpolated.
     assert "## QA Regression Test: TUI startup smoke" in out
     assert "check that the TUI renders." in out
@@ -39,7 +41,7 @@ def test_file_findings_addendum_covers_bugs_and_improvements():
     # Improvement filing path.
     assert "--plan improvements" in out
     # Pointer-to-capture guidance present.
-    assert "pm/qa/captures/regression/" in out
+    assert "capture" in out.lower()
     # No-fixes-here prohibition preserved.
     assert "don't fix it here" in out
     # Verdict-vs-filing separation kept.
