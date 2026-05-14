@@ -36,10 +36,22 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 
 ## Status
 
-- ✅ Merged (12): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185) plus `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, Phase 7 prerequisite, tracked under improvements)
-- ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
-- 📋 Phase 9 (6 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-98f670e` (QA scenario quality supervisor with queryable scenario sessions), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
-- 📋 Phase 10 (8 PRs): `pr-9603d04` (GitHub backend mock — sibling of FakeClaudeSession), `pr-7d5d036` (`pm tui test` containment cleanup), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-2680fbf` (planner authors a new regression when none fits), `pr-51586d2` (mocks awareness in the new-regression authoring flow), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
+**Merged (12)** — Phases 1-5 plus the Phase 7 prerequisite:
+- Phase 1: pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b
+- Phase 2: pr-47940bc, pr-97ddabf, pr-271cb3a
+- Phase 3: pr-e3a711c, pr-d39a7fb
+- Phase 4: pr-e84b43c
+- Phase 5: pr-d60d185
+- Phase 7 prereq: pr-6be8ee6 (#190, tracked under improvements)
+
+**Pending (22)** — Phases 6-10:
+- Phase 6 — test backfill (1): pr-fbda1a8
+- Phase 7 — evidence-gated bug fix loop (5): pr-eb450a0, pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
+- Phase 8 — post-activation refinements (2): pr-b77702b, pr-2c060b2
+- Phase 9 — headless / unsupervised hardening (6): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf
+- Phase 10 — QA loop surface improvements (8): pr-9603d04, pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2
+
+**Cross-phase sequencing note**: Phase 7 (evidence + coverage gates on the existing scenario model) and Phase 10 (scenarios → regression-test bindings, new-regression authoring, mocks at authoring surface) both reshape the QA loop. Phase 10 changes the underlying scenario model that Phase 7's gates measure against. Recommended order: land Phase 10's regressions-as-scenarios chain (pr-7d5d036 → pr-06a96fa → pr-2680fbf → pr-51586d2) before Phase 7's coverage stack (pr-b42059d → pr-8ed578d → pr-8422dea → pr-c2397e2), so the coverage gates measure the post-Phase-10 flow. If sequenced the other way, Phase 7 PRs may need amendment after Phase 10 lands.
 
 ## Prerequisites
 
@@ -64,50 +76,50 @@ Teach review and QA agents to use `pm pr add --plan bugs` when they spot issues 
 
 Different impl prompt for bug PRs: write a failing test first, fix the code, verify the test passes. Reviewers check that a reproduction test exists. Session-end reconcile step is verification-only — primary dedup is owned by the discovery supervisor post-hoc.
 
-### PR: Auto-sequence chain: TUI keypress + programmatic CLI
+### PR: Auto-sequence chain: TUI keypress + programmatic CLI ✅ MERGED (#172)
 `pr-e58459b`
 
 Chain start → review → QA on a single PR, halting at existing pause conditions and stopping before merge. Two entry points: TUI keypress (human use) and `pm pr auto-sequence <id>` CLI (watcher use). The CLI is essential — without it, watcher Claude sessions would have to drive the chain via tmux send-keys against the TUI.
 
 ## Phase 2: Discovery (after Phase 1)
 
-### PR: Regression test sessions file bugs and improvements into correct plans
+### PR: Regression test sessions file bugs and improvements into correct plans ✅ MERGED (#171)
 `pr-47940bc` (depends on: pr-539110b)
 
 Prompt-addendum at the launch-path wrapper in `launch_qa_item()` so the existing Claude-based regression test sessions know to file findings via `pm pr add --plan bugs` or `--plan ux`. Mirror of `pr-539110b` for regression tests. Verdicts unchanged.
 
-### PR: Watcher-target window for regression test launches
+### PR: Watcher-target window for regression test launches ✅ MERGED (#173)
 `pr-97ddabf` (depends on: pr-47940bc)
 
 Add an optional `target_window` parameter to `launch_qa_item()` so watcher-driven launches stay in the watcher's pane and human launches keep their current main-window behavior.
 
-### PR: Discovery supervisor watcher (BaseWatcher subclass)
+### PR: Discovery supervisor watcher (BaseWatcher subclass) ✅ MERGED (#174)
 `pr-271cb3a` (depends on: pr-47940bc, pr-97ddabf)
 
 New `pm_core/watchers/discovery_supervisor.py` subclass + `generate_discovery_supervisor_prompt()`. Each tick reads `pm/watchers/discovery.log` and decides whether to launch a regression test, monitors in-flight tests, reconciles newly-filed bug/improvement PRs (dedup against open PRs in the target plan), appends to the log, emits READY or INPUT_REQUIRED. User guidance flows in automatically via the Watcher notes section.
 
 ## Phase 3: Implementation watchers (after Phase 1)
 
-### PR: Bug-fix implementation watcher (BaseWatcher subclass)
+### PR: Bug-fix implementation watcher (BaseWatcher subclass) ✅ MERGED (#177)
 `pr-e3a711c` (depends on: pr-e58459b)
 
 New `pm_core/watchers/bug_fix_impl_watcher.py` + `generate_bug_fix_impl_prompt()`. Each tick reads its work log, scans `plan=bugs` for pending PRs, picks the best candidate dynamically (severity + recurrence + work-log signals + user notes), advances via `pm pr auto-sequence`, and auto-merges on QA PASS. Detects stuck/loop-failing PRs and escalates via INPUT_REQUIRED.
 
-### PR: Improvement-fix implementation watcher (BaseWatcher subclass)
+### PR: Improvement-fix implementation watcher (BaseWatcher subclass) ✅ MERGED (#176)
 `pr-d39a7fb` (depends on: pr-e58459b)
 
 Mirror of `pr-e3a711c` against `plan=ux`. Differences: longer cadence, gated merge (PRs that PASS QA are advanced to ready-for-merge and held for human taste check), taste-shaped prioritization guidance.
 
 ## Phase 4: Human surface (after Phases 2-3)
 
-### PR: Watcher review session: Claude pane with work-log access
+### PR: Watcher review session: Claude pane with work-log access ✅ MERGED (#175)
 `pr-e84b43c` (depends on: pr-271cb3a)
 
 Dedicated Claude session launched from the TUI with read access to all three watchers' work logs at `pm/watchers/*.log`, current plan/PR state, and per-test transcripts. Opens with a summary of recent activity, then chat-driven. Write actions (notes additions, pausing a watcher) require explicit confirmation.
 
 ## Phase 5: Activation (final)
 
-### PR: End-to-end QA review and auto-start command
+### PR: End-to-end QA review and auto-start command ✅ MERGED (#178)
 `pr-d60d185` (depends on: pr-271cb3a, pr-e3a711c, pr-d39a7fb, pr-e84b43c)
 
 Final integration PR. Single command (`pm watcher start regression-loop` or similar) that brings up all three watchers with sensible defaults — without this, users have to start each watcher individually. Also serves as the end-to-end QA pass: once everything else has merged, exercise the full autonomous loop and catch integration gaps the per-PR reviews can't see.
@@ -152,6 +164,8 @@ Beyond line coverage: branch/path coverage on the diff and user-story coverage o
 `pr-c2397e2` (pending)
 
 When coverage gates fail, the refinement prompt asks the QA planner for additional scenarios specifically targeting the uncovered fix-line set. Closes the loop between gate failure and scenario growth.
+
+**Interaction with `pr-0b14f2c`** (Phase 10 — planner adds/replaces scenarios mid-run): both PRs extend planner behavior after the initial plan emits. `pr-0b14f2c` is the user-driven (`+` / `r` / `R` keypress) path; `pr-c2397e2` is the verdict-gate-driven (coverage-gap-detected) path. They share the same underlying "add scenarios to a running batch" machinery — implementing `pr-0b14f2c` first gives `pr-c2397e2` the splice/re-aggregate primitives for free, and `pr-c2397e2`'s coverage-targeted prompt becomes a new programmatic caller of that primitive rather than a parallel mechanism. Sequence: `pr-0b14f2c` first, `pr-c2397e2` builds on top.
 
 ## Phase 8: Post-activation refinements
 
@@ -225,7 +239,9 @@ Single PR is justified because each piece is small and they are tightly coupled 
 
 ## Phase 10: QA loop surface improvements
 
-Filed during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger. Each addresses a friction point that surfaced from running real QA cycles against the bug-fix flow.
+Filed in two waves: most during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger (pr-7d5d036, pr-06a96fa, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2); the rest (pr-9603d04, pr-2680fbf, pr-51586d2) during a plan-review session on 2026-05-14 that surfaced the regressions-as-scenarios + new-regression-authoring + mocks-at-authoring chain.
+
+> **Re-testing obligation for Phases 1-5**: every PR in Phases 1-5 was implemented and QA'd under the *pre-Phase-10* QA flow — INSTRUCTION+ARTIFACT scenarios, mocks injected at scenario planning (later stripped by `pr-6be8ee6` / commit `3eb89e6`), no regression-test binding, no new-regression authoring step. When Phase 10's chain lands (`pr-06a96fa` → `pr-2680fbf` → `pr-51586d2`), the regression library becomes the canonical surface and the QA loop's verdicts mean something different. Every merged feature in Phases 1-5 (the three watchers, the auto-sequence chain, the discovery supervisor, the regression-filing addendum, watcher-target windows, the human review session, the auto-start command) needs to be re-exercised under the new flow as part of `pr-2680fbf`'s post-merge validation. Specifically: regression tests should exist (or be authored via `pr-2680fbf`) for the bug-fix watcher pick-and-advance loop, the improvement-fix watcher gated-merge behavior, the discovery supervisor's launch + reconcile cycle, the auto-sequence chain's halt-at-pause-condition handling, and the watcher review session's summary-then-chat opening. None of those are covered today by the new flow; they were validated only under the old flow they're about to become irrelevant to.
 
 ### PR: GitHub backend mock for regression tests
 `pr-9603d04` (pending)
