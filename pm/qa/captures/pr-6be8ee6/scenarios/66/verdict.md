@@ -1,0 +1,5 @@
+# Scenario 66: qa_finalize closes out a PR with captures, and duplicate-verifier guard holds under follow-up
+
+INPUT_REQUIRED
+
+refiner rejected: Neither half of this scenario can be driven from a real user surface in this session. There is no `pm qa finalize` / close-out CLI — `_run_qa_finalize_pane` is only invoked automatically at the tail of the `pm qa run` loop after every scenario reaches a verdict, so exercising it requires a complete multi-pane Claude QA run against a bug PR with real impl captures and a verifier-confirmed PASS. The duplicate-verifier guard (commit 04e3874e, not e8fe399) fires inside `_poll_tmux_verdicts` only when the verifier itself FLAGS a PASS and the controller — not the user — auto-sends a follow-up into the scenario pane; there is no user-facing "send follow-up to a PASSed scenario" entry point. Both halves need live Claude-driven worker+verifier panes producing a FLAGGED-after-PASS sequence, which the in-session budget and available surface cannot reach without substituting code-reading or a harnessed mock.
