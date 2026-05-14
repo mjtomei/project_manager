@@ -13184,7 +13184,7 @@ prs:
   plan: plan-regression
   title: 'Bug-fix flow: surface TUI QA repro instructions in session prompt'
   branch: pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-
-  status: in_review
+  status: merged
   depends_on: []
   description: "The bug-fix flow prompt (pm_core/prompt_gen.py:_BUG_FIX_FLOW_BLOCK)\
     \ tells sessions to write a failing test or fall back to a \"manual repro note\"\
@@ -13220,10 +13220,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/190
   gh_pr_number: 190
   created_at: '2026-05-04T12:22:33.932646+00:00'
-  updated_at: '2026-05-14T00:24:24.516054+00:00'
+  updated_at: '2026-05-14T01:26:28.915335+00:00'
   started_at: '2026-05-04T14:15:15.348715+00:00'
-  reviewed_at: '2026-05-14T00:24:24.516054+00:00'
-  merged_at: null
+  reviewed_at: '2026-05-13T21:52:39.296176+00:00'
+  merged_at: '2026-05-14T01:26:28.915335+00:00'
   notes:
   - id: note-a3ed531
     text: 'scope: extended to add pm/qa/artifacts/ category (recipes for capturing
@@ -18461,6 +18461,240 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-13T22:13:10.760231+00:00'
   updated_at: '2026-05-13T22:14:18.887957+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-35df22a
+  plan: improvements
+  title: 'Improvement: integrate /simplify into pm''s review loop as a polish pass
+    invoked by the review agent'
+  branch: pm/pr-35df22a-improvement-integrate-simplify-into-pm-s-review-lo
+  status: pending
+  depends_on: []
+  description: 'Spawn a `/simplify` agent in a sibling pane that runs concurrently
+    with the review loop, sharing the workdir. Don''t sequence `/simplify` as a step
+    inside the review iteration; let it iterate on its own pace, polishing the code
+    while the review loop iterates verdicts. They communicate through the workdir,
+    not through pm.
+
+
+    The visible shape of `/simplify` is "three review agents in parallel" but the
+    engineering investment is in the prompt details we can''t see — better to lean
+    on Anthropic''s optimized version than reimplement.
+
+
+    ## Architecture
+
+
+    When the review loop launches its pane for a PR, pm also launches a sibling **`/simplify`
+    pane** in the same window. Both share the same workdir:
+
+
+    ```
+
+    review-#190 window
+
+    ├── pane 1: diff (existing)
+
+    ├── pane 2: review claude (existing) — emits PASS / NEEDS_WORK / INPUT_REQUIRED
+
+    └── pane 3: simplify claude (NEW) — runs /simplify repeatedly with a small loop
+
+    ```
+
+
+    The simplify pane runs a prompt like:
+
+
+    > You are running a polish pass alongside an active code review. The workdir is
+    shared. Repeat the following loop until the review pane signals completion (or
+    until you have nothing useful to do):
+
+    > 1. Run `/simplify focus on <focus-text>` to apply a polish pass to the current
+    state of the workdir.
+
+    > 2. Wait briefly for the review pane to advance.
+
+    > 3. Loop.
+
+    > Do not modify files the review pane is currently working on. If you encounter
+    merge conflicts with the review pane''s edits, abort the current /simplify pass
+    and wait for the review to settle.
+
+
+    The review pane is unchanged. It sees a workdir that''s being continuously polished
+    by the simplify pane; if it triggers NEEDS_WORK, its fix-and-commit loop continues
+    normally.
+
+
+    ## How concurrency works in practice
+
+
+    The workdir is the shared substrate. Both panes commit through pm''s normal commit
+    path. Coordination is by convention:
+
+
+    - **Simplify writes after each commit boundary**: it waits for the review pane
+    to commit a change, then runs `/simplify` once, then commits its polish as a separate
+    commit. Avoids in-flight write conflicts.
+
+    - **If simplify and review commit collide**: git''s normal merge / rebase semantics
+    apply. The verdict pane is the authority on PASS; simplify''s polish is opportunistic.
+
+    - **Simplify exits when**: the review pane emits PASS, OR the loop is dismissed
+    externally, OR simplify has had no useful changes to make for N consecutive iterations.
+
+
+    pm doesn''t coordinate the two with locks or IPC. The simplify pane''s prompt
+    makes it aware of the review pane''s presence and tells it to be defensive. If
+    concurrency edge cases bite, we tighten the simplify prompt — not pm''s orchestration
+    code.
+
+
+    ## When to spawn the simplify pane
+
+
+    - **Always** for non-bug-fix PRs in `in_review`, when the review loop starts.
+
+    - **Never** for bug-fix-flow PRs (per `_BUG_FIX_FLOW_BLOCK` from pr-6be8ee6).
+    Bug fixes are about one specific change; concurrent /simplify rewriting adjacent
+    code muddies the diff and the verdict.
+
+    - **Never** for PRs marked `no-polish: true` in project.yaml. Escape hatch for
+    diffs that are intentionally surface-level (release notes, version bumps).
+
+
+    ## Implementation
+
+
+    Touch points:
+
+
+    - `pm_core/cli/pr.py:_launch_review_window` — when creating the review window,
+    conditionally add a third pane running the simplify agent. Reuse the same container
+    plumbing as the existing review-claude pane.
+
+    - `pm_core/prompt_gen.py` — add a `generate_simplify_prompt` function. Short prompt:
+    workdir context, the focus-text, the "polish loop until review PASSes" framing.
+
+    - `pm_core/cli/pr.py` — when computing whether to spawn the simplify pane, check
+    bug-fix-flow status and the `no-polish` field.
+
+    - `pm_core/pane_registry` — new role `simplify-claude` for the new pane, so cleanup
+    and rebalance know about it.
+
+
+    A small helper computes `<focus-text>` from the PR''s spec / description — "memory
+    efficiency" for perf-shaped PRs, "readability and naming" for general impl PRs,
+    blank when no signal is available.
+
+
+    ## Acceptance criteria
+
+
+    - For a non-bug-fix PR in review, the review window has three panes: diff, review-claude,
+    simplify-claude.
+
+    - The simplify pane is running a Claude session executing /simplify repeatedly
+    while the review loop iterates.
+
+    - Commits in the workdir from the simplify pane are attributed to simplify (e.g.
+    commit message prefix `polish:`) so reviewers can tell them apart from impl/review
+    fixes.
+
+    - When the review loop emits PASS and exits, the simplify pane exits within ~10s.
+
+    - Bug-fix-flow PRs do NOT spawn the simplify pane.
+
+    - PRs with `no-polish: true` do NOT spawn the simplify pane.
+
+
+    ## Invariants
+
+
+    - The simplify pane MUST NOT have authority over verdict — only the review pane
+    emits PASS/NEEDS_WORK.
+
+    - The simplify pane MUST be defensive about concurrent writes: it only commits
+    at points where the review pane is between iterations (defined as: no uncommitted
+    changes in the workdir and at least 5s since the last review commit).
+
+    - /simplify invocations from the simplify pane MUST run inside its own session
+    — pm does not invoke /simplify directly.
+
+    - If /simplify is unavailable in the Claude Code version inside the container,
+    the simplify pane logs and idles instead of crashing.
+
+
+    ## Edge cases
+
+
+    - **Simplify and review both push to origin at the same time**: pm''s existing
+    push-proxy serializes pushes via the per-branch lock. Whichever commit lands first
+    wins the push; the other rebases.
+
+    - **Simplify''s polish breaks tests**: the next review iteration sees the failure
+    and emits NEEDS_WORK; the review pane''s fix-and-commit loop addresses it.
+
+    - **Simplify makes a polish change that the reviewer immediately wants to revert**:
+    the review pane wins. This is acceptable noise — the simplify pane is opportunistic.
+
+    - **Long-running simplify (e.g., huge diff)**: the simplify pane will be slower
+    than the review loop. That''s fine; the review pane is the authority. Simplify''s
+    contribution is whatever it manages to land before the loop terminates.
+
+    - **Container resource pressure with three panes per review**: monitor the container
+    memory budget; if needed, lower the simplify pane''s effort/model tier (Sonnet
+    vs Opus) since polish doesn''t need maximum reasoning.
+
+
+    ## Verification
+
+
+    - Trigger pm pr review on a non-bug PR. Confirm three panes appear.
+
+    - Watch the workdir''s git log: it should show interleaved `review:` and `polish:`
+    commits.
+
+    - Confirm the review loop''s verdict is unchanged in shape — pm''s hook-extracted
+    verdicts work the same way.
+
+    - Open a bug-fix-flow PR. Trigger review. Confirm only two panes (diff + review-claude).
+
+    - Set `no-polish: true` on a PR. Trigger review. Confirm only two panes.
+
+
+    ## Out of scope
+
+
+    - Replicating /simplify''s internal three-reviewer pattern with pm''s own subagents.
+    We''re invoking the real thing, not reimplementing.
+
+    - Coordination between simplify and the QA loop. QA already runs separately; simplify
+    is scoped to the review window.
+
+    - Custom focus-text per project type. One default helper; per-project tuning is
+    a follow-up.
+
+    - Locking / IPC between simplify and review panes. The workdir + commit boundaries
+    are sufficient coordination; if conflicts bite, we tighten the simplify prompt
+    before reaching for locks.
+
+
+    ## Related
+
+
+    - pr-6be8ee6 (_BUG_FIX_FLOW_BLOCK) — bug-fix prompt path excluded from polish.
+
+    - pr-66bf1b6 (spec template improvements) — adjacent prompt-shape work.
+
+    - Skill docs: https://code.claude.com/docs/en/commands.md (/simplify); https://code.claude.com/docs/en/skills.md.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-13T13:55:43.812188+00:00'
+  updated_at: '2026-05-13T14:02:16.586424+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
