@@ -39,7 +39,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - ✅ Merged (12): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185) plus `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, Phase 7 prerequisite, tracked under improvements)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
 - 📋 Phase 9 (6 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-98f670e` (QA scenario quality supervisor with queryable scenario sessions), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
-- 📋 Phase 10 (6 PRs): `pr-9603d04` (GitHub backend mock — sibling of FakeClaudeSession), `pr-7d5d036` (`pm tui test` containment bug), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
+- 📋 Phase 10 (7 PRs): `pr-9603d04` (GitHub backend mock — sibling of FakeClaudeSession), `pr-51586d2` (shared mock library + scenario-author discovery), `pr-7d5d036` (`pm tui test` containment bug), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
 
 ## Prerequisites
 
@@ -231,6 +231,13 @@ Filed during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger. E
 `pr-9603d04` (pending)
 
 Sibling of `pr-abcf70f` (FakeClaudeSession) for the GitHub side. Provides a scriptable `FakeGitHubBackend` (or transport-level fake) so regression tests can exercise github-backend code paths — PR create, status sync, draft↔ready transitions, comments, merge, post-merge pull, rate-limit / conflict / merged-elsewhere responses — without hitting the real GitHub API. Without this, regression coverage stops at the GitHub boundary and bug-fix watchers cannot reproduce GitHub-specific bugs deterministically.
+
+### PR: Shared mock library — scenario-created mocks discoverable to future authors
+`pr-51586d2` (depends on: pr-abcf70f, pr-9603d04)
+
+Closes the gap that none of the existing Phase 9/10 PRs covers explicitly: when a scenario session creates a new mock to exercise its target, that mock must be registered in a shared library at `pm/qa/mocks/` so future scenario-authoring sessions discover and reuse it. Without this, the regression flow's leverage doesn't compound — each scenario re-derives the same fakes inline, slightly differently, with different bugs.
+
+Adds: directory convention + frontmatter schema at `pm/qa/mocks/`, loader helper, `pm qa mocks list / show` CLI, prompt-addendum block listing the existing registry for QA-planner, QA scenario refiner, and regression-filing wrapper (`pr-47940bc`) sessions, with instructions to prefer existing mocks and to write registry entries + python modules as part of the scenario PR when authoring new ones. FakeClaudeSession (`pr-abcf70f`) and FakeGitHubBackend (`pr-9603d04`) are the first two registered entries; `pr-b3b8df0` (auto-synthesis primitive) and `pr-f4dc8a2` (library auditor) become consumers.
 
 ### PR: Bug: `pm tui test` hardcodes "testing against the pm tmux session"
 `pr-7d5d036` (depends on: pr-abcf70f, pr-9603d04)
