@@ -7004,7 +7004,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-abcf70f
-  plan: plan-qa
+  plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
   branch: pm/pr-abcf70f-fakeclaudesession-scriptable-claude-replacement-fo
   status: in_review
