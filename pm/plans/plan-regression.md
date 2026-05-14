@@ -44,10 +44,10 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - Phase 5: pr-d60d185
 - Phase 7 prereq: pr-6be8ee6 (#190, tracked under improvements)
 
-**Pending (22)** — Phases 6-10:
+**Pending (24)** — Phases 6-10:
 - Phase 6 — test backfill (1): pr-fbda1a8
 - Phase 7 — evidence-gated bug fix loop (5): pr-eb450a0, pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
-- Phase 8 — post-activation refinements (2): pr-b77702b, pr-2c060b2
+- Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
 - Phase 9 — headless / unsupervised hardening (6): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf
 - Phase 10 — QA loop surface improvements (8): pr-9603d04, pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2
 
@@ -185,25 +185,28 @@ PRs added after the loop landed, addressing gaps surfaced once the watchers were
 
 Adds a per-plan `auto_merge` setting (default true) so plans that need human review before shipping (ambient surfaces, UX iteration) can let watchers run impl/review/QA but stop short of merging. Also injects a dep-merge preamble into the start prompt when the PR has unmerged deps, so iteratively-developed plans stay coherent without each PR landing on master first.
 
-### PR: Expand regression corpus — CLI rendering at varied widths + watcher behavior coverage
+Three Claude-driven regression-corpus expansion PRs, filed together. Same pattern (markdown in `pm/qa/regression/`, run via `launch_qa_item`, scheduled by the discovery supervisor `pr-271cb3a`), split for tight QA scope per PR. All three are independent of Phase 10 code-wise but land more usefully after `pr-06a96fa` (downstream QA scenarios exercising these surfaces bind to these regression tests via `REGRESSION: <id>` rather than INSTRUCTION+ARTIFACT).
+
+### PR: Claude-based regression test — CLI output rendering at varied terminal widths
 `pr-2c060b2` (pending)
 
-Two surface families, both filed as Claude-driven regression scenarios consumed by the discovery supervisor (`pr-271cb3a`):
+`pm/qa/regression/cli-output-widths.md` — resizes a tmux pane to randomly-chosen widths (60–180, seeded RNG, plus edge values), captures `pm pr list` / `pm pr ready` / `pm plan list` output, asks Claude to flag layout bugs (overflow, mid-word breaks, miscounted wide-char icons) and improvements (technically-correct-but-ugly). Motivated by two real bugs from a single manual session that unit tests cannot enumerate.
 
-**Family 1 — CLI output rendering at varied widths.** `pm/qa/regression/cli-output-widths.md` resizes a tmux pane to randomly-chosen widths (60–180), captures listing-command output, and flags layout bugs (overflow, mid-word breaks, miscounted wide-char icons). Motivated by two real bugs from a single manual session that unit tests cannot enumerate.
+### PR: Regression coverage — watcher behavior and review session
+`pr-70d02ed` (pending)
 
-**Family 2 — Watcher behavior coverage.** Separate scenarios per surface in `pm/qa/regression/`:
-- `discovery-supervisor-tick.md` — tick against fixture state, verify launch+reconcile+log+verdict
-- `bug-fix-watcher-pick-and-advance.md` — pick correct candidate, advance via `pm pr auto-sequence`, auto-merge on PASS; variants for at-cap, stuck, reproduce-failure
-- `improvement-fix-watcher-gated-merge.md` — gated merge stops at qa-pass, human-merge cycle
-- `watcher-review-session-summary.md` — opening summary, follow-up query, remediation flow (add Watcher-section note, verify next tick picks it up)
-- `auto-sequence-halt-conditions.md` — all documented pause conditions on both TUI and CLI entry points
+Four new markdowns covering the watcher / observation surfaces from Phases 2-4:
+- `discovery-supervisor-tick.md` — tick against fixture state; verify work-log read, regression-test launch in watcher window (`pr-97ddabf`), dedup + reconcile, log append, READY emit; variants for cold start / rolling context / in-flight continuation
+- `bug-fix-watcher-pick-and-advance.md` — pick correct candidate via prioritization + Watcher notes, invoke `pm pr auto-sequence`, advance impl→review→QA→auto-merge; variants for at-cap, stuck NEEDS_WORK loop, reproduce-failure
+- `improvement-fix-watcher-gated-merge.md` — same shape against `plan=ux`; stops at qa-pass, human merges between ticks, no re-attempt
+- `watcher-review-session-summary.md` — opening summary across all three watchers, follow-up query, remediation flow (add Watcher-section note, verify next tick picks it up)
 
-Today watcher behavior is verified only by BaseWatcher framework tests and live operator markdown. After this PR, the discovery supervisor's own corpus contains regression coverage of the watchers — drift gets caught by the same loop that watches everything else.
+Folds in the opportunistic audit: as scenarios run, Claude is asked to flag *other* uncovered surfaces and file improvement PRs proposing regression tests, complementing `pr-f4dc8a2`'s static auditor.
 
-**Family 3 — opportunistic audit.** As the scenarios run, Claude is asked to flag *other* uncovered surfaces and file improvement PRs proposing new regression tests, complementing `pr-f4dc8a2`'s static auditor.
+### PR: Regression coverage — auto-sequence chain pause conditions
+`pr-a1f267a` (pending)
 
-After Phase 10 lands, QA scenarios that exercise these surfaces bind to these regression tests via `pr-06a96fa` rather than legacy INSTRUCTION+ARTIFACT — durable accumulation that makes the Phase 10 redesign worth landing. Independent of Phase 10's chain code-wise; lands more usefully after it.
+`pm/qa/regression/auto-sequence-halt-conditions.md` — exercises every documented pause condition of the chain (`pr-e58459b`) on both entry points (TUI `O` keypress + `pm pr auto-sequence <id>` CLI): impl idle-no-spec, review INPUT_REQUIRED, QA INPUT_REQUIRED, stop-before-merge (auto-merge=false or improvement-gated), review NEEDS_WORK loop, QA NEEDS_WORK loop, max-iterations hit. Verifies each pause halts correctly and resumes from the right state.
 
 ## Phase 9: Headless and unsupervised hardening
 

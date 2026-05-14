@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e58459b
+  active_pr: pr-a1f267a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11957,179 +11957,61 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-98b2a95-bug-dedicated-plans-window-is-shared-f6381eb7
 - id: pr-2c060b2
   plan: plan-regression
-  title: 'Expand regression corpus: CLI rendering at varied widths + watcher behavior
-    coverage'
+  title: 'Claude-based regression test: CLI output rendering at varied terminal widths'
   branch: pm/pr-2c060b2-claude-based-regression-test-cli-output-rendering-
   status: pending
   depends_on: []
-  description: '## Goal
-
-
-    Expand the regression corpus consumed by the discovery supervisor (pr-271cb3a)
-    with two surface families that today have no coverage despite being the load-bearing
-    parts of the autonomous loop:
-
-
-    1. CLI output rendering at varied terminal widths — the original motivation for
-    this PR. Layout bugs only surface at specific (width, content) combinations that
-    unit tests cannot enumerate.
-
-    2. Watcher behavior — the three watcher classes from Phases 2-3 (discovery supervisor
-    pr-271cb3a, bug-fix impl pr-e3a711c, improvement-fix impl pr-d39a7fb) plus the
-    human review session pr-e84b43c. Their core behavior is regression-test-worthy:
-    launching the right thing each tick, reconciling correctly, emitting the right
-    verdict, growing the work log without losing context, surviving restart, picking
-    PRs in the right order under various states.
-
-
-    Both families share the Claude-driven regression-scenario pattern (markdown in
-    pm/qa/regression/, run via launch_qa_item, scenarios bind to them via pr-06a96fa
-    after Phase 10 lands). Filing them together keeps the regression-corpus-expansion
-    work in one place.
-
-
-    ## Family 1: CLI output rendering at varied widths
-
-
-    Motivation: layout bugs depend on (a) terminal width relative to line length,
-    (b) wide-char emoji status icons miscounted by len(), (c) interactions between
-    our wrapping and the terminal''s own edge-wrap behavior, and (d) less / other
-    pagers in the path. Two real bugs from a single manual-testing session motivated
-    this:
-
-
-    1. echo_record gated wrapping on isatty(stdout) — silently no-op''d when piped
-    to less.
-
-    2. _wrap_record_to_width used len() rather than cell_len(), so lines one cell
-    over the width (because of a wide emoji) slipped past the wrap check and got mid-word-broken
-    by the renderer. The textwrap.fill fallback had the same bug.
-
-
-    Both would have been caught by a "render this command at width 94 and verify no
-    line exceeds 94 visual cells" check.
-
-
-    Scenario shape:
-
-    - pm/qa/regression/cli-output-widths.md
-
-    - For each of N randomly-chosen terminal widths in 60-180 (N~8 plus edge values),
-    open a tmux pane resized to that width, run each listing command (pm pr list,
-    pm pr list -t, pm pr list -t --workdirs, pm pr ready, pm plan list), capture via
-    tmux capture-pane -p, hand to Claude with width context, ask: are any lines wider
-    than the terminal? mid-word breaks? indent inconsistencies? wrapping at non-natural
-    boundaries when natural ones exist?
-
-    - Aggregate per-width findings into PASS/NEEDS_WORK with width + offending output
-    + description.
-
-    - Also probe for improvements (technically-correct-but-ugly layouts) and file
-    via pm pr add --plan improvements.
-
-    - Seeded RNG for reproducibility.
-
-
-    ## Family 2: Watcher regression coverage
-
-
-    Motivation: watchers are merged but their behavior is verified only by (a) unit
-    tests at the BaseWatcher framework level (pr-3032fb6) and (b) live operator markdown.
-    pr-fbda1a8 adds Claude-based watcher-class tests, but those exercise the watcher
-    logic deterministically with FakeClaudeSession — they are unit-ish, not end-to-end.
-    The discovery-supervisor-launched regression-test corpus needs explicit coverage
-    of the watchers themselves so that drift in watcher behavior is caught by the
-    same loop that watches everything else.
-
-
-    Scenarios (each a separate markdown file in pm/qa/regression/):
-
-
-    - pm/qa/regression/discovery-supervisor-tick.md — start the discovery supervisor
-    against a fixture project state (some pending PRs, some in flight, some recently
-    merged), let it tick, verify it reads the work log, launches the expected regression
-    test in the watcher window (per pr-97ddabf), reconciles a synthetically-filed
-    bug PR via dedup against existing entries, appends a one-line summary, emits READY.
-    Variants: empty work log (cold start), full work log (rolling context), in-flight
-    test from previous tick (continuation).
-
-
-    - pm/qa/regression/bug-fix-watcher-pick-and-advance.md — bug-fix watcher against
-    plan=bugs with multiple pending PRs, verify it picks the right candidate per the
-    prompt''s prioritization signals + Watcher notes, invokes pm pr auto-sequence,
-    advances to QA, auto-merges on PASS. Variants: at concurrency cap (does nothing),
-    stuck PR with repeated NEEDS_WORK (escalates), reproduce-step failure from pr-30588a7
-    (escalates).
-
-
-    - pm/qa/regression/improvement-fix-watcher-gated-merge.md — same shape against
-    plan=ux, verify the gated-merge behavior (stops at qa-pass, does NOT merge, marks
-    ready for human merge). Variant: human merges some PRs between ticks, next tick
-    continues.
-
-
-    - pm/qa/regression/watcher-review-session-summary.md — launch the watcher review
-    session (pr-e84b43c), verify the opening summary covers all three watchers'' recent
-    activity, exercise a follow-up question (asks Claude why a specific bug was deduped
-    against another), exercise a remediation flow (add a Watcher-section note), confirm
-    the note shows up in the next watcher tick.
-
-
-    - pm/qa/regression/auto-sequence-halt-conditions.md — drive the auto-sequence
-    chain (pr-e58459b) through all documented pause conditions: impl idle-no-spec,
-    review INPUT_REQUIRED, QA INPUT_REQUIRED, stop-before-merge. Verify the chain
-    halts correctly at each. Both TUI keypress path and pm pr auto-sequence CLI path.
-
-
-    After Phase 10 lands, scenarios in QA runs that exercise these surfaces bind to
-    these regression tests via pr-06a96fa rather than the legacy INSTRUCTION+ARTIFACT
-    scaffolding. This is the durable accumulation that makes Phase 10 worth landing.
-
-
-    ## Family 3: opportunistic — surfaces this scenario notices
-
-
-    As the per-width and per-watcher scenarios run, Claude is asked to flag *other*
-    uncovered surfaces it notices in the project that should have regression tests
-    but do not. Findings file as improvement PRs (proposing new regression-test additions)
-    via the existing addendum from pr-47940bc. This makes pr-2c060b2 a one-time forcing
-    function for broader audit too, complementing pr-f4dc8a2 (the static QA library
-    auditor that does this systematically).
-
-
-    ## Sequencing
-
-
-    Independent of Phase 10''s chain, but lands more usefully after it: scenarios
-    authored here bind to themselves as regression tests via pr-06a96fa once it''s
-    in place. If sequenced before Phase 10, they run as standalone Claude-driven scenarios
-    and get retrofitted to the regression-binding model after. Either order is workable.
-
-
-    ## Manual testing
-
-
-    Review the rendered output across the seeded widths to confirm the verdict logic
-    flags real layout bugs and ignores acceptable wrapping. For the watcher scenarios,
-    walk through each variant and confirm the scenario''s verdict matches what a human
-    reviewing the same trace would conclude. INPUT_REQUIRED is appropriate for the
-    visual-judgment portion of the width scenarios and for the multi-tick judgment
-    portions of the watcher scenarios.
-
-
-    ## Out of scope
-
-
-    - New regression tests for non-CLI / non-watcher surfaces — those are handled
-    by pr-f4dc8a2''s audit + pr-2680fbf''s runtime authoring.
-
-    - Modifying the watcher classes themselves to be more testable — out of scope;
-    the regression scenarios drive them as they are.'
+  description: "## Goal\n\nAdd a Claude-driven regression scenario that exercises\
+    \ pm's CLI listing commands at randomly-chosen terminal widths and inspects the\
+    \ rendered output for layout bugs.\n\n## Motivation\n\nThis kind of bug is hard\
+    \ to catch with unit tests because the buggy behavior depends on (a) the specific\
+    \ terminal width relative to the line length, (b) wide-char emoji status icons\
+    \ miscounted by len(), (c) interactions between our wrapping and the terminal's\
+    \ own edge-wrap behavior, and (d) less or other pagers being in the path. Two\
+    \ real bugs from a single session of manual testing motivated this:\n\n1. echo_record\
+    \ gated wrapping on isatty(stdout) — silently no-op'd when piped to less.\n2.\
+    \ _wrap_record_to_width used len() rather than cell_len(), so lines that were\
+    \ one cell over the width (because of a wide emoji icon) slipped past the wrap\
+    \ check unwrapped and got mid-word-broken by the renderer. The textwrap.fill fallback\
+    \ had the same bug for long lines without good break tokens.\n\nBoth bugs would\
+    \ have been caught immediately by a \"render this command at width 94 and verify\
+    \ no line exceeds 94 visual cells\" check.\n\n## Scenario shape\n\npm/qa/regression/cli-output-widths.md,\
+    \ exercising 'pm pr list', 'pm pr list -t', 'pm pr list -t --workdirs', 'pm pr\
+    \ ready', 'pm plan list', and other record-style commands as they are added.\n\
+    \n1. Set up: ensure pm has a non-trivial set of PRs in project.yaml (the test\
+    \ project's own state is a good sample — many PRs with varying title lengths,\
+    \ status icons, deps lists, optional machine/timestamp suffixes).\n\n2. For each\
+    \ of N randomly-chosen terminal widths in 60-180 (N ~= 8 plus edge values like\
+    \ exactly the threshold the test detects):\n   a. Open a tmux pane resized to\
+    \ that width (tmux resize-pane -t <pane> -x <width>).\n   b. Run each listing\
+    \ command in that pane and capture via tmux capture-pane -p.\n   c. Hand the captured\
+    \ output + the known terminal width to Claude with a prompt asking: are any lines\
+    \ visually wider than the terminal? Are any words split mid-word? Are continuation\
+    \ lines indented consistently? Does wrapping land at the natural boundary tokens\
+    \ we configured (' <- ', ' (', ' [') when those tokens are present? Other layout\
+    \ oddities?\n\n3. Aggregate per-width findings into a single PASS/NEEDS_WORK verdict.\
+    \ Each finding includes the width, the offending output, and a short description.\n\
+    \n4. Probe for improvements: Claude flags layouts that are technically correct\
+    \ but ugly or hard to read (e.g. one-character spillover, awkward continuation\
+    \ that could break at a better point, emoji not properly cell-counted). These\
+    \ file as improvements via pm pr add --plan improvements rather than bugs.\n\n\
+    5. Output a summary of findings and verdicts.\n\n6. Seeded RNG so a failure is\
+    \ reproducible (width logged in the failure).\n\n## Sequencing\n\nIndependent\
+    \ of Phase 10. Lands more usefully after pr-06a96fa (QA scenarios bind to regression\
+    \ tests) since downstream QA scenarios that exercise CLI rendering can then bind\
+    \ to this regression test via REGRESSION: <id>.\n\n## Manual testing\n\nReview\
+    \ the rendered output across the seeded widths to confirm the verdict logic flags\
+    \ real layout bugs and ignores acceptable wrapping. INPUT_REQUIRED is appropriate\
+    \ for the visual-judgment portion.\n\n## Related\n\n- pr-70d02ed (filed alongside):\
+    \ watcher behavior regression coverage. Same Claude-driven regression-test pattern,\
+    \ different surface.\n- pr-a1f267a (filed alongside): auto-sequence chain regression\
+    \ coverage. Same pattern, different surface.\n- pr-f4dc8a2 (QA library auditor):\
+    \ the static counterpart that proposes missing regression tests systematically."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T12:32:08.900344+00:00'
-  updated_at: '2026-05-14T14:45:51.270942+00:00'
+  updated_at: '2026-05-14T14:49:48.502061+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -19686,6 +19568,283 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-14T14:37:18.381479+00:00'
   updated_at: '2026-05-14T14:38:43.017620+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-70d02ed
+  plan: plan-regression
+  title: 'Regression coverage: watcher behavior and review session'
+  branch: pm/pr-70d02ed-regression-coverage-watcher-behavior-and-review-se
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+
+    Add Claude-driven regression-test markdowns covering the four watcher / observation
+    surfaces from Phases 2-4: the discovery supervisor, the bug-fix implementation
+    watcher, the improvement-fix implementation watcher, and the watcher review session.
+    Today these are covered only by BaseWatcher framework tests (pr-3032fb6) and live
+    operator markdown. They merged under the old QA flow and need durable, discovery-supervisor-runnable
+    coverage going forward.
+
+
+    ## Scenarios
+
+
+    Four new files in pm/qa/regression/:
+
+
+    ### 1. discovery-supervisor-tick.md
+
+    Start the discovery supervisor against a fixture project state (some pending PRs,
+    some in flight, some recently merged). Let it tick. Verify it:
+
+    - Reads the work log (pm/watchers/discovery.log) for context
+
+    - Launches the expected regression test in the watcher''s window (per pr-97ddabf)
+
+    - Reconciles a synthetically-filed bug PR via dedup against existing entries (pm
+    pr list --plan bugs)
+
+    - Appends a one-line summary
+
+    - Emits READY (or INPUT_REQUIRED if a deliberate ambiguity is seeded)
+
+
+    Variants:
+
+    - Empty work log (cold start)
+
+    - Full work log (rolling context — verify trimming/summarization works)
+
+    - In-flight test from previous tick (continuation, not re-launch)
+
+
+    ### 2. bug-fix-watcher-pick-and-advance.md
+
+    Bug-fix watcher (pr-e3a711c) against plan=bugs with multiple pending PRs. Verify
+    it:
+
+    - Picks the right candidate per the prompt''s prioritization signals (severity
+    + recurrence + age + Watcher notes)
+
+    - Invokes pm pr auto-sequence on the picked PR
+
+    - Advances impl -> review -> QA -> auto-merge on PASS
+
+    - Honors concurrency cap (does nothing when at cap)
+
+
+    Variants:
+
+    - At concurrency cap (no-op)
+
+    - Stuck PR with repeated NEEDS_WORK (escalates via INPUT_REQUIRED)
+
+    - Reproduce-step failure from pr-30588a7 (escalates)
+
+
+    ### 3. improvement-fix-watcher-gated-merge.md
+
+    Improvement-fix watcher (pr-d39a7fb) against plan=ux. Same shape as bug-fix-watcher
+    but with gated-merge: PRs that PASS QA are marked ready-for-merge and NOT merged.
+    Verify:
+
+    - Stops at qa-pass; no merge happens
+
+    - Next tick continues without re-attempting the merged-pending PR
+
+
+    Variants:
+
+    - Human merges some PRs between ticks; next tick picks up the next candidate
+
+    - Backlog with multiple ready-for-merge PRs
+
+
+    ### 4. watcher-review-session-summary.md
+
+    Launch the watcher review session (pr-e84b43c) from the TUI. Verify:
+
+    - Opening summary covers all three watchers'' recent activity (discovery, bug-fix,
+    improvement-fix)
+
+    - A follow-up question (e.g. "why was bug X deduped against bug Y?") gets a reasoned
+    answer using the work logs
+
+    - A remediation flow (add a Watcher-section note to notes.txt) confirms before
+    applying
+
+    - The added note shows up in the next watcher tick
+
+
+    ## Family 3: opportunistic audit (folded in here)
+
+
+    As these scenarios run, Claude is asked to flag *other* uncovered surfaces it
+    notices in the project that should have regression tests but do not. Findings
+    file as improvement PRs proposing new regression-test additions, via the existing
+    addendum from pr-47940bc. This is a one-time forcing function for broader audit,
+    complementing pr-f4dc8a2 (the static QA library auditor that does this systematically).
+
+
+    ## Sequencing
+
+
+    Independent of Phase 10 code-wise. Lands more usefully after pr-06a96fa (QA scenarios
+    bind to regression tests) since downstream QA scenarios exercising these surfaces
+    can then bind to these regression tests via REGRESSION: <id> rather than INSTRUCTION+ARTIFACT.
+
+
+    ## Manual testing
+
+
+    Walk through each variant per scenario and confirm the verdict matches what a
+    human reviewing the same trace would conclude. INPUT_REQUIRED is appropriate for
+    the multi-tick judgment portions and the watcher-review-session follow-up phase.
+
+
+    ## Out of scope
+
+
+    - The auto-sequence chain itself (separate PR — filed in the same wave).
+
+    - CLI rendering scenarios (pr-2c060b2).
+
+    - Modifying the watcher classes themselves to be more testable — the regression
+    scenarios drive them as they are.
+
+
+    ## Related
+
+
+    - pr-2c060b2 (filed alongside): CLI rendering at varied widths. Same pattern,
+    different surface.
+
+    - pr-a1f267a (filed alongside): auto-sequence chain regression coverage.
+
+    - pr-fbda1a8 (Phase 6 bridge PR): exercises watchers deterministically with FakeClaudeSession;
+    this PR exercises them via the discovery-supervisor-launched runtime path. Complementary.
+
+    - pr-f4dc8a2 (QA library auditor): static counterpart that proposes missing regression
+    tests systematically.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T14:49:12.969486+00:00'
+  updated_at: '2026-05-14T14:49:49.637943+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a1f267a
+  plan: plan-regression
+  title: 'Regression coverage: auto-sequence chain pause conditions'
+  branch: pm/pr-a1f267a-regression-coverage-auto-sequence-chain-pause-cond
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+
+    Add a Claude-driven regression-test markdown covering the auto-sequence chain
+    (pr-e58459b) — the start -> review -> QA pipeline used by both TUI keypress and
+    the programmatic pm pr auto-sequence CLI consumed by the impl watchers. Today
+    its halt-at-pause-condition behavior is covered only by ad-hoc manual testing.
+
+
+    ## Scenarios
+
+
+    New file pm/qa/regression/auto-sequence-halt-conditions.md exercising every documented
+    pause condition on both entry points:
+
+
+    ### Entry points
+
+    - TUI keypress (O key on a selected PR)
+
+    - pm pr auto-sequence <id> CLI (programmatic; what watchers use)
+
+
+    ### Pause conditions to verify
+
+    1. **impl idle-no-spec**: PR enters impl, the spec_impl is missing or pending
+    review (spec_pending=True), session goes idle. Chain pauses; impl window left
+    in place for human inspection.
+
+
+    2. **review INPUT_REQUIRED**: review session emits INPUT_REQUIRED. Chain pauses
+    at review; does not advance to QA.
+
+
+    3. **QA INPUT_REQUIRED**: QA scenario emits INPUT_REQUIRED (or refiner rejection
+    per pr-b59f0c7 reason machinery). Chain pauses at QA; does not advance to merge.
+
+
+    4. **stop-before-merge**: chain reaches QA PASS but the configured behavior is
+    stop-before-merge (auto-merge=false per pr-b77702b, or improvement-fix gated).
+    Chain stops; PR sits in qa-pass / ready-for-merge state.
+
+
+    5. **review NEEDS_WORK loop**: review emits NEEDS_WORK -> impl rerun -> review
+    again. Verify the chain loops correctly (does not double-advance to QA) and respects
+    max-iterations.
+
+
+    6. **QA NEEDS_WORK loop**: same shape on the QA side — NEEDS_WORK loops back to
+    a fix iteration before re-running QA scenarios.
+
+
+    7. **terminal pause (max-iterations hit)**: chain hits max-iterations on a sub-loop.
+    Pauses with structured reason (per pr-b59f0c7) the watcher can route.
+
+
+    For each pause, the regression captures: (a) which entry point triggered the chain,
+    (b) which pause condition fired, (c) the chain''s emitted state, (d) whether the
+    next manual / watcher action correctly resumes from the paused state.
+
+
+    ## Sequencing
+
+
+    Independent of Phase 10 code-wise. Lands more usefully after pr-06a96fa.
+
+
+    ## Manual testing
+
+
+    Drive each pause condition from both entry points and confirm the chain halts
+    and resumes correctly. INPUT_REQUIRED appropriate for the visual / state-inspection
+    portion.
+
+
+    ## Out of scope
+
+
+    - Watcher behavior itself (pr-70d02ed handles that).
+
+    - CLI rendering (pr-2c060b2).
+
+    - Modifying the auto-sequence chain — the regression drives it as-is.
+
+
+    ## Related
+
+
+    - pr-2c060b2 and pr-70d02ed (filed alongside): the other two pieces of the regression-corpus
+    expansion wave.
+
+    - pr-e58459b (merged): the auto-sequence chain this PR covers.
+
+    - pr-fbda1a8 (Phase 6 bridge PR): exercises the chain deterministically via FakeClaudeSession''s
+    three integration backstops; this PR exercises it via the discovery-supervisor-launched
+    runtime path. Complementary.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T14:49:39.950664+00:00'
+  updated_at: '2026-05-14T14:49:39.950664+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
