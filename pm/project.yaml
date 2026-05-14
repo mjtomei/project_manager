@@ -16676,7 +16676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-05-14T01:10:55.416541+00:00'
+  updated_at: '2026-05-14T01:12:48.557344+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16735,6 +16735,17 @@ prs:
       exercised deterministically end-to-end.'
     created_at: '2026-05-14T01:10:54Z'
     last_edited: '2026-05-14T01:10:54Z'
+  - id: note-cd01975
+    text: 'While doing the runner cleanup, sweep pm/qa/instructions/ to make sure
+      every instruction still matches the current flows — instructions written before
+      later refactors (BDD-shaped scenarios, captures-out-of-git, new session/container
+      layout, etc.) may have stale steps or references. Also audit coverage: every
+      user-facing surface added since the instruction library was last refreshed (notably
+      the QA flow itself — pm qa run, pm qa author-*, pm qa add-*, pm qa docs, pm
+      qa captures-path, the create-picker modal, etc.) should have at least one instruction
+      that drives it end-to-end so future scenarios have a Given to build on.'
+    created_at: '2026-05-14T01:12:48Z'
+    last_edited: '2026-05-14T01:12:48Z'
 - id: pr-f4dc8a2
   plan: plan-regression
   title: 'QA library auditor: scan a project and suggest fills for missing instructions,
