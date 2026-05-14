@@ -261,14 +261,24 @@ This PR reconnects the library at the right surface: the new-regression authorin
 Generalize the per-scenario `verdict_reason` field added for the refiner-rejection path to every place a non-PASS verdict comes out of an automated loop (main scenario workers, review-loop, watcher). Reasons land in `state.scenario_verdict_reasons[idx]`, flow into `qa_status.json` and `verdict.md`, and render as a one-line "↳ <reason>" continuation under each non-PASS verdict in status panes. Triage stops requiring pane-scrollback archaeology.
 
 ### PR: QA scenario planner allows adding scenarios mid-run or after initial plan
-`pr-0b14f2c` (depends on: pr-6be8ee6)
+`pr-0b14f2c` (depends on: pr-6be8ee6, pr-2680fbf)
 
-Let the planner add scenarios beyond the initial plan and let users re-run NEEDS_WORK scenarios or replace INPUT_REQUIRED ones, so coverage gaps and earlier failures resolve without restarting QA. The overall verdict can transition from INPUT_REQUIRED or NEEDS_WORK back to PASS as added/replaced scenarios settle. New `+` / `r` / `R` keys in the scenarios pane pull the latest `QA_PLAN_START/END` block from the planner pane's transcript. Replaced scenarios' prior captures preserved under `scenarios/<n>/prior-N/`. Manual testing: drive the keypress flow against a real run with at least one NEEDS_WORK and one INPUT_REQUIRED scenario; INPUT_REQUIRED is appropriate for the human-judged "load this plan block" moments.
+Let the planner add scenarios beyond the initial plan and let users re-run NEEDS_WORK scenarios or replace INPUT_REQUIRED ones, so coverage gaps and earlier failures resolve without restarting QA. The overall verdict can transition from INPUT_REQUIRED or NEEDS_WORK back to PASS as added/replaced scenarios settle. New `+` / `r` / `R` keys in the scenarios pane pull the latest `QA_PLAN_START/END` block from the planner pane's transcript. Replaced scenarios' prior captures preserved under `scenarios/<n>/prior-N/`.
 
-### PR: QA library auditor
+**Interaction with the regressions-as-scenarios flow**: a newly-added or replacement scenario may emit `REGRESSION: <id>` (existing) or `NEW_REGRESSION: <slug>` (planner authors one inline via `pr-2680fbf`). When it's `NEW_REGRESSION`, the authoring sub-step runs first — drafts `pm/qa/regression/<slug>.md` (with mocks-awareness from `pr-51586d2` if applicable), commits to the PR branch — and only then does the scenario itself run. Without this handoff, mid-run additions for surfaces lacking a regression would fall back to INSTRUCTION+ARTIFACT and defeat the Phase 10 redesign. The scenarios pane shows a per-scenario sub-status ("authoring regression…" → "running scenario…") so users see why a freshly-added scenario takes longer than an existing-regression-bound one.
+
+Manual testing: drive the keypress flow against a real run with at least one NEEDS_WORK and one INPUT_REQUIRED scenario; also exercise an add-scenario that triggers NEW_REGRESSION and verify the regression file lands on the branch before the scenario runs; INPUT_REQUIRED is appropriate for the human-judged "load this plan block" moments.
+
+### PR: QA library auditor — propose regression-test fills (with attached mocks)
 `pr-f4dc8a2` (pending)
 
-Scan a project and suggest fills for missing QA instructions, regression tests, artifact recipes, and mocks. A meta-tool that helps users grow the QA library that the rest of the loop depends on. Closes the loop between "the QA loop got more powerful" (Phase 10 above) and "the library underneath it actually has enough content to use that power."
+Static project-wide counterpart to `pr-2680fbf` (which authors regressions on-demand per scenario). Scans the project's user-visible surfaces (CLI subcommands, TUI keybindings, watcher entrypoints, backends), intersects with what `pm/qa/regression/` already covers, and proposes a markdown audit report with three tiers reflecting the Phase 10 hierarchy:
+
+1. **Regression tests (primary)** — missing regression-test drafts for uncovered surfaces. Same proposal shape as `pr-2680fbf`'s runtime authoring, just batch.
+2. **Mocks (attached to regressions)** — for each proposed or existing regression, mockable external dependencies that lack registry entries. Mocks never proposed standalone — they attach to a regression-test surface, consistent with `pr-51586d2`.
+3. **Instructions / artifact recipes (fallback-only)** — flag legacy INSTRUCTION+ARTIFACT scaffolding that should migrate to regression tests; do not propose new entries except for genuine one-shot probes/oracles.
+
+Proposals go to a report (no auto-apply) for human or scenario-author follow-up. Can be invoked manually (`pm qa audit`) or scheduled via the discovery supervisor (`pr-271cb3a`) as a periodic stale-library check.
 
 ## Success criteria
 

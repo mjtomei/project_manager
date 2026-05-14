@@ -17913,43 +17913,156 @@ prs:
     last_edited: '2026-05-14T01:12:48Z'
 - id: pr-f4dc8a2
   plan: plan-regression
-  title: 'QA library auditor: scan a project and suggest fills for missing instructions,
-    regression tests, artifact recipes, and mocks'
+  title: 'QA library auditor: scan a project and propose regression-test fills (with
+    attached mocks)'
   branch: pm/pr-f4dc8a2-qa-library-auditor-scan-a-project-and-suggest-fill
   status: pending
   depends_on:
   - pr-6be8ee6
   - pr-7d5d036
-  description: "## Goal\n\nAdd a high-level flow that analyzes a project and suggests\
-    \ (or\nscaffolds) fills for gaps in its QA library — `pm/qa/instructions/`,\n\
-    `pm/qa/regression/`, `pm/qa/artifacts/`, and `pm/qa/mocks/` — based on\nwhat the\
-    \ codebase actually exposes.\n\nToday, authoring is per-file and entirely on the\
-    \ human: `pm qa\nadd-instruction`, `pm qa author-artifact`, etc. Projects with\
-    \ no QA\ncollaterals get nothing for free; even projects with some have no way\n\
-    to know which obvious surfaces are uncovered.\n\n## Proposed shape\n\n`pm qa audit`\
-    \ (or similar) launches a Claude session that:\n\n1. Inspects the project — surfaces\
-    \ (CLIs, TUIs, services), entry\n   points, dependency graph, existing `pm/qa/*`\
-    \ files.\n2. Builds a coverage map: for each visible surface, which categories\n\
-    \   of QA collateral exist and which are missing (e.g. \"the\n   `pm session`\
-    \ flow has no env-setup instruction; the auth flow has\n   no mock contract for\
-    \ the IdP it talks to\").\n3. Reports the gaps to the user, ranked by surface\
-    \ importance / change\n   frequency / blast radius.\n4. For each gap the user\
-    \ accepts, either scaffolds a stub via the\n   existing `pm qa add-*` / `mocks\
-    \ add` commands, or launches the\n   guided `pm qa author-*` flow to draft the\
-    \ file with the user.\n\n## Out of scope\n\n- Running the suggested tests/scenarios\
-    \ — this is purely about\n  filling library gaps.\n- Merging or modifying mocks\
-    \ against actual fakes/stubs in the\n  codebase. The mock file is the contract;\
-    \ implementations stay the\n  scenario's job.\n- Replacing per-category authoring;\
-    \ this composes the existing CLI\n  rather than supplanting it.\n\n## Notes\n\n\
-    - Belongs after pr-7d5d036 lands (regression-runner isolation), so\n  any audit-suggested\
-    \ regression test inherits the new isolation\n  semantics by default.\n- The audit\
-    \ prompt should load `pm_core/docs/qa_library.md` so the\n  Claude session has\
-    \ the same ground truth as the per-category\n  author flows."
+  description: '## Goal
+
+
+    A meta-tool that scans a project and proposes fills for the QA library, with the
+    regression-test surface as the primary accumulation point (per the Phase 10 redesign
+    in plan-regression.md).
+
+
+    ## Why now
+
+
+    After pr-06a96fa (scenarios bind to regression tests) and pr-2680fbf (planner
+    authors a new regression when none fits) land, the QA flow''s compounding step
+    lives in regression tests, with mocks attached at that surface. pr-2680fbf is
+    the *runtime* fill-the-gap step: when the planner needs a regression and none
+    exists, it writes one as part of the scenario. This PR is the *static* counterpart:
+    a scan-the-project audit that proposes the fills the runtime path hasn''t reached,
+    and surfaces hierarchy problems (e.g. legacy INSTRUCTION+ARTIFACT scenarios that
+    should be migrated to regression tests).
+
+
+    ## Hierarchy the auditor enforces
+
+
+    1. Regression tests (primary) — the auditor''s main output. For each user-visible
+    surface in the project that lacks a regression test exercising it, propose a regression-test
+    draft. Same shape as pr-2680fbf''s runtime authoring step but driven by a project-wide
+    scan rather than a per-PR scenario need.
+
+
+    2. Mocks (attached to regression-test surfaces) — for each proposed or existing
+    regression test, identify mockable external dependencies (per pm qa mocks and
+    the registry shipped by pr-942aa21). Propose mock entries for surfaces that need
+    them but lack registry entries. Mocks are not proposed standalone; they always
+    attach to a regression-test surface — consistent with pr-51586d2''s choice that
+    mocks awareness lives at the regression-authoring surface.
+
+
+    3. Instructions / artifact recipes (fallback-only) — flag legacy INSTRUCTION+ARTIFACT
+    scaffolding that exists for flows now better expressed as regression tests. Suggest
+    migration; do not propose new INSTRUCTION+ARTIFACT entries except for genuine
+    one-shot probes/oracles (per the Phase 10 fallback rule).
+
+
+    ## Inputs
+
+
+    - pm/qa/regression/ existing entries (loaded via qa_instructions.list_all)
+
+    - pm/qa/mocks/ registry (loaded via qa_instructions.list_mocks)
+
+    - pm/qa/instructions/ and pm/qa/artifacts/ for the fallback-only audit
+
+    - Project source code — the auditor probes for user-visible surfaces (CLI subcommands,
+    TUI key bindings, watcher entrypoints, backends) and intersects with what the
+    regression library exercises
+
+
+    ## Outputs
+
+
+    A markdown report at pm/qa/audit-TIMESTAMP.md (or similar) with sections per hierarchy
+    tier:
+
+    - Missing regression tests (with proposed drafts ready to be filed or merged directly
+    into pm/qa/regression/)
+
+    - Missing mocks attached to existing or proposed regression tests
+
+    - Legacy INSTRUCTION+ARTIFACT scenarios that should migrate to regression tests
+
+    - Stale or duplicated entries that should be merged or removed
+
+
+    ## Failure modes
+
+
+    - Auditor over-proposes (every surface gets a regression test, library bloats)
+    — controlled by a confidence threshold and by surfacing proposals as a report
+    for human review rather than auto-filing.
+
+    - Auditor misses surfaces — exposed by the auditor running periodically (e.g.
+    via the discovery supervisor pr-271cb3a) and converging over time.
+
+    - Auditor''s proposed mocks do not match what pr-51586d2''s runtime authoring
+    would produce — keep the prompt for proposing mocks aligned with pr-51586d2''s
+    surface-declaration requirements so both paths produce schema-compatible entries.
+
+
+    ## Scope
+
+
+    - New module pm_core/qa/audit.py (or similar) implementing the scan.
+
+    - Leader Claude session driving the scan: prompt that lists existing library,
+    surveys source code for surfaces, proposes fills per the hierarchy.
+
+    - Report writer.
+
+    - pm qa audit CLI command.
+
+    - Tests: a synthetic project with deliberate gaps produces the expected report
+    sections; existing entries are not re-proposed; the proposed regression-test draft
+    is well-formed and would parse via pr-06a96fa''s binding logic; proposed mocks
+    declare target_surface per pr-51586d2.
+
+
+    ## Out of scope
+
+
+    - Auto-applying audit proposals — proposals go to the report for human or scenario-author
+    follow-up.
+
+    - Versioning of audit reports.
+
+    - Cross-project audit (single project only for now).
+
+
+    ## Depends on
+
+
+    Conceptually depends on the Phase 10 flow being in place — proposals are shaped
+    by pr-06a96fa, pr-2680fbf, pr-51586d2. Pragmatically, the auditor can be developed
+    against the existing pm/qa/ surface and refined once the runtime flow lands. No
+    hard code-level dep until the schema details settle.
+
+
+    ## Related
+
+
+    - pr-2680fbf (runtime new-regression authoring) — same proposal shape, different
+    trigger (per-scenario vs. project-wide scan).
+
+    - pr-51586d2 (mocks at regression-authoring) — auditor''s mock proposals must
+    produce schema-compatible entries.
+
+    - pr-271cb3a (discovery supervisor) — can run the auditor periodically as a stale-library
+    check.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-08T17:14:58.761363+00:00'
-  updated_at: '2026-05-08T19:03:14.282100+00:00'
+  updated_at: '2026-05-14T02:05:36.805646+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -18347,74 +18460,184 @@ prs:
   status: pending
   depends_on:
   - pr-6be8ee6
-  description: "## Goal\n\nLet the QA scenario planner add additional scenarios to\
-    \ a QA run\nbeyond the initial plan, **and let users re-run NEEDS_WORK scenarios\n\
-    or replace INPUT_REQUIRED ones**, so coverage gaps and earlier\nfailures can be\
-    \ resolved without restarting QA from scratch. The\noverall QA verdict can transition\
-    \ from INPUT_REQUIRED or NEEDS_WORK\nback to PASS as added/replaced scenarios\
-    \ settle.\n\n## Why\n\nToday the planner runs once, emits a fixed \\`QA_PLAN_START\
-    \ / END\\`\nblock, and the orchestrator launches exactly those scenarios. The\n\
-    overall verdict is whatever falls out of that single batch. What's\nmissing:\n\
-    \n- **Coverage gaps surfaced mid-run.** Watching scenarios execute\n  often reveals\
-    \ an angle the initial plan didn't cover (a surface\n  the planner didn't know\
-    \ about, an edge case implied by a worker's\n  INPUT_REQUIRED, a multi-actor variant\
-    \ prompted by what a single\n  scenario uncovered).\n- **NEEDS_WORK scenarios\
-    \ after a fix is committed.** A scenario\n  finds a bug, the fix gets committed\
-    \ during QA, and the scenario\n  needs to re-run against the fixed code to confirm.\
-    \ Today that\n  means a separate QA run.\n- **INPUT_REQUIRED scenarios after the\
-    \ blocker clears.** A scenario\n  stalled on a missing dependency, ambiguity,\
-    \ or refiner rejection;\n  once the user addresses it (installs the dep, clarifies\
-    \ the\n  spec, narrows the scenario), it should be re-pluggable as a\n  replacement\
-    \ scenario without losing the rest of the run's\n  progress.\n- **User-directed\
-    \ coverage.** A human watching the run may want to\n  request \"also exercise\
-    \ X\" without dropping current progress.\n\n## UX\n\nThe planner pane from the\
-    \ initial run sticks around. The user\niterates with it freely (refine the request,\
-    \ broaden/narrow,\nreject and re-emit) until a plan block they like is sitting\
-    \ at\nthe bottom of the planner pane's transcript.\n\nTwo actions in the scenarios\
-    \ pane:\n\n1. **Add scenarios** (e.g. \\`+\\` key) — pull in the latest plan\n\
-    \   block from the planner pane and append the new scenarios to\n   the running\
-    \ batch. New scenarios get fresh indices continuing\n   from \\`max(existing_index)\
-    \ + 1\\`.\n2. **Replace a scenario** (e.g. \\`r\\` key on the selected row) —\n\
-    \   the selected scenario, currently NEEDS_WORK or INPUT_REQUIRED,\n   is removed\
-    \ from the batch and the latest plan block from the\n   planner pane is spliced\
-    \ in as its replacement(s). Useful when\n   you want to refine a scenario whose\
-    \ initial framing didn't\n   work and re-run with a better one.\n\nRe-running\
-    \ an existing scenario (without replacement) — i.e. driving\nthe same scenario\
-    \ again against fresher code — is also exposed (e.g.\n\\`R\\` key) and routes\
-    \ through the same concretize → worker → verify\npipeline.\n\n\\\"Load latest\\\
-    \" in all cases means \\\"the most recent\n\\`QA_PLAN_START / END\\` block in\
-    \ the planner pane's transcript at\nthe moment the key is pressed.\\\" Intermediate\
-    \ drafts stay in the\ntranscript and don't affect the running batch.\n\n## Behind\
-    \ the scenes\n\n- Orchestrator API for adding, replacing, and re-running scenarios\n\
-    \  in a live \\`QALoopState\\`.\n- The scenarios pane keybindings trigger the\
-    \ splice/replace/re-run:\n  read the planner pane's transcript, run the existing\n\
-    \  \\`parse_qa_plan\\` on the latest plan block, hand the result to\n  the orchestrator.\n\
-    - New/replacement/re-run scenarios go through the same concretizer\n  + worker\
-    \ + verifier pipeline as the initial batch.\n- \\`qa_status.json\\` and the scenarios\
-    \ pane update in place.\n- **Overall verdict re-aggregation.** When a replacement\
-    \ or re-run\n  settles with a different outcome than its predecessor, the\n  aggregated\
-    \ overall verdict recomputes; \\`state.latest_verdict\\`\n  can transition INPUT_REQUIRED\
-    \ → PASS or NEEDS_WORK → PASS as a\n  result. The finalize pane gating updates\
-    \ accordingly: extends\n  \\`verified_scenarios\\` check to cover late additions\
-    \ and\n  recomputes when scenarios are replaced.\n- Replaced scenarios' prior\
-    \ \\`prompt.md\\` / \\`verdict.md\\` captures\n  are preserved (e.g. moved to\
-    \ a numbered subdir like\n  \\`scenarios/<n>/prior-1/\\`) so the run history isn't\
-    \ lost.\n\n## Scope\n\n- Live-state add / replace / re-run in \\`QALoopState\\\
-    ` + orchestrator.\n- Key bindings in the scenarios pane (\\`qa_status.py\\`) plus\
-    \ the\n  scraping/parsing logic.\n- Finalize gate covers late additions and recomputed\
-    \ verdicts.\n- Capture preservation when a scenario is replaced.\n\n## Out of\
-    \ scope\n\n- Removing scenarios from a running plan without replacement.\n- Editing\
-    \ existing scenario STEPS mid-run (would conflict with\n  concretizer output already\
-    \ in flight; replace-with-fresh-plan\n  is the supported path instead).\n- Auto-detecting\
-    \ new plan blocks the planner emits (the user\n  decides when to pull them in).\n\
-    - Persisting follow-up-addition provenance across runs.\n\n## Depends on\n\npr-6be8ee6\
-    \ — uses the \\`verdict_reasons\\` field and shared verdict\ninfrastructure that\
-    \ lands there."
+  - pr-2680fbf
+  description: '## Goal
+
+
+    Let the QA scenario planner add additional scenarios to a QA run beyond the initial
+    plan, and let users re-run NEEDS_WORK scenarios or replace INPUT_REQUIRED ones,
+    so coverage gaps and earlier failures can be resolved without restarting QA from
+    scratch. The overall QA verdict can transition from INPUT_REQUIRED or NEEDS_WORK
+    back to PASS as added/replaced scenarios settle.
+
+
+    ## Why
+
+
+    Today the planner runs once, emits a fixed QA_PLAN_START / END block, and the
+    orchestrator launches exactly those scenarios. The overall verdict is whatever
+    falls out of that single batch. What''s missing:
+
+
+    - Coverage gaps surfaced mid-run. Watching scenarios execute often reveals an
+    angle the initial plan did not cover (a surface the planner did not know about,
+    an edge case implied by a worker''s INPUT_REQUIRED, a multi-actor variant prompted
+    by what a single scenario uncovered).
+
+    - NEEDS_WORK scenarios after a fix is committed. A scenario finds a bug, the fix
+    gets committed during QA, and the scenario needs to re-run against the fixed code
+    to confirm. Today that means a separate QA run.
+
+    - INPUT_REQUIRED scenarios after the blocker clears. A scenario stalled on a missing
+    dependency, ambiguity, or refiner rejection; once the user addresses it, it should
+    be re-pluggable as a replacement scenario without losing the rest of the run''s
+    progress.
+
+    - User-directed coverage. A human watching the run may want to request "also exercise
+    X" without dropping current progress.
+
+
+    ## UX
+
+
+    The planner pane from the initial run sticks around. The user iterates with it
+    freely (refine the request, broaden/narrow, reject and re-emit) until a plan block
+    they like is sitting at the bottom of the planner pane''s transcript.
+
+
+    Two actions in the scenarios pane:
+
+
+    1. Add scenarios (e.g. + key) — pull in the latest plan block from the planner
+    pane and append the new scenarios to the running batch. New scenarios get fresh
+    indices continuing from max(existing_index) + 1.
+
+
+    2. Replace a scenario (e.g. r key on the selected row) — the selected scenario,
+    currently NEEDS_WORK or INPUT_REQUIRED, is removed from the batch and the latest
+    plan block from the planner pane is spliced in as its replacement(s). Useful when
+    you want to refine a scenario whose initial framing did not work and re-run with
+    a better one.
+
+
+    Re-running an existing scenario (without replacement) — i.e. driving the same
+    scenario again against fresher code — is also exposed (e.g. R key) and routes
+    through the same concretize -> worker -> verify pipeline.
+
+
+    "Load latest" in all cases means "the most recent QA_PLAN_START / END block in
+    the planner pane''s transcript at the moment the key is pressed." Intermediate
+    drafts stay in the transcript and do not affect the running batch.
+
+
+    ## Interaction with the regressions-as-scenarios flow
+
+
+    After pr-06a96fa lands, scenarios bind to regression tests via REGRESSION: <id>;
+    after pr-2680fbf lands, the planner can emit NEW_REGRESSION: <slug> and author
+    a new regression test inline. Mid-run add/replace must handle both:
+
+
+    - If a newly-added or replacement scenario references an existing REGRESSION:
+    <id>, the standard concretize -> worker -> verify path runs against that regression.
+    Same as today.
+
+
+    - If a newly-added or replacement scenario emits NEW_REGRESSION: <slug>, the new-regression
+    authoring sub-step runs first (drafts pm/qa/regression/<slug>.md, including mocks-awareness
+    from pr-51586d2 if its constraints are met). Only after the regression file lands
+    on the PR branch does the scenario itself run. The scenarios pane reflects this
+    as a sub-status on the new entry (e.g. "authoring regression..." -> "running scenario...")
+    so the user can see why a freshly-added scenario takes longer than a freshly-added
+    existing-regression-bound one.
+
+
+    - A replacement scenario that authors a new regression must NOT inherit the old
+    scenario''s slug or capture directory — it gets fresh indices and a fresh workdir
+    per the existing replacement semantics. The old scenario''s prior captures move
+    to scenarios/<n>/prior-N/ as already specified.
+
+
+    This is load-bearing: without it, adding a scenario mid-run that needs a regression
+    that does not yet exist would either fail (no regression -> no run) or fall back
+    to INSTRUCTION+ARTIFACT (defeats the Phase 10 redesign). Mid-run add/replace must
+    use the same preferred path as initial-batch authoring.
+
+
+    ## Behind the scenes
+
+
+    - Orchestrator API for adding, replacing, and re-running scenarios in a live QALoopState.
+
+    - The scenarios pane keybindings trigger the splice/replace/re-run: read the planner
+    pane''s transcript, run the existing parse_qa_plan on the latest plan block, hand
+    the result to the orchestrator.
+
+    - New/replacement/re-run scenarios go through the same concretizer + worker +
+    verifier pipeline as the initial batch.
+
+    - For scenarios with NEW_REGRESSION, the orchestrator invokes the new-regression
+    authoring sub-step before the concretizer (or as part of concretization, depending
+    on where pr-2680fbf hooks it). The scenario only enters the worker stage after
+    the drafted regression file is on the branch.
+
+    - qa_status.json and the scenarios pane update in place, including the per-scenario
+    sub-status for in-flight regression authoring.
+
+    - Overall verdict re-aggregation. When a replacement or re-run settles with a
+    different outcome than its predecessor, the aggregated overall verdict recomputes;
+    state.latest_verdict can transition INPUT_REQUIRED -> PASS or NEEDS_WORK -> PASS
+    as a result. The finalize pane gating updates accordingly: extends verified_scenarios
+    check to cover late additions and recomputes when scenarios are replaced.
+
+    - Replaced scenarios'' prior prompt.md / verdict.md captures are preserved (e.g.
+    moved to a numbered subdir like scenarios/<n>/prior-1/) so the run history is
+    not lost.
+
+
+    ## Scope
+
+
+    - Live-state add / replace / re-run in QALoopState + orchestrator.
+
+    - Key bindings in the scenarios pane (qa_status.py) plus the scraping/parsing
+    logic.
+
+    - NEW_REGRESSION handoff to pr-2680fbf''s authoring sub-step for mid-run-added
+    scenarios.
+
+    - Finalize gate covers late additions and recomputed verdicts.
+
+    - Capture preservation when a scenario is replaced.
+
+
+    ## Out of scope
+
+
+    - Removing scenarios from a running plan without replacement.
+
+    - Editing existing scenario STEPS mid-run (would conflict with concretizer output
+    already in flight; replace-with-fresh-plan is the supported path instead).
+
+    - Auto-detecting new plan blocks the planner emits (the user decides when to pull
+    them in).
+
+    - Persisting follow-up-addition provenance across runs.
+
+
+    ## Depends on
+
+
+    - pr-6be8ee6 — uses the verdict_reasons field and shared verdict infrastructure
+    that lands there.
+
+    - pr-2680fbf — the NEW_REGRESSION authoring sub-step that mid-run add/replace
+    invokes when needed.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T21:02:19.201672+00:00'
-  updated_at: '2026-05-13T21:37:27.608456+00:00'
+  updated_at: '2026-05-14T02:06:09.002431+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
