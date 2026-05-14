@@ -31,6 +31,7 @@ Design:
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -39,6 +40,53 @@ from pathlib import Path
 # real Claude transcripts, ``"type": "assistant"`` from ``json.dumps``).
 _ASSISTANT_RE = re.compile(r'"type"\s*:\s*"assistant"')
 _USER_RE = re.compile(r'"type"\s*:\s*"user"')
+
+
+def _read_transcript_text(transcript_path: str | Path | None) -> str:
+    """Read a Claude transcript, tolerating slug-mismatched symlinks.
+
+    Band-aid for pr-488b748: when ``build_claude_shell_cmd`` creates the
+    transcript symlink it derives the target's parent dir from the cwd
+    *we* passed in, but Claude writes to a parent derived from its
+    actual runtime cwd. If those diverge (e.g. a worktree symlinked to a
+    different canonical path, or a nested pm invocation that registered
+    one workdir while launching the pane at another), the symlink
+    target never appears. The session_id is unique, though, so we can
+    recover the real path by scanning ``~/.claude/projects/*/`` for the
+    matching ``<session_id>.jsonl``.
+    """
+    if not transcript_path:
+        return ""
+    p = Path(transcript_path)
+    try:
+        return p.read_text(errors="replace")
+    except (OSError, FileNotFoundError):
+        pass
+    # Symlink target missing — fall back to a session-id glob.
+    sid: str | None = None
+    try:
+        if p.is_symlink():
+            sid = Path(os.readlink(p)).stem
+    except OSError:
+        sid = None
+    if not sid:
+        sid = p.stem
+    if not (len(sid) == 36 and sid.count("-") == 4):
+        return ""
+    projects_dir = Path.home() / ".claude" / "projects"
+    try:
+        matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
+    except OSError:
+        return ""
+    if not matches:
+        return ""
+    # Pick the most recently modified — handles edge cases where stale
+    # files with the same sid linger from a prior run.
+    real = max(matches, key=lambda m: m.stat().st_mtime)
+    try:
+        return real.read_text(errors="replace")
+    except OSError:
+        return ""
 
 
 def extract_verdict_from_transcript(
@@ -51,12 +99,7 @@ def extract_verdict_from_transcript(
     latest assistant turn does not contain any of *verdicts* on its own
     line.
     """
-    if not transcript_path:
-        return None
-    try:
-        text = Path(transcript_path).read_text(errors="replace")
-    except (OSError, FileNotFoundError):
-        return None
+    text = _read_transcript_text(transcript_path)
     if not text:
         return None
 
@@ -112,12 +155,7 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
     extraction (:func:`extract_verdict_from_transcript`) remains purely
     text-based and is not affected.
     """
-    if not transcript_path:
-        return ""
-    try:
-        text = Path(transcript_path).read_text(errors="replace")
-    except (OSError, FileNotFoundError):
-        return ""
+    text = _read_transcript_text(transcript_path)
     if not text:
         return ""
 

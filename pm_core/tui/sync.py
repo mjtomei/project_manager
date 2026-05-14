@@ -104,7 +104,10 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         status_bar = app.query_one("#status-bar", StatusBar)
         project = app._data.get("project", {})
         prs = app._data.get("prs") or []
-        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
+        # Don't clobber a mode-specific status bar (QA/Plans) with project info.
+        mode_owns_status = getattr(app, "_qa_visible", False) or getattr(app, "_plans_visible", False)
+        if not mode_owns_status:
+            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
 
         # Use shorter interval for manual refresh, longer for background
         min_interval = (
@@ -207,7 +210,11 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             if is_manual:
                 app.log_message("Refreshed")
 
-        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
+        mode_owns_status = getattr(app, "_qa_visible", False) or getattr(app, "_plans_visible", False)
+        if mode_owns_status:
+            app._update_status_bar()
+        else:
+            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
 
         # Clear log message after 1 second for manual refresh
         if is_manual:

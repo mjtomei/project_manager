@@ -137,6 +137,74 @@ QA_PLAN_END
         assert parse_qa_plan("") == []
         assert parse_qa_plan("No plan here") == []
 
+    def test_artifact_field_unresolved(self):
+        """Without pm_root, ARTIFACT value is stored verbatim and STEPS doesn't
+        eat the ARTIFACT line."""
+        output = """
+QA_PLAN_START
+SCENARIO 1: TUI smoke
+FOCUS: pane layout
+INSTRUCTION: none
+ARTIFACT: tmux-screen-recording.md
+STEPS: Drive the TUI and capture.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == ["tmux-screen-recording.md"]
+        assert scenarios[0].steps == "Drive the TUI and capture."
+
+    def test_artifact_field_none_clears(self):
+        output = """
+QA_PLAN_START
+SCENARIO 1: T
+FOCUS: x
+ARTIFACT: none
+STEPS: do.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == []
+
+    def test_artifact_field_resolves_against_pm_root(self, tmp_path):
+        # Set up a fake pm/qa/artifacts/ with one recipe
+        art = tmp_path / "qa" / "artifacts"
+        art.mkdir(parents=True)
+        (art / "tmux-screen-recording.md").write_text(
+            "---\ntitle: t\n---\nbody")
+        output = """
+QA_PLAN_START
+SCENARIO 1: T
+FOCUS: x
+ARTIFACT: tmux-screen-recording
+STEPS: do.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output, pm_root=tmp_path)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == ["artifacts/tmux-screen-recording.md"]
+
+    def test_artifact_field_supports_multiple(self, tmp_path):
+        art = tmp_path / "qa" / "artifacts"
+        art.mkdir(parents=True)
+        (art / "tmux-screen-recording.md").write_text("---\ntitle: t\n---\nbody")
+        (art / "cli-recording.md").write_text("---\ntitle: c\n---\nbody")
+        output = """
+QA_PLAN_START
+SCENARIO 1: T
+FOCUS: x
+ARTIFACT: tmux-screen-recording, cli-recording
+STEPS: do.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output, pm_root=tmp_path)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == [
+            "artifacts/tmux-screen-recording.md",
+            "artifacts/cli-recording.md",
+        ]
+
     def test_malformed_heading(self):
         output = """
 QA_PLAN_START
@@ -1225,8 +1293,9 @@ class TestVerifySingleScenario:
         assert passed is False
         assert "did not run" in reason.lower()
 
-    def test_pane_split_failure_trusts_original(self):
-        """If we can't split a pane, trust the original verdict."""
+    def test_pane_split_failure_marks_unverified(self):
+        """If we can't split a pane, the scenario stays unverified so
+        finalize blocks instead of trusting the original verdict."""
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
@@ -1234,27 +1303,30 @@ class TestVerifySingleScenario:
              patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
             passed, reason, _ = _verify_single_scenario(
                 scenario, "PASS", "output", {}, {},
-                session="pm-session",
+                session="pm-session", qa_workdir="/tmp/qa",
             )
-        assert passed is True
+        assert passed is False
+        assert "split" in reason.lower()
 
-    def test_no_pane_trusts_original(self):
-        """If scenario pane is gone, trust the original verdict."""
+    def test_no_pane_marks_unverified(self):
+        """If scenario pane is gone, the scenario stays unverified."""
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
         with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
             passed, reason, _ = _verify_single_scenario(
                 scenario, "PASS", "output", {}, {},
-                session="pm-session",
+                session="pm-session", qa_workdir="/tmp/qa",
             )
-        assert passed is True
+        assert passed is False
+        assert "pane" in reason.lower()
 
-    def test_poll_returns_none_trusts_original(self):
-        """If polling returns None (pane died), trust original."""
+    def test_poll_returns_none_marks_unverified(self):
+        """If polling returns None (pane died), scenario stays unverified."""
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
         passed, reason, _ = self._mock_verify(scenario, "PASS", "output", None)
-        assert passed is True
+        assert passed is False
+        assert reason
 
     def test_uses_transcript_when_available(self, tmp_path):
         """When scenario has a transcript, prompt references the file."""
@@ -1270,6 +1342,8 @@ class TestVerifySingleScenario:
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", return_value="%2"), \
              patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"), \
              patch("pm_core.claude_launcher.build_claude_shell_cmd",
                    return_value="claude ...") as mock_cmd, \
              patch("subprocess.run", return_value=mock_wid), \
@@ -1309,7 +1383,7 @@ class TestVerifySingleScenario:
              patch("pm_core.pane_layout.rebalance"):
             _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
-                session="pm-session")
+                session="pm-session", qa_workdir="/tmp/qa")
         call_kwargs = mock_cmd.call_args
         assert "pane output" in (call_kwargs.kwargs.get("prompt", "") or "")
 

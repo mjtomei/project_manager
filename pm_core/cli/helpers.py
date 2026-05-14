@@ -157,7 +157,7 @@ class HelpGroup(click.Group):
 
     Handles two cases:
     - ``pm pr help`` — 'help' as the command name on a group
-    - ``pm tui test help`` — 'help' as an arg to a leaf command
+    - ``pm qa show help`` — 'help' as an arg to a leaf command
     """
 
     group_class = type  # auto-propagate HelpGroup to child groups
@@ -174,7 +174,7 @@ class HelpGroup(click.Group):
             args = ["list"] + args[1:]
         cmd_name, cmd, remaining = super().resolve_command(ctx, args)
         # Also handle 'help' as first arg to a leaf command:
-        # e.g. 'pm tui test help' → 'pm tui test --help'
+        # e.g. 'pm qa show help' → 'pm qa show --help'
         if (remaining and remaining[0] == "help"
                 and cmd is not None and not isinstance(cmd, click.MultiCommand)):
             remaining = ["--help"] + remaining[1:]

@@ -29,9 +29,10 @@ def test_impl_prompt_includes_bug_fix_flow_for_bug_pr():
                   "description": "broken"})
     p = prompt_gen.generate_prompt(data, "pr-x")
     assert "Bug Fix Flow" in p
-    assert "Reproduce" in p
-    assert "Reconcile" in p
-    assert "confirmed-overlap" in p
+    assert "Manual repro" in p
+    assert "Write a failing test" in p
+    assert "Verify with the test" in p
+    assert "Verify manually" in p
 
 
 def test_impl_prompt_omits_bug_flow_for_feature_pr():
@@ -45,7 +46,8 @@ def test_review_prompt_includes_bug_checklist_for_bug_pr():
                   "description": "broken"})
     r = prompt_gen.generate_review_prompt(data, "pr-x")
     assert "Bug Fix Review Checklist" in r
-    assert "Reproduction test exists" in r
+    assert "Pre-fix and post-fix captures" in r
+    assert "INPUT_REQUIRED" in r
 
 
 def test_review_prompt_omits_bug_checklist_for_feature_pr():
@@ -68,3 +70,41 @@ def test_type_bug_field_also_triggers_flow():
                   "description": "broken"})
     p = prompt_gen.generate_prompt(data, "pr-z")
     assert "Bug Fix Flow" in p
+
+
+def test_bug_flow_includes_pre_fix_repro_gate():
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken"})
+    p = prompt_gen.generate_prompt(data, "pr-x")
+    assert "Manual repro on pre-fix code" in p
+
+
+def test_bug_flow_points_at_qa_dirs():
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken"})
+    p = prompt_gen.generate_prompt(data, "pr-x")
+    assert "pm/qa/instructions/" in p
+    assert "pm/qa/artifacts/" in p
+    # Captures dir is now resolved via `pm qa captures-path <pr-id>`
+    # (host path under ~/.pm/sessions/<tag>/captures/<pr-id>/) rather
+    # than the legacy in-repo `pm/qa/captures/` path.
+    assert "pm qa captures-path pr-x" in p
+
+
+def test_bug_review_points_at_captures_dir():
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken"})
+    r = prompt_gen.generate_review_prompt(data, "pr-x")
+    assert "pm qa captures-path pr-x" in r
+    assert "/impl/" in r
+    assert "Pre-fix and post-fix" in r
+
+
+def test_bug_flow_uses_local_pr_id_for_captures_dir():
+    # GH PR number is intentionally ignored — local id only, since
+    # propagating gh_pr_number through project.yaml is unreliable.
+    data = _data({"id": "pr-x", "title": "Bug", "plan": "bugs",
+                  "description": "broken", "gh_pr_number": 190})
+    p = prompt_gen.generate_prompt(data, "pr-x")
+    assert "pm qa captures-path pr-x" in p
+    assert "pr-190" not in p

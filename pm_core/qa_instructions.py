@@ -1,9 +1,15 @@
 """QA instruction library management.
 
-Manages instruction files in pm/qa/instructions/ (reusable procedures),
-pm/qa/regression/ (migrated TUI tests), and pm/qa/mocks/ (shared mock
-definitions injected into every QA scenario prompt).  Files are markdown
-with YAML frontmatter.
+Manages four categories of files under pm/qa/, all markdown with YAML
+frontmatter:
+
+- pm/qa/instructions/ — reusable test-environment procedures
+- pm/qa/regression/   — migrated TUI tests
+- pm/qa/artifacts/    — recipes for capturing concrete evidence of
+                        behavior (recordings, logs) consumable by
+                        humans or downstream agents
+- pm/qa/mocks/        — shared mock definitions injected into every QA
+                        scenario prompt
 """
 
 from pathlib import Path
@@ -39,6 +45,21 @@ def regression_dir(pm_root: Path) -> Path:
 def mocks_dir(pm_root: Path) -> Path:
     """Return pm/qa/mocks/."""
     d = qa_dir(pm_root) / "mocks"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def artifacts_dir(pm_root: Path) -> Path:
+    """Return pm/qa/artifacts/.
+
+    Holds recipes for capturing concrete evidence of behavior —
+    recordings, logs, screenshots — designed to be consumable by both
+    humans and downstream agents.  The captures themselves land under
+    ~/.pm/sessions/<tag>/captures/<pr-id>/ on the host (resolve via
+    ``pm qa captures-path <pr-id>``) — a convention referenced from
+    recipes, not enforced here.
+    """
+    d = qa_dir(pm_root) / "artifacts"
     d.mkdir(exist_ok=True)
     return d
 
@@ -117,15 +138,18 @@ def list_mocks(pm_root: Path) -> list[dict]:
     return _list_dir(mocks_dir(pm_root))
 
 
-def list_all(pm_root: Path) -> dict:
-    """Return all QA items by category.
+def list_artifacts(pm_root: Path) -> list[dict]:
+    """List artifact-capture recipes from pm/qa/artifacts/."""
+    return _list_dir(artifacts_dir(pm_root))
 
-    Returns {"instructions": [...], "regression": [...], "mocks": [...]}.
-    """
+
+def list_all(pm_root: Path) -> dict:
+    """Return all QA items by category."""
     return {
         "instructions": list_instructions(pm_root),
         "regression": list_regression_tests(pm_root),
         "mocks": list_mocks(pm_root),
+        "artifacts": list_artifacts(pm_root),
     }
 
 
@@ -150,7 +174,7 @@ def resolve_instruction_ref(pm_root: Path, ref: str) -> tuple[str, str] | None:
     all_items = list_all(pm_root)
     # Build a flat lookup: filename -> category
     known: dict[str, str] = {}
-    for category in ("instructions", "regression"):
+    for category in ("instructions", "regression", "artifacts"):
         for item in all_items[category]:
             fname = Path(item["path"]).name
             known[fname] = category
@@ -202,6 +226,8 @@ def get_instruction(pm_root: Path, instruction_id: str,
     """
     if category == "regression":
         base = regression_dir(pm_root)
+    elif category == "artifacts":
+        base = artifacts_dir(pm_root)
     else:
         base = instructions_dir(pm_root)
 
@@ -262,6 +288,7 @@ def instruction_summary_for_prompt(pm_root: Path,
     categories = [("instructions", "Instructions")]
     if include_regression:
         categories.append(("regression", "Regression Tests"))
+    categories.append(("artifacts", "Artifact Recipes"))
 
     lines: list[str] = []
     for category, label in categories:

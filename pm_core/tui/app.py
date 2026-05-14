@@ -1,5 +1,6 @@
 """Textual TUI App for Project Manager."""
 
+import shlex
 from pathlib import Path
 
 from pm_core.paths import configure_logger
@@ -25,6 +26,7 @@ from pm_core.plan_parser import extract_plan_intro
 from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (
     ConnectScreen, HelpScreen, MergeLockScreen, PlanPickerScreen, PlanAddScreen,
+    QACreatePickerScreen,
 )
 from pm_core.tui import pane_ops
 from pm_core.tui import frame_capture
@@ -604,6 +606,15 @@ class ProjectManagerApp(App):
         from pm_core.paths import get_global_setting
         if not self._data:
             return
+        # When a mode-specific view owns the status bar, don't overwrite it
+        # with the project status. Re-render the mode's bar instead so that
+        # refresh / background sync keeps counters in sync.
+        if self._qa_visible:
+            self._update_qa_status_bar()
+            return
+        if self._plans_visible:
+            self._update_plans_status_bar()
+            return
         project = self._data.get("project", {})
         prs = self._data.get("prs") or []
         tree = self.query_one("#tech-tree", TechTree)
@@ -1130,10 +1141,7 @@ class ProjectManagerApp(App):
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
         plans_pane.focus()
-        # Update status bar
-        plans = self._data.get("plans") or []
-        status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]p=back to tree[/dim]")
+        self._update_plans_status_bar()
         self.call_after_refresh(self._capture_frame, "show_plans_view")
 
     def _refresh_plans_pane(self) -> None:
@@ -1215,16 +1223,25 @@ class ProjectManagerApp(App):
         self._refresh_qa_pane()
         qa_pane = self.query_one("#qa-pane", QAPane)
         qa_pane.focus()
-        # Update status bar
+        self._update_qa_status_bar()
+        self.call_after_refresh(self._capture_frame, "show_qa_view")
+
+    def _update_qa_status_bar(self) -> None:
         from pm_core import qa_instructions
         if self._root:
             all_items = qa_instructions.list_all(self._root)
-            total = len(all_items.get("instructions", [])) + len(all_items.get("regression", []))
+            total = (len(all_items.get("instructions", []))
+                     + len(all_items.get("regression", []))
+                     + len(all_items.get("artifacts", [])))
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  d=debug  a=add  q=back[/dim]")
-        self.call_after_refresh(self._capture_frame, "show_qa_view")
+
+    def _update_plans_status_bar(self) -> None:
+        plans = (self._data or {}).get("plans") or []
+        status_bar = self.query_one("#status-bar", StatusBar)
+        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]p=back to tree[/dim]")
 
     def _refresh_qa_pane(self) -> None:
         """Refresh the QA pane with current data."""
@@ -1232,7 +1249,7 @@ class ProjectManagerApp(App):
         if self._root:
             all_items = qa_instructions.list_all(self._root)
         else:
-            all_items = {"instructions": [], "regression": []}
+            all_items = {"instructions": [], "regression": [], "artifacts": []}
         qa_pane = self.query_one("#qa-pane", QAPane)
         qa_pane.update_items(all_items)
 
@@ -1278,7 +1295,10 @@ class ProjectManagerApp(App):
         message.stop()
         _log.info("qa action: %s (item=%s)", message.action, message.item_id)
         if message.action == "add":
-            pane_ops.launch_pane(self, "pm qa add new-instruction", "qa-add")
+            self.push_screen(
+                QACreatePickerScreen(),
+                callback=lambda r: self._on_qa_create_picker(r),
+            )
         elif message.action == "edit":
             if message.item_id:
                 parts = message.item_id.split(":", 1)
@@ -1299,4 +1319,25 @@ class ProjectManagerApp(App):
                     )
             else:
                 self.log_message("No QA item selected")
+
+    def _on_qa_create_picker(self, result) -> None:
+        """Callback for QACreatePickerScreen.
+
+        result is None on cancel, or (category, mode, name) on confirm.
+        Maps the (category, mode) pair to the matching pm qa subcommand.
+        """
+        if not result:
+            return
+        category, mode, name = result
+        # category: "instructions" / "regression" / "artifacts"
+        # mode:     always "author" — the TUI picker only exposes the
+        #           guided authoring flow; use `pm qa add-*` from the
+        #           CLI for the scaffold-stub flow.
+        suffix = {
+            "instructions": "instruction",
+            "regression":   "regression",
+            "artifacts":    "artifact",
+        }[category]
+        cmd = f"pm qa {mode}-{suffix} {shlex.quote(name)}"
+        pane_ops.launch_pane(self, cmd, f"qa-{mode}")
 

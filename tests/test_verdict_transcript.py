@@ -164,6 +164,36 @@ def test_bold_incidental_still_rejected(tmp_path: Path) -> None:
     assert extract_verdict_from_transcript(p, VERDICTS) is None
 
 
+def test_dangling_symlink_falls_back_to_session_id_glob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Reproduce pr-488b748: build_claude_shell_cmd points the symlink at a
+    # mangled-cwd dir Claude never writes to (the cwd we *passed* in), but
+    # the real JSONL lands in a sibling dir derived from Claude's actual
+    # runtime cwd. The reader must locate it by session_id.
+    sid = "abcdef01-2345-6789-abcd-ef0123456789"
+    fake_home = tmp_path / "home"
+    projects = fake_home / ".claude" / "projects"
+    expected_dir = projects / "-where-we-thought"
+    actual_dir = projects / "-where-claude-actually-wrote"
+    expected_dir.mkdir(parents=True)
+    actual_dir.mkdir(parents=True)
+
+    real_jsonl = actual_dir / f"{sid}.jsonl"
+    real_jsonl.write_text("\n".join([
+        _user_line("q"),
+        _assistant_line("Verdict on its own line:\nPASS\n"),
+    ]) + "\n")
+
+    # Symlink points into the empty expected_dir — its target never exists.
+    symlink = tmp_path / "iter-1.jsonl"
+    symlink.symlink_to(expected_dir / f"{sid}.jsonl")
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+    assert extract_verdict_from_transcript(symlink, VERDICTS) == "PASS"
+
+
 def test_longer_verdict_not_masked_by_shorter_prefix(tmp_path: Path) -> None:
     # If the extractor naively scans PASS first it would match only PASS
     # when the real verdict is a longer PASS_* variant.  Longest-first

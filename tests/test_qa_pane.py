@@ -33,7 +33,8 @@ def _flatten_items(all_items: dict) -> list[dict]:
     """Reproduce the flattening logic from QAPane.update_items."""
     flat: list[dict] = []
     for category, label in [("instructions", "Instructions"),
-                            ("regression", "Regression Tests")]:
+                            ("regression", "Regression Tests"),
+                            ("artifacts", "Artifact Recipes")]:
         items = all_items.get(category, [])
         flat.append({"_section": label, "_count": len(items)})
         for item in items:
@@ -133,7 +134,7 @@ class TestQAPaneDataStructure:
 
     def test_flat_list_structure(self):
         flat = _flatten_items(SAMPLE_ITEMS)
-        assert len(flat) == 5  # 2 headers + 3 items
+        assert len(flat) == 6  # 3 headers + 3 items
         assert flat[0]["_section"] == "Instructions"
         assert flat[0]["_count"] == 2
         assert flat[1]["_item_id"] == "instructions:login-flow"
@@ -141,6 +142,8 @@ class TestQAPaneDataStructure:
         assert flat[3]["_section"] == "Regression Tests"
         assert flat[3]["_count"] == 1
         assert flat[4]["_item_id"] == "regression:pane-layout"
+        assert flat[5]["_section"] == "Artifact Recipes"
+        assert flat[5]["_count"] == 0
 
     def test_section_headers_show_correct_counts(self):
         """Step 3: Sections show correct item counts."""
@@ -150,12 +153,28 @@ class TestQAPaneDataStructure:
         assert headers[0]["_count"] == 2
         assert headers[1]["_section"] == "Regression Tests"
         assert headers[1]["_count"] == 1
+        assert headers[2]["_section"] == "Artifact Recipes"
+        assert headers[2]["_count"] == 0
 
     def test_empty_sections(self):
-        flat = _flatten_items({"instructions": [], "regression": []})
-        assert len(flat) == 2  # Just 2 headers
-        assert flat[0]["_count"] == 0
-        assert flat[1]["_count"] == 0
+        flat = _flatten_items({"instructions": [], "regression": [], "artifacts": []})
+        assert len(flat) == 3  # 3 headers, no items
+        assert all(it["_count"] == 0 for it in flat)
+
+    def test_artifacts_category_renders(self):
+        items = {
+            "instructions": [],
+            "regression": [],
+            "artifacts": [
+                {"id": "tmux-rec", "title": "Tmux Rec", "description": "cap",
+                 "path": "/tmp/tmux-rec.md", "tags": ["artifact"]},
+            ],
+        }
+        flat = _flatten_items(items)
+        # 3 headers + 1 artifact item
+        assert len(flat) == 4
+        assert flat[3]["_item_id"] == "artifacts:tmux-rec"
+        assert flat[3]["_category"] == "artifacts"
 
     def test_item_enrichment(self):
         """Items get _category and _item_id fields."""

@@ -74,12 +74,14 @@ class TestPushProxyBranchValidation:
         resp = _send_request(sock_path,
                              {"args": ["origin", "pm/pr-123-feature"]})
         assert resp["exit_code"] == 0
-        # First call: _resolve_local_remote_url checks origin URL
-        # Second call: the actual git push
+        # Push runs as `git -C <source> push <args>` (post-PR-6be8ee6 design:
+        # source is the caller's clone, which has origin set to the real
+        # upstream).  Find that call.
         push_call = [c for c in mock_run.call_args_list
-                     if c[0][0][0:2] == ["git", "push"]]
+                     if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
         assert len(push_call) == 1
-        assert push_call[0][0][0] == ["git", "push", "origin", "pm/pr-123-feature"]
+        cmd = push_call[0][0][0]
+        assert cmd[3:] == ["push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
     def test_allows_force_push_plus_prefix(self, mock_run, proxy, sock_path):
@@ -186,8 +188,12 @@ class TestPushProxyBranchValidation:
         resp = _send_request(sock_path,
                              {"args": ["-u", "origin", "pm/pr-123-feature"]})
         assert resp["exit_code"] == 0
-        cmd = mock_run.call_args[0][0]
-        assert cmd == ["git", "push", "-u", "origin", "pm/pr-123-feature"]
+        push_call = [c for c in mock_run.call_args_list
+                     if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert len(push_call) == 1
+        cmd = push_call[0][0][0]
+        # cmd is ["git", "-C", <source>, "push", "-u", "origin", "pm/pr-123-feature"]
+        assert cmd[3:] == ["push", "-u", "origin", "pm/pr-123-feature"]
 
 
 class TestDangerousFlags:
@@ -424,31 +430,44 @@ class TestCallerWorkdir:
     @patch("subprocess.run")
     @patch("pm_core.push_proxy._resolve_local_remote_url",
            return_value="/some/pr-workdir")
-    def test_local_push_uses_caller_workdir(self, _mock_resolve, mock_run,
-                                            proxy, sock_path):
-        """_local_push fetches FROM the caller's clone, not self.workdir."""
-        def side_effect(cmd, **kwargs):
-            if cmd[:2] == ["git", "-C"]:
-                # The fetch step in _local_push
-                return MagicMock(returncode=0, stdout="", stderr="")
-            # resolve_real_origin follow-up (no real upstream)
-            return MagicMock(returncode=1, stdout="", stderr="")
-        mock_run.side_effect = side_effect
+    def test_rejects_local_path_origin(self, _mock_resolve, mock_run,
+                                       proxy, sock_path):
+        """Local-path origins are rejected: the old fetch-into-target fallback
+        silently desynced the target's worktree, so this is now fail-closed.
+        Scenario clones must rewrite origin to the real upstream URL before
+        pushing."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": "/caller-clone",
+        })
+        assert resp["exit_code"] == 1
+        assert "local path" in resp["stderr"]
+        # No git push subprocess should have been invoked.
+        push_calls = [c for c in mock_run.call_args_list
+                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert not push_calls
 
+    @patch("subprocess.run")
+    @patch("pm_core.push_proxy._resolve_local_remote_url", return_value=None)
+    def test_push_runs_from_caller_workdir(self, _mock_resolve, mock_run,
+                                            proxy, sock_path):
+        """When origin is a real URL, push runs `git -C <caller>` so origin
+        resolution happens in the caller's clone, not the proxy default."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
             "cmd": "push",
             "args": ["origin", "pm/pr-123-feature"],
             "workdir": "/caller-clone",
         })
         assert resp["exit_code"] == 0
-        # Find the fetch call: git -C <target> fetch --update-head-ok <source> <refspec>
-        fetch_calls = [c for c in mock_run.call_args_list
-                       if c[0][0][:2] == ["git", "-C"]]
-        assert len(fetch_calls) == 1
-        fetch_cmd = fetch_calls[0][0][0]
-        # Source must be the caller's clone, not the proxy default workdir
-        assert "/caller-clone" in fetch_cmd
-        assert "/proxy-default-workdir" not in fetch_cmd
+        push_calls = [c for c in mock_run.call_args_list
+                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert len(push_calls) == 1
+        push_cmd = push_calls[0][0][0]
+        assert push_cmd[2] == "/caller-clone"
+        assert push_cmd[3:] == ["push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
     def test_fetch_uses_caller_workdir(self, mock_run, proxy, sock_path):
@@ -502,53 +521,41 @@ class TestCallerWorkdir:
         assert mock_run.call_args[1]["cwd"] == "/proxy-default-workdir"
 
     @patch("subprocess.run")
-    @patch("pm_core.push_proxy._resolve_local_remote_url",
-           return_value="/some/pr-workdir")
+    @patch("pm_core.push_proxy._resolve_local_remote_url", return_value=None)
     def test_no_workdir_push_falls_back_to_self_workdir(
             self, _mock_resolve, mock_run, proxy, sock_path):
         """Legacy push without 'workdir' falls back to self.workdir as source."""
-        def side_effect(cmd, **kwargs):
-            if cmd[:2] == ["git", "-C"]:
-                return MagicMock(returncode=0, stdout="", stderr="")
-            return MagicMock(returncode=1, stdout="", stderr="")
-        mock_run.side_effect = side_effect
-
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
             "cmd": "push",
             "args": ["origin", "pm/pr-123-feature"],
             # no "workdir" key — legacy caller
         })
         assert resp["exit_code"] == 0
-        fetch_calls = [c for c in mock_run.call_args_list
-                       if c[0][0][:2] == ["git", "-C"]]
-        assert len(fetch_calls) == 1
-        fetch_cmd = fetch_calls[0][0][0]
+        push_calls = [c for c in mock_run.call_args_list
+                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert len(push_calls) == 1
+        push_cmd = push_calls[0][0][0]
         # Source must be self.workdir, not some caller path
-        assert "/proxy-default-workdir" in fetch_cmd
+        assert push_cmd[2] == "/proxy-default-workdir"
 
     @patch("subprocess.run")
-    @patch("pm_core.push_proxy._resolve_local_remote_url",
-           return_value="/some/pr-workdir")
+    @patch("pm_core.push_proxy._resolve_local_remote_url", return_value=None)
     def test_empty_workdir_push_falls_back_to_self_workdir(
             self, _mock_resolve, mock_run, proxy, sock_path):
         """An empty-string 'workdir' in a push request falls back to self.workdir."""
-        def side_effect(cmd, **kwargs):
-            if cmd[:2] == ["git", "-C"]:
-                return MagicMock(returncode=0, stdout="", stderr="")
-            return MagicMock(returncode=1, stdout="", stderr="")
-        mock_run.side_effect = side_effect
-
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
             "cmd": "push",
             "args": ["origin", "pm/pr-123-feature"],
             "workdir": "",   # empty string — behaves like absent
         })
         assert resp["exit_code"] == 0
-        fetch_calls = [c for c in mock_run.call_args_list
-                       if c[0][0][:2] == ["git", "-C"]]
-        assert len(fetch_calls) == 1
-        fetch_cmd = fetch_calls[0][0][0]
-        assert "/proxy-default-workdir" in fetch_cmd
+        push_calls = [c for c in mock_run.call_args_list
+                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert len(push_calls) == 1
+        push_cmd = push_calls[0][0][0]
+        assert push_cmd[2] == "/proxy-default-workdir"
 
     @patch("subprocess.run")
     def test_ls_remote_ignores_workdir(self, mock_run, proxy, sock_path):
