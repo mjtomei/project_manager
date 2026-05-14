@@ -9,6 +9,8 @@ Establish a continuous quality improvement loop where the existing Claude-based 
 - Enforce a disciplined reproduce-first bug fix flow
 - Give humans a conversational surface for checking in on the autonomous loops
 
+> See `pm/docs/literature-review.md` for context on the academic and industry work surrounding this plan — benchmarks, autonomous coding agents, LLM-driven test generation, self-improving loops, integrity audits, and watcher architectures. Includes pointers to what's reused, what's adapted, and where this plan is making its own bet.
+
 ## Reuse: existing infrastructure
 
 The autonomous loops are deliberately built on existing primitives. New code is limited to per-watcher subclasses, prompt templates, and one CLI extension.
