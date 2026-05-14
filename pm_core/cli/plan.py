@@ -343,6 +343,21 @@ For any issues found, you can propose a fix. Fixes can be applied as follows:
 - For plan updates: edit the plan file directly at {plan_path}
 - To add new PRs: use `pm pr add`
 
+IMPORTANT: keep the three sources of truth in sync. Whenever you change
+a PR's functionality, scope, or dependencies:
+1. Run `pm pr edit` (the canonical update — writes to project.yaml).
+2. Update the corresponding section in the plan file at {plan_path}
+   so the human-readable plan reflects the change.
+3. If the PR is already merged or in_review (i.e. its body cannot be
+   meaningfully rewritten anymore), add a `pm pr note add <id> "..."`
+   describing the change in context (e.g. "Phase N redesign: this PR's
+   <feature> is now consumed at <new surface> by <other PR>") instead
+   of editing the description.
+
+Apply the same rule when you reference a merged PR's behavior from a
+new pending PR — add a note on the merged PR pointing back, so future
+sessions reading either side find the connection.
+
 After fixing, summarize what was changed.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
     else:
