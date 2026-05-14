@@ -16644,7 +16644,8 @@ prs:
     for containers and for non-pm targets'
   branch: pm/pr-7d5d036-bug-pm-tui-test-hardcodes-testing-against-the-pm-t
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-abcf70f
   description: "## Symptom\n\n`pm tui test <id>` always prepends a Session Context\
     \ that says:\n\n    You are testing against tmux session: <pm-session>\n\n   \
     \ To interact with this session, use commands like:\n    - pm tui view -s <pm-session>\n\
@@ -16675,7 +16676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-05-08T20:14:09.773947+00:00'
+  updated_at: '2026-05-14T01:10:55.416541+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16727,6 +16728,13 @@ prs:
       else) rather than asked of the test prompt.'
     created_at: '2026-05-08T20:14:09Z'
     last_edited: '2026-05-08T20:14:09Z'
+  - id: note-a618612
+    text: 'Depends on pr-abcf70f (FakeClaudeSession): the runner cleanup needs predictable
+      outcomes for its own regression coverage, which requires controlling the Claude
+      session verdict via a fake. Without that, runner behavior changes can''t be
+      exercised deterministically end-to-end.'
+    created_at: '2026-05-14T01:10:54Z'
+    last_edited: '2026-05-14T01:10:54Z'
 - id: pr-f4dc8a2
   plan: plan-regression
   title: 'QA library auditor: scan a project and suggest fills for missing instructions,
