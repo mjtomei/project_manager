@@ -63,6 +63,32 @@ For the artifact under review, answer concretely:
 
 This block is **load-bearing** because the artifact's stated goal includes being readable by people considering using the tool. A review that catches every citation error but misses the accessibility failures has missed the artifact's core obligation. *Catching jargon a working engineer would have used without thinking is the whole job here.*
 
+### Block 4 — writing quality and prose craft
+
+Block 2 covers macro flow (section-to-section transitions, structural moves, hooks, paragraph-level repetition). Block 3 covers accessibility (jargon, glosses, scale anchors). Block 4 covers what's between them: the prose itself at the paragraph, sentence, and word level.
+
+This block is for what a working copy-editor would flag — issues that don't affect what the text *means* but that affect how it *reads*. A sentence that is technically correct, accessible to the audience, and structurally in the right place can still be ugly, ambiguous, awkward, monotonous, or imprecise. Block 4 catches those.
+
+For the artifact under review, answer concretely:
+
+- **Paragraph-level cohesion**: does each paragraph carry one idea? Find paragraphs that string together two or three distinct ideas without a clear connecting argument — propose where to split. Find paragraphs whose topic sentence doesn't match what the rest of the paragraph actually does — propose a rewritten topic sentence or a restructure.
+- **Paragraph-to-paragraph flow**: does paragraph N's last sentence set up paragraph N+1's first sentence? Look for adjacent paragraphs where the topic shifts without a transition. Propose the bridging sentence or clause.
+- **Sentence-to-sentence transitions inside paragraphs**: look for paragraphs where every sentence starts with the same kind of grammatical structure ("The plan does X. The plan also does Y. The plan further does Z."), or where sentences sit side-by-side without logical connectives (because / so / however / instead). Propose the rewritten transitions.
+- **Voice and tone consistency**: does the document maintain one register? Find passages that slip between formal-academic ("we hypothesize that"), casual-explanatory ("you'd close the tab here"), and corporate-flat ("this represents a significant contribution"). Propose the consistent register and rewrite the outliers.
+- **Sentence rhythm and variety**: find runs of three-plus same-length, same-structure sentences. Propose a varied alternative. Also flag the opposite — a string of overly-clever varied-structure sentences that obscure the content instead of conveying it.
+- **Word-choice precision**: words that are *roughly right* vs. words that are *exactly right*. Find sentences using vague verbs ("involves," "deals with," "is related to," "looks at") where a specific verb would say more. Find adjectives that pad rather than discriminate ("substantial," "significant," "important," "key"). Propose precise replacements.
+- **Deadwood and bloat**: find phrases that can be cut without losing meaning ("it should be noted that," "in many cases," "as a matter of fact," "the fact that," double-negatives that resolve to positives, qualifiers stacking on qualifiers). Propose the cut.
+- **Awkward constructions**: passive voice used reflexively rather than for effect, nominalizations that should be verbs ("the establishment of" → "establishing"), buried verbs and subjects, run-on sentences with three or more independent clauses connected by "and."
+- **Hedging vs. confidence**: catch every hedge ("seems to," "may be," "might possibly," "tends to," "appears to," "in some sense") and judge whether it earns its place. A hedge on a real uncertainty is right; a hedge on a confident claim is a stylistic tic to cut. Propose the cuts.
+- **Heavy modifiers and intensifiers**: "very," "really," "quite," "rather," "fairly," "somewhat" — most can be cut. Propose the cuts.
+- **Emphasis restraint**: italicizing, bolding, all-caps, dashes-for-drama — used sparingly these emphasize; used densely they cancel each other. Count the emphasis density per page and propose what to leave un-emphasized.
+- **Clichés and corporate-speak**: phrases that survive on familiarity rather than precision ("leverage," "stakeholders," "best-in-class," "robust," "comprehensive," "holistic," "going forward"). Propose direct replacements.
+- **Sentence-internal logical structure**: in long sentences, does the subject control the verb? Is the most important clause the main clause? Find sentences where the load-bearing claim is buried in a subordinate clause and the main clause is throwaway. Propose the inversion.
+
+**Important**: for every Block 4 finding, propose the specific rewrite — show the before-and-after sentence or paragraph. A finding that says "this paragraph is awkward" is useless; a finding that says "the third sentence of paragraph two reads 'The plan does X, which represents a significant departure from the existing approach' — replace with 'This breaks with the existing approach in X'" is useful. Block 4 is the most explicit-rewrite-heavy block; the reviewer's job is to do the rewriting work, not flag the rough edge.
+
+Block 4 is **not** load-bearing the way Block 3 is — readers can accept ugly prose if the substance is right. But it's the difference between a document that's *read* and a document that's *referred to*. A lit review with crisp prose is the one people actually finish.
+
 ## The protocol
 
 1. **Run the reviewer blind**. Each cycle is a fresh Claude session that does not know what previous cycles concluded. Critical — knowing prior findings biases the reviewer toward agreement.
