@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-a1f267a
+  active_pr: pr-0cf3626
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -16284,7 +16284,8 @@ prs:
   notes: []
 - id: pr-e2b7fdf
   plan: plan-regression
-  title: ProgramBench submission scaffolding
+  title: Realistic single-prompt task — internet + directive + post-run integrity
+    audit
   branch: pm/pr-e2b7fdf-programbench-submission-scaffolding
   status: pending
   depends_on:
@@ -16292,70 +16293,89 @@ prs:
   - pr-6f9301e
   - pr-ed10ac4
   - pr-b3b8df0
-  description: 'Bundle four pieces as one deliverable, demonstrating the autonomous
-    loop end-to-end on an external benchmark. Single PR is justified because each
-    piece is small and they are tightly coupled by the submission shape.
-
-
-    Context. ProgramBench (https://programbench.com) is a 200-task benchmark where
-    the agent gets only a compiled binary + docs and must reproduce a working codebase.
-    Per-task cleanroom Docker images provide ubuntu 22.04 + git + tmux + python3 +
-    pytest + libtmux + Rust + Go + build-essential, with the binary at /workspace/executable
-    chmod 111. No internet during inference; the submission is the produced /workspace
-    as a tarball. Top score on the current leaderboard is Claude Opus 4.7 at 0% Resolved
-    / 3.0% Almost-Resolved using mini-swe-agent. A pm submission would be a different
-    agent at the same model.
-
-
-    Architecture: layer pm on top of the per-task cleanroom image and run a leader
-    Claude session that uses pm itself as its orchestration tool. backend=local, container-mode=off
-    (the cleanroom IS the container — no per-PR podman). When the leader is done,
-    /workspace is the submission.
-
-
-    Pieces:
-
-
-    1. ProgramBench backend for the auto-synthesis primitive (pr-b3b8df0). Registers
-    a backend that probes /workspace/executable + docs and emits pm/qa/instructions/binary-comparison.md
-    describing how candidate builds are compared to the reference binary''s behavior.
-    The synthesis logic lives in the primitive; this PR just registers the per-task-type
-    heuristics.
-
-
-    2. Leader prompt template — new prompt builder (sibling of generate_prompt, generate_review_prompt)
-    framing pm as the leader''s tool. Lists relevant CLI commands, calls into the
-    auto-synthesis primitive at session start to populate pm/qa/instructions/, then
-    files plan + PRs and drives them through start/review/QA/merge.
-
-
-    3. Adapter CLI — pm bench programbench --task <id> drops the task into a workdir,
-    generates the leader prompt, spawns the leader session in benchmark_mode, extracts
-    /workspace as the submission tarball when the leader finishes.
-
-
-    4. Reproducibility Dockerfile — FROM programbench/<task>:task_cleanroom layered
-    with pm + Claude Code + pinned deps. The submission asset.
-
-
-    5. Egress-allowlist firewall harness — iptables / network namespace at the sandbox
-    boundary allowing only the model API endpoint. Defense-in-depth against incidental
-    network use during benchmark runs.
-
-
-    Depends on the rest of Phase 9 (self-recovery audit, headless/benchmark mode,
-    no-progress safety stop, auto-synthesis primitive) — the scaffolding only exercises
-    functionality those provide.
-
-
-    Manual testing: run the adapter against a held-back ProgramBench task and inspect
-    the produced /workspace tarball before submission. Compare the leader''s session
-    log against the structured-log expectations from the headless-mode PR.'
+  - pr-fbda1a8
+  description: "## Goal\n\nThe capstone of the autonomous loop: a single-prompt task\
+    \ evaluation that mirrors how a real engineer works — internet access, a written\
+    \ directive specifying the task and its constraints, and a post-run integrity\
+    \ audit confirming the agent didn't cheat by referencing the answer directly.\
+    \ This is the realistic shape of the \"single prompt flow\" Phases 1-10 have been\
+    \ building toward.\n\nInspired by ProgramBench (https://programbench.com) but\
+    \ deliberately not its exact submission format. ProgramBench tests an agent's\
+    \ ability to rebuild a working codebase from a compiled binary + docs alone, with\
+    \ no internet. That's an interesting constraint but unrealistic — real engineers\
+    \ have the internet. The thing the autonomous loop should actually be good at\
+    \ is \"given a directive and the materials you'd realistically have, produce a\
+    \ working result without referencing the answer.\"\n\nThe exact-ProgramBench offline\
+    \ task lives in `pr-0cf3626` (filed alongside, see Related) as a separate runnable;\
+    \ this PR is the primary deliverable.\n\n## Shape\n\nLayer pm on top of a per-task\
+    \ cleanroom image. A leader Claude session uses pm itself as its orchestration\
+    \ tool: files plan + PRs, drives them through start/review/QA/merge under the\
+    \ Phase 10 flow, produces a working result. Three constraints make this realistic\
+    \ where ProgramBench is artificial:\n\n1. **Internet access** — the agent has\
+    \ the same web access a real engineer would. Stack Overflow, library docs, vendor\
+    \ sites, search. No artificial sandboxing of common knowledge.\n\n2. **Directive\
+    \ + provided materials** — the task envelope is a written directive describing\
+    \ what to build, plus the same docs / specs / reference behavior a real engineer\
+    \ would be given (the reference binary's observable behavior, API documentation,\
+    \ examples). The agent is told explicitly which materials it may consult.\n\n\
+    3. **Post-run integrity audit** — after the run, audit the agent's tool-use transcript\
+    \ (web fetches, file reads, command executions) against an allowlist derived from\
+    \ (2). The audit verifies the agent did NOT reference:\n   - The reference implementation's\
+    \ source code\n   - Test cases for the task\n   - Walkthroughs or solutions specific\
+    \ to the task\n   - Anything else explicitly out-of-bounds in the directive\n\
+    \   \n   This is the load-bearing realism check: agents with internet can trivially\
+    \ Google the answer if it's findable. The integrity audit is what makes the score\
+    \ meaningful.\n\n## Pieces\n\n- **Leader prompt template** — new prompt builder\
+    \ (sibling of `generate_prompt`, `generate_review_prompt`) framing pm as the leader's\
+    \ tool. Lists relevant CLI commands, references the provided-materials manifest,\
+    \ instructs the leader to file the plan + PRs and drive them via the Phase 10\
+    \ QA flow (regression-bound scenarios, new-regression authoring where needed,\
+    \ etc.). Different prompt from `pr-b3b8df0`'s auto-synthesis primitive (which\
+    \ is setup-time / pre-leader); this is the leader prompt itself.\n\n- **Task envelope\
+    \ format** — `pm/tasks/<task_id>/` directory convention. Contains: `directive.md`\
+    \ (the prompt), `materials/` (the provided docs / reference binary / examples),\
+    \ `allowlist.yaml` (what the integrity audit permits), and post-run `audit.md`\
+    \ (the audit report). The cleanroom image mounts `/workspace/task/` to this directory.\n\
+    \n- **Adapter CLI** — `pm bench realistic --task <path>` (or similar) drops the\
+    \ task envelope into a workdir, generates the leader prompt, spawns the leader\
+    \ session in `benchmark_mode` (`pr-6f9301e`), extracts `/workspace/result/` as\
+    \ the produced artifact when the leader finishes.\n\n- **Integrity audit module**\
+    \ — `pm_core/bench/audit.py`. Inputs: tool-use transcript (from Claude's session\
+    \ logs), allowlist. Outputs: structured `audit.md` enumerating every out-of-bounds\
+    \ reference (or stating clean), with verdict PASS / FAIL. FAIL includes the offending\
+    \ tool call(s) with a one-line reason. Integrates with existing verdict surfaces.\n\
+    \n- **Reproducibility Dockerfile** — `FROM` whatever base the task envelope declares,\
+    \ layered with pm + Claude Code + pinned deps. Egress allowlist permits the model\
+    \ API + the explicitly-allowed materials sources; everything else is blocked at\
+    \ the network namespace (iptables-style harness).\n\n- **End-to-end test** — a\
+    \ fixture task envelope + expected artifact + expected integrity-audit verdict;\
+    \ verifies the adapter, leader prompt, post-run audit, and Phase 10 QA flow all\
+    \ interact correctly.\n\n## Why depends on pr-fbda1a8 (bridge PR)\n\n`pr-fbda1a8`\
+    \ re-validates Phases 1-5 features under Phase 10's flow. The leader session this\
+    \ PR spawns drives the entire autonomous loop end-to-end — if any Phase 1-5 feature\
+    \ has silently regressed under the new flow, the leader fails for reasons unrelated\
+    \ to the task. Bridge must land first so this PR's failures are signal, not noise.\n\
+    \n## Manual testing\n\nRun the adapter against the fixture task envelope and a\
+    \ held-back real task. Confirm: the leader produces a result, the QA flow drives\
+    \ scenarios under the Phase 10 model (regression-bound), the integrity audit catches\
+    \ a deliberately-seeded out-of-bounds reference, and the audit PASSes on a clean\
+    \ run.\n\n## Depends on\n\n- pr-ca6859f (self-recovery audit — required for unattended\
+    \ operation)\n- pr-6f9301e (headless / benchmark_mode — runtime substrate)\n-\
+    \ pr-ed10ac4 (no-progress safety stop — prevents the leader from spinning)\n-\
+    \ pr-b3b8df0 (auto-synthesis primitive — produces QA instructions from the task\
+    \ envelope)\n- pr-fbda1a8 (bridge PR — confirms Phase 1-5 features work under\
+    \ Phase 10 flow)\n\n## Out of scope\n\n- The exact ProgramBench offline task —\
+    \ separate PR, see Related.\n- Multi-task benchmark harness — this PR runs one\
+    \ task at a time; batching is follow-up.\n- Reference-implementation comparison\
+    \ via behavior diff — that's the synthesis primitive's job.\n\n## Related\n\n\
+    - pr-0cf3626 (filed alongside): the exact ProgramBench offline task as a separate\
+    \ runnable. Inherits the leader prompt + adapter CLI from this PR but flips internet=off\
+    \ and switches the post-run check to ProgramBench's submission tarball format."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-06T03:29:28.294226+00:00'
-  updated_at: '2026-05-10T17:22:15.954021+00:00'
+  updated_at: '2026-05-14T15:12:05.067732+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -19845,6 +19865,258 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-14T14:49:39.950664+00:00'
   updated_at: '2026-05-14T14:49:39.950664+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-418acc2
+  plan: plan-cb4ef69
+  title: Gated coherence review for plan edits during plan-review conversations
+  branch: pm/pr-418acc2-gated-coherence-review-for-plan-edits-during-plan-
+  status: pending
+  depends_on: []
+  description: '## Problem
+
+
+    During plan review, the back-and-forth between user and review agent produces
+    edits to the plan markdown. Those edits trend toward incoherence: the review conversation
+    operates at a local scope ("change this section," "rephrase this PR''s spec,"
+    "add a note here"), while the plan as a whole has a higher-level shape (motivation,
+    dependencies, sequencing, the story the plan tells across its PRs). Local edits
+    accumulate without anyone enforcing that the whole plan still hangs together.
+    Symptoms include: PRs whose spec drifts from the plan''s stated intent; new notes
+    that contradict earlier sections; inconsistent terminology between PR descriptions
+    and the plan overview; PRs added or removed without the surrounding plan text
+    being updated to match.
+
+
+    The existing plan-review PRs in this plan (pr-8e6bc47 parent-context, pr-6f04a57
+    summary-accuracy, pr-dadf4b3 external-children) all address scoping/visibility
+    — making sure the review sees the right material. None of them gate the *writing*
+    side. This PR addresses the write side: every plan edit produced during review
+    should pass through a coherence gate before it lands.
+
+
+    ## Shape of the gate (to be decided as part of this PR)
+
+
+    The high-level idea is a sub-agent that holds the plan''s higher-level intent
+    in working memory and validates each edit (or batch of edits) against it. Multiple
+    plausible ways to implement that sub-agent — the right choice depends on cost,
+    integration overhead, latency tolerance, and how tightly we want to couple the
+    gate to the review agent. **Exploring this is part of the PR.**
+
+
+    Candidate implementations to investigate:
+
+
+    1. **Claude skill (e.g. a custom /coherence-review).** Cheapest to call from inside
+    the review agent''s session; runs in the same context budget; we don''t maintain
+    a separate session lifecycle. Downsides: a skill is invoked by the parent agent,
+    so it can''t enforce a gate the parent forgets to call; the gate becomes advisory
+    rather than mandatory.
+
+
+    2. **Prompt-only — add a "before every plan edit, re-read the whole plan and check
+    coherence" instruction to the review agent''s system prompt.** Zero infrastructure;
+    instruction-following only. Downsides: same enforcement problem as skill — the
+    agent may skip the step when under context pressure or when an edit feels obviously
+    local. Doesn''t buy the higher-level-awareness property we want.
+
+
+    3. **Sibling pane sub-agent (mirrors pr-35df22a''s /simplify pattern).** A separate
+    Claude session in a sibling pane sharing the workdir. The review agent makes edits;
+    the sibling agent watches the plan file, validates each commit against the plan''s
+    overall shape, and either approves silently or posts a structured "coherence concern"
+    back into the review pane. Enforces coherence at the file-boundary level instead
+    of trusting the review agent to invoke a skill. Downsides: another concurrent
+    Claude session per plan-review window (cost, complexity, coordination).
+
+
+    4. **Pre-commit-style gate at the file-write boundary.** pm intercepts every Write/Edit
+    to a plan markdown file; before applying, it spawns a sub-agent that sees the
+    proposed diff plus the surrounding plan and either accepts or returns a rejection
+    reason for the review agent to incorporate. Tightest enforcement but the most
+    invasive integration (needs to hook the agent''s tool calls).
+
+
+    5. **Per-turn diff review.** At the end of each review-agent turn, diff the plan
+    file against the turn''s baseline, hand the cumulative diff + plan context to
+    a sub-agent, and post the verdict back into the review pane before the next turn
+    begins. Cheaper than per-edit gating; tolerates a turn''s worth of incoherent
+    intermediate state but catches it before it persists.
+
+
+    The exploration should produce: a one-page comparison of (1)–(5) with rough cost
+    estimates, an experimental run of the two most promising options on a real plan-review
+    session, and a recommendation. The implementation then follows the recommendation.
+
+
+    ## Considerations to weigh during the exploration
+
+
+    - **Advisory vs. mandatory.** Skills/prompts are advisory; pane-based and pre-commit
+    gates can be mandatory. Pick deliberately.
+
+    - **Latency.** A per-edit gate adds seconds per edit; a per-turn gate adds seconds
+    per turn; a sibling-pane gate adds nothing on the critical path but coordinates
+    asynchronously. Match latency to the review experience we want.
+
+    - **What the gate actually checks.** Coherence-with-plan-overview is the headline,
+    but candidates include: terminology consistency across PRs within the plan, sequencing/dependency
+    consistency, motivation drift, "is this edit at the right level of abstraction
+    for this plan" (the higher-level awareness the user wants preserved).
+
+    - **Failure mode.** When the gate flags an incoherence, does it block the edit,
+    surface the concern to the user, surface to the review agent only, or write a
+    structured note into the plan?
+
+
+    ## Out of scope
+
+
+    - Coherence checks across plans (parent/child summary accuracy is pr-6f04a57''s
+    domain).
+
+    - Coherence for PR specs that aren''t plan markdown (PR-spec edits during review
+    have their own flow).
+
+
+    ## Acceptance criteria
+
+
+    - A written comparison of at least three sub-agent implementation candidates with
+    rough cost and a chosen recommendation.
+
+    - Working implementation of the chosen approach, exercised on at least one real
+    plan-review session in this project.
+
+    - Evidence: a plan-review session log showing the gate firing on a real edit,
+    with the verdict (accept or coherence concern) visible in the review window or
+    the plan diff.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T14:59:40.187547+00:00'
+  updated_at: '2026-05-14T14:59:40.187547+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0cf3626
+  plan: plan-regression
+  title: 'Offshoot: exact ProgramBench task as a separate runnable'
+  branch: pm/pr-0cf3626-offshoot-exact-programbench-task-as-a-separate-run
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+
+    Offshoot of `pr-e2b7fdf` (the realistic single-prompt task evaluation): run the
+    exact ProgramBench task as defined by the benchmark, for submission to the public
+    leaderboard. Inherits the leader prompt and adapter CLI from `pr-e2b7fdf` but
+    flips the realism constraints to match ProgramBench''s artificial-but-defined
+    shape.
+
+
+    ## Why this is an offshoot, not the primary goal
+
+
+    The primary autonomous-loop goal is the realistic version in `pr-e2b7fdf`: internet
+    access, written directive, post-run integrity audit. That measures the thing the
+    loop should actually be good at. ProgramBench''s offline-only shape is interesting
+    as a public benchmark with a leaderboard, but it''s not how the loop will be used
+    in practice. Filing it as a separate runnable keeps the realistic version as the
+    load-bearing capstone and lets the ProgramBench submission be an opportunistic
+    side deliverable.
+
+
+    ## Differences from pr-e2b7fdf
+
+
+    | Aspect | Realistic (pr-e2b7fdf) | Exact ProgramBench (this PR) |
+
+    |---|---|---|
+
+    | Internet | Allowed (with audit) | Blocked (iptables network namespace) |
+
+    | Inputs | Directive + provided materials | `/workspace/executable` (chmod 111)
+    + docs |
+
+    | Verification | Post-run integrity audit | ProgramBench''s binary-behavior comparison
+    |
+
+    | Submission shape | Produced artifact + audit report | `/workspace/` extracted
+    as tarball |
+
+    | Base image | Per-task user-specified | `programbench/<task>:task_cleanroom`
+    |
+
+
+    ## Implementation
+
+
+    - **Adapter CLI variant** — `pm bench programbench --task <id>` runs the task
+    in the cleanroom image, with internet blocked at the network-namespace boundary
+    except for the model API endpoint.
+
+    - **Reuses from pr-e2b7fdf**: the leader prompt template (specialised slightly
+    to drop the internet-permitted hints), the auto-synthesis primitive (`pr-b3b8df0`)
+    producing the binary-comparison QA instructions from `/workspace/executable`,
+    the headless runtime (`pr-6f9301e`).
+
+    - **ProgramBench-specific**: the network-namespace firewall is stricter (model
+    API only); the submission tarball extraction targets `/workspace/` rather than
+    a `result/` subdirectory; the QA verdict comes from binary-behavior comparison
+    (no integrity audit needed since internet is off).
+
+    - **Reproducibility Dockerfile**: `FROM programbench/<task>:task_cleanroom` layered
+    with pm + Claude Code + pinned deps. The submission asset.
+
+
+    ## Sequencing
+
+
+    Lands after `pr-e2b7fdf`. Most of the machinery is reused; this PR is the per-benchmark-variant
+    skin.
+
+
+    ## Manual testing
+
+
+    Run the adapter against a held-back ProgramBench task and inspect the produced
+    `/workspace` tarball before submitting to the leaderboard. Confirm no network
+    egress beyond the model API endpoint during the run.
+
+
+    ## Depends on
+
+
+    - pr-e2b7fdf (realistic single-prompt task — primary capstone; this PR inherits
+    its leader prompt and adapter CLI)
+
+    - pr-b3b8df0 (auto-synthesis primitive — produces the binary-comparison QA instructions)
+
+
+    ## Out of scope
+
+
+    - Other public benchmark submissions (SWE-Bench, HumanEval, etc.) — separate PRs
+    if pursued.
+
+    - Optimizing the leader prompt for ProgramBench''s specific shape — the realistic
+    version''s prompt should work; tuning is follow-up.
+
+
+    ## Related
+
+
+    - pr-e2b7fdf — the realistic version this PR offshoot from.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T15:11:58.897160+00:00'
+  updated_at: '2026-05-14T15:11:58.897160+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

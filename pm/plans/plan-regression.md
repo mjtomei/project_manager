@@ -55,11 +55,11 @@ This is the load-bearing change: the regression library starts to *compound* —
 - Phase 5: pr-d60d185
 - Phase 7 prereq: pr-6be8ee6 (#190, tracked under improvements)
 
-**Pending (24)** — Phases 6-10:
+**Pending (25)** — Phases 6-10:
 - Phase 6 — test backfill (1): pr-fbda1a8
 - Phase 7 — evidence-gated bug fix loop (5): pr-eb450a0, pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
 - Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
-- Phase 9 — headless / unsupervised hardening (6): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf
+- Phase 9 — headless / unsupervised hardening + single-prompt capstone (7): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf (realistic capstone), pr-0cf3626 (exact-ProgramBench offshoot)
 - Phase 10 — QA loop surface improvements (8): pr-9603d04, pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2
 
 **Cross-phase sequencing note**: Phase 7 (evidence + coverage gates on the existing scenario model) and Phase 10 (scenarios → regression-test bindings, new-regression authoring, mocks at authoring surface) both reshape the QA loop. Phase 10 changes the underlying scenario model that Phase 7's gates measure against. Recommended order: land Phase 10's regressions-as-scenarios chain (pr-7d5d036 → pr-06a96fa → pr-2680fbf → pr-51586d2) before Phase 7's coverage stack (pr-b42059d → pr-8ed578d → pr-8422dea → pr-c2397e2), so the coverage gates measure the post-Phase-10 flow. If sequenced the other way, Phase 7 PRs may need amendment after Phase 10 lands.
@@ -225,9 +225,11 @@ Folds in the opportunistic audit: as scenarios run, Claude is asked to flag *oth
 
 `pm/qa/regression/auto-sequence-halt-conditions.md` — exercises every documented pause condition of the chain (`pr-e58459b`) on both entry points (TUI `O` keypress + `pm pr auto-sequence <id>` CLI): impl idle-no-spec, review INPUT_REQUIRED, QA INPUT_REQUIRED, stop-before-merge (auto-merge=false or improvement-gated), review NEEDS_WORK loop, QA NEEDS_WORK loop, max-iterations hit. Verifies each pause halts correctly and resumes from the right state.
 
-## Phase 9: Headless and unsupervised hardening
+## Phase 9: Headless and unsupervised hardening + single-prompt capstone
 
-Push the loop from "autonomous with a human in reserve via INPUT_REQUIRED" to "autonomous and recoverable with no human in the path." Driven by the ProgramBench submission as a concrete forcing function — the cleanroom image has no human and no human-reachable surface — but the hardening (self-recovery playbooks, no-progress detection, headless runtime) is generally useful for unattended operation.
+Push the loop from "autonomous with a human in reserve via INPUT_REQUIRED" to "autonomous and recoverable with no human in the path." Then exercise the hardened loop end-to-end as the realistic single-prompt task evaluation (`pr-e2b7fdf`) — the capstone of Phases 1-10. An exact-ProgramBench offshoot (`pr-0cf3626`) runs the same machinery against ProgramBench's public benchmark for leaderboard submission.
+
+Three pieces of hardening (self-recovery playbooks, no-progress detection, headless runtime), one scenario-quality safety net (false-PASS supervisor), and the auto-synthesis primitive that produces QA instructions from a task envelope. The capstone PR composes all of them.
 
 ### PR: Watcher self-recovery audit
 `pr-ca6859f` (pending). **Land first** — gates the headless/benchmark mode below.
@@ -267,19 +269,25 @@ Scenario sessions stay queryable after their verdict via `--resume`; the supervi
 
 Per-scenario amendment cap (default 2) prevents supervisor loops; cap-exceeding cases escalate via the self-recovery playbook. Distinct from `pr-ca6859f` (technical retry) and `pr-ed10ac4` (spinning-loop detection): this one is about verdict trust, not loop dynamics.
 
-### PR: ProgramBench submission scaffolding
-`pr-e2b7fdf` (depends on: pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0).
+### PR: Realistic single-prompt task — internet + directive + post-run integrity audit (CAPSTONE)
+`pr-e2b7fdf` (depends on: pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-fbda1a8).
 
-Now consumes the auto-synthesis primitive — registers a ProgramBench backend that probes `/workspace/executable` + docs and emits `pm/qa/instructions/binary-comparison.md`. The synthesis driver lives in `pr-b3b8df0`; this PR contributes the per-task-type backend, the leader prompt, the adapter CLI, the reproducibility Dockerfile, and the egress-allowlist firewall harness.
+The end-to-end goal of Phases 1-10: a single-prompt task evaluation that mirrors how a real engineer works. Layer pm on top of a cleanroom image; a leader Claude session uses pm itself as its orchestration tool, files plan + PRs, drives them through the Phase 10 QA flow, produces a working result.
 
-Bundle four pieces as one deliverable, demonstrating the autonomous loop end-to-end on an external benchmark rather than starting a parallel benchmark plan.
+Inspired by ProgramBench (https://programbench.com) but deliberately not its exact shape. ProgramBench's offline-only constraint (no internet, only `/workspace/executable` + docs) is artificial; real engineers have the internet. The realistic version uses three constraints instead:
 
-- **Leader prompt template**: a new prompt builder (sibling of `generate_prompt`, `generate_review_prompt`) framing pm as the leader's tool. Lists relevant CLI commands, delegates QA-instruction authoring to the leader (writes `pm/qa/instructions/binary-comparison.md` based on its probe of `/workspace/executable`), files plan + PRs, drives them through start/review/QA/merge.
-- **Adapter CLI**: `pm bench programbench --task <id>` drops the task into a workdir, generates the leader prompt, spawns the leader session in `benchmark_mode`, extracts `/workspace` as the submission tarball when the leader finishes.
-- **Reproducibility Dockerfile**: `FROM programbench/<task>:task_cleanroom` layered with pm + Claude Code + pinned deps. The submission asset.
-- **Egress-allowlist firewall harness**: iptables / network namespace at the sandbox boundary allowing only the model API endpoint. Defense-in-depth against incidental network use during benchmark runs; `backend=local`, `container-mode=off` (the cleanroom is the container).
+1. **Internet access** — agent has the same web access a real engineer would. No artificial sandboxing of common knowledge.
+2. **Directive + provided materials** — task envelope (`pm/tasks/<id>/`) contains a written `directive.md`, `materials/` (the docs / reference behavior / examples), and an `allowlist.yaml` describing what may be consulted.
+3. **Post-run integrity audit** — `pm_core/bench/audit.py` walks the leader's tool-use transcript (web fetches, file reads, command executions) against the allowlist and emits a structured `audit.md`. Verifies the agent did NOT reference the reference implementation's source, task-specific test cases, or task walkthroughs. This is the load-bearing realism check — with internet, agents could trivially Google the answer if findable; the audit is what makes the score meaningful.
 
-Single PR is justified because each piece is small and they are tightly coupled by the submission shape. Manual testing: run the adapter against a held-back ProgramBench task and inspect the produced `/workspace` tarball before submission.
+Pieces: leader prompt template (sibling of `generate_prompt` / `generate_review_prompt`), task envelope format, adapter CLI (`pm bench realistic --task <path>`), integrity audit module, reproducibility Dockerfile, end-to-end fixture test. Reuses the auto-synthesis primitive (`pr-b3b8df0`) to produce QA instructions from the task envelope.
+
+**Depends on `pr-fbda1a8`** (the bridge PR): the leader spawns the full autonomous loop, so any silently-regressed Phase 1-5 feature would make the leader fail for reasons unrelated to the task. The bridge confirms the loop is sound under Phase 10's flow before this PR depends on it end-to-end.
+
+### PR: Offshoot — exact ProgramBench task as a separate runnable
+`pr-0cf3626` (depends on: pr-e2b7fdf, pr-b3b8df0)
+
+Same machinery as the capstone above, but with the realism constraints flipped to match ProgramBench's defined shape: internet blocked at the network-namespace boundary (model API only), inputs are `/workspace/executable` (chmod 111) + docs, verification is ProgramBench's binary-behavior comparison, submission is the `/workspace/` tarball. Adapter CLI variant: `pm bench programbench --task <id>`. Filed as an offshoot because (a) the realistic version is the primary goal of the loop and (b) ProgramBench's offline constraint is more of an opportunistic public-leaderboard target than a realistic working mode. Reuses the leader prompt + adapter CLI + headless runtime from the capstone; the only ProgramBench-specific pieces are the stricter firewall, the binary-comparison verdict path, and the tarball extraction shape.
 
 ## Phase 10: QA flow redesign — regressions as scenarios, mocks at the authoring surface
 
@@ -359,11 +367,12 @@ Proposals go to a report (no auto-apply) for human or scenario-author follow-up.
 - QA verdicts incorporate line, fix-line, path/branch, and user-story coverage signals
 - Coverage gate failures trigger targeted scenario growth via the planner, not silent NEEDS_WORK loops
 
-**Headless / unsupervised hardening (Phase 9, pending):**
+**Headless / unsupervised hardening + single-prompt capstone (Phase 9, pending):**
 - INPUT_REQUIRED rate on a representative bug-fix corpus drops measurably after the self-recovery audit
 - Autonomous loops can run end-to-end with no human-reachable surface (headless / benchmark_mode)
 - No-progress safety stop short-circuits spinning review/QA loops before max-iterations
 - Scenario quality supervisor catches false-PASS scenarios in headless mode before verdicts propagate
+- **Capstone**: a single-prompt task (`pr-e2b7fdf`) produces a working result via the full Phase 10 autonomous loop under realistic constraints — internet on, written directive + provided materials, post-run integrity audit confirming no out-of-bounds references. The exact-ProgramBench offshoot (`pr-0cf3626`) succeeds on the public leaderboard.
 
 **QA flow redesign (Phase 10, pending — the most consequential):**
 - Regression library compounds: every QA run for an uncovered surface either binds to an existing regression test or authors a new one via `pr-2680fbf`; INSTRUCTION+ARTIFACT scaffolding decays toward zero except for genuine one-shot probes/oracles
