@@ -18791,121 +18791,161 @@ prs:
   notes: []
 - id: pr-51586d2
   plan: plan-regression
-  title: 'Shared mock library: scenario-created mocks become discoverable to future
-    scenario authors'
+  title: Reconnect existing mocks library to scenario prompts under diff-scoped constraints
   branch: pm/pr-51586d2-shared-mock-library-scenario-created-mocks-become-
   status: pending
   depends_on: []
-  description: 'When a QA scenario creates a new mock (FakeClaudeSession script, FakeGitHubBackend
-    response sequence, fixture, fake subprocess) to exercise its target, that mock
-    must be registered in a shared library at pm/qa/mocks/ so future scenario-authoring
-    sessions can discover and reuse it instead of re-deriving the same fake.
+  description: '## Context
 
 
-    ## Why
+    The shared mocks library already exists: pr-942aa21 (PR #125, merged March 2026)
+    shipped pm/qa/mocks/, the pm qa mocks CLI (list, add, show, edit), a YAML frontmatter
+    convention, qa_instructions.list_mocks / mocks_for_prompt loaders, spec_gen.get_spec_mocks_section,
+    and prompt-side wiring that injected a Mock Library section into the QA planner
+    prompt and a ## Mocks block into every scenario prompt.
 
 
-    The regression flow''s leverage compounds only if mocks accumulate. Today each
-    scenario session that needs a mock writes one inline and throws it away when the
-    session ends. Next session for an adjacent area writes the same mock again, slightly
-    differently, with different bugs. The library never grows. Without explicit registration
-    + discovery, the auto-synthesis primitive (pr-b3b8df0) and the QA library auditor
-    (pr-f4dc8a2) work against a moving target — every scenario authored is starting
-    from scratch on the mock side.
+    pr-6be8ee6 (#190) deliberately stripped the prompt-side wiring (commit 3eb89e6)
+    while keeping the machinery for a one-revert restore. The failure mode that triggered
+    the removal: workers either invented mock contracts the diff didn''t need, or
+    followed spec-level mock guidance unrelated to what they were driving. The machinery
+    sat unused because exposing it indiscriminately produced worse scenarios than
+    not exposing it.
 
 
-    ## Shape
+    This PR reconnects the library to scenario-author prompts under constraints designed
+    to avoid that failure mode, so the library''s accumulation value (mocks compound
+    across sessions) actually kicks in without re-introducing the noise.
 
 
-    1. **Mock registry at pm/qa/mocks/**: one markdown file per mock. Frontmatter
-    declares: target surface (e.g. github-backend.pr_create, claude-session.tool-use),
-    inputs the mock accepts, response shape, scripted-behavior summary. Body documents
-    usage and links to the Python module that implements it (sibling files at pm/qa/mocks/_lib/*.py).
+    ## What''s kept from the original pr-51586d2 idea
 
 
-    2. **Scenario-author prompt addendum**: when a QA-planner or scenario-refiner
-    session is asked to author a scenario, the prompt enumerates the existing mock
-    registry. The session is instructed to: prefer existing mocks; only author a new
-    mock if no existing one fits; when authoring a new mock, write the registry entry
-    + the python module as part of the scenario PR (not as a side effect that disappears).
+    - FakeClaudeSession (pr-abcf70f) and FakeGitHubBackend (pr-9603d04) registered
+    as the first two concrete entries in pm/qa/mocks/.
+
+    - The compounding-library thesis: mocks an author writes once become discoverable
+    to future authors.
 
 
-    3. **Mock-creation flow in scenarios**: regression-test sessions that file new
-    bugs / scenarios via pm pr add — taught by pr-47940bc — also write any mocks they
-    depended on into pm/qa/mocks/ and reference them by registry id from the scenario
-    markdown. Same addendum mechanism.
+    ## What''s different — the constraints
 
 
-    4. **Discovery surface**: pm qa mocks list / pm qa mocks show <id> CLI for humans;
-    programmatic loader for scenario harnesses; the auto-synthesis primitive (pr-b3b8df0)
-    and the QA library auditor (pr-f4dc8a2) read the registry when proposing fills.
+    1. **Diff-scoped enumeration.** When the QA planner / scenario refiner / regression-filing
+    wrapper assembles a prompt, the mocks block lists only mocks whose declared target
+    surface overlaps with files in the PR diff (or, for regression-filing, the surface
+    the test exercises). A mock whose surface isn''t touched by the diff isn''t shown
+    to the session at all. This is the most important difference from the pr-942aa21
+    era — that version showed the whole library to every scenario, which is what generated
+    the noise.
 
 
-    5. **Bootstrap content**: pr-abcf70f''s FakeClaudeSession and pr-9603d04''s FakeGitHubBackend
-    get registered as the first two entries when those PRs land, so the registry is
-    non-empty by the time scenario-authoring flows turn on.
+    2. **Opt-in by spec.** Mocks injection happens only when spec_qa explicitly declares
+    a mocks section (the mechanism pr-942aa21 already built for spec-driven mock plans).
+    The spec phase is where the human-in-the-loop or the planner decides ''this PR''s
+    scenarios should use mocks''; in the absence of a spec mocks section, scenarios
+    run against real surfaces. No always-on injection.
 
 
-    ## Why this would have helped from the start
+    3. **Authoring is a side effect of scenarios, not a free-floating action.** When
+    a scenario session needs a mock that doesn''t exist, the prompt addendum instructs
+    it to file the new mock via pm qa mocks add as part of the scenario PR, with frontmatter
+    declaring the target surface (the same constraint that makes (1) work — surface
+    declarations are mandatory). The pm/qa/mocks/ entry + python module land in the
+    scenario PR''s branch, not as a separate filing.
 
 
-    Asked retrospectively: the regression-loop scaffolding (Phases 1-5) built the
-    watchers and the discovery supervisor before the QA library had a place for mocks
-    to live. Sibling PRs filing into pm/qa/instructions/ and pm/qa/regression/ already
-    have the directory-as-library shape; mocks need the same shape and explicit prompt-addendum
-    + discovery wiring to participate. This PR retrofits the missing piece so the
-    auto-synthesis primitive (pr-b3b8df0), QA library auditor (pr-f4dc8a2), and scenario-author
-    flows produce mocks that compound instead of evaporating.
+    4. **Bootstrap with concrete examples.** When pr-abcf70f and pr-9603d04 land,
+    register them as the first two entries with full frontmatter and reference implementations.
+    The registry being non-empty + showing two well-shaped examples is what makes
+    future scenario authors produce useful mocks instead of placeholder ones.
 
 
     ## Scope
 
 
-    - pm/qa/mocks/ directory convention + frontmatter schema + loader helper.
+    - Audit the kept-but-disconnected machinery (QAScenario.mock_ids, parse_qa_plan
+    MOCKS, parse_new_mocks_from_plan, qa_instructions.list_mocks / mocks_for_prompt,
+    spec_gen.get_spec_mocks_section, mocks_dir helpers) and decide piece-by-piece
+    what to reconnect vs. what to leave dormant. Land the audit as part of this PR''s
+    design.
 
-    - Prompt addendums for: QA planner, QA scenario refiner, regression-filing wrapper
-    (pr-47940bc''s launch wrapper).
+    - Add diff-scope filtering to qa_instructions.mocks_for_prompt (new parameter:
+    changed_files; return only mocks whose target_surface matches one of them).
 
-    - pm qa mocks list / show CLI.
+    - Reintroduce the mocks block injection in generate_qa_planner_prompt and the
+    regression-filing wrapper (pr-47940bc), gated on (a) spec_qa has a mocks section,
+    and (b) the diff-scoped enumeration returns a non-empty set.
 
-    - Wire pr-abcf70f and pr-9603d04 entries (as those PRs land, or in this PR with
-    stubs if they haven''t).
+    - Reintroduce the new-mock authoring instruction in the scenario-author addendum,
+    with the surface-declaration requirement enforced.
 
-    - Tests: scenario-author prompts include the mock registry; a session that authors
-    a new mock writes the registry entry; loader resolves mocks by id.
+    - Strengthen the frontmatter schema if needed (currently shipped via pr-942aa21
+    — verify it carries target_surface).
+
+    - Bootstrap entries for FakeClaudeSession and FakeGitHubBackend land when those
+    PRs merge (or stub entries in this PR if they merge first).
+
+    - Tests: diff-scoped enumeration returns only matching mocks; mocks block is omitted
+    when no spec mocks section exists; a scenario that authors a new mock includes
+    the registry entry in its commit; the regression-filing addendum carries the same
+    constraint.
 
 
     ## Out of scope
 
 
-    - Versioning the mocks (could be a follow-up).
+    - Revisiting pr-942aa21''s mocks CLI surface (list/add/show/edit already work).
+
+    - Versioning the mocks (could be follow-up).
 
     - Auto-detecting that two scenarios authored similar mocks that could be merged
-    (the QA library auditor pr-f4dc8a2 is the right place for that).
+    (pr-f4dc8a2 QA library auditor''s job).
+
+
+    ## Why this won''t re-introduce the noise pr-6be8ee6 removed
+
+
+    The pr-942aa21-era injection showed every mock to every scenario regardless of
+    relevance, and the spec mocks section was a free-form list that workers couldn''t
+    always map back to what they were testing. The diff-scope filter + spec-gated
+    injection means: a scenario only sees mocks for surfaces in its PR''s diff, and
+    only when the spec explicitly opted in. If a PR''s diff doesn''t touch a mockable
+    surface, no mocks are shown. If a spec doesn''t call for mocks, no mocks are shown.
+    The default behavior of #190''s strip is preserved; only the explicitly-relevant
+    cases get the injection.
 
 
     ## Depends on
 
 
-    pr-abcf70f (FakeClaudeSession — first concrete mock to register)
+    - pr-abcf70f (FakeClaudeSession — first concrete registered mock)
 
-    pr-9603d04 (FakeGitHubBackend — second concrete mock to register)
+    - pr-9603d04 (FakeGitHubBackend — second concrete registered mock)
 
 
     ## Related
 
 
+    - pr-942aa21 (plan-qa, merged) — built the library and CLI this PR reconnects
+    to prompts.
+
+    - pr-6be8ee6 (#190, merged) — stripped the prompt wiring this PR reintroduces
+    under constraints. Note note-a1c6f30 on pr-942aa21 has the original design rationale;
+    commit 3eb89e6 has the removal rationale.
+
     - pr-b3b8df0 (auto-synthesis primitive) — consumer of the registry.
 
-    - pr-f4dc8a2 (QA library auditor) — also reads/extends the registry.
+    - pr-f4dc8a2 (QA library auditor) — also reads/extends the registry; the place
+    where ''two mocks could be merged'' detection lives.
 
-    - pr-47940bc (regression-filing wrapper) — its prompt addendum gets the mock-registry
-    block.'
+    - pr-47940bc (regression-filing wrapper) — its prompt addendum gets the diff-scoped
+    mocks block.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T01:49:12.189951+00:00'
-  updated_at: '2026-05-14T01:49:12.189951+00:00'
+  updated_at: '2026-05-14T01:56:29.881512+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
