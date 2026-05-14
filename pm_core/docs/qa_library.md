@@ -185,6 +185,10 @@ session follows to produce a capture under
 `pm qa captures-path <pr-id>`) that downstream consumers (humans
 replaying, agents parsing) can use to confirm what happened.
 
+Reference an artifact recipe from a QA scenario by its filename stem
+in the `ARTIFACT:` field (comma-separated when a scenario uses more
+than one recipe).
+
 A minimal example:
 
 ```text
@@ -335,7 +339,7 @@ Reference a mock from a QA scenario by its filename stem in the
 | `pm qa author-regression <name>` | Guided authoring for a regression test. |
 | `pm qa author-artifact <name>` | Guided authoring for an artifact recipe. |
 | `pm qa docs` | Prints this document. |
-| QA planner prompt | `instruction_summary_for_prompt` renders `### Instructions` and `### Artifact Recipes`. Recipes are referenced by filename in the scenario `INSTRUCTION:` field. |
+| QA planner prompt | `instruction_summary_for_prompt` renders `### Instructions` and `### Artifact Recipes`. Instructions are referenced from a scenario by filename in the `INSTRUCTION:` field; artifact recipes are referenced in the `ARTIFACT:` field (comma-separated for multiple). |
 | Scenario 0 prompt | Same library summary, scoped to the interactive session. |
 | Bug-fix flow prompt | Points sessions at `pm/qa/instructions/` and `pm/qa/artifacts/` by directory; sessions discover specific files themselves. Captures go under `$(pm qa captures-path <pr-id>)/impl/pre-fix/` and `…/post-fix/`. |
 | Bug-fix review checklist | Tells reviewers to read captures under `$(pm qa captures-path <pr-id>)/impl/`. |
