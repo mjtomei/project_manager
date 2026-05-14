@@ -692,3 +692,7 @@ def main():
         import sys
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+    except FileNotFoundError as e:
+        import sys
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
