@@ -185,10 +185,25 @@ PRs added after the loop landed, addressing gaps surfaced once the watchers were
 
 Adds a per-plan `auto_merge` setting (default true) so plans that need human review before shipping (ambient surfaces, UX iteration) can let watchers run impl/review/QA but stop short of merging. Also injects a dep-merge preamble into the start prompt when the PR has unmerged deps, so iteratively-developed plans stay coherent without each PR landing on master first.
 
-### PR: Claude-based regression test: CLI output rendering at varied terminal widths
+### PR: Expand regression corpus — CLI rendering at varied widths + watcher behavior coverage
 `pr-2c060b2` (pending)
 
-Extends the regression corpus consumed by the discovery supervisor (`pr-271cb3a`). New scenario at `pm/qa/regression/cli-output-widths.md` resizes a tmux pane to randomly-chosen widths, captures `pm pr list` / `pm pr ready` / `pm plan list` output, and asks Claude to flag layout bugs (overflow, mid-word breaks, miscounted wide-char icons). Findings file as bugs or improvements via the existing addendum from `pr-47940bc`. Manual testing: review the rendered output across the seeded widths to confirm the verdict logic flags real layout bugs and ignores acceptable wrapping — INPUT_REQUIRED is appropriate for the visual-judgment portion.
+Two surface families, both filed as Claude-driven regression scenarios consumed by the discovery supervisor (`pr-271cb3a`):
+
+**Family 1 — CLI output rendering at varied widths.** `pm/qa/regression/cli-output-widths.md` resizes a tmux pane to randomly-chosen widths (60–180), captures listing-command output, and flags layout bugs (overflow, mid-word breaks, miscounted wide-char icons). Motivated by two real bugs from a single manual session that unit tests cannot enumerate.
+
+**Family 2 — Watcher behavior coverage.** Separate scenarios per surface in `pm/qa/regression/`:
+- `discovery-supervisor-tick.md` — tick against fixture state, verify launch+reconcile+log+verdict
+- `bug-fix-watcher-pick-and-advance.md` — pick correct candidate, advance via `pm pr auto-sequence`, auto-merge on PASS; variants for at-cap, stuck, reproduce-failure
+- `improvement-fix-watcher-gated-merge.md` — gated merge stops at qa-pass, human-merge cycle
+- `watcher-review-session-summary.md` — opening summary, follow-up query, remediation flow (add Watcher-section note, verify next tick picks it up)
+- `auto-sequence-halt-conditions.md` — all documented pause conditions on both TUI and CLI entry points
+
+Today watcher behavior is verified only by BaseWatcher framework tests and live operator markdown. After this PR, the discovery supervisor's own corpus contains regression coverage of the watchers — drift gets caught by the same loop that watches everything else.
+
+**Family 3 — opportunistic audit.** As the scenarios run, Claude is asked to flag *other* uncovered surfaces and file improvement PRs proposing new regression tests, complementing `pr-f4dc8a2`'s static auditor.
+
+After Phase 10 lands, QA scenarios that exercise these surfaces bind to these regression tests via `pr-06a96fa` rather than legacy INSTRUCTION+ARTIFACT — durable accumulation that makes the Phase 10 redesign worth landing. Independent of Phase 10's chain code-wise; lands more usefully after it.
 
 ## Phase 9: Headless and unsupervised hardening
 
