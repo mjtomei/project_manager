@@ -10,6 +10,8 @@ Establish a continuous quality improvement loop where the existing Claude-based 
 - Give humans a conversational surface for checking in on the autonomous loops
 
 > See `pm/docs/literature-review.md` for context on the academic and industry work surrounding this plan — benchmarks, autonomous coding agents, LLM-driven test generation, self-improving loops, integrity audits, and watcher architectures. Includes pointers to what's reused, what's adapted, and where this plan is making its own bet.
+>
+> See `pm/docs/adversarial-review/METHODOLOGY.md` for an adversarial-review protocol (ported from the Omerta paper's by-hand review loop) that can subject this plan and the literature review to systematic criticism through fresh, blind reviewer cycles. Worked examples from the Omerta runs live alongside the methodology doc.
 
 ## Reuse: existing infrastructure
 
