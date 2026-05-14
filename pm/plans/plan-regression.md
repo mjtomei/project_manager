@@ -34,6 +34,17 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 
 **Human surface** — `pr-e84b43c`, a Claude session launched from the TUI that reads the three work logs, summarizes recent activity, and is conversational from there.
 
+## How the QA flow evolves (Phase 10 lookahead)
+
+The architecture above describes the system as Phases 1-5 shipped it: three watchers, the discovery supervisor scheduling regression tests, scenarios driven by INSTRUCTION+ARTIFACT scaffolding. Phase 10 reshapes the underlying scenario model — that's the most consequential pending change in this plan and it affects how to read the later phases. In short:
+
+- **Before Phase 10**: scenarios = INSTRUCTION (setup) + ARTIFACT (drive/capture). Regression tests are a separate library the discovery supervisor runs on its own cadence. Mocks library exists (`pr-942aa21`, plan-qa, merged) but its prompt injection at scenario planning was stripped (`pr-6be8ee6` / commit `3eb89e6`) because it produced noise.
+- **After Phase 10**: scenarios bind to regression tests as their canonical flow driver (`pr-06a96fa`). When no regression fits, the planner authors one inline (`pr-2680fbf`) and the drafted regression becomes a durable library entry the discovery supervisor will rerun. Mocks awareness reconnects at the new-regression authoring surface (`pr-51586d2`) — diff-scoped, surface-declared — instead of the indiscriminate scenario-prompt injection that didn't work. INSTRUCTION+ARTIFACT remains as a fallback only for one-shot probes/oracles.
+
+This is the load-bearing change: the regression library starts to *compound* — every QA run that hits a new surface adds a regression test, which subsequent QA runs reuse, which the discovery supervisor exercises on its own schedule. Phase 6 (the bridge PR), Phase 7 (coverage gates), and Phase 9 (headless / scenario quality supervisor) all interact with this new model.
+
+**Reading order tip**: if you're picking up the plan cold, read Phase 10 first; the other pending phases assume its model lands or measure against it.
+
 ## Status
 
 **Merged (12)** — Phases 1-5 plus the Phase 7 prerequisite:
@@ -144,6 +155,8 @@ This is the checkpoint that confirms the merged Phase 1-5 features still behave 
 
 Goal: tighten the bug-fix flow until the loop can run unsupervised. The earlier phases got reproduce→fix→verify into the prompt; these PRs make each step produce on-disk evidence the watcher / verdict gate can hard-check.
 
+**Sequencing with Phase 10**: five of the six PRs in this phase add coverage and verdict gates on the QA scenario model. Phase 10 changes that model. Recommended: land Phase 10's regressions-as-scenarios chain first so the coverage gates measure the new flow; otherwise the Phase 7 gates need amendment after Phase 10 lands (see the cross-phase sequencing note in Status).
+
 ### PR: Bug-fix flow surface TUI QA repro instructions in session prompt ✅ MERGED (#190)
 `pr-6be8ee6` (plan=improvements)
 
@@ -176,23 +189,27 @@ When coverage gates fail, the refinement prompt asks the QA planner for addition
 
 **Interaction with `pr-0b14f2c`** (Phase 10 — planner adds/replaces scenarios mid-run): both PRs extend planner behavior after the initial plan emits. `pr-0b14f2c` is the user-driven (`+` / `r` / `R` keypress) path; `pr-c2397e2` is the verdict-gate-driven (coverage-gap-detected) path. They share the same underlying "add scenarios to a running batch" machinery — implementing `pr-0b14f2c` first gives `pr-c2397e2` the splice/re-aggregate primitives for free, and `pr-c2397e2`'s coverage-targeted prompt becomes a new programmatic caller of that primitive rather than a parallel mechanism. Sequence: `pr-0b14f2c` first, `pr-c2397e2` builds on top.
 
-## Phase 8: Post-activation refinements
+## Phase 8: Post-activation refinements + regression-corpus expansion
 
-PRs added after the loop landed, addressing gaps surfaced once the watchers were running in anger.
+PRs added after the loop landed, addressing gaps surfaced once the watchers were running in anger. Two themes — a per-plan workflow refinement (`pr-b77702b`) and three regression-corpus expansion PRs (`pr-2c060b2`, `pr-70d02ed`, `pr-a1f267a`).
 
-### PR: Per-plan auto-merge=false mode with dep-merge in start prompt
+### Theme 1: workflow refinement
+
+#### PR: Per-plan auto-merge=false mode with dep-merge in start prompt
 `pr-b77702b` (pending)
 
 Adds a per-plan `auto_merge` setting (default true) so plans that need human review before shipping (ambient surfaces, UX iteration) can let watchers run impl/review/QA but stop short of merging. Also injects a dep-merge preamble into the start prompt when the PR has unmerged deps, so iteratively-developed plans stay coherent without each PR landing on master first.
 
+### Theme 2: regression-corpus expansion (3 PRs)
+
 Three Claude-driven regression-corpus expansion PRs, filed together. Same pattern (markdown in `pm/qa/regression/`, run via `launch_qa_item`, scheduled by the discovery supervisor `pr-271cb3a`), split for tight QA scope per PR. All three are independent of Phase 10 code-wise but land more usefully after `pr-06a96fa` (downstream QA scenarios exercising these surfaces bind to these regression tests via `REGRESSION: <id>` rather than INSTRUCTION+ARTIFACT).
 
-### PR: Claude-based regression test — CLI output rendering at varied terminal widths
+#### PR: Claude-based regression test — CLI output rendering at varied terminal widths
 `pr-2c060b2` (pending)
 
 `pm/qa/regression/cli-output-widths.md` — resizes a tmux pane to randomly-chosen widths (60–180, seeded RNG, plus edge values), captures `pm pr list` / `pm pr ready` / `pm plan list` output, asks Claude to flag layout bugs (overflow, mid-word breaks, miscounted wide-char icons) and improvements (technically-correct-but-ugly). Motivated by two real bugs from a single manual session that unit tests cannot enumerate.
 
-### PR: Regression coverage — watcher behavior and review session
+#### PR: Regression coverage — watcher behavior and review session
 `pr-70d02ed` (pending)
 
 Four new markdowns covering the watcher / observation surfaces from Phases 2-4:
@@ -203,7 +220,7 @@ Four new markdowns covering the watcher / observation surfaces from Phases 2-4:
 
 Folds in the opportunistic audit: as scenarios run, Claude is asked to flag *other* uncovered surfaces and file improvement PRs proposing regression tests, complementing `pr-f4dc8a2`'s static auditor.
 
-### PR: Regression coverage — auto-sequence chain pause conditions
+#### PR: Regression coverage — auto-sequence chain pause conditions
 `pr-a1f267a` (pending)
 
 `pm/qa/regression/auto-sequence-halt-conditions.md` — exercises every documented pause condition of the chain (`pr-e58459b`) on both entry points (TUI `O` keypress + `pm pr auto-sequence <id>` CLI): impl idle-no-spec, review INPUT_REQUIRED, QA INPUT_REQUIRED, stop-before-merge (auto-merge=false or improvement-gated), review NEEDS_WORK loop, QA NEEDS_WORK loop, max-iterations hit. Verifies each pause halts correctly and resumes from the right state.
@@ -264,9 +281,13 @@ Bundle four pieces as one deliverable, demonstrating the autonomous loop end-to-
 
 Single PR is justified because each piece is small and they are tightly coupled by the submission shape. Manual testing: run the adapter against a held-back ProgramBench task and inspect the produced `/workspace` tarball before submission.
 
-## Phase 10: QA loop surface improvements
+## Phase 10: QA flow redesign — regressions as scenarios, mocks at the authoring surface
+
+The most consequential pending phase: replaces the underlying QA scenario model. Where Phases 1-5 built the autonomous-loop substrate and Phases 7-9 hardened it, Phase 10 changes what the loop is *scheduling against*. After this phase lands, the regression library compounds — every QA run that hits a new surface adds a regression test, and every subsequent QA run reuses what's accumulated. This is what turns the loop from "an automation around the existing scenario format" into a system that gets stronger over time.
 
 Filed in two waves: most during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger (pr-7d5d036, pr-06a96fa, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2); the rest (pr-9603d04, pr-2680fbf, pr-51586d2) during a plan-review session on 2026-05-14 that surfaced the regressions-as-scenarios + new-regression-authoring + mocks-at-authoring chain.
+
+The chain (PRs that together form the redesign): `pr-9603d04` (GitHub mock substrate) and `pr-abcf70f` (FakeClaudeSession, plan-regression, in_review) → `pr-7d5d036` (regression-runner containment cleanup) → `pr-06a96fa` (scenarios bind to regression tests) → `pr-2680fbf` (planner authors a new regression when none fits) → `pr-51586d2` (mocks awareness at the new-regression authoring surface). Other Phase 10 PRs (`pr-b59f0c7`, `pr-0b14f2c`, `pr-f4dc8a2`) are independent improvements that compose with the chain.
 
 > **Re-testing obligation for Phases 1-5**: every PR in Phases 1-5 was implemented and QA'd under the *pre-Phase-10* QA flow — INSTRUCTION+ARTIFACT scenarios, mocks injected at scenario planning (later stripped by `pr-6be8ee6` / commit `3eb89e6`), no regression-test binding, no new-regression authoring step. When Phase 10's chain lands (`pr-06a96fa` → `pr-2680fbf` → `pr-51586d2`), the regression library becomes the canonical surface and the QA loop's verdicts mean something different. Every merged feature in Phases 1-5 (the three watchers, the auto-sequence chain, the discovery supervisor, the regression-filing addendum, watcher-target windows, the human review session, the auto-start command) needs to be re-exercised under the new flow. The bridge PR that performs this re-validation is `pr-fbda1a8` (Phase 6 — see below), which depends on Phase 10's chain so it runs only after the new flow lands.
 
@@ -274,7 +295,6 @@ Filed in two waves: most during `pr-6be8ee6`'s QA iteration once the loop was ex
 `pr-9603d04` (pending)
 
 Sibling of `pr-abcf70f` (FakeClaudeSession) for the GitHub side. Provides a scriptable `FakeGitHubBackend` (or transport-level fake) so regression tests can exercise github-backend code paths — PR create, status sync, draft↔ready transitions, comments, merge, post-merge pull, rate-limit / conflict / merged-elsewhere responses — without hitting the real GitHub API. Without this, regression coverage stops at the GitHub boundary and bug-fix watchers cannot reproduce GitHub-specific bugs deterministically.
-
 
 ### PR: Bug: `pm tui test` hardcodes "testing against the pm tmux session"
 `pr-7d5d036` (depends on: pr-abcf70f, pr-9603d04)
@@ -325,6 +345,7 @@ Proposals go to a report (no auto-apply) for human or scenario-author follow-up.
 
 ## Success criteria
 
+**Autonomous loop (Phases 1-5, met today):**
 - Discovery runs unattended via the existing watcher framework, surfacing both bugs and improvements
 - Findings are deduplicated post-hoc by the discovery supervisor and routed to the correct plan
 - Bug fixes follow reproduce→fix→verify and land without manual kickoff
@@ -332,3 +353,20 @@ Proposals go to a report (no auto-apply) for human or scenario-author follow-up.
 - Implementation watchers detect and handle stuck/loop-failing fix sessions
 - Users influence watcher behavior by editing `notes.txt` Watcher section, not by reaching into watcher state directly
 - Humans interact with the loops via the watcher review session and `notes.txt`, not by direct watcher manipulation
+
+**Evidence-gated bug fix (Phase 7, pending):**
+- Bug-fix PRs cannot advance without machine-checkable pre-fix repro and post-fix verification artifacts on disk
+- QA verdicts incorporate line, fix-line, path/branch, and user-story coverage signals
+- Coverage gate failures trigger targeted scenario growth via the planner, not silent NEEDS_WORK loops
+
+**Headless / unsupervised hardening (Phase 9, pending):**
+- INPUT_REQUIRED rate on a representative bug-fix corpus drops measurably after the self-recovery audit
+- Autonomous loops can run end-to-end with no human-reachable surface (headless / benchmark_mode)
+- No-progress safety stop short-circuits spinning review/QA loops before max-iterations
+- Scenario quality supervisor catches false-PASS scenarios in headless mode before verdicts propagate
+
+**QA flow redesign (Phase 10, pending — the most consequential):**
+- Regression library compounds: every QA run for an uncovered surface either binds to an existing regression test or authors a new one via `pr-2680fbf`; INSTRUCTION+ARTIFACT scaffolding decays toward zero except for genuine one-shot probes/oracles
+- Mocks awareness is wired at the new-regression authoring surface only (`pr-51586d2`); the pre-strip scenario-planning injection pattern stays gone
+- The QA library auditor (`pr-f4dc8a2`) periodically proposes fills aligned with the same hierarchy
+- All Phase 1-5 features re-validated under the new flow via the bridge PR (`pr-fbda1a8`) before the regression loop is declared unsupervised-ready
