@@ -4151,7 +4151,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/125
   gh_pr_number: 125
   created_at: '2026-03-06T19:02:04.662125+00:00'
-  updated_at: '2026-03-20T02:22:36.877662+00:00'
+  updated_at: '2026-05-14T02:08:19.158179+00:00'
   started_at: '2026-03-06T21:13:20.894896+00:00'
   reviewed_at: '2026-03-20T02:07:52.600287+00:00'
   merged_at: '2026-03-20T02:22:36.877662+00:00'
@@ -4235,6 +4235,18 @@ prs:
       frontmatter structure: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-942aa21-434f29d41626ca06)'
     created_at: '2026-03-20T02:22:38Z'
     last_edited: '2026-03-20T02:22:38Z'
+  - id: note-549241a
+    text: 'PHASE 10 OF plan-regression BUILDS ON THIS PR (2026-05-14). The library,
+      pm qa mocks CLI, frontmatter convention, and loader helpers shipped here are
+      the substrate that pr-51586d2 reconnects to scenario authoring. The reconnection
+      is at a *different surface* than the original injection point: not at scenario
+      planning (which was stripped by pr-6be8ee6 / #190 commit 3eb89e6 because it
+      produced noise — workers invented mocks the diff didn''t need), but at the new-regression-test
+      authoring prompt introduced by pr-2680fbf. The kept-but-disconnected machinery
+      noted in 3eb89e6''s commit message is exactly what pr-51586d2 audits and selectively
+      rewires. See plan-regression.md Phase 10 for the full target flow.'
+    created_at: '2026-05-14T02:08:18Z'
+    last_edited: '2026-05-14T02:08:18Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--4c4031f8
 - id: pr-4585fd3
   plan: tui-ux
@@ -13249,7 +13261,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/190
   gh_pr_number: 190
   created_at: '2026-05-04T12:22:33.932646+00:00'
-  updated_at: '2026-05-14T01:26:28.915335+00:00'
+  updated_at: '2026-05-14T02:08:20.256286+00:00'
   started_at: '2026-05-04T14:15:15.348715+00:00'
   reviewed_at: '2026-05-13T21:52:39.296176+00:00'
   merged_at: '2026-05-14T01:26:28.915335+00:00'
@@ -13488,6 +13500,21 @@ prs:
       across CLI and TUI surfaces: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-387044f9ea662722)'
     created_at: '2026-05-14T00:47:23Z'
     last_edited: '2026-05-14T00:47:23Z'
+  - id: note-912b25f
+    text: PHASE 10 OF plan-regression REINTRODUCES MOCKS AT A DIFFERENT SURFACE (2026-05-14).
+      Commit 3eb89e6 stripped mock prompting from QA planner / scenario / spec-gen
+      prompts to fix the noise problem — workers inventing mocks the diff didn't need,
+      or following spec-level mock guidance disconnected from what they were driving.
+      Phase 10 does NOT undo that strip. Instead it lands pr-06a96fa (scenarios bind
+      to regression tests), pr-2680fbf (planner authors a new regression when none
+      fits), and pr-51586d2 (mocks awareness in the new-regression authoring prompt,
+      diff-scoped and surface-declared). The new injection point — drafting a regression
+      test — is where 'which mocks apply to this surface?' becomes a well-posed question,
+      because the regression draft IS the surface declaration. Scenario-prompt and
+      planner-prompt injection remain gone. See plan-regression.md Phase 10 for the
+      full target flow.
+    created_at: '2026-05-14T02:08:19Z'
+    last_edited: '2026-05-14T02:08:19Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-in-e802a472
 - id: pr-cfe24ea
   plan: improvements
@@ -18351,45 +18378,60 @@ prs:
   depends_on:
   - pr-7d5d036
   description: "## Goal\n\nSwitch QA scenarios from \"instruction (setup) + artifact\
-    \ recipe\n(drive + capture)\" pairs to binding directly to a **regression test**\n\
-    as the canonical flow driver, with per-scenario assertions layered\non top.\n\n\
-    ## Why\n\nToday every QA run reinvents how to drive a flow. The planner picks\n\
-    an instruction for setup and a recipe for capture, and the worker\nstitches them\
-    \ together. The flows get exercised once (during that\nQA run), captured, and\
-    \ then never re-run — every PR's scenarios\nstart from scratch.\n\nRegression\
-    \ tests are designed to be durable, reusable, recorded\nflows. If a QA scenario\
-    \ IS a regression-test run + per-scenario\nThens, then:\n\n- The library of \"\
-    exercised user flows\" grows by accumulation\n  rather than per-PR effort.\n-\
-    \ The same flow is driven the same way across PRs, so behavior\n  drift gets caught.\n\
-    - Captures from regression runs feed both the regression history\n  and the QA\
-    \ scenario's evidence.\n- The instruction/artifact-recipe split goes away — a\
-    \ regression\n  test already specifies the surface, the driver, and the capture.\n\
-    \n## After this PR\n\nQA scenario shape becomes (sketch):\n\n    SCENARIO N: <title>\n\
+    \ recipe (drive / capture)\" pairs to binding directly to a regression test as\
+    \ the canonical flow driver, with per-scenario assertions layered on top.\n\n\
+    ## Why\n\nToday every QA run reinvents how to drive a flow. The planner picks\
+    \ an instruction for setup and a recipe for capture, and the worker stitches them\
+    \ together. The flows get exercised once (during that QA run), captured, and then\
+    \ never re-run — every PR's scenarios start from scratch.\n\nRegression tests\
+    \ are designed to be durable, reusable, recorded flows. If a QA scenario IS a\
+    \ regression-test run + per-scenario Thens, then:\n\n- The library of \"exercised\
+    \ user flows\" grows by accumulation rather than per-PR effort.\n- The same flow\
+    \ is driven the same way across PRs, so behavior drift gets caught.\n- Captures\
+    \ from regression runs feed both the regression history and the QA scenario's\
+    \ evidence.\n- The instruction/artifact-recipe split goes away — a regression\
+    \ test already specifies the surface, the driver, and the capture.\n\n## After\
+    \ this PR\n\nQA scenario shape becomes (sketch):\n\n    SCENARIO N: <title>\n\
     \    FOCUS: <area>\n    REGRESSION: <regression-test-id>\n    STEPS:\n      GIVEN:\
     \ <starting state — usually established by the regression test's setup>\n    \
     \  WHEN: <usually the regression test's user action>\n      THEN: <PR-specific\
-    \ observable outcomes the regression run should produce>\n\nINSTRUCTION and ARTIFACT\
-    \ fields can stay for scenarios where no\nregression test fits yet, but the planner\
-    \ is nudged toward\nREGRESSION first.\n\n## Why this depends on the prior PR\n\
-    \nThe prior PR cleans up the regression runner — drops surface-\nspecific framing\
-    \ assumptions and fixes the containment model so\nregression runs don't leak state\
-    \ into the caller's repo. That\ncleanup makes the runner safely reusable as a\
-    \ QA-scenario\nprimitive. Until it lands, binding QA to regression would inherit\n\
-    those bugs at scale.\n\n## Scope\n\n- Extend QA scenario parsing to recognize\
-    \ REGRESSION: <id>.\n- Concretizer verifies the regression test exists and its\n\
-    \  user-visible surface matches the scenario's Then.\n- Worker invokes the regression\
-    \ test's flow and overlays the\n  scenario's Then assertions on the resulting\
-    \ captures.\n- Planner prompt updated to prefer REGRESSION when a fitting test\n\
-    \  exists; falls back to INSTRUCTION + ARTIFACT otherwise.\n- Recipe library +\
-    \ instruction library remain for scaffolding;\n  the regression library becomes\
-    \ the primary durable surface\n  catalog.\n\n## Out of scope\n\n- Building any\
-    \ new regression tests in this PR.\n- Removing INSTRUCTION/ARTIFACT support (they\
-    \ remain as the\n  fallback path)."
+    \ observable outcomes the regression run should produce>\n\n## Planner preference\
+    \ order (Phase 10 hierarchy)\n\nAfter pr-2680fbf lands, the planner's preference\
+    \ order becomes:\n\n1. REGRESSION: <id> — an existing regression test in pm/qa/regression/\
+    \ fits the scenario's flow. The regression has already been written and is the\
+    \ canonical driver. Use this when a fit exists; this is the load-bearing path\
+    \ that makes the library compound.\n\n2. NEW_REGRESSION: <slug> (introduced by\
+    \ pr-2680fbf) — no existing regression fits, so the planner authors one as part\
+    \ of the QA run. The drafted regression lands on the PR branch, the scenario binds\
+    \ to it by slug, and the new regression becomes part of the durable library that\
+    \ subsequent PRs can reuse. This is the PREFERRED path when there's no existing\
+    \ fit — falling through to (3) skips the chance to grow the library.\n\n3. INSTRUCTION\
+    \ + ARTIFACT (legacy / fallback) — kept for genuine one-shot probes/oracles that\
+    \ don't fit the regression-test shape (e.g. \"is this config value parsed correctly?\"\
+    , \"what does pm pr list return for an empty project?\"). Should be rare after\
+    \ pr-2680fbf lands; the auditor (pr-f4dc8a2) flags overuse.\n\nThis PR establishes\
+    \ (1). pr-2680fbf adds (2). (3) remains as the fallback the planner should prefer\
+    \ to avoid.\n\n## Why this depends on the prior PR\n\npr-7d5d036 cleans up the\
+    \ regression runner — drops surface-specific framing assumptions and fixes the\
+    \ containment model so regression runs don't leak state into the caller's repo.\
+    \ That cleanup makes the runner safely reusable as a QA-scenario primitive. Until\
+    \ it lands, binding QA to regression would inherit those bugs at scale.\n\n##\
+    \ Scope\n\n- Extend QA scenario parsing to recognize REGRESSION: <id>.\n- Concretizer\
+    \ verifies the regression test exists and its user-visible surface matches the\
+    \ scenario's Then.\n- Worker invokes the regression test's flow and overlays the\
+    \ scenario's Then assertions on the resulting captures.\n- Planner prompt updated\
+    \ to prefer REGRESSION when a fitting test exists; defer NEW_REGRESSION wiring\
+    \ to pr-2680fbf; fall back to INSTRUCTION + ARTIFACT only when neither fits.\n\
+    - Recipe library + instruction library remain for scaffolding; the regression\
+    \ library becomes the primary durable surface catalog.\n\n## Out of scope\n\n\
+    - Authoring new regressions inline (that's pr-2680fbf).\n- Removing INSTRUCTION/ARTIFACT\
+    \ support (they remain as a fallback for one-shot probes/oracles).\n- Mocks awareness\
+    \ in regression authoring (that's pr-51586d2, which depends on pr-2680fbf)."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T17:59:03.725239+00:00'
-  updated_at: '2026-05-13T18:18:10.237652+00:00'
+  updated_at: '2026-05-14T02:08:41.617056+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
