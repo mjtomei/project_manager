@@ -39,7 +39,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - ✅ Merged (12): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185) plus `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, Phase 7 prerequisite, tracked under improvements)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
 - 📋 Phase 9 (6 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-98f670e` (QA scenario quality supervisor with queryable scenario sessions), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
-- 📋 Phase 10 (5 PRs filed during pr-6be8ee6 QA iteration): `pr-7d5d036` (`pm tui test` containment bug), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
+- 📋 Phase 10 (6 PRs): `pr-9603d04` (GitHub backend mock — sibling of FakeClaudeSession), `pr-7d5d036` (`pm tui test` containment bug), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
 
 ## Prerequisites
 
@@ -227,10 +227,15 @@ Single PR is justified because each piece is small and they are tightly coupled 
 
 Filed during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger. Each addresses a friction point that surfaced from running real QA cycles against the bug-fix flow.
 
-### PR: Bug: `pm tui test` hardcodes "testing against the pm tmux session"
-`pr-7d5d036` (pending)
+### PR: GitHub backend mock for regression tests
+`pr-9603d04` (pending)
 
-The regression-runner harness assumes the test target is the host pm tmux session; wrong for containers and for non-pm targets. Cleanup of the runner's surface framing and containment model so regression runs don't leak state into the caller's repo. Prerequisite for using regression tests as durable QA flow drivers (`pr-06a96fa`).
+Sibling of `pr-abcf70f` (FakeClaudeSession) for the GitHub side. Provides a scriptable `FakeGitHubBackend` (or transport-level fake) so regression tests can exercise github-backend code paths — PR create, status sync, draft↔ready transitions, comments, merge, post-merge pull, rate-limit / conflict / merged-elsewhere responses — without hitting the real GitHub API. Without this, regression coverage stops at the GitHub boundary and bug-fix watchers cannot reproduce GitHub-specific bugs deterministically.
+
+### PR: Bug: `pm tui test` hardcodes "testing against the pm tmux session"
+`pr-7d5d036` (depends on: pr-abcf70f, pr-9603d04)
+
+The regression-runner harness assumes the test target is the host pm tmux session; wrong for containers and for non-pm targets. Cleanup of the runner's surface framing and containment model so regression runs don't leak state into the caller's repo. Adds FakeClaudeSession + FakeGitHubBackend as dependencies so the cleaned-up runner can drive both Claude and GitHub deterministically from the start. Prerequisite for using regression tests as durable QA flow drivers (`pr-06a96fa`).
 
 ### PR: QA scenarios reuse regression tests as their flow driver
 `pr-06a96fa` (depends on: pr-7d5d036)

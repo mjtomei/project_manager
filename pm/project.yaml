@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-98f670e
+  active_pr: pr-9603d04
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3082,11 +3082,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-02T14:04:13.218092+00:00'
-  updated_at: '2026-03-02T14:04:13.218092+00:00'
+  updated_at: '2026-05-14T01:47:38.292603+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-db7abe5
+    text: 'OVERLAP with pr-8422dea in plan-regression: pr-8422dea adds user-story
+      coverage as a verdict signal. This PR''s user-story metadata is the input that
+      PR consumes. Sequence: this PR first, pr-8422dea second; or merge if scope grows.'
+    created_at: '2026-05-14T01:47:37Z'
+    last_edited: '2026-05-14T01:47:37Z'
 - id: pr-a792886
   plan: plan-qa
   title: Add pause-after-QA-plan mode with global setting, prefix key, and per-PR
@@ -5625,7 +5631,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-04-24T17:09:31.219040+00:00'
+  updated_at: '2026-05-14T01:47:40.477024+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
@@ -5640,6 +5646,12 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:30Z'
     last_edited: '2026-04-24T17:09:30Z'
+  - id: note-4833b75
+    text: 'OVERLAP with pr-b59f0c7 in plan-regression: pr-b59f0c7 captures reason
+      strings into the verdict shape that this PR persists across TUI restart. Touches
+      the same verdict-storage surface; sequence them or coordinate the shape change.'
+    created_at: '2026-05-14T01:47:40Z'
+    last_edited: '2026-05-14T01:47:40Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
@@ -7424,11 +7436,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-03-22T19:31:05.710967+00:00'
+  updated_at: '2026-05-14T01:47:37.204184+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1757ea3
+    text: 'OVERLAP with pr-0b14f2c in plan-regression: pr-0b14f2c also covers re-running
+      INPUT_REQUIRED scenarios with overall verdict re-aggregation, plus adding scenarios
+      mid-run and replacing NEEDS_WORK ones. Reconcile before either is started —
+      likely one PR''s work, possibly fold this PR''s polling-resume mechanics into
+      pr-0b14f2c or split clearly along live-state-orchestration vs verdict-aggregation
+      lines.'
+    created_at: '2026-05-14T01:47:36Z'
+    last_edited: '2026-05-14T01:47:36Z'
 - id: pr-df1aa3f
   plan: null
   title: 'fix: rename tmux session after git init in guide to restore pm session access'
@@ -8603,11 +8624,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-07T16:28:08.722459+00:00'
-  updated_at: '2026-04-07T22:23:46.487655+00:00'
+  updated_at: '2026-05-14T01:47:39.380244+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b336a79
+    text: 'OVERLAP with pr-f4dc8a2 in plan-regression: pr-f4dc8a2 (QA library auditor)
+      also grows the QA library automatically — from a project scan rather than git
+      history. Different ingestion source, same destination (pm/qa/instructions, regression,
+      recipes, mocks). Reconcile before either is started — probably both useful as
+      independent backends behind a shared interface.'
+    created_at: '2026-05-14T01:47:39Z'
+    last_edited: '2026-05-14T01:47:39Z'
 - id: pr-5dc3808
   plan: plan-qa
   title: 'Review/QA model comparison: benchmark results and analysis for local vs
@@ -17781,6 +17810,7 @@ prs:
   status: pending
   depends_on:
   - pr-abcf70f
+  - pr-9603d04
   description: "## Symptom\n\n`pm tui test <id>` always prepends a Session Context\
     \ that says:\n\n    You are testing against tmux session: <pm-session>\n\n   \
     \ To interact with this session, use commands like:\n    - pm tui view -s <pm-session>\n\
@@ -18695,6 +18725,66 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-13T13:55:43.812188+00:00'
   updated_at: '2026-05-13T14:02:16.586424+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9603d04
+  plan: plan-regression
+  title: GitHub backend mock for regression tests
+  branch: pm/pr-9603d04-github-backend-mock-for-regression-tests
+  status: pending
+  depends_on: []
+  description: 'Provide a mock/fake GitHub backend so regression tests can exercise
+    the github-backend code paths (PR create, status sync, comments, merges, post-merge
+    pull) without hitting the real GitHub API. Sibling of pr-abcf70f (FakeClaudeSession):
+    same shape — scriptable responses, deterministic, fast — for the GitHub side of
+    pm.
+
+
+    Why: today the github backend (pm_core/github_backend.py and adjacent) is exercised
+    end-to-end only against real GitHub, so regression coverage stops at the boundary.
+    Bugs that only surface against GitHub-specific responses (rate limiting, conflict
+    states, draft↔ready transitions, sync races) cannot be reproduced by the regression
+    runner. With this in place, the existing Claude-driven regression tests can drive
+    the github backend through scripted scenarios in CI / containers and the bug-fix
+    watcher can reproduce GitHub-side bugs without poking the real API.
+
+
+    Scope:
+
+    - A FakeGitHubBackend class that implements the same surface as the real backend
+    (or a transport-level fake that the real backend can talk to — pick whichever
+    is less invasive after a quick design probe).
+
+    - Scriptable response sequences (success / 4xx / 5xx / rate-limit / conflict /
+    merged-elsewhere) so tests can compose realistic flows.
+
+    - Hooks into pm pr sync and the github status polling paths so tests can advance
+    simulated remote state.
+
+    - Helpers for the common scenarios: create-draft-on-start, upgrade-on-done, merge-with-pull,
+    sync-mid-flow.
+
+    - Test fixtures that swap the real backend for the fake in regression tests, mirroring
+    how pr-abcf70f swaps the Claude session.
+
+
+    Out of scope:
+
+    - Replaying real captured GitHub traffic (could be a follow-up).
+
+    - Mocking gh CLI invocations elsewhere in the codebase that aren''t on the backend
+    hot path.
+
+
+    Consumed by pr-7d5d036 (regression-runner cleanup), which adds it as a dep alongside
+    pr-abcf70f so regression tests can drive both Claude and GitHub deterministically.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T01:46:56.386043+00:00'
+  updated_at: '2026-05-14T01:46:56.386043+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
