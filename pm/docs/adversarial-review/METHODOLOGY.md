@@ -33,6 +33,25 @@ Ask the reviewer (a Claude session, fresh, blind to previous review cycles):
 - What hooks or punchy lines would best get your main points across and where should you add them?
 - What figures or tables / diagrams / code examples could be added that would be most valuable for demonstrating the core ideas?
 
+### Block 3 — non-expert accessibility (load-bearing)
+
+**Audience assumption**: a working software engineer who has not read the cited papers, is not embedded in the research community whose vocabulary the artifact uses, and is reading this to decide whether the underlying plan is sound. They have technical fluency but they will not look up a term to keep reading. If a passage assumes shared context they don't have, they bounce.
+
+For the artifact under review, answer concretely:
+
+- **Undefined jargon**: list every term used without an inline gloss that a non-expert reader would have to look up. ("RAG", "ACI", "verifier-guided generation", "RL self-play", "reward hacking", "alignment", "self-consistency", etc. — be specific to what the artifact actually uses.) For each, propose a one-clause gloss that could be inlined on first use.
+- **Implicit prior-art dependencies**: where does the artifact assume the reader has read a specific paper or knows a specific tool? Name those dependencies. The artifact should either (a) summarize the needed context inline, or (b) make clear the section is optional context-building for readers who don't have it.
+- **Unmotivated framings**: where does the artifact assume the reader already buys into a research agenda or perspective? E.g., "as everyone knows, X" or "the obvious next step is Y." A non-expert reader hasn't agreed to anything yet. Flag these and propose a one-sentence motivation that earns the agreement instead of assuming it.
+- **Abstract claims without concrete examples**: which load-bearing claims are made in fully abstract terms? A non-expert reader retains information through concrete examples ("a regression test like `pm tui send q` followed by checking that the popup closes") more than through abstract characterizations ("a regression test exercising a UI flow"). Propose example sentences for the worst offenders.
+- **Dense paragraphs**: any paragraph longer than ~6 sentences or carrying more than two distinct ideas. Suggest where to split.
+- **Names dropped without context**: every paper-author-tool-product-method named without a one-line "what it is and why we mention it." E.g., "Reflexion's actor-critic loop" assumes the reader knows what Reflexion is and what an actor-critic loop is. Propose inline glosses.
+- **Insider-only quips, in-jokes, or hedged language**: phrases that signal in-group membership rather than communicate substance ("it's complicated", "the usual caveats apply", "modulo the obvious limitations"). Replace with the actual substance or cut.
+- **Quantitative claims without scale anchors**: numbers given without telling the reader whether they're good or bad ("42-50% sensitivity" — is that high? low? compared to what?). Propose anchor comparisons.
+
+**Important**: for every accessibility finding, *propose the specific simplification* rather than just flagging the problem. A finding that says "Section 4 uses jargon" is useless; a finding that says "Section 4 uses 'actor-critic loop' on line 88; replace with 'a generator-and-grader pair, where the generator produces output and the grader judges it; if the grader rejects, the generator tries again'" is useful. The point of this block is to make the artifact actually usable by its stated audience, not to demonstrate the reviewer's vocabulary.
+
+This block is **load-bearing** because the artifact's stated goal includes being readable by non-experts. A review that catches every citation error but misses the accessibility failures has missed the artifact's core obligation.
+
 ## The protocol
 
 1. **Run the reviewer blind**. Each cycle is a fresh Claude session that does not know what previous cycles concluded. Critical — knowing prior findings biases the reviewer toward agreement.
