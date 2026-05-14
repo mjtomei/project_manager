@@ -124,12 +124,21 @@ Dedicated Claude session launched from the TUI with read access to all three wat
 
 Final integration PR. Single command (`pm watcher start regression-loop` or similar) that brings up all three watchers with sensible defaults — without this, users have to start each watcher individually. Also serves as the end-to-end QA pass: once everything else has merged, exercise the full autonomous loop and catch integration gaps the per-PR reviews can't see.
 
-## Phase 6: Test backfill
+## Phase 6: Test backfill — and bridge between old and new QA flows
 
-### PR: Claude-based tests for watcher classes and prompt generation gaps
-`pr-fbda1a8` (depends on: pr-d60d185)
+### PR: Bridge old and new QA flows — tests for merged watchers under Phase 10 model
+`pr-fbda1a8` (depends on: pr-d60d185, pr-06a96fa, pr-2680fbf, pr-51586d2)
 
-The three concrete watcher classes and four new prompt builders shipped without direct unit tests — covered only by the BaseWatcher framework tests and the live operator markdown. This PR backfills using FakeClaudeSession (`pr-abcf70f`, merged) so watchers can be exercised deterministically: per-class watcher tests, prompt-string assertions for the new builders, integration backstop for the three auto-sequence paths flagged during `pr-e58459b`'s review, and behavioral tests for `launch_qa_item`'s new `target_window` parameter and regression-filing addendum.
+The three concrete watcher classes and four new prompt builders shipped without direct unit tests — covered only by the BaseWatcher framework tests and the live operator markdown. **And** they shipped under the old INSTRUCTION+ARTIFACT scenario model. This PR is the bridge between Phases 1-5 and Phase 10: it adds the missing tests using FakeClaudeSession (`pr-abcf70f`) and FakeGitHubBackend (`pr-9603d04`, Phase 10), AND it re-exercises every merged Phase 1-5 feature against the new regressions-as-scenarios flow.
+
+Scope:
+1. Per-class watcher tests (`tests/test_{discovery_supervisor,bug_fix_impl_watcher,improvement_fix_impl_watcher}.py`) — scenarios bind to regression tests (via `pr-06a96fa`) or trigger new-regression authoring (via `pr-2680fbf`), not INSTRUCTION+ARTIFACT.
+2. Prompt-string assertions for the four new prompt builders (discovery_supervisor, bug_fix_impl, improvement_fix_impl, watcher_review_session) — verifying mocks awareness is wired at the new-regression authoring surface (`pr-51586d2`) and NOT at scenario planning.
+3. Auto-sequence integration backstop covering the three paths flagged in `pr-e58459b`'s review.
+4. Behavioral tests for `launch_qa_item`'s `target_window` (`pr-97ddabf`) and the regression-filing addendum (`pr-47940bc`).
+5. **End-to-end re-validation of Phases 1-5 features under Phase 10's flow** — discovery supervisor launch+reconcile, bug-fix watcher pick-and-advance, improvement-fix watcher gated-merge, auto-sequence halt-at-pause, watcher review session opening, regression-filing routing. Prefer existing regression tests (`REGRESSION: <id>`); use `NEW_REGRESSION: <slug>` via `pr-2680fbf` where none exist, growing the library rather than expanding scaffolding.
+
+This is the checkpoint that confirms the merged Phase 1-5 features still behave correctly under the new model before declaring the regression loop ready for unsupervised operation.
 
 ## Phase 7: Evidence-gated bug fix loop (post-activation hardening)
 
@@ -241,7 +250,7 @@ Single PR is justified because each piece is small and they are tightly coupled 
 
 Filed in two waves: most during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger (pr-7d5d036, pr-06a96fa, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2); the rest (pr-9603d04, pr-2680fbf, pr-51586d2) during a plan-review session on 2026-05-14 that surfaced the regressions-as-scenarios + new-regression-authoring + mocks-at-authoring chain.
 
-> **Re-testing obligation for Phases 1-5**: every PR in Phases 1-5 was implemented and QA'd under the *pre-Phase-10* QA flow — INSTRUCTION+ARTIFACT scenarios, mocks injected at scenario planning (later stripped by `pr-6be8ee6` / commit `3eb89e6`), no regression-test binding, no new-regression authoring step. When Phase 10's chain lands (`pr-06a96fa` → `pr-2680fbf` → `pr-51586d2`), the regression library becomes the canonical surface and the QA loop's verdicts mean something different. Every merged feature in Phases 1-5 (the three watchers, the auto-sequence chain, the discovery supervisor, the regression-filing addendum, watcher-target windows, the human review session, the auto-start command) needs to be re-exercised under the new flow as part of `pr-2680fbf`'s post-merge validation. Specifically: regression tests should exist (or be authored via `pr-2680fbf`) for the bug-fix watcher pick-and-advance loop, the improvement-fix watcher gated-merge behavior, the discovery supervisor's launch + reconcile cycle, the auto-sequence chain's halt-at-pause-condition handling, and the watcher review session's summary-then-chat opening. None of those are covered today by the new flow; they were validated only under the old flow they're about to become irrelevant to.
+> **Re-testing obligation for Phases 1-5**: every PR in Phases 1-5 was implemented and QA'd under the *pre-Phase-10* QA flow — INSTRUCTION+ARTIFACT scenarios, mocks injected at scenario planning (later stripped by `pr-6be8ee6` / commit `3eb89e6`), no regression-test binding, no new-regression authoring step. When Phase 10's chain lands (`pr-06a96fa` → `pr-2680fbf` → `pr-51586d2`), the regression library becomes the canonical surface and the QA loop's verdicts mean something different. Every merged feature in Phases 1-5 (the three watchers, the auto-sequence chain, the discovery supervisor, the regression-filing addendum, watcher-target windows, the human review session, the auto-start command) needs to be re-exercised under the new flow. The bridge PR that performs this re-validation is `pr-fbda1a8` (Phase 6 — see below), which depends on Phase 10's chain so it runs only after the new flow lands.
 
 ### PR: GitHub backend mock for regression tests
 `pr-9603d04` (pending)

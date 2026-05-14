@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2680fbf
+  active_pr: pr-e58459b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11352,18 +11352,29 @@ prs:
   notes: []
 - id: pr-fbda1a8
   plan: plan-regression
-  title: Claude-based tests for watcher classes and prompt generation gaps
+  title: 'Bridge old and new QA flows: tests for merged watchers under Phase 10 model'
   branch: pm/pr-fbda1a8-claude-based-tests-for-watcher-classes-and-prompt-
   status: pending
   depends_on:
   - pr-d60d185
-  description: "Fill the testing gaps identified after the regression-loop landing.\
-    \ The three new concrete watcher classes and their prompt builders shipped without\
-    \ direct unit tests — covered only by framework-level tests and a live operator\
-    \ markdown. This PR adds Claude-based integration tests using FakeClaudeSession\
-    \ (pr-abcf70f, merged) so the watchers can be exercised without real Claude calls.\n\
-    \nTargets:\n\n1. **Watcher class tests** — new `tests/test_discovery_supervisor.py`,\
-    \ `tests/test_bug_fix_impl_watcher.py`, `tests/test_improvement_fix_impl_watcher.py`.\
+  - pr-06a96fa
+  - pr-2680fbf
+  - pr-51586d2
+  description: "## Goal\n\nThis PR is the bridge between the old (Phases 1-5) and\
+    \ new (Phase 10) QA flows. It fills the testing gaps identified after the regression-loop\
+    \ landing AND re-validates every merged feature from Phases 1-5 under the new\
+    \ regressions-as-scenarios flow.\n\nThe three concrete watcher classes and their\
+    \ prompt builders shipped without direct unit tests — covered only by framework-level\
+    \ tests and a live operator markdown. Worse, they shipped *and* were QA'd under\
+    \ the old INSTRUCTION+ARTIFACT scenario model that Phase 10 replaces. When Phase\
+    \ 10's chain (pr-06a96fa → pr-2680fbf → pr-51586d2) lands, the QA loop's verdicts\
+    \ mean something different — the merged features need re-validation against the\
+    \ new model.\n\nThis PR adds Claude-based integration tests using FakeClaudeSession\
+    \ (pr-abcf70f) and FakeGitHubBackend (pr-9603d04, Phase 10) so the watchers can\
+    \ be exercised deterministically, with scenarios bound to (or authoring) real\
+    \ regression tests rather than the deprecated INSTRUCTION+ARTIFACT scaffolding.\n\
+    \n## Targets\n\n1. **Watcher class tests under the new flow** — new tests/test_discovery_supervisor.py,\
+    \ tests/test_bug_fix_impl_watcher.py, tests/test_improvement_fix_impl_watcher.py.\
     \ Each script a sequence of FakeClaudeSession responses for a few ticks, verifying:\n\
     \   - The watcher reads its work log and project state correctly\n   - It writes\
     \ expected entries on each tick\n   - It emits READY / INPUT_REQUIRED at the right\
@@ -11371,29 +11382,68 @@ prs:
     \ existing launch_qa_item path (mocked to record the call) and reconciles filed\
     \ PRs post-hoc\n   - For the impl watchers: they pick the right PR from their\
     \ plan, invoke pm pr auto-sequence on it, and (for bug-fix) auto-merge on PASS\n\
-    \n2. **Watcher prompt generation tests** — extend `tests/test_bug_fix_flow_prompts.py`\
+    \   - **Critically**: the scenarios the watchers consume bind to regression tests\
+    \ (via pr-06a96fa) or trigger new-regression authoring (via pr-2680fbf), not INSTRUCTION+ARTIFACT.\n\
+    \n2. **Watcher prompt generation tests** — extend tests/test_bug_fix_flow_prompts.py\
     \ patterns to the four new prompt builders in prompt_gen.py (discovery_supervisor,\
     \ bug_fix_impl, improvement_fix_impl, watcher_review_session). Direct prompt-string\
     \ assertions: notes injection works, work-log path is referenced, plan source\
-    \ is correct, merge mode (auto vs gated) is encoded.\n\n3. **Auto-sequence integration\
-    \ backstop** — `tests/test_pr_auto_sequence_integration.py` that exercises the\
-    \ three integration paths flagged during pr-e58459b's review (O keypress + _stop_before_merge,\
-    \ _check_impl_idle against a real PaneIdleTracker, _launch_qa_detached running\
-    \ run_qa_sync from a detached process). FakeClaudeSession + the existing TUI test\
-    \ framework (pr-ac3625d) substrate.\n\n4. **Pane_ops behavioral tests** — add\
-    \ tests for launch_qa_item's new target_window parameter (pr-97ddabf) and the\
-    \ regression filing addendum (pr-47940bc): assert the addendum text appears in\
-    \ the wrapped session prompt and that target_window correctly routes to the watcher's\
-    \ pane.\n\nManual testing during review: run `pytest tests/test_discovery_supervisor.py\
+    \ is correct, merge mode (auto vs gated) is encoded, mocks awareness is wired\
+    \ at the new-regression authoring surface (pr-51586d2) and NOT at scenario planning.\n\
+    \n3. **Auto-sequence integration backstop** — tests/test_pr_auto_sequence_integration.py\
+    \ that exercises the three integration paths flagged during pr-e58459b's review\
+    \ (O keypress + _stop_before_merge, _check_impl_idle against a real PaneIdleTracker,\
+    \ _launch_qa_detached running run_qa_sync from a detached process). FakeClaudeSession\
+    \ + the existing TUI test framework (pr-ac3625d) substrate.\n\n4. **Pane_ops behavioral\
+    \ tests** — add tests for launch_qa_item's new target_window parameter (pr-97ddabf)\
+    \ and the regression filing addendum (pr-47940bc): assert the addendum text appears\
+    \ in the wrapped session prompt and that target_window correctly routes to the\
+    \ watcher's pane.\n\n5. **End-to-end re-validation of Phases 1-5 under Phase 10's\
+    \ flow** (NEW SCOPE):\n   - Discovery supervisor launch + reconcile cycle, exercised\
+    \ against regression tests bound via pr-06a96fa\n   - Bug-fix watcher pick-and-advance\
+    \ loop, verified that scenarios bind to regression tests (existing or freshly-authored\
+    \ via pr-2680fbf)\n   - Improvement-fix watcher gated-merge behavior, verified\
+    \ the regression library grows when new-regressions are authored\n   - Auto-sequence\
+    \ chain's halt-at-pause-condition handling, verified pauses still fire correctly\
+    \ when the scenario stage runs under the new flow\n   - Watcher review session's\
+    \ summary-then-chat opening, verified it reads the work logs correctly given the\
+    \ new scenario shape\n   - Regression-filing addendum from pr-47940bc, verified\
+    \ that regression tests filing bugs still file them with the correct plan routing\
+    \ under the new flow\n   - For each of the above, prefer existing regression tests\
+    \ (REGRESSION: <id>); use NEW_REGRESSION: <slug> via pr-2680fbf where none exist,\
+    \ contributing to the library rather than expanding test scaffolding.\n\n## Why\
+    \ this bridges old and new\n\nThe old Phases 1-5 PRs were implemented, reviewed,\
+    \ and QA'd against the pre-Phase-10 flow — INSTRUCTION+ARTIFACT scenarios, pre-strip\
+    \ mocks injection, no regression-test binding. They merged. Phase 10's chain changes\
+    \ the underlying model. Without this PR, there is no checkpoint that confirms\
+    \ the merged features still behave correctly under the new model — they could\
+    \ regress silently as soon as the new flow becomes the default.\n\nThis PR makes\
+    \ that checkpoint explicit: it depends on Phase 10's chain (pr-06a96fa, pr-2680fbf,\
+    \ pr-51586d2) so it runs only after those land, and it exercises every Phase 1-5\
+    \ feature against the new flow before declaring the regression loop ready for\
+    \ unsupervised operation.\n\n## Manual testing during review\n\nRun `pytest tests/test_discovery_supervisor.py\
     \ tests/test_bug_fix_impl_watcher.py tests/test_improvement_fix_impl_watcher.py\
-    \ tests/test_pr_auto_sequence_integration.py -v` and confirm all pass. The new\
-    \ tests should be deterministic — no real Claude calls, no real tmux operations\
-    \ beyond what the existing test substrate supports."
+    \ tests/test_pr_auto_sequence_integration.py -v` and confirm all pass. New tests\
+    \ should be deterministic — no real Claude calls, no real tmux operations beyond\
+    \ what the existing test substrate supports. Additionally, manually verify a single\
+    \ end-to-end run of the full watcher chain under the new flow: discovery supervisor\
+    \ launches a regression test, test files a bug, bug-fix watcher picks it up, auto-sequence\
+    \ runs scenarios that bind to regression tests, verdict propagates, merge happens.\
+    \ INPUT_REQUIRED appropriate for the visual / end-to-end validation portions.\n\
+    \n## Depends on\n\n- pr-d60d185 — the merged auto-start command this PR's end-to-end\
+    \ probe drives.\n- pr-06a96fa — the regressions-as-scenarios binding model; tests\
+    \ must exercise it.\n- pr-2680fbf — the new-regression authoring step; tests must\
+    \ cover both \"binds to existing\" and \"authors new\" paths.\n- pr-51586d2 —\
+    \ the mocks-at-authoring surface; tests must verify mocks awareness is at the\
+    \ right surface.\n\n## Out of scope\n\n- Coverage gates (Phase 7's pr-b42059d,\
+    \ pr-8ed578d) — separate PR chain.\n- Watcher self-recovery audit (Phase 9 pr-ca6859f)\
+    \ — separate scope.\n- Adding new regression tests outside the scope of validating\
+    \ Phases 1-5 features."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T20:49:18.500977+00:00'
-  updated_at: '2026-05-02T20:49:18.500977+00:00'
+  updated_at: '2026-05-14T14:43:03.645253+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -19324,6 +19374,164 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-14T01:59:40.177233+00:00'
   updated_at: '2026-05-14T01:59:40.177233+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-eb4b7e3
+  plan: bugs
+  title: 'Bug: editor subprocess inherits TUI''s process group — orphaned editors
+    silently steal input bytes'
+  branch: pm/pr-eb4b7e3-bug-editor-subprocess-inherits-tui-s-process-group
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\nA vim editor spawned by `pm pr edit` (10 days old) was\
+    \ found still alive, orphaned to PID 1 but **keeping the TUI's PGID** (3389450).\
+    \ Because that pgid was the foreground process group of the TUI's pty (/dev/pts/51),\
+    \ both vim and the TUI received terminal input from the line discipline. They\
+    \ raced for each byte you typed — about 1 in 4 keypresses made it past vim to\
+    \ the TUI.\n\nManifested as random key drops in the TUI: pressing h or l four\
+    \ times in slow succession (~500ms apart) registered only one keypress in the\
+    \ TUI's event loop. Traced via `textual.events.Key.__init__` — only one Key event\
+    \ constructed per four keypresses. Killing the orphan vim eliminated the drops\
+    \ immediately.\n\n## Root cause\n\n`pm_core/editor.py:81` spawns the user's $EDITOR\
+    \ with:\n\n    subprocess.call([editor, tmp_path])\n\nNo `start_new_session=True`,\
+    \ no `preexec_fn=os.setsid`. The child inherits the TUI's PGID. If the TUI's terminal\
+    \ client disconnects or the editor otherwise outlives a clean teardown, it gets\
+    \ reparented to PID 1 but retains the original pgid. When that pgid happens to\
+    \ be the foreground pgrp of a live pty (the TUI keeps running on the same pgid),\
+    \ the orphan editor becomes a silent input thief.\n\n## Three things to do\n\n\
+    ### 1. Fix the immediate site\n\nIn `pm_core/editor.py`, pass `start_new_session=True`\
+    \ so the editor gets its own session/process group:\n\n    ret = subprocess.call([editor,\
+    \ tmp_path], start_new_session=True)\n\n### 2. Audit other interactive-child spawn\
+    \ sites\n\nAny pm code that hands control to an interactive program inheriting\
+    \ stdin from the TUI process is at risk. Candidates worth checking (grep `subprocess.(call|run|Popen)`\
+    \ across pm_core):\n\n- `pm_core/editor.py` — confirmed culprit; commit-message\
+    \ editors, note editors, spec editors all flow through here\n- `pm_core/cli/meta.py`,\
+    \ `pm_core/cli/tui.py` — interactive flows that may shell out\n- `pm_core/providers.py`,\
+    \ `pm_core/claude_launcher.py` — claude session launches (usually in tmux panes\
+    \ so already isolated, but worth verifying)\n- `pm_core/push_proxy.py` — already\
+    \ isolated (its own PGID per ps output), but confirm\n- Anything that runs `git\
+    \ commit` without `-m` (opens $EDITOR), or `git merge` with conflict resolution\
+    \ prompts, or `gh pr create` without `--body`\n\nFor each: pass `start_new_session=True`\
+    \ OR redirect `stdin=subprocess.DEVNULL` when the child shouldn't need terminal\
+    \ input. Background daemons (push_proxy, watchers) should always get `stdin=DEVNULL`.\
+    \ Foreground interactive children (editors, pagers) should get `start_new_session=True`.\n\
+    \n### 3. Automated detection of stdin-sharing processes\n\nAt TUI startup (and\
+    \ optionally periodically), scan `/proc/*/fd/0` for any process other than the\
+    \ TUI itself that has the TUI's controlling pty as fd 0. If found, log a warning\
+    \ (with PID, command, PPID) and surface it in the status bar so the user can act\
+    \ before keys start vanishing.\n\nImplementation sketch (pm_core/tui/app.py mount\
+    \ hook):\n\n    import os, glob\n    my_tty = os.readlink(f\"/proc/{os.getpid()}/fd/0\"\
+    )\n    intruders = []\n    for fd_link in glob.glob(\"/proc/*/fd/0\"):\n     \
+    \   pid = fd_link.split(\"/\")[2]\n        if pid == str(os.getpid()): continue\n\
+    \        try:\n            if os.readlink(fd_link) == my_tty:\n              \
+    \  cmd = open(f\"/proc/{pid}/cmdline\").read().replace(\"\\\\0\", \" \")\n   \
+    \             intruders.append((pid, cmd))\n        except OSError:\n        \
+    \    pass\n    if intruders:\n        _log.warning(\"stdin intruders on %s: %s\"\
+    , my_tty, intruders)\n        # surface in status bar / log_message\n\nThis catches\
+    \ the bug class generically — even subprocess paths we forgot to fix, or future\
+    \ ones we add without thinking.\n\n## Tradeoffs: detection-and-warn vs. fix-at-spawn-site\n\
+    \n**Fix-at-spawn-site** (option 2): correct by construction — once every spawn\
+    \ passes `start_new_session=True` or `stdin=DEVNULL`, the bug class is gone. Downsides:\
+    \ easy to forget when adding new spawn sites; orphaned children in their own session\
+    \ can be harder to clean up on TUI shutdown (we no longer get them via process-group\
+    \ signaling, so we need explicit tracking); some children may legitimately want\
+    \ to share our tty (rare for pm).\n\n**Detection-and-warn** (option 3): catches\
+    \ everything regardless of spawn-site discipline, including future regressions\
+    \ and external processes that somehow inherit our fd. Downsides: only reactive\
+    \ — the user has already lost keypresses by the time the warning shows; needs\
+    \ a recovery action (kill the intruder, or surface \"kill PID X\" suggestion);\
+    \ periodic scanning adds (small) overhead.\n\n**Recommendation:** do both. Option\
+    \ 2 is the real fix; option 3 is a safety net for the cases we miss. Option 3\
+    \ alone is insufficient (lossy keys before detection); option 2 alone is fragile\
+    \ (one missed spawn site silently regresses).\n\nThere is a third option — **separate\
+    \ process groups per spawn, with explicit cleanup tracking**. Reject: more code\
+    \ (a registry of child pgids to clean up on TUI exit), and `start_new_session=True`\
+    \ already achieves the isolation goal with no tracking needed since the orphan\
+    \ can no longer share our pgid. Process-group tracking only matters if we want\
+    \ to signal *groups* of children together, which we don't for editors.\n\n## Verification\n\
+    \n- `pm pr edit <id>`, then kill the parent shell forcibly so vim becomes an orphan\
+    \ with PID 1 as PPID. Check `ps -o pid,pgid,cmd -p <vim-pid>` — after the fix,\
+    \ pgid == vim's own pid, not the TUI's.\n- Reproduce the h/l drop test from the\
+    \ original session: should see every `Key.__init__` fire.\n- Restart the TUI with\
+    \ a known intruder process (e.g. a `sleep infinity </dev/pts/$TUI_PTY &` in another\
+    \ shell) and confirm the detection logs a warning."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T14:24:57.763019+00:00'
+  updated_at: '2026-05-14T14:26:01.950544+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b4b68f3
+  plan: bugs
+  title: 'Bug: decouple TUI in-memory state from project.yaml via a coalescing write
+    queue'
+  branch: pm/pr-b4b68f3-bug-decouple-tui-in-memory-state-from-project-yaml
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\nTUI key handling exhibits a \"first press lags, next\
+    \ few queue, results appear all at once\" pattern when navigating PR selection\
+    \ rapidly. With ~330 PRs in project.yaml, every h/l keypress that moves the selection\
+    \ blocks the asyncio event loop for hundreds of milliseconds.\n\n## Root cause\n\
+    \n`pm_core/tui/pr_view.py:42` `handle_pr_selected` calls `store.locked_update(...)`\
+    \ synchronously on the main thread for every selection change, just to persist\
+    \ `active_pr`. `store.locked_update` (`pm_core/store.py:262-265`):\n\n    with\
+    \ _lock(root, timeout):\n        data = load(root, validate=validate)   # parse\
+    \ full ~18k-line yaml\n        fn(data)\n        save(data, root)            \
+    \           # rewrite the whole file\n\nPer keypress: file lock + full yaml parse\
+    \ + full yaml write. Subsequent keypresses queue in Textual's event queue until\
+    \ the I/O finishes, then process in a batch.\n\n## Architecture (proposal)\n\n\
+    Decouple in-memory project state from on-disk state, with a coalescing write queue\
+    \ between them.\n\n**In-memory layer.** `app._data` (already exists) becomes the\
+    \ source of truth for the running TUI. All TUI mutations write to `app._data`\
+    \ immediately and return — synchronous, no I/O, no lock. UI reads from `app._data`\
+    \ directly.\n\n**Write queue.** A bounded async queue of pending file-state operations.\
+    \ Operations are tagged with an op-kind key (e.g. `(\"set\", \"project.active_pr\"\
+    )`, `(\"update_pr_status\", pr_id)`). A background worker drains the queue and\
+    \ applies operations to disk via `locked_update`.\n\n**Coalescing.** Before enqueuing,\
+    \ the queue checks for an existing pending op with the same key and replaces it.\
+    \ So 12 rapid `set active_pr=*` enqueues collapse to one disk write of the final\
+    \ value. Debounce emerges naturally: pressing h/l repeatedly queues one pending\
+    \ op that keeps getting replaced; the worker only sees the last value when it\
+    \ gets around to draining.\n\n**Conflict resolution.** External writes (other\
+    \ pm processes editing project.yaml) need to be respected. On each drain cycle\
+    \ the worker re-reads the file under the lock, applies the queued ops on top of\
+    \ the fresh disk state, and writes. This is what `locked_update`'s closure-based\
+    \ API already enables — we just route through the queue instead of inline.\n\n\
+    **Shutdown.** App exit flushes the queue (await drain) before returning.\n\n##\
+    \ Touch points\n\n- `pm_core/store.py` — add `WriteQueue` class with `enqueue(key,\
+    \ fn)` and a `drain()` coroutine. Existing `locked_update` stays for one-shot\
+    \ CLI use.\n- `pm_core/tui/app.py` — own a `WriteQueue` instance on mount; start\
+    \ its worker task; flush on unmount.\n- `pm_core/tui/pr_view.py:handle_pr_selected`\
+    \ and similar — replace direct `store.locked_update(...)` calls with `app._write_queue.enqueue((\"\
+    set\", \"active_pr\"), lambda d: d[\"project\"].__setitem__(\"active_pr\", pr_id))`.\n\
+    - Audit other TUI mutation sites (status flips from sync, watcher updates, note\
+    \ appends) and route them through the queue too. CLI paths keep using `locked_update`\
+    \ directly.\n\n## Out of scope (separate PRs)\n\n- The TUI redraw refactor (pr-4c41017\
+    \ / #131: split TechTree into per-node widgets, cache edges and layout) — that\
+    \ PR targets render cost; this one targets state-write cost on the asyncio thread.\
+    \ The two are complementary.\n- Replacing the yaml-file backing store with SQLite\
+    \ or similar — possible future work, but the queue abstraction makes that swap\
+    \ localized.\n\n## Acceptance criteria\n\n- Holding h or l in the tech tree no\
+    \ longer queues keys; selection follows input in real time.\n- After rapid selection\
+    \ navigation across N PRs, exactly one `active_pr` write to disk reflects the\
+    \ final selection.\n- Quitting the TUI flushes pending writes before exit (no\
+    \ lost mutations).\n- Concurrent external edits to project.yaml from another pm\
+    \ process are not clobbered (re-read under lock before applying queued ops).\n\
+    \n## Verification\n\n- Repro: open TUI with ~330 PRs; hold j/k for 2 seconds;\
+    \ observe selection movement and event-loop responsiveness.\n- Pre-fix baseline:\
+    \ selection batches; visible lag.\n- Post-fix: smooth nav; check `git diff project.yaml`\
+    \ shows a single `active_pr:` change to the final selected PR, not an in-flight\
+    \ intermediate."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T14:37:18.381479+00:00'
+  updated_at: '2026-05-14T14:38:43.017620+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
