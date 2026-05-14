@@ -39,7 +39,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - ✅ Merged (12): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185) plus `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, Phase 7 prerequisite, tracked under improvements)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
 - 📋 Phase 9 (6 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-98f670e` (QA scenario quality supervisor with queryable scenario sessions), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
-- 📋 Phase 10 (7 PRs): `pr-9603d04` (GitHub backend mock — sibling of FakeClaudeSession), `pr-51586d2` (reconnect existing mocks library to scenario prompts under diff-scoped constraints), `pr-7d5d036` (`pm tui test` containment bug), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
+- 📋 Phase 10 (8 PRs): `pr-9603d04` (GitHub backend mock — sibling of FakeClaudeSession), `pr-7d5d036` (`pm tui test` containment cleanup), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-2680fbf` (planner authors a new regression when none fits), `pr-51586d2` (mocks awareness in the new-regression authoring flow), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
 
 ## Prerequisites
 
@@ -232,14 +232,6 @@ Filed during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger. E
 
 Sibling of `pr-abcf70f` (FakeClaudeSession) for the GitHub side. Provides a scriptable `FakeGitHubBackend` (or transport-level fake) so regression tests can exercise github-backend code paths — PR create, status sync, draft↔ready transitions, comments, merge, post-merge pull, rate-limit / conflict / merged-elsewhere responses — without hitting the real GitHub API. Without this, regression coverage stops at the GitHub boundary and bug-fix watchers cannot reproduce GitHub-specific bugs deterministically.
 
-### PR: Reconnect existing mocks library to scenario prompts under diff-scoped constraints
-`pr-51586d2` (depends on: pr-abcf70f, pr-9603d04)
-
-The shared mocks library, `pm/qa/mocks/` directory, frontmatter convention, `pm qa mocks` CLI (list/add/show/edit), and loader helpers (`qa_instructions.list_mocks`, `mocks_for_prompt`, `spec_gen.get_spec_mocks_section`) already exist — shipped by `pr-942aa21` (plan-qa, merged March 2026, PR #125). The prompt-side wiring was deliberately stripped by `pr-6be8ee6` (#190, commit `3eb89e6`) because the indiscriminate Mock Library + always-on `## Mocks` injection generated noise: scenario workers invented mock contracts the diff didn't need or followed spec-level mock guidance unrelated to what they were driving.
-
-This PR reconnects the library to prompts under two constraints designed to avoid that failure mode: (1) **diff-scoped enumeration** — the mocks block lists only mocks whose declared target surface overlaps with files in the PR diff, so a scenario sees mocks only for surfaces it actually touches; (2) **opt-in by spec** — injection happens only when `spec_qa` declares a mocks section, so scenarios run against real surfaces by default and the spec phase is where the explicit decision lives. Together, the default behavior of #190's strip is preserved; only explicitly-relevant cases get the injection.
-
-Scope: audit which kept-but-disconnected machinery to rewire vs. leave dormant, add diff-scope filtering to `mocks_for_prompt`, reintroduce the mocks-block injection in `generate_qa_planner_prompt` and the regression-filing wrapper (`pr-47940bc`) gated on both constraints, reintroduce the new-mock authoring addendum with mandatory surface declaration, register `pr-abcf70f` (FakeClaudeSession) and `pr-9603d04` (FakeGitHubBackend) as bootstrap entries. `pr-b3b8df0` (auto-synthesis primitive) and `pr-f4dc8a2` (library auditor) remain consumers of the registry. Note `note-a1c6f30` on `pr-942aa21` holds the original design rationale; commit `3eb89e6` holds the strip rationale this PR's constraints must answer.
 
 ### PR: Bug: `pm tui test` hardcodes "testing against the pm tmux session"
 `pr-7d5d036` (depends on: pr-abcf70f, pr-9603d04)
@@ -249,7 +241,19 @@ The regression-runner harness assumes the test target is the host pm tmux sessio
 ### PR: QA scenarios reuse regression tests as their flow driver
 `pr-06a96fa` (depends on: pr-7d5d036)
 
-Switch QA scenarios from "instruction (setup) + artifact recipe (drive/capture)" pairs to binding directly to a regression test, with per-scenario assertions layered on top. The library of exercised user flows grows by accumulation rather than per-PR effort; the same flow is driven the same way across PRs so behavior drift gets caught; captures from regression runs feed both the regression history and the QA evidence record. INSTRUCTION/ARTIFACT remain as the fallback path.
+Switch QA scenarios from "instruction (setup) + artifact recipe (drive/capture)" pairs to binding directly to a regression test, with per-scenario assertions layered on top. The library of exercised user flows grows by accumulation rather than per-PR effort; the same flow is driven the same way across PRs so behavior drift gets caught; captures from regression runs feed both the regression history and the QA evidence record. INSTRUCTION/ARTIFACT remain as a fallback for one-shot probes/oracles; the new-regression-authoring step (`pr-2680fbf`) is the preferred path when no existing regression fits.
+
+### PR: QA scenario planner authors a new regression test when none fits
+`pr-2680fbf` (depends on: pr-06a96fa)
+
+When the planner classifies a scenario's flow and no existing regression test in `pm/qa/regression/` drives that flow, it authors a new regression test as part of the QA run instead of falling through to INSTRUCTION+ARTIFACT scaffolding. Planner emits `NEW_REGRESSION: <slug>` alongside the existing `REGRESSION: <id>` field; a sub-step drafts `pm/qa/regression/<slug>.md` following existing conventions; the scenario binds to the drafted regression by slug. The drafted file commits to the PR's branch and is automatically in scope for the discovery supervisor (`pr-271cb3a`) on subsequent ticks. This is the step that makes the regression library compound — without it, the planner takes the easy INSTRUCTION+ARTIFACT path and the library never accumulates new drivers. This is also the load-bearing surface for mocks awareness — see `pr-51586d2`.
+
+### PR: Mocks awareness in the new-regression authoring flow
+`pr-51586d2` (depends on: pr-abcf70f, pr-9603d04, pr-06a96fa, pr-2680fbf)
+
+The shared mocks library, `pm/qa/mocks/` directory, `pm qa mocks` CLI, frontmatter convention, and loader helpers already exist (shipped by `pr-942aa21`, plan-qa, PR #125, merged March 2026). The prompt-side wiring was deliberately stripped by `pr-6be8ee6` (#190, commit `3eb89e6`) because indiscriminate injection at scenario planning produced noise — workers invented mocks the diff didn't need or followed spec-level mock guidance disconnected from what they were driving. The mocks belonged at a different surface.
+
+This PR reconnects the library at the right surface: the new-regression authoring prompt introduced by `pr-2680fbf`. A regression test specifies a flow against a surface, so the moment a regression is being drafted is exactly when "which mocks apply to this surface?" is well-posed. Two constraints: (1) **diff-scoped enumeration** — the mocks block lists only mocks whose declared `target_surface` overlaps with files in the PR's diff; (2) **no fallback to scenario-prompt injection** — the injection point is the new-regression authoring prompt, period. The pr-942aa21-era pattern of injecting at scenario planning stays gone. FakeClaudeSession (`pr-abcf70f`) and FakeGitHubBackend (`pr-9603d04`) register as the bootstrap entries when they merge. Note `note-a1c6f30` on `pr-942aa21` has the original rationale; commit `3eb89e6` has the strip rationale this PR's surface choice answers.
 
 ### PR: Capture reason strings for non-PASS verdicts
 `pr-b59f0c7` (depends on: pr-6be8ee6)

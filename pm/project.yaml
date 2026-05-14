@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-51586d2
+  active_pr: pr-2680fbf
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -18791,161 +18791,274 @@ prs:
   notes: []
 - id: pr-51586d2
   plan: plan-regression
-  title: Reconnect existing mocks library to scenario prompts under diff-scoped constraints
+  title: Mocks awareness in the new-regression authoring flow
   branch: pm/pr-51586d2-shared-mock-library-scenario-created-mocks-become-
   status: pending
   depends_on: []
   description: '## Context
 
 
-    The shared mocks library already exists: pr-942aa21 (PR #125, merged March 2026)
-    shipped pm/qa/mocks/, the pm qa mocks CLI (list, add, show, edit), a YAML frontmatter
-    convention, qa_instructions.list_mocks / mocks_for_prompt loaders, spec_gen.get_spec_mocks_section,
-    and prompt-side wiring that injected a Mock Library section into the QA planner
-    prompt and a ## Mocks block into every scenario prompt.
+    The shared mocks library already exists: pr-942aa21 (plan-qa, PR #125, merged
+    March 2026) shipped pm/qa/mocks/, the pm qa mocks CLI (list/add/show/edit), a
+    YAML frontmatter convention, and loader helpers (qa_instructions.list_mocks, mocks_for_prompt,
+    spec_gen.get_spec_mocks_section).
 
 
-    pr-6be8ee6 (#190) deliberately stripped the prompt-side wiring (commit 3eb89e6)
-    while keeping the machinery for a one-revert restore. The failure mode that triggered
-    the removal: workers either invented mock contracts the diff didn''t need, or
-    followed spec-level mock guidance unrelated to what they were driving. The machinery
-    sat unused because exposing it indiscriminately produced worse scenarios than
-    not exposing it.
+    pr-6be8ee6 (#190, commit 3eb89e6) deliberately stripped the prompt-side wiring
+    because indiscriminate injection — Mock Library section in the QA planner, always-on
+    ''## Mocks'' block in every scenario prompt — produced noise: scenario workers
+    invented mock contracts the diff didn''t need, or followed spec-level mock guidance
+    unrelated to what they were driving. The mocks belonged at a different surface
+    than the one pr-942aa21 wired them into.
 
 
-    This PR reconnects the library to scenario-author prompts under constraints designed
-    to avoid that failure mode, so the library''s accumulation value (mocks compound
-    across sessions) actually kicks in without re-introducing the noise.
+    This PR reconnects the library at the right surface: the new-regression authoring
+    flow (pr-2680fbf), not scenario generation.
 
 
-    ## What''s kept from the original pr-51586d2 idea
+    ## Why this surface
 
 
-    - FakeClaudeSession (pr-abcf70f) and FakeGitHubBackend (pr-9603d04) registered
-    as the first two concrete entries in pm/qa/mocks/.
-
-    - The compounding-library thesis: mocks an author writes once become discoverable
-    to future authors.
-
-
-    ## What''s different — the constraints
-
-
-    1. **Diff-scoped enumeration.** When the QA planner / scenario refiner / regression-filing
-    wrapper assembles a prompt, the mocks block lists only mocks whose declared target
-    surface overlaps with files in the PR diff (or, for regression-filing, the surface
-    the test exercises). A mock whose surface isn''t touched by the diff isn''t shown
-    to the session at all. This is the most important difference from the pr-942aa21
-    era — that version showed the whole library to every scenario, which is what generated
-    the noise.
+    After pr-06a96fa (scenarios bind to regression tests) and pr-2680fbf (planner
+    authors a new regression when none fits) land, the QA flow''s compounding step
+    lives in regression-test authoring. A regression test specifies a flow against
+    a surface; that surface may have mocks the test should use (e.g. FakeGitHubBackend
+    if the test exercises github-backend behavior, FakeClaudeSession if it drives
+    a Claude-spawned subflow). Authoring a regression test is exactly the moment where
+    the question ''which mocks apply to this surface?'' is well-posed — the surface
+    is being declared in the same act.
 
 
-    2. **Opt-in by spec.** Mocks injection happens only when spec_qa explicitly declares
-    a mocks section (the mechanism pr-942aa21 already built for spec-driven mock plans).
-    The spec phase is where the human-in-the-loop or the planner decides ''this PR''s
-    scenarios should use mocks''; in the absence of a spec mocks section, scenarios
-    run against real surfaces. No always-on injection.
+    Contrast with the pr-942aa21 era where mocks were shown at scenario planning.
+    At that stage the surface a scenario will exercise hasn''t been pinned down yet,
+    so the mocks block was either too broad (whole library shown — noise) or too narrow
+    (spec mocks section shown — disconnected from what the scenario actually does).
+    The new-regression authoring step does not have this problem: the regression-test
+    draft is precisely the surface declaration that gates which mocks are relevant.
 
 
-    3. **Authoring is a side effect of scenarios, not a free-floating action.** When
-    a scenario session needs a mock that doesn''t exist, the prompt addendum instructs
-    it to file the new mock via pm qa mocks add as part of the scenario PR, with frontmatter
-    declaring the target surface (the same constraint that makes (1) work — surface
-    declarations are mandatory). The pm/qa/mocks/ entry + python module land in the
-    scenario PR''s branch, not as a separate filing.
+    ## Constraints (carried over from the prior draft, re-scoped)
 
 
-    4. **Bootstrap with concrete examples.** When pr-abcf70f and pr-9603d04 land,
-    register them as the first two entries with full frontmatter and reference implementations.
-    The registry being non-empty + showing two well-shaped examples is what makes
-    future scenario authors produce useful mocks instead of placeholder ones.
+    1. **Diff-scoped enumeration.** The mocks block shown to the new-regression authoring
+    sub-session lists only mocks whose declared target_surface overlaps with files
+    in the PR''s diff. A mock for a surface the diff doesn''t touch isn''t shown.
+
+
+    2. **No fallback to scenario-prompt injection.** The injection point is the new-regression
+    authoring prompt, period. Existing-regression scenarios and INSTRUCTION+ARTIFACT
+    fallback scenarios get no mocks injection — the pr-942aa21-era pattern stays gone.
+
+
+    3. **Authoring a new mock is allowed but explicit.** If the regression author
+    finds no fitting mock, the prompt instructs it to file a new mock via pm qa mocks
+    add as part of the same PR branch, with frontmatter declaring target_surface.
+    Mandatory surface declaration is what makes (1) work going forward.
 
 
     ## Scope
 
 
-    - Audit the kept-but-disconnected machinery (QAScenario.mock_ids, parse_qa_plan
-    MOCKS, parse_new_mocks_from_plan, qa_instructions.list_mocks / mocks_for_prompt,
-    spec_gen.get_spec_mocks_section, mocks_dir helpers) and decide piece-by-piece
-    what to reconnect vs. what to leave dormant. Land the audit as part of this PR''s
-    design.
+    - Audit the kept-but-disconnected machinery (qa_instructions.list_mocks, mocks_for_prompt,
+    spec_gen.get_spec_mocks_section, QAScenario.mock_ids, parse_qa_plan MOCKS, parse_new_mocks_from_plan,
+    mocks_dir helpers) and decide piece-by-piece what to rewire vs. leave dormant.
 
-    - Add diff-scope filtering to qa_instructions.mocks_for_prompt (new parameter:
-    changed_files; return only mocks whose target_surface matches one of them).
+    - Add diff-scope filtering to mocks_for_prompt (new parameter: changed_files;
+    return only mocks whose target_surface matches one of them). Strengthen the frontmatter
+    schema with target_surface if pr-942aa21 didn''t already require it.
 
-    - Reintroduce the mocks block injection in generate_qa_planner_prompt and the
-    regression-filing wrapper (pr-47940bc), gated on (a) spec_qa has a mocks section,
-    and (b) the diff-scoped enumeration returns a non-empty set.
+    - Add a mocks-aware block to the new-regression authoring prompt introduced by
+    pr-2680fbf. The block enumerates diff-scoped existing mocks and provides the new-mock
+    authoring instructions.
 
-    - Reintroduce the new-mock authoring instruction in the scenario-author addendum,
-    with the surface-declaration requirement enforced.
+    - Bootstrap entries for FakeClaudeSession (pr-abcf70f) and FakeGitHubBackend (pr-9603d04)
+    land when those PRs merge, with full frontmatter and reference implementations
+    as the worked examples future authors look at.
 
-    - Strengthen the frontmatter schema if needed (currently shipped via pr-942aa21
-    — verify it carries target_surface).
-
-    - Bootstrap entries for FakeClaudeSession and FakeGitHubBackend land when those
-    PRs merge (or stub entries in this PR if they merge first).
-
-    - Tests: diff-scoped enumeration returns only matching mocks; mocks block is omitted
-    when no spec mocks section exists; a scenario that authors a new mock includes
-    the registry entry in its commit; the regression-filing addendum carries the same
-    constraint.
+    - Tests: diff-scope filter returns only matching mocks; new-regression authoring
+    prompt contains the mocks block when diff-scope returns ≥1 mock; omits the block
+    when empty; a new-regression draft that authors a new mock commits the registry
+    entry on the PR branch; scenarios that bind to existing regressions get no mocks
+    injection.
 
 
     ## Out of scope
 
 
-    - Revisiting pr-942aa21''s mocks CLI surface (list/add/show/edit already work).
+    - Reintroducing mocks injection at scenario planning or scenario worker prompts
+    (that''s exactly what pr-6be8ee6 removed and this PR doesn''t undo).
 
-    - Versioning the mocks (could be follow-up).
+    - pr-942aa21''s CLI surface (list/add/show/edit already work).
 
-    - Auto-detecting that two scenarios authored similar mocks that could be merged
-    (pr-f4dc8a2 QA library auditor''s job).
+    - Versioning the mocks (follow-up if needed).
 
-
-    ## Why this won''t re-introduce the noise pr-6be8ee6 removed
-
-
-    The pr-942aa21-era injection showed every mock to every scenario regardless of
-    relevance, and the spec mocks section was a free-form list that workers couldn''t
-    always map back to what they were testing. The diff-scope filter + spec-gated
-    injection means: a scenario only sees mocks for surfaces in its PR''s diff, and
-    only when the spec explicitly opted in. If a PR''s diff doesn''t touch a mockable
-    surface, no mocks are shown. If a spec doesn''t call for mocks, no mocks are shown.
-    The default behavior of #190''s strip is preserved; only the explicitly-relevant
-    cases get the injection.
+    - Auto-detecting duplicate mocks across scenarios (pr-f4dc8a2 QA library auditor''s
+    job).
 
 
     ## Depends on
 
 
-    - pr-abcf70f (FakeClaudeSession — first concrete registered mock)
+    - pr-06a96fa (scenarios bind to regression tests — establishes the surface model)
 
-    - pr-9603d04 (FakeGitHubBackend — second concrete registered mock)
+    - pr-2680fbf (planner authors a new regression when none fits — the prompt this
+    PR extends)
+
+    - pr-abcf70f (FakeClaudeSession — first bootstrap entry)
+
+    - pr-9603d04 (FakeGitHubBackend — second bootstrap entry)
 
 
     ## Related
 
 
     - pr-942aa21 (plan-qa, merged) — built the library and CLI this PR reconnects
-    to prompts.
+    at the new surface. Note note-a1c6f30 has the original design rationale.
 
-    - pr-6be8ee6 (#190, merged) — stripped the prompt wiring this PR reintroduces
-    under constraints. Note note-a1c6f30 on pr-942aa21 has the original design rationale;
-    commit 3eb89e6 has the removal rationale.
+    - pr-6be8ee6 (#190, merged) — stripped the prompt wiring at the wrong surface.
+    Commit 3eb89e6 has the strip rationale. This PR''s surface choice answers it.
 
-    - pr-b3b8df0 (auto-synthesis primitive) — consumer of the registry.
+    - pr-b3b8df0 (auto-synthesis primitive) — consumer of the registry at project
+    setup time.
 
-    - pr-f4dc8a2 (QA library auditor) — also reads/extends the registry; the place
-    where ''two mocks could be merged'' detection lives.
+    - pr-f4dc8a2 (QA library auditor) — scans for missing fills, dedup duplicates.
 
-    - pr-47940bc (regression-filing wrapper) — its prompt addendum gets the diff-scoped
-    mocks block.'
+    - pr-47940bc (regression-filing wrapper) — regression-test sessions filing findings
+    already have a prompt addendum; this PR does not change it (regression-test runners
+    just consume mocks, not author them post-hoc).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T01:49:12.189951+00:00'
-  updated_at: '2026-05-14T01:56:29.881512+00:00'
+  updated_at: '2026-05-14T02:00:12.259431+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2680fbf
+  plan: plan-regression
+  title: QA scenario planner creates new regression test when none fits
+  branch: pm/pr-2680fbf-qa-scenario-planner-creates-new-regression-test-wh
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+
+    When the QA scenario planner is producing scenarios for a PR and finds no existing
+    regression test in pm/qa/regression/ that drives the user flow a scenario needs,
+    it authors a new regression test as part of the QA run rather than falling back
+    to ad-hoc INSTRUCTION + ARTIFACT scaffolding. The new regression test lands in
+    pm/qa/regression/ in the same PR''s branch, becomes a durable asset the discovery
+    supervisor (pr-271cb3a) can rerun, and is bound to the scenario via the REGRESSION:
+    field introduced by pr-06a96fa.
+
+
+    ## Why
+
+
+    After pr-06a96fa lands, QA scenarios prefer binding to existing regression tests.
+    INSTRUCTION + ARTIFACT remain only as a fallback. But fallback-as-permanent-strategy
+    is exactly the dynamic that prevents the regression library from growing — the
+    planner takes the easy path and the library never accumulates new drivers. The
+    compounding-value of the regression flow only kicks in when ''no regression fits
+    → write one'' is the planner''s default, not an afterthought.
+
+
+    ## Shape
+
+
+    1. **Planner decision:** during scenario planning, for each candidate scenario
+    the planner classifies its driving flow. If an existing regression test matches
+    the flow, emit REGRESSION: <id>. If none matches, emit NEW_REGRESSION: <slug>
+    with a one-line description and the planner proceeds to draft the regression test.
+
+
+    2. **New-regression authoring sub-step:** for each NEW_REGRESSION, a sub-session
+    (or a planner-extension turn) drafts pm/qa/regression/<slug>.md following the
+    existing regression-test conventions (frontmatter, setup, drive, capture, assertions).
+    The drafted file lands in the PR''s branch as part of the scenario''s QA workdir
+    commits, the same way scenario captures already do.
+
+
+    3. **Scenario rebinding:** the scenario emitted by the planner references the
+    newly-drafted regression test by its slug. Concretizer and worker treat it the
+    same as an existing regression test — load and run it.
+
+
+    4. **Discovery-supervisor pickup:** because the new regression lives in pm/qa/regression/,
+    it''s automatically in scope for the discovery supervisor (pr-271cb3a) on subsequent
+    ticks. The library grows by accumulation as designed.
+
+
+    ## Awareness handoff to mocks
+
+
+    This is the point where the mocks library becomes relevant — NOT during scenario
+    authoring (the pr-942aa21 / pr-6be8ee6 failure mode), but when a regression test
+    is being drafted. A regression test specifies a flow against a surface; that surface
+    may have mocks the test should use (e.g. FakeGitHubBackend if the test exercises
+    github-backend behavior). The new-regression authoring prompt is where the diff-scoped
+    mocks block belongs. Sequencing: this PR first, pr-51586d2 (mocks reconnection)
+    reads its hand-off contract from here.
+
+
+    ## Failure paths
+
+
+    - Planner thinks a regression fits but it doesn''t quite — the scenario fails
+    to bind and falls back to NEW_REGRESSION. Handled by treating REGRESSION: as a
+    hint that can be downgraded mid-concretization.
+
+    - Drafted regression test fails to run on first attempt — same retry/INPUT_REQUIRED
+    pattern that exists for scenarios today; the half-drafted file stays on the branch
+    for next iteration.
+
+    - INSTRUCTION + ARTIFACT fallback still exists for scenarios where authoring a
+    regression doesn''t make sense (one-shot probes, oracle questions, etc.); planner
+    is taught the bar: prefer existing regression, then draft new regression, then
+    fall back.
+
+
+    ## Scope
+
+
+    - Extend QA planner output schema with NEW_REGRESSION block (sibling of REGRESSION).
+
+    - Add new-regression authoring sub-step to the planner pipeline (prompt-builder
+    + invocation).
+
+    - Concretizer + worker accept newly-drafted regression by slug.
+
+    - pr-06a96fa''s REGRESSION-binding code path consumes the new entries seamlessly.
+
+    - Tests: planner emits NEW_REGRESSION when no fit; authoring sub-step produces
+    a well-formed markdown file; scenario binds to the drafted regression; falls back
+    to INSTRUCTION when neither REGRESSION nor NEW_REGRESSION is appropriate.
+
+
+    ## Depends on
+
+
+    - pr-06a96fa (scenarios bind to regression tests as their flow driver — this PR
+    extends that binding to newly-authored regressions)
+
+
+    ## Related
+
+
+    - pr-51586d2 (mocks reconnection) — depends on this PR; the mocks-awareness block
+    lives in the new-regression authoring prompt, not in scenario generation.
+
+    - pr-f4dc8a2 (QA library auditor) — scans for missing fills; this PR is the runtime
+    equivalent (write the fill on the spot when a scenario needs one).
+
+    - pr-271cb3a (discovery supervisor) — picks up newly-authored regressions on next
+    tick.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T01:59:40.177233+00:00'
+  updated_at: '2026-05-14T01:59:40.177233+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
