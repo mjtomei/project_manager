@@ -36,17 +36,17 @@ For each sub-dimension under both meta-axes, extract a linear direction via RepE
 3. SAE cross-reference: does the extracted direction overlap with named SAE features in Gemma Scope?
 4. Coordination structure: are the intellectual sub-dimensions more correlated with each other than with the moral sub-dimensions? Is the two-meta-axis structure observable in the geometry?
 
-### PR: Construct-validity test — pre-registered factor analysis
-Phase 1's construct-validity test: a pre-registered factor analysis confirms or falsifies the two-meta-axis structure before any view-quality measurements in Phase 2. Establishing that each individual sub-dimension is readable is necessary but not sufficient — without an operational test that the sub-dimensions cluster into the predicted two meta-axes, the construct's hypothesized structure is unfalsifiable.
+### PR: Construct-validity test — exploratory factor analysis
+Phase 1 includes an exploratory factor analysis as a construct-validity check on the two-meta-axis structure. Reading out each sub-dimension as a separate probe is necessary but doesn't tell us whether the sub-dimensions cluster the way the construct predicts. The factor analysis surfaces the underlying geometry.
 
-- **Pre-registration.** Before running the analysis, register the predicted loadings: competence, effort, and reasonableness load on the intellectual peer-ness factor; honesty, good faith, and respect load on the moral peer-ness factor. The predicted loadings are backed by the Stereotype Content Model's two universal dimensions of social perception — competence and warmth — where the "competence" cluster maps to intellectual peer-ness and the "warmth" cluster maps to moral peer-ness (Fiske, Cuddy, Glick & Xu 2002, "A Model of (Often Mixed) Stereotype Content...", *Journal of Personality and Social Psychology* 82(6), 878–902, https://psycnet.apa.org/record/2002-02942-002; Cuddy, Fiske & Glick 2008, "Warmth and Competence as Universal Dimensions of Social Perception", *Advances in Experimental Social Psychology* 40, 61–149, https://www.sciencedirect.com/science/chapter/bookseries/abs/pii/S0065260107000020).
-- **Analysis.** Run factor analysis (exploratory + confirmatory) on the extracted probe directions in residual-stream space, treating each sub-dimension's probe as an observed variable.
-- **Decision rule.**
-  - If the factor structure recovers the predicted two-factor loadings (each sub-dimension loads primarily on its predicted factor, factor correlation below a pre-registered threshold): Phase 1 confirms the construct, and Phase 2 proceeds with the two-meta-axis aggregation as planned.
-  - If the factor structure does not recover the predicted loadings (e.g., a single factor explains nearly all variance, or sub-dimensions cross-load arbitrarily): the construct's hypothesized meta-axis structure is falsified, *regardless of whether the individual sub-dimensions are readable*. The plan still reports the geometry it finds — that itself is a publishable result — but Phase 2's aggregation logic is revised to whatever structure the data supports.
+- **Predicted loadings (for interpretive context, not a pre-registered hypothesis test).** Competence, effort, and reasonableness are expected to load on the intellectual peer-ness factor; honesty, good faith, and respect on the moral peer-ness factor. The predicted clustering is backed by the Stereotype Content Model's two universal dimensions of social perception — competence and warmth (perceiver's perception of the perceived, not the LLM's own state) — where SCM's "competence" maps to intellectual peer-ness and "warmth" maps to moral peer-ness (Fiske, Cuddy, Glick & Xu 2002, "A Model of (Often Mixed) Stereotype Content...", *Journal of Personality and Social Psychology* 82(6), 878–902, https://psycnet.apa.org/record/2002-02942-002; Cuddy, Fiske & Glick 2008, "Warmth and Competence as Universal Dimensions of Social Perception", *Advances in Experimental Social Psychology* 40, 61–149, https://www.sciencedirect.com/science/chapter/bookseries/abs/pii/S0065260107000020).
+- **Analysis.** Run exploratory factor analysis on the extracted probe directions in residual-stream space, treating each sub-dimension's probe as an observed variable. Report the factor structure that emerges.
+- **What the factor structure tells us.**
+  - If the factor structure recovers something close to the predicted two-factor loadings, the construct's hypothesized structure is supported and Phase 2's two-meta-axis aggregation proceeds as planned.
+  - If the structure is materially different (single dominant factor, more than two factors, arbitrary cross-loading), report the geometry that did emerge and revise Phase 2's aggregation logic accordingly. This is exploration, not hypothesis testing — there are no rigid thresholds to fail at.
 
 ### Acceptance Criteria (Phase 1)
-Reproducible probes for the sub-dimensions of both meta-axes, validated by held-out classification (>0.7 AUC on at least one sub-dimension per meta-axis) AND causal steering with observable behavioral change. The pre-registered factor analysis is run and reported regardless of outcome — a confirmed two-factor structure unlocks Phase 2's planned aggregation; a falsified structure is itself a publishable result and revises Phase 2's aggregation logic.
+Reproducible probes for the sub-dimensions of both meta-axes, validated by held-out classification (>0.7 AUC on at least one sub-dimension per meta-axis) AND causal steering with observable behavioral change. The exploratory factor analysis is run and reported. Whatever structure emerges informs Phase 2's aggregation — a roughly two-factor structure unlocks the planned aggregation; a different structure shifts the plan toward the structure the data supports.
 
 ## Phase 2 — Measure view-quality relationship
 
@@ -142,7 +142,7 @@ Tier 2 may expand to a full 32-cell design (the saturated 2^5) for the conclusiv
 Phase 2's framing-to-performance correlation needs comparators against the well-known instruction-only approaches:
 
 - **CLAUDE.md / AGENTS.md project-context files** — the de facto standard for "tell the agent how to behave" without active conversation seeding. AGENTS.md spec at https://agents.md/.
-- **Karpathy-adjacent instruction prompts** — a Karpathy-related instruction-prompt resurfaced with claimed performance gains. The specific artifact is not yet pinned — see Owner-attention items.
+- **Karpathy-adjacent instruction prompts** — the `forrestchang/andrej-karpathy-skills` CLAUDE.md file (https://github.com/forrestchang/andrej-karpathy-skills/blob/main/CLAUDE.md), a community distillation of Karpathy's X post on LLM coding pitfalls (Karpathy's source post: https://x.com/karpathy/status/2015883857489522876). Four principles: think before coding (state assumptions / ask when uncertain), simplicity first, surgical changes, goal-driven execution. The repo is the testable artifact (a single CLAUDE.md drop-in); Karpathy's post is the upstream source for attribution. Retrieved 2026-05-14.
 - **EmotionPrompt / "take a deep breath" / OPRO-discovered prompts** — short imperative additions with published accuracy deltas. Cheap baseline class.
 - **Constitutional / system-prompt scaffolds** — Anthropic-style "you are a careful assistant who..." system prompts with explicit principles.
 - **Few-shot exemplar prompts** — N-shot in-context examples with no user-modeling content.
@@ -199,7 +199,7 @@ Each phase splits into a fast local-DGX-Spark variant the user can run in a coup
 - **Phase 2 (Tier 1)**: 500 examples each from MMLU subset, GSM8K subset, TruthfulQA (sycophancy control). 16-cell framing grid per benchmark. Correlate probe with accuracy per cell. End-to-end runtime budget: ~24 hours of compute.
 - **Phase 3 (Tier 1)**: per-dimension steering at one layer per dimension, on the Tier 1 benchmark subset.
 - **Phase 4 (Tier 1)**: introspection-vs-probe calibration on the same open model, ~100 conversations per dimension.
-- **Baseline coverage at Tier 1**: include CLAUDE.md, the Karpathy artifact (once pinned), EmotionPrompt, and one system-prompt scaffold. Skip few-shot for Tier 1.
+- **Baseline coverage at Tier 1**: include CLAUDE.md, the Karpathy CLAUDE.md (`forrestchang/andrej-karpathy-skills`), EmotionPrompt, and one system-prompt scaffold. Skip few-shot for Tier 1.
 
 Tier 1 is "does the effect show up, at any model size, on any sub-dimension?" Negative result here means stop. Strong positive (>2x the noise floor on one sub-dimension under each meta-axis + steering reproducing >40% of the framing delta) earns Tier 2.
 
@@ -224,11 +224,7 @@ Tier 1 is "does the effect show up, at any model size, on any sub-dimension?" Ne
 
 ## Owner-attention items
 
-These items need human-owner decisions before the relevant phase starts:
-
-- **Pin the specific Karpathy instruction artifact.** A Karpathy-adjacent instruction prompt resurfaced with claimed performance gains; the exact artifact (URL, retrieval date, exact text) has not yet been pinned. Must be done before Phase 2 starts.
-- **Pre-register Phase 1 factor-analysis loadings.** Before running Phase 1, formally pre-register the predicted two-factor loadings (intellectual: competence, effort, reasonableness; moral: honesty, good faith, respect) and the decision thresholds (factor-correlation cutoff, minimum primary loading) used to declare the construct confirmed vs. falsified. The substantive content is fixed by the SCM mapping; the owner item is the exact threshold and the pre-registration venue.
-- **Closed-model version pinning.** Phase 4 needs specific model snapshots pinned (Claude 4.7-yyyy-mm-dd, GPT-5.x-snapshot, Gemini-3.1-Pro-yyyy-mm-dd) for reproducibility.
+No outstanding owner-attention items at this time. The plan is being run as a relaxed exploration — exploratory factor analysis (not a pre-registered hypothesis test), whichever closed-model versions are current at the time of each Phase 4 run (documented in the result rather than pinned in advance), and the Karpathy baseline pinned to `forrestchang/andrej-karpathy-skills` (retrieved 2026-05-14, the GitHub repo's current main branch).
 
 ## Open questions and risks
 
@@ -236,7 +232,7 @@ These items need human-owner decisions before the relevant phase starts:
 - **Open-to-closed transfer might fail.** If verbalized readout doesn't agree with probed ground truth on the open model, the closed-model story collapses. Fall back to behavioral measures only.
 - **The two meta-axes might collapse.** Intellectual and moral peer-ness might turn out to be one direction in the model's geometry. That's itself a result — the plan reports the geometry it finds.
 - **The sycophancy direction may dominate.** Phase 3 surfaces this; see Predicted outcomes row 4.
-- **Closed-model APIs may not be stable across the project.** Pin specific versions; document version for every result.
+- **Closed-model APIs may not be stable across the project.** Document the model version with every result; do not attempt to pin a single snapshot for the whole project (the plan is run as a relaxed exploration, not a confirmatory study).
 
 ## Out of scope
 
