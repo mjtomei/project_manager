@@ -36,8 +36,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 
 ## Status
 
-- ✅ Merged (11): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185)
-- 🔨 In progress (1): `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, tracked under improvements but listed here as Phase 7 prerequisite)
+- ✅ Merged (12): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185) plus `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, Phase 7 prerequisite, tracked under improvements)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
 - 📋 Phase 9 (6 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-98f670e` (QA scenario quality supervisor with queryable scenario sessions), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
 
@@ -123,8 +122,8 @@ The three concrete watcher classes and four new prompt builders shipped without 
 
 Goal: tighten the bug-fix flow until the loop can run unsupervised. The earlier phases got reproduce→fix→verify into the prompt; these PRs make each step produce on-disk evidence the watcher / verdict gate can hard-check.
 
-### PR: Bug-fix flow surface TUI QA repro instructions in session prompt
-`pr-6be8ee6` (#190, in_progress, plan=improvements)
+### PR: Bug-fix flow surface TUI QA repro instructions in session prompt ✅ MERGED (#190)
+`pr-6be8ee6` (plan=improvements)
 
 Adds a "did you reproduce on pre-fix code?" gate to `_BUG_FIX_FLOW_BLOCK` and references `pm/qa/instructions/tui-manual-test.md` for TUI bugs. Tracked under improvements but is the prompt-side prerequisite for the evidence-artifact PR below — listed here for plan visibility.
 
