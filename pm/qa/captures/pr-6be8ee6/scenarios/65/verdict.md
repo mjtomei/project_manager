@@ -1,5 +1,0 @@
-# Scenario 65: Review-loop INPUT_REQUIRED gate for missing captures, then PASS after captures added
-
-INPUT_REQUIRED
-
-refiner rejected: Driving this scenario from the user surface requires running the actual review loop end-to-end (`zz d` in the TUI) and waiting for a real Claude review session to produce a verdict — twice (once with empty captures, once after dropping captures), each iteration taking multiple minutes of wall time and live Claude API spend. The "INPUT_REQUIRED on missing captures" gate is enforced only by prompt text in `pm_core/bug_fix_prompts.py:_bug_fix_review_block` that asks the reviewer to surface missing pre-fix/post-fix captures as INPUT_REQUIRED — there is no code-level check that emits the verdict — so the outcome depends on Claude's judgment during the review and is not deterministic enough for a QA scenario. Additionally, the "does not immediately re-spin in a NEEDS_WORK cycle" assertion requires negative-time observation of the loop after INPUT_REQUIRED, which compounds the wall-time cost.
