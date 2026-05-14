@@ -39,6 +39,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - ✅ Merged (12): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185) plus `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, Phase 7 prerequisite, tracked under improvements)
 - ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
 - 📋 Phase 9 (6 PRs filed): `pr-ca6859f` (self-recovery audit), `pr-6f9301e` (headless/benchmark mode), `pr-ed10ac4` (no-progress safety stop), `pr-b3b8df0` (QA instruction auto-synthesis primitive), `pr-98f670e` (QA scenario quality supervisor with queryable scenario sessions), `pr-e2b7fdf` (ProgramBench submission scaffolding, consumes the primitive)
+- 📋 Phase 10 (5 PRs filed during pr-6be8ee6 QA iteration): `pr-7d5d036` (`pm tui test` containment bug), `pr-06a96fa` (QA scenarios reuse regression tests as flow drivers), `pr-b59f0c7` (capture reason strings for non-PASS verdicts), `pr-0b14f2c` (planner can add/replace scenarios mid-run), `pr-f4dc8a2` (QA library auditor)
 
 ## Prerequisites
 
@@ -221,6 +222,35 @@ Bundle four pieces as one deliverable, demonstrating the autonomous loop end-to-
 - **Egress-allowlist firewall harness**: iptables / network namespace at the sandbox boundary allowing only the model API endpoint. Defense-in-depth against incidental network use during benchmark runs; `backend=local`, `container-mode=off` (the cleanroom is the container).
 
 Single PR is justified because each piece is small and they are tightly coupled by the submission shape. Manual testing: run the adapter against a held-back ProgramBench task and inspect the produced `/workspace` tarball before submission.
+
+## Phase 10: QA loop surface improvements
+
+Filed during `pr-6be8ee6`'s QA iteration once the loop was exercised in anger. Each addresses a friction point that surfaced from running real QA cycles against the bug-fix flow.
+
+### PR: Bug: `pm tui test` hardcodes "testing against the pm tmux session"
+`pr-7d5d036` (pending)
+
+The regression-runner harness assumes the test target is the host pm tmux session; wrong for containers and for non-pm targets. Cleanup of the runner's surface framing and containment model so regression runs don't leak state into the caller's repo. Prerequisite for using regression tests as durable QA flow drivers (`pr-06a96fa`).
+
+### PR: QA scenarios reuse regression tests as their flow driver
+`pr-06a96fa` (depends on: pr-7d5d036)
+
+Switch QA scenarios from "instruction (setup) + artifact recipe (drive/capture)" pairs to binding directly to a regression test, with per-scenario assertions layered on top. The library of exercised user flows grows by accumulation rather than per-PR effort; the same flow is driven the same way across PRs so behavior drift gets caught; captures from regression runs feed both the regression history and the QA evidence record. INSTRUCTION/ARTIFACT remain as the fallback path.
+
+### PR: Capture reason strings for non-PASS verdicts
+`pr-b59f0c7` (depends on: pr-6be8ee6)
+
+Generalize the per-scenario `verdict_reason` field added for the refiner-rejection path to every place a non-PASS verdict comes out of an automated loop (main scenario workers, review-loop, watcher). Reasons land in `state.scenario_verdict_reasons[idx]`, flow into `qa_status.json` and `verdict.md`, and render as a one-line "↳ <reason>" continuation under each non-PASS verdict in status panes. Triage stops requiring pane-scrollback archaeology.
+
+### PR: QA scenario planner allows adding scenarios mid-run or after initial plan
+`pr-0b14f2c` (depends on: pr-6be8ee6)
+
+Let the planner add scenarios beyond the initial plan and let users re-run NEEDS_WORK scenarios or replace INPUT_REQUIRED ones, so coverage gaps and earlier failures resolve without restarting QA. The overall verdict can transition from INPUT_REQUIRED or NEEDS_WORK back to PASS as added/replaced scenarios settle. New `+` / `r` / `R` keys in the scenarios pane pull the latest `QA_PLAN_START/END` block from the planner pane's transcript. Replaced scenarios' prior captures preserved under `scenarios/<n>/prior-N/`. Manual testing: drive the keypress flow against a real run with at least one NEEDS_WORK and one INPUT_REQUIRED scenario; INPUT_REQUIRED is appropriate for the human-judged "load this plan block" moments.
+
+### PR: QA library auditor
+`pr-f4dc8a2` (pending)
+
+Scan a project and suggest fills for missing QA instructions, regression tests, artifact recipes, and mocks. A meta-tool that helps users grow the QA library that the rest of the loop depends on. Closes the loop between "the QA loop got more powerful" (Phase 10 above) and "the library underneath it actually has enough content to use that power."
 
 ## Success criteria
 
