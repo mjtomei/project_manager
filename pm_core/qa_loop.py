@@ -963,7 +963,9 @@ is missing>
 REFINER_REJECT_END
 
 IMPORTANT: Your response must end with one of those END markers. Do not
-include any text after it. Pick exactly one — either refine or reject."""
+include any text after it. Pick exactly one — either refine or reject.
+Only include the REFINER_REJECT_START / REFINER_REJECT_END markers when
+actually rejecting; omit them entirely when refining."""
 
 
 def _build_concretize_cmd(
