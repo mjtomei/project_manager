@@ -1,0 +1,10 @@
+{"version": 2, "width": 160, "height": 50, "timestamp": 1778717737, "env": {"SHELL": "/bin/bash", "TERM": "screen"}}
+[0.002801, "o", "+ PM=/home/pm/.local/bin/pm\r\n+ env -u PYTHONPATH /home/pm/.local/bin/pm qa list\r\n"]
+[0.046976, "o", "\r\nInstructions (3):\r\n  legacy: Legacy with tags — A legacy instruction file containing obsolete tags\r\n  nodesc: No Description\r\n  nofrontmatter: Nofrontmatter\r\n\r\nRegression Tests (0):\r\n  (none)\r\n\r\nArtifact Recipes (0):\r\n  (none)\r\n\r\n"]
+[0.055136, "o", "+ echo ---\r\n---\r\n+ env -u PYTHONPATH /home/pm/.local/bin/pm qa show legacy\r\n"]
+[0.111732, "o", "# Legacy with tags\r\nA legacy instruction file containing obsolete tags\r\n[/tmp/fmproj/pm/qa/instructions/legacy.md]\r\n\r\nLegacy body.\r\n\r\n"]
+[0.118732, "o", "+ echo ---\r\n---\r\n+ env -u PYTHONPATH /home/pm/.local/bin/pm qa show nodesc\r\n"]
+[0.176879, "o", "# No Description\r\n[/tmp/fmproj/pm/qa/instructions/nodesc.md]\r\n\r\nBody without description.\r\n\r\n"]
+[0.184104, "o", "+ echo ---\r\n---\r\n+ env -u PYTHONPATH /home/pm/.local/bin/pm qa show nofrontmatter\r\n"]
+[0.242233, "o", "# Nofrontmatter\r\n[/tmp/fmproj/pm/qa/instructions/nofrontmatter.md]\r\n\r\nThis file has no frontmatter at all.\r\n\r\nJust plain markdown body content.\r\n\r\n"]
+[0.24978, "o", "+ echo ---DONE\r\n---DONE\r\n"]

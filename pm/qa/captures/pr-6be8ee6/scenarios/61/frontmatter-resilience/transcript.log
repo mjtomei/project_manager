@@ -1,0 +1,43 @@
++ PM=/home/pm/.local/bin/pm
++ env -u PYTHONPATH /home/pm/.local/bin/pm qa list
+
+Instructions (3):
+  legacy: Legacy with tags — A legacy instruction file containing obsolete tags
+  nodesc: No Description
+  nofrontmatter: Nofrontmatter
+
+Regression Tests (0):
+  (none)
+
+Artifact Recipes (0):
+  (none)
+
++ echo ---
+---
++ env -u PYTHONPATH /home/pm/.local/bin/pm qa show legacy
+# Legacy with tags
+A legacy instruction file containing obsolete tags
+[/tmp/fmproj/pm/qa/instructions/legacy.md]
+
+Legacy body.
+
++ echo ---
+---
++ env -u PYTHONPATH /home/pm/.local/bin/pm qa show nodesc
+# No Description
+[/tmp/fmproj/pm/qa/instructions/nodesc.md]
+
+Body without description.
+
++ echo ---
+---
++ env -u PYTHONPATH /home/pm/.local/bin/pm qa show nofrontmatter
+# Nofrontmatter
+[/tmp/fmproj/pm/qa/instructions/nofrontmatter.md]
+
+This file has no frontmatter at all.
+
+Just plain markdown body content.
+
++ echo ---DONE
+---DONE
