@@ -13193,7 +13193,7 @@ prs:
   plan: plan-regression
   title: 'Bug-fix flow: surface TUI QA repro instructions in session prompt'
   branch: pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-
-  status: qa
+  status: in_review
   depends_on: []
   description: "The bug-fix flow prompt (pm_core/prompt_gen.py:_BUG_FIX_FLOW_BLOCK)\
     \ tells sessions to write a failing test or fall back to a \"manual repro note\"\
@@ -13229,9 +13229,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/190
   gh_pr_number: 190
   created_at: '2026-05-04T12:22:33.932646+00:00'
-  updated_at: '2026-05-13T21:12:52.617876+00:00'
+  updated_at: '2026-05-14T00:24:24.516054+00:00'
   started_at: '2026-05-04T14:15:15.348715+00:00'
-  reviewed_at: '2026-05-13T21:12:52.617876+00:00'
+  reviewed_at: '2026-05-14T00:24:24.516054+00:00'
   merged_at: null
   notes:
   - id: note-a3ed531
@@ -13443,6 +13443,31 @@ prs:
       guard: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-5b3236ea0e767f20)'
     created_at: '2026-05-13T21:40:00Z'
     last_edited: '2026-05-13T21:40:00Z'
+  - id: note-24cbc85
+    text: 'QA INPUT_REQUIRED: Bug-fix flow prompt structure varies by PR plan: PASS;
+      pm qa add-/author-/list/show/edit across three categories: INPUT_REQUIRED; pm
+      qa docs and packaging survive install from outside the source tree: PASS; pm
+      qa regression replaces pm tui test with unified filing addendum: PASS; TUI QA
+      pane sections, status counter, and create-picker modal: PASS; End-to-end bug-fix
+      session produces pre-fix and post-fix captures: INPUT_REQUIRED; Review-loop
+      INPUT_REQUIRED gate for missing captures, then PASS after captures added: INPUT_REQUIRED;
+      qa_finalize closes out a PR with captures, and duplicate-verifier guard holds
+      under follow-up: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-608b1b9a0bd5b9cf)'
+    created_at: '2026-05-14T00:28:21Z'
+    last_edited: '2026-05-14T00:28:21Z'
+  - id: note-95b17f6
+    text: 'QA NEEDS_WORK: Bug-fix flow prompt is bug-PR gated and points at the new
+      captures + library layout: PASS; pm qa CLI surface across three categories (add/author/list/show/edit/docs/regression):
+      PASS; TUI QA pane shows three sections and the create-picker modal routes correctly:
+      PASS; Packaged qa_library.md survives pip install and pm qa docs works from
+      any cwd: NEEDS_WORK; End-to-end bug-fix session produces pre-fix + post-fix
+      captures and downstream QA scenarios save under the new layout: INPUT_REQUIRED;
+      Review-loop INPUT_REQUIRED gate flips to PASS once captures are added: INPUT_REQUIRED;
+      qa_finalize closes out a PR with valid captures: INPUT_REQUIRED; Duplicate-verifier
+      guard holds when a verdict is followed up: INPUT_REQUIRED; Frontmatter resilience
+      across CLI and TUI surfaces: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6be8ee6-387044f9ea662722)'
+    created_at: '2026-05-14T00:47:23Z'
+    last_edited: '2026-05-14T00:47:23Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-in-e802a472
 - id: pr-cfe24ea
   plan: improvements
