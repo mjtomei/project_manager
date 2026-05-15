@@ -99,7 +99,25 @@ Block 4 is **not** load-bearing the way Block 3 is — readers can accept ugly p
 
 4. **Self-review during response**. Fetch every work the reviewer referenced. Verify the reviewer's claims about prior art (the reviewer can be wrong). Then ask the same questions of yourself — does your own critique surface anything the reviewer missed?
 
-5. **Walk the citation graph**. For the most relevant works the reviewer or the source text cites, follow citations forward (cited-by) and backward (references). Google Scholar is the practical tool. The goal is finding directly-relevant prior work the reviewer didn't surface.
+5. **Walk the citation graph — explicitly, on Google Scholar, with named seeds.** The biggest recurring miss in our loops has been new prior art that exists but the reviewer didn't find. The remedy is procedural, not a matter of trying harder:
+
+   a. **List the seeds explicitly before searching.** Pick the 5–8 most-cited or most-load-bearing references the artifact already names. Write them down. The seed list is the audit trail — if a Cycle 3 reviewer finds a key paper the artifact missed, the previous reviewer's seed list shows which seed should have led there.
+
+   b. **For each seed, walk both directions on Google Scholar.** Forward: click "Cited by" on Scholar's seed entry and read the most-recent 20–30 citing papers. Backward: scan the seed's own References for prior art the artifact doesn't yet cite. Time-budget per seed: 5–10 minutes. Total time-budget: 30–60 minutes for the walk.
+
+   c. **Use Scholar's date filter aggressively.** Sort by date, restrict to the last 12 months, and look specifically for very-recent work (last 30 days especially) — that's where missed prior art accumulates because the artifact's earlier draft predates the publication. The most damaging misses in our loops have all been from the last 6 months.
+
+   d. **Search beyond arXiv.** Key methodology papers in this space appear at transformer-circuits.pub (Anthropic), alignment.anthropic.com (Anthropic Alignment Science), OpenReview, ACL Anthology, transluce.org, and various lab blogs. Searching "arxiv:<topic>" alone misses these. Search the topic plain, then check the lab pages of the relevant research groups (Anthropic, Transluce, DeepMind interpretability, AISI) directly.
+
+   e. **For citations the reviewer flagged as unverifiable or hallucinated**: the next cycle's reviewer must explicitly search Google Scholar, the lab's own page, and OpenReview for the named work before treating it as not-found. Cycle 1's reviewer flagged "Choi et al. 2025" and the response substituted a different paper — but Choi/Transluce 2025 was real, just not on arXiv. Default to "search more places" before "doesn't exist."
+
+   f. **Specific search recipes per topic cluster** (concrete, named tactics):
+      - *Activation-to-language readout / probing methodology*: search transformer-circuits.pub, alignment.anthropic.com, transluce.org, and OpenReview for "activation verbalizer," "activation oracle," "patchscope," "latent decoder," plus a Google Scholar "cited by" walk on Patchscopes (Ghandeharioun 2024).
+      - *Autonomous coding agents / benchmarks*: search swebench.com, OpenHands' GitHub, and Scholar "cited by" on SWE-Bench (Jimenez 2024).
+      - *LLM agent integrity / cheating detection*: search nist.gov/caisi, alignment.anthropic.com, and Scholar "cited by" on ImpossibleBench (Zhong 2025).
+      - *Social-psychology framework for person perception*: search Scholar "cited by" on Fiske/Cuddy SCM (2002) and Goodwin 2014 — both have substantial follow-up literature including the dispute over how many dimensions structure person perception.
+
+   g. **Report the walk's coverage explicitly in the review.** Include a "Citation graph walk" section listing: which seeds were searched, the date range covered, the count of new citing/cited papers found per seed, and the additions proposed. If the walk found nothing new, say so — that's a positive convergence signal.
 
 6. **Verify accessibility**. If a paper is paywalled with no open-access version, derivative, or report covering the same ground, remove it from the citations and add it to an appendix of "wanted-but-inaccessible" works with a one-line note on what citing it would have changed.
 

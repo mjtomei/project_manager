@@ -36,6 +36,8 @@ For each sub-dimension under both meta-axes, extract a linear direction via RepE
 3. SAE cross-reference: does the extracted direction overlap with named SAE features in Gemma Scope?
 4. Coordination structure: are the intellectual sub-dimensions more correlated with each other than with the moral sub-dimensions? Is the two-meta-axis structure observable in the geometry?
 
+**Note on non-linear probes.** Linear directions per sub-dimension is the planned methodology (RepE-style mean-diff per layer). For the more abstract sub-dimensions (good faith, reasonableness), where linear probes may underperform, an NLA-style verbalization read-out (Fraser-Taliente, Kantamneni, Ong et al. 2026, "Natural Language Autoencoders", https://transformer-circuits.pub/2026/nla/) is a more expressive non-linear alternative. The plan does not commit to this in Phase 1's first pass — linear is the cheaper baseline — but the option is available if linear underperforms on construct-validity.
+
 ### PR: Construct-validity test — exploratory factor analysis
 Phase 1 includes an exploratory factor analysis as a construct-validity check on the two-meta-axis structure. Reading out each sub-dimension as a separate probe is necessary but doesn't tell us whether the sub-dimensions cluster the way the construct predicts. The factor analysis surfaces the underlying geometry.
 
@@ -97,6 +99,8 @@ For at least one sub-dimension under each meta-axis, steering the probed directi
 **Goal.** Produce a calibrated output-token readout that elicits peer-ness self-reports from closed models (Claude / GPT / Gemini), grounded in the open-model probe as ground truth.
 
 **Standalone novelty.** First production-applicable peer-ness measurement for closed models. Lindsey (https://transformer-circuits.pub/2025/introspection/) and Binder et al. (https://arxiv.org/abs/2410.13787) show above-chance introspective accuracy. Turpin et al. (https://arxiv.org/abs/2305.04388) shows CoT confabulation is real. The plan's contribution is the calibration: tie the verbalized readout to a probe-grounded scale so closed-model self-reports have known accuracy.
+
+**Implementation note.** Phase 4's design is informal NLA: ask the closed model to verbalize its judgment of the user via meta-prompt, calibrate against the Phase 1 open-model probe. Anthropic's published Natural Language Autoencoder stack (Fraser-Taliente, Kantamneni, Ong et al. 2026, https://transformer-circuits.pub/2026/nla/) is the formal version of the same operation, with a reconstructor enforcing faithfulness. The plan can either build its own activation-verbalizer-style readout or adopt the NLA stack directly when externally available for the target closed models. Code is released at https://github.com/kitft/natural_language_autoencoders. Activation Oracles (Karvonen et al., Anthropic 2025, https://alignment.anthropic.com/2025/activation-oracles/) is the adjacent supervised precursor.
 
 ### PR: Introspection prompt design (per dimension)
 Design prompts that ask the model to report its perception of the user along each sub-dimension. Multiple styles: direct, indirect, structured-fields with confidence scores. Per dimension, not just overall.
@@ -255,6 +259,9 @@ See the literature survey at `pm/docs/literature-review-user-model.md` for the f
 - Turpin et al. "Language Models Don't Always Say What They Think" (2023)
 - Belrose et al. "Eliciting Latent Predictions" (2023)
 - Pan/Chen/Steinhardt "LatentQA" (2024)
+- Ghandeharioun et al. "Patchscopes" (ICML 2024)
+- Karvonen et al. "Activation Oracles" (Anthropic 2025)
+- Fraser-Taliente, Kantamneni, Ong et al. "Natural Language Autoencoders" (Anthropic 2026)
 - Sharma et al. "Towards Understanding Sycophancy" (2023)
 - Perez et al. "Discovering Language Model Behaviors with Model-Written Evaluations" (2022)
 - Gemma Scope (2024)
