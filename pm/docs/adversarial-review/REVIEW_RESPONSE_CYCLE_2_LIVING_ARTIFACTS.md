@@ -180,3 +180,20 @@ These 17 findings are accepted for the edit pass as a batch; the edit agent shou
 ## Convergence note
 
 Cycle 2's walk surfaced three real prior-art additions — all accepted, all at *narrower* scope than the reviewer proposed after abstract verification. The highest-severity finding (blackboard revival) was the most overstated: neither paper deletes the controller and both keep the board passive, so it preempts vocabulary, not thesis. This is the now-standard pattern of this loop — the reviewer is directionally right and consistently over-claims the magnitude. The plan's framing survives Cycle 2, narrowed in §(c) and §8, with Finding 6 the one genuinely unresolved item, deliberately left for the plan owner. Cycle 3 should pressure-test the §(c) rewrite and the Finding 6 resolution once the plan owner has chosen.
+
+---
+
+## Finding 6 — RESOLVED (plan-owner input, 2026-05-15)
+
+The plan owner's guidance: "Ultimately we will do whatever works best, so it doesn't hinge on there being no adjudicator. But the idea is to build a system that can improve and maintain itself, in whole or part, without the intelligences (machine or human) that act as adjudicators now."
+
+This dissolves the tension the reviewer flagged rather than choosing between options (a) and (b). The reviewer framed the integrity-maintenance task as a "relocated adjudicator" that contradicts a "no central arbiter" claim. But the plan's goal was never the dogmatic absence of adjudication. The goal is to **remove the system's dependency on the adjudicators it relies on *today*** — the human reviewer and pm's central state machine.
+
+The integrity-maintenance task *is* adjudication-flavored — and that is the contribution, not a contradiction of it. The adjudication function gets **relocated from outside the system to inside it**: instead of a human or pm's state machine sitting above the work and deciding, the living substrate carries its own integrity-maintenance as first-class tasks. "Relocated adjudicator" is accurate and is exactly the design — adjudication absorbed into the self-maintaining substrate.
+
+**Edit (replaces finding 6's two options):**
+
+- Drop any framing of "no central arbiter" as an absolute. The lit review should not claim adjudication is eliminated.
+- Reframe the claim as: the plan removes the system's dependence on *external, currently-relied-on* adjudicators (human review, pm's central state machine) by internalizing adjudication into the substrate's own integrity-maintenance tasks. The integrity-maintenance task is adjudication relocated from outside the system to inside it — part of the living substrate, not an external intelligence the system depends on.
+- Use "in whole or part" honestly: the plan does not claim total elimination of human or external judgment. It claims the system can carry progressively more of its own maintenance and improvement. The human still enters — at the boundary, for the work the system's own adjudication could not resolve. This connects to and sharpens the plan's existing "human as boundary, not bottleneck" framing: the integrity-maintenance task is the *mechanism* by which the human stops being the bottleneck adjudicator.
+- This is a whole-system goal, not a claim about the negotiation's internal topology. Whether, locally, an integrity task is "a participant in" vs. "above" a given negotiation is an implementation detail the plan can settle whichever way works best. The load-bearing claim is the dependency removal, not the topology.
