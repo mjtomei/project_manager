@@ -125,6 +125,36 @@ Block 4 is **not** load-bearing the way Block 3 is — readers can accept ugly p
 
 8. **Stop when findings get pedantic.** Three cycles was the Omerta paper's natural stopping point. Watch for findings that are nitpicks of phrasing rather than substance — that's the convergence signal.
 
+## Principle: narrow the contribution; don't collapse it
+
+When a reviewer surfaces closer prior art — a paper that does some of what the artifact claims is novel — there are two failure modes the response cycle has to avoid:
+
+**Failure mode A** — *capitulate*. Accept the reviewer's framing wholesale, agree the prior art "did the same thing," cut the contribution claim to zero. This was the move that almost happened with LatentQA in Cycle 1 of the user-model lit review (the response substituted LatentQA for the missing Choi/Transluce; the substitute paper turned out to do something materially different from what we thought). It's also the move that almost happened when Cycle 3 surfaced Choi/Transluce and Cycle 4 surfaced Goodwin et al. — each time the temptation was to collapse the novelty story rather than re-state it precisely.
+
+**Failure mode B** — *hold the line too hard*. Insist the artifact is doing something genuinely new even after the prior art makes that hard to defend, with the result that the contribution claim reads as special-pleading.
+
+**The correct move is to narrow, not collapse.** When prior art is surfaced:
+
+1. **List what the prior art actually does**, sourced from its abstract (verified — see the next section). Be precise about variable, methodology, dependent measure, scope, and experimental setup.
+2. **List what the artifact under review does**, in the same terms.
+3. **Compute the intersection**: what does the prior art preempt? That's what the contribution claim has to give up.
+4. **Compute the artifact's residual contribution**: what does the artifact do that the prior art doesn't? List it as specifically as the artifact actually delivers — not what the artifact's authors aspire to but what the artifact's described methodology actually produces. The residual is the new, narrower contribution claim.
+5. **Update the artifact's contribution statement to the residual.** Replace the old framing wholesale; do not add hedges to the old framing.
+
+The result, done right, is a contribution claim that is smaller than the old one but stronger because it's defended against the prior art on point-by-point grounds. The Cycles 3-and-walk handling of Choi/Transluce → Deas & McKeown in the user-model lit review is the worked example: the original "first to probe user-modeling representations" claim shrank to "extends Choi's user-attribute decoding to the peer-ness meta-dimensional structure" (Cycle 3), then to "extends the Deas/McKeown SCM-linear-probe lineage with contrast-pair extraction, task-performance DV, Phase 3 causal mediation, and Phase 4 closed-model transfer" (walk). At each step the contribution narrowed but did not collapse, and each narrower version was more defensible than the broader one it replaced.
+
+The hardest part of this move is the verification step (next section). It's tempting to take the reviewer's characterization of the prior art at face value, because the reviewer sounds confident. Don't. Fetch the prior-art paper's abstract directly. Confirm it does what the reviewer says it does, on the variables and DV the reviewer says it does. The LatentQA-substitution and the walker-over-characterized-AuditBench moments both happened because someone trusted a confident-sounding summary instead of the source.
+
+### Procedural rule
+
+When a response cycle accepts a prior-art finding, the response file must include:
+
+- A "What [prior art] actually does" subsection sourced from the abstract (with a verbatim quote from the abstract where load-bearing claims are made).
+- A "What the artifact does that [prior art] doesn't" subsection enumerating the residual contributions.
+- The replacement contribution statement, written out, that goes into the artifact's edit.
+
+A response file that just says "accept the finding, the prior art preempts our novelty claim" without producing the residual is rejected. So is a response file that says "disagree, our work is different" without the point-by-point comparison.
+
 ## How this maps to our project-manager work
 
 Two artifacts in this repo would benefit from this loop:
