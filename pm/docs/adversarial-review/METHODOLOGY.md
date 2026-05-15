@@ -125,6 +125,8 @@ Block 4 is **not** load-bearing the way Block 3 is — readers can accept ugly p
 
 8. **Stop when findings get pedantic.** Three cycles was the Omerta paper's natural stopping point. Watch for findings that are nitpicks of phrasing rather than substance — that's the convergence signal.
 
+9. **Once length is flagged, the response cycle must net-cut.** The loop has a structural bias toward growth: each cycle surfaces new prior art and new findings, and the natural response is to *add* — a citation, a rebuttal paragraph, a clarifying gloss. Across the living-artifacts review, every cycle flagged the document as too long and every response added material anyway; it grew from ~13,000 to ~16,000 words while its load-bearing accessibility obligation got worse. The remedy is a hard rule: once any reviewer flags length, that cycle's response must produce a **net word reduction**, and the apply pass must count words before and after to confirm it. New citations go in tersely (one sentence each); every addition is paired with a larger cut; dense survey material moves to an appendix rather than sitting in the body. If the apply pass nets positive or flat, it has failed and must be redone. A document that converges on substance but bloats on length has not converged.
+
 ## Principle: narrow the contribution; don't collapse it
 
 When a reviewer surfaces closer prior art — a paper that does some of what the artifact claims is novel — there are two failure modes the response cycle has to avoid:
