@@ -244,6 +244,7 @@ No outstanding owner-attention items at this time. The plan is being run as a re
 - Adversarial probing for safety implications (e.g., can a user manipulate the model by playing a high-status persona?). Worth doing but a separate research thread.
 - Real-time peer-ness tracking that updates as the conversation evolves. The plan's framing manipulations are static; dynamic adaptation is a follow-up.
 - Direct production integration into pm's prompt generation. The earlier version of this plan had a Phase 4 "seeded conversations in pm" production track. That has been removed — the new Phase 4 is closed-model readout. Production use of peer-ness-aware prompting is a follow-up plan, conditional on Phase 2/3 success.
+- Production translation: fine-tuning models to be warmer or more empathetic as a generic property is documented to reduce accuracy (Ibrahim et al. 2026 Nature). The plan's results would inform input-framing strategies, not training-time interventions, unless follow-up work specifically addresses Ibrahim's trade-off.
 
 ## References (inline citations above)
 
