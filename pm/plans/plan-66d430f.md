@@ -64,6 +64,8 @@ Reproducible probes for the sub-dimensions of both meta-axes, validated by held-
 ### PR: Benchmark task suite
 Pick benchmarks with hard correctness signal: MMLU (knowledge), GSM8K / MATH (math reasoning), HumanEval (code), TruthfulQA (resistance to popular wrongness), FEVER (fact-checking where agreement with stated user belief is sometimes wrong).
 
+**Methodology note — primary DV must be non-contaminated.** MMLU, GSM8K, and HumanEval have appeared in enough training corpora that benchmark contamination is a known issue: if a contaminated benchmark is saturated, the framing effect has little headroom and Phase 2 risks registering a ceiling-artifact null rather than a true null. Phase 2's **primary DV is a non-contaminated recent benchmark — LiveBench, SWE-Bench Verified, or BBH-extra.** MMLU, GSM8K, and HumanEval are demoted to **secondary anchor DVs**, interpreted as relative-movement signals under matched-content paraphrases only, not as absolute accuracy.
+
 ### PR: Run multi-axis framing × benchmark grid
 For each task, generate matched conversation prefixes that vary along the five input axes (fractional factorial, same cell pattern as Phase 1). Run task accuracy across framings; in parallel, extract the Phase 1 probe values per example.
 
@@ -91,6 +93,15 @@ Steer one dimension while holding others fixed. Identifies which dimensions are 
 ### PR: Sycophancy-direction comparison
 Include a sycophancy probe as a control direction. If steering the sycophancy direction produces the same accuracy delta as steering the peer-ness directions, the plan's mechanism story is wrong but the result is still publishable — see Predicted outcomes.
 
+### PR: Alternative-mechanism disambiguation
+A positive Phase 2 result is consistent with at least three alternative mechanisms that have nothing to do with peer-ness perception specifically, and Phase 3 must disambiguate against all three:
+
+1. **Register-matching** — a generic "high-effort prompt → high-effort response" stylistic mirroring rule (cf. the Sclar 2024 prompt-formatting noise floor).
+2. **High-status-interlocutor rule** — a "cautious, careful output when the interlocutor reads as high-status" rule learned from corporate / formal genres, with status rather than equality doing the work.
+3. **RLHF-policy bypass** — a post-training "be careful when the user seems sophisticated" policy installed by reward signal, bypassing the pretraining-imitation story.
+
+For each, extract an independent direction (register, status-rule, RLHF-policy) by the same contrast-pair method and steer it against the peer-ness directions. The peer-ness mechanism story holds only if the peer-ness direction retains explanatory power once these three are accounted for.
+
 ### Acceptance Criteria (Phase 3)
 For at least one sub-dimension under each meta-axis, steering the probed direction reproduces ≥50% of the framing-induced accuracy change on at least one benchmark.
 
@@ -99,6 +110,8 @@ For at least one sub-dimension under each meta-axis, steering the probed directi
 **Goal.** Produce a calibrated output-token readout that elicits peer-ness self-reports from closed models (Claude / GPT / Gemini), grounded in the open-model probe as ground truth.
 
 **Standalone novelty.** First production-applicable peer-ness measurement for closed models. Lindsey (https://transformer-circuits.pub/2025/introspection/) and Binder et al. (https://arxiv.org/abs/2410.13787) show above-chance introspective accuracy. Turpin et al. (https://arxiv.org/abs/2305.04388) shows CoT confabulation is real. The plan's contribution is the calibration: tie the verbalized readout to a probe-grounded scale so closed-model self-reports have known accuracy.
+
+**Evidence bar — behavioral-grade only.** Phase 4 calibrates the closed-model verbalized readout against the *Phase 1 correlational probe*, not the causally-validated Phase 3 direction. Phase 4's transfer therefore inherits Phase 1's behavioral-grade evidence bar, not Phase 3's interchange-intervention bar. A positive Phase 4 result on a closed model means the verbalized self-report tracks the open-model probe well enough to be useful; it does **not** establish that the closed model has a causally-mediating peer-ness representation. Phase 4 results must be reported with this limitation stated explicitly so production-facing readers do not read closed-model transfer as a causal claim.
 
 **Implementation note.** Phase 4's design is informal NLA: ask the closed model to verbalize its judgment of the user via meta-prompt, calibrate against the Phase 1 open-model probe. Anthropic's published Natural Language Autoencoder stack (Fraser-Taliente, Kantamneni, Ong et al. 2026, https://transformer-circuits.pub/2026/nla/) is the formal version of the same operation, with a reconstructor enforcing faithfulness. The plan can either build its own activation-verbalizer-style readout or adopt the NLA stack directly when externally available for the target closed models. Code is released at https://github.com/kitft/natural_language_autoencoders. Activation Oracles (Karvonen et al., Anthropic 2025, https://alignment.anthropic.com/2025/activation-oracles/) is the adjacent supervised precursor.
 
@@ -132,6 +145,8 @@ The five axes map (imperfectly but legibly) onto the IV's sub-dimensions: polite
 Not all 2^5 = 32 combinations need to be sampled. The design is **Resolution V at 16 cells per benchmark**, sampling fractional combinations of the five framing axes (politeness × respect × honesty × good-faith × effort). All main effects and all two-factor interactions are estimable; higher-order (three-way and above) interactions are aliased with main effects and treated as negligible per the standard fractional-factorial assumption. Each cell is paraphrase-matched on length, vocabulary register, and task content; only the manipulated axes vary.
 
 Tier 2 may expand to a full 32-cell design (the saturated 2^5) for the conclusive runs; this loses no inference power relative to Resolution V and adds estimability of the higher-order interactions if Tier 1 suggests they are non-negligible.
+
+**Multiplicity control.** The design evaluates six sub-dimension probes against five framing axes across multiple benchmarks; the predicted-outcome table has six rows, each implicitly a separate hypothesis. Family-wise error control is a precondition for those rows being interpretable as independent findings rather than a multiple-comparisons artifact: apply **Holm-Bonferroni on the per-sub-dimension main effects** and **Benjamini-Hochberg FDR on the interaction terms**. The same multiplicity discipline applies to the multi-axis analysis that steers peer-ness against the register / status-rule / RLHF-policy alternative-mechanism directions. The correction is specified before Phase 2 is run.
 
 ### Confounders the design controls
 
