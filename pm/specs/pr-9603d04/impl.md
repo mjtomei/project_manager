@@ -39,16 +39,22 @@ need to drive is the set of `gh` CLI invocations:
   polling path.
 - `pm_core/cli/pr.py` — direct `subprocess.run` for `gh pr merge` (line ~1839)
   and `gh pr close` (line ~2624).
-- `pm_core/git_ops.py:244` — `gh pr create` for *pm-state-sync* commits. This
-  is **out of scope** ("invocations elsewhere that aren't on the backend hot
-  path").
+- `pm_core/git_ops.py:244` — `gh pr create` for *pm-state-sync* commits.
 
 `backend.py:GitHubBackend` only exposes `is_merged` / `pr_instructions`; a
 `Backend`-subclass fake would cover almost none of the path. Therefore a
 **transport-level fake** is far less invasive: intercept `gh` at the
-`run_gh()` chokepoint. The three direct `subprocess.run(["gh", ...])` calls on
-the hot path are re-routed through `gh_ops.run_gh()` so a single chokepoint
-covers everything. This is also a small code-quality consolidation.
+`run_gh()` chokepoint. **Every** direct `subprocess.run(["gh", ...])` call in
+pm — the three on the PR hot path (`sync_from_github`, `cli/pr.py` merge and
+close) plus the `git_ops` pm-state-sync `gh pr create` — is re-routed through
+`gh_ops.run_gh()` so a single chokepoint covers all `gh` operations pm runs.
+This is also a small code-quality consolidation.
+
+> **Scope note (2026-05-17):** the original description excluded the
+> `git_ops` `gh pr create` as "not the backend hot path". Per follow-up
+> clarification, *every* `gh` CLI operation pm runs today must have realistic
+> functionality and state behind it in the fake — so it is now routed
+> through the chokepoint and handled like the rest.
 
 ## 1. Requirements (grounded)
 
@@ -62,9 +68,11 @@ covers everything. This is also a small code-quality consolidation.
   delegates to it when installed (and skips `_check_gh()`), else runs the real
   subprocess. Add a `timeout` param to `run_gh()` (preserves the 30s timeout
   `sync_from_github` currently uses).
-- **R3 Route hot-path direct calls through `run_gh()`**: `sync_from_github`'s
-  `pr view`, `cli/pr.py`'s `pr merge` and `pr close`. Behavior preserved
-  (returncode/stdout/stderr, cwd, check=False, timeout).
+- **R3 Route all direct `gh` calls through `run_gh()`**: `sync_from_github`'s
+  `pr view`, `cli/pr.py`'s `pr merge` and `pr close`, and `git_ops`'s
+  pm-state-sync `pr create`. Behavior preserved (returncode/stdout/stderr,
+  cwd, check=False, timeout). After this, every `gh` operation pm runs flows
+  through the one chokepoint the fake intercepts.
 - **R4 Scriptable responses**: `queue_response(match, returncode, stdout,
   stderr)` injects canned results consumed FIFO when a command matches —
   composing success / 4xx / 5xx / rate-limit / conflict / merged-elsewhere
@@ -111,7 +119,8 @@ covers everything. This is also a small code-quality consolidation.
 - *Full Backend reimpl vs transport fake* → transport fake (see probe).
 - *Match semantics for `queue_response`* → match against a space-joined prefix
   of the `gh` argv (e.g. `"pr merge"`), or a callable predicate. Consumed once.
-- *git_ops `gh pr create`* → left alone; out of scope, not hot path.
+- *git_ops `gh pr create`* → routed through `run_gh()` like every other `gh`
+  call (see scope note); the fake handles it (`--head`, no `--base`).
 - *gh CLI exact JSON shape* → fake emits the documented field names; tests
   only assert on fields pm actually reads.
 

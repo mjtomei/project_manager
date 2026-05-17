@@ -108,6 +108,21 @@ def test_close_pr(fake_github):
     assert fake_github.prs[pr.number].state == "CLOSED"
 
 
+def test_pr_create_head_without_base(fake_github):
+    """The git_ops state-sync form: `gh pr create --head X` (no --base)."""
+    result = gh_ops.run_gh(
+        "pr", "create",
+        "--title", "pm: update project state",
+        "--body", "Automated pm state sync.",
+        "--head", "pm-state-sync",
+        check=False,
+    )
+    assert result.returncode == 0
+    pr = fake_github.prs[1]
+    assert pr.head == "pm-state-sync"
+    assert pr.base == fake_github.default_branch  # defaulted
+
+
 def test_get_pr_state(fake_github):
     pr = fake_github.add_pr(head="feature-x", is_draft=True)
     info = gh_ops.get_pr_state(pr.number)
