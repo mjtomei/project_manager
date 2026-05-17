@@ -290,20 +290,29 @@ def fake_claude_config_for_type(
     """Return the merged fake-claude config for *session_type*, or None.
 
     Merges ``_defaults`` with the per-type entry and returns a flat dict
-    suitable for ``_fake_claude_args()``.  Returns None when:
+    suitable for ``_fake_claude_args()``.
+
+    The special ``_all`` key turns on "fake everything" mode: any session
+    type without its own entry — and any call with no *session_type* at all —
+    falls back to ``_all``, which is always treated as a no-verdict session
+    (its ``verdicts``, if any, are ignored).  Explicit per-type entries still
+    win over ``_all``.
+
+    Returns None when:
 
     - no fake-claude config file exists, or
-    - *session_type* is None, or
-    - *session_type* is not listed in the config (intentionally unfaked).
+    - *session_type* has no entry and there is no ``_all`` catch-all.
     """
-    if not session_type:
-        return None
     raw = fake_claude_config(session_tag)
     if raw is None:
         return None
-    type_config = raw.get(session_type)
+    type_config = raw.get(session_type) if session_type else None
     if type_config is None:
-        return None
+        all_config = raw.get("_all")
+        if all_config is None:
+            return None
+        # Catch-all is always a no-verdict session — strip any stray verdicts.
+        type_config = {k: v for k, v in all_config.items() if k != "verdicts"}
     defaults = raw.get("_defaults", {})
     binary = raw.get("binary")
     merged = {**defaults, **type_config}
@@ -324,6 +333,14 @@ def set_fake_claude_config(session_tag: str, config: dict) -> None:
 
     errors: list[str] = []
     for key, value in config.items():
+        if key == "_all":
+            # Catch-all "fake everything" entry — a no-verdict session, so it
+            # must not carry verdicts (they would be silently ignored).
+            if isinstance(value, dict) and value.get("verdicts"):
+                errors.append(
+                    "'_all' is a no-verdict catch-all; remove its 'verdicts'."
+                )
+            continue
         if key.startswith("_") or key == "binary":
             continue  # _defaults, binary — not session-type entries
         if not isinstance(value, dict):

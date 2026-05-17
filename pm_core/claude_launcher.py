@@ -34,11 +34,14 @@ def _pick_fake_verdict(verdicts: dict) -> str:
 def _fake_claude_args(config: dict) -> list[str]:
     """Build the fake-claude argv (excluding the binary) from a config dict.
 
-    Picks a verdict randomly from the weighted ``verdicts`` map and
-    translates recognised config keys into CLI flags.
+    Picks a verdict randomly from the weighted ``verdicts`` map.  An empty or
+    absent ``verdicts`` map means a no-verdict session (impl/watcher/merge, or
+    a session type matched only by the ``_all`` catch-all): the fake emits
+    ``--verdict NONE`` and stays open like a real interactive session.
+    Recognised config keys are translated into CLI flags.
     """
-    verdicts = config.get("verdicts", {"PASS": 1})
-    verdict = _pick_fake_verdict(verdicts)
+    verdicts = config.get("verdicts") or {}
+    verdict = _pick_fake_verdict(verdicts) if verdicts else "NONE"
     args = ["--verdict", verdict]
     for cfg_key, flag in (
         ("preamble", "--preamble"),
@@ -47,6 +50,7 @@ def _fake_claude_args(config: dict) -> list[str]:
         ("body_lines", "--body-lines"),
         ("body_batch", "--body-batch"),
         ("body_delay", "--body-delay"),
+        ("hold", "--hold"),
     ):
         if cfg_key in config:
             args.extend([flag, str(config[cfg_key])])

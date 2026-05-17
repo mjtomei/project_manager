@@ -35,6 +35,14 @@ ALL_VERDICTS = (
     + [end for _, end in BLOCK_VERDICTS.values()]
 )
 
+# Sentinel "verdict" for non-verdict sessions (impl, watcher, merge): the fake
+# writes realistic output but emits no verdict keyword and — like a real
+# interactive Claude session — stays open instead of exiting.
+NO_VERDICT = "NONE"
+
+# Everything accepted by the --verdict flag, including the no-verdict sentinel.
+ALL_VERDICT_CHOICES = ALL_VERDICTS + [NO_VERDICT]
+
 # ---------------------------------------------------------------------------
 # Per-session-type verdict constraints
 # ---------------------------------------------------------------------------
@@ -153,8 +161,30 @@ _BODY_LINES = [
 ]
 
 
+def _hold_open(hold: float | None) -> None:
+    """Keep the process alive after a no-verdict session's output.
+
+    A real interactive Claude session does not exit when it finishes a turn —
+    it stays open in its pane waiting for the next input.  No-verdict fake
+    sessions (impl, watcher, merge) mimic that:
+
+    - ``hold is None``  — block on stdin until EOF (the pane's tty closes when
+      the window is killed).  This is the default for live tmux launches.
+    - ``hold >= 0``     — sleep that many seconds, then exit.  Bounded form
+      for tests.  ``hold == 0`` exits immediately.
+    """
+    if hold is None:
+        try:
+            sys.stdin.read()
+        except (KeyboardInterrupt, OSError):
+            pass
+        return
+    if hold > 0:
+        time.sleep(hold)
+
+
 def run_fake_claude(
-    verdict: str,
+    verdict: str | None,
     preamble: int = 3,
     preamble_delay: float = 0.0,
     delay: float = 0.0,
@@ -164,6 +194,7 @@ def run_fake_claude(
     body_delay: float = 0.0,
     stream: bool = False,
     char_delay: float = 0.015,
+    hold: float | None = None,
 ) -> None:
     """Execute the fake Claude session.
 
@@ -174,10 +205,12 @@ def run_fake_claude(
          verdict poller does not prematurely accept keywords from earlier
          output while new content is still arriving.
       3. Sleep *delay* seconds (simulates overall session duration).
-      4. The verdict block.
+      4. The verdict block — skipped for no-verdict sessions.
 
     Args:
-        verdict: Verdict keyword to emit (required).
+        verdict: Verdict keyword to emit.  ``None`` or ``"NONE"`` runs a
+            no-verdict session (impl/watcher/merge): output but no verdict,
+            and the process stays open per *hold* instead of exiting.
         preamble: Number of filler prose lines before the generated body.
         preamble_delay: Seconds to sleep between each preamble line.
         delay: Seconds to sleep immediately before writing the verdict.
@@ -188,8 +221,12 @@ def run_fake_claude(
         body_delay: Seconds to sleep between each *body_batch* chunk.
         stream: Write output character-by-character to simulate streaming.
         char_delay: Per-character sleep when *stream* is True (default 0.015 s).
+        hold: No-verdict sessions only — see :func:`_hold_open`.  ``None``
+            (default) blocks on stdin until the pane closes; a number sleeps
+            that many seconds then exits.  Ignored for verdict sessions.
     """
-    upper = verdict.upper()
+    no_verdict = verdict is None or verdict.upper() == NO_VERDICT
+    upper = "" if no_verdict else verdict.upper()
     _w = lambda text: _write(text, stream=stream, char_delay=char_delay)
 
     # 1. Preamble lines
@@ -212,6 +249,12 @@ def run_fake_claude(
     # 3. Pre-verdict delay
     if delay > 0:
         time.sleep(delay)
+
+    # No-verdict session: emit no verdict and stay open like a real
+    # interactive Claude session would.
+    if no_verdict:
+        _hold_open(hold)
+        return
 
     # 4. Verdict block
     if upper in SINGLE_LINE_VERDICTS:

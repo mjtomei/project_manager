@@ -10,6 +10,8 @@ import pytest
 
 from pm_core.fake_claude import (
     ALL_VERDICTS,
+    ALL_VERDICT_CHOICES,
+    NO_VERDICT,
     SINGLE_LINE_VERDICTS,
     BLOCK_VERDICTS,
     SESSION_TYPE_VERDICTS,
@@ -373,6 +375,55 @@ class TestVerdictDetection:
 
 
 # ---------------------------------------------------------------------------
+# run_fake_claude — no-verdict (NONE) sessions
+# ---------------------------------------------------------------------------
+
+class TestRunFakeClaudeNoVerdict:
+    def _capture(self, **kwargs) -> str:
+        kwargs.setdefault("hold", 0)  # don't block the test on stdin
+        buf = StringIO()
+        with patch("sys.stdout", buf):
+            run_fake_claude(**kwargs)
+        return buf.getvalue()
+
+    @pytest.mark.parametrize("verdict", [None, "NONE", "none"])
+    def test_no_verdict_emits_no_keyword(self, verdict):
+        out = self._capture(verdict=verdict, preamble=3)
+        lines = [l.strip() for l in out.splitlines() if l.strip()]
+        # Preamble prose only — no verdict keyword, no block markers.
+        assert len(lines) == 3
+        for v in ALL_VERDICTS:
+            assert v not in lines
+        for start, end in BLOCK_VERDICTS.values():
+            assert start not in lines and end not in lines
+
+    def test_no_verdict_still_writes_body_lines(self):
+        out = self._capture(verdict="NONE", preamble=2, body_lines=4)
+        lines = [l for l in out.splitlines() if l.strip()]
+        assert len(lines) == 6
+
+    def test_hold_sleeps_then_returns(self):
+        with patch("pm_core.fake_claude.time.sleep") as mock_sleep:
+            self._capture(verdict="NONE", preamble=0, hold=2.5)
+        assert call(2.5) in mock_sleep.call_args_list
+
+    def test_hold_zero_does_not_sleep_or_block(self):
+        with patch("pm_core.fake_claude.time.sleep") as mock_sleep:
+            self._capture(verdict="NONE", preamble=0, hold=0)
+        assert call(0) not in mock_sleep.call_args_list
+
+    def test_hold_none_blocks_on_stdin(self):
+        # hold=None must read stdin until EOF — emulates staying open until
+        # the pane's tty closes.  A finite StringIO returns immediately.
+        buf = StringIO()
+        with patch("sys.stdout", buf), \
+             patch("sys.stdin", StringIO("")) as fake_stdin:
+            run_fake_claude(verdict="NONE", preamble=1, hold=None)
+        # stdin was consumed (read to EOF)
+        assert fake_stdin.read() == ""
+
+
+# ---------------------------------------------------------------------------
 # bin/fake-claude executable
 # ---------------------------------------------------------------------------
 
@@ -412,6 +463,29 @@ class TestBinFakeClaude:
         assert "FLAGGED_START" in result.stdout
         assert "test failure" in result.stdout
         assert "FLAGGED_END" in result.stdout
+
+    def test_no_verdict_output(self):
+        """--verdict NONE emits output but no verdict keyword; --hold 0 exits."""
+        result = subprocess.run(
+            [sys.executable, str(BIN_FAKE_CLAUDE), "--verdict", "NONE",
+             "--preamble", "2", "--hold", "0"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+        assert len(lines) == 2
+        for v in ALL_VERDICTS:
+            assert v not in lines
+
+    def test_no_verdict_blocks_until_stdin_closes(self):
+        """Without --hold, a no-verdict session stays open until stdin EOF."""
+        result = subprocess.run(
+            [sys.executable, str(BIN_FAKE_CLAUDE), "--verdict", "NONE",
+             "--preamble", "1"],
+            input="",  # closing stdin (EOF) lets the held-open session exit
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
 
     def test_invalid_verdict_fails(self):
         result = subprocess.run(
@@ -669,6 +743,50 @@ class TestFakeClaudeConfig:
         result = fake_claude_config_for_type("review", tag)
         assert result["binary"] == "/custom/fake"
 
+    # _all catch-all ("fake everything") mode
+
+    def test_all_catches_absent_session_type(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        config = {
+            "_defaults": {"preamble": 4},
+            "_all": {"delay": 0.2},
+            "review": {"verdicts": {"PASS": 1}},
+        }
+        set_fake_claude_config(tag, config)
+        # "impl" has no entry → falls back to _all (no-verdict catch-all)
+        result = fake_claude_config_for_type("impl", tag)
+        assert result is not None
+        assert "verdicts" not in result        # no-verdict session
+        assert result["delay"] == 0.2          # from _all
+        assert result["preamble"] == 4         # from _defaults
+
+    def test_all_catches_none_session_type(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {"_all": {"preamble": 1}})
+        result = fake_claude_config_for_type(None, tag)
+        assert result is not None
+        assert "verdicts" not in result
+
+    def test_explicit_type_wins_over_all(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        config = {
+            "_all": {"delay": 9.0},
+            "review": {"verdicts": {"PASS": 1}, "delay": 1.0},
+        }
+        set_fake_claude_config(tag, config)
+        result = fake_claude_config_for_type("review", tag)
+        assert result["verdicts"] == {"PASS": 1}   # explicit entry, not _all
+        assert result["delay"] == 1.0
+
+    def test_set_raises_on_verdicts_in_all(self, tmp_path, monkeypatch):
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        with pytest.raises(ValueError, match="_all"):
+            set_fake_claude_config(tag, {"_all": {"verdicts": {"PASS": 1}}})
+
 
 # ---------------------------------------------------------------------------
 # Launcher fake-claude integration (_pick_fake_verdict, _fake_claude_args,
@@ -713,6 +831,26 @@ class TestFakeClaudeLauncher:
         args = _fake_claude_args({"verdicts": {"PASS": 1}, "body_lines": 10})
         assert "--body-lines" in args
 
+    def test_fake_claude_args_no_verdicts_emits_none(self):
+        """A config with no verdicts (no-verdict / _all catch-all) emits NONE."""
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"preamble": 2})
+        idx = args.index("--verdict")
+        assert args[idx + 1] == "NONE"
+
+    def test_fake_claude_args_empty_verdicts_emits_none(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"verdicts": {}})
+        idx = args.index("--verdict")
+        assert args[idx + 1] == "NONE"
+
+    def test_fake_claude_args_passes_hold(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"hold": 5})
+        assert "--hold" in args
+        idx = args.index("--hold")
+        assert args[idx + 1] == "5"
+
     def test_find_claude_always_uses_shutil_which(self, monkeypatch):
         """find_claude no longer checks fake config — session_type is required."""
         from pm_core import claude_launcher
@@ -736,11 +874,11 @@ class TestFakeClaudeLauncher:
         assert "--verdict" in cmd
         assert "PASS" in cmd
 
-    def test_build_shell_cmd_no_fake_for_impl(self, monkeypatch):
-        """impl session type should not be faked even when config exists."""
+    def test_build_shell_cmd_no_fake_when_config_resolves_none(self, monkeypatch):
+        """When config resolution returns None (no entry, no _all), use real claude."""
         from pm_core import claude_launcher
         monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
-                            lambda st, tag=None: None)  # impl returns None
+                            lambda st, tag=None: None)
         monkeypatch.setattr("pm_core.paths.skip_permissions_enabled", lambda tag=None: False)
         cmd = claude_launcher.build_claude_shell_cmd(prompt="hi", session_type="impl")
         assert "--verdict" not in cmd
@@ -752,6 +890,18 @@ class TestFakeClaudeLauncher:
         monkeypatch.setattr("pm_core.paths.skip_permissions_enabled", lambda tag=None: False)
         cmd = claude_launcher.build_claude_shell_cmd(prompt="hi")
         assert "--verdict" not in cmd
+
+    def test_build_shell_cmd_no_verdict_config_emits_none(self, monkeypatch):
+        """A no-verdict config (e.g. impl via _all catch-all) emits --verdict NONE."""
+        from pm_core import claude_launcher
+        no_verdict_config = {"preamble": 2, "hold": 3}
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: no_verdict_config)
+        cmd = claude_launcher.build_claude_shell_cmd(
+            prompt="hi", session_type="impl")
+        assert str(claude_launcher._FAKE_CLAUDE_BIN) in cmd
+        assert "--verdict NONE" in cmd
+        assert "--hold 3" in cmd
 
     def test_launch_claude_uses_fake_binary(self, monkeypatch, tmp_path):
         """launch_claude must invoke fake-claude binary, not the real claude."""

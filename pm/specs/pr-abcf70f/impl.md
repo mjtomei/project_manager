@@ -8,17 +8,20 @@ loop state machines, and verification transitions without real API calls.
 
 1. **Core engine — `pm_core/fake_claude.py`**
    - `run_fake_claude(verdict, preamble, preamble_delay, delay, body, body_lines,
-     body_batch, body_delay, stream, char_delay)` writes to stdout in the order:
-     preamble lines → generated body lines (batched, with inter-batch delay) →
-     pre-verdict sleep → verdict block.
-   - **Single-line verdicts** (`PASS`, `PASS_WITH_SUGGESTIONS`, `NEEDS_WORK`,
-     `INPUT_REQUIRED`, `VERIFIED`): bare keyword on its own line.
+     body_batch, body_delay, stream, char_delay, hold)` writes to stdout in the
+     order: preamble lines → generated body lines (batched, with inter-batch
+     delay) → pre-verdict sleep → verdict block.
+   - **Single-line verdicts** (`PASS`, `NEEDS_WORK`, `INPUT_REQUIRED`,
+     `VERIFIED`): bare keyword on its own line.
    - **Block verdicts** (`FLAGGED`, `REFINED_STEPS`, `QA_PLAN`): `_START` marker,
      body (default placeholder when omitted), `_END` marker — each on its own line.
+   - **No-verdict sessions** (`verdict` is `None` or `"NONE"`): emit preamble/body
+     but no verdict block, then stay open per `hold` (see requirement 9) — models
+     `impl`/`watcher`/`merge` interactive sessions.
    - `--verdict` accepts the short name (`FLAGGED`) or the bare end marker
      (`FLAGGED_END`); both resolve to the same block via `_resolve_block_name`.
-   - Output must be detectable by `pm_core.loop_shared.extract_verdict_from_content`
-     with the keyword sets used by review/qa loops.
+   - Output must be detectable by `pm_core.loop_shared.match_verdict` (scanned
+     line-by-line) with the keyword sets used by review/qa loops.
 
 2. **CLI — `pm fake-claude`** (`pm_core/cli/fake_claude.py`)
    - Click command exposing all engine parameters; `--verdict` required, all
@@ -34,27 +37,37 @@ loop state machines, and verification transitions without real API calls.
 
 4. **Per-session-type verdict catalogue** (`SESSION_TYPE_VERDICTS`)
    - Maps each `pm_core.model_config.SESSION_TYPES` entry to the verdicts valid
-     for it (e.g. `review` → PASS/PASS_WITH_SUGGESTIONS/NEEDS_WORK/INPUT_REQUIRED;
+     for it (e.g. `review` → PASS/NEEDS_WORK/INPUT_REQUIRED;
      `qa_verification` → VERIFIED/FLAGGED; `qa_planning` → QA_PLAN; `impl`,
-     `watcher`, `merge` → empty).
+     `watcher`, `merge` → empty = no-verdict sessions).
    - `validate_session_verdicts(session_type, verdicts)` returns error-string
      list (empty = valid).
 
 5. **Session-file override — `pm_core/paths.py`**
    - `fake_claude_config(tag)` reads `<sessions_dir>/<tag>/fake-claude` JSON.
    - `set_fake_claude_config(tag, cfg)` validates per-type verdicts before writing,
-     raises `ValueError` on invalid verdict / unknown session type.
+     raises `ValueError` on invalid verdict / unknown session type / `verdicts`
+     placed inside the `_all` catch-all.
    - `clear_fake_claude(tag)` removes the file.
    - `fake_claude_config_for_type(session_type, tag)` merges `_defaults`,
-     per-type overrides, and propagates top-level `binary`. Returns `None` if
-     `session_type` absent or no file. `_defaults` and `binary` keys are not
-     validated as session types.
+     per-type overrides, and propagates top-level `binary`. `_defaults`,
+     `binary`, and `_all` keys are not validated as session types.
+   - **`_all` catch-all ("fake everything"):** when the config has an `_all`
+     key, any session type without its own entry — and any call with
+     `session_type=None` — falls back to `_all`, always treated as a
+     **no-verdict** session (its `verdicts`, if any, are stripped/rejected).
+     Explicit per-type entries still win. Without `_all`, an absent type or
+     `None` session_type still returns `None` (real claude).
 
 6. **Launcher integration — `pm_core/claude_launcher.py`**
    - `_pick_fake_verdict(verdicts)` does weighted random selection from the
      verdict→weight dict.
    - `_fake_claude_args(cfg)` builds the CLI args (verdict, preamble, delay,
-     body_lines, …).
+     body_lines, `hold`, …). A config with empty/absent `verdicts` emits
+     `--verdict NONE` (no-verdict session).
+   - `watcher` and `impl` launch sites pass `session_type=` so they can be
+     faked individually; `merge` already does. `_all` mode additionally fakes
+     untyped/unlisted launches without needing each call site threaded.
    - `_fake_claude_config_for_type(session_type)` thin wrapper around
      `paths.fake_claude_config_for_type`.
    - `build_claude_shell_cmd(prompt, session_type=…)`: when fake config exists
@@ -68,18 +81,32 @@ loop state machines, and verification transitions without real API calls.
      trigger.
 
 7. **Companion fixtures — `tests/fixtures/fake_claude/*.txt`**
-   - One file per verdict (`pass.txt`, `pass_with_suggestions.txt`,
-     `needs_work.txt`, `input_required.txt`, `verified.txt`, `flagged.txt`,
-     `refined_steps.txt`, `qa_plan.txt`); each contains the rendered output of
-     the corresponding verdict for use in unit tests / golden comparisons.
+   - One file per verdict (`pass.txt`, `needs_work.txt`, `input_required.txt`,
+     `verified.txt`, `flagged.txt`, `refined_steps.txt`, `qa_plan.txt`); each
+     contains the rendered output of the corresponding verdict for use in unit
+     tests / golden comparisons. (`pass_with_suggestions.txt` was dropped with
+     PR #166.)
 
 8. **Tests — `tests/test_fake_claude.py`** covering:
-   `_resolve_block_name`, single-line + block verdict output shape, preamble
-   sizing & delay semantics, body-line batching, stream-mode equivalence,
-   fixture content, integration with `extract_verdict_from_content`, the
-   `bin/fake-claude` executable (subprocess), config round-trip / validation,
+   `_resolve_block_name`, single-line + block verdict output shape, no-verdict
+   (`NONE`) output + `hold` semantics, preamble sizing & delay semantics,
+   body-line batching, stream-mode equivalence, fixture content, integration
+   with `loop_shared.match_verdict`, the `bin/fake-claude` executable
+   (subprocess), config round-trip / validation, `_all` catch-all resolution,
    `_pick_fake_verdict` / `_fake_claude_args`, and launcher substitution under
    each entry point.
+
+9. **No-verdict sessions & `hold` — staying open like a real session**
+   - `impl`, `watcher`, `merge` (and any type matched only by `_all`) never
+     emit a verdict. The fake writes preamble/body, then **does not exit** —
+     a real interactive Claude session stays in its pane after a turn.
+   - `run_fake_claude(hold=…)` / `--hold SECONDS`:
+     - omitted (`None`) — block on stdin until EOF (the pane's tty closing
+       when the window is killed). Default for live tmux launches.
+     - `>= 0` — sleep that many seconds then exit (bounded form for tests;
+       `0` exits immediately).
+   - `hold` is ignored for verdict sessions (they exit after the verdict, as
+     before).
 
 ## Implicit Requirements
 

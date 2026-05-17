@@ -3,13 +3,13 @@
 import click
 
 from pm_core.cli import cli
-from pm_core.fake_claude import ALL_VERDICTS
+from pm_core.fake_claude import ALL_VERDICT_CHOICES
 
 
 @cli.command("fake-claude")
 @click.option("--verdict", required=True,
-              type=click.Choice(ALL_VERDICTS, case_sensitive=False),
-              help="Verdict to emit.")
+              type=click.Choice(ALL_VERDICT_CHOICES, case_sensitive=False),
+              help="Verdict to emit; NONE runs a no-verdict session.")
 @click.option("--preamble", default=3, show_default=True,
               help="Number of filler prose lines before the generated body.")
 @click.option("--preamble-delay", default=0.0, show_default=True,
@@ -28,10 +28,14 @@ from pm_core.fake_claude import ALL_VERDICTS
               help="Write output character-by-character to simulate streaming.")
 @click.option("--char-delay", default=0.015, show_default=True,
               help="Per-character sleep when --stream is active (seconds).")
+@click.option("--hold", type=float, default=None,
+              help="No-verdict (--verdict NONE) sessions only: seconds to "
+                   "stay open after output. Omitted blocks until stdin "
+                   "closes; 0 exits immediately.")
 def fake_claude_cmd(verdict: str, preamble: int, preamble_delay: float,
                     delay: float, body: str | None,
                     body_lines: int, body_batch: int, body_delay: float,
-                    stream: bool, char_delay: float) -> None:
+                    stream: bool, char_delay: float, hold: float | None) -> None:
     """Emit a verdict for integration testing without calling the real Claude API.
 
     Output sequence: preamble lines → generated body lines (batched) →
@@ -42,6 +46,10 @@ def fake_claude_cmd(verdict: str, preamble: int, preamble_delay: float,
 
     Block-style verdicts (FLAGGED, REFINED_STEPS, QA_PLAN) are written as
     a START marker, an optional body (--body), and an END marker.
+
+    NONE runs a no-verdict session (impl/watcher/merge): output but no
+    verdict keyword, and the process stays open like a real interactive
+    session — see --hold.
 
     Use --body-lines / --body-batch / --body-delay together to emit content
     in timed batches before the verdict — useful for testing that the verdict
@@ -69,4 +77,5 @@ def fake_claude_cmd(verdict: str, preamble: int, preamble_delay: float,
         body_delay=body_delay,
         stream=stream,
         char_delay=char_delay,
+        hold=hold,
     )

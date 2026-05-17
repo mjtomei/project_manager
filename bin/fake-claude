@@ -11,6 +11,7 @@ Usage:
   fake-claude --verdict FLAGGED --body "Step 1: FAILED"
   fake-claude --verdict QA_PLAN --preamble 0
   fake-claude --verdict PASS --stream
+  fake-claude --verdict NONE              # no-verdict session, stays open
 """
 
 import argparse
@@ -20,7 +21,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pm_core.fake_claude import ALL_VERDICTS, run_fake_claude
+from pm_core.fake_claude import ALL_VERDICT_CHOICES, run_fake_claude
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -33,9 +34,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--verdict",
         required=False,
         default="PASS",
-        choices=ALL_VERDICTS,
+        choices=ALL_VERDICT_CHOICES,
         metavar="VERDICT",
-        help=f"Verdict to emit (default: PASS). One of: {', '.join(ALL_VERDICTS)}",
+        help=f"Verdict to emit (default: PASS); NONE runs a no-verdict "
+             f"session. One of: {', '.join(ALL_VERDICT_CHOICES)}",
     )
     p.add_argument(
         "--preamble",
@@ -98,6 +100,15 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="Per-character sleep when --stream is active (default: 0.015).",
     )
+    p.add_argument(
+        "--hold",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="No-verdict (--verdict NONE) sessions only: seconds to stay "
+             "open after output. Omitted blocks until stdin closes (the "
+             "pane is killed); 0 exits immediately.",
+    )
     return p
 
 
@@ -117,6 +128,7 @@ def main() -> None:
         body_delay=args.body_delay,
         stream=args.stream,
         char_delay=args.char_delay,
+        hold=args.hold,
     )
 
 
