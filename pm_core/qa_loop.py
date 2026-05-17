@@ -445,6 +445,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     finalize_cmd = build_claude_shell_cmd(
         prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
         session_id=finalize_session_id,
+        session_tag=state.session_tag,
     )
 
     try:
@@ -977,6 +978,7 @@ def _build_concretize_cmd(
     instruction_content: str | None = None,
     write_dir: str | None = None,
     session_id: str | None = None,
+    session_tag: str | None = None,
 ) -> str:
     """Build the shell command for the concretization step."""
     from pm_core.claude_launcher import build_claude_shell_cmd
@@ -994,6 +996,7 @@ def _build_concretize_cmd(
         effort=resolution.effort, cwd=cwd, write_dir=write_dir,
         session_id=session_id,
         session_type="qa_scenario",
+        session_tag=session_tag,
     )
 
     if container_name:
@@ -1127,7 +1130,8 @@ def _launch_scenario_0(
         prompt=child_prompt,
         model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
         cwd=scenario_cwd,
-        session_type="qa_scenario")
+        session_type="qa_scenario",
+        session_tag=state.session_tag)
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
@@ -1361,7 +1365,8 @@ def _launch_scenarios_in_tmux(
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
             instruction_content=instruction_content,
-            session_id=scenario.concretize_session_id)
+            session_id=scenario.concretize_session_id,
+            session_tag=state.session_tag)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1601,7 +1606,8 @@ def _launch_scenarios_in_containers(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
             write_dir=str(clone_path),
-            session_id=scenario.concretize_session_id)
+            session_id=scenario.concretize_session_id,
+            session_tag=state.session_tag)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1792,6 +1798,7 @@ def _build_scenario_run_cmd(
         effort=qa_resolution.effort,
         transcript=transcript, cwd=wd_in, write_dir=host_clone,
         session_type="qa_scenario",
+        session_tag=state.session_tag,
     )
 
     if use_containers:
@@ -1963,6 +1970,7 @@ def _poll_tmux_verdicts(
                 scenario, verdict, content, pr_data, data,
                 session=session, stop_check=_stop,
                 qa_workdir=state.qa_workdir,
+                session_tag=state.session_tag,
             )
         except Exception:
             _log.warning("Verification thread crashed for scenario %d — "
@@ -2427,6 +2435,7 @@ def _verify_single_scenario(
     session: str | None = None,
     stop_check: Callable[[], bool] | None = None,
     qa_workdir: str | None = None,
+    session_tag: str | None = None,
 ) -> tuple[bool, str, str | None]:
     """Verify a single scenario's verdict in its dedicated verifier pane.
 
@@ -2513,6 +2522,7 @@ def _verify_single_scenario(
             effort=resolution.effort,
             cwd=verify_cwd, session_id=verify_session_id,
             session_type="qa_verification",
+            session_tag=session_tag,
         )
         try:
             verify_pane = tmux_mod.split_pane_at(
@@ -2733,7 +2743,8 @@ def run_qa_sync(
             model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
             cwd=workdir_path,
             session_id=planner_session_id,
-            session_type="qa_planning")
+            session_type="qa_planning",
+            session_tag=state.session_tag)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window

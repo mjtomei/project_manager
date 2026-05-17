@@ -68,6 +68,14 @@ loop state machines, and verification transitions without real API calls.
    - `watcher` and `impl` launch sites pass `session_type=` so they can be
      faked individually; `merge` already does. `_all` mode additionally fakes
      untyped/unlisted launches without needing each call site threaded.
+   - **QA call sites pass `session_tag=state.session_tag`.** The QA
+     orchestrator's cwd may be a QA workdir, so `build_claude_shell_cmd`'s
+     cwd-derived `get_session_tag()` fallback would drift. `QALoopState.session_tag`
+     (captured once from the tmux session name) is the authoritative,
+     drift-proof tag, and is the dir pm's other per-session files live under.
+     All six QA `build_claude_shell_cmd` calls thread it (concretize, scenario,
+     scenario-0, verification, planning, finalize); `_build_concretize_cmd` and
+     `_verify_single_scenario` gained a `session_tag` parameter to carry it.
    - `_fake_claude_config_for_type(session_type)` thin wrapper around
      `paths.fake_claude_config_for_type`.
    - `build_claude_shell_cmd(prompt, session_type=…)`: when fake config exists
