@@ -938,9 +938,14 @@ class TestGitHubMergePull:
         mock_finalize, tmp_github_merge_project,
     ):
         """Re-attempt on already-merged PR should still pull and finalize."""
-        # gh pr merge fails (already merged)
-        mock_subprocess.return_value = MagicMock(
-            returncode=1, stdout="", stderr="already been merged")
+        # gh pr merge fails (already merged), but `gh auth status` (the
+        # gh_ops pre-flight check) must still succeed.
+        def gh_side_effect(*args, **kwargs):
+            argv = args[0] if args else []
+            if "auth" in argv:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="already been merged")
+        mock_subprocess.side_effect = gh_side_effect
 
         def run_git_side_effect(*args, **kwargs):
             if args[0] == "rev-parse":

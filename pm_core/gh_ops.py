@@ -4,9 +4,38 @@ import json
 import shutil
 import subprocess
 import sys
-from typing import Optional
+from contextlib import contextmanager
+from typing import Callable, Optional
 
 from pm_core.paths import log_shell_command
+
+
+# Pluggable `gh` transport. When set, run_gh() delegates to this callable
+# instead of spawning the real `gh` CLI. Used by FakeGitHubBackend
+# (pm_core/fake_github.py) so regression tests can drive the github backend
+# code paths without hitting the real GitHub API. The runner takes the gh
+# argv (without the leading "gh") plus an optional cwd and returns a
+# subprocess.CompletedProcess.
+GhRunner = Callable[[list[str], Optional[str]], subprocess.CompletedProcess]
+_GH_RUNNER: Optional[GhRunner] = None
+
+
+def set_gh_runner(runner: Optional[GhRunner]) -> Optional[GhRunner]:
+    """Install a `gh` transport runner. Returns the previously installed one."""
+    global _GH_RUNNER
+    prev = _GH_RUNNER
+    _GH_RUNNER = runner
+    return prev
+
+
+@contextmanager
+def gh_runner(runner: Optional[GhRunner]):
+    """Context manager: install ``runner`` as the gh transport, restore on exit."""
+    prev = set_gh_runner(runner)
+    try:
+        yield runner
+    finally:
+        set_gh_runner(prev)
 
 
 def _check_gh():
@@ -35,13 +64,32 @@ def _check_gh():
         raise SystemExit(1)
 
 
-def run_gh(*args: str, cwd: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
+def run_gh(
+    *args: str,
+    cwd: Optional[str] = None,
+    check: bool = True,
+    timeout: Optional[float] = None,
+) -> subprocess.CompletedProcess:
     """Run a gh CLI command.
 
-    Logs to TUI log file if running under TUI.
+    Logs to TUI log file if running under TUI. When a transport runner is
+    installed via set_gh_runner(), the command is dispatched to it instead of
+    the real `gh` CLI (and the gh-installed/authenticated check is skipped).
     """
-    _check_gh()
     cmd = ["gh", *args]
+
+    if _GH_RUNNER is not None:
+        log_shell_command(cmd, prefix="gh")
+        result = _GH_RUNNER(list(args), cwd)
+        if result.returncode != 0:
+            log_shell_command(cmd, prefix="gh", returncode=result.returncode)
+        if check and result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode, cmd, result.stdout, result.stderr
+            )
+        return result
+
+    _check_gh()
     log_shell_command(cmd, prefix="gh")
     result = subprocess.run(
         cmd,
@@ -49,6 +97,7 @@ def run_gh(*args: str, cwd: Optional[str] = None, check: bool = True) -> subproc
         capture_output=True,
         text=True,
         check=check,
+        timeout=timeout,
     )
     if result.returncode != 0:
         log_shell_command(cmd, prefix="gh", returncode=result.returncode)
@@ -132,6 +181,43 @@ def create_draft_pr(workdir: str, title: str, base: str, body: str = "") -> Opti
         pr_number = pr_info.get("number") if pr_info else None
 
     return {"url": pr_url, "number": pr_number}
+
+
+def get_pr_state(pr_ref: str | int, cwd: Optional[str] = None,
+                 timeout: Optional[float] = 30) -> Optional[dict]:
+    """Fetch state/isDraft/mergedAt for a PR. Returns None on failure.
+
+    Used by the github status-polling path (pr_sync.sync_from_github).
+    """
+    result = run_gh(
+        "pr", "view", str(pr_ref),
+        "--json", "state,isDraft,mergedAt",
+        cwd=cwd,
+        check=False,
+        timeout=timeout,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return json.loads(result.stdout)
+    return None
+
+
+def merge_pr(workdir: str, pr_ref: str | int,
+             method: str = "merge") -> subprocess.CompletedProcess:
+    """Merge a GitHub PR via gh CLI. Returns the completed process."""
+    return run_gh(
+        "pr", "merge", str(pr_ref), f"--{method}",
+        cwd=workdir,
+        check=False,
+    )
+
+
+def close_pr(pr_ref: str | int, delete_branch: bool = False,
+             cwd: Optional[str] = None) -> subprocess.CompletedProcess:
+    """Close a GitHub PR via gh CLI. Returns the completed process."""
+    args = ["pr", "close", str(pr_ref)]
+    if delete_branch:
+        args.append("--delete-branch")
+    return run_gh(*args, cwd=cwd, check=False)
 
 
 def mark_pr_ready(workdir: str, pr_ref: str | int) -> bool:

@@ -1835,10 +1835,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                 gh_merged = True
             else:
                 click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
-                merge_result = subprocess.run(
-                    ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
-                    cwd=workdir, capture_output=True, text=True,
-                )
+                from pm_core import gh_ops
+                merge_result = gh_ops.merge_pr(workdir, gh_pr_number)
                 gh_merged = merge_result.returncode == 0
                 if gh_merged:
                     click.echo(f"GitHub PR #{gh_pr_number} merged.")
@@ -2619,11 +2617,8 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
     if gh_pr_number and not keep_github:
         click.echo(f"Closing GitHub PR #{gh_pr_number}...")
         try:
-            delete_flag = [] if keep_branch else ["--delete-branch"]
-            result = subprocess.run(
-                ["gh", "pr", "close", str(gh_pr_number), *delete_flag],
-                capture_output=True, text=True
-            )
+            from pm_core import gh_ops
+            result = gh_ops.close_pr(gh_pr_number, delete_branch=not keep_branch)
             if result.returncode == 0:
                 click.echo(f"GitHub PR #{gh_pr_number} closed.")
             else:
