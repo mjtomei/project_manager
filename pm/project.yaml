@@ -19155,11 +19155,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-14T01:46:56.386043+00:00'
+  updated_at: '2026-05-17T22:15:38.659713+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-54753b4
+    text: 'Scope correction (description oversight): the fake must be backed by a
+      real local git repo so git-affecting gh operations produce real git state. A
+      ''pm pr merge'' on the github backend has two halves — the gh API call and the
+      git plumbing that follows (git fetch / merge --ff-only via _pull_after_merge);
+      a pure in-memory fake only covers the first. Implemented as FakeGitHubRepo +
+      FakeGitHubBackend.with_git_repo(): gh pr create ensures the head branch exists,
+      gh pr merge does a real git merge, a consumer clone can fetch + merge --ff-only.
+      Also: every gh CLI operation pm runs today (incl. the git_ops pm-state-sync
+      ''gh pr create'') is now routed through the gh_ops chokepoint and handled by
+      the fake. Carve-out: comment/admin operations (gh pr comment, repo settings)
+      stay pure-metadata stubs for now — only git operations need a working repo.
+      See pm/specs/pr-9603d04/impl.md (R8) for details.'
+    created_at: '2026-05-17T22:15:37Z'
+    last_edited: '2026-05-17T22:15:37Z'
 - id: pr-51586d2
   plan: plan-regression
   title: Mocks awareness in the new-regression authoring flow
