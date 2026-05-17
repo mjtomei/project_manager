@@ -113,9 +113,16 @@ loop state machines, and verification transitions without real API calls.
 - `impl` / `watcher` / `merge` session types never emit verdicts — config
   validation rejects verdicts for them; launcher returns `None` so the real
   claude path is used.
-- **PR #166 conflict (PASS_WITH_SUGGESTIONS removal):** This branch is 547
-  commits behind master; #166 dropped `PASS_WITH_SUGGESTIONS` from the review
-  verdict surface. On rebase, expect conflicts in `SESSION_TYPE_VERDICTS["review"]`,
-  `SINGLE_LINE_VERDICTS`, `ALL_VERDICTS`, the fixture file
-  `pass_with_suggestions.txt`, and the parametrized tests referencing it. Drop
-  PASS_WITH_SUGGESTIONS during the rebase. (Tracked, not pre-resolved here.)
+- **PR #166 conflict (PASS_WITH_SUGGESTIONS removal):** RESOLVED. master was
+  merged into the branch (merge commit fc3fde8). #166's removal of
+  `PASS_WITH_SUGGESTIONS` was applied: dropped from `SINGLE_LINE_VERDICTS`,
+  `SESSION_TYPE_VERDICTS["review"]` (now `PASS`/`NEEDS_WORK`/`INPUT_REQUIRED`),
+  the `pm fake-claude` CLI docstring, the `pass_with_suggestions.txt` fixture
+  (deleted), and the parametrized tests. The fake-claude files themselves did
+  not conflict (new on this branch); merge conflicts were limited to
+  `cli/__init__.py`, `cli/pr.py`, and `qa_loop.py` — all from master's
+  unrelated refactors, resolved by threading `session_type=` into master's
+  rewritten launch paths.
+- **`loop_shared.extract_verdict_from_content` removed on master:** the
+  verdict-detection tests now scan content line-by-line via
+  `loop_shared.match_verdict`, matching how production detection works.
