@@ -1,5 +1,32 @@
 # Spec: GitHub backend mock for regression tests (pr-9603d04)
 
+## Description correction (2026-05-17)
+
+The original task description treated the fake as a pure GitHub-API
+simulator. That was an oversight: a regression test that runs `pm pr merge`
+on the github backend exercises **two** halves —
+
+1. the GitHub-API call (`gh pr merge`), and
+2. the git plumbing that follows (`git fetch` / `git merge --ff-only` in the
+   repo dir, via `_pull_after_merge`).
+
+A pure in-memory fake covers (1) but leaves (2) needing a separately-mocked
+git repo, so the merge-with-pull / post-merge-pull scenarios cannot run
+end-to-end against the fake alone.
+
+**Corrected requirement:** the fake must be backed by a **real (local) git
+repo** so that the *git-affecting* `gh` operations produce real git state —
+`gh pr create` ⇒ a branch exists; `gh pr merge` ⇒ the branch is actually
+merged into base in the backing repo, so a downstream `git fetch` /
+`git merge --ff-only` succeeds.
+
+**Still pure-metadata (explicitly NOT git-backed for now):** operations that
+do not affect git history — PR comments (`gh pr comment`), and any repo
+admin / settings surface. These remain in-memory stubs; making them real is
+deferred. Only the git-affecting operations need a working repo.
+
+This is captured as **R8** below.
+
 ## Design probe
 
 The "github backend" is not a single class. The surface that regression tests
@@ -50,6 +77,20 @@ covers everything. This is also a small code-quality consolidation.
 - **R7 Test fixture**: a `fake_github` pytest fixture (in `tests/conftest.py`)
   that installs the fake for the duration of a test, mirroring how a
   FakeClaudeSession fixture would swap the Claude session.
+- **R8 Git-backed fake** (see *Description correction* above): the fake owns
+  a real local git repo acting as the "remote". Git-affecting `gh`
+  operations mutate it for real:
+  - `gh pr create [--head <branch>]` ⇒ the head branch must exist in the
+    backing repo (created/registered if absent).
+  - `gh pr merge <ref>` ⇒ actually merge the head branch into the PR's base
+    branch in the backing repo (so a clone's `git fetch` + `git merge
+    --ff-only origin/<base>` fast-forwards cleanly).
+  - `gh pr view` / `pr list` state stays consistent with the repo.
+  Pure-metadata operations (`gh pr comment`, repo admin) are **not**
+  git-backed — they remain in-memory stubs; promoting them is deferred.
+  The fixture must provide both the backing repo and a clone/workdir so
+  scenario tests can run the full merge-with-pull path without hand-mocking
+  `git_ops`.
 
 ## 2. Implicit requirements
 
@@ -85,3 +126,17 @@ No **[UNRESOLVED]** ambiguities.
   `is_pr_merged` fallback in `cli/pr.py` then succeeds.
 - `pr ready` on a non-draft PR → still returncode 0 (idempotent).
 - Concurrent runner installs → context manager nests via save/restore.
+- **Git-backed (R8):** `gh pr merge` on a branch that conflicts with base in
+  the backing repo → the real git merge fails; the fake should surface a
+  conflict-shaped failure (consistent with `simulate_conflict`) rather than
+  silently flipping state to MERGED.
+- **Git-backed (R8):** `gh pr merge` on an already-merged branch → branch is
+  already an ancestor of base; treat as merged-elsewhere (returncode 1, the
+  `is_pr_merged` fallback then succeeds).
+
+## 5. Implementation status
+
+Initial commit landed the **pure-metadata transport fake** (R1–R7). R8
+(git-backed repo) is the description correction and is **not yet
+implemented** — tracked as the next step for this PR. Comment/admin
+operations stay metadata-only by design.
