@@ -2,11 +2,13 @@
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from pm_core import gh_ops, pr_sync
 from pm_core.fake_github import (
+    REAL_GIT,
     FakeGitHubBackend,
     create_draft_on_start,
     merge_with_pull,
@@ -236,3 +238,77 @@ def test_sync_from_github_draft_to_ready(fake_github, tmp_path):
 
     result = pr_sync.sync_from_github(root, save_state=False)
     assert result.status_updates == {"pr-001": "in_review"}
+
+
+# --- git-backed fake: real git state behind git-affecting operations -------
+
+def _git(*args, cwd):
+    # Real git binary — bypasses the pm push-proxy wrapper so `fetch` from a
+    # consumer clone reaches the local FakeGitHubRepo remote.
+    return subprocess.run([REAL_GIT, *args], cwd=str(cwd),
+                          capture_output=True, text=True)
+
+
+def test_with_git_repo_builds_backing_repo(tmp_path):
+    backend = FakeGitHubBackend.with_git_repo(tmp_path / "gh")
+    assert backend.git_repo is not None
+    assert backend.git_repo.branch_exists("master")
+
+
+def test_git_backed_pr_create_creates_branch(fake_github_repo):
+    """`gh pr create --head X` registers X as a real branch on the remote."""
+    gh_ops.create_draft_pr("/tmp/repo", "Feature", "master", "body")
+    branch = fake_github_repo.prs[1].head
+    assert fake_github_repo.git_repo.branch_exists(branch)
+
+
+def test_git_backed_merge_advances_base(fake_github_repo):
+    pr = fake_github_repo.add_pr(head="feature-x")
+    assert fake_github_repo.git_repo.is_merged("feature-x") is False
+    result = gh_ops.merge_pr("/tmp/repo", pr.number)
+    assert result.returncode == 0
+    assert fake_github_repo.git_repo.is_merged("feature-x") is True
+
+
+def test_git_backed_merge_with_pull(fake_github_repo, tmp_path):
+    """The full merge-with-pull path: gh merge then a consumer ff-only pull."""
+    consumer = fake_github_repo.git_repo.clone(tmp_path / "consumer")
+
+    pr = fake_github_repo.create_draft("feature-x")  # real branch on remote
+    assert gh_ops.merge_pr("/tmp/repo", pr.number).returncode == 0
+
+    # The consumer workdir pulls base exactly as `_pull_after_merge` does.
+    assert _git("fetch", "origin", cwd=consumer).returncode == 0
+    ff = _git("merge", "--ff-only", "origin/master", cwd=consumer)
+    assert ff.returncode == 0, ff.stderr
+    assert (Path(consumer) / ".pr-feature-x").exists()
+
+
+def test_git_backed_merge_conflict(fake_github_repo):
+    """A real git conflict surfaces as a conflict-shaped `gh` failure."""
+    a = fake_github_repo.add_pr(head="feat-a", files={"shared.txt": "from A\n"})
+    b = fake_github_repo.add_pr(head="feat-b", files={"shared.txt": "from B\n"})
+
+    assert gh_ops.merge_pr("/tmp/repo", a.number).returncode == 0
+    result = gh_ops.merge_pr("/tmp/repo", b.number)
+    assert result.returncode == 1
+    assert "conflict" in result.stderr.lower()
+    # base unchanged for the conflicting PR; state stays OPEN
+    assert fake_github_repo.prs[b.number].state == "OPEN"
+    assert fake_github_repo.git_repo.is_merged("feat-b") is False
+
+
+def test_git_backed_merge_already_merged(fake_github_repo):
+    """merged-elsewhere on a git-backed fake still reports already-merged."""
+    pr = fake_github_repo.add_pr(head="feature-x")
+    fake_github_repo.merge(pr)
+    result = gh_ops.merge_pr("/tmp/repo", pr.number)
+    assert result.returncode == 1
+    assert "already merged" in result.stderr
+
+
+def test_git_backed_seed_merged_state(fake_github_repo):
+    """add_pr(state='MERGED') performs a real merge on the backing repo."""
+    pr = fake_github_repo.add_pr(head="feature-x", state="MERGED")
+    assert pr.state == "MERGED"
+    assert fake_github_repo.git_repo.is_merged("feature-x") is True

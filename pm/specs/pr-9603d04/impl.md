@@ -145,7 +145,30 @@ No **[UNRESOLVED]** ambiguities.
 
 ## 5. Implementation status
 
-Initial commit landed the **pure-metadata transport fake** (R1–R7). R8
-(git-backed repo) is the description correction and is **not yet
-implemented** — tracked as the next step for this PR. Comment/admin
-operations stay metadata-only by design.
+- **R1–R7** — pure-metadata transport fake: implemented.
+- **R8** — git-backed remote: implemented. `FakeGitHubRepo` is a real local
+  git repo; `FakeGitHubBackend.with_git_repo()` / the `fake_github_repo`
+  fixture wire it in. `gh pr create` ensures the head branch exists; `gh pr
+  merge` performs a real `git merge --no-ff` of head into base; a consumer
+  clone (`FakeGitHubRepo.clone`) can `git fetch` + `git merge --ff-only` to
+  complete the pull half. Real merge conflicts surface as conflict-shaped
+  `gh` failures.
+- Comment/admin operations remain metadata-only by design.
+
+### Note: the pm git push-proxy wrapper
+
+Sandboxed pm workdirs put a `git` shell wrapper early on `PATH` that forwards
+`push`/`fetch`/`pull`/`ls-remote` to a host-side proxy. `FakeGitHubRepo`
+therefore (a) never runs `git push` — all mutations are local
+init/commit/checkout/merge — and (b) invokes the **real** git binary
+(`fake_github.REAL_GIT`) so a consumer clone's `git fetch` reaches the local
+fake remote instead of the proxy.
+
+Consequence for the regression runner (pr-7d5d036): if a regression test
+drives *real* pm code whose `_pull_after_merge` runs `git fetch origin`
+through pm's `git_ops` (the wrapped `git`), that fetch is proxied, not served
+by the fake. The regression-runner environment must either run without the
+wrapper or point the consumer repo's `origin` at the `FakeGitHubRepo` path
+and use real git. Tests in this PR exercise the consumer pull directly with
+`REAL_GIT` to validate the git-backed behavior; full pm-driven integration
+is the regression runner's responsibility.

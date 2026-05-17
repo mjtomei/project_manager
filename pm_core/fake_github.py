@@ -1,26 +1,43 @@
-"""In-memory fake GitHub backend for regression tests.
+"""Fake GitHub backend for regression tests.
 
 Sibling of FakeClaudeSession (pr-abcf70f): scriptable, deterministic, fast —
 for the GitHub side of pm.
 
 The real github backend is exercised end-to-end only against live GitHub: all
-`gh` CLI traffic funnels through ``gh_ops.run_gh`` (and the hot-path direct
-calls in ``pr_sync`` / ``cli.pr`` were routed through it too). ``run_gh``
-exposes a pluggable transport via ``gh_ops.set_gh_runner`` / ``gh_runner``.
+`gh` CLI traffic funnels through ``gh_ops.run_gh`` (every direct
+``subprocess.run(["gh", ...])`` call in pm was routed through it too).
+``run_gh`` exposes a pluggable transport via ``gh_ops.set_gh_runner`` /
+``gh_runner``.
 
-``FakeGitHubBackend`` is such a transport: it interprets `gh` argv against
-in-memory PR state and returns ``subprocess.CompletedProcess`` objects, so
-regression tests can drive PR create / status sync / comments / merges /
-post-merge pull without touching the network.
+``FakeGitHubBackend`` is such a transport: it interprets `gh` argv and returns
+``subprocess.CompletedProcess`` objects, so regression tests can drive PR
+create / status sync / comments / merges / post-merge pull without touching
+the network.
+
+**Git backing.** A `pm pr merge` on the github backend has two halves: the
+GitHub-API call (`gh pr merge`) and the git plumbing that follows
+(`git fetch` / `git merge --ff-only`, via ``_pull_after_merge``). So the
+*git-affecting* `gh` operations are backed by a real local git repo
+(:class:`FakeGitHubRepo`) acting as the remote: `gh pr create` ensures the
+head branch exists, `gh pr merge` actually merges it into the base branch, so
+a downstream `git fetch` + `git merge --ff-only` fast-forwards cleanly.
+Operations that do not affect git history — `gh pr comment`, repo admin — stay
+pure in-memory metadata (deferred; see pm/specs/pr-9603d04/impl.md, R8).
 
 Typical use::
 
+    # pure-metadata fake (no git operations needed)
     backend = FakeGitHubBackend()
     with backend.installed():
         gh_ops.create_draft_pr(workdir, "Title", "master", "body")
+
+    # git-backed fake (merge-with-pull and other git-affecting flows)
+    backend = FakeGitHubBackend.with_git_repo(tmp_path)
+    with backend.installed():
         ...
 
-or via the ``fake_github`` pytest fixture in ``tests/conftest.py``.
+or via the ``fake_github`` / ``fake_github_repo`` pytest fixtures in
+``tests/conftest.py``.
 
 Scripted failures let tests compose realistic flows::
 
@@ -31,12 +48,35 @@ Scripted failures let tests compose realistic flows::
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional, Union
 
 from pm_core import gh_ops
+
+
+def _resolve_real_git() -> str:
+    """Locate the real `git` binary, bypassing any pm push-proxy wrapper.
+
+    Sandboxed pm workdirs put a `git` shell wrapper early on PATH that
+    forwards remote commands (push/fetch/pull/ls-remote) to a host-side
+    proxy. FakeGitHubRepo only ever operates on a purely local repo, so it
+    must use the real binary directly — otherwise `git fetch` from a consumer
+    clone would be hijacked away from the fake remote.
+    """
+    for cand in ("/usr/bin/git", "/bin/git"):
+        if os.path.exists(cand):
+            return cand
+    return shutil.which("git") or "git"
+
+
+#: Path to the real git binary (see _resolve_real_git). Exported so tests
+#: driving a consumer clone of a FakeGitHubRepo can bypass the wrapper too.
+REAL_GIT = _resolve_real_git()
 
 
 # --- canned error payloads (mirror real `gh` stderr shapes) -----------------
@@ -52,6 +92,116 @@ CONFLICT_STDERR = (
 )
 NOT_FOUND_STDERR = "gh: Could not resolve to a PullRequest (HTTP 404)"
 UNAUTHORIZED_STDERR = "gh: authentication required (HTTP 401)"
+
+
+# --- git-backed remote ------------------------------------------------------
+
+class FakeGitHubRepo:
+    """A real local git repo standing in for the GitHub-side remote.
+
+    ``path`` is an ordinary (non-bare) git repo usable directly as a git
+    ``origin`` for ``git clone`` / ``git fetch``. Branch and merge mutations
+    are performed in place, so the git-affecting `gh` operations produce
+    genuine git history that a downstream ``git fetch`` / ``git merge
+    --ff-only`` can consume.
+
+    Implementation note: all mutations are local (init / commit / checkout /
+    merge) — the fake never runs ``git push``, so it works inside sandboxed
+    environments whose push is proxied/restricted.
+    """
+
+    def __init__(self, path: Union[str, Path], default_branch: str = "master"):
+        self.path = str(path)
+        self.default_branch = default_branch
+        self._init()
+
+    # -- low-level git -------------------------------------------------------
+
+    def _git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        result = subprocess.run(
+            [REAL_GIT, *args], cwd=self.path, capture_output=True, text=True,
+        )
+        if check and result.returncode != 0:
+            raise RuntimeError(
+                f"git {' '.join(args)} failed in {self.path}: "
+                f"{result.stderr.strip()}"
+            )
+        return result
+
+    def _init(self) -> None:
+        """Create the remote repo with an initial commit on the base branch."""
+        Path(self.path).mkdir(parents=True, exist_ok=True)
+        self._git("init", "-b", self.default_branch)
+        self._git("config", "user.email", "fake-gh@example.com")
+        self._git("config", "user.name", "Fake GitHub")
+        self._git("config", "commit.gpgsign", "false")
+        Path(self.path, "README.md").write_text("fake github remote\n")
+        self._git("add", "README.md")
+        self._git("commit", "-m", "initial commit")
+
+    # -- queries -------------------------------------------------------------
+
+    def branch_exists(self, name: str) -> bool:
+        result = self._git("rev-parse", "--verify", "--quiet",
+                           f"refs/heads/{name}", check=False)
+        return result.returncode == 0
+
+    def is_merged(self, head: str, base: Optional[str] = None) -> bool:
+        """True if ``head``'s tip is an ancestor of ``base``."""
+        base = base or self.default_branch
+        result = self._git("merge-base", "--is-ancestor", head, base,
+                           check=False)
+        return result.returncode == 0
+
+    # -- mutations -----------------------------------------------------------
+
+    def ensure_branch(self, name: str, *, base: Optional[str] = None,
+                      files: Optional[dict[str, str]] = None) -> None:
+        """Create branch ``name`` (forked from ``base``) if it is absent.
+
+        ``files`` maps repo-relative paths to contents committed on the new
+        branch; the default is a unique marker file so the branch is one
+        commit ahead of base (a mergeable PR). Existing branches are left
+        untouched.
+        """
+        base = base or self.default_branch
+        if name == base or self.branch_exists(name):
+            return
+        self._git("checkout", "-b", name, base)
+        payload = files or {f".pr-{name}": f"branch {name}\n"}
+        for rel, content in payload.items():
+            dest = Path(self.path, rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content)
+            self._git("add", rel)
+        self._git("commit", "-m", f"work on {name}")
+        self._git("checkout", base)
+
+    def merge_branch(self, head: str,
+                     base: Optional[str] = None) -> tuple[bool, str]:
+        """Merge ``head`` into ``base``.
+
+        Returns ``(ok, detail)``. On a real git conflict ``ok`` is False and
+        ``base`` is left unchanged — the caller surfaces a conflict-shaped
+        `gh` failure.
+        """
+        base = base or self.default_branch
+        if not self.branch_exists(head):
+            return False, f"head branch {head!r} does not exist"
+        self._git("checkout", base)
+        merge = self._git("merge", "--no-ff", "--no-edit", head, check=False)
+        if merge.returncode != 0:
+            self._git("merge", "--abort", check=False)
+            return False, (merge.stdout + merge.stderr).strip()
+        return True, ""
+
+    def clone(self, dest: Union[str, Path]) -> str:
+        """Clone the remote to ``dest`` — a consumer workdir for tests."""
+        dest = str(dest)
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([REAL_GIT, "clone", self.path, dest],
+                       capture_output=True, text=True, check=True)
+        return dest
 
 
 @dataclass
@@ -110,21 +260,36 @@ PRRef = Union[FakePR, str, int]
 
 
 class FakeGitHubBackend:
-    """Scriptable in-memory stand-in for the GitHub side of pm.
+    """Scriptable stand-in for the GitHub side of pm.
 
-    Install it with :meth:`installed` (or the ``fake_github`` fixture) and the
-    backend serves every ``gh`` invocation that flows through ``gh_ops``.
+    Install it with :meth:`installed` (or a fixture) and the backend serves
+    every ``gh`` invocation that flows through ``gh_ops``. Pass ``git_repo``
+    (or build via :meth:`with_git_repo`) so the git-affecting operations are
+    backed by a real repo.
     """
 
     def __init__(self, owner: str = "owner", repo: str = "repo",
-                 default_branch: str = "master"):
+                 default_branch: str = "master",
+                 git_repo: Optional[FakeGitHubRepo] = None):
         self.owner = owner
         self.repo = repo
         self.default_branch = default_branch
+        self.git_repo = git_repo
         self.prs: dict[int, FakePR] = {}
         self.calls: list[list[str]] = []  # every gh argv, for assertions
         self._next_number = 1
         self._scripts: list[_Scripted] = []
+
+    @classmethod
+    def with_git_repo(cls, base_path: Union[str, Path], *,
+                      owner: str = "owner", repo: str = "repo",
+                      default_branch: str = "master") -> "FakeGitHubBackend":
+        """Build a git-backed fake: a real :class:`FakeGitHubRepo` remote."""
+        git_repo = FakeGitHubRepo(
+            Path(base_path) / "remote.git", default_branch=default_branch,
+        )
+        return cls(owner=owner, repo=repo, default_branch=default_branch,
+                   git_repo=git_repo)
 
     # --- state seeding ------------------------------------------------------
 
@@ -133,22 +298,28 @@ class FakeGitHubBackend:
 
     def add_pr(self, *, title: str = "Test PR", head: str,
                base: Optional[str] = None, body: str = "",
-               is_draft: bool = False, state: str = "OPEN") -> FakePR:
-        """Seed a PR directly into simulated remote state."""
+               is_draft: bool = False, state: str = "OPEN",
+               files: Optional[dict[str, str]] = None) -> FakePR:
+        """Seed a PR into simulated remote state.
+
+        When git-backed, the head branch is created in the backing repo
+        (``files`` lets tests craft branch contents — e.g. for conflicts),
+        and ``state="MERGED"`` performs a real merge.
+        """
         number = self._next_number
         self._next_number += 1
+        base = base or self.default_branch
         pr = FakePR(
-            number=number,
-            title=title,
-            base=base or self.default_branch,
-            head=head,
-            url=self._url(number),
-            body=body,
-            is_draft=is_draft,
-            state=state,
-            merged_at="2026-01-01T00:00:00Z" if state == "MERGED" else None,
+            number=number, title=title, base=base, head=head,
+            url=self._url(number), body=body, is_draft=is_draft, state="OPEN",
         )
         self.prs[number] = pr
+        if self.git_repo is not None:
+            self.git_repo.ensure_branch(head, base=base, files=files)
+        if state == "MERGED":
+            self.merge(pr)
+        elif state == "CLOSED":
+            pr.state = "CLOSED"
         return pr
 
     def resolve(self, ref: PRRef) -> Optional[FakePR]:
@@ -169,10 +340,11 @@ class FakeGitHubBackend:
     # --- simulated remote-state transitions (scenario building blocks) ------
 
     def create_draft(self, head: str, *, title: str = "Test PR",
-                      base: Optional[str] = None, body: str = "") -> FakePR:
+                      base: Optional[str] = None, body: str = "",
+                      files: Optional[dict[str, str]] = None) -> FakePR:
         """Simulate the draft PR `pm pr start` opens on the github backend."""
         return self.add_pr(title=title, head=head, base=base, body=body,
-                           is_draft=True)
+                           is_draft=True, files=files)
 
     def mark_ready(self, ref: PRRef) -> FakePR:
         """Simulate the draft -> ready transition `pm pr review` performs."""
@@ -180,9 +352,23 @@ class FakeGitHubBackend:
         pr.is_draft = False
         return pr
 
+    def _do_merge(self, pr: FakePR) -> tuple[bool, str]:
+        """Perform the merge (real git when git-backed). Returns (ok, detail)."""
+        if self.git_repo is not None:
+            return self.git_repo.merge_branch(pr.head, pr.base)
+        return True, ""
+
     def merge(self, ref: PRRef) -> FakePR:
-        """Simulate the PR being merged on the remote."""
+        """Simulate the PR being merged on the remote.
+
+        When git-backed this performs a real merge; a conflict raises
+        ``RuntimeError`` (use ``gh pr merge`` / :meth:`simulate_conflict` to
+        exercise conflict *handling* — this helper is for the happy path).
+        """
         pr = self._require(ref)
+        ok, detail = self._do_merge(pr)
+        if not ok:
+            raise RuntimeError(f"cannot merge PR #{pr.number}: {detail}")
         pr.state = "MERGED"
         pr.is_draft = False
         pr.merged_at = "2026-01-01T00:00:00Z"
@@ -195,7 +381,7 @@ class FakeGitHubBackend:
         return pr
 
     def add_comment(self, ref: PRRef, body: str) -> FakePR:
-        """Append a comment to a PR."""
+        """Append a comment to a PR (pure metadata — not git-backed)."""
         pr = self._require(ref)
         pr.comments.append(body)
         return pr
@@ -351,7 +537,14 @@ class FakeGitHubBackend:
         if pr.state == "CLOSED":
             return _completed(["pr", "merge"], 1, "",
                               f"X Pull request #{pr.number} is closed")
-        self.merge(pr)
+        ok, detail = self._do_merge(pr)
+        if not ok:
+            # A real git conflict in the backing repo -> conflict-shaped fail.
+            return _completed(["pr", "merge"], 1, "",
+                              f"{CONFLICT_STDERR}\n{detail}")
+        pr.state = "MERGED"
+        pr.is_draft = False
+        pr.merged_at = "2026-01-01T00:00:00Z"
         return _completed(["pr", "merge"], 0,
                           f"X Merged pull request #{pr.number}\n", "")
 
@@ -416,7 +609,12 @@ def upgrade_on_done(backend: FakeGitHubBackend, ref: PRRef) -> FakePR:
 
 
 def merge_with_pull(backend: FakeGitHubBackend, ref: PRRef) -> FakePR:
-    """Scenario: the PR is merged remotely; `pm pr merge` then pulls base."""
+    """Scenario: the PR is merged remotely; `pm pr merge` then pulls base.
+
+    With a git-backed fake the base branch genuinely advances, so a consumer
+    workdir cloned from ``backend.git_repo`` can `git fetch` + `git merge
+    --ff-only` to complete the pull half.
+    """
     return backend.merge(ref)
 
 
