@@ -7,37 +7,25 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
   d       — Mark PR as in_review and open review window.
   z d     — If a loop is running for the selected PR, make this iteration
              the last one.  Otherwise, perform a fresh ``pr review``.
-  zz d    — Start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS).
-             If a loop is already running, make this iteration the last one.
-  zzz d   — Start a strict review loop (stops only on full PASS).
+  zz d    — Start a review loop (iterates until PASS).
              If a loop is already running, make this iteration the last one.
 """
 
 from pm_core.paths import configure_logger
 from pm_core import store
-from pm_core.loop_shared import (
-    extract_verdict_from_content,
-    VerdictStabilityTracker,
-)
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
     VERDICT_PASS,
-    VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
 
-# Tracks consecutive polls where MERGED was detected per merge key.
-# Uses the same stability mechanism as review/watcher verdict detection.
-_merge_verdict_tracker = VerdictStabilityTracker()
-
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
-    VERDICT_PASS_WITH_SUGGESTIONS: "[yellow bold]~ PASS_WITH_SUGGESTIONS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
     "KILLED": "[red bold]☠ KILLED[/]",
@@ -60,11 +48,19 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
 
 
 # ---------------------------------------------------------------------------
-# z d  — fresh done or stop loop
+# z d  — kill running loop and open a fresh review
 # ---------------------------------------------------------------------------
 
-def stop_loop_or_fresh_done(app) -> None:
-    """Handle ``z d``: stop a running loop, or do a fresh done."""
+def stop_loop_or_fresh_review(app) -> None:
+    """Handle ``z d``: stop any running loop and start a fresh review.
+
+    Used to be "stop loop OR fresh review" — if a loop was running you
+    only got the stop, no fresh review.  Now the two are combined:
+    any running loop is killed (matching ``zz d``'s supersede path —
+    set stop_requested + kill the review window so the running
+    iteration's verdict-poll bails) and then ``review_pr(fresh=True)``
+    opens a fresh review window for the user.
+    """
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
         app.log_message("No PR selected")
@@ -72,44 +68,116 @@ def stop_loop_or_fresh_done(app) -> None:
 
     loop = app._review_loops.get(pr_id)
     if loop and loop.running:
-        _stop_loop(app, pr_id)
-    else:
-        # Original z d behaviour: fresh done
-        from pm_core.tui import pr_view
-        pr_view.done_pr(app, fresh=True)
+        loop.stop_requested = True
+        # Kill the review window so the running iteration's
+        # _poll_for_verdict (which doesn't check stop_requested)
+        # detects pane-gone, raises PaneKilledError, and the loop
+        # exits at once instead of running to completion.
+        from pm_core import tmux as tmux_mod
+        from pm_core.cli.helpers import _pr_display_id
+        if pr and app._session_name:
+            win_name = f"review-{_pr_display_id(pr)}"
+            try:
+                from pm_core import home_window
+                win = tmux_mod.find_window_by_name(app._session_name, win_name)
+                if win:
+                    home_window.park_if_on(app._session_name, win["id"])
+                tmux_mod.kill_window(app._session_name, win_name)
+            except Exception:
+                _log.debug(
+                    "review_loop_ui: kill of review window for z d failed"
+                    " for %s", pr_id, exc_info=True)
+        _log.info("review_loop_ui: z d killed running loop for %s", pr_id)
+        app.log_message(
+            f"[bold]Stopped review loop[/] for {pr_id} — opening fresh review")
+
+    from pm_core.tui import pr_view
+    pr_view.review_pr(app, fresh=True)
 
 
 # ---------------------------------------------------------------------------
-# zz d / zzz d  — start or stop loop
+# zz d  — start or stop loop
 # ---------------------------------------------------------------------------
 
-def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
-    """Handle ``zz d`` / ``zzz d``: start loop or stop if one is running."""
+def start_or_stop_loop(app) -> None:
+    """Handle ``zz d``: always start a fresh review loop.
+
+    Previously this toggled — pressing ``zz d`` while a loop ran would
+    stop it.  That left no way to restart a loop without first
+    cancelling, and it wasn't obvious that ``zz d`` cancelled rather
+    than restarted.  Behavior now matches ``z d`` (fresh review): if a
+    loop is already running for the same PR, we set its
+    ``stop_requested`` flag and **kill the review window** so the
+    iteration's verdict-poll detects pane-gone and bails immediately
+    (rather than running to completion before checking the flag).
+    Then a fresh loop starts.
+
+    Cancelling a loop is now done via TUI restart (which sweeps the
+    in-memory loop registry on remount) or by Ctrl+C in the loop's
+    review pane.
+    """
+    from pm_core.tui import auto_start as _auto_start
+
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
         app.log_message("No PR selected")
         return
 
-    loop = app._review_loops.get(pr_id)
-    if loop and loop.running:
-        _stop_loop(app, pr_id)
-        return
+    existing = app._review_loops.get(pr_id)
+    superseded = bool(existing and existing.running)
+    if superseded:
+        existing.stop_requested = True
+        # Force the running iteration to terminate now: the
+        # _run_claude_review path blocks in _poll_for_verdict (which
+        # doesn't check stop_requested) until the pane is gone.
+        # Killing the review window makes that poll return None →
+        # PaneKilledError → the loop exits.
+        from pm_core import tmux as tmux_mod
+        from pm_core.cli.helpers import _pr_display_id
+        if pr and app._session_name:
+            win_name = f"review-{_pr_display_id(pr)}"
+            try:
+                from pm_core import home_window
+                win = tmux_mod.find_window_by_name(app._session_name, win_name)
+                if win:
+                    home_window.park_if_on(app._session_name, win["id"])
+                tmux_mod.kill_window(app._session_name, win_name)
+            except Exception:
+                _log.debug("review_loop_ui: kill of review window for"
+                           " supersede failed for %s", pr_id,
+                           exc_info=True)
+        _log.info("review_loop_ui: superseding running loop for %s "
+                  "with a fresh one", pr_id)
 
-    _start_loop(app, pr_id, pr, stop_on_suggestions)
+    _start_loop(app, pr_id, pr,
+                transcript_dir=str(_auto_start.get_transcript_dir(app)),
+                superseded=superseded)
 
 
 # ---------------------------------------------------------------------------
 # Core start / stop
 # ---------------------------------------------------------------------------
 
-def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
-                transcript_dir: str | None = None,
-                resume_state: ReviewLoopState | None = None) -> None:
+def _start_loop(app, pr_id: str, pr: dict | None,
+                transcript_dir: str,
+                resume_state: ReviewLoopState | None = None,
+                superseded: bool = False) -> None:
     """Start a review loop for the given PR.
+
+    ``transcript_dir`` is required — hook-driven verdict polling needs a
+    per-iteration JSONL transcript.  Callers resolve it via
+    :func:`pm_core.tui.auto_start.get_transcript_dir` which is total
+    (lazily synthesises a ``manual-<token>`` run dir when auto-start
+    isn't active).
 
     When *resume_state* is provided, the loop continues from the saved
     iteration count and history instead of starting fresh.  Used by
     breadcrumb restoration after merge-triggered TUI restarts.
+
+    Pass ``superseded=True`` when a previously-running loop for this
+    PR was killed to make room for this one — only changes the
+    user-visible status message so it's clear this is a fresh restart
+    rather than a brand-new launch.
     """
     from pm_core import tmux as tmux_mod
 
@@ -126,6 +194,19 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
         return
 
+    # Ensure the transcript directory exists on disk.  Fail fast here
+    # (before launching a podman container + review pane) if creation
+    # fails — better than surfacing the error after the pane is up.
+    try:
+        from pathlib import Path as _Path
+        _Path(transcript_dir).mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        app.log_message(
+            f"[red]Cannot create transcript dir[/] {transcript_dir}: {e}"
+        )
+        _log.warning("_start_loop: mkdir %s failed: %s", transcript_dir, e)
+        return
+
     # Get pm_root for launching the review window
     pm_root = str(store.find_project_root())
 
@@ -139,18 +220,30 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
         mode_label = f"resumed at iteration {state.iteration}"
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
     else:
-        state = ReviewLoopState(pr_id=pr_id, stop_on_suggestions=stop_on_suggestions)
+        state = ReviewLoopState(pr_id=pr_id)
         app._review_loops[pr_id] = state
-        mode_label = "strict (PASS only)" if not stop_on_suggestions else "normal"
-        _log.info("review_loop_ui: starting %s loop for %s", mode_label, pr_id)
+        _log.info("review_loop_ui: starting loop for %s", pr_id)
 
-    app.log_message(
-        f"[bold]Review loop started[/] for {pr_id} [{mode_label}] loop={state.loop_id} — z d to stop",
-        sticky=3,
-    )
+    if superseded:
+        msg = (f"[bold]Fresh review loop started[/] for {pr_id} "
+               f"loop={state.loop_id}")
+    elif resume_state:
+        msg = (f"[bold]Review loop resumed[/] for {pr_id} "
+               f"at iteration {state.iteration} loop={state.loop_id}")
+    else:
+        msg = (f"[bold]Review loop started[/] for {pr_id} "
+               f"loop={state.loop_id}")
+    app.log_message(msg, sticky=3)
 
     # Ensure the poll timer is running
     _ensure_poll_timer(app)
+
+    # Persist to the shared runtime state so external readers (popup
+    # picker, status spinner) can see the loop is active.
+    from pm_core import runtime_state as _rs
+    _rs.set_action_state(pr_id, "review-loop", "running",
+                         iteration=state.iteration,
+                         loop_id=state.loop_id)
 
     # Start the background loop
     start_review_loop_background(
@@ -188,6 +281,15 @@ def _on_iteration_from_thread(app, state: ReviewLoopState) -> None:
     """Called from the background thread after each iteration."""
     _log.info("review_loop_ui: iteration %d verdict=%s for %s",
               state.iteration, state.latest_verdict, state.pr_id)
+    from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        _log.debug("review_loop_ui: skipping iteration mirror for "
+                   "superseded loop_id=%s", state.loop_id)
+        return
+    _rs.set_action_state(state.pr_id, "review-loop", "running",
+                         iteration=state.iteration,
+                         loop_id=state.loop_id,
+                         verdict=state.latest_verdict)
 
 
 def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
@@ -195,7 +297,10 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
 
-    # Finalize review transcript symlinks for this loop's iterations
+    # Finalize review transcript symlinks for this loop's iterations.
+    # Done before the supersede check because the transcripts are this
+    # loop's own work — they need finalizing whether or not we still
+    # own the runtime_state entry.
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
         from pathlib import Path
@@ -206,6 +311,43 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                 if (p.is_symlink() and p.suffix == ".jsonl"
                         and p.name.startswith(f"review-{state.pr_id}-")):
                     finalize_transcript(p)
+
+    from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        # We were superseded by a fresh loop; don't overwrite its
+        # 'running' entry with our terminal (often KILLED) verdict.
+        _log.debug("review_loop_ui: skipping completion mirror for "
+                   "superseded loop_id=%s verdict=%s",
+                   state.loop_id, state.latest_verdict)
+        return
+    # ERROR/KILLED are runtime failures, not clean completions; record
+    # them as state="failed" so the popup spinner can distinguish a
+    # successful loop end from a failure and surface the verdict to the
+    # user instead of silently dismissing.
+    final_state = ("failed"
+                   if state.latest_verdict in ("ERROR", "KILLED")
+                   else "done")
+    _rs.set_action_state(state.pr_id, "review-loop", final_state,
+                         iteration=state.iteration,
+                         verdict=state.latest_verdict)
+
+
+def _is_active_loop(state: ReviewLoopState) -> bool:
+    """True when the recorded loop_id in runtime_state still matches.
+
+    A loop superseded by ``start_or_stop_loop`` keeps running its
+    background thread until it hits a checkpoint, then fires its
+    completion callback.  By that time runtime_state holds the new
+    loop's loop_id; comparing IDs lets the old callbacks bow out
+    instead of clobbering the new entry.
+    """
+    from pm_core import runtime_state as _rs
+    cur = _rs.get_action_state(state.pr_id, "review-loop")
+    cur_id = cur.get("loop_id")
+    # If nothing's recorded yet, this loop is the only candidate; allow
+    # the write so iteration mirrors still work for the very first
+    # iteration after a restart.
+    return not cur_id or cur_id == state.loop_id
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +444,7 @@ def _poll_loop_state_inner(app) -> None:
         app.log_message(msg, sticky=10)
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
-        if state.latest_verdict in (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS):
+        if state.latest_verdict == VERDICT_PASS:
             _maybe_start_qa(app, state.pr_id)
 
     # Stop the timer if no loops are running AND no active PRs need animation
@@ -339,12 +481,15 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 
     Called when review passes.  Works in two modes:
 
-    - **Self-driving QA** (``zz t`` / ``zzz t``): always transitions,
+    - **Self-driving QA** (``zz t``): always transitions,
       independent of auto-start.  The self-driving NEEDS_WORK path starts
       a review loop directly, so the review→QA transition must also be
       independent.
     - **Auto-start mode**: only transitions if auto-start is enabled and
       the PR is within the target scope.
+
+    If the project-level ``skip_qa`` setting is true, QA is skipped and
+    the PR goes straight to merge.
 
     QA completion is handled by qa_loop_ui which triggers merge on QA PASS.
     """
@@ -365,14 +510,35 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             if pr_id not in allowed:
                 return
 
+    # If project has skip_qa enabled, skip QA and go straight to merge.
+    # Merge only happens via _maybe_auto_merge (which requires
+    # auto-start to be enabled) — manual zz d / zz t do not auto-merge.
+    project = (app._data or {}).get("project") or {}
+    if project.get("skip_qa"):
+        _log.info("auto_qa: skip_qa enabled, skipping QA for %s", pr_id)
+        app.log_message(f"Auto-start: {pr_id} review passed, skipping QA (skip_qa enabled)")
+        _maybe_auto_merge(app, pr_id)
+        return
+
     # Transition PR status to "qa"
     if app._root:
-        data = store.load(app._root)
-        pr = store.get_pr(data, pr_id)
-        if pr and pr.get("status") == "in_review":
-            pr["status"] = "qa"
-            store.save(data, app._root)
-            app._load_state()
+        transitioned = False
+
+        def apply_qa(data):
+            nonlocal transitioned
+            p = store.get_pr(data, pr_id)
+            if p and p.get("status") == "in_review":
+                p["status"] = "qa"
+                transitioned = True
+
+        try:
+            store.locked_update(app._root, apply_qa)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            app.log_message(f"Error: {e}")
+            _log.warning("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
+            return
+        app._load_state()
+        if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
             app.log_message(f"Auto-QA: {pr_id} review passed, starting QA")
 
@@ -380,16 +546,21 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             from pm_core.tui import qa_loop_ui
             qa_loop_ui.start_qa(app, pr_id)
         else:
+            current = store.get_pr(app._data, pr_id)
             _log.debug("auto_qa: %s not in_review (status=%s), skipping",
-                       pr_id, pr.get("status") if pr else "missing")
+                       pr_id, current.get("status") if current else "missing")
 
 
 # ---------------------------------------------------------------------------
 # Auto-merge passing reviews
 # ---------------------------------------------------------------------------
 
-def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
+def _maybe_auto_merge(app, pr_id: str) -> None:
     """Auto-merge a PR after a passing review/QA.
+
+    Only runs when auto-start is enabled and the PR is in the active
+    auto-start target's dependency tree.  Manual ``zz d`` / ``zz t``
+    never trigger merges — merge is an auto-start-only action.
 
     Runs ``pm pr merge --resolve-window --background <pr_id>``
     synchronously, then triggers ``auto_start.check_and_start()`` to
@@ -397,24 +568,28 @@ def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
     ``--resolve-window`` causes a Claude merge-resolution window to open;
     we register ``merge:<pr_id>`` in the idle tracker so
     ``_poll_impl_idle`` can detect when it finishes and re-attempt.
-
-    Args:
-        force: Skip the auto-start enabled/scope checks.  Used by
-            self-driving QA which operates independently of auto-start.
     """
     from pm_core.tui import auto_start as _auto_start
-    if not force and not _auto_start.is_enabled(app):
+    if not _auto_start.is_enabled(app):
         return
 
     # Scope to auto-start target's dependency tree
-    if not force:
-        target = _auto_start.get_target(app)
-        if target:
-            prs = app._data.get("prs") or []
-            allowed = _auto_start._transitive_deps(prs, target)
-            allowed.add(target)
-            if pr_id not in allowed:
-                return
+    target = _auto_start.get_target(app)
+    if target:
+        prs = app._data.get("prs") or []
+        allowed = _auto_start._transitive_deps(prs, target)
+        allowed.add(target)
+        if pr_id not in allowed:
+            return
+
+    # Auto-sequence keypress: stop before merge.
+    if pr_id in getattr(app, "_stop_before_merge", set()):
+        _log.info("auto_merge: %s in stop_before_merge — skipping merge", pr_id)
+        app.log_message(
+            f"[green bold]✓ {pr_id} ready to merge[/] "
+            f"(auto-sequence armed — press 'g' to merge)"
+        )
+        return
 
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
@@ -451,9 +626,10 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
 
+    # Pass the flag explicitly in both directions — the in-tmux env-var
+    # default would otherwise flip resolve_window=False back on.
     merge_cmd = "pr merge"
-    if resolve_window:
-        merge_cmd += " --resolve-window"
+    merge_cmd += " --resolve-window" if resolve_window else " --no-resolve-window"
     if propagation_only:
         merge_cmd += " --propagation-only"
     merge_cmd += " --background"
@@ -464,7 +640,11 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     pr_view.run_command(app, merge_cmd)
 
     # Reload state — subprocess modified project.yaml on disk
-    app._data = store.load(app._root)
+    try:
+        app._data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("_attempt_auto_merge: corrupt YAML after merge cmd: %s", e)
+        return False
     merged_pr = store.get_pr(app._data, pr_id)
     return bool(merged_pr and merged_pr.get("status") == "merged")
 
@@ -480,7 +660,6 @@ def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
     pending_merges.discard(pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
-    _merge_verdict_tracker.reset(merge_key)
     # check_and_start returns early if auto-start is off
     app.run_worker(_auto_start.check_and_start(app))
 
@@ -509,6 +688,8 @@ def _kill_merge_window(app, pr_id: str) -> None:
     window_name = f"merge-{display_id}"
     win = tmux_mod.find_window_by_name(session, window_name)
     if win:
+        from pm_core import home_window
+        home_window.park_if_on(session, win["id"])
         tmux_mod.kill_window(session, window_name)
         _log.info("killed merge window %s for %s", window_name, pr_id)
 
@@ -538,7 +719,6 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
     _kill_merge_window(app, pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
-    _merge_verdict_tracker.reset(merge_key)
 
     in_propagation = pr_id in app._merge_propagation_phase
 
@@ -595,7 +775,6 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     app._merge_input_required_prs.add(pr_id)
 
     # Reset the verdict tracker so we can detect MERGED after the user helps
-    _merge_verdict_tracker.reset(merge_key)
 
     app.log_message(
         f"[red bold]⏸ Merge INPUT_REQUIRED[/] for {pr_id}: "
@@ -657,24 +836,32 @@ def _poll_impl_idle(app) -> None:
         active_pr_ids.add(pr_id)
         window_name = _pr_display_id(pr)
 
-        # Lazy pane resolution: register if not yet tracked or pane gone
+        # Lazy pane resolution: register if not yet tracked or pane gone.
+        # Hook-driven tracking requires the transcript path launched by
+        # ``pm pr start --transcript``; skip PRs without one (e.g. manual
+        # launches) — they won't auto-advance but also won't misfire.
         if not tracker.is_tracked(pr_id) or tracker.is_gone(pr_id):
             pane_id = _find_impl_pane(session, window_name)
-            if pane_id:
-                tracker.register(pr_id, pane_id)
-            else:
-                continue  # window not found, skip
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
+            try:
+                tracker.register(pr_id, pane_id, impl_transcript)
+            except ValueError:
+                # Symlink not yet created — try again next tick.
+                continue
 
         tracker.poll(pr_id)
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
-            # Check if Claude is on an interactive selection screen (trust
-            # prompt, permission prompt, etc.) — that's not "done".
-            from pm_core.pane_idle import content_has_interactive_prompt
-            content = tracker.get_content(pr_id)
-            if content_has_interactive_prompt(content):
-                _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
+            if pr.get("spec_pending"):
+                # Spec generation paused for user input (ambiguity
+                # resolution).  The session is waiting, not done.
+                _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
                 tracker.mark_active(pr_id)
             else:
                 newly_idle.append((pr_id, pr))
@@ -702,41 +889,45 @@ def _poll_impl_idle(app) -> None:
             pending_merges.discard(pr_id)
             merge_key = f"merge:{pr_id}"
             tracker.unregister(merge_key)
-            _merge_verdict_tracker.reset(merge_key)
             continue
 
         merge_key = f"merge:{pr_id}"
         window_name = f"merge-{_pr_display_id(pr)}"
 
-        # Lazy pane resolution
+        # Lazy pane resolution — requires the merge transcript launched
+        # by ``pm pr merge --resolve-window --transcript``.
         if not tracker.is_tracked(merge_key) or tracker.is_gone(merge_key):
             pane_id = _find_impl_pane(session, window_name)
-            if pane_id:
-                tracker.register(merge_key, pane_id)
-            else:
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            merge_transcript = str(tdir / f"merge-{pr_id}.jsonl")
+            try:
+                tracker.register(merge_key, pane_id, merge_transcript)
+            except ValueError:
                 continue
 
         active_merge_keys.add(merge_key)
         tracker.poll(merge_key)
 
         # --- Primary: check for MERGED or INPUT_REQUIRED verdict ---
-        merge_content = tracker.get_content(merge_key)
-        if merge_content:
-            verdict = extract_verdict_from_content(
-                merge_content,
-                verdicts=("MERGED", "INPUT_REQUIRED"),
-                keywords=("MERGED", "INPUT_REQUIRED"),
-                log_prefix="merge_verdict",
+        merge_transcript_path = tracker.get_transcript_path(merge_key)
+        if merge_transcript_path:
+            from pm_core.verdict_transcript import extract_verdict_from_transcript
+            verdict = extract_verdict_from_transcript(
+                merge_transcript_path, ("MERGED", "INPUT_REQUIRED"),
             )
-            if _merge_verdict_tracker.update(merge_key, verdict):
-                if verdict == "MERGED":
-                    _log.info("merge_verdict: MERGED detected for %s (stable)", pr_id)
-                    app.log_message(f"MERGED detected for {pr_id}, finalizing merge")
-                    _finalize_detected_merge(app, pr_id, merge_key, tracker,
-                                             pending_merges, active_merge_keys)
-                elif verdict == "INPUT_REQUIRED":
-                    _log.info("merge_verdict: INPUT_REQUIRED detected for %s (stable)", pr_id)
-                    _handle_merge_input_required(app, pr_id, merge_key)
+            if verdict == "MERGED":
+                _log.info("merge_verdict: MERGED detected for %s", pr_id)
+                app.log_message(f"MERGED detected for {pr_id}, finalizing merge")
+                _finalize_detected_merge(app, pr_id, merge_key, tracker,
+                                         pending_merges, active_merge_keys)
+                continue
+            if verdict == "INPUT_REQUIRED":
+                _log.info("merge_verdict: INPUT_REQUIRED detected for %s", pr_id)
+                _handle_merge_input_required(app, pr_id, merge_key)
                 continue
 
         # --- Fallback: idle detection (for _pending_merge_prs entries only) ---
@@ -744,14 +935,6 @@ def _poll_impl_idle(app) -> None:
             continue
 
         if tracker.became_idle(merge_key):
-            # Check for interactive prompt before treating as idle
-            from pm_core.pane_idle import content_has_interactive_prompt
-            merge_content = tracker.get_content(merge_key)
-            if content_has_interactive_prompt(merge_content):
-                _log.info("merge_idle: %s idle but showing interactive prompt, resetting", pr_id)
-                tracker.mark_active(merge_key)
-                continue
-
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
@@ -764,15 +947,74 @@ def _poll_impl_idle(app) -> None:
                                   pending_merges, active_merge_keys)
             # else: still not merged — keep tracking
 
+    # --- Third pass: non-loop review windows ---
+    # Track the review pane for in_review PRs that don't have a running
+    # review loop, so the picker shows [working]/[idle]/[wait] and we
+    # can pick up the review verdict from the transcript.
+    active_review_keys: set[str] = set()
+    for pr in (app._data.get("prs") or []):
+        if pr.get("status") != "in_review":
+            continue
+        pr_id = pr.get("id", "")
+        if not pr_id:
+            continue
+        loop = app._review_loops.get(pr_id)
+        if loop and loop.running:
+            continue  # loop iterations own the review window's transcript
+
+        review_key = f"review:{pr_id}"
+        window_name = f"review-{_pr_display_id(pr)}"
+
+        if not tracker.is_tracked(review_key) or tracker.is_gone(review_key):
+            pane_id = _find_impl_pane(session, window_name)
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            review_transcript = str(tdir / f"review-{pr_id}.jsonl")
+            try:
+                tracker.register(review_key, pane_id, review_transcript)
+            except ValueError:
+                continue
+
+        active_review_keys.add(review_key)
+        tracker.poll(review_key)
+
+        # --- Mirror the review verdict ---
+        review_transcript_path = tracker.get_transcript_path(review_key)
+        if review_transcript_path:
+            from pm_core.verdict_transcript import extract_verdict_from_transcript
+            verdict = extract_verdict_from_transcript(
+                review_transcript_path,
+                ("LGTM", "NEEDS_WORK", "INPUT_REQUIRED"),
+            )
+            if verdict:
+                from pm_core import runtime_state as _rs
+                cur = _rs.get_action_state(pr_id, "review") or {}
+                if cur.get("verdict") != verdict or cur.get("state") != "done":
+                    try:
+                        _rs.set_action_state(pr_id, "review", "done",
+                                             verdict=verdict)
+                    except Exception:
+                        _log.debug("runtime_state review verdict mirror failed",
+                                   exc_info=True)
+
     # Unregister stale merge keys and clean up verdict stability state
     for key in tracker.tracked_keys():
         if key.startswith("merge:") and key not in active_merge_keys:
             tracker.unregister(key)
-            _merge_verdict_tracker.reset(key)
+
+    # Unregister stale review keys
+    for key in tracker.tracked_keys():
+        if key.startswith("review:") and key not in active_review_keys:
+            tracker.unregister(key)
 
     # Unregister PRs no longer active
     for key in tracker.tracked_keys():
-        if not key.startswith("merge:") and key not in active_pr_ids:
+        if (not key.startswith("merge:")
+                and not key.startswith("review:")
+                and key not in active_pr_ids):
             tracker.unregister(key)
 
     # Auto-start review for newly-idle implementation PRs
@@ -815,11 +1057,15 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
 
         # Reload state — subprocess modified project.yaml on disk
         # but _run_command_sync doesn't update in-memory data.
-        app._data = store.load(app._root)
+        try:
+            app._data = store.load(app._root)
+        except store.ProjectYamlParseError as e:
+            _log.warning("_auto_start_single: corrupt YAML after review cmd: %s", e)
+            return
         updated_pr = store.get_pr(app._data, pr_id)
         if updated_pr and updated_pr.get("status") == "in_review":
             # Start a review loop (same as _auto_start_review_loops)
             loop = app._review_loops.get(pr_id)
             if not loop:
-                _start_loop(app, pr_id, updated_pr, stop_on_suggestions=False,
-                             transcript_dir=str(tdir) if tdir else None)
+                _start_loop(app, pr_id, updated_pr,
+                             transcript_dir=str(tdir))

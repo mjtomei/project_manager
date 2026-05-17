@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pm_core import tmux as tmux_mod
 from pm_core.claude_launcher import launch_claude_print_background, find_claude
+from pm_core.shell import shell_quote
 
 
 # --- Review prompt templates ---
@@ -132,7 +133,7 @@ def review_step(step_name: str, goal_description: str, check_prompt: str, root: 
                     ).stdout.strip()
                     tmux_mod.split_pane_background(
                         session_name, "v",
-                        f"echo 'pm review: {step_name} — PASS' && sleep 5"
+                        f"echo {shell_quote(f'pm review: {step_name} — PASS')} && sleep 5"
                     )
                 except Exception:
                     pass
@@ -149,12 +150,12 @@ def review_step(step_name: str, goal_description: str, check_prompt: str, root: 
                     capture_output=True, text=True,
                 ).stdout.strip()
                 # Show a summary in a background pane
-                summary = output[:200].replace("'", "'\\''").replace("\n", " ")
-                fix_cmd = f"pm plan fix --review {review_path}"
+                summary = output[:200].replace("\n", " ")
+                fix_cmd = f"pm plan fix --review {shell_quote(str(review_path))}"
                 pane_cmd = (
-                    f"echo 'pm review: {step_name} — NEEDS_FIX' && "
-                    f"echo '{summary}' && "
-                    f"echo 'Run: {fix_cmd}' && "
+                    f"echo {shell_quote(f'pm review: {step_name} — NEEDS_FIX')} && "
+                    f"echo {shell_quote(summary)} && "
+                    f"echo {shell_quote(f'Run: {fix_cmd}')} && "
                     f"sleep 30"
                 )
                 tmux_mod.split_pane_background(session_name, "v", pane_cmd)

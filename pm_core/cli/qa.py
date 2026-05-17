@@ -12,19 +12,36 @@ from pm_core.cli import cli
 
 @cli.group()
 def qa():
-    """Manage QA instructions and regression tests."""
+    """Manage QA instructions, regression tests, artifact recipes, and mocks."""
+
+
+_QA_LIST_CATEGORIES = [
+    ("instructions", "Instructions"),
+    ("regression", "Regression Tests"),
+    ("artifacts", "Artifact Recipes"),
+]
+
+
+def _resolve_qa_item(qa_instructions, root, instruction_id, category):
+    """Resolve a QA item across categories, with optional category hint."""
+    if category is not None:
+        return qa_instructions.get_instruction(root, instruction_id, category)
+    for cat, _ in _QA_LIST_CATEGORIES:
+        item = qa_instructions.get_instruction(root, instruction_id, cat)
+        if item is not None:
+            return item
+    return None
 
 
 @qa.command("list")
 def qa_list():
-    """List QA instructions and regression tests by category."""
+    """List QA instructions, regression tests, and artifact recipes."""
     from pm_core import qa_instructions
 
     root = state_root()
     all_items = qa_instructions.list_all(root)
 
-    for category, label in [("instructions", "Instructions"),
-                            ("regression", "Regression Tests")]:
+    for category, label in _QA_LIST_CATEGORIES:
         items = all_items[category]
         click.echo(f"\n{label} ({len(items)}):")
         if not items:
@@ -38,23 +55,17 @@ def qa_list():
 @qa.command("show")
 @click.argument("instruction_id")
 @click.option("--category", "-c", default=None,
-              help="Category: instructions or regression (auto-detected)")
+              help="Category: instructions, regression, or artifacts "
+                   "(auto-detected)")
 def qa_show(instruction_id: str, category: str | None):
-    """Print the full content of a QA instruction."""
+    """Print the full content of a QA instruction or artifact recipe."""
     from pm_core import qa_instructions
 
     root = state_root()
-
-    # Auto-detect category if not specified
-    if category is None:
-        item = qa_instructions.get_instruction(root, instruction_id, "instructions")
-        if item is None:
-            item = qa_instructions.get_instruction(root, instruction_id, "regression")
-    else:
-        item = qa_instructions.get_instruction(root, instruction_id, category)
+    item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
-        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        click.echo(f"QA item not found: {instruction_id}", err=True)
         raise SystemExit(1)
 
     click.echo(f"# {item['title']}")
@@ -64,32 +75,11 @@ def qa_show(instruction_id: str, category: str | None):
     click.echo(item["body"])
 
 
-@qa.command("add")
-@click.argument("name")
-def qa_add(name: str):
-    """Create a new QA instruction and open it in $EDITOR."""
-    from pm_core import qa_instructions
-
-    root = state_root()
-    d = qa_instructions.instructions_dir(root)
-
-    # Sanitize name to filename
-    file_id = name.lower().replace(" ", "-")
-    # Remove non-alphanumeric chars except hyphens
-    file_id = "".join(c for c in file_id if c.isalnum() or c == "-")
-    filepath = d / f"{file_id}.md"
-
-    if filepath.exists():
-        click.echo(f"Instruction already exists: {filepath}", err=True)
-        raise SystemExit(1)
-
-    # Create template
-    title = name.replace("-", " ").title()
-    filepath.write_text(f"""\
+_ADD_TEMPLATES = {
+    "instructions": """\
 ---
 title: {title}
 description:
-tags: []
 ---
 ## Setup
 
@@ -98,7 +88,66 @@ tags: []
 ## Expected Behavior
 
 ## Reporting
-""")
+""",
+    "regression": """\
+---
+title: {title}
+description:
+---
+You are a careful tester. Bring up the surface this test exercises
+(spawn a pane, start a server, invoke a CLI — whatever fits), drive
+it through the scenarios below, and report results.
+
+## Scenarios
+
+- Scenario 1: <what to verify>
+
+## Reporting
+
+For each scenario, report PASS or FAIL with one line of evidence.
+End with an overall PASS/FAIL.
+""",
+    "artifacts": """\
+---
+title: {title}
+description:
+---
+## When to use
+
+## What this recipe produces
+
+## Capture
+
+## Manifest format
+""",
+}
+
+
+def _category_dir(qa_instructions, root, category):
+    if category == "artifacts":
+        return qa_instructions.artifacts_dir(root)
+    if category == "regression":
+        return qa_instructions.regression_dir(root)
+    return qa_instructions.instructions_dir(root)
+
+
+def _qa_add(name: str, category: str) -> None:
+    """Shared implementation for add-instruction / add-regression / add-artifact."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    d = _category_dir(qa_instructions, root, category)
+
+    file_id = name.lower().replace(" ", "-")
+    file_id = "".join(c for c in file_id if c.isalnum() or c == "-")
+    filepath = d / f"{file_id}.md"
+
+    if filepath.exists():
+        click.echo(f"Already exists: {filepath}", err=True)
+        raise SystemExit(1)
+
+    title = name.replace("-", " ").title()
+    filepath.write_text(_ADD_TEMPLATES[category].format(title=title))
 
     click.echo(f"Created: {filepath}")
 
@@ -106,29 +155,197 @@ tags: []
     subprocess.run([editor, str(filepath)])
 
 
+@qa.command("add-instruction")
+@click.argument("name")
+def qa_add_instruction(name: str):
+    """Create a new QA instruction in pm/qa/instructions/ and open in $EDITOR."""
+    _qa_add(name, "instructions")
+
+
+@qa.command("add-regression")
+@click.argument("name")
+def qa_add_regression(name: str):
+    """Create a new regression test in pm/qa/regression/ and open in $EDITOR."""
+    _qa_add(name, "regression")
+
+
+@qa.command("add-artifact")
+@click.argument("name")
+def qa_add_artifact(name: str):
+    """Create a new artifact recipe in pm/qa/artifacts/ and open in $EDITOR."""
+    _qa_add(name, "artifacts")
+
+
+@qa.command("captures-path")
+@click.argument("pr_id")
+def qa_captures_path(pr_id: str):
+    """Print the host path of the captures directory for a PR.
+
+    Captures (QA recordings, transcripts, bug-fix pre/post-fix
+    artifacts, regression captures) live under
+    ``~/.pm/sessions/<session-tag>/captures/<pr-id>/`` and are bind-
+    mounted to ``/pm-captures`` inside scenario containers. Use this
+    command to resolve the host path for tooling that needs to read
+    captures (review sessions, sync to remote storage, etc.).
+
+    Accepts the canonical pm PR id (``pr-NNN``), a GitHub PR number
+    (``42``), or a #-prefixed GitHub number (``#42``) — same
+    resolution as ``pm pr cd``.
+
+    Inside a container the captures dir is bind-mounted at
+    ``/pm-captures``; this command prints that path (because the
+    host-side ``~/.pm`` location isn't visible from inside the
+    container) so a session can resolve its own captures path without
+    caring whether it runs on the host or inside a container.
+    """
+    from pm_core import store
+    from pm_core.cli.helpers import _resolve_pr_id, state_root
+    from pm_core.paths import captures_dir
+
+    data = store.load(state_root())
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if pr_entry is None:
+        click.echo(f"PR '{pr_id}' not found.", err=True)
+        raise click.exceptions.Exit(1)
+    path = captures_dir(pr_entry["id"])
+    if path is None:
+        click.echo(
+            "Error: cannot resolve session tag (not inside a git repo?)",
+            err=True,
+        )
+        raise click.exceptions.Exit(1)
+    click.echo(str(path))
+
+
+def _author_path(category: str, name: str) -> Path:
+    from pm_core import qa_instructions
+    root = state_root()
+    d = _category_dir(qa_instructions, root, category)
+    file_id = "".join(c for c in name.lower().replace(" ", "-")
+                      if c.isalnum() or c == "-")
+    return d / f"{file_id}.md"
+
+
+def _qa_author(name: str, category: str) -> None:
+    """Launch a Claude session that walks the user through authoring."""
+    from pm_core import qa_authoring
+    from pm_core.claude_launcher import launch_claude
+
+    target = _author_path(category, name)
+    if target.exists():
+        click.echo(f"Already exists: {target}", err=True)
+        raise SystemExit(1)
+
+    root = state_root()
+    prompt = qa_authoring.build_authoring_prompt(name, category, target)
+    rc = launch_claude(prompt, session_key=f"qa-author:{category}:{name}",
+                       pm_root=root, resume=False)
+    raise SystemExit(rc)
+
+
+@qa.command("author-instruction")
+@click.argument("name")
+def qa_author_instruction(name: str):
+    """Author a new QA instruction with a guided Claude session."""
+    _qa_author(name, "instructions")
+
+
+@qa.command("author-regression")
+@click.argument("name")
+def qa_author_regression(name: str):
+    """Author a new regression test with a guided Claude session."""
+    _qa_author(name, "regression")
+
+
+@qa.command("author-artifact")
+@click.argument("name")
+def qa_author_artifact(name: str):
+    """Author a new artifact recipe with a guided Claude session."""
+    _qa_author(name, "artifacts")
+
+
+@qa.command("docs")
+def qa_docs():
+    """Print the QA library reference (schema, conventions, surfaces)."""
+    from pm_core import qa_authoring
+    click.echo(qa_authoring.qa_library_doc(), nl=False)
+
+
 @qa.command("edit")
 @click.argument("instruction_id")
 @click.option("--category", "-c", default=None,
-              help="Category: instructions or regression (auto-detected)")
+              help="Category: instructions, regression, or artifacts "
+                   "(auto-detected)")
 def qa_edit(instruction_id: str, category: str | None):
-    """Edit a QA instruction in $EDITOR."""
+    """Edit a QA instruction or artifact recipe in $EDITOR."""
     from pm_core import qa_instructions
 
     root = state_root()
-
-    if category is None:
-        item = qa_instructions.get_instruction(root, instruction_id, "instructions")
-        if item is None:
-            item = qa_instructions.get_instruction(root, instruction_id, "regression")
-    else:
-        item = qa_instructions.get_instruction(root, instruction_id, category)
+    item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
-        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        click.echo(f"QA item not found: {instruction_id}", err=True)
         raise SystemExit(1)
 
     editor = os.environ.get("EDITOR", "vim")
     subprocess.run([editor, item["path"]])
+
+
+@qa.command("regression")
+@click.argument("test_id")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+@click.option("--file-prs", "file_prs", is_flag=True, default=False,
+              help="File PRs (--plan bugs, --plan improvements) for any findings")
+@click.option("--file-bugs", "file_prs", is_flag=True, default=False, hidden=True)
+def qa_regression(test_id: str, session: str | None, file_prs: bool):
+    """Run a regression test from pm/qa/regression/.
+
+    Each test is a Claude prompt; the runner assembles a Session
+    Context, optional findings-filing addendum, and the test body, then
+    launches Claude to exercise the project and report back.
+
+    Use `pm qa list` to see available regression tests.
+    """
+    from pathlib import Path
+    from pm_core import qa_instructions
+    from pm_core.cli.helpers import _find_tui_pane
+    from pm_core.regression_prompts import build_regression_test_prompt
+    from pm_core.claude_launcher import launch_claude
+
+    try:
+        root = state_root()
+    except FileNotFoundError:
+        root = Path.home() / ".pm"
+
+    item = qa_instructions.get_instruction(root, test_id, category="regression")
+    if not item:
+        click.echo(f"Unknown regression test: {test_id}", err=True)
+        click.echo("Run 'pm qa list' to see available tests.")
+        raise SystemExit(1)
+
+    body = item.get("body", "")
+    title = item.get("title", test_id)
+
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
+        raise SystemExit(1)
+
+    full_prompt = build_regression_test_prompt(
+        session=sess,
+        pane_id=pane_id,
+        title=title,
+        body=body,
+        file_findings=file_prs,
+    )
+
+    click.echo(f"Running regression: {title}")
+    click.echo(f"Session: {sess}")
+    click.echo("-" * 60)
+
+    rc = launch_claude(full_prompt, session_key=f"qa-regression:{test_id}",
+                       pm_root=root, cwd=None, resume=False)
+    raise SystemExit(rc)
 
 
 @qa.command("run")
@@ -224,7 +441,7 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     import secrets
     from pm_core import qa_instructions, store
     from pm_core import tmux as tmux_mod
-    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core.container import is_container_mode_enabled, _runtime_available
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.loop_shared import get_pm_session
 
@@ -280,7 +497,7 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     import shutil
     shutil.copy2(item["path"], dest_dir / filename)
 
-    use_containers = is_container_mode_enabled() and _docker_available()
+    use_containers = is_container_mode_enabled() and _runtime_available()
 
     if use_containers:
         from pm_core import container as container_mod
@@ -367,6 +584,93 @@ End with a summary of which steps work and which don't, then one of:
         click.echo(f"  Window: {window_name}")
 
 
+@qa.command("launch")
+@click.argument("item_id")
+@click.option("--target-window", default=None,
+              help="tmux window to launch into (split as a new pane). "
+                   "If omitted, opens a new window named after the item.")
+def qa_launch(item_id: str, target_window: str | None):
+    """Launch a QA instruction or regression test as a Claude pane.
+
+    Headless equivalent of the TUI's ``launch_qa_item`` — meant for
+    watchers that need to spawn QA sessions without going through the TUI
+    process.
+
+    *item_id* has the form ``category:id`` (e.g. ``regression:auth-flow``).
+    """
+    from pm_core import qa_instructions
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core import tmux as tmux_mod
+
+    parts = item_id.split(":", 1)
+    if len(parts) != 2:
+        click.echo(f"Invalid QA item id (expected 'category:id'): {item_id}", err=True)
+        raise SystemExit(1)
+    category, qa_id = parts
+
+    root = state_root()
+    item = qa_instructions.get_instruction(root, qa_id, category=category)
+    if item is None:
+        click.echo(f"QA item not found: {item_id}", err=True)
+        raise SystemExit(1)
+
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("pm qa launch requires tmux.", err=True)
+        raise SystemExit(1)
+
+    session = tmux_mod.get_session_name()
+    if not session:
+        click.echo("No tmux session detected.", err=True)
+        raise SystemExit(1)
+
+    sess_label = os.environ.get("PM_SESSION") or session
+    title = item.get("title", qa_id)
+    body = item.get("body", "")
+
+    if category == "regression":
+        # Route regression launches through the unified builder so headless
+        # and TUI launches produce identical prompts.
+        from pm_core.regression_prompts import build_regression_test_prompt
+        full_prompt = build_regression_test_prompt(
+            session=sess_label,
+            pane_id=None,
+            title=title,
+            body=body,
+            file_findings=True,
+        )
+    else:
+        full_prompt = f"""\
+## Session Context
+
+You are running a QA instruction against tmux session: {sess_label}
+
+To interact with this session, use commands like:
+- pm tui view -s {sess_label}
+- pm tui send <keys> -s {sess_label}
+- tmux list-panes -t {sess_label} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm/pane-registry/{sess_label}.json
+
+## QA Instruction: {title}
+
+{body}
+"""
+
+    cmd = build_claude_shell_cmd(prompt=full_prompt)
+    cwd = str(root.parent) if root.name == "pm" else str(root)
+
+    if target_window:
+        win = tmux_mod.find_window_by_name(session, target_window)
+        if not win:
+            click.echo(f"Target window not found: {target_window}", err=True)
+            raise SystemExit(1)
+        pane_id = tmux_mod.split_pane(session, "h", cmd, window=win["id"])
+        click.echo(f"Launched {item_id} in window '{target_window}' (pane {pane_id})")
+    else:
+        window_name = f"qa-{qa_id}"
+        tmux_mod.new_window(session, window_name, cmd, cwd=cwd, switch=False)
+        click.echo(f"Launched {item_id} in new window '{window_name}'")
+
+
 @qa.command("standalone")
 @click.argument("instruction_id")
 def qa_standalone(instruction_id: str):
@@ -407,7 +711,7 @@ def qa_standalone(instruction_id: str):
     click.echo(f"Running standalone QA: {item['title']}")
     click.echo(f"  Workdir: {workdir}")
 
-    cmd = build_claude_shell_cmd(prompt=prompt)
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir)
     # Launch as tmux window if in a session, otherwise blocking
     session = tmux_mod.get_session_name() if tmux_mod.in_tmux() else None
     if session:
@@ -418,3 +722,141 @@ def qa_standalone(instruction_id: str):
         click.echo("  Running in foreground (no tmux session detected)")
         os.chdir(workdir)
         os.execvp("bash", ["bash", "-c", cmd])
+
+
+# ---------------------------------------------------------------------------
+# pm qa mocks — shared mock definition library
+# ---------------------------------------------------------------------------
+
+@qa.group("mocks")
+def qa_mocks():
+    """Manage shared mock definitions (pm/qa/mocks/).
+
+    Mocks defined here are injected into every QA scenario prompt so all
+    parallel scenario agents use the same contracts rather than independently
+    deciding how to simulate external dependencies (Claude sessions, git
+    operations, tmux, etc.).
+    """
+
+
+@qa_mocks.command("list")
+def qa_mocks_list():
+    """List all shared mock definitions."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    mocks = qa_instructions.list_mocks(root)
+
+    if not mocks:
+        click.echo("No mock definitions found in pm/qa/mocks/")
+        click.echo("Use 'pm qa mocks add <name>' to create one.")
+        return
+
+    click.echo(f"\nMocks ({len(mocks)}):")
+    for mock in mocks:
+        desc = f" — {mock['description']}" if mock["description"] else ""
+        click.echo(f"  {mock['id']}: {mock['title']}{desc}")
+    click.echo()
+
+
+@qa_mocks.command("show")
+@click.argument("mock_id")
+def qa_mocks_show(mock_id: str):
+    """Print the full content of a mock definition."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    mock = qa_instructions.get_mock(root, mock_id)
+
+    if mock is None:
+        click.echo(f"Mock not found: {mock_id}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"# {mock['title']}")
+    if mock["description"]:
+        click.echo(mock["description"])
+    click.echo(f"[{mock['path']}]\n")
+    click.echo(mock["body"])
+
+
+@qa_mocks.command("add")
+@click.argument("name")
+def qa_mocks_add(name: str):
+    """Create a new mock definition and open it in $EDITOR."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    d = qa_instructions.mocks_dir(root)
+
+    file_id = name.lower().replace(" ", "-")
+    file_id = "".join(c for c in file_id if c.isalnum() or c == "-")
+    filepath = d / f"{file_id}.md"
+
+    if filepath.exists():
+        click.echo(f"Mock already exists: {filepath}", err=True)
+        raise SystemExit(1)
+
+    title = name.replace("-", " ").title()
+    filepath.write_text(f"""\
+---
+title: {title}
+description:
+tags: []
+---
+## Contract
+
+What external dependency this mock simulates, and what behavior it stands
+in for (e.g. "Claude API sessions — simulates a Claude session that returns
+scripted responses without making real API calls").
+
+## Scripted Responses
+
+The responses or return values this mock should produce for common test
+scenarios.  Be specific enough that scenario agents can implement the mock
+consistently.
+
+## What Remains Unmocked
+
+What is still real (not mocked) even when this mock is active.
+""")
+
+    click.echo(f"Created: {filepath}")
+
+    editor = os.environ.get("EDITOR", "vim")
+    subprocess.run([editor, str(filepath)])
+
+
+@qa_mocks.command("edit")
+@click.argument("mock_id")
+def qa_mocks_edit(mock_id: str):
+    """Edit a mock definition in $EDITOR."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    mock = qa_instructions.get_mock(root, mock_id)
+
+    if mock is None:
+        click.echo(f"Mock not found: {mock_id}", err=True)
+        raise SystemExit(1)
+
+    editor = os.environ.get("EDITOR", "vim")
+    subprocess.run([editor, mock["path"]])
+
+
+@qa_mocks.command("prompt")
+def qa_mocks_prompt():
+    """Print the mocks block that gets injected into QA scenario prompts.
+
+    Use this to verify what mock contracts scenario agents will see.
+    """
+    from pm_core import qa_instructions
+
+    root = state_root()
+    block = qa_instructions.mocks_for_prompt(root)
+
+    if not block:
+        click.echo("No mocks defined — scenario prompts will have no Mocks section.")
+        click.echo("Use 'pm qa mocks add <name>' to define one.")
+        return
+
+    click.echo(block)

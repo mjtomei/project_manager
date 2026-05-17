@@ -9,6 +9,7 @@ import pytest
 from pm_core.pane_layout import (
     base_session_name,
     compute_layout,
+    handle_pane_opened,
     is_mobile,
     _layout_node,
     _layout_columns,
@@ -18,13 +19,13 @@ from pm_core.pane_layout import (
     get_window_data,
     _iter_all_panes,
     load_registry,
-    save_registry,
     register_pane,
     unregister_pane,
     _reconcile_registry,
     MOBILE_WIDTH_THRESHOLD,
     DEFAULT_MIN_PANE_WIDTH,
 )
+from pm_core.pane_registry import _save_registry
 
 
 class TestBaseSessionName:
@@ -432,7 +433,7 @@ class TestMultiWindowRegistry:
 
     def test_register_pane_different_windows(self, mock_registry):
         """Registering panes in different windows creates separate entries."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test", "windows": {}, "generation": "1",
         })
 
@@ -448,7 +449,7 @@ class TestMultiWindowRegistry:
 
     def test_unregister_pane_finds_across_windows(self, mock_registry):
         """Unregister searches all windows for the pane."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [{"id": "%1", "role": "tui", "order": 0, "cmd": "tui"}],
@@ -469,7 +470,7 @@ class TestMultiWindowRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_reconcile_one_window_doesnt_affect_other(self, mock_panes, mock_registry):
         """Reconciling window @30 doesn't touch window @38."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [
@@ -498,7 +499,7 @@ class TestMultiWindowRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_empty_window_removed_after_reconcile(self, mock_panes, mock_registry):
         """Window entry is removed when all its panes die."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [
@@ -525,7 +526,7 @@ class TestMultiWindowRegistry:
 
     def test_per_window_user_modified_isolation(self, mock_registry):
         """user_modified is per-window, not global."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [{"id": "%1", "role": "tui", "order": 0, "cmd": "tui"}],
@@ -588,7 +589,7 @@ class TestHealRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_dead_panes_removed(self, mock_panes, mock_registry):
         """Dead panes are removed during reconciliation."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [
@@ -612,7 +613,7 @@ class TestHealRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_dead_window_cleaned_up(self, mock_panes, mock_registry):
         """Window with all dead panes is removed (if tmux returns other panes)."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [{"id": "%1", "role": "tui", "order": 0, "cmd": "tui"}],
@@ -644,7 +645,7 @@ class TestHealRegistry:
             },
             "generation": "1",
         }
-        save_registry("pm-test", original)
+        _save_registry("pm-test", original)
 
         # Both panes alive
         mock_panes.return_value = [("%1", 0), ("%2", 1)]
@@ -653,3 +654,98 @@ class TestHealRegistry:
 
         data = load_registry("pm-test")
         assert len(data["windows"]["@30"]["panes"]) == 2
+
+
+class TestHandlePaneOpenedSkipsWrite:
+    """handle_pane_opened returns None (skips write) when pane is already known."""
+
+    def _patch_layout_registry_path(self, mock_registry):
+        """Patch registry_path in pane_layout's namespace too (it's a re-export)."""
+        def _reg_path(session):
+            return mock_registry / f"{session}.json"
+        return patch("pm_core.pane_layout.registry_path", side_effect=_reg_path)
+
+    def test_known_pane_skips_write(self, mock_registry):
+        """When pane_id is already registered, no write occurs."""
+        import os
+
+        registry_data = {
+            "session": "pm-test",
+            "windows": {
+                "@30": {"panes": [
+                    {"id": "%1", "role": "tui", "order": 0, "cmd": "tui"},
+                ], "user_modified": False},
+            },
+            "generation": "1",
+        }
+        _save_registry("pm-test", registry_data)
+
+        reg_file = mock_registry / "pm-test.json"
+        mtime_before = os.path.getmtime(reg_file)
+
+        with self._patch_layout_registry_path(mock_registry):
+            handle_pane_opened("pm-test", "@30", "%1")
+
+        mtime_after = os.path.getmtime(reg_file)
+        assert mtime_before == mtime_after, "file should not be rewritten when pane is already known"
+
+    def test_unknown_pane_triggers_write(self, mock_registry):
+        """When pane_id is unknown, the registry IS written with user_modified=True."""
+        registry_data = {
+            "session": "pm-test",
+            "windows": {
+                "@30": {"panes": [
+                    {"id": "%1", "role": "tui", "order": 0, "cmd": "tui"},
+                ], "user_modified": False},
+            },
+            "generation": "1",
+        }
+        _save_registry("pm-test", registry_data)
+
+        with self._patch_layout_registry_path(mock_registry):
+            handle_pane_opened("pm-test", "@30", "%99")
+
+        data = load_registry("pm-test")
+        assert data["windows"]["@30"]["user_modified"] is True
+
+
+class TestHealRegistrySkipsWrite:
+    """heal_registry returns None (skips write) when no changes are needed."""
+
+    @patch("pm_core.tui.pane_ops.tmux_mod.get_pane_indices")
+    @patch("pm_core.tui.pane_ops.tmux_mod.get_window_id")
+    @patch("pm_core.tui.pane_ops.tmux_mod.in_tmux", return_value=True)
+    def test_healthy_registry_skips_write(
+        self, mock_in_tmux, mock_get_window, mock_get_panes, mock_registry
+    ):
+        """When all panes are alive and TUI is registered, no write occurs."""
+        import os
+        from pm_core.tui.pane_ops import heal_registry
+
+        tui_pane = "%1"
+        window = "@30"
+
+        registry_data = {
+            "session": "pm-test",
+            "windows": {
+                window: {"panes": [
+                    {"id": tui_pane, "role": "tui", "order": 0, "cmd": "tui"},
+                    {"id": "%2", "role": "editor", "order": 1, "cmd": "vim"},
+                ], "user_modified": False},
+            },
+            "generation": "1",
+        }
+        _save_registry("pm-test", registry_data)
+
+        reg_file = mock_registry / "pm-test.json"
+        mtime_before = os.path.getmtime(reg_file)
+
+        mock_get_window.return_value = window
+        # All panes alive
+        mock_get_panes.return_value = [(tui_pane, 0), ("%2", 1)]
+
+        with patch.dict(os.environ, {"TMUX_PANE": tui_pane}):
+            heal_registry("pm-test")
+
+        mtime_after = os.path.getmtime(reg_file)
+        assert mtime_before == mtime_after, "file should not be rewritten when registry is healthy"

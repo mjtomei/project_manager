@@ -376,9 +376,12 @@ class TestCurrentOrBaseSession:
     def test_in_same_session(self, mock_in, mock_gsn):
         assert current_or_base_session("proj") == "proj"
 
+    @patch("pm_core.tmux.subprocess.run")
     @patch("pm_core.tmux.get_session_name", return_value="proj~2")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_in_grouped_session(self, mock_in, mock_gsn):
+    def test_in_grouped_session(self, mock_in, mock_gsn, mock_run):
+        """When current session is a grouped session and it's attached, return it."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
         assert current_or_base_session("proj") == "proj~2"
 
     @patch("pm_core.tmux.subprocess.run")

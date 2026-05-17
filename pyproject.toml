@@ -18,7 +18,10 @@ dependencies = [
 test = ["pytest>=8.0"]
 
 [tool.setuptools]
-packages = ["pm_core", "pm_core.tui", "pm_core.cluster", "pm_core.cli", "pm_core.bench"]
+packages = ["pm_core", "pm_core.tui", "pm_core.cluster", "pm_core.cli", "pm_core.bench", "pm_core.watchers"]
+
+[tool.setuptools.package-data]
+pm_core = ["docs/*.md"]
 
 [project.scripts]
 pm = "pm_core.wrapper:main"

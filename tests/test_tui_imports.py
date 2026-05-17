@@ -76,7 +76,7 @@ class TestPaneOpsImports:
         from pm_core.tui.pane_ops import launch_pane
         sig = inspect.signature(launch_pane)
         params = list(sig.parameters.keys())
-        assert params == ["app", "cmd", "role", "fresh"]
+        assert params == ["app", "cmd", "role", "fresh", "target_window"]
 
     def test_rebalance(self):
         from pm_core.tui.pane_ops import rebalance
@@ -128,7 +128,7 @@ class TestPaneOpsImports:
         from pm_core.tui.pane_ops import launch_qa_item
         sig = inspect.signature(launch_qa_item)
         params = list(sig.parameters.keys())
-        assert params == ["app", "item_id"]
+        assert params == ["app", "item_id", "target_window"]
 
     def test_handle_plan_action(self):
         from pm_core.tui.pane_ops import handle_plan_action

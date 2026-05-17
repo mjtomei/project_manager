@@ -1,8 +1,7 @@
 """Host-side git remote proxy for containerised sessions.
 
 Containers must not hold git credentials directly.  Each container gets a
-dedicated proxy — a daemon on the host listening on a Unix socket that is
-mounted into the container.  A git wrapper inside the container intercepts
+proxy socket mounted into it.  A git wrapper inside the container intercepts
 remote-interacting commands (``push``, ``fetch``, ``pull``, ``ls-remote``)
 and forwards them to the proxy.
 
@@ -13,14 +12,19 @@ The proxy:
      via ``git fetch`` from the target side to avoid ``denyCurrentBranch``
   4. Streams back exit code, stdout, and stderr transparently
 
-One proxy per container — no shared state, no routing.  The proxy starts
-when the container is created and is cleaned up when the container is removed.
+When multiple QA scenario containers share a proxy (same session + PR), each
+container's git wrapper includes its host-side clone path in the request as
+``"workdir"``.  The proxy uses this path as the source for push and the target
+for fetch/pull, falling back to ``self.workdir`` for legacy requests that omit
+the field.
 
 Protocol (newline-delimited JSON over Unix socket):
-  Request:  {"cmd": "push|fetch|pull|ls-remote", "args": ["origin", "branch"]}
+  Request:  {"cmd": "push|fetch|pull|ls-remote", "args": ["origin", "branch"],
+             "workdir": "/host/path/to/clone"}
   Response: {"exit_code": 0, "stdout": "...", "stderr": "..."}
 
 Legacy requests without ``cmd`` are treated as push (backward compat).
+``"workdir"`` is optional; omitting it falls back to ``self.workdir``.
 """
 
 import json
@@ -223,12 +227,19 @@ class PushProxy:
             conn.sendall((json.dumps(response) + "\n").encode())
             return
 
+        # Caller's host-side workdir (optional — omitted by legacy wrappers).
+        # When present, used as the source for push and the target for
+        # fetch/pull instead of self.workdir (which is only correct for the
+        # first scenario that started the proxy).
+        caller_workdir: str | None = request.get("workdir") or None
+
         # Dispatch based on cmd (default "push" for backward compat)
         cmd = request.get("cmd", "push")
         if cmd == "push":
-            response = self._execute_push(args)
+            response = self._execute_push(args, caller_workdir=caller_workdir)
         elif cmd in ("fetch", "pull", "ls-remote"):
-            response = self._execute_read_cmd(cmd, args)
+            response = self._execute_read_cmd(cmd, args,
+                                              caller_workdir=caller_workdir)
         else:
             response = {"exit_code": 1, "stdout": "",
                         "stderr": f"git-proxy: unknown command '{cmd}'\n"}
@@ -257,7 +268,8 @@ class PushProxy:
                 return {"exit_code": 1, "stdout": "", "stderr": msg}
         return None
 
-    def _execute_push(self, push_args: list[str]) -> dict:
+    def _execute_push(self, push_args: list[str],
+                      caller_workdir: str | None = None) -> dict:
         """Validate the branch and execute git push on the host."""
         # Reject flags that could execute arbitrary programs on the host
         danger = self._check_dangerous_flags(push_args, "push")
@@ -274,7 +286,8 @@ class PushProxy:
                 return {"exit_code": 1, "stdout": "", "stderr": msg}
 
         # Determine the target branch from the push args
-        target_branch = self._extract_target_branch(push_args)
+        target_branch = self._extract_target_branch(
+            push_args, workdir=caller_workdir or self.workdir)
 
         if target_branch is None:
             msg = ("push-proxy: rejected — could not determine target branch "
@@ -289,124 +302,81 @@ class PushProxy:
                          target_branch, self.allowed_branch)
             return {"exit_code": 1, "stdout": "", "stderr": msg}
 
-        # Check if origin is a local path.  QA clones should have their
-        # origin set to the real remote at clone time, but local-only repos
-        # (no upstream) still have a local-path origin.  For those, we
-        # can't ``git push`` (fails with receive.denyCurrentBranch on
-        # non-bare repos), so we fetch from the clone into the target repo
-        # instead — the proxy can see both paths on the host.
+        # Scenario clones have `origin` rewritten to the real upstream
+        # URL at clone time, so push runs directly from the caller's
+        # clone.  Local-path origins are explicitly rejected: the old
+        # fetch-into-target fallback advanced the target's branch ref
+        # without touching its worktree, which silently desynced any
+        # later commit made there.  Refuse instead of corrupting state.
+        workdir = caller_workdir or self.workdir
         remote = self._extract_remote_name(push_args)
-        local_target = _resolve_local_remote_url(self.workdir, remote)
+        local_target = _resolve_local_remote_url(workdir, remote)
 
         if local_target is not None:
-            return self._local_push(local_target, target_branch)
-
-        cmd = ["git", "push"] + push_args
-        _log.info("Push proxy executing: %s (in %s)", cmd, self.workdir)
-        try:
-            result = subprocess.run(
-                cmd, cwd=self.workdir,
-                capture_output=True, text=True, timeout=120,
+            msg = (
+                f"push-proxy: rejected — caller's '{remote}' resolves to a "
+                f"local path ({local_target}). Scenario clones must have "
+                f"`origin` set to the real upstream URL before pushing "
+                f"(create_scenario_workdir runs `git remote set-url origin "
+                f"<real-url>` after the local clone).\n"
             )
-            return {
-                "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            }
-        except subprocess.TimeoutExpired:
-            return {"exit_code": 1, "stdout": "",
-                    "stderr": "push-proxy: git push timed out after 120s\n"}
-        except Exception as exc:
-            return {"exit_code": 1, "stdout": "",
-                    "stderr": f"push-proxy: {exc}\n"}
+            _log.warning("Push rejected: local-path origin %s -> %s",
+                         remote, local_target)
+            return {"exit_code": 1, "stdout": "", "stderr": msg}
 
-    def _local_push(self, target_repo: str, branch: str) -> dict:
-        """Push to a local repo, then forward to the real upstream if any.
+        return self._local_push(push_args, caller_workdir=workdir)
 
-        ``git push`` to a non-bare repo with the branch checked out fails
-        with ``receive.denyCurrentBranch``.  Instead, we:
-          1. ``git fetch <clone> <branch>:<branch>`` from the target side
-             to update the local PR workdir's branch ref
-          2. Forward to the real upstream (if the target repo has one)
-             so the remote stays in sync
+    def _local_push(self, push_args: list[str],
+                    caller_workdir: str | None = None) -> dict:
+        """Execute the validated push from the caller's clone.
+
+        Scenario clones have ``origin`` set to the real upstream URL,
+        so the proxy just runs the literal push from the caller's clone
+        — the upstream resolves on its own.  All security checks
+        (allowed branch, dangerous flags) ran in ``_execute_push``
+        before this is called.
         """
-        # Step 1: Update the local target repo's branch ref
-        # --update-head-ok is needed because the target repo typically has
-        # this branch checked out, and git refuses to fetch into a checked-out
-        # branch without it.
-        refspec = f"refs/heads/{branch}:refs/heads/{branch}"
-        cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
-               self.workdir, refspec]
-        _log.info("Push proxy local push (step 1 — update local): %s", cmd)
+        source = caller_workdir or self.workdir
+        cmd = ["git", "-C", source, "push"] + push_args
+        _log.info("Push proxy push: %s", cmd)
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=120,
             )
-        except subprocess.TimeoutExpired:
-            return {"exit_code": 1, "stdout": "",
-                    "stderr": "git-proxy: local push timed out after 120s\n"}
-        except Exception as exc:
-            return {"exit_code": 1, "stdout": "",
-                    "stderr": f"git-proxy: local push failed: {exc}\n"}
-
-        if result.returncode != 0:
             return {
                 "exit_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
             }
-        _log.info("Local push succeeded: %s → %s (%s)",
-                  self.workdir, target_repo, branch)
+        except subprocess.TimeoutExpired:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": "git-proxy: push timed out after 120s\n"}
+        except Exception as exc:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": f"git-proxy: push failed: {exc}\n"}
 
-        # Step 2: Forward to real upstream if the target repo has one
-        real_url = resolve_real_origin(target_repo)
-        if real_url:
-            fwd_cmd = ["git", "push", "origin", branch]
-            _log.info("Push proxy forwarding to upstream: %s (from %s)",
-                      fwd_cmd, target_repo)
-            try:
-                fwd = subprocess.run(
-                    fwd_cmd, cwd=target_repo,
-                    capture_output=True, text=True, timeout=120,
-                )
-                # Combine output from both steps
-                return {
-                    "exit_code": fwd.returncode,
-                    "stdout": result.stdout + fwd.stdout,
-                    "stderr": result.stderr + fwd.stderr,
-                }
-            except subprocess.TimeoutExpired:
-                return {"exit_code": 1, "stdout": result.stdout,
-                        "stderr": result.stderr +
-                        "git-proxy: upstream push timed out after 120s\n"}
-            except Exception as exc:
-                return {"exit_code": 1, "stdout": result.stdout,
-                        "stderr": result.stderr +
-                        f"git-proxy: upstream push failed: {exc}\n"}
-
-        # No real upstream — local-only repo, local update is sufficient
-        return {
-            "exit_code": 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
-
-    def _execute_read_cmd(self, git_cmd: str, args: list[str]) -> dict:
+    def _execute_read_cmd(self, git_cmd: str, args: list[str],
+                          caller_workdir: str | None = None) -> dict:
         """Execute a read-only git remote command (fetch, pull, ls-remote).
 
-        These run directly from self.workdir with no branch restriction —
-        containers have full read access to the remote.
+        These run from the caller's workdir with no branch restriction.
+        The caller's origin already points at the real upstream URL
+        (set up at scenario clone time), so the proxy just runs the
+        literal args — no remote-chain walking needed.
+
+        Falls back to self.workdir for legacy requests without a workdir field.
         """
         # Reject flags that could execute arbitrary programs on the host
         danger = self._check_dangerous_flags(args, git_cmd)
         if danger:
             return danger
 
+        workdir = caller_workdir or self.workdir
         cmd = ["git", git_cmd] + args
-        _log.info("Git proxy executing read cmd: %s (in %s)", cmd, self.workdir)
+        _log.info("Git proxy executing read cmd: %s (in %s)", cmd, workdir)
         try:
             result = subprocess.run(
-                cmd, cwd=self.workdir,
+                cmd, cwd=workdir,
                 capture_output=True, text=True, timeout=120,
             )
             return {
@@ -438,11 +408,13 @@ class PushProxy:
             return arg
         return "origin"
 
-    def _extract_target_branch(self, push_args: list[str]) -> str | None:
+    def _extract_target_branch(self, push_args: list[str],
+                               workdir: str | None = None) -> str | None:
         """Extract the target branch from git push arguments.
 
         Returns the branch name, or None if it can't be determined
         (in which case we fall back to current branch check).
+        Uses *workdir* (or self.workdir) for HEAD resolution.
         """
         # Skip flags, first positional is remote, second is refspec
         positional: list[str] = []
@@ -478,11 +450,12 @@ class PushProxy:
             if dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/"):]
             # Resolve symbolic refs like HEAD to actual branch name
+            _wd = workdir or self.workdir
             if dst == "HEAD":
                 try:
                     result = subprocess.run(
                         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                        cwd=self.workdir, capture_output=True, text=True,
+                        cwd=_wd, capture_output=True, text=True,
                         timeout=5,
                     )
                     if result.returncode == 0:
@@ -492,11 +465,12 @@ class PushProxy:
             return dst if dst else None
 
         # No explicit refspec — check what branch HEAD is on
+        _wd = workdir or self.workdir
         if not positional or len(positional) == 1:
             try:
                 result = subprocess.run(
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=self.workdir, capture_output=True, text=True,
+                    cwd=_wd, capture_output=True, text=True,
                     timeout=5,
                 )
                 if result.returncode == 0:
@@ -597,6 +571,10 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
         [sys.executable, "-m", "pm_core.push_proxy",
          sock_path, workdir, allowed_branch],
         start_new_session=True,  # detach from parent process group
+        # Redirect stdin too: when spawned from a tmux popup (`display-popup
+        # -E pm _popup-cmd ...`), an inherited pty FD keeps the popup
+        # overlay open for the lifetime of this daemon.
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

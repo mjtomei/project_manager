@@ -101,9 +101,23 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     pr_id = status.get("pr_id", "?")
     scenarios = status.get("scenarios", [])
     overall = status.get("overall", "")
+    error = status.get("error", "")
 
     lines.append(f"{_BOLD}QA Status: {pr_id}{_RESET}")
     lines.append("")
+
+    # Show error block if present (spec missing, no scenarios, etc.)
+    if error:
+        lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
+        lines.append("")
+        for err_line in error.split("\n"):
+            lines.append(f"  {_RED}{err_line}{_RESET}")
+        lines.append("")
+        lines.append(f"{_DIM}  q: quit{_RESET}")
+        padded = [_pad_line(l, cols) for l in lines]
+        while len(padded) < rows:
+            padded.append(" " * cols)
+        return _CLEAR_SCREEN + "\n".join(padded)
 
     # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
     title_width = max(cols - 28, 10)
@@ -116,6 +130,7 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         idx = sc.get("index", "?")
         title = _truncate(sc.get("title", ""), title_width)
         verdict = sc.get("verdict", "")
+        verdict_reason = sc.get("verdict_reason", "")
 
         if "(verifying" in verdict:
             # Animated spinner for verdicts being verified
@@ -147,6 +162,14 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             suffix = _RESET
 
         lines.append(f"{prefix}{idx:>3}  {title:<{title_width}}  {verdict_display}{suffix}")
+        if verdict_reason:
+            # Render the reason on a continuation line, indented to align
+            # under the title column and dimmed so it doesn't compete with
+            # the verdict colour above.
+            reason_indent = " " * (2 + 3 + 2)  # prefix + idx col + gap
+            reason_text = _truncate(verdict_reason,
+                                    max(cols - len(reason_indent) - 4, 10))
+            lines.append(f"{reason_indent}{_DIM}↳ {reason_text}{_RESET}")
 
     lines.append("")
 

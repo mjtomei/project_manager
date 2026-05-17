@@ -6,10 +6,33 @@ from unittest import mock
 import tempfile
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from pm_core import store, git_ops
 from pm_core.cli import pr as pr_mod
+
+
+def _run_git_mock(project_data, extras=None):
+    """Build a run_git side_effect that satisfies pr_start's base-branch check.
+
+    ``pr_start`` calls ``git_ops.run_git("show", f"{base}:{yaml_path}", ...)``
+    to verify the PR is committed on the base branch.  Return the project
+    yaml for that lookup, else a generic success stub.  ``extras`` lets a
+    test override specific commands (e.g. return failure for ``push``).
+    """
+    yaml_dump = yaml.safe_dump(project_data)
+
+    def side_effect(*args, **kwargs):
+        if extras:
+            result = extras(*args, **kwargs)
+            if result is not None:
+                return result
+        if args[:1] == ("show",) and len(args) > 1 and ":project.yaml" in args[1]:
+            return mock.Mock(returncode=0, stdout=yaml_dump, stderr="")
+        return mock.Mock(returncode=0, stdout="abc12345\n", stderr="")
+
+    return side_effect
 
 
 @pytest.fixture
@@ -192,7 +215,7 @@ class TestPrStartCreatesDraftPr:
                             checkout_branch=mock.DEFAULT,
                             pull_rebase=mock.DEFAULT,
                             is_git_repo=mock.Mock(return_value=True),
-                            run_git=mock.Mock(return_value=mock.Mock(returncode=0, stdout="abc12345\n", stderr="")),
+                            run_git=mock.Mock(side_effect=_run_git_mock(tmp_project_with_pending_pr["data"])),
                         ):
                             with mock.patch("shutil.rmtree"):
                                 with mock.patch("shutil.move"):
@@ -245,13 +268,10 @@ class TestPrStartCreatesDraftPr:
         """pr_start should continue if push fails."""
         runner = CliRunner()
 
-        call_count = [0]
-
-        def selective_run_git(*args, **kwargs):
-            call_count[0] += 1
-            if args[0] == "push":
+        def _push_fails(*args, **kwargs):
+            if args and args[0] == "push":
                 return mock.Mock(returncode=1, stdout="", stderr="push failed")
-            return mock.Mock(returncode=0, stdout="abc12345\n", stderr="")
+            return None
 
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pending_pr["pm_dir"]):
             with mock.patch.object(pr_mod, "find_claude", return_value=None):
@@ -263,7 +283,8 @@ class TestPrStartCreatesDraftPr:
                             checkout_branch=mock.DEFAULT,
                             pull_rebase=mock.DEFAULT,
                             is_git_repo=mock.Mock(return_value=True),
-                            run_git=selective_run_git,
+                            run_git=mock.Mock(side_effect=_run_git_mock(
+                                tmp_project_with_pending_pr["data"], extras=_push_fails)),
                         ):
                             with mock.patch("shutil.rmtree"):
                                 with mock.patch("shutil.move"):
@@ -304,7 +325,7 @@ class TestPrStartCreatesDraftPr:
                             checkout_branch=mock.DEFAULT,
                             pull_rebase=mock.DEFAULT,
                             is_git_repo=mock.Mock(return_value=True),
-                            run_git=mock.Mock(return_value=mock.Mock(returncode=0, stdout="abc12345\n", stderr="")),
+                            run_git=mock.Mock(side_effect=_run_git_mock(data)),
                         ):
                             with mock.patch("shutil.rmtree"):
                                 with mock.patch("shutil.move"):

@@ -15,7 +15,6 @@ import time
 # Single-line verdicts: emitted as bare keywords on their own line
 SINGLE_LINE_VERDICTS = (
     "PASS",
-    "PASS_WITH_SUGGESTIONS",
     "NEEDS_WORK",
     "INPUT_REQUIRED",
     "VERIFIED",
@@ -45,7 +44,7 @@ ALL_VERDICTS = (
 # Used to validate fake-claude configs and to pick sensible defaults.
 SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "impl":            (),   # implementation: no verdict, interactive coding
-    "review":          ("PASS", "PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "INPUT_REQUIRED"),
+    "review":          ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
     "qa":              ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),  # generic fallback
     "qa_planning":     ("QA_PLAN",),
     "qa_scenario":     ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),

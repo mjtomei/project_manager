@@ -1,7 +1,6 @@
 ---
 title: TUI Manual Testing
 description: Test TUI changes against a throwaway project in the workdir
-tags: [tui, manual]
 ---
 ## Setup
 
@@ -10,6 +9,12 @@ tags: [tui, manual]
    python3 -m venv /tmp/pm-venv && source /tmp/pm-venv/bin/activate
    pip install -e .   # run from the project_manager clone
    ```
+   The container sets `PYTHONPATH=/opt/pm-src` (master), shadowing the
+   editable install. Override before launching the session:
+   ```
+   export PYTHONPATH=/workspace   # path to your editable clone
+   ```
+   Confirm with `pm which` — it should print your clone, not `/opt/pm-src`.
 2. Create a throwaway test project. Use your workdir if you have one, otherwise `/tmp`, for example:
    ```
    TEST_DIR=<workdir>/pm-test-$(date +%s)

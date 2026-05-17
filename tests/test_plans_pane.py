@@ -171,7 +171,7 @@ class TestPlansPane:
         # command string use the SAME action word.
         for action in ("breakdown", "review"):
             # Find: action == "<action>" ... pm plan <action>
-            pattern = rf'action\s*==\s*"{action}".*?launch_pane\(.*?pm plan {action}'
+            pattern = rf'action\s*==\s*"{action}".*?_launch_in_plans_window\(.*?pm plan {action}'
             assert re.search(pattern, src, re.DOTALL), (
                 f"action '{action}' does not route to 'pm plan {action}' in handle_plan_action"
             )

@@ -149,7 +149,7 @@ From pm_core/tui/app.py:
 - PRSelected message sent when PR is highlighted or activated (Enter)
 - Enter triggers edit (same as 'e' key)
 - action_start_pr() runs `pm pr start <id>`
-- action_done_pr() runs `pm pr review <id>`
+- action_review_pr() runs `pm pr review <id>`
 - action_launch_claude() opens Claude in new pane
 
 ## Reporting

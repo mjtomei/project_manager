@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from pm_core import store
 from pm_core.cli import cli
 from pm_core.prompt_gen import (
+    _format_pr_notes,
     generate_prompt, generate_review_prompt,
     generate_qa_planner_prompt, generate_qa_child_prompt,
 )
@@ -403,6 +404,152 @@ class TestPrEditNotes:
 # ---------------------------------------------------------------------------
 # Prompt generation
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Workdir note merging (_format_pr_notes)
+# ---------------------------------------------------------------------------
+
+def _make_workdir_state(tmp_path, pr_id, notes):
+    """Create a pm/project.yaml inside tmp_path with a single PR carrying notes."""
+    pr = {
+        "id": pr_id,
+        "plan": None,
+        "title": "Test PR",
+        "branch": f"pm/{pr_id}",
+        "status": "in_progress",
+        "depends_on": [],
+        "description": "desc",
+        "agent_machine": None,
+        "gh_pr": None,
+        "gh_pr_number": None,
+        "notes": notes,
+    }
+    data = {
+        "project": {"name": "test", "repo": str(tmp_path), "base_branch": "master"},
+        "plans": [],
+        "prs": [pr],
+    }
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir(exist_ok=True)
+    store.save(data, pm_dir)
+    return str(tmp_path)
+
+
+class TestFormatPrNotesWorkdirMerge:
+    """Tests for _format_pr_notes merging notes from main + workdir."""
+
+    def test_no_workdir(self):
+        """Without workdir, behaves as before."""
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr)
+        assert "Main note" in result
+        assert "## PR Notes" in result
+
+    def test_workdir_adds_unique_notes(self, tmp_path):
+        """Notes only in the workdir are included in the merged output."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "wd-1", "text": "Workdir note", "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Main note" in result
+        assert "Workdir note" in result
+
+    def test_dedup_prefers_later_last_edited(self, tmp_path):
+        """When both have the same note ID, the one with later last_edited wins."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "n1", "text": "Updated in workdir", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-03T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Original in main", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Updated in workdir" in result
+        assert "Original in main" not in result
+
+    def test_dedup_main_wins_when_newer(self, tmp_path):
+        """When main's last_edited is later, main version is kept."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "n1", "text": "Older workdir version", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-01T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Newer main version", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-05T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Newer main version" in result
+        assert "Older workdir version" not in result
+
+    def test_dedup_falls_back_to_created_at(self, tmp_path):
+        """When last_edited is missing, falls back to created_at for comparison."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "n1", "text": "Workdir version", "created_at": "2026-01-05T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main version", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Workdir version" in result
+        assert "Main version" not in result
+
+    def test_sorted_by_created_at(self, tmp_path):
+        """Merged notes are sorted by created_at."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "wd-1", "text": "Middle note", "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "First note", "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "n2", "text": "Last note", "created_at": "2026-01-03T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        first_pos = result.index("First note")
+        middle_pos = result.index("Middle note")
+        last_pos = result.index("Last note")
+        assert first_pos < middle_pos < last_pos
+
+    def test_workdir_missing_path(self):
+        """Non-existent workdir path degrades gracefully."""
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir="/nonexistent/path")
+        assert "Main note" in result
+
+    def test_workdir_no_matching_pr(self, tmp_path):
+        """Workdir has project.yaml but not this PR — still works."""
+        workdir = _make_workdir_state(tmp_path, "pr-OTHER", [
+            {"id": "wd-1", "text": "Other PR note", "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Main note" in result
+        assert "Other PR note" not in result
+
+    def test_both_empty_returns_empty(self, tmp_path):
+        """Both sources with no notes returns empty string."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [])
+        pr = {"id": "pr-001", "notes": []}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert result == ""
+
+    def test_only_workdir_has_notes(self, tmp_path):
+        """Main has no notes but workdir does — workdir notes appear."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "wd-1", "text": "Workdir only", "created_at": "2026-01-01T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001"}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Workdir only" in result
+
 
 class TestPromptGenNotes:
     def _data(self, notes=None):

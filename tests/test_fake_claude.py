@@ -287,7 +287,6 @@ class TestFixtures:
 
     @pytest.mark.parametrize("verdict,filename", [
         ("PASS", "pass.txt"),
-        ("PASS_WITH_SUGGESTIONS", "pass_with_suggestions.txt"),
         ("NEEDS_WORK", "needs_work.txt"),
         ("INPUT_REQUIRED", "input_required.txt"),
         ("VERIFIED", "verified.txt"),
@@ -324,64 +323,52 @@ class TestVerdictDetection:
             run_fake_claude(**kwargs)
         return buf.getvalue()
 
+    @staticmethod
+    def _detect(content: str, verdicts: tuple[str, ...]) -> str | None:
+        """Scan content line-by-line for a verdict keyword.
+
+        Mirrors how production verdict detection
+        (``pm_core.loop_shared.match_verdict``) keys on a keyword that is the
+        entire content of a line.
+        """
+        from pm_core.loop_shared import match_verdict
+        for line in content.splitlines():
+            hit = match_verdict(line, verdicts)
+            if hit:
+                return hit
+        return None
+
     def test_pass_detected_by_extract_verdict(self):
-        from pm_core.loop_shared import extract_verdict_from_content
         out = self._capture(verdict="PASS", preamble=3)
-        result = extract_verdict_from_content(
-            out,
-            verdicts=("PASS", "PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "INPUT_REQUIRED"),
-            keywords=("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
-        )
+        result = self._detect(
+            out, ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"))
         assert result == "PASS"
 
     def test_needs_work_detected(self):
-        from pm_core.loop_shared import extract_verdict_from_content
         out = self._capture(verdict="NEEDS_WORK", preamble=3)
-        result = extract_verdict_from_content(
-            out,
-            verdicts=("PASS", "PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "INPUT_REQUIRED"),
-            keywords=("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
-        )
+        result = self._detect(
+            out, ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"))
         assert result == "NEEDS_WORK"
 
     def test_input_required_detected(self):
-        from pm_core.loop_shared import extract_verdict_from_content
         out = self._capture(verdict="INPUT_REQUIRED", preamble=3)
-        result = extract_verdict_from_content(
-            out,
-            verdicts=("PASS", "PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "INPUT_REQUIRED"),
-            keywords=("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
-        )
+        result = self._detect(
+            out, ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"))
         assert result == "INPUT_REQUIRED"
 
     def test_verified_detected(self):
-        from pm_core.loop_shared import extract_verdict_from_content
         out = self._capture(verdict="VERIFIED", preamble=3)
-        result = extract_verdict_from_content(
-            out,
-            verdicts=("VERIFIED", "FLAGGED_END"),
-            keywords=("VERIFIED", "FLAGGED_START", "FLAGGED_END"),
-        )
+        result = self._detect(out, ("VERIFIED", "FLAGGED_END"))
         assert result == "VERIFIED"
 
     def test_flagged_end_detected(self):
-        from pm_core.loop_shared import extract_verdict_from_content
         out = self._capture(verdict="FLAGGED", preamble=3)
-        result = extract_verdict_from_content(
-            out,
-            verdicts=("VERIFIED", "FLAGGED_END"),
-            keywords=("VERIFIED", "FLAGGED_START", "FLAGGED_END"),
-        )
+        result = self._detect(out, ("VERIFIED", "FLAGGED_END"))
         assert result == "FLAGGED_END"
 
     def test_refined_steps_end_detected(self):
-        from pm_core.loop_shared import extract_verdict_from_content
         out = self._capture(verdict="REFINED_STEPS", preamble=3)
-        result = extract_verdict_from_content(
-            out,
-            verdicts=("REFINED_STEPS_END",),
-            keywords=("REFINED_STEPS_START", "REFINED_STEPS_END"),
-        )
+        result = self._detect(out, ("REFINED_STEPS_END",))
         assert result == "REFINED_STEPS_END"
 
 
@@ -489,9 +476,9 @@ class TestSessionTypeVerdicts:
     def test_review_verdicts(self):
         allowed = SESSION_TYPE_VERDICTS["review"]
         assert "PASS" in allowed
-        assert "PASS_WITH_SUGGESTIONS" in allowed
         assert "NEEDS_WORK" in allowed
         assert "INPUT_REQUIRED" in allowed
+        assert "PASS_WITH_SUGGESTIONS" not in allowed
         assert "VERIFIED" not in allowed
         assert "FLAGGED" not in allowed
 

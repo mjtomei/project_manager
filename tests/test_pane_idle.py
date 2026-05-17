@@ -1,299 +1,157 @@
-"""Tests for pane idle detection (pm_core.pane_idle)."""
+"""Tests for PaneIdleTracker — the hook-event driven idle tracker.
 
-import time
+The old hash-comparison path is gone; registration requires a
+transcript path whose symlink (or UUID-named file) yields a
+Claude session_id.
+"""
+
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from pm_core.pane_idle import PaneIdleTracker, content_has_interactive_prompt
+from pm_core.pane_idle import PaneIdleTracker
 
 
 @pytest.fixture
 def tracker():
-    """Create a tracker with a short threshold for fast tests."""
-    return PaneIdleTracker(idle_threshold=1.0)
+    return PaneIdleTracker()
 
 
-class TestPaneIdleTracker:
-    """Unit tests for PaneIdleTracker."""
+@pytest.fixture
+def transcript(tmp_path: Path) -> Path:
+    """Create a transcript symlink whose target filename is a UUID."""
+    sid = "12345678-1234-1234-1234-123456789abc"
+    target = tmp_path / f"{sid}.jsonl"
+    target.write_text("")
+    link = tmp_path / "t.jsonl"
+    link.symlink_to(target)
+    return link
 
-    def test_register_and_is_tracked(self, tracker):
-        assert not tracker.is_tracked("pr-001")
-        tracker.register("pr-001", "%5")
-        assert tracker.is_tracked("pr-001")
 
-    def test_unregister(self, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.unregister("pr-001")
-        assert not tracker.is_tracked("pr-001")
+class TestRegistration:
+    def test_register_and_is_tracked(self, tracker, transcript):
+        tracker.register("key-1", "%0", str(transcript))
+        assert tracker.is_tracked("key-1")
+        assert not tracker.is_idle("key-1")
 
-    def test_unregister_unknown_key_is_noop(self, tracker):
-        tracker.unregister("nonexistent")  # should not raise
+    def test_register_rejects_unrecoverable_transcript(self, tracker, tmp_path):
+        bogus = tmp_path / "not-a-uuid.jsonl"
+        bogus.write_text("")
+        with pytest.raises(ValueError):
+            tracker.register("k", "%0", str(bogus))
 
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello world")
-    def test_poll_not_idle_before_threshold(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        result = tracker.poll("pr-001")
-        assert result is False
-        assert not tracker.is_idle("pr-001")
+    def test_unregister(self, tracker, transcript):
+        tracker.register("k", "%0", str(transcript))
+        tracker.unregister("k")
+        assert not tracker.is_tracked("k")
 
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello world")
-    def test_poll_idle_after_threshold(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
 
-        # First poll: sets the content hash
-        tracker.poll("pr-001")
-        assert not tracker.is_idle("pr-001")
-
-        # Backdate the last_change_time to simulate time passing
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-
-        # Second poll: same content, threshold exceeded
-        result = tracker.poll("pr-001")
-        assert result is True
-        assert tracker.is_idle("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane")
-    def test_content_change_resets_idle(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-
-        # First poll with content A
-        mock_capture.return_value = "content A"
-        tracker.poll("pr-001")
-
-        # Backdate to exceed threshold
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-
-        # Poll with different content — should reset, not be idle
-        mock_capture.return_value = "content B"
-        result = tracker.poll("pr-001")
-        assert result is False
-        assert not tracker.is_idle("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=False)
-    def test_pane_gone(self, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        result = tracker.poll("pr-001")
-        assert result is False
-        assert tracker.is_gone("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello")
-    def test_register_new_pane_resets_state(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.poll("pr-001")
-
-        # Backdate and become idle
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-        assert tracker.is_idle("pr-001")
-
-        # Re-register with a new pane — should reset
-        tracker.register("pr-001", "%9")
-        assert not tracker.is_idle("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello")
-    def test_register_same_pane_does_not_reset(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.poll("pr-001")
-
-        # Backdate and become idle
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-        assert tracker.is_idle("pr-001")
-
-        # Re-register with same pane — should NOT reset
-        tracker.register("pr-001", "%5")
-        assert tracker.is_idle("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello")
-    def test_mark_active(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.poll("pr-001")
-
-        # Backdate and become idle
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-        assert tracker.is_idle("pr-001")
-
-        # mark_active should reset
-        tracker.mark_active("pr-001")
-        assert not tracker.is_idle("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello")
-    def test_became_idle_fires_once(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.poll("pr-001")
-
-        # Not idle yet
-        assert not tracker.became_idle("pr-001")
-
-        # Backdate and become idle
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-        assert tracker.is_idle("pr-001")
-
-        # First call returns True
-        assert tracker.became_idle("pr-001")
-        # Second call returns False (already notified)
-        assert not tracker.became_idle("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane")
-    def test_became_idle_resets_on_activity(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-
-        # Go idle
-        mock_capture.return_value = "content A"
-        tracker.poll("pr-001")
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-        assert tracker.became_idle("pr-001")
-
-        # New content makes it active again
-        mock_capture.return_value = "content B"
-        tracker.poll("pr-001")
-        assert not tracker.is_idle("pr-001")
-
-        # Go idle again
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-
-        # became_idle fires again for the new transition
-        assert tracker.became_idle("pr-001")
-
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello")
-    def test_mark_active_resets_became_idle(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.poll("pr-001")
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-        assert tracker.became_idle("pr-001")
-
-        # mark_active resets the notification
-        tracker.mark_active("pr-001")
-        assert not tracker.became_idle("pr-001")
-
-        # Go idle again — should fire
-        with tracker._lock:
-            tracker._states["pr-001"].last_change_time = time.monotonic() - 2.0
-        tracker.poll("pr-001")
-        assert tracker.became_idle("pr-001")
-
+class TestPolling:
     def test_poll_unknown_key(self, tracker):
-        result = tracker.poll("nonexistent")
-        assert result is False
+        assert tracker.poll("nope") is False
 
-    def test_is_idle_unknown_key(self, tracker):
-        assert not tracker.is_idle("nonexistent")
+    def test_poll_pane_gone(self, tracker, transcript):
+        tracker.register("k", "%0", str(transcript))
+        with patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=False):
+            assert tracker.poll("k") is False
+        assert tracker.is_gone("k")
 
-    def test_is_gone_unknown_key(self, tracker):
-        assert not tracker.is_gone("nonexistent")
+    def test_idle_prompt_hook_marks_idle(self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
 
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=False)
-    def test_gone_then_reregister(self, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.poll("pr-001")
-        assert tracker.is_gone("pr-001")
+        def fake_read_event(session_id):
+            return {"event_type": "idle_prompt", "timestamp": 123.0,
+                    "session_id": session_id, "matcher": "Notification"}
 
-        # Re-register with new pane
-        tracker.register("pr-001", "%10")
-        assert not tracker.is_gone("pr-001")
+        monkeypatch.setattr("pm_core.hook_events.read_event", fake_read_event)
+        assert tracker.poll("k") is True
+        assert tracker.is_idle("k")
 
-    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
-    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello world")
-    def test_get_content(self, mock_capture, mock_exists, tracker):
-        tracker.register("pr-001", "%5")
-        tracker.poll("pr-001")
-        assert tracker.get_content("pr-001") == "hello world"
-
-    def test_get_content_unknown_key(self, tracker):
-        assert tracker.get_content("nonexistent") == ""
-
-
-class TestContentHasInteractivePrompt:
-    """Tests for the interactive prompt detection helper."""
-
-    def test_trust_prompt(self):
-        content = (
-            " Security guide\n"
-            " ❯ 1. Yes, I trust this folder\n"
-            "   2. No, I don't trust this folder\n"
+    def test_became_idle_one_shot(self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+        monkeypatch.setattr(
+            "pm_core.hook_events.read_event",
+            lambda sid: {"event_type": "idle_prompt", "timestamp": 1.0,
+                         "session_id": sid},
         )
-        assert content_has_interactive_prompt(content) is True
+        tracker.poll("k")
+        assert tracker.became_idle("k") is True
+        assert tracker.became_idle("k") is False
 
-    def test_permission_prompt(self):
-        content = (
-            "? Allow Read /path/to/file\n"
-            " ❯ Allow once\n"
-            "   Allow always\n"
-            "   Deny\n"
+    def test_permission_prompt_marks_waiting_for_input(self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+        monkeypatch.setattr(
+            "pm_core.hook_events.read_event",
+            lambda sid: {"event_type": "permission_prompt", "timestamp": 1.0,
+                         "session_id": sid},
         )
-        assert content_has_interactive_prompt(content) is True
+        tracker.poll("k")
+        assert tracker.is_waiting_for_input("k") is True
+        assert tracker.is_idle("k") is False
 
-    def test_normal_idle_output(self):
-        content = (
-            "$ claude --dangerously-skip-permissions\n"
-            "Claude is working...\n"
-            "Done! Created 3 files.\n"
-            "\n"
+    def test_idle_after_permission_clears_waiting(self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+
+        sequence = [
+            {"event_type": "permission_prompt", "timestamp": 1.0, "session_id": "s"},
+            {"event_type": "idle_prompt", "timestamp": 2.0, "session_id": "s"},
+        ]
+
+        def read_event(sid):
+            return sequence.pop(0) if sequence else None
+
+        monkeypatch.setattr("pm_core.hook_events.read_event", read_event)
+        tracker.poll("k")
+        assert tracker.is_waiting_for_input("k") is True
+        tracker.poll("k")
+        assert tracker.is_waiting_for_input("k") is False
+        assert tracker.is_idle("k") is True
+
+    def test_stop_event_does_not_flip_idle(self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+        monkeypatch.setattr(
+            "pm_core.hook_events.read_event",
+            lambda sid: {"event_type": "Stop", "timestamp": 1.0,
+                         "session_id": sid},
         )
-        assert content_has_interactive_prompt(content) is False
+        assert tracker.poll("k") is False
+        assert not tracker.is_idle("k")
 
-    def test_empty_content(self):
-        assert content_has_interactive_prompt("") is False
 
-    def test_selector_with_sibling_above(self):
-        """Selector with an indented sibling option above should match."""
-        content = (
-            "   Option A\n"
-            " ❯ Option B\n"
-        )
-        assert content_has_interactive_prompt(content) is True
+def test_tracked_keys(tracker, transcript, tmp_path):
+    sid2 = "87654321-4321-4321-4321-cba987654321"
+    target2 = tmp_path / f"{sid2}.jsonl"
+    target2.write_text("")
+    link2 = tmp_path / "t2.jsonl"
+    link2.symlink_to(target2)
 
-    def test_selector_with_sibling_below(self):
-        """Selector with an indented sibling option below should match."""
-        content = (
-            " ❯ Option A\n"
-            "   Option B\n"
-        )
-        assert content_has_interactive_prompt(content) is True
+    tracker.register("a", "%0", str(transcript))
+    tracker.register("b", "%1", str(link2))
+    assert set(tracker.tracked_keys()) == {"a", "b"}
 
-    def test_bare_selector_no_text(self):
-        """Bare ❯ without following text (e.g. input cursor) should not match."""
-        content = "Some output\n❯ \n"
-        assert content_has_interactive_prompt(content) is False
 
-    def test_input_cursor_with_proposed_message(self):
-        """Claude's input cursor with a proposed message should NOT match."""
-        content = (
-            "Done! Created 3 files.\n"
-            "\n"
-            "❯ Would you like me to run the tests?\n"
-        )
-        assert content_has_interactive_prompt(content) is False
-
-    def test_input_cursor_with_indented_selector(self):
-        """Indented ❯ but no sibling options should NOT match."""
-        content = (
-            "Some output\n"
-            "  ❯ some proposed text\n"
-            "more output\n"
-        )
-        assert content_has_interactive_prompt(content) is False
+def test_mark_active(tracker, transcript, monkeypatch):
+    tracker.register("k", "%0", str(transcript))
+    monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                        lambda p: True)
+    monkeypatch.setattr(
+        "pm_core.hook_events.read_event",
+        lambda sid: {"event_type": "idle_prompt", "timestamp": 1.0,
+                     "session_id": sid},
+    )
+    tracker.poll("k")
+    assert tracker.is_idle("k")
+    tracker.mark_active("k")
+    assert not tracker.is_idle("k")

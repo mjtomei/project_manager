@@ -1,5 +1,6 @@
 """Textual TUI App for Project Manager."""
 
+import shlex
 from pathlib import Path
 
 from pm_core.paths import configure_logger
@@ -22,9 +23,10 @@ from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanA
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
 from pm_core.plan_parser import extract_plan_intro
 
-from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
+from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (
     ConnectScreen, HelpScreen, MergeLockScreen, PlanPickerScreen, PlanAddScreen,
+    QACreatePickerScreen,
 )
 from pm_core.tui import pane_ops
 from pm_core.tui import frame_capture
@@ -49,6 +51,13 @@ class ProjectManagerApp(App):
         color: $text;
         padding: 0 1;
         margin-top: 1;
+    }
+    SessionBar {
+        height: 1;
+        background: $surface;
+        color: $text;
+        padding: 0 1;
+        display: none;
     }
     #main-area {
         layout: horizontal;
@@ -117,7 +126,7 @@ class ProjectManagerApp(App):
         Binding("q", "toggle_qa", "QA"),
         Binding("s", "start_pr", "Start PR", show=True),
         Binding("S", "start_pr_companion", "Start+Companion", show=False),
-        Binding("d", "done_pr", "Review", show=True),
+        Binding("d", "review_pr", "Review", show=True),
         Binding("g", "merge_pr", "Merge", show=True),
         Binding("G", "merge_pr_companion", "Merge+Companion", show=False),
 
@@ -144,13 +153,16 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
-        # w is handled as a prefix key in on_key (wf=focus, ww=list, ws=start/stop)
+        Binding("O", "auto_sequence_pr", "Auto-seq", show=True),
+        Binding("w", "focus_watcher", "Watcher", show=False),
+        Binding("V", "review_spec", "Review Spec", show=False),
+        Binding("Y", "cleanup_pr", "Cleanup", show=True),
     ]
 
     def on_key(self, event) -> None:
         """Handle z and w modifier prefix keys.
 
-        z supports z, zz, zzz modifiers for review/QA loop control.
+        z supports z and zz modifiers for review/QA loop control.
         w is a prefix key for watcher commands: wf=focus, ww=list, ws=start/stop.
 
         Also buffers keystrokes when / was pressed but the command bar
@@ -158,6 +170,10 @@ class ProjectManagerApp(App):
         """
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
+            return
+        # When a modal/screen is on top of the default screen, let it handle
+        # its own keys — App-level prefix keys (y/w/z) must not swallow them.
+        if len(self.screen_stack) > 1:
             return
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
@@ -184,8 +200,35 @@ class ProjectManagerApp(App):
                 self._action_focus_watcher()
             elif key == "s":
                 self._action_watcher_toggle()
+            elif key == "r":
+                self._action_watcher_review()
             else:
                 self.log_message("[dim]w cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        # y prefix mode: dispatch second key as cleanup-then-action
+        if self._y_mode:
+            self._y_mode = False
+            if self._y_cancel_timer:
+                self._y_cancel_timer.stop()
+                self._y_cancel_timer = None
+            self._clear_log_message()
+            key = event.character or event.key
+            if key in ("s", "d", "t"):
+                pr_view.cleanup_then_action(self, key)
+            else:
+                self.log_message("[dim]y cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        if (event.key == "y" or event.character == "y"):
+            if not self.check_action("cleanup_pr", ()):
+                return
+            self._y_mode = True
+            self._z_count = 0
+            self.log_message("[bold]y …[/] [dim](cleanup-then: s=start d=review t=qa)[/]")
+            self._y_cancel_timer = self.set_timer(2.0, self._cancel_y_mode)
             event.prevent_default()
             event.stop()
             return
@@ -194,15 +237,16 @@ class ProjectManagerApp(App):
             if not self.check_action("focus_watcher", ()):
                 return
             self._w_mode = True
-            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop)[/]")
+            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop r=review)[/]")
             # Auto-cancel after 2 seconds
             self._w_cancel_timer = self.set_timer(2.0, self._cancel_w_mode)
             event.prevent_default()
             event.stop()
             return
         if event.key == "z":
-            if self._z_count >= 3:
-                # zzz → cancel (toggle off)
+            if self._z_count >= 2:
+                # zzz → cancel (toggle off).  Only z and zz are valid prefixes;
+                # a third z resets.
                 self._z_count = 0
                 self._clear_log_message()
             else:
@@ -210,31 +254,37 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and (self._z_count > 0 or self._w_mode):
+        elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._y_mode):
             self._z_count = 0
             if self._w_mode:
                 self._w_mode = False
                 if self._w_cancel_timer:
                     self._w_cancel_timer.stop()
                     self._w_cancel_timer = None
+            if self._y_mode:
+                self._y_mode = False
+                if self._y_cancel_timer:
+                    self._y_cancel_timer.stop()
+                    self._y_cancel_timer = None
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
-        if action in ("start_pr", "start_pr_companion", "done_pr",
+        if action in ("start_pr", "start_pr_companion", "review_pr",
                        "merge_pr", "merge_pr_companion",
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
+                       "review_spec", "cleanup_pr"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
+        if action in ("start_pr", "start_pr_companion", "review_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
@@ -267,7 +317,7 @@ class ProjectManagerApp(App):
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
-        # z modifier key state (vim-style prefix, supports z/zz/zzz)
+        # z modifier key state (vim-style prefix, supports z/zz)
         self._z_count: int = 0
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
@@ -287,15 +337,22 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
+        # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
+        # When a PR is in this set, _maybe_auto_merge stops at "ready to
+        # merge" instead of launching the merge window.
+        self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
         self._watcher_manager = WatcherManager()
         # w prefix key state
         self._w_mode: bool = False
         self._w_cancel_timer = None
+        # y prefix key state (cleanup-then-action)
+        self._y_mode: bool = False
+        self._y_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
-        # Self-driving QA state (zz t / zzz t — tracks pass counts per PR)
+        # Self-driving QA state (zz t — tracks pass counts per PR)
         self._self_driving_qa: dict = {}
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
@@ -304,7 +361,7 @@ class ProjectManagerApp(App):
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
 
-        Returns 0 (no z), 1 (z), 2 (zz), or 3 (zzz).
+        Returns 0 (no z), 1 (z), or 2 (zz).
         Non-zero is truthy, so ``if app._consume_z():`` still works
         for callers that only care about "was z pressed".
         """
@@ -328,6 +385,7 @@ class ProjectManagerApp(App):
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
+        yield SessionBar(id="session-bar")
         with Container(id="main-area"):
             with TreeScroll(id="tree-container"):
                 yield TechTree(id="tech-tree")
@@ -341,7 +399,16 @@ class ProjectManagerApp(App):
         yield CommandBar(id="command-bar")
 
     def on_mount(self) -> None:
-        _log.info("TUI mounted (cwd=%s)", Path.cwd())
+        import os
+        try:
+            from pm_core.tui import auto_start as _auto_start
+            trigger = ("merge_restart"
+                       if _auto_start.has_merge_restart_marker()
+                       else "initial")
+        except Exception:
+            trigger = "initial"
+        _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
+                  os.getpid(), Path.cwd(), trigger)
         # Get session name for frame capture file naming
         if tmux_mod.in_tmux():
             try:
@@ -352,6 +419,20 @@ class ProjectManagerApp(App):
                 self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
+        # External-reload IPC: write a pidfile and install a SIGUSR1 handler
+        # so CLI commands can ask us to reload state without depending on
+        # tmux send-keys (which gets eaten by whichever widget has focus).
+        self._install_reload_signal()
+        # Sweep stale runtime_state entries from the previous TUI
+        # process — a freshly-started TUI doesn't own any pane or loop
+        # recorded by an old one, so anything still flagged as
+        # running/idle/queued is no longer live.  Action mirrors will
+        # rewrite real entries as panes register and loops resume.
+        try:
+            from pm_core import runtime_state as _rs
+            _rs.sweep_stale_states("tui-mount")
+        except Exception:
+            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         # Load any existing capture config
         frame_capture.load_capture_config(self)
         # Set up watchers on child widgets for frame capture
@@ -447,6 +528,8 @@ class ProjectManagerApp(App):
             _log.warning("no project.yaml found")
             self._root = None
             self._data = {}
+        except store.ProjectYamlParseError as e:
+            _log.warning("corrupt project.yaml, keeping previous state: %s", e)
 
         # Decide which view to show based on whether PRs exist
         prs = self._data.get("prs") or []
@@ -523,6 +606,15 @@ class ProjectManagerApp(App):
         from pm_core.paths import get_global_setting
         if not self._data:
             return
+        # When a mode-specific view owns the status bar, don't overwrite it
+        # with the project status. Re-render the mode's bar instead so that
+        # refresh / background sync keeps counters in sync.
+        if self._qa_visible:
+            self._update_qa_status_bar()
+            return
+        if self._plans_visible:
+            self._update_plans_status_bar()
+            return
         project = self._data.get("project", {})
         prs = self._data.get("prs") or []
         tree = self.query_one("#tech-tree", TechTree)
@@ -557,6 +649,7 @@ class ProjectManagerApp(App):
             auto_start=self._auto_start,
             watcher_status=watcher_status,
         )
+        self.query_one("#session-bar", SessionBar).refresh_session_info()
 
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""
@@ -654,22 +747,17 @@ class ProjectManagerApp(App):
     def action_start_pr_companion(self) -> None:
         pr_view.start_pr(self, companion=True)
 
-    def action_done_pr(self) -> None:
+    def action_review_pr(self) -> None:
         z = self._consume_z()
         if z == 0:
-            # plain d = mark done (in_progress → in_review) + open review window
-            pr_view.done_pr(self)
+            # plain d = mark in_review and open review window
+            pr_view.review_pr(self)
         elif z == 1:
-            # z d = fresh done (kill existing review window), OR stop loop if running
-            review_loop_ui.stop_loop_or_fresh_done(self)
-        elif z == 2:
-            # zz d = start review loop (stops on PASS or PASS_WITH_SUGGESTIONS),
-            #        or stop loop if running
-            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=True)
+            # z d = kill any running loop and open a fresh review window
+            review_loop_ui.stop_loop_or_fresh_review(self)
         else:
-            # zzz d = start strict review loop (stops only on PASS),
-            #         or stop loop if running
-            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
+            # zz d = start a fresh review loop (supersedes any running)
+            review_loop_ui.start_or_stop_loop(self)
 
     def action_merge_pr(self) -> None:
         pr_view.merge_pr(self)
@@ -726,11 +814,29 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
+    def action_auto_sequence_pr(self) -> None:
+        from pm_core.tui.auto_start import auto_sequence_for_pr
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+        self.run_worker(auto_sequence_for_pr(self, pr_id))
+
     def _cancel_w_mode(self) -> None:
         """Auto-cancel w prefix mode after timeout."""
         if self._w_mode:
             self._w_mode = False
             self._clear_log_message()
+
+    def _cancel_y_mode(self) -> None:
+        """Auto-cancel y prefix mode after timeout."""
+        if self._y_mode:
+            self._y_mode = False
+            self._clear_log_message()
+
+    def action_cleanup_pr(self) -> None:
+        pr_view.cleanup_pr(self)
 
     def _action_focus_watcher(self) -> None:
         """Focus the watcher window (wf key chord)."""
@@ -804,6 +910,40 @@ class ProjectManagerApp(App):
             meta_pm_root=str(meta_root) if meta_root else None,
         )
 
+    def _action_watcher_review(self) -> None:
+        """Launch the watcher review session (wr key chord)."""
+        _log.info("action: watcher_review")
+        pane_ops.launch_watcher_review(self)
+
+    def action_review_spec(self) -> None:
+        """Open the oldest pending spec for review (V key)."""
+        from pm_core import spec_gen
+        _log.info("action: review_spec")
+
+        pr_id = spec_gen.oldest_pending_spec_pr(self._data)
+        if not pr_id:
+            self.log_message("No specs pending review")
+            return
+
+        pr = store.get_pr(self._data, pr_id)
+        if not pr:
+            self.log_message(f"PR {pr_id} not found")
+            return
+
+        phase = spec_gen.get_pending_spec_phase(pr)
+        if not phase:
+            self.log_message(f"No pending spec for {pr_id}")
+            return
+
+        # Select this PR in the tree
+        tree = self.query_one("#tech-tree", TechTree)
+        tree.select_pr(pr_id)
+
+        # Launch spec-approve in a pane
+        pane_ops.launch_pane(self, f"pm pr spec-approve {pr_id}",
+                             "spec-review", fresh=True)
+        self.log_message(f"Reviewing {phase} spec for {pr_id}")
+
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
 
@@ -811,6 +951,9 @@ class ProjectManagerApp(App):
         from pm_core.tui import auto_start
         if auto_start.has_merge_restart_marker():
             auto_start.save_breadcrumb(self)
+            _log.info("action_restart: reason=merge_restart_marker")
+        else:
+            _log.info("action_restart: reason=user")
         pane_ops.restart_app(self)
 
     def action_refresh(self) -> None:
@@ -824,6 +967,114 @@ class ProjectManagerApp(App):
                 await self._do_normal_sync(is_manual=True)
             self.run_worker(do_refresh())
             self.log_message("Refreshing...")
+
+    def _reload_pidfile(self) -> Path | None:
+        """Path to this app's reload pidfile, keyed by tmux session name."""
+        if not self._session_name:
+            return None
+        from pm_core.paths import pm_home
+        return pm_home() / f"tui-{self._session_name}.pid"
+
+    def _command_queue_file(self) -> Path | None:
+        """Path to this app's external command queue, keyed by session name."""
+        if not self._session_name:
+            return None
+        from pm_core.paths import pm_home
+        return pm_home() / f"tui-{self._session_name}.cmd-queue"
+
+    def _install_reload_signal(self) -> None:
+        """Write pidfile and register signal handlers.
+
+        SIGUSR1 → ``action_reload`` (state-only reload).
+        SIGUSR2 → drain the per-session command queue file and dispatch
+        each line through ``handle_command_submitted`` (same path as the
+        in-TUI ``/`` command bar).  Lets external processes (popup
+        picker, CLI helpers) submit commands without depending on
+        focus-sensitive ``tmux send-keys`` timing.
+        """
+        import os
+        import signal
+        import asyncio
+        pidfile = self._reload_pidfile()
+        if pidfile is None:
+            _log.debug("No session name yet, skipping signal-handler install")
+            return
+        try:
+            pidfile.write_text(str(os.getpid()))
+        except OSError as e:
+            _log.debug("Could not write TUI pidfile %s: %s", pidfile, e)
+            return
+        # Pre-create the command queue file so external writers can
+        # always open it for append without a race.
+        queue = self._command_queue_file()
+        if queue is not None:
+            try:
+                queue.touch(exist_ok=True)
+            except OSError as e:
+                _log.debug("Could not create TUI command queue %s: %s",
+                           queue, e)
+        try:
+            loop = asyncio.get_event_loop()
+            loop.add_signal_handler(signal.SIGUSR1, self.action_reload)
+            loop.add_signal_handler(signal.SIGUSR2, self._drain_command_queue)
+            _log.info("Installed SIGUSR1 reload + SIGUSR2 cmd-queue handlers"
+                      " (pidfile=%s, queue=%s)", pidfile, queue)
+        except (NotImplementedError, RuntimeError) as e:
+            # add_signal_handler isn't available on Windows; not relevant
+            # for our tmux flow but log so it's visible if it ever fires.
+            _log.debug("Could not install signal handlers: %s", e)
+
+    def _drain_command_queue(self) -> None:
+        """Read pending commands from the queue file and dispatch them.
+
+        Each non-empty line is a command identical to what the in-TUI
+        ``/`` command bar would submit.  We dispatch via the same
+        ``handle_command_submitted`` path so behavior matches exactly.
+        Commands are processed in FIFO order; the queue is truncated
+        after a successful read.
+        """
+        from pm_core.tui import pr_view
+        queue = self._command_queue_file()
+        if queue is None or not queue.exists():
+            return
+        import fcntl
+        try:
+            # Take the same exclusive flock the appender uses around
+            # write+signal so a racing append can't slip a line in
+            # between our read and truncate (which would silently drop
+            # it — the appender's later SIGUSR2 would then drain an
+            # empty file).
+            with open(queue, "r+") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    content = f.read()
+                    f.seek(0)
+                    f.truncate()
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except OSError as e:
+            _log.debug("Could not read TUI command queue %s: %s", queue, e)
+            return
+        for line in content.splitlines():
+            cmd = line.strip()
+            if not cmd:
+                continue
+            _log.info("queue dispatch: cmd=%r", cmd)
+            try:
+                pr_view.handle_command_submitted(self, cmd)
+                _log.info("queue dispatch: cmd=%r result=ok", cmd)
+            except Exception:
+                _log.exception("queue dispatch: cmd=%r result=exc", cmd)
+
+    def on_unmount(self) -> None:
+        """Clean up the reload pidfile and command queue on shutdown."""
+        _log.info("TUI unmount: session=%s", self._session_name)
+        for path in (self._reload_pidfile(), self._command_queue_file()):
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as e:
+                    _log.debug("Could not remove TUI file %s: %s", path, e)
 
     def action_reload(self) -> None:
         """Reload state from disk without triggering PR sync.
@@ -847,7 +1098,6 @@ class ProjectManagerApp(App):
             return
         _log.info("action: reload (state only)")
         self._load_state()
-        self.refresh(layout=True)
 
     def action_focus_command(self) -> None:
         _log.debug("action: focus_command")
@@ -891,10 +1141,7 @@ class ProjectManagerApp(App):
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
         plans_pane.focus()
-        # Update status bar
-        plans = self._data.get("plans") or []
-        status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]p=back to tree[/dim]")
+        self._update_plans_status_bar()
         self.call_after_refresh(self._capture_frame, "show_plans_view")
 
     def _refresh_plans_pane(self) -> None:
@@ -976,16 +1223,25 @@ class ProjectManagerApp(App):
         self._refresh_qa_pane()
         qa_pane = self.query_one("#qa-pane", QAPane)
         qa_pane.focus()
-        # Update status bar
+        self._update_qa_status_bar()
+        self.call_after_refresh(self._capture_frame, "show_qa_view")
+
+    def _update_qa_status_bar(self) -> None:
         from pm_core import qa_instructions
         if self._root:
             all_items = qa_instructions.list_all(self._root)
-            total = len(all_items.get("instructions", [])) + len(all_items.get("regression", []))
+            total = (len(all_items.get("instructions", []))
+                     + len(all_items.get("regression", []))
+                     + len(all_items.get("artifacts", [])))
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  d=debug  a=add  q=back[/dim]")
-        self.call_after_refresh(self._capture_frame, "show_qa_view")
+
+    def _update_plans_status_bar(self) -> None:
+        plans = (self._data or {}).get("plans") or []
+        status_bar = self.query_one("#status-bar", StatusBar)
+        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]p=back to tree[/dim]")
 
     def _refresh_qa_pane(self) -> None:
         """Refresh the QA pane with current data."""
@@ -993,7 +1249,7 @@ class ProjectManagerApp(App):
         if self._root:
             all_items = qa_instructions.list_all(self._root)
         else:
-            all_items = {"instructions": [], "regression": []}
+            all_items = {"instructions": [], "regression": [], "artifacts": []}
         qa_pane = self.query_one("#qa-pane", QAPane)
         qa_pane.update_items(all_items)
 
@@ -1008,11 +1264,10 @@ class ProjectManagerApp(App):
     def action_start_qa_on_pr(self) -> None:
         """Start QA on the selected PR.
 
-        Keybinding variants (same z-prefix pattern as review):
+        Keybinding variants:
           t      — one-shot QA run (or focus existing window)
           z t    — fresh start (stop running QA, kill old windows, restart)
-          zz t   — start/stop QA loop (lenient)
-          zzz t  — start/stop QA loop (strict)
+          zz t   — start/stop QA loop
         """
         from pm_core.tui import qa_loop_ui
         tree = self.query_one("#tech-tree", TechTree)
@@ -1025,10 +1280,8 @@ class ProjectManagerApp(App):
             qa_loop_ui.focus_or_start_qa(self, pr_id)
         elif z == 1:
             qa_loop_ui.fresh_start_qa(self, pr_id)
-        elif z == 2:
-            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=False)
         else:
-            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=True)
+            qa_loop_ui.start_or_stop_qa_loop(self, pr_id)
 
     def on_qaitem_selected(self, message: QAItemSelected) -> None:
         _log.debug("qa item selected: %s", message.item_id)
@@ -1042,7 +1295,10 @@ class ProjectManagerApp(App):
         message.stop()
         _log.info("qa action: %s (item=%s)", message.action, message.item_id)
         if message.action == "add":
-            pane_ops.launch_pane(self, "pm qa add new-instruction", "qa-add")
+            self.push_screen(
+                QACreatePickerScreen(),
+                callback=lambda r: self._on_qa_create_picker(r),
+            )
         elif message.action == "edit":
             if message.item_id:
                 parts = message.item_id.split(":", 1)
@@ -1063,4 +1319,25 @@ class ProjectManagerApp(App):
                     )
             else:
                 self.log_message("No QA item selected")
+
+    def _on_qa_create_picker(self, result) -> None:
+        """Callback for QACreatePickerScreen.
+
+        result is None on cancel, or (category, mode, name) on confirm.
+        Maps the (category, mode) pair to the matching pm qa subcommand.
+        """
+        if not result:
+            return
+        category, mode, name = result
+        # category: "instructions" / "regression" / "artifacts"
+        # mode:     always "author" — the TUI picker only exposes the
+        #           guided authoring flow; use `pm qa add-*` from the
+        #           CLI for the scaffold-stub flow.
+        suffix = {
+            "instructions": "instruction",
+            "regression":   "regression",
+            "artifacts":    "artifact",
+        }[category]
+        cmd = f"pm qa {mode}-{suffix} {shlex.quote(name)}"
+        pane_ops.launch_pane(self, cmd, f"qa-{mode}")
 

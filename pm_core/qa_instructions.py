@@ -1,8 +1,15 @@
 """QA instruction library management.
 
-Manages instruction files in pm/qa/instructions/ (reusable procedures) and
-pm/qa/regression/ (migrated TUI tests).  Files are markdown with YAML
-frontmatter.
+Manages four categories of files under pm/qa/, all markdown with YAML
+frontmatter:
+
+- pm/qa/instructions/ — reusable test-environment procedures
+- pm/qa/regression/   — migrated TUI tests
+- pm/qa/artifacts/    — recipes for capturing concrete evidence of
+                        behavior (recordings, logs) consumable by
+                        humans or downstream agents
+- pm/qa/mocks/        — shared mock definitions injected into every QA
+                        scenario prompt
 """
 
 from pathlib import Path
@@ -31,6 +38,28 @@ def instructions_dir(pm_root: Path) -> Path:
 def regression_dir(pm_root: Path) -> Path:
     """Return pm/qa/regression/."""
     d = qa_dir(pm_root) / "regression"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def mocks_dir(pm_root: Path) -> Path:
+    """Return pm/qa/mocks/."""
+    d = qa_dir(pm_root) / "mocks"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def artifacts_dir(pm_root: Path) -> Path:
+    """Return pm/qa/artifacts/.
+
+    Holds recipes for capturing concrete evidence of behavior —
+    recordings, logs, screenshots — designed to be consumable by both
+    humans and downstream agents.  The captures themselves land under
+    ~/.pm/sessions/<tag>/captures/<pr-id>/ on the host (resolve via
+    ``pm qa captures-path <pr-id>``) — a convention referenced from
+    recipes, not enforced here.
+    """
+    d = qa_dir(pm_root) / "artifacts"
     d.mkdir(exist_ok=True)
     return d
 
@@ -104,14 +133,23 @@ def list_regression_tests(pm_root: Path) -> list[dict]:
     return _list_dir(regression_dir(pm_root))
 
 
-def list_all(pm_root: Path) -> dict:
-    """Return all QA items by category.
+def list_mocks(pm_root: Path) -> list[dict]:
+    """List mock definition files from pm/qa/mocks/."""
+    return _list_dir(mocks_dir(pm_root))
 
-    Returns {"instructions": [...], "regression": [...]}.
-    """
+
+def list_artifacts(pm_root: Path) -> list[dict]:
+    """List artifact-capture recipes from pm/qa/artifacts/."""
+    return _list_dir(artifacts_dir(pm_root))
+
+
+def list_all(pm_root: Path) -> dict:
+    """Return all QA items by category."""
     return {
         "instructions": list_instructions(pm_root),
         "regression": list_regression_tests(pm_root),
+        "mocks": list_mocks(pm_root),
+        "artifacts": list_artifacts(pm_root),
     }
 
 
@@ -136,7 +174,7 @@ def resolve_instruction_ref(pm_root: Path, ref: str) -> tuple[str, str] | None:
     all_items = list_all(pm_root)
     # Build a flat lookup: filename -> category
     known: dict[str, str] = {}
-    for category in ("instructions", "regression"):
+    for category in ("instructions", "regression", "artifacts"):
         for item in all_items[category]:
             fname = Path(item["path"]).name
             known[fname] = category
@@ -188,6 +226,8 @@ def get_instruction(pm_root: Path, instruction_id: str,
     """
     if category == "regression":
         base = regression_dir(pm_root)
+    elif category == "artifacts":
+        base = artifacts_dir(pm_root)
     else:
         base = instructions_dir(pm_root)
 
@@ -200,6 +240,28 @@ def get_instruction(pm_root: Path, instruction_id: str,
     return {
         "id": instruction_id,
         "title": meta.get("title", instruction_id.replace("-", " ").title()),
+        "description": meta.get("description", ""),
+        "tags": meta.get("tags", []),
+        "path": str(f),
+        "body": body,
+    }
+
+
+def get_mock(pm_root: Path, mock_id: str) -> dict | None:
+    """Load a single mock definition with full body content.
+
+    Returns dict with keys: id, title, description, tags, path, body.
+    Returns None if not found.
+    """
+    f = mocks_dir(pm_root) / f"{mock_id}.md"
+    if not f.exists():
+        return None
+
+    content = f.read_text()
+    meta, body = _parse_frontmatter(content)
+    return {
+        "id": mock_id,
+        "title": meta.get("title", mock_id.replace("-", " ").title()),
         "description": meta.get("description", ""),
         "tags": meta.get("tags", []),
         "path": str(f),
@@ -226,6 +288,7 @@ def instruction_summary_for_prompt(pm_root: Path,
     categories = [("instructions", "Instructions")]
     if include_regression:
         categories.append(("regression", "Regression Tests"))
+    categories.append(("artifacts", "Artifact Recipes"))
 
     lines: list[str] = []
     for category, label in categories:
@@ -243,3 +306,34 @@ def instruction_summary_for_prompt(pm_root: Path,
         return "No QA instructions found."
 
     return "\n".join(lines)
+
+
+def mocks_for_prompt(pm_root: Path) -> str:
+    """Build the Mocks section for QA scenario prompts from pm/qa/mocks/.
+
+    Returns a formatted markdown block ready for injection, or empty string
+    if no mocks are defined.
+    """
+    mocks = list_mocks(pm_root)
+    if not mocks:
+        return ""
+
+    lines: list[str] = [
+        "## Mocks",
+        "",
+        "The following mock contracts are defined for this project.  Use these "
+        "when writing or running QA scenarios — do not devise your own mocking "
+        "strategy for dependencies listed here.",
+        "",
+    ]
+    for mock in mocks:
+        f = Path(mock["path"])
+        content = f.read_text()
+        _, body = _parse_frontmatter(content)
+        desc = f" — {mock['description']}" if mock["description"] else ""
+        lines.append(f"### {mock['title']}{desc}")
+        lines.append("")
+        lines.append(body.strip())
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
