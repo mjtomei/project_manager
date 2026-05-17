@@ -9,7 +9,7 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zz t   — start/stop QA loop
 """
 
-from pm_core.paths import configure_logger, get_global_setting_value
+from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.qa_loop import (
     QALoopState,
@@ -18,19 +18,11 @@ from pm_core.qa_loop import (
     VERDICT_INPUT_REQUIRED,
     start_qa_background,
     _compute_qa_window_name,
+    get_qa_pass_count as _get_qa_pass_count,
 )
 from pm_core.loop_shared import get_pm_session
 
 _log = configure_logger("pm.tui.qa_loop_ui")
-
-
-def _get_qa_pass_count() -> int:
-    """Read qa-pass-count from global settings, default 1."""
-    val = get_global_setting_value("qa-pass-count", "")
-    try:
-        return max(1, int(val))
-    except ValueError:
-        return 1
 
 
 def _get_selected_pr(app) -> tuple[str | None, dict | None]:

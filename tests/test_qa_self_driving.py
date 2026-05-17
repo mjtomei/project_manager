@@ -666,31 +666,31 @@ class TestEdgeCases:
 
     def test_qa_pass_count_setting_default(self):
         """Default qa-pass-count should be 1."""
-        from pm_core.tui.qa_loop_ui import _get_qa_pass_count
+        from pm_core.qa_loop import get_qa_pass_count
 
-        with patch("pm_core.tui.qa_loop_ui.get_global_setting_value", return_value=""):
-            assert _get_qa_pass_count() == 1
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert get_qa_pass_count() == 1
 
     def test_qa_pass_count_setting_custom(self):
         """Custom qa-pass-count should be respected."""
-        from pm_core.tui.qa_loop_ui import _get_qa_pass_count
+        from pm_core.qa_loop import get_qa_pass_count
 
-        with patch("pm_core.tui.qa_loop_ui.get_global_setting_value", return_value="3"):
-            assert _get_qa_pass_count() == 3
+        with patch("pm_core.paths.get_global_setting_value", return_value="3"):
+            assert get_qa_pass_count() == 3
 
     def test_qa_pass_count_minimum_1(self):
         """qa-pass-count should never be less than 1."""
-        from pm_core.tui.qa_loop_ui import _get_qa_pass_count
+        from pm_core.qa_loop import get_qa_pass_count
 
-        with patch("pm_core.tui.qa_loop_ui.get_global_setting_value", return_value="0"):
-            assert _get_qa_pass_count() == 1
+        with patch("pm_core.paths.get_global_setting_value", return_value="0"):
+            assert get_qa_pass_count() == 1
 
     def test_qa_pass_count_invalid_returns_1(self):
         """Invalid qa-pass-count should default to 1."""
-        from pm_core.tui.qa_loop_ui import _get_qa_pass_count
+        from pm_core.qa_loop import get_qa_pass_count
 
-        with patch("pm_core.tui.qa_loop_ui.get_global_setting_value", return_value="abc"):
-            assert _get_qa_pass_count() == 1
+        with patch("pm_core.paths.get_global_setting_value", return_value="abc"):
+            assert get_qa_pass_count() == 1
 
     def test_trigger_auto_merge_calls_maybe_auto_merge(self, tmp_path):
         """_trigger_auto_merge delegates to _maybe_auto_merge (which
