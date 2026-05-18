@@ -7061,7 +7061,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-14T14:46:11.378857+00:00'
+  updated_at: '2026-05-18T20:40:54.784352+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
@@ -7116,6 +7116,46 @@ prs:
       PR before merging and link it as a prerequisite of pr-fbda1a8.'
     created_at: '2026-05-14T14:46:11Z'
     last_edited: '2026-05-14T14:46:11Z'
+  - id: note-567f97b
+    text: 'SCOPE EXTENSION (2026-05-18, review discussion): this PR grew beyond the
+      original FakeClaudeSession plan in four ways, all to keep the fake''s verdict
+      surface from drifting from production:
+
+
+      1. No-verdict mock mode + `_all` "fake everything" config key. impl/watcher/merge-style
+      sessions emit no verdict; the fake now writes output and stays open (blocks
+      on stdin until the pane closes, or `--hold N`). The `_all` top-level key in
+      the per-session fake-claude JSON fakes every session type, with untyped calls
+      falling back to a no-verdict mock.
+
+
+      2. Verdict-surface audit (addresses note-30c1a2e). Audited every verdict-extraction
+      site and closed three drift gaps: watcher (emits READY/INPUT_REQUIRED, was registered
+      no-verdict), qa concretize/refiner (emits REFINED_STEPS/REFINER_REJECT, was
+      mis-typed as qa_scenario), qa finalize (emits FINALIZE_DONE/FINALIZE_BLOCKED,
+      had no session type). New verdicts added to the fake catalogue. NOTE: this PR
+      did NOT do the proposed shared VerdictRegistry refactor — verdict definitions
+      still live in two places (detection path + fake_claude.py). If that registry
+      is still wanted before pr-fbda1a8, it should be a follow-up PR.
+
+
+      3. qa_concretize and qa_finalize promoted to first-class model_config.SESSION_TYPES
+      (fall back to "qa"). The refiner and finalize panes are now independently model-targetable
+      via project.yaml model_config and `pm model set`. cli/model.py now derives its
+      session-type list from model_config instead of hard-coding a duplicate.
+
+
+      4. validate_model_config() added — flags unknown session-type keys / invalid
+      effort levels in project.yaml model_config (resolution silently ignored them
+      before). Surfaced as warnings in `pm model show`.
+
+
+      Also: master was merged into the branch (was ~949 commits behind); PASS_WITH_SUGGESTIONS
+      dropped per #166; all six QA build_claude_shell_cmd calls now pass session_tag=state.session_tag
+      to avoid cwd-based tag drift. Full suite green (2408 passed). Spec updated with
+      a "Scope extensions beyond the original plan" section.'
+    created_at: '2026-05-18T20:40:53Z'
+    last_edited: '2026-05-18T20:40:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
