@@ -123,9 +123,9 @@ loop state machines, and verification transitions without real API calls.
    each entry point.
 
 9. **No-verdict sessions & `hold` — staying open like a real session**
-   - `impl`, `watcher`, `merge` (and any type matched only by `_all`) never
-     emit a verdict. The fake writes preamble/body, then **does not exit** —
-     a real interactive Claude session stays in its pane after a turn.
+   - `impl`, `merge` (and any type matched only by `_all`) never emit a
+     verdict. The fake writes preamble/body, then **does not exit** — a real
+     interactive Claude session stays in its pane after a turn.
    - `run_fake_claude(hold=…)` / `--hold SECONDS`:
      - omitted (`None`) — block on stdin until EOF (the pane's tty closing
        when the window is killed). Default for live tmux launches.
@@ -163,9 +163,9 @@ loop state machines, and verification transitions without real API calls.
 
 - Real claude not on PATH but fake is configured: launcher entry points must
   not raise (commits e8eae36, 449edb4, 44fe695 already address this).
-- `impl` / `watcher` / `merge` session types never emit verdicts — config
-  validation rejects verdicts for them; launcher returns `None` so the real
-  claude path is used.
+- `impl` / `merge` session types never emit verdicts — config validation
+  rejects verdicts for them. When no fake config matches, the launcher returns
+  `None` so the real claude path is used.
 - **PR #166 conflict (PASS_WITH_SUGGESTIONS removal):** RESOLVED. master was
   merged into the branch (merge commit fc3fde8). #166's removal of
   `PASS_WITH_SUGGESTIONS` was applied: dropped from `SINGLE_LINE_VERDICTS`,
@@ -179,3 +179,43 @@ loop state machines, and verification transitions without real API calls.
 - **`loop_shared.extract_verdict_from_content` removed on master:** the
   verdict-detection tests now scan content line-by-line via
   `loop_shared.match_verdict`, matching how production detection works.
+
+## Scope extensions beyond the original plan
+
+These were added during review discussion; they go past the initial PR
+description but are needed for FakeClaudeSession to faithfully model production.
+
+1. **No-verdict mock mode + `_all` "fake everything".** The original plan
+   covered only verdict-emitting sessions. Added: `verdict=None`/`"NONE"`
+   no-verdict mode that stays open (`hold`), and the `_all` catch-all config
+   key so untyped/unlisted launches are faked too (requirements 9 and 5).
+
+2. **Full verdict-surface audit.** Per the PR's forward-looking refactor
+   request, every verdict-extraction site was audited. Three drift gaps were
+   closed: `watcher` (emits READY/INPUT_REQUIRED — was registered as
+   no-verdict), `qa_concretize` (refiner emits REFINED_STEPS/REFINER_REJECT —
+   was mis-typed as `qa_scenario`), `qa_finalize` (emits
+   FINALIZE_DONE/FINALIZE_BLOCKED — had no session type). New verdicts added
+   to the fake catalogue accordingly (requirement 4).
+
+3. **`qa_concretize` / `qa_finalize` promoted to first-class session types.**
+   Added to `model_config.SESSION_TYPES` and `_FALLBACK_TYPES` (→ `qa`), so
+   the step refiner and finalize pane are **independently model-targetable**
+   via `project.yaml` `model_config.session_models` / `session_effort` and
+   `pm model set`. `_build_concretize_cmd` resolves with `qa_concretize`;
+   `_run_qa_finalize_pane` gained a `project_data` parameter and now resolves
+   a model with `qa_finalize` (previously used the CLI default). `cli/model.py`
+   no longer hard-codes its own session-type list — it derives from
+   `model_config.SESSION_TYPES`.
+
+4. **`model_config` validation.** `validate_model_config(project_data)` checks
+   that `session_models` / `session_effort` keys are known session types and
+   that effort values are valid. `resolve_model_and_provider` silently ignores
+   unknown keys, so a typo'd session type would otherwise never take effect;
+   `pm model show` now surfaces these problems as warnings.
+
+5. **`session_tag` threading for QA.** All six QA `build_claude_shell_cmd`
+   call sites pass `session_tag=state.session_tag` (the drift-proof
+   tmux-derived tag) instead of relying on `build_claude_shell_cmd`'s
+   cwd-based `get_session_tag()` fallback, which drifts when the QA
+   orchestrator's cwd is a QA workdir.

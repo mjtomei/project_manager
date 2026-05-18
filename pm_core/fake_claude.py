@@ -55,10 +55,8 @@ ALL_VERDICT_CHOICES = ALL_VERDICTS + [NO_VERDICT]
 # Empty tuple means the session type never emits a verdict (no fake needed).
 # Used to validate fake-claude configs and to pick sensible defaults.
 #
-# Keys are not limited to ``model_config.SESSION_TYPES`` — ``qa_concretize``
-# and ``qa_finalize`` are sub-steps of the QA loop that emit their own verdict
-# sets and so need their own fake-claude session type, even though they share
-# model resolution with ``qa_scenario`` / the QA loop.
+# Keys mirror ``model_config.SESSION_TYPES`` — every session type is both
+# independently model-targetable and independently fake-scriptable.
 SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "impl":            (),   # implementation: no verdict, interactive coding
     "review":          ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),

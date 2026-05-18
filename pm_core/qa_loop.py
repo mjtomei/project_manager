@@ -384,6 +384,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
                           session: str, window_name: str,
                           workdir_path: str | None,
                           stop_check: Callable[[], bool] | None = None,
+                          project_data: dict | None = None,
                           ) -> str | None:
     """Run the post-QA finalize pane synchronously.
 
@@ -442,9 +443,14 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
 
     import uuid as _uuid
     finalize_session_id = str(_uuid.uuid4())
+    _finalize_resolution = _resolve_qa_model(pr_data, project_data,
+                                             session_type="qa_finalize")
     finalize_cmd = build_claude_shell_cmd(
         prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
         session_id=finalize_session_id,
+        model=_finalize_resolution.model,
+        provider=_finalize_resolution.provider,
+        effort=_finalize_resolution.effort,
         session_type="qa_finalize",
         session_tag=state.session_tag,
     )
@@ -854,9 +860,10 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
                       session_type: str = "qa"):
     """Resolve model/provider for a QA session type.
 
-    session_type should be "qa_planning" for the planner, "qa_scenario"
-    for scenario workers, or "qa_verification" for the verification step.
-    Falls back to "qa" config if the specific type is not configured.
+    session_type is one of "qa_planning" (planner), "qa_scenario" (scenario
+    workers), "qa_concretize" (step refiner), "qa_verification" (verification
+    step), or "qa_finalize" (post-QA finalize pane). Each falls back to "qa"
+    config when the specific type is not configured.
     """
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     return resolve_model_and_provider(
@@ -985,7 +992,7 @@ def _build_concretize_cmd(
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
-                                   session_type="qa_scenario")
+                                   session_type="qa_concretize")
     base_branch = project_data.get("project", {}).get("base_branch", "master")
     pr_branch = pr_data.get("branch", "")
 
@@ -3082,6 +3089,7 @@ def run_qa_sync(
         state.finalize_verdict = _run_qa_finalize_pane(
             state, pr_data, session, window_name, workdir_path,
             stop_check=lambda: state.stop_requested,
+            project_data=data,
         )
     except Exception:
         _log.exception("Failed to run QA finalize pane")
