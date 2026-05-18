@@ -41,11 +41,12 @@ def fake_claude_cmd(verdict: str, preamble: int, preamble_delay: float,
     Output sequence: preamble lines → generated body lines (batched) →
     pre-verdict sleep → verdict block.
 
-    Single-line verdicts (PASS, NEEDS_WORK, INPUT_REQUIRED, VERIFIED) are
-    written as a bare keyword on its own line.
+    Single-line verdicts (PASS, NEEDS_WORK, INPUT_REQUIRED, VERIFIED, READY,
+    FINALIZE_DONE, FINALIZE_BLOCKED) are written as a bare keyword on its own
+    line.
 
-    Block-style verdicts (FLAGGED, REFINED_STEPS, QA_PLAN) are written as
-    a START marker, an optional body (--body), and an END marker.
+    Block-style verdicts (FLAGGED, REFINED_STEPS, REFINER_REJECT, QA_PLAN) are
+    written as a START marker, an optional body (--body), and an END marker.
 
     NONE runs a no-verdict session (impl/watcher/merge): output but no
     verdict keyword, and the process stays open like a real interactive
