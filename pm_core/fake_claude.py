@@ -18,12 +18,16 @@ SINGLE_LINE_VERDICTS = (
     "NEEDS_WORK",
     "INPUT_REQUIRED",
     "VERIFIED",
+    "READY",             # watcher loop: iteration complete
+    "FINALIZE_DONE",     # qa finalize: push + fast-forward succeeded
+    "FINALIZE_BLOCKED",  # qa finalize: a prerequisite blocked completion
 )
 
 # Block-style verdicts: emitted as START … END pairs
 BLOCK_VERDICTS = {
     "FLAGGED": ("FLAGGED_START", "FLAGGED_END"),
     "REFINED_STEPS": ("REFINED_STEPS_START", "REFINED_STEPS_END"),
+    "REFINER_REJECT": ("REFINER_REJECT_START", "REFINER_REJECT_END"),
     "QA_PLAN": ("QA_PLAN_START", "QA_PLAN_END"),
 }
 
@@ -50,15 +54,22 @@ ALL_VERDICT_CHOICES = ALL_VERDICTS + [NO_VERDICT]
 # Maps each session type to the verdict names that are valid for it.
 # Empty tuple means the session type never emits a verdict (no fake needed).
 # Used to validate fake-claude configs and to pick sensible defaults.
+#
+# Keys are not limited to ``model_config.SESSION_TYPES`` — ``qa_concretize``
+# and ``qa_finalize`` are sub-steps of the QA loop that emit their own verdict
+# sets and so need their own fake-claude session type, even though they share
+# model resolution with ``qa_scenario`` / the QA loop.
 SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "impl":            (),   # implementation: no verdict, interactive coding
     "review":          ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
     "qa":              ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),  # generic fallback
     "qa_planning":     ("QA_PLAN",),
     "qa_scenario":     ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
+    "qa_concretize":   ("REFINED_STEPS", "REFINER_REJECT"),
     "qa_verification": ("VERIFIED", "FLAGGED"),
-    "watcher":         (),   # background watcher: no verdict
-    "merge":           (),   # merge conflict: no verdict
+    "qa_finalize":     ("FINALIZE_DONE", "FINALIZE_BLOCKED"),
+    "watcher":         ("READY", "INPUT_REQUIRED"),
+    "merge":           (),   # merge conflict: no verdict, interactive
 }
 
 
@@ -95,6 +106,7 @@ def validate_session_verdicts(session_type: str, verdicts: dict) -> list[str]:
 _DEFAULT_BODIES = {
     "FLAGGED": "Step 1: FAILED — expected output not produced.",
     "REFINED_STEPS": "1. Build the project\n2. Run the test suite\n3. Verify output",
+    "REFINER_REJECT": "Scenario rejected: steps depend on an unavailable fixture.",
     "QA_PLAN": (
         "SCENARIO 1: Basic functionality\n"
         "STEPS:\n"

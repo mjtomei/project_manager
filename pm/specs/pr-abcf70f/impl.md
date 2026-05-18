@@ -12,9 +12,11 @@ loop state machines, and verification transitions without real API calls.
      order: preamble lines → generated body lines (batched, with inter-batch
      delay) → pre-verdict sleep → verdict block.
    - **Single-line verdicts** (`PASS`, `NEEDS_WORK`, `INPUT_REQUIRED`,
-     `VERIFIED`): bare keyword on its own line.
-   - **Block verdicts** (`FLAGGED`, `REFINED_STEPS`, `QA_PLAN`): `_START` marker,
-     body (default placeholder when omitted), `_END` marker — each on its own line.
+     `VERIFIED`, `READY`, `FINALIZE_DONE`, `FINALIZE_BLOCKED`): bare keyword on
+     its own line.
+   - **Block verdicts** (`FLAGGED`, `REFINED_STEPS`, `REFINER_REJECT`,
+     `QA_PLAN`): `_START` marker, body (default placeholder when omitted),
+     `_END` marker — each on its own line.
    - **No-verdict sessions** (`verdict` is `None` or `"NONE"`): emit preamble/body
      but no verdict block, then stay open per `hold` (see requirement 9) — models
      `impl`/`watcher`/`merge` interactive sessions.
@@ -36,10 +38,22 @@ loop state machines, and verification transitions without real API calls.
      extra args.
 
 4. **Per-session-type verdict catalogue** (`SESSION_TYPE_VERDICTS`)
-   - Maps each `pm_core.model_config.SESSION_TYPES` entry to the verdicts valid
-     for it (e.g. `review` → PASS/NEEDS_WORK/INPUT_REQUIRED;
-     `qa_verification` → VERIFIED/FLAGGED; `qa_planning` → QA_PLAN; `impl`,
-     `watcher`, `merge` → empty = no-verdict sessions).
+   - Maps each verdict-emitting session to its actual verdict set. Audited
+     against every verdict-extraction site (per the PR's forward-looking
+     refactor request):
+     - `review` → PASS/NEEDS_WORK/INPUT_REQUIRED
+     - `qa_scenario` (worker) → PASS/NEEDS_WORK/INPUT_REQUIRED
+     - `qa_concretize` (refiner) → REFINED_STEPS/REFINER_REJECT
+     - `qa_verification` → VERIFIED/FLAGGED
+     - `qa_planning` → QA_PLAN
+     - `qa_finalize` → FINALIZE_DONE/FINALIZE_BLOCKED
+     - `watcher` → READY/INPUT_REQUIRED
+     - `impl`, `merge` → empty = no-verdict (interactive) sessions
+   - Keys are **not** limited to `model_config.SESSION_TYPES`: `qa_concretize`
+     and `qa_finalize` are QA-loop sub-steps with their own verdict surface, so
+     they get their own fake-claude session type even though they share model
+     resolution with the QA loop. `SESSION_TYPES ⊆ SESSION_TYPE_VERDICTS` still
+     holds (the test checks one direction only).
    - `validate_session_verdicts(session_type, verdicts)` returns error-string
      list (empty = valid).
 
@@ -76,6 +90,9 @@ loop state machines, and verification transitions without real API calls.
      All six QA `build_claude_shell_cmd` calls thread it (concretize, scenario,
      scenario-0, verification, planning, finalize); `_build_concretize_cmd` and
      `_verify_single_scenario` gained a `session_tag` parameter to carry it.
+   - QA call sites also pass the correct `session_type`: the refiner is
+     `qa_concretize` (not `qa_scenario` — different verdict surface) and the
+     finalize pane is `qa_finalize`.
    - `_fake_claude_config_for_type(session_type)` thin wrapper around
      `paths.fake_claude_config_for_type`.
    - `build_claude_shell_cmd(prompt, session_type=…)`: when fake config exists
@@ -89,11 +106,12 @@ loop state machines, and verification transitions without real API calls.
      trigger.
 
 7. **Companion fixtures — `tests/fixtures/fake_claude/*.txt`**
-   - One file per verdict (`pass.txt`, `needs_work.txt`, `input_required.txt`,
-     `verified.txt`, `flagged.txt`, `refined_steps.txt`, `qa_plan.txt`); each
-     contains the rendered output of the corresponding verdict for use in unit
-     tests / golden comparisons. (`pass_with_suggestions.txt` was dropped with
-     PR #166.)
+   - One file per verdict — `pass.txt`, `needs_work.txt`, `input_required.txt`,
+     `verified.txt`, `ready.txt`, `finalize_done.txt`, `finalize_blocked.txt`,
+     `flagged.txt`, `refined_steps.txt`, `refiner_reject.txt`, `qa_plan.txt` —
+     each containing the rendered output of the corresponding verdict for use
+     in unit tests / golden comparisons. (`pass_with_suggestions.txt` was
+     dropped with PR #166.)
 
 8. **Tests — `tests/test_fake_claude.py`** covering:
    `_resolve_block_name`, single-line + block verdict output shape, no-verdict

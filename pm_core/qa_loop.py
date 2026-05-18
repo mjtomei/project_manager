@@ -445,6 +445,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     finalize_cmd = build_claude_shell_cmd(
         prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
         session_id=finalize_session_id,
+        session_type="qa_finalize",
         session_tag=state.session_tag,
     )
 
@@ -995,7 +996,10 @@ def _build_concretize_cmd(
         model=resolution.model, provider=resolution.provider,
         effort=resolution.effort, cwd=cwd, write_dir=write_dir,
         session_id=session_id,
-        session_type="qa_scenario",
+        # The refiner emits REFINED_STEPS / REFINER_REJECT, not the worker's
+        # PASS/NEEDS_WORK — so it is its own fake-claude session type even
+        # though it shares model resolution with qa_scenario.
+        session_type="qa_concretize",
         session_tag=session_tag,
     )
 

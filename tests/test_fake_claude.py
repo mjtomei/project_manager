@@ -292,6 +292,9 @@ class TestFixtures:
         ("NEEDS_WORK", "needs_work.txt"),
         ("INPUT_REQUIRED", "input_required.txt"),
         ("VERIFIED", "verified.txt"),
+        ("READY", "ready.txt"),
+        ("FINALIZE_DONE", "finalize_done.txt"),
+        ("FINALIZE_BLOCKED", "finalize_blocked.txt"),
     ])
     def test_single_line_fixture_contains_verdict(self, verdict, filename):
         fixture = FIXTURES_DIR / filename
@@ -302,6 +305,7 @@ class TestFixtures:
     @pytest.mark.parametrize("block_name,filename", [
         ("FLAGGED", "flagged.txt"),
         ("REFINED_STEPS", "refined_steps.txt"),
+        ("REFINER_REJECT", "refiner_reject.txt"),
         ("QA_PLAN", "qa_plan.txt"),
     ])
     def test_block_fixture_contains_markers(self, block_name, filename):
@@ -575,11 +579,26 @@ class TestSessionTypeVerdicts:
         assert "QA_PLAN" in allowed
         assert "PASS" not in allowed
 
+    def test_qa_concretize_verdicts(self):
+        allowed = SESSION_TYPE_VERDICTS["qa_concretize"]
+        assert "REFINED_STEPS" in allowed
+        assert "REFINER_REJECT" in allowed
+        assert "PASS" not in allowed   # refiner never emits the worker verdict
+
+    def test_qa_finalize_verdicts(self):
+        allowed = SESSION_TYPE_VERDICTS["qa_finalize"]
+        assert "FINALIZE_DONE" in allowed
+        assert "FINALIZE_BLOCKED" in allowed
+
+    def test_watcher_verdicts(self):
+        # Watchers emit READY / INPUT_REQUIRED — they are NOT no-verdict.
+        allowed = SESSION_TYPE_VERDICTS["watcher"]
+        assert "READY" in allowed
+        assert "INPUT_REQUIRED" in allowed
+        assert "PASS" not in allowed
+
     def test_impl_has_no_verdicts(self):
         assert SESSION_TYPE_VERDICTS["impl"] == ()
-
-    def test_watcher_has_no_verdicts(self):
-        assert SESSION_TYPE_VERDICTS["watcher"] == ()
 
     def test_merge_has_no_verdicts(self):
         assert SESSION_TYPE_VERDICTS["merge"] == ()
