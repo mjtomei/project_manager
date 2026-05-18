@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0cf3626
+  active_pr: pr-1d8b2b7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -7061,7 +7061,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-18T20:40:54.784352+00:00'
+  updated_at: '2026-05-18T21:03:45.382234+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
@@ -7156,6 +7156,12 @@ prs:
       a "Scope extensions beyond the original plan" section.'
     created_at: '2026-05-18T20:40:53Z'
     last_edited: '2026-05-18T20:40:53Z'
+  - id: note-af93128
+    text: Filed the deferred shared-VerdictRegistry refactor as follow-up pr-1d8b2b7
+      (plan-regression) and linked it as a prerequisite of pr-fbda1a8, per the forward-looking
+      refactor request in note-30c1a2e.
+    created_at: '2026-05-18T21:03:43Z'
+    last_edited: '2026-05-18T21:03:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
@@ -11440,6 +11446,7 @@ prs:
   - pr-06a96fa
   - pr-2680fbf
   - pr-51586d2
+  - pr-1d8b2b7
   description: "## Goal\n\nThis PR is the bridge between the old (Phases 1-5) and\
     \ new (Phase 10) QA flows. It fills the testing gaps identified after the regression-loop\
     \ landing AND re-validates every merged feature from Phases 1-5 under the new\
@@ -11523,7 +11530,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T20:49:18.500977+00:00'
-  updated_at: '2026-05-14T14:43:03.645253+00:00'
+  updated_at: '2026-05-18T21:03:35.305178+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -20157,6 +20164,47 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-14T15:11:58.897160+00:00'
   updated_at: '2026-05-14T15:11:58.897160+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1d8b2b7
+  plan: plan-regression
+  title: 'Shared VerdictRegistry: unify verdict definitions across detection path
+    and fake_claude'
+  branch: pm/pr-1d8b2b7-shared-verdictregistry-unify-verdict-definitions-a
+  status: pending
+  depends_on: []
+  description: 'Follow-up to pr-abcf70f (FakeClaudeSession). That PR deferred the
+    shared verdict-registry refactor proposed in its forward-looking refactor request
+    (note-30c1a2e): verdict definitions currently live in two places — the detection
+    path (pm_core/qa_loop.py, pm_core/loop_shared.py, pm_core/verdict_transcript.py,
+    pm_core/prompt_gen.py) and pm_core/fake_claude.py (SINGLE_LINE_VERDICTS / BLOCK_VERDICTS
+    / SESSION_TYPE_VERDICTS).
+
+
+    Goal: introduce a shared VerdictRegistry/VerdictHandler that both the verdict-detection
+    path AND FakeClaudeSession import from. The registry declares the canonical set
+    of verdicts, their parsing rules (single-line vs START/END block), per-session-type
+    verdict sets, and per-verdict metadata. New verdicts are added in one place and
+    test infra picks them up automatically.
+
+
+    Why: pr-fbda1a8 (the bridge PR after pr-abcf70f) depends on FakeClaudeSession
+    not drifting from production. With definitions in two places, later PRs that add
+    verdicts/verdict-state (pr-eb450a0 evidence markers, pr-b42059d coverage data,
+    pr-8ed578d fix-line gate, pr-b59f0c7 reason strings, pr-2680fbf NEW_REGRESSION
+    sub-status, pr-98f670e shallow-PASS amendments) can silently diverge the fake
+    from the detector — tests pass while production regresses.
+
+
+    This is the follow-up the pr-abcf70f refactor request asked to be filed before
+    merge; should be linked as a prerequisite of pr-fbda1a8.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-18T21:03:10.950816+00:00'
+  updated_at: '2026-05-18T21:03:10.950816+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

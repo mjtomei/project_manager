@@ -29,13 +29,18 @@ from pm_core.fake_claude import ALL_VERDICT_CHOICES
 @click.option("--char-delay", default=0.015, show_default=True,
               help="Per-character sleep when --stream is active (seconds).")
 @click.option("--hold", type=float, default=None,
-              help="No-verdict (--verdict NONE) sessions only: seconds to "
-                   "stay open after output. Omitted blocks until stdin "
-                   "closes; 0 exits immediately.")
+              help="Seconds to stay open after output (no-verdict sessions, "
+                   "and verdict sessions when --session-id is set). Omitted "
+                   "blocks until stdin closes; 0 exits immediately.")
+@click.option("--session-id", default=None,
+              help="Claude session id. When set, the fake also writes a "
+                   "Claude-format JSONL transcript and emits the idle_prompt "
+                   "hook event, then stays open.")
 def fake_claude_cmd(verdict: str, preamble: int, preamble_delay: float,
                     delay: float, body: str | None,
                     body_lines: int, body_batch: int, body_delay: float,
-                    stream: bool, char_delay: float, hold: float | None) -> None:
+                    stream: bool, char_delay: float, hold: float | None,
+                    session_id: str | None) -> None:
     """Emit a verdict for integration testing without calling the real Claude API.
 
     Output sequence: preamble lines → generated body lines (batched) →
@@ -79,4 +84,5 @@ def fake_claude_cmd(verdict: str, preamble: int, preamble_delay: float,
         stream=stream,
         char_delay=char_delay,
         hold=hold,
+        session_id=session_id,
     )

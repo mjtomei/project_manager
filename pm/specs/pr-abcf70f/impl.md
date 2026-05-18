@@ -8,9 +8,9 @@ loop state machines, and verification transitions without real API calls.
 
 1. **Core engine — `pm_core/fake_claude.py`**
    - `run_fake_claude(verdict, preamble, preamble_delay, delay, body, body_lines,
-     body_batch, body_delay, stream, char_delay, hold)` writes to stdout in the
-     order: preamble lines → generated body lines (batched, with inter-batch
-     delay) → pre-verdict sleep → verdict block.
+     body_batch, body_delay, stream, char_delay, hold, session_id)` writes to
+     stdout in the order: preamble lines → generated body lines (batched, with
+     inter-batch delay) → pre-verdict sleep → verdict block.
    - **Single-line verdicts** (`PASS`, `NEEDS_WORK`, `INPUT_REQUIRED`,
      `VERIFIED`, `READY`, `FINALIZE_DONE`, `FINALIZE_BLOCKED`): bare keyword on
      its own line.
@@ -22,8 +22,15 @@ loop state machines, and verification transitions without real API calls.
      `impl`/`watcher`/`merge` interactive sessions.
    - `--verdict` accepts the short name (`FLAGGED`) or the bare end marker
      (`FLAGGED_END`); both resolve to the same block via `_resolve_block_name`.
-   - Output must be detectable by `pm_core.loop_shared.match_verdict` (scanned
-     line-by-line) with the keyword sets used by review/qa loops.
+   - **Transcript + hook emission (requirement 10).** When `session_id` is
+     given the engine also writes a Claude-format JSONL transcript and emits
+     the `idle_prompt` hook event — the inputs production verdict detection
+     actually reads (see requirement 10). Without a `session_id` it only
+     writes to stdout.
+   - The stdout verdict text must be detectable by
+     `pm_core.loop_shared.match_verdict` (scanned line-by-line) — used by the
+     watcher loops and `parse_review_verdict`, which operate on the
+     transcript-derived assistant text.
 
 2. **CLI — `pm fake-claude`** (`pm_core/cli/fake_claude.py`)
    - Click command exposing all engine parameters; `--verdict` required, all
@@ -31,9 +38,11 @@ loop state machines, and verification transitions without real API calls.
 
 3. **Standalone executable — `bin/fake-claude`**
    - `argparse`-based, executable bit set, shebang `python3`.
-   - Uses `parse_known_args` so Claude-specific flags (`--resume`, `--session-id`,
-     `--model`, `--dangerously-skip-permissions`, `-p`, positional prompt) are
-     silently ignored when invoked as a drop-in claude replacement.
+   - Uses `parse_known_args` so Claude-specific flags (`--resume`, `--model`,
+     `--dangerously-skip-permissions`, `-p`, positional prompt) are silently
+     ignored when invoked as a drop-in claude replacement. `--session-id` is a
+     *recognised* flag (requirement 10) — the fake uses it to write the
+     transcript and emit the hook event.
    - `--verdict` optional with default `PASS` so the launcher can invoke without
      extra args.
 
@@ -122,7 +131,11 @@ loop state machines, and verification transitions without real API calls.
    with `loop_shared.match_verdict`, the `bin/fake-claude` executable
    (subprocess), config round-trip / validation, `_all` catch-all resolution,
    `_pick_fake_verdict` / `_fake_claude_args`, and launcher substitution under
-   each entry point.
+   each entry point. Also covers requirement 10: the JSONL transcript is
+   readable by `extract_verdict_from_transcript` / `read_latest_assistant_text`
+   (single-line + block verdicts), the `idle_prompt` hook event is written and
+   refreshed, no `session_id` → no transcript/hook, and `bin/fake-claude
+   --session-id` end-to-end via subprocess.
 
 9. **No-verdict sessions & `hold` — staying open like a real session**
    - `impl`, `merge` (and any type matched only by `_all`) never emit a
@@ -133,8 +146,42 @@ loop state machines, and verification transitions without real API calls.
        when the window is killed). Default for live tmux launches.
      - `>= 0` — sleep that many seconds then exit (bounded form for tests;
        `0` exits immediately).
-   - `hold` is ignored for verdict sessions (they exit after the verdict, as
-     before).
+   - `hold` applies to verdict sessions too **when a `session_id` is set**
+     (requirement 10): the pane must stay alive while the loop polls, then the
+     loop kills it. A verdict session with **no** `session_id` (CLI /
+     unit-test use) still exits immediately after the verdict.
+
+10. **Claude-format transcript + hook event — faithful drop-in detection**
+   - Production verdict detection (`loop_shared.poll_for_verdict`) is
+     **hook-driven**: it blocks on an `idle_prompt` hook event, then reads the
+     verdict from Claude's native JSONL transcript via
+     `verdict_transcript.extract_verdict_from_transcript`. It does **not**
+     scrape pane content (`extract_verdict_from_content` was removed on
+     master). A fake that only writes stdout therefore cannot drive any loop
+     that polls a tmux pane.
+   - When `run_fake_claude` is given a `session_id` it:
+     - writes a minimal Claude-format JSONL transcript to
+       `~/.claude/projects/<mangled-cwd>/<session-id>.jsonl` (a `user` record
+       as the latest-turn boundary + an `assistant` record whose `text`
+       content is the fake's full stdout output). `_claude_transcript_path`
+       mirrors `claude_launcher._claude_project_dir`;
+       `verdict_transcript._read_transcript_text`'s session-id glob tolerates
+       cwd-mangling drift.
+     - emits the `idle_prompt` hook event to `~/.pm/hooks/<session-id>.json`
+       (reusing `hook_receiver._write_event` so the format cannot drift), and
+       **re-emits it every `_HOOK_REFRESH` (2 s)** while held open — a poller
+       only acts on an event newer than its grace period (review 20 s, QA
+       30 s), so a single emission would never satisfy it.
+   - The launcher threads `session_id` into the fake **only via
+     `build_claude_shell_cmd`** (the tmux-pane path the loops poll). The
+     `--session-id` already generated for `transcript=` callers, or passed
+     explicitly by QA call sites, is forwarded as `--session-id` to the fake.
+     `launch_claude` / `launch_claude_print*` do not thread it — they are
+     interactive / print-mode and are not verdict-polled (print mode reads
+     stdout directly).
+   - `bin/fake-claude` and `pm fake-claude` expose `--session-id`;
+     `bin/fake-claude` now *recognises* it rather than discarding it via
+     `parse_known_args`.
 
 ## Implicit Requirements
 
@@ -178,9 +225,13 @@ loop state machines, and verification transitions without real API calls.
   `cli/__init__.py`, `cli/pr.py`, and `qa_loop.py` — all from master's
   unrelated refactors, resolved by threading `session_type=` into master's
   rewritten launch paths.
-- **`loop_shared.extract_verdict_from_content` removed on master:** the
-  verdict-detection tests now scan content line-by-line via
-  `loop_shared.match_verdict`, matching how production detection works.
+- **`loop_shared.extract_verdict_from_content` removed on master:** pane
+  scraping is gone. Production detection is now hook-driven —
+  `poll_for_verdict` blocks on an `idle_prompt` hook event then reads the
+  verdict from the JSONL transcript (`extract_verdict_from_transcript`). The
+  fake therefore writes a transcript and emits the hook event (requirement
+  10); `match_verdict` is still used by the watcher loops / `parse_review_verdict`,
+  but on transcript-derived assistant text, not pane content.
 
 ## Scope extensions beyond the original plan
 

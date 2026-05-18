@@ -3,10 +3,27 @@
 Writes realistic-looking output and emits a specified verdict so tests can
 exercise verdict detection, review loop state machines, and QA loop
 transitions without real API calls.
+
+Production verdict detection (``loop_shared.poll_for_verdict``) is
+hook-driven: it blocks on an ``idle_prompt`` hook event, then reads the
+verdict from Claude's native JSONL transcript — it does *not* scrape pane
+content.  So when the fake is given a ``session_id`` (the launcher passes
+one for any pane whose verdict a loop will poll) it also:
+
+  * writes a minimal Claude-format ``.jsonl`` transcript whose assistant
+    turn contains the fake's full output, and
+  * emits (and, while held open, periodically refreshes) the
+    ``idle_prompt`` hook event the poller waits on.
+
+Without a ``session_id`` (CLI / unit-test use) it just writes to stdout.
 """
 
+import json
+import os
+import select
 import sys
 import time
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Verdict catalogue
@@ -186,26 +203,125 @@ _BODY_LINES = [
 ]
 
 
-def _hold_open(hold: float | None) -> None:
-    """Keep the process alive after a no-verdict session's output.
+# Interval (seconds) at which the idle hook is refreshed while a session is
+# held open.  A poller with a grace period only acts on an event *newer* than
+# its grace window, so a single emission would never satisfy it — see
+# ``loop_shared.poll_for_verdict``.
+_HOOK_REFRESH = 2.0
 
-    A real interactive Claude session does not exit when it finishes a turn —
-    it stays open in its pane waiting for the next input.  No-verdict fake
-    sessions (impl, watcher, merge) mimic that:
 
-    - ``hold is None``  — block on stdin until EOF (the pane's tty closes when
-      the window is killed).  This is the default for live tmux launches.
-    - ``hold >= 0``     — sleep that many seconds, then exit.  Bounded form
-      for tests.  ``hold == 0`` exits immediately.
+def _claude_transcript_path(session_id: str) -> Path:
+    """Compute Claude's native transcript path for the current cwd + session.
+
+    Mirrors ``claude_launcher._claude_project_dir`` — Claude Code stores
+    transcripts under ``~/.claude/projects/<mangled-cwd>/<session-id>.jsonl``
+    with ``/`` and ``.`` in the path replaced by ``-``.  The fake runs in the
+    pane's cwd, which is the cwd pm passed to ``build_claude_shell_cmd``, so
+    the launcher-side ``transcript_path_for`` resolves to the same file.
+    (``verdict_transcript._read_transcript_text`` additionally globs by
+    session-id, so minor cwd drift is tolerated.)
     """
-    if hold is None:
-        try:
-            sys.stdin.read()
-        except (KeyboardInterrupt, OSError):
-            pass
+    mangled = os.getcwd().replace("/", "-").replace(".", "-")
+    return Path.home() / ".claude" / "projects" / mangled / f"{session_id}.jsonl"
+
+
+def _write_fake_transcript(session_id: str, assistant_text: str) -> None:
+    """Write a minimal Claude-format JSONL transcript for *session_id*.
+
+    Production verdict detection (``poll_for_verdict`` →
+    ``extract_verdict_from_transcript``) reads Claude's native JSONL
+    transcript, not pane content — so a faithful fake must produce one.  Two
+    records: a user turn (the latest-turn boundary marker) and an assistant
+    turn whose text content is the fake's full stdout output.
+    """
+    try:
+        path = _claude_transcript_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        records = [
+            {"type": "user", "sessionId": session_id,
+             "message": {"role": "user", "content": "<fake-claude prompt>"}},
+            {"type": "assistant", "sessionId": session_id,
+             "message": {"role": "assistant",
+                         "content": [{"type": "text", "text": assistant_text}]}},
+        ]
+        path.write_text("".join(json.dumps(r) + "\n" for r in records))
+    except OSError:
+        pass
+
+
+def _emit_idle_hook(session_id: str) -> None:
+    """Write an ``idle_prompt`` hook event for *session_id*.
+
+    Real Claude triggers ``~/.claude/settings.json`` hooks that record turn
+    boundaries under ``~/.pm/hooks/<session-id>.json``; ``poll_for_verdict``
+    blocks on that event before reading the transcript.  The fake writes the
+    event itself, reusing ``hook_receiver``'s atomic writer so the format
+    cannot drift.
+    """
+    try:
+        from pm_core.hook_receiver import _write_event
+        _write_event(session_id, {
+            "event_type": "idle_prompt",
+            "timestamp": time.time(),
+            "session_id": session_id,
+            "matcher": "",
+            "cwd": os.getcwd(),
+        })
+    except Exception:
+        pass
+
+
+def _hold_open(hold: float | None, session_id: str | None = None) -> None:
+    """Keep the process alive after the session's output.
+
+    A real Claude session does not exit when it finishes a turn — it stays
+    open in its pane waiting for the next input, and the loop kills the pane
+    once it has read the verdict.  The fake mimics that:
+
+    - ``hold is None``  — stay open until stdin EOF (the pane's tty closes
+      when the window is killed).  Default for live tmux launches.
+    - ``hold >= 0``     — stay open that many seconds, then exit.  Bounded
+      form for tests.  ``hold == 0`` exits immediately.
+
+    When *session_id* is set the idle hook is (re-)emitted on entry and every
+    ``_HOOK_REFRESH`` seconds while held open, so a poller with a grace
+    period eventually observes an event newer than its grace window.  With no
+    *session_id* there is nothing to refresh — the original simple wait.
+    """
+    if not session_id:
+        if hold is None:
+            try:
+                sys.stdin.read()
+            except (KeyboardInterrupt, OSError):
+                pass
+        elif hold > 0:
+            time.sleep(hold)
         return
-    if hold > 0:
-        time.sleep(hold)
+
+    # session_id set — refresh the idle hook while held open.
+    if hold is not None:
+        deadline = time.monotonic() + max(0.0, hold)
+        while True:
+            _emit_idle_hook(session_id)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(_HOOK_REFRESH, remaining))
+    else:
+        while True:
+            _emit_idle_hook(session_id)
+            try:
+                ready, _, _ = select.select([sys.stdin], [], [], _HOOK_REFRESH)
+            except (OSError, ValueError):
+                # stdin not selectable (closed / not a real fd) — fall back
+                # to a single blocking read, then exit.
+                try:
+                    sys.stdin.read()
+                except (KeyboardInterrupt, OSError):
+                    pass
+                return
+            if ready:
+                return
 
 
 def run_fake_claude(
@@ -220,6 +336,7 @@ def run_fake_claude(
     stream: bool = False,
     char_delay: float = 0.015,
     hold: float | None = None,
+    session_id: str | None = None,
 ) -> None:
     """Execute the fake Claude session.
 
@@ -246,13 +363,26 @@ def run_fake_claude(
         body_delay: Seconds to sleep between each *body_batch* chunk.
         stream: Write output character-by-character to simulate streaming.
         char_delay: Per-character sleep when *stream* is True (default 0.015 s).
-        hold: No-verdict sessions only — see :func:`_hold_open`.  ``None``
-            (default) blocks on stdin until the pane closes; a number sleeps
-            that many seconds then exits.  Ignored for verdict sessions.
+        hold: How long to stay open after the output — see
+            :func:`_hold_open`.  ``None`` (default) stays open until the pane
+            closes; a number stays open that many seconds then exits.
+            Applies to no-verdict sessions always, and to verdict sessions
+            whenever *session_id* is set (so the poller has a live pane).
+        session_id: Claude session id.  When set, the fake also writes a
+            Claude-format JSONL transcript and emits the ``idle_prompt`` hook
+            event — the inputs production verdict detection actually reads —
+            and stays open afterwards so the poller can observe them.  When
+            ``None`` the fake only writes to stdout (CLI / unit-test use).
     """
     no_verdict = verdict is None or verdict.upper() == NO_VERDICT
     upper = "" if no_verdict else verdict.upper()
-    _w = lambda text: _write(text, stream=stream, char_delay=char_delay)
+    # Accumulate every byte written to stdout so the same text can be replayed
+    # into the JSONL transcript as the assistant turn's content.
+    captured: list[str] = []
+
+    def _w(text: str) -> None:
+        captured.append(text)
+        _write(text, stream=stream, char_delay=char_delay)
 
     # 1. Preamble lines
     for i in range(preamble):
@@ -275,27 +405,36 @@ def run_fake_claude(
     if delay > 0:
         time.sleep(delay)
 
-    # No-verdict session: emit no verdict and stay open like a real
-    # interactive Claude session would.
-    if no_verdict:
-        _hold_open(hold)
-        return
+    # 4. Verdict block — skipped entirely for no-verdict sessions.
+    if not no_verdict:
+        if upper in SINGLE_LINE_VERDICTS:
+            _w("\n" + upper + "\n")
+        else:
+            block_name = _resolve_block_name(upper)
+            if block_name is None:
+                # Unknown verdict — emit as-is (best-effort).
+                _w("\n" + upper + "\n")
+            else:
+                start_marker, end_marker = BLOCK_VERDICTS[block_name]
+                body_text = (body if body is not None
+                             else _DEFAULT_BODIES.get(block_name, ""))
+                _w("\n" + start_marker + "\n")
+                if body_text:
+                    _w(body_text.rstrip("\n") + "\n")
+                _w(end_marker + "\n")
 
-    # 4. Verdict block
-    if upper in SINGLE_LINE_VERDICTS:
-        _w("\n" + upper + "\n")
-        return
+    # 5. Transcript — written once the full output is known, so the polling
+    #    loop reads a complete assistant turn.  Only when a session_id was
+    #    provided (i.e. launched in a pane whose verdict a loop will poll).
+    if session_id:
+        _write_fake_transcript(session_id, "".join(captured))
 
-    block_name = _resolve_block_name(upper)
-    if block_name is None:
-        # Unknown verdict — emit as-is (best-effort)
-        _w("\n" + upper + "\n")
-        return
-
-    start_marker, end_marker = BLOCK_VERDICTS[block_name]
-    body_text = body if body is not None else _DEFAULT_BODIES.get(block_name, "")
-
-    _w("\n" + start_marker + "\n")
-    if body_text:
-        _w(body_text.rstrip("\n") + "\n")
-    _w(end_marker + "\n")
+    # 6. Stay open like a real Claude session:
+    #    - no-verdict sessions always stay open (they never exit on their own);
+    #    - verdict sessions stay open when a session_id was provided, so the
+    #      poller has a live pane and a refreshed hook to detect against —
+    #      the loop kills the pane once it has read the verdict.
+    #    Without a session_id a verdict session exits immediately (CLI /
+    #    unit-test use), preserving the original drop-in behaviour.
+    if no_verdict or session_id:
+        _hold_open(hold, session_id=session_id)

@@ -105,17 +105,28 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         metavar="SECONDS",
-        help="No-verdict (--verdict NONE) sessions only: seconds to stay "
-             "open after output. Omitted blocks until stdin closes (the "
-             "pane is killed); 0 exits immediately.",
+        help="Seconds to stay open after output (no-verdict sessions, and "
+             "verdict sessions when --session-id is set). Omitted blocks "
+             "until stdin closes (the pane is killed); 0 exits immediately.",
+    )
+    p.add_argument(
+        "--session-id",
+        default=None,
+        metavar="UUID",
+        help="Claude session id. When set, the fake also writes a "
+             "Claude-format JSONL transcript and emits the idle_prompt hook "
+             "event (what production verdict detection reads), and stays "
+             "open afterwards. The launcher passes this for polled panes.",
     )
     return p
 
 
 def main() -> None:
-    # parse_known_args so that Claude-specific flags (--resume, --session-id,
-    # --model, --dangerously-skip-permissions, -p, …) are silently ignored when
-    # fake-claude is invoked as a drop-in replacement via the session override.
+    # parse_known_args so that Claude-specific flags (--resume, --model,
+    # --dangerously-skip-permissions, -p, …) are silently ignored when
+    # fake-claude is invoked as a drop-in replacement via the session
+    # override.  --session-id is a recognised flag (see _build_parser): the
+    # fake uses it to write the transcript / emit the hook event.
     args, _ = _build_parser().parse_known_args()
     run_fake_claude(
         verdict=args.verdict,
@@ -129,6 +140,7 @@ def main() -> None:
         stream=args.stream,
         char_delay=args.char_delay,
         hold=args.hold,
+        session_id=args.session_id,
     )
 
 

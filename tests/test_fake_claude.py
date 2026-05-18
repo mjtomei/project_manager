@@ -1,5 +1,6 @@
 """Tests for pm_core.fake_claude and the pm fake-claude CLI command."""
 
+import json
 import subprocess
 import sys
 from io import StringIO
@@ -1073,3 +1074,168 @@ class TestBinFakeClaudeOptionalVerdict:
         )
         assert result.returncode == 0
         assert "PASS" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Transcript + hook emission — the inputs production verdict detection reads
+# ---------------------------------------------------------------------------
+
+class TestTranscriptAndHook:
+    """When a session_id is given the fake must produce a Claude-format JSONL
+    transcript and an ``idle_prompt`` hook event, because the production
+    poller (``loop_shared.poll_for_verdict``) is hook+JSONL driven and never
+    scrapes pane content.
+    """
+
+    SID = "abcdef01-2345-6789-abcd-ef0123456789"
+
+    def _run(self, tmp_path, monkeypatch, **kwargs):
+        """Run the fake with HOME + cwd redirected into *tmp_path*."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.chdir(tmp_path)
+        kwargs.setdefault("preamble", 2)
+        kwargs.setdefault("hold", 0)  # emit hook once, don't block
+        buf = StringIO()
+        with patch("sys.stdout", buf):
+            run_fake_claude(session_id=self.SID, **kwargs)
+        return buf.getvalue()
+
+    def _transcript_path(self, tmp_path):
+        from pm_core.fake_claude import _claude_transcript_path
+        return _claude_transcript_path(self.SID)
+
+    def test_transcript_file_written(self, tmp_path, monkeypatch):
+        self._run(tmp_path, monkeypatch, verdict="PASS")
+        assert self._transcript_path(tmp_path).exists()
+
+    def test_transcript_verdict_detectable(self, tmp_path, monkeypatch):
+        """The written transcript must be readable by the real detector."""
+        from pm_core.verdict_transcript import extract_verdict_from_transcript
+        self._run(tmp_path, monkeypatch, verdict="NEEDS_WORK")
+        verdict = extract_verdict_from_transcript(
+            str(self._transcript_path(tmp_path)),
+            ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"))
+        assert verdict == "NEEDS_WORK"
+
+    def test_transcript_block_verdict_detectable(self, tmp_path, monkeypatch):
+        from pm_core.verdict_transcript import extract_verdict_from_transcript
+        self._run(tmp_path, monkeypatch, verdict="FLAGGED")
+        verdict = extract_verdict_from_transcript(
+            str(self._transcript_path(tmp_path)), ("VERIFIED", "FLAGGED_END"))
+        assert verdict == "FLAGGED_END"
+
+    def test_transcript_assistant_text_is_full_output(self, tmp_path, monkeypatch):
+        """read_latest_assistant_text must return the fake's full stdout."""
+        from pm_core.verdict_transcript import read_latest_assistant_text
+        out = self._run(tmp_path, monkeypatch, verdict="PASS")
+        text = read_latest_assistant_text(str(self._transcript_path(tmp_path)))
+        assert text == out
+
+    def test_transcript_markers_extractable(self, tmp_path, monkeypatch):
+        """Block markers in the transcript survive for extract_between_markers."""
+        from pm_core.verdict_transcript import read_latest_assistant_text
+        from pm_core.loop_shared import extract_between_markers
+        self._run(tmp_path, monkeypatch, verdict="REFINED_STEPS",
+                  body="1. do a thing\n2. do another")
+        text = read_latest_assistant_text(str(self._transcript_path(tmp_path)))
+        body = extract_between_markers(
+            text, "REFINED_STEPS_START", "REFINED_STEPS_END")
+        assert body == "1. do a thing\n2. do another"
+
+    def _hook_path(self, tmp_path):
+        # Read the hook file directly: ``hook_events._HOOKS_BASE`` is captured
+        # at import time from the real home, so it ignores a monkeypatched
+        # ``Path.home`` (in production both processes see the real home and
+        # agree).
+        return tmp_path / ".pm" / "hooks" / f"{self.SID}.json"
+
+    def test_idle_hook_event_written(self, tmp_path, monkeypatch):
+        self._run(tmp_path, monkeypatch, verdict="PASS")
+        hook = self._hook_path(tmp_path)
+        assert hook.exists()
+        ev = json.loads(hook.read_text())
+        assert ev["event_type"] == "idle_prompt"
+        assert ev["session_id"] == self.SID
+        assert float(ev["timestamp"]) > 0
+
+    def test_no_session_id_writes_no_transcript(self, tmp_path, monkeypatch):
+        """Without a session_id the fake only writes stdout (CLI use)."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.chdir(tmp_path)
+        buf = StringIO()
+        with patch("sys.stdout", buf):
+            run_fake_claude(verdict="PASS", preamble=1)  # no session_id
+        assert not (tmp_path / ".claude").exists()
+        assert not (tmp_path / ".pm" / "hooks").exists()
+
+    def test_hold_refreshes_hook(self, tmp_path, monkeypatch):
+        """While held open, the idle hook is re-emitted on a fresh timestamp."""
+        from pm_core import fake_claude
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        # Drive the clock deterministically — wall-clock resolution is too
+        # coarse on some hosts to distinguish two back-to-back emissions.
+        ticks = iter([100.0, 200.0])
+        monkeypatch.setattr(fake_claude.time, "time", lambda: next(ticks))
+
+        hook = self._hook_path(tmp_path)
+        fake_claude._emit_idle_hook(self.SID)
+        first = json.loads(hook.read_text())["timestamp"]
+        fake_claude._emit_idle_hook(self.SID)
+        second = json.loads(hook.read_text())["timestamp"]
+        assert first == 100.0
+        assert second == 200.0
+
+    def test_no_verdict_session_with_id_writes_transcript(self, tmp_path, monkeypatch):
+        """No-verdict sessions with a session_id still produce a transcript."""
+        self._run(tmp_path, monkeypatch, verdict="NONE")
+        assert self._transcript_path(tmp_path).exists()
+
+
+class TestTranscriptHookCLI:
+    """End-to-end: the bin/fake-claude executable writes transcript + hook."""
+
+    SID = "11112222-3333-4444-5555-666677778888"
+
+    def test_executable_writes_transcript_and_hook(self, tmp_path):
+        import os
+        env = {**os.environ, "HOME": str(tmp_path)}
+        result = subprocess.run(
+            [sys.executable, str(BIN_FAKE_CLAUDE),
+             "--verdict", "PASS", "--preamble", "1",
+             "--session-id", self.SID, "--hold", "0"],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(tmp_path), env=env,
+        )
+        assert result.returncode == 0
+        assert "PASS" in result.stdout
+        mangled = str(tmp_path).replace("/", "-").replace(".", "-")
+        transcript = (tmp_path / ".claude" / "projects" / mangled
+                      / f"{self.SID}.jsonl")
+        assert transcript.exists()
+        assert '"type": "assistant"' in transcript.read_text()
+        hook = tmp_path / ".pm" / "hooks" / f"{self.SID}.json"
+        assert hook.exists()
+
+
+class TestFakeArgsSessionId:
+    def test_fake_claude_args_includes_session_id(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"verdicts": {"PASS": 1}}, session_id="sid-123")
+        assert "--session-id" in args
+        assert args[args.index("--session-id") + 1] == "sid-123"
+
+    def test_fake_claude_args_omits_session_id_when_none(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"verdicts": {"PASS": 1}})
+        assert "--session-id" not in args
+
+    def test_build_shell_cmd_threads_session_id(self, monkeypatch):
+        from pm_core import claude_launcher
+        cfg = {"verdicts": {"PASS": 1}}
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: cfg if st == "review" else None)
+        cmd = claude_launcher.build_claude_shell_cmd(
+            prompt="p", session_type="review", session_id="sid-xyz")
+        assert "--session-id sid-xyz" in cmd

@@ -31,7 +31,7 @@ def _pick_fake_verdict(verdicts: dict) -> str:
     return random.choices(names, weights=weights, k=1)[0]
 
 
-def _fake_claude_args(config: dict) -> list[str]:
+def _fake_claude_args(config: dict, session_id: str | None = None) -> list[str]:
     """Build the fake-claude argv (excluding the binary) from a config dict.
 
     Picks a verdict randomly from the weighted ``verdicts`` map.  An empty or
@@ -39,10 +39,16 @@ def _fake_claude_args(config: dict) -> list[str]:
     a session type matched only by the ``_all`` catch-all): the fake emits
     ``--verdict NONE`` and stays open like a real interactive session.
     Recognised config keys are translated into CLI flags.
+
+    When *session_id* is given it is passed through as ``--session-id`` so the
+    fake writes a JSONL transcript and emits the ``idle_prompt`` hook event —
+    the inputs the hook-driven verdict poller actually reads.
     """
     verdicts = config.get("verdicts") or {}
     verdict = _pick_fake_verdict(verdicts) if verdicts else "NONE"
     args = ["--verdict", verdict]
+    if session_id:
+        args.extend(["--session-id", session_id])
     for cfg_key, flag in (
         ("preamble", "--preamble"),
         ("preamble_delay", "--preamble-delay"),
@@ -438,7 +444,11 @@ def build_claude_shell_cmd(
     fc_config = fake_claude_config_for_type(session_type, session_tag)
     if fc_config is not None:
         binary = fc_config.get("binary", _FAKE_CLAUDE_BIN)
-        fake_args = _fake_claude_args(fc_config)
+        # Thread the session_id (generated above for transcript=, or passed
+        # by the caller) so the fake writes the JSONL transcript + hook event
+        # the verdict poller reads.  None for interactive panes that aren't
+        # polled — the fake then just writes to stdout.
+        fake_args = _fake_claude_args(fc_config, session_id=session_id)
         cmd = env_prefix + shlex.quote(binary) + " " + " ".join(shlex.quote(a) for a in fake_args)
         log_shell_command(cmd, prefix="claude")
         return cmd
