@@ -52,12 +52,17 @@ ALL_VERDICT_CHOICES = ALL_VERDICTS + [NO_VERDICT]
 # ---------------------------------------------------------------------------
 
 # Maps each session type to the verdict names that are valid for it.
-# Empty tuple means the session type never emits a verdict (no fake needed).
-# Used to validate fake-claude configs and to pick sensible defaults.
+# Empty tuple means the session type never emits a verdict — the fake runs as
+# a no-verdict session (output then stay open). Used to validate fake-claude
+# configs and to pick sensible defaults.
 #
-# Keys mirror ``model_config.SESSION_TYPES`` — every session type is both
-# independently model-targetable and independently fake-scriptable.
+# Every ``model_config.SESSION_TYPES`` entry appears here. The additional
+# entries below the divider are no-verdict interactive sessions outside the
+# PR/QA loops (plan, meta, guide, …): they are not model-targetable, they just
+# need their own fake-claude session type so they can be faked selectively
+# rather than only via the ``_all`` catch-all.
 SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
+    # --- model_config.SESSION_TYPES — PR/QA loop sessions ---
     "impl":            (),   # implementation: no verdict, interactive coding
     "review":          ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
     "qa":              ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),  # generic fallback
@@ -68,6 +73,16 @@ SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "qa_finalize":     ("FINALIZE_DONE", "FINALIZE_BLOCKED"),
     "watcher":         ("READY", "INPUT_REQUIRED"),
     "merge":           (),   # merge conflict: no verdict, interactive
+    # --- non-loop interactive sessions: no verdict, fake-claude routing only ---
+    "plan":            (),   # pm plan: add / breakdown / review / deps / import
+    "meta":            (),   # pm meta: work on pm itself
+    "guide":           (),   # pm guide: onboarding / getting-started
+    "cluster":         (),   # pm cluster: cross-repo exploration
+    "container":       (),   # pm container build session
+    "qa_author":       (),   # pm qa: author / debug / launch / standalone
+    "qa_regression":   (),   # pm qa regression authoring
+    "discuss":         (),   # TUI ad-hoc Claude / discuss panes
+    "watcher_review":  (),   # TUI chat-driven watcher-loop review
 }
 
 

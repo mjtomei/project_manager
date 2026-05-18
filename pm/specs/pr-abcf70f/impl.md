@@ -49,11 +49,13 @@ loop state machines, and verification transitions without real API calls.
      - `qa_finalize` → FINALIZE_DONE/FINALIZE_BLOCKED
      - `watcher` → READY/INPUT_REQUIRED
      - `impl`, `merge` → empty = no-verdict (interactive) sessions
-   - Keys are **not** limited to `model_config.SESSION_TYPES`: `qa_concretize`
-     and `qa_finalize` are QA-loop sub-steps with their own verdict surface, so
-     they get their own fake-claude session type even though they share model
-     resolution with the QA loop. `SESSION_TYPES ⊆ SESSION_TYPE_VERDICTS` still
-     holds (the test checks one direction only).
+   - Also registers no-verdict (empty) entries for the non-loop interactive
+     sessions — `plan`, `meta`, `guide`, `cluster`, `container`, `qa_author`,
+     `qa_regression`, `discuss`, `watcher_review` — so they too can be faked
+     selectively (see scope extension 6).
+   - Every `model_config.SESSION_TYPES` entry appears here; the non-loop keys
+     above are fake-claude-only (not model-targetable). The
+     `SESSION_TYPES ⊆ SESSION_TYPE_VERDICTS` invariant holds.
    - `validate_session_verdicts(session_type, verdicts)` returns error-string
      list (empty = valid).
 
@@ -219,3 +221,17 @@ description but are needed for FakeClaudeSession to faithfully model production.
    tmux-derived tag) instead of relying on `build_claude_shell_cmd`'s
    cwd-based `get_session_tag()` fallback, which drifts when the QA
    orchestrator's cwd is a QA workdir.
+
+6. **`session_type` threaded into non-loop launch sites.** Beyond the PR/QA
+   loop, every other Claude launch now passes a `session_type` so it can be
+   faked *selectively* (not just via the `_all` catch-all). New no-verdict
+   session types — `plan`, `meta`, `guide`, `cluster`, `container`,
+   `qa_author`, `qa_regression`, `discuss`, `watcher_review` — were added to
+   `SESSION_TYPE_VERDICTS` (all empty: these are interactive, no-verdict
+   sessions). Threaded sites: `cli/plan.py` (×6), `cli/meta.py`,
+   `cli/guide.py` (×4), `cli/cluster.py`, `cli/container.py` (×2),
+   `cli/qa.py` (×6 — author/regression/debug/launch/standalone),
+   `tui/pane_ops.py` (×4). `launch_claude_in_tmux` gained a `session_type`
+   parameter for the same reason. These extra keys are **not** in
+   `model_config.SESSION_TYPES` — they are fake-claude routing only, not
+   model-targetable (`SESSION_TYPES ⊆ SESSION_TYPE_VERDICTS` still holds).

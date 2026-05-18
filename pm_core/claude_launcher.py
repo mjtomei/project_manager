@@ -549,10 +549,15 @@ def finalize_transcript(transcript_path: Path) -> None:
         _log.debug("transcript: target %s does not exist, skipping finalize", target)
 
 
-def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None) -> None:
-    """Send a claude command to a tmux pane."""
+def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,
+                          session_type: str | None = None) -> None:
+    """Send a claude command to a tmux pane.
+
+    Pass *session_type* to let the fake-claude override apply (see
+    ``build_claude_shell_cmd``).
+    """
     from pm_core.tmux import send_keys
-    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd)
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd, session_type=session_type)
     send_keys(pane_target, cmd)
 
 

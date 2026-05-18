@@ -158,7 +158,7 @@ def container_build(tag: str | None, base: str | None):
         click.echo(prompt)
         raise SystemExit(1)
 
-    claude_cmd = build_claude_shell_cmd(prompt=prompt)
+    claude_cmd = build_claude_shell_cmd(prompt=prompt, session_type="container")
 
     # Try to launch in tmux
     pm_session = _get_pm_session()
@@ -184,7 +184,7 @@ def container_build(tag: str | None, base: str | None):
     click.echo("Launching Claude...")
     from pm_core.claude_launcher import launch_claude
     launch_claude(prompt, cwd=str(project_dir), session_key="container:build",
-                  pm_root=root)
+                  pm_root=root, session_type="container")
 
 
 def _build_container_build_prompt(

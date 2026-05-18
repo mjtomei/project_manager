@@ -603,6 +603,19 @@ class TestSessionTypeVerdicts:
     def test_merge_has_no_verdicts(self):
         assert SESSION_TYPE_VERDICTS["merge"] == ()
 
+    @pytest.mark.parametrize("st", [
+        "plan", "meta", "guide", "cluster", "container",
+        "qa_author", "qa_regression", "discuss", "watcher_review",
+    ])
+    def test_non_loop_session_types_registered_as_no_verdict(self, st):
+        # Non-PR/QA-loop interactive sessions: registered so they can be
+        # faked selectively, but they emit no verdict.
+        assert st in SESSION_TYPE_VERDICTS
+        assert SESSION_TYPE_VERDICTS[st] == ()
+        # validation accepts an empty verdict set and rejects any verdict
+        assert validate_session_verdicts(st, {}) == []
+        assert validate_session_verdicts(st, {"PASS": 1}) != []
+
     def test_validate_valid_config(self):
         assert validate_session_verdicts("review", {"PASS": 70, "NEEDS_WORK": 30}) == []
 
