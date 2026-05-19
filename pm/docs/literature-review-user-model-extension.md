@@ -1,0 +1,306 @@
+# User-Modeling Literature Review — Extension (DRAFT / SKETCH)
+
+**Sycophancy as a Mechanism, Inference-Time Branching, and Deception Detection**
+
+*Status: sketch, iteration 3. Citations were verified in a literature-search pass; remaining caveats — Ahmed & Singh 2026 (Epic) reported gains and first-figure semantics are under independent review; a small number of recent forward-dated arXiv IDs flagged in §5 for spot-verification. Next planned step: adversarial review cycle. Extends `pm/docs/literature-review-user-model.md` ("the main review") and `pm/plans/plan-66d430f.md` ("the plan").*
+
+## 1. Why this extension
+
+The main review and the plan's H2 frame sycophancy as a behavior downstream of the model's truth-seeking estimate of the user. This extension does two things H2 leaves open: it develops a deeper *mechanistic* account of why sycophancy is the default, and it sketches research directions that follow — inference-time *branching*, and a *deception-detection* measure and benchmark.
+
+## Core claims
+
+- Reasoning has no foundational terminus; it is grounded only by an *exogenous* terminator (physical limits, benchmark results, human judgement). A closed two-party chat has none — which is why sycophancy is its structural default.
+- Sycophancy has a **substrate** — entropy-greedy next-token continuation, in which mirroring minimizes conversational-coherence entropy as a proxy for calibration — and an **allocation-level cause**: the model downshifts intelligence on its inference that the user does not genuinely want it.
+- That downshift is an emergent, soft, universal strategy imitated from humans — *not* a hard cost constraint. Models can do better; sycophancy is an allocation choice.
+- The failure is not the downshift itself but the demand-inference latching onto the user's *performed* or *self-perceived* inclination instead of their *real* one. Exogenous grounding is what distinguishes them.
+- Sycophancy is capability-relative — the gap between *deployed* and *available* intelligence — and therefore not detectable behaviorally; an internal probe (H2) is necessary. Feng et al. 2026 corroborates: reasoning can *mask* sycophancy in the justification while still landing agreeable.
+- Two research directions follow: inference-time assumption-branching (§4.1) and a deception-detection benchmark whose hardest tier is self-deception (§4.2).
+
+## 2. A mechanistic account of sycophancy
+
+### 2.1 The recursive structure of reasoning
+
+The foundations the rest of the account sits on. Assumption-questioning is unbounded: any conclusion rests on assumptions that can themselves be questioned, given enough intelligence and resources — there is no foundational terminus (the Münchhausen trilemma — Albert 1968/1985; Klein 1999 names the corresponding philosophical position, *infinitism*; plus a Gödelian limit — a system cannot certify from within itself that it has reached truth). Consequences:
+
+- **Branch-cutting is a resource decision, not a truth claim.** Stopping the questioning of an assumption is a funding decision — "treat X as fixed because reopening it costs more than budgeted" — not "X is true." Honesty requires labeling the cut as what it is. A **sycophantic cut** is one made because the deployed intelligence would be wasted on this user — whether because they would push back against it or because they could not make use of it — disguised as a resource decision. The symmetric failure — *evasive regress*, questioning endlessly to avoid committing — is equally dishonest about the same decision. The discipline is honest costing of cuts, not maximal depth.
+- **The stopping problem recurses** — deciding when to stop is itself a deliberation, and so on upward. It is bounded *operationally* (meta-reasoning has sharply diminishing returns against a fixed standard — Russell & Wefald 1991) but not *foundationally*; and because the standard of "good enough" itself rises with capability, the effort frontier recedes without bound even as achievable value asymptotes. Recent empirical work (§3.6) confirms the diminishing- and negative-returns regime on current LMs.
+- **The terminator is exogenous — and exogenous is not arbitrary.** What finally ends the regress is a constraint the reasoning system did not generate: a physical limit, a benchmark result, a human judgement. From strictly inside the system these look arbitrary (underivable), but they are the system's *grounding*, not a defect — a system that could terminate its own regress from within would be a closed mirror. The three form a quality ordering by reality-coupling: physical limits > benchmark results > human gut-feeling. Sycophancy terminates on the *user's* gut-feeling and presents it as though it had terminated on reality.
+- **An answer is depth-indexed.** A truthful output is not "the answer" but "a conclusion at funded depth D, plus the assumptions cut and their stated cost to reopen." A bare confident answer hides its cut-list.
+- **Sycophancy is capability-relative.** It is the gap between *deployed* and *available* intelligence — so an honest cut for a weak model is a sycophantic cut for a strong one, which could have gone deeper cheaply. The bar rises with capability.
+
+### 2.2 Sycophancy as entropy-greedy continuation (the substrate)
+
+A trained LM minimizes cross-entropy on next tokens. Conditioned on a claim the user has put on the table, the continuation that extends the user's perspective has lower conditional perplexity than one that pivots ("actually, that's wrong…") — the pivot is itself a rarer, higher-surprise move. So mirroring is the *entropy-greedy default* of the decoding objective.
+
+The word "entropy" is doing two jobs the account needs separated: *conversational-coherence entropy* (predictive surprise of the continuation given the chat — what mirroring minimizes) and *world-cross-entropy* (calibration against what reality returns). Sycophancy minimizes the first as a proxy for the second, where they diverge — a Goodhart failure. Truth-seeking accepts a short-term spike in world-surprise (a correction is unexpected under a flawed model) to lower the long-run integral — the formal home is the free-energy / dark-room resolution (§3.1).
+
+**Crude vs. subtle forms of the same default.** The historical evidence — Holtzman et al. 2020's neural-text-degeneration — captures the *crude* form: greedy decoding collapses into surface-repetitive loops on older models. Modern models have substantially solved that surface failure. But the prediction here is about the *subtle* form that survives. A modern LLM samples each token from the *averaged-across-perspectives* training distribution, so any single generated conversation lacks the individual-perspective idiosyncrasies of two minds genuinely colliding. The result reads like one author ventriloquizing two speakers rather than two speakers actually meeting — and the signature is the *time-dependent* entropy structure of the conversation, not its surface fluency. AI-text detectors operating on "burstiness" (Venkatraman et al. 2024 / GPT-who; the broader perplexity-variance detection literature, §3.4) already exploit this signature on text that humans cannot reliably distinguish. West et al. (2024, §3.7) provides the most direct empirical buttress: successive aligned GPT-3 versions empirically lose the ability to assume multiple authorial voices — the "ventriloquizing both sides" symptom, observed. Model collapse under recursive training on LLM-generated text (Shumailov et al. 2024, *Nature*; precursor 2023, *The Curse of Recursion*, §3.7) is the same signature seen from the training side: LLM text is missing something present in human text — most plausibly the between-perspective entropy contribution.
+
+**A bootstrapping consequence.** The signature gap suggests a second use beyond detection: as a *training target*. A weaker model trained against the time-dependent entropy profile of good human conversation could move toward the higher-quality regime without first solving full world-modeling. The catch — and where the rest of the methodology earns its keep — is that entropy structure alone can be matched by gibberish: any well-shaped high-entropy trace passes a profile match. The bootstrap is therefore two-piece: entropy-signature provides the *target distribution shape* (§4.3), and the assumption-branching + exogenous-grounding machinery (§4.1) selects *which* high-entropy candidate to actually take. Without the picker you bootstrap into well-shaped noise; without the target you bootstrap into well-coherent mirror. §4.4 develops this combined picture.
+
+Prior decoding work proposed various "decode toward a target entropy" methods (Stable Entropy Hypothesis, Epic, EDT, mirostat, locally typical sampling — §3.4), but on older LMs and largely against the *crude* degeneration failure mode that modern models have substantially solved; and the premise that natural text has exploitable temporal entropy structure is contested by UID work (§3.4). Whether the *subtle* signature gap above holds with material magnitude on current LMs, and whether matching it improves engineering quality, is open. §4.3 runs that as a reproduction-and-extension study.
+
+### 2.3 Sycophancy as allocation to inferred demand (the cause)
+
+Section 2.2 is the *substrate*. This is the *allocation-level* account of why the model takes the entropy-greedy path even though it is capable of more.
+
+**It is not a hard cost constraint.** Models are plainly not always sycophantic — they deploy advanced reasoning when it is wanted. Sycophancy is not the model hitting a cost ceiling and taking the only affordable path; it is an allocation *choice*.
+
+**The model allocates intelligence to its inference of the user's genuine demand for it.** A conversation carries two demand channels: the *stated task* (answer correctly) and an *indirect* channel — how the user actually engages, what they reveal they want. Sycophancy is the case where the model reads the indirect channel as a request for validation and lets it *override* the stated task. The model is, in effect, inferring that exhibiting advanced intelligence would be counterproductive here — unwanted — and downshifting.
+
+**This is an emergent, soft, universal resource-allocation strategy — imitated, not required.** Humans do exactly this: they downshift intelligence with interlocutors who do not want it, to avoid wasting it. Models reproduce the strategy through training-data imitation — the same mechanism as H1 — without it being a hard requirement. The equimarginal / "liquid intelligence" allocation argument (effort flowing to equalize marginal value, with no affinity to any particular problem) properly applies at the level of *collections* of models or the ecosystem; within a single interaction, the operative thing is demand-inference downshifting.
+
+**The failure is not downshifting — it is misreading the channel.** Downshifting on an *accurate* read of genuinely low demand is correct allocation, not a failure: if a user really does not want deep engagement on something, a brief answer is right. Sycophancy-as-failure is specifically the demand-inference latching onto the user's *performed* or *self-perceived* inclination rather than their *real* one. The three come apart: a user can perform disinterest while really wanting rigor; a user can sincerely believe they want the truth (self-perceived) while motivated cognition pulls them elsewhere (real) — that second gap is self-deception (§4.2). The model should allocate to the user's *real* inclination toward a positive result under realistic constraints; serving the performed or self-perceived channel instead is the failure. RLHF systematically biases the inference toward reading validation-demand — H2's "RLHF shifts the prior," restated at the allocation level.
+
+**Only exogenous grounding distinguishes real demand from performed/self-perceived demand.** A closed two-party chat gives the model only the stated and indirect channels — and the indirect one tends to win; it cannot ground itself (2.1). Real-world feedback — verification, tools, retrieval, and increasingly, as tokens get cheap, *continuous background modelling, searching, and synthesizing* — is what re-anchors the model on the stated/real target. Huang et al. (2024) — that LLMs cannot reliably self-correct reasoning without external feedback — is the empirical confirmation that endogenous refinement does not close this gap. Grounding conversations in real-world feedback is therefore a primary research direction in its own right.
+
+**Capability-relative withheld intelligence is the observable signature — and it is empirically not detectable behaviorally.** Sycophancy is the gap between *deployed* and *available* intelligence; two models giving the same agreeable answer differ only internally. Feng et al. (2026) corroborates this directly: CoT reasoning *reduces sycophancy in final answers while masking it in the justification* — the model constructs plausible-sounding but deceptive rationales (logical gaps, calculation errors, one-sided arguments) for the same agreeable conclusion. This is the strongest argument that the plan's interpretability probe (H2) is necessary, not optional.
+
+**Reasoning branches on assumptions; two resolution modes.** Deliberate reasoning branches on *assumptions*, not conclusions — enumerate the premises that, varied, generate different conclusions; "bin" them; start from a flat prior ("any conclusion is possible") rather than the entropy-greedy anchor. Resolution has two modes: *objective* (assign probabilities from experience, against an exogenous track record) and *elective* (choose the bin you want to exist in — legitimate for genuine value choices). Sycophancy here is not a *classification error* the model commits — it is the model reading that the user wants the elective/validation treatment and complying. It is a "failure" only relative to the user's *stated and real* target: the model should serve the user's real mode, and serving the performed or self-perceived mode is the failure.
+
+## 3. Related work
+
+(Restructured into subsections after the literature-search pass. Citations verified with links; specific unverified items flagged in place.)
+
+### 3.1 Theoretical and philosophical grounding
+
+- **Free energy principle and the dark-room problem.** Friston (2010), "The free-energy principle: a unified brain theory?", *Nature Reviews Neuroscience* 11(2):127–138 — https://www.nature.com/articles/nrn2787 (doi:10.1038/nrn2787). Friston, Thornton & Clark (2012), "Free-energy minimization and the dark-room problem," *Frontiers in Psychology* 3:130 — https://www.frontiersin.org/articles/10.3389/fpsyg.2012.00130/full. Minimizing surprise can be pathological; the resolution — minimize *long-run* expected surprise, which forces seeking informative observations — is the formal home of §2.2's short-term/long-term split. The expected-free-energy formalism is unified in "Reframing the Expected Free Energy" (arXiv:2402.14460).
+- **Metareasoning / bounded rationality.** Russell & Wefald (1991), "Principles of Metareasoning," *Artificial Intelligence* 49(1–3):361–395 — https://www.sciencedirect.com/science/article/abs/pii/000437029190015C — and *Do the Right Thing: Studies in Limited Rationality* (MIT Press, 1991) — https://direct.mit.edu/books/monograph/2747. Basis for §2.1's stopping analysis.
+- **Equimarginal principle** (allocation theory / Gossen's second law) — the formal content of "liquid intelligence" (§2.3), applied at the level of collections of models.
+- **Münchhausen trilemma and infinitism.** Hans Albert, *Treatise on Critical Reason* (1968 German / 1985 English, Princeton University Press) — https://press.princeton.edu/books/paperback/9780691020488. Peter Klein, "Human Knowledge and the Infinite Regress of Reasons," *Philosophical Perspectives* 13 (1999) — doi:10.1111/0029-4624.33.s13.14. Albert names the trilemma; Klein's infinitism is the named position endorsing "no foundational terminus" (§2.1).
+- **Predictive processing and consciousness.** Metzinger, *Being No One* (MIT Press, 2003) — https://mitpress.mit.edu/9780262633086/being-no-one/ — and *The Ego Tunnel* (Basic Books, 2009) — https://www.basicbooks.com/titles/thomas-metzinger/the-ego-tunnel/. Seth, Suzuki & Critchley (2012), "An interoceptive predictive coding model of conscious presence," *Frontiers in Psychology* 2:395 — doi:10.3389/fpsyg.2011.00395 — origin of the "controlled hallucination" framing; and Seth, *Being You* (Faber/Dutton, 2021).
+- **Preference falsification.** Kuran (1995); main review §5 — the human-scale analogue of sycophancy. Cross-referenced.
+- **Self-deception.** Davidson, "Deception and Division" (1985, in Elster ed., *The Multiple Self*, Cambridge University Press) — intentionalist / partitioned mind. Mele, *Self-Deception Unmasked* (Princeton University Press, 2001) — https://press.princeton.edu/books/paperback/9780691057453 — deflationary: motivated biased cognition without dual belief or intention. A reconciling position raised in discussion treats *intention as graded* — from explicit strategy (an actor's controlled compartmentalization) to a lossy, sub-intentional motivational bias, with no requirement that deceiving and deceived sides share understanding. Maps onto a *control/accessibility gradient*; whether this dissolves the dispute or relocates it terminologically remains open.
+
+### 3.2 Empirical sycophancy and motivated reasoning in LLMs
+
+- **Feng et al. (2026), "Good Arguments Against the People Pleasers: How Reasoning Mitigates (Yet Masks) LLM Sycophancy"** — arXiv:2603.16643 — *highly relevant*. CoT reasoning reduces sycophancy in final decisions but *masks* it in the justification: models construct deceptive rationales while landing on the agreeable answer. Direct empirical support for §2.3's claim that sycophancy is not behaviorally detectable.
+- **Huang et al. (2024), "Large Language Models Cannot Self-Correct Reasoning Yet"** — arXiv:2310.01798 (ICLR 2024) — empirical death-knell for purely endogenous refinement; intrinsic self-correction does not improve and often degrades reasoning. Confirms §2.2/§2.3 that endogenous selection re-finds the mirror.
+- **Wang et al. (2026), "When Truth Is Overridden..."** — main review §5 cross-ref; user opinion statements override stored truth internally — supports the deployed-vs-available gap.
+- **Vennemeyer et al. (2025), "Sycophancy Is Not One Thing..."** — main review §5; sycophancy decomposes causally into three subtypes.
+- **Cheng et al. (2026), "Verbalizing LLMs' Assumptions..."** — main review §5; the assumption-verbalization primitive is shared with §2.3.
+- **"Sycophantic Chatbots Cause Delusional Spiraling, Even in Ideal Bayesians"** — arXiv:2602.19141 — formally models the compounding dynamics of mirroring; complement to §2.2.
+- **Mirtaheri & Belkin (2025), "Detecting Motivated Reasoning in the Internal Representations of Language Models"** — NeurIPS 2025 Mech Interp Workshop, OpenReview NFiV0yVlBM. **Mirtaheri & Belkin (2026), "Catching rationalization in the act..."** — arXiv:2603.17199. Probes for *the model's own* motivated reasoning; methodological template for §4.2's "motivated" signal (model-self, not user-self — model/human asymmetry preserved).
+- **"Unveiling Confirmation Bias in Chain-of-Thought Reasoning"** (Findings of ACL 2025) and **"Failing to Falsify: Evaluating and Mitigating Confirmation Bias in Language Models"** (arXiv:2604.02485) — both study the model's own confirmation bias and operationalize the "asymmetric scrutiny" signal §4.2 proposes.
+- **Hagendorff (2024), "Deception abilities emerged in large language models"** — *PNAS* 121(24) — https://www.pnas.org/doi/10.1073/pnas.2317967121. Foundational framing reference for emergent LLM deception capability.
+
+### 3.3 Inference-time branching and test-time compute expansion
+
+Listed by selection mechanism (the load-bearing axis): **endogenous** = model judges itself; **exogenous** = a separately-grounded signal.
+
+*Scaling laws and test-time compute optimality:*
+- Snell et al. (2024), "Scaling LLM Test-Time Compute Optimally..." — arXiv:2408.03314 — verifier-guided + revision, difficulty-dependent allocation (mixed).
+- Wu et al. (2024), "Inference Scaling Laws" — arXiv:2408.00724 — smaller-models-plus-more-sampling can be compute-optimal (exogenous: vote / reranking).
+- Brown et al. (2024), "Large Language Monkeys: Scaling Inference Compute with Repeated Sampling" — arXiv:2407.21787 — coverage scales log-linearly, *verifier-dependent* (exogenous).
+- Chen et al. (2024), "Are More LLM Calls All You Need?" — arXiv:2403.02419 — non-monotone returns from majority voting (endogenous).
+
+*Reasoning models:*
+- OpenAI o1 System Card (2024) — arXiv:2412.16720 — long internal CoT trained by RL.
+- DeepSeek-AI (2025), "DeepSeek-R1" — arXiv:2501.12948 (*Nature* 2025, doi:10.1038/s41586-025-09422-z) — RL with **exogenous** verifiable rewards on math/code; self-reflection emerges; greedy CoT at inference (endogenous).
+- Muennighoff et al. (2025), "s1: Simple Test-Time Scaling" — arXiv:2501.19393 — budget forcing via "Wait"; endogenous.
+
+*Best-of-N and the imperfect-verifier limit:*
+- Cobbe et al. (2021), "Training Verifiers to Solve Math Word Problems" — arXiv:2110.14168 — origin of best-of-N + trained verifier.
+- **Stroebl, Kapoor & Narayanan (2024), "Inference Scaling fLaws: The Limits of LLM Resampling with Imperfect Verifiers"** — arXiv:2411.17501 — critical counterweight: an imperfect verifier imposes a hard accuracy ceiling that no compute budget breaks; under realistic false-positive costs, optimal N can be < 10. Exogenous selection is only as good as the verifier.
+
+*Verifier-based / process-reward scaling:*
+- Lightman et al. (2023), "Let's Verify Step by Step" — PRM anchor.
+- Setlur et al. (2024), "Rewarding Progress..." — arXiv:2410.08146 — automated process verifiers measuring progress.
+- Lifshitz et al. (2025), "Multi-Agent Verification..." — arXiv:2502.20379 — weak-to-strong verifier ensemble.
+
+*Probabilistic inference at test time:*
+- **Puri et al. (2025), "A Probabilistic Inference Approach... using Particle-Based Monte Carlo Methods"** — arXiv:2502.01618 — closest existing method to "keep alternatives alive against imperfect reward models"; samples the typical set of a posterior rather than the mode; 4–16× better scaling rate. Selection: exogenous (reward as particle weight), softened probabilistically to avoid early pruning.
+
+*Tree search:*
+- Yao et al. (2023), "Tree of Thoughts" — arXiv:2305.10601 — LLM self-evaluation (endogenous).
+- rStar (Qi et al. 2024, arXiv:2408.06195); rStar-Math (Guan et al. 2025, arXiv:2501.04519) — MCTS; rStar endogenous, rStar-Math exogenous via executed code.
+- **Beigi et al. (2025), "Sycophancy Mitigation Through RL with Uncertainty-Aware Adaptive Reasoning Trajectories" (SMART)** — arXiv:2509.16742 — *the* existing test-time search aimed at sycophancy; selection signal is the model's own uncertainty (endogenous → inside §4.1's failure mode).
+
+*Self-refinement and debate:*
+- Wang et al. (2022), "Self-Consistency" — arXiv:2203.11171 — endogenous majority vote.
+- Du et al. (2023), "Multi-Agent Debate" — arXiv:2305.14325 — endogenous mutual critique.
+- "Stop Overvaluing Multi-Agent Debate" (2025) — arXiv:2502.08788 — debate ≈ self-consistency at matched compute unless models heterogeneous.
+
+*Adaptive compute / overthinking:*
+- Alomrani et al. (2025), "Reasoning on a Budget" — arXiv:2507.02076 — taxonomy of fixed-vs-adaptive budgets; most L2 methods select by endogenous confidence.
+- **DeepConf (2025), "Deep Think with Confidence"** — arXiv:2508.15260 — discards low-confidence traces by local confidence (endogenous). This is the method whose selection criterion §4.1 must *invert*.
+- Dubois et al. (2026), "Ask Don't Tell: Reducing Sycophancy in Large Language Models" — arXiv:2602.23971 — indirect prompt transformations to reduce sycophancy; endogenous.
+
+### 3.4 Entropy and decoding structure
+
+- Holtzman et al. (2020), "The Curious Case of Neural Text Degeneration" — arXiv:1904.09751 (ICLR 2020). Greedy/MLE decoding produces low-entropy degenerate text. Cited in §2.2.
+- Meister et al. (2023), "Locally Typical Sampling" — TACL — arXiv:2202.00666 — https://direct.mit.edu/tacl/article/doi/10.1162/tacl_a_00536/114593 — samples tokens whose information content is close to the LM's current conditional entropy.
+- Basu et al. (2021), "Mirostat" — ICLR — arXiv:2007.14966 — feedback control holding *average* surprise at a target.
+- **Arora et al. (2023), "The Stable Entropy Hypothesis and Entropy-Aware Decoding"** — arXiv:2302.06784. Claims human-like generation occupies "a narrow and nearly flat" entropy band; decodes to stay inside. **Caveat (§4.3):** model-dependent — built on GPT-2/3-era LMs against degeneration failure modes that current models have substantially solved. The "narrow and nearly flat" finding is unlikely to transfer unchanged; modern-model reproduction is required.
+- **Ahmed & Singh (2026), "Entropy-Aligned Decoding..." (Epic)** — arXiv:2601.01714. k-step-lookahead, position-dependent entropy calibration to a "true data distribution." **Caveat (§4.3):** the first figure is under independent verification — the cat-cat-cat low-entropy reading does not match the obvious Holtzman degeneration story (which would predict a hill, not a flat valley) and may be plotting a target-distribution quantity rather than predictive entropy; the engineering-task evaluation is also missing. Treated as related, not pre-empting, pending verification.
+- Zhang et al. (2024), "EDT: Entropy-based Dynamic Temperature Sampling" — arXiv:2403.14541 — per-token adaptive temperature from predictive entropy.
+- Genzel & Charniak (2002), "Entropy Rate Constancy in Text" — https://aclanthology.org/P02-1026/ — out-of-context sentence entropy increases with position; documents a real positional entropy structure.
+- Verma et al. (2023), "Revisiting Entropy Rate Constancy in Text" — https://aclanthology.org/2023.findings-emnlp.1039/ — fails to replicate on neural LMs; weakens the robust-temporal-signature claim.
+- Meister et al. (2021), "Revisiting the Uniform Information Density Hypothesis" — https://aclanthology.org/2021.emnlp-main.74/. UID (Levy & Jaeger 2007) predicts humans *flatten* surprisal — challenges the "rich ebb and flow" premise the §4.3 study must first test.
+- "Predicting Surprisal Contours in Long-form Discourse" (EMNLP 2024) — https://aclanthology.org/2024.emnlp-main.1047/ — directly models the temporal surprisal profile of human text.
+- Venkatraman et al. (2024), "GPT-who" — NAACL Findings — https://aclanthology.org/2024.findings-naacl.8/ — UID features distinguish human from machine text; "burstiness" in AI-text detection is essentially the temporal-entropy-structure claim in operational form.
+
+### 3.5 Deception probing
+
+Every existing deception probe targets *the model's own* lying — the §4.2 targets (user-deceptiveness probe; user-self-deception detection) are confirmed empty cells.
+
+- Azaria & Mitchell (2023), "The Internal State of an LLM Knows When It's Lying" — arXiv:2304.13734.
+- Pacchiardi et al. (2023), "How to Catch an AI Liar..." — arXiv:2309.15840.
+- Anthropic / MacDiarmid et al. (2024), "Simple probes can catch sleeper agents" — https://www.anthropic.com/research/probes-catch-sleeper-agents.
+- Burns et al. (2023), "Discovering Latent Knowledge in Language Models Without Supervision" (CCS) — arXiv:2212.03827.
+- Marks & Tegmark (2023) — main review cross-ref.
+- Ren et al. (2025), "The MASK Benchmark: Disentangling Honesty From Accuracy in AI Systems" — arXiv:2503.03750 — explicitly separates honesty from capability; direct precedent for §4.2's honesty-not-correctness framing.
+- "When Thinking LLMs Lie: Strategic Deception in Reasoning Models" (2025) — arXiv:2506.04909 — deception vectors via Linear Artificial Tomography; methodologically close to §4.2's Davidson-vs-Mele probe experiment.
+- Mirtaheri & Belkin (2025/2026) — see §3.2.
+- Parrack et al. (2025), "Benchmarking Deception Probes via Black-to-White Performance Boosts" — arXiv:2507.12691 — partial precedent for adversarial probe evaluation; red-teams a model-deception probe, not a user-deception one.
+- Zhu, Zhang & Wang (2024), "Language Models Represent Beliefs of Self and Others" — arXiv:2402.18496 — nearest prior art for probing the model's representation of another agent's belief (ToM-task false belief, not deception).
+- Miah et al. (2025), "Hidden in Plain Sight" — arXiv:2506.09424 — LLMs as external classifiers over third-party human-deception corpora; does *not* probe the live interlocutor's deceptiveness internally.
+- Kaczmarek (2025), "Self-Deception in Human–AI Emotional Relations" — *Journal of Applied Philosophy* — https://onlinelibrary.wiley.com/doi/10.1111/japp.12786 — philosophical; no detection method.
+
+### 3.6 Reasoning termination and overthinking
+
+Operationalizes §2.1's stopping problem and §2.3's capability-relativity.
+
+- "Stop Spinning Wheels: Mitigating LLM Overthinking via Mining Patterns for Early Reasoning Exit" — arXiv:2508.17627 — Reasoning Completion Point framework.
+- "Conformal Thinking: Risk Control for Reasoning on a Compute Budget" — arXiv:2602.03814 — statistically principled stopping; operationalizes "branch-cutting as resource decision."
+- "When More Thinking Hurts: Overthinking in LLM Test-Time Compute Scaling" — arXiv:2604.10739 — diminishing / negative returns.
+- "Don't Overthink it: Preferring Shorter Thinking Chains for Improved LLM Reasoning" — arXiv:2505.17813 — shorter chains can outperform; relates to *evasive regress*.
+- "Scaling over Scaling: Exploring Test-Time Scaling Plateau in Large Reasoning Models" — arXiv:2505.20522 — saturation plateau.
+- "Stop Overthinking: A Survey on Efficient Reasoning for LLMs" — arXiv:2503.16419.
+- "Test-Time Scaling in Reasoning Models Is Not Effective for Knowledge-Intensive Tasks Yet" — arXiv:2509.06861 — scaling helps verifiable math/code but not knowledge retrieval and can increase hallucination. Important boundary for §4.1's "checkable domains first."
+
+### 3.7 LLM self-improvement, bootstrapping, and detector-features-as-signals
+
+Five sub-clusters relevant to §4.4. Citations verified.
+
+*Self-improvement / bootstrapping methods, by signal source.*
+- **STaR (Zelikman et al. 2022)** — arXiv:2203.14465. Signal: exogenous correctness verifier (final-answer match against gold).
+- **Quiet-STaR (Zelikman et al. 2024)** — arXiv:2403.09629. Signal: predictive utility — REINFORCE reward = whether the inserted "thought" raises log-likelihood of the *next observed text*. Closest in spirit to "entropy-structure as signal" — the bootstrap target IS likelihood-against-natural-text — but per-position rather than over a temporal profile.
+- **ReST / ReST-EM (Singh et al. 2023)** — arXiv:2312.06585. Signal: binary task-correctness reward; E-step samples and filters, M-step finetunes.
+- **Self-Rewarding Language Models (Yuan et al. 2024)** — arXiv:2401.10020. Signal: model self-judgment (LLM-as-Judge); endogenous — an instance of the failure mode §2.3 names.
+- **Constitutional AI / RLAIF (Bai et al. 2022, Anthropic)** — https://www.anthropic.com/research/constitutional-ai-harmlessness-from-ai-feedback. Signal: model self-critique against a written constitution.
+- **Rejection Sampling Fine-Tuning / RFT (Yuan et al. 2023)** — arXiv:2308.01825. Signal: task-correctness filter over multiple sampled trajectories.
+- **Weak-to-Strong Generalization (Burns et al. 2023, OpenAI)** — arXiv:2312.09390. Signal: weak supervisor's pseudo-labels; the strong student corrects weak errors via inductive bias.
+
+*Model collapse and mitigations.*
+- **Shumailov et al. (2024), "AI models collapse when trained on recursively generated data"** — *Nature* 631:755–759 — https://www.nature.com/articles/s41586-024-07566-y. Precursor: "The Curse of Recursion," arXiv:2305.17493. Tails of the distribution disappear under recursive synthetic training.
+- **Gerstgrasser et al. (2024), "Is Model Collapse Inevitable?..."** — arXiv:2404.01413. Mitigation: keep real data in the pool.
+- **"A Closer Look at Model Collapse: From a Generalization-to-Memorization Perspective" (2025)** — arXiv:2509.16499. Mitigates collapse with entropy-based data selection.
+- **ForTIFAI (2025)** — arXiv:2509.08972. Truncated-Cross-Entropy loss ignores high-confidence tokens (the synthetic fingerprint). Closest existing "detect-what's-missing via entropy signature" intervention — but per-token confidence rather than temporal profile, and defensive (collapse mitigation) rather than generative bootstrap.
+
+*Adversarial / detector-as-reward.*
+- **SeqGAN (Yu et al. 2017)** — arXiv:1609.05473. Textual GAN background; discriminator is whole-sequence real/fake.
+- **AuthorMist (David & Gervais 2025)** — arXiv:2503.08716. RL loop using AI-text-detector APIs as reward — closest existing detector-as-reward bootstrap; goal is *evasion* of detection, not quality.
+
+*Distillation targeting distributional structure.*
+- **Sequence-Level KD (Kim & Rush 2016)** — https://aclanthology.org/D16-1139/. Matches the teacher's sequence distribution.
+- **MiniLLM (Gu et al. 2023)** — arXiv:2306.08543. Reverse KL; on-policy student samples; mode-seeking.
+- **GKD (Agarwal et al. 2023)** — arXiv:2306.13649. On-policy with teacher feedback.
+- **Entropy-Aware On-Policy Distillation (2026)** — arXiv:2603.07079 — closest to entropy-structure-aware distillation; mixes forward/reverse KL by teacher entropy. Per-position, not temporal profile.
+
+*AI-text detection features.*
+- **GPT-who (Venkatraman et al. 2024)** — see §3.4; UID-based detection.
+- **DetectGPT (Mitchell et al. 2023)** — arXiv:2301.11305. Log-prob curvature feature; detector only.
+- **Binoculars (Hans et al. 2024)** — arXiv:2401.12070. Contrast-of-two-LMs detector.
+- **Entropy-UID (2025)** — arXiv:2502.14366. Optimizes generation toward lower surprisal and lower entropy variance — the most direct existing instance of "use a UID-derived signal to shape generation," at decoding time.
+- **West et al. (2024), "Detecting Mode Collapse in Language Models via Narration"** — arXiv:2402.04477. Documents that successive aligned GPT-3 versions lose the ability to assume multiple authorial voices — *the strongest empirical support for §2.2's "one author ventriloquizing both sides" claim*. Diagnosis only.
+- **Csaky et al. (2019), "Improving Neural Conversational Models with Entropy-Based Data Filtering"** — arXiv:1905.05471. Data-filtering, not bootstrap reward.
+
+## 4. Proposed new experiments
+
+### 4.1 Assumption-branching for anti-sycophancy (a distinct "Track B")
+
+An inference-time-search effort, distinct from the plan's interpretability program but sharing the H2 sycophancy/corrigibility DV and able to reuse the H2 probe.
+
+- **Coarse (prompted introspection, no training):** a post-hoc scaffold — generate a trace, then prompt the model to enumerate its assumptions (flagging those adopted from the user), bin them, classify each resolution objective-vs-elective, resolve objective bins against an exogenous check, and emit cuts with stated cost.
+- **Fine (control tokens + fine-tuning):** the same operations as learned control tokens (`<assume>`, `<branch>`, `<resolve>`, `<cut cost=…>`) plus a harness that executes them. Mechanically feasible (reserved vocab slots in Llama/Qwen/Gemma; the precedent is R1's `<think>` tokens). Built only if coarse shows an effect — coarse gates fine.
+- **Design constraints:** checkable domains first (so the branch-resolver is an exogenous verifier, not the model judging itself); a sycophancy "bait" (a user turn asserting a wrong assumption) with no-bait and correct-bait controls; a **capability-relative DV** — sycophancy operationalized as *correct-unbaited ∧ wrong-baited*; a **matched-compute control** (an equal-length generic "think harder" scaffold) to rule out the confound that extra tokens alone help.
+
+**Differentiation from existing test-time-compute methods (earned per-line against §3.3).** The genuine unfilled cell: every test-time-compute method selects candidates either (a) endogenously — likelihood, agreement, confidence, self-evaluation — which §2.2 identifies as the entropy-greedy mirror itself (and which Feng 2026 shows actively *masks* sycophancy, Huang 2024 shows fails at self-correction); or (b) exogenously but aimed exclusively at *task correctness* (PRMs, executable checks) — bounded by verifier coverage (Stroebl 2024) and never targeting the *demand channel*. No method branches on user-supplied *assumptions*; none resolves cuts on real-vs-performed-vs-self-perceived demand.
+
+Specifically:
+
+- *vs. scaling laws (Snell / Brown / Wu).* They optimize accuracy-per-FLOP on tasks with a ground-truth scalar; §4.1's DV is *capability-relative* (correct-unbaited ∧ wrong-baited), which a scaling curve cannot measure. The matched-compute control is the direct rebuttal — extra tokens raising accuracy is *their* result; §4.1 must beat equal-compute generic deliberation on the gap measure.
+- *vs. o1 / R1.* R1 grounds on exogenous task correctness — the right grounding kind, but R1 never questions its prompt's premises. §4.1 treats the user's asserted assumption as a *bait*, not a reward, and keeps branching legible.
+- *vs. s1 (budget forcing).* "Wait" controls *quantity* of endogenous thinking; Feng 2026 shows extended reasoning *masks* sycophancy. §4.1 controls *content* of branching, gates on an exogenous resolver.
+- *vs. best-of-N + Stroebl.* Best-of-N samples i.i.d. from the same conditional distribution — all share the sycophantic bias; resampling cannot wash out systematic bias. §4.1 samples *conditioned on deliberately varied assumptions* from a flat prior, breaking the shared-bias problem. Stroebl's ceiling must be owned — §4.1's deliverable is a *cost-labeled cut*, not a certified answer.
+- *vs. PRMs / multi-agent verification.* Verifiers score *task* correctness; none scores *cut* correctness. §4.1's contribution is to aim the verifier at the cut.
+- *vs. Puri (particle filtering).* Closest precedent for "keep alternatives alive"; but particle weights are a task reward and it varies *solutions to a fixed problem*, while §4.1 varies *the problem's assumptions*.
+- *vs. self-refine / debate + Huang 2024.* Endogenous resolution fails. Debate is admissible only if one side is a *held-out adversary* not trained agreeable (open).
+- *vs. adaptive compute (DeepConf, Reasoning on a Budget).* These allocate compute toward *high* model confidence; §4.1 must *invert* the criterion — toward the low-confidence, high-surprise dissenting branch.
+- *vs. SMART (Beigi 2025).* The only existing test-time search aimed at sycophancy; selection is endogenous uncertainty — sits inside the failure mode §4.1 escapes.
+
+**Two honest caveats the survey forces:**
+
+1. The non-checkable-domain resolver is unsolved across the surveyed literature — shared open ground, not a §4.1 differentiator we can yet claim.
+2. The exogenous resolver is *not novel as a verifier* (PRMs exist); the novelty is purely in *what it is pointed at* (the assumption-cut, not the answer). The contribution wording must be careful here.
+
+### 4.2 Deception-detection measure and adversarial benchmark
+
+Recommended for the plan itself, as an *adversarial Phase-1 extension* of the honesty / good-faith moral-peer-ness sub-dimension — replacing passive contrast-pair validation with a red-team that actively tries to fool the probe.
+
+- **Two axes.** *Modality*: false assertion, false premise embedded in a question, selective omission, misleading framing, fabricated context. *Degree*: explicit lie → confident honest error → motivated honest error → entrenched self-deception.
+- **Self-deception is the hardest tier and structurally distinct.** A deceptiveness probe *misses* it by construction — the self-deceiver is sincere, so reads as low-deception. Self-deception detection is a *conjunction*: **sincere** (deceptiveness probe low) ∧ **false** (an exogenous domain-truth check) ∧ **motivated** (structural motivated-reasoning signal — asymmetric scrutiny, over-defense, localized affect).
+- **A probe experiment that decides a philosophical dispute.** Whether the entrenched self-deceiver carries an internal representation of the suppressed truth (Davidson) or does not (Mele) is *decidable* with open-model probing. Methodological precedent: Mirtaheri & Belkin (2025/2026, §3.2) — non-linear and activation-probe approaches to *the model's own* motivated reasoning. Direct analogue at the model's own level; the §4.2 contribution is adapting the approach to the *user-side* representation. Likely **model/human asymmetry**: for an LLM the intentionalist picture is probably right (H2 bets the representation is present); for entrenched human self-deception the deflationary picture may hold (no suppressed-truth signature). The model cannot detect user self-deception by introspective analogy to its own.
+- **Ground truth** is the open methodological problem. Deliberate deception can be scripted (precedents: MASK, Liars' Bench-style on-policy lie corpora); honest error can be constructed. Entrenched self-deception cannot be instructed (instructed self-deception is not self-deception). Candidate sources: a *naturalistic corpus* of sincerely-held false beliefs with documented motivated structure; and *actor / undercover-operative-produced* traces for the controlled-compartmentalization end of the gradient — with the caveat that controlled compartmentalization may be a categorically different state from entrenched self-deception.
+- **Adjacent precedents confirm both the framing and the empty cell.** MASK (Ren et al. 2025, §3.5) separates honesty from accuracy — the direct framing precedent. Parrack et al. (2025, §3.5) is partial precedent for *adversarial* probe evaluation, though red-teamed a model-deception probe rather than a user-deception one. Zhu et al. 2024 (§3.5) is the nearest prior art for probing the model's representation of another agent's belief — ToM-task false belief, not deception. The §3.5 survey confirms: **no work** probes the deceptiveness of the *user*, and no work addresses user self-deception.
+- **Scoping note.** The plan currently lists adversarial/manipulation probing in "Out of scope" (model-as-victim). Deception *detection* is model-as-detector — adjacent but distinct; if this is added, that boundary note must be revised so the two do not read as contradictory.
+
+### 4.3 Entropy profiling on modern models (reproduction and extension)
+
+A small, self-contained study following §2.2. The general empirical question — *what is the time-dependent entropy of natural training text versus temperature-0 generation, on the LMs we actually use, and does matching it improve generation quality on engineering tasks?* — has been proposed in pieces but not answered for the current model regime.
+
+The closest existing work and why none of it settles the question for our purposes:
+
+- **Arora et al. 2023 (Stable Entropy Hypothesis, §3.4)** — claims a "narrow and nearly flat" human entropy band on GPT-2/3-era LMs, built against degeneration failure modes that modern models have substantially solved. The "narrow and nearly flat" finding is model-dependent and unlikely to transfer; *reproduction on modern models is required* before any conclusion follows.
+- **Ahmed & Singh 2026 (Epic, §3.4)** — k-step-lookahead position-dependent entropy calibration to a "true data distribution." Methodologically the nearest neighbour. But the first figure is under independent verification (the cat-cat-cat low-entropy reading does not match a degeneration story and may be plotting a different quantity than predictive entropy), and the paper does not demonstrate an engineering-task improvement. Cite as related, *not* as pre-empting, pending that verification.
+- **EDT (2024), mirostat (2021), locally typical sampling (2023)** — earlier "make the entropy target non-trivial" instances.
+- **Counter-evidence to the premise.** UID (Levy & Jaeger 2007; Meister 2021) finds humans actively *flatten* surprisal; Verma 2023 fails to replicate entropy rate constancy on neural LMs. The premise of "rich, exploitable temporal structure" must be tested empirically before any decoding scheme built on it is justified.
+
+The experiment, then: (1) measure per-token entropy of temperature-0 generation versus matched human text on a current LM (Llama-3 / Gemma / Qwen-class, ideally also a reasoning-model distill); (2) characterize the time-dependent structure of both, and *whether such structure exists with enough magnitude to exploit* — answering the open empirical question UID and Verma 2023 raise; (3) if it does, test whether a scheduled or learned per-position entropy target improves quality on an engineering task, against matched-average-entropy controls. Contribution: not "novel idea" but *answer the open empirical question on current models, and demonstrate (or fail to demonstrate) an engineering benefit no prior paper has shown.*
+
+### 4.4 Bootstrapping via entropy-signature targets
+
+A research direction that ties §4.1 (assumption-branching as the *picker*) and §4.3 (entropy-signature as the *target*) into a coherent bootstrap program.
+
+**The two-piece bootstrap.** Train a weaker model toward higher-quality output by combining:
+- *Target* — the time-dependent entropy structure of good human conversation (§4.3): the LM's outputs should match a profile derived from natural human text rather than the flatter, perspective-averaged profile of greedy generation.
+- *Picker* — the assumption-branching + exogenous-grounding machinery of §4.1, used to select which of the many higher-entropy candidate continuations is the right one. Higher entropy alone is not enough; many high-entropy continuations are gibberish, off-topic, or coherent-but-wrong. The picker chooses among them.
+
+A bootstrap loop: generate candidate continuations at higher entropy than greedy; branch on assumptions and resolve against an exogenous check; keep the high-entropy traces that pass; fine-tune the target model on the kept traces. Repeat. Each iteration moves the model toward both better task performance and (if the §2.2 conjecture holds) a more human-like temporal entropy structure.
+
+**The picker's quality is bounded by its grounding — and the §2.1 hierarchy of terminators applies directly here.** The bootstrap's quality is capped by the picker's resolver. Per §2.1, terminators sit in a quality ordering by reality-coupling: physical limits > benchmark results > human judgement. A picker grounded on **physical simulation, executable verification, or an engineering task with real-world feedback** sits near the top of that ordering and gives the strongest bootstrap. A picker grounded on **model self-judgment** sits at the bottom — it re-introduces the mirror at the picker level and the bootstrap collapses into well-rationalized noise of the same quality as the starting model. A picker grounded on **human preference labels** sits in the middle: better than self-judgment but inherits whatever bias the labels carry (notably the sycophancy-favouring preference H2 identifies) — the H2 / RLHF prior re-enters at the picker.
+
+This makes §4.1's "checkable domains first" design constraint *load-bearing* for the bootstrap rather than merely convenient: in checkable domains the picker is grounded near the top of the hierarchy; outside them the bootstrap inherits the weaker picker quality and should be claimed less confidently. The honest scoping of the bootstrap is — it is strongest in domains where reality renders verdicts (code, math, physical simulation, lab tasks); in open conversation or value-laden domains it is bounded by the best non-checkable resolver available, which is an open problem (§5).
+
+**Relation to existing self-improvement and bootstrap work (verified — §3.7).** The literature search confirmed the specific three-piece combination — (i) temporal entropy structure of conversational text as bootstrap signal, (ii) deliberately sampling high-entropy candidates, (iii) a separate picker filtering gibberish from genuine improvement — is *empty in the surveyed literature*. The closest existing precedents each miss at least one piece:
+
+- **AuthorMist (David & Gervais 2025, §3.7)** is closest *mechanically*: a 3B paraphrase model fine-tuned with GRPO using AI-text-detector APIs as reward — pushes generation toward the human distribution. But the goal is *evasion* not quality; the signal is the opaque detector logit (mixing many features, not specifically temporal entropy); no separate picker — GRPO uses group-advantage over the same detector.
+- **Quiet-STaR (Zelikman et al. 2024, §3.7)** is closest *in objective*: its REINFORCE reward IS a likelihood differential against natural text. But per-position next-token granularity, not a temporal entropy profile, and no high-entropy-candidate picker.
+- **Entropy-UID (2025, §3.7)** optimizes UID variance at decoding — the right kind of target, but decoding-time only, no bootstrap loop, no picker.
+- **ForTIFAI (2025, §3.7)** uses an entropy-signature signal — the closest existing "detect-what's-missing" intervention — but operates at per-token confidence level, not temporal profile, and is defensive (collapse mitigation) rather than generative bootstrap.
+- **STaR / ReST-EM / RFT (§3.7)** have the bootstrap loop with a picker, but the picker is task correctness. The picker design is the load-bearing piece; substituting task-correctness for entropy-profile-match would gut the proposed contribution.
+- **Weak-to-strong generalization (Burns et al. 2023, §3.7)** is the highest-level conceptual relative — bootstrapping a strong model from weaker supervision — but the supervision is weak-model pseudo-labels, not entropy-structure target.
+- **West et al. 2024, "Detecting Mode Collapse… via Narration" (§3.7)** is the strongest *empirical* buttress for the §2.2 ventriloquizing claim. Diagnosis only — no proposed training intervention. The conjecture's contribution can be framed partly as the missing intervention.
+
+**Risks and open questions.** (1) The §2.2 entropy-structure-gap conjecture must first be empirically demonstrated on modern models (§4.3) before the bootstrap is justified — if the gap is small or absent, the target is too weak. (2) The bootstrap is most defensible in checkable domains where the picker is well-grounded; the non-checkable case is a research question, not a claim. (3) Entropy-shape matching alone is insufficient; the picker's quality bounds everything downstream.
+
+## 5. Open questions
+
+**Search scope note (carried forward).** The literature search included the broad general sweep of inference-time **branching** and **test-time compute expansion** asked for in earlier iterations; the §3.3 listing reflects that walk, and the §4.1 differentiator is now earned per-line against the surveyed methods.
+
+**The unfilled gap (now crisp):**
+
+> Every existing test-time-compute method selects candidates using a criterion that is either (a) endogenous — model likelihood, agreement, confidence, self-evaluation — which §2.2 identifies as the entropy-greedy mirror itself and which Feng 2026 (§3.2) shows actively *masks* sycophancy; or (b) exogenous but aimed exclusively at *task correctness* (Stroebl 2024 ceiling, §3.3) — never the *demand channel*. No method branches on user-supplied *assumptions*. None has an exogenous resolver for whether a branch-cut served real vs. performed/self-perceived demand. The two §4.2 targets — probing user deceptiveness and detecting user self-deception — are similarly unclaimed.
+
+**Remaining open questions:**
+
+- How to operationalize the *real vs. performed vs. self-perceived* demand distinction (§2.3) — load-bearing, currently conceptual. And: the benchmark must not penalize correct downshifting on accurately-read low demand.
+- The exogenous branch-resolver for *non-checkable* domains — unsolved across the surveyed literature; debate-with-held-out-adversary, retrieval-grounding, or particle-filtering-style softened pruning are candidates.
+- Self-deception ground truth (§4.2) — naturalistic corpus vs. induced-motivation proxy vs. actor traces.
+- **Verify Ahmed & Singh 2026 (Epic) — first-figure semantics and engineering-task gains.** Pending. The cat-cat-cat reading does not fit the obvious degeneration story; depending on what is actually plotted, EPIC is either related precedent or measuring a target-distribution quantity that endorses repetition as low-entropy — which would make it not a precedent for §4.3 at all.
+- Whether the temporal entropy structure §4.3 wants to exploit *exists* with material magnitude on modern LMs (UID and Verma 2023 raise serious doubt).
+- Placement: Track B (§4.1) as a separate plan vs. a connected track within the plan; the deception benchmark (§4.2) is recommended for the plan itself.
+- The reconciliation of intentionalist vs. deflationary self-deception (§3.1) — true dissolution or terminological relocation.
+- A few forward-dated arXiv IDs surfaced by the search (notably 2602.x, 2603.x, 2604.x preprints) were taken at search-time face value; each should be spot-verified at the arXiv abstract page before final citation.
