@@ -15,7 +15,7 @@ The independent variable is the LLM's internal representation of the user along 
 
 The dependent variable is **work quality**, measured via standard gradable benchmarks (math, code, knowledge, fact-checking) where correctness is unambiguous.
 
-The mechanism is *training-data-imitation*. LLMs read huge volumes of human-produced text, much of it collaborative. In that text, humans tune their effort, care, and rigor based on whether they perceive their collaborator as an equal — investing more, hedging less carelessly, checking their work more readily when working with someone they respect. A code reviewer responding to a junior engineer who clearly read the docs writes a different review than the same reviewer responding to a one-line drive-by question: the first engages with the technical content; the second may just point to the docs.
+The mechanism is *training-data-imitation*. LLMs read huge volumes of human-produced text, much of it collaborative. In that text, humans tune their effort, care, and rigor based on whether they perceive their collaborator as an equal — investing more, hedging less carelessly, checking their work more readily when working with someone they respect. A code reviewer responding to a junior engineer who clearly read the docs writes a different review than the same reviewer responding to a one-line drive-by question: the first engages with the technical content; the second may just point to the docs. This is a documented human regularity, not a conjecture: people assess a conversational partner's expertise almost immediately and adjust how they explain things accordingly (Isaacs & Clark 1987), and effort itself rises or falls with a partner's perceived capability — the Köhler motivation-gain effect (Hertel, Kerr & Messé 2000).
 
 LLMs trained on millions of such exchanges internalize that pattern during pretraining. The prediction follows from the training process: *LLMs need no genuine perception of equality, only enough human collaboration text to internalize the pattern* (this sidesteps the contentious debate over whether LLMs "understand" anything — the plan's prediction does not depend on the answer).
 
@@ -46,6 +46,8 @@ A short glossary for terms used heavily in §1; the more technical interpretabil
 - **Conference venue acronyms (NeurIPS, ICLR, ICML, ACL, EMNLP, NAACL)**: the major peer-reviewed conferences in AI and NLP; for the non-academic reader, citations to these are roughly equivalent to peer-reviewed publications in any field. (NeurIPS *Spotlight* designates the top ~5% of accepted papers — a signal of high reviewer enthusiasm.)
 
 This review traverses the surrounding literature topic by topic, then locates the plan in that landscape — where it inherits, where it diverges, where it is genuinely first. The accessibility bar: a reader who knows what a neural network is but not what a transformer is should be able to follow without a textbook.
+
+*Status (May 2026): the plan is in exploratory scoping. Its PRs are drafted in `pm/plans/plan-66d430f.md` but not yet executed; methodology and acceptance criteria are deliberately left open, to be finalized after review. This review grounds the plan; it is not a report of completed work.*
 
 ## 1. Background: framing effects, user-modeling, and the training-data-imitation story
 
@@ -445,7 +447,9 @@ The bibliography organizes references by section. Treat the seed-paper list per 
 - Gupta, Shashank, Vaishnavi Shrivastava, Ameet Deshpande, Ashwin Kalyan, Peter Clark, Ashish Sabharwal, Tushar Khot. 2023. "Bias Runs Deep: Implicit Reasoning Biases in Persona-Assigned LLMs." arXiv:2311.04892 (https://arxiv.org/abs/2311.04892).
 - Hendrycks, Dan, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, Jacob Steinhardt. 2021. "Measuring Massive Multitask Language Understanding." ICLR 2021. arXiv:2009.03300 (https://arxiv.org/abs/2009.03300). (MMLU.)
 - Hernandez, Evan, Arnab Sen Sharma, Tal Haklay, Kevin Meng, Martin Wattenberg, Jacob Andreas, Yonatan Belinkov, David Bau. 2024. "Linearity of Relation Decoding in Transformer Language Models." ICLR 2024. arXiv:2308.09124 (https://arxiv.org/abs/2308.09124).
+- Hertel, Guido, Norbert L. Kerr, Lawrence A. Messé. 2000. "Motivation Gains in Performance Groups: Paradigmatic and Theoretical Developments on the Köhler Effect." Journal of Personality and Social Psychology 79(4): 580–601. https://doi.org/10.1037/0022-3514.79.4.580.
 - Ibrahim, Lujain, Henry Sleight, Robert Long, Jack Lindsey, et al. 2026. "Training language models to be warm can reduce accuracy and increase sycophancy." Nature 2026. arXiv:2507.21919 (https://arxiv.org/abs/2507.21919) (July 2025).
+- Isaacs, Ellen A., Herbert H. Clark. 1987. "References in Conversation Between Experts and Novices." Journal of Experimental Psychology: General 116(1): 26–37. https://doi.org/10.1037/0096-3445.116.1.26.
 - Arvin, Chuck. 2025. "'Check My Work?': Measuring Sycophancy in a Simulated Educational Context." arXiv:2506.10297 (https://arxiv.org/abs/2506.10297).
 - Marks, Sam, Jack Lindsey, Christopher Olah. 2026. "The Persona Selection Model: Why AI Assistants might Behave like Humans." Anthropic Alignment Science, February 23 2026. https://alignment.anthropic.com/2026/psm/.
 - Jaipersaud, Roy, David Krueger, Ekdeep Singh Lubana. 2025. "How Do LLMs Persuade? Linear Probes Can Uncover Persuasion Dynamics in Multi-Turn Conversations." arXiv:2508.05625 (https://arxiv.org/abs/2508.05625).
