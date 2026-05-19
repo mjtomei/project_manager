@@ -31,24 +31,142 @@ def _pick_fake_verdict(verdicts: dict) -> str:
     return random.choices(names, weights=weights, k=1)[0]
 
 
-def _fake_claude_args(config: dict, session_id: str | None = None) -> list[str]:
+def _advance_scripted_cursor(session_tag: str | None, session_type: str,
+                             sequence_len: int, wrap: bool) -> int:
+    """Atomically advance the scripted-verdict cursor for *session_type*.
+
+    The cursor lives in ``<session_dir>/fake-claude.state`` as JSON
+    ``{"<session_type>": <next_index>}``.  Returns the index to use *this*
+    invocation (then bumps it for the next).  Concurrent panes of the same
+    session type advancing simultaneously are serialised via ``fcntl.flock``
+    so neither grabs the same slot.
+
+    ``wrap=False`` clamps the cursor at ``sequence_len - 1`` (the terminal
+    entry keeps emitting once the script runs out).  ``wrap=True`` cycles
+    back to 0.
+    """
+    import fcntl
+    from pm_core.paths import session_dir
+
+    if sequence_len <= 0:
+        return 0
+    sd = session_dir(session_tag)
+    if sd is None:
+        # No session dir → no place to persist the cursor.  Fall back to
+        # always emitting the first entry (deterministic, drift-free).
+        return 0
+    state_path = sd / "fake-claude.state"
+    fd = os.open(str(state_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            raw = os.read(fd, 1 << 20).decode("utf-8") or "{}"
+            state = json.loads(raw) if raw.strip() else {}
+            if not isinstance(state, dict):
+                state = {}
+        except (ValueError, OSError):
+            state = {}
+        cur = state.get(session_type, 0)
+        if not isinstance(cur, int) or cur < 0:
+            cur = 0
+        if cur >= sequence_len:
+            cur = 0 if wrap else sequence_len - 1
+        if wrap:
+            nxt = (cur + 1) % sequence_len
+        else:
+            nxt = min(cur + 1, sequence_len - 1) if sequence_len > 1 else 0
+            # When sequence has one entry, clamp means: always emit slot 0;
+            # cursor stays at 0 so the file content does not churn.
+            if sequence_len == 1:
+                nxt = 0
+        state[session_type] = nxt
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.ftruncate(fd, 0)
+        os.write(fd, (json.dumps(state) + "\n").encode("utf-8"))
+        return cur
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _resolve_fake_verdict(verdicts, session_type: str | None,
+                          session_tag: str | None) -> tuple[str, dict]:
+    """Pick the next verdict and any per-iteration overrides.
+
+    Returns ``(verdict_name, overrides_dict)``.  For weighted-random configs
+    (a plain verdict→weight dict) the overrides dict is empty.  For
+    scripted-sequence configs the overrides come from the per-entry dict (if
+    any), layered later on top of the base config.
+
+    ``"NONE"`` is returned when verdicts is empty/absent.
+    """
+    from pm_core.fake_claude import _scripted_sequence, _scripted_entry_verdict
+
+    if not verdicts:
+        return "NONE", {}
+
+    sequence = _scripted_sequence(verdicts)
+    if sequence is None:
+        # Existing weighted-random dict form.
+        return _pick_fake_verdict(verdicts), {}
+
+    if not sequence:
+        return "NONE", {}
+
+    wrap = isinstance(verdicts, dict) and bool(verdicts.get("wrap"))
+    # No persistent cursor without a session_type to key it under: emit slot 0.
+    if not session_type:
+        idx = 0
+    else:
+        idx = _advance_scripted_cursor(session_tag, session_type, len(sequence), wrap)
+    entry = sequence[idx]
+    name = _scripted_entry_verdict(entry) or "NONE"
+    overrides: dict = {}
+    if isinstance(entry, dict):
+        overrides = {k: v for k, v in entry.items() if k != "verdict"}
+    return name, overrides
+
+
+def _fake_claude_args(config: dict, session_id: str | None = None,
+                     session_type: str | None = None,
+                     session_tag: str | None = None) -> list[str]:
     """Build the fake-claude argv (excluding the binary) from a config dict.
 
-    Picks a verdict randomly from the weighted ``verdicts`` map.  An empty or
-    absent ``verdicts`` map means a no-verdict session (impl/watcher/merge, or
-    a session type matched only by the ``_all`` catch-all): the fake emits
-    ``--verdict NONE`` and stays open like a real interactive session.
-    Recognised config keys are translated into CLI flags.
+    Resolves the next verdict from the ``verdicts`` field, which may be:
 
-    When *session_id* is given it is passed through as ``--session-id`` so the
-    fake writes a JSONL transcript and emits the ``idle_prompt`` hook event —
-    the inputs the hook-driven verdict poller actually reads.
+    * a verdict→weight ``dict`` — random pick weighted by the values
+    * a ``list`` of entries — scripted sequence (clamp-to-last by default)
+    * a ``dict`` with ``"sequence"`` list and optional ``"wrap": true`` —
+      scripted with wrap-around
+
+    An empty / absent verdicts field means a no-verdict session
+    (impl/watcher/merge, or a session type matched only by the ``_all``
+    catch-all): the fake emits ``--verdict NONE`` and stays open like a real
+    interactive session.
+
+    Scripted entries may carry per-iteration overrides (``body``, ``delay``,
+    ``preamble``, …) which are layered on top of the base config keys for
+    just that invocation.
+
+    When *session_id* is given it is passed through as ``--session-id`` so
+    the fake writes a JSONL transcript and emits the ``idle_prompt`` hook
+    event — the inputs the hook-driven verdict poller actually reads.
     """
     verdicts = config.get("verdicts") or {}
-    verdict = _pick_fake_verdict(verdicts) if verdicts else "NONE"
+    verdict, overrides = _resolve_fake_verdict(verdicts, session_type, session_tag)
+
+    # Layer per-entry overrides on top of the base config.  Caller's config
+    # values lose to script-entry overrides for this single invocation.
+    effective = {k: v for k, v in config.items() if k != "verdicts"}
+    effective.update(overrides)
+
     args = ["--verdict", verdict]
     if session_id:
         args.extend(["--session-id", session_id])
+    if "body" in effective:
+        args.extend(["--body", str(effective["body"])])
     for cfg_key, flag in (
         ("preamble", "--preamble"),
         ("preamble_delay", "--preamble-delay"),
@@ -58,9 +176,60 @@ def _fake_claude_args(config: dict, session_id: str | None = None) -> list[str]:
         ("body_delay", "--body-delay"),
         ("hold", "--hold"),
     ):
-        if cfg_key in config:
-            args.extend([flag, str(config[cfg_key])])
+        if cfg_key in effective:
+            args.extend([flag, str(effective[cfg_key])])
     return args
+
+
+def peek_fake_verdicts(session_tag: str | None = None) -> dict:
+    """Return ``{session_type: next_verdict}`` without advancing any cursors.
+
+    Useful as a debug aid for scripted-sequence configs: shows which slot
+    each session type would emit on its next launch.  Weighted-random
+    configs report ``"<random>"`` since the pick is non-deterministic.
+    Session types whose verdicts are empty/absent report ``"NONE"``.
+    """
+    from pm_core.fake_claude import _scripted_sequence, _scripted_entry_verdict
+    from pm_core.paths import fake_claude_config, session_dir
+
+    raw = fake_claude_config(session_tag)
+    if not raw:
+        return {}
+    sd = session_dir(session_tag)
+    state: dict = {}
+    if sd is not None:
+        state_path = sd / "fake-claude.state"
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text()) or {}
+                if not isinstance(state, dict):
+                    state = {}
+            except (OSError, json.JSONDecodeError):
+                state = {}
+
+    out: dict = {}
+    for key, value in raw.items():
+        if key in ("_defaults", "binary") or not isinstance(value, dict):
+            continue
+        verdicts = value.get("verdicts") or {}
+        if not verdicts:
+            out[key] = "NONE"
+            continue
+        seq = _scripted_sequence(verdicts)
+        if seq is None:
+            out[key] = "<random>"
+            continue
+        if not seq:
+            out[key] = "NONE"
+            continue
+        wrap = isinstance(verdicts, dict) and bool(verdicts.get("wrap"))
+        cur = state.get(key, 0)
+        if not isinstance(cur, int) or cur < 0:
+            cur = 0
+        if cur >= len(seq):
+            cur = 0 if wrap else len(seq) - 1
+        out[key] = _scripted_entry_verdict(seq[cur]) or "NONE"
+    return out
 
 
 def _resolve_provider(provider: str | None = None):
@@ -225,7 +394,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
 
     if fc_config is not None:
         cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
-        cmd.extend(_fake_claude_args(fc_config))
+        cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
         cmd = [claude]
         if _skip_permissions():
@@ -311,7 +480,7 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     _, model_flag, run_env = _resolve_provider(provider)
     if fc_config is not None:
         cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
-        cmd.extend(_fake_claude_args(fc_config))
+        cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
         cmd = [claude]
         if _skip_permissions():
@@ -448,7 +617,9 @@ def build_claude_shell_cmd(
         # by the caller) so the fake writes the JSONL transcript + hook event
         # the verdict poller reads.  None for interactive panes that aren't
         # polled — the fake then just writes to stdout.
-        fake_args = _fake_claude_args(fc_config, session_id=session_id)
+        fake_args = _fake_claude_args(fc_config, session_id=session_id,
+                                      session_type=session_type,
+                                      session_tag=session_tag)
         cmd = env_prefix + shlex.quote(binary) + " " + " ".join(shlex.quote(a) for a in fake_args)
         log_shell_command(cmd, prefix="claude")
         return cmd
@@ -605,7 +776,7 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
     def _run():
         if fc_config is not None:
             cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
-            cmd.extend(_fake_claude_args(fc_config))
+            cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
         else:
             claude = find_claude()
             if not claude:

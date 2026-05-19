@@ -1239,3 +1239,216 @@ class TestFakeArgsSessionId:
         cmd = claude_launcher.build_claude_shell_cmd(
             prompt="p", session_type="review", session_id="sid-xyz")
         assert "--session-id sid-xyz" in cmd
+
+
+# ---------------------------------------------------------------------------
+# Scripted verdict sequences (multi-iteration loop scenarios)
+# ---------------------------------------------------------------------------
+
+class TestScriptedVerdictValidation:
+    def test_list_form_accepted(self):
+        assert validate_session_verdicts("review", ["NEEDS_WORK", "PASS"]) == []
+
+    def test_list_form_with_override_dicts(self):
+        seq = [{"verdict": "FLAGGED", "body": "Step 3"}, {"verdict": "VERIFIED"}]
+        assert validate_session_verdicts("qa_verification", seq) == []
+
+    def test_list_rejects_invalid_verdict(self):
+        errors = validate_session_verdicts("review", ["PASS", "VERIFIED"])
+        assert errors and "VERIFIED" in errors[0]
+
+    def test_list_rejects_malformed_entry(self):
+        errors = validate_session_verdicts("review", ["PASS", 42])
+        assert errors and "malformed" in errors[0]
+
+    def test_list_rejects_entry_missing_verdict_key(self):
+        errors = validate_session_verdicts("review", [{"body": "x"}])
+        assert errors and "malformed" in errors[0]
+
+    def test_sequence_dict_form_accepted(self):
+        verdicts = {"sequence": ["NEEDS_WORK", "PASS"], "wrap": True}
+        assert validate_session_verdicts("review", verdicts) == []
+
+    def test_list_rejected_for_no_verdict_type(self):
+        errors = validate_session_verdicts("impl", ["PASS"])
+        assert errors and "never emits a verdict" in errors[0]
+
+    def test_empty_list_ok_for_no_verdict_type(self):
+        assert validate_session_verdicts("impl", []) == []
+
+
+class TestSetFakeClaudeConfigScripted:
+    def _setup(self, tmp_path, monkeypatch, tag="scripted-tag"):
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+        return tag
+
+    def test_list_form_writes(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"review": {"verdicts": ["NEEDS_WORK", "PASS"]}}
+        set_fake_claude_config(tag, cfg)
+        assert fake_claude_config(tag) == cfg
+
+    def test_list_form_invalid_verdict_raises(self, tmp_path, monkeypatch):
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        with pytest.raises(ValueError, match="VERIFIED"):
+            set_fake_claude_config(tag, {"review": {"verdicts": ["VERIFIED"]}})
+
+    def test_sequence_dict_form_writes(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"qa_verification": {"verdicts": {
+            "sequence": [{"verdict": "FLAGGED", "body": "X"}, {"verdict": "VERIFIED"}],
+            "wrap": True,
+        }}}
+        set_fake_claude_config(tag, cfg)
+        assert fake_claude_config(tag) == cfg
+
+
+class TestScriptedCursorAdvance:
+    def _setup(self, tmp_path, monkeypatch, tag="cursor-tag"):
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+        return tag
+
+    def test_clamp_to_last_advances_and_clamps(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _advance_scripted_cursor
+        tag = self._setup(tmp_path, monkeypatch)
+        # 3-entry sequence, clamp (wrap=False)
+        slots = [_advance_scripted_cursor(tag, "review", 3, False) for _ in range(5)]
+        assert slots == [0, 1, 2, 2, 2]
+
+    def test_wrap_cycles(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _advance_scripted_cursor
+        tag = self._setup(tmp_path, monkeypatch)
+        slots = [_advance_scripted_cursor(tag, "review", 3, True) for _ in range(5)]
+        assert slots == [0, 1, 2, 0, 1]
+
+    def test_independent_per_session_type(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _advance_scripted_cursor
+        tag = self._setup(tmp_path, monkeypatch)
+        a = _advance_scripted_cursor(tag, "review", 2, False)
+        b = _advance_scripted_cursor(tag, "qa_verification", 2, False)
+        assert a == 0 and b == 0
+        a2 = _advance_scripted_cursor(tag, "review", 2, False)
+        assert a2 == 1  # review advanced; qa_verification untouched
+
+    def test_state_file_written(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _advance_scripted_cursor
+        tag = self._setup(tmp_path, monkeypatch)
+        _advance_scripted_cursor(tag, "review", 3, False)
+        state = json.loads((tmp_path / tag / "fake-claude.state").read_text())
+        assert state == {"review": 1}
+
+    def test_single_entry_sequence(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _advance_scripted_cursor
+        tag = self._setup(tmp_path, monkeypatch)
+        slots = [_advance_scripted_cursor(tag, "review", 1, False) for _ in range(3)]
+        assert slots == [0, 0, 0]
+
+
+class TestFakeClaudeArgsScripted:
+    def _setup(self, tmp_path, monkeypatch, tag="scripted-args-tag"):
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+        return tag
+
+    def test_list_form_progresses_through_sequence(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _fake_claude_args
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"verdicts": ["NEEDS_WORK", "PASS"]}
+        v1 = _fake_claude_args(cfg, session_type="review", session_tag=tag)
+        v2 = _fake_claude_args(cfg, session_type="review", session_tag=tag)
+        v3 = _fake_claude_args(cfg, session_type="review", session_tag=tag)
+        assert v1[v1.index("--verdict") + 1] == "NEEDS_WORK"
+        assert v2[v2.index("--verdict") + 1] == "PASS"
+        # Clamp-to-last: a third invocation still emits PASS, never NONE.
+        assert v3[v3.index("--verdict") + 1] == "PASS"
+
+    def test_entry_overrides_layer_over_base(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _fake_claude_args
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {
+            "preamble": 5,
+            "verdicts": [{"verdict": "FLAGGED", "body": "Step 3: FAILED", "preamble": 1},
+                         {"verdict": "VERIFIED"}],
+        }
+        v1 = _fake_claude_args(cfg, session_type="qa_verification", session_tag=tag)
+        assert v1[v1.index("--verdict") + 1] == "FLAGGED"
+        assert v1[v1.index("--body") + 1] == "Step 3: FAILED"
+        # Per-entry preamble (1) wins over base preamble (5).
+        assert v1[v1.index("--preamble") + 1] == "1"
+        v2 = _fake_claude_args(cfg, session_type="qa_verification", session_tag=tag)
+        assert v2[v2.index("--verdict") + 1] == "VERIFIED"
+        # No body override on entry 2 — flag absent.
+        assert "--body" not in v2
+        # Base preamble restored.
+        assert v2[v2.index("--preamble") + 1] == "5"
+
+    def test_sequence_dict_with_wrap(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _fake_claude_args
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"verdicts": {"sequence": ["NEEDS_WORK", "PASS"], "wrap": True}}
+        verdicts = []
+        for _ in range(5):
+            a = _fake_claude_args(cfg, session_type="review", session_tag=tag)
+            verdicts.append(a[a.index("--verdict") + 1])
+        assert verdicts == ["NEEDS_WORK", "PASS", "NEEDS_WORK", "PASS", "NEEDS_WORK"]
+
+    def test_weighted_dict_form_still_works(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _fake_claude_args
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"verdicts": {"PASS": 1}}
+        a = _fake_claude_args(cfg, session_type="review", session_tag=tag)
+        assert a[a.index("--verdict") + 1] == "PASS"
+        # No state file should appear for weighted-random configs.
+        assert not (tmp_path / tag / "fake-claude.state").exists()
+
+    def test_empty_sequence_emits_none(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _fake_claude_args
+        tag = self._setup(tmp_path, monkeypatch)
+        a = _fake_claude_args({"verdicts": []}, session_type="review", session_tag=tag)
+        assert a[a.index("--verdict") + 1] == "NONE"
+
+    def test_session_type_none_falls_back_to_slot_zero(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import _fake_claude_args
+        self._setup(tmp_path, monkeypatch)
+        cfg = {"verdicts": ["NEEDS_WORK", "PASS"]}
+        # Without session_type the cursor cannot key itself — always slot 0.
+        for _ in range(3):
+            a = _fake_claude_args(cfg)
+            assert a[a.index("--verdict") + 1] == "NEEDS_WORK"
+
+
+class TestPeekFakeVerdicts:
+    def _setup(self, tmp_path, monkeypatch, tag="peek-tag"):
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+        return tag
+
+    def test_peek_reports_scripted_and_weighted(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import peek_fake_verdicts, _advance_scripted_cursor
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {
+            "review": {"verdicts": ["NEEDS_WORK", "PASS"]},
+            "qa_verification": {"verdicts": {"VERIFIED": 1}},
+            "_all": {},
+        })
+        peek = peek_fake_verdicts(tag)
+        assert peek["review"] == "NEEDS_WORK"
+        assert peek["qa_verification"] == "<random>"
+        # Advance the review cursor; peek should reflect the new position.
+        _advance_scripted_cursor(tag, "review", 2, False)
+        assert peek_fake_verdicts(tag)["review"] == "PASS"
+
+    def test_peek_does_not_advance_cursor(self, tmp_path, monkeypatch):
+        from pm_core.claude_launcher import peek_fake_verdicts
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {"review": {"verdicts": ["NEEDS_WORK", "PASS"]}})
+        for _ in range(3):
+            assert peek_fake_verdicts(tag)["review"] == "NEEDS_WORK"
+        assert not (tmp_path / tag / "fake-claude.state").exists()

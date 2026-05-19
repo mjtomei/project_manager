@@ -103,17 +103,84 @@ SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
 }
 
 
-def validate_session_verdicts(session_type: str, verdicts: dict) -> list[str]:
+def _scripted_sequence(verdicts) -> list | None:
+    """Return the scripted sequence list if *verdicts* is in scripted form.
+
+    Two scripted shapes are accepted:
+
+    * a bare ``list`` of entries (clamp-to-last by default)
+    * a ``dict`` with a ``"sequence"`` list (optionally ``"wrap": true``)
+
+    Anything else (a verdict→weight dict without ``"sequence"``) is the
+    existing weighted-random form — this function returns ``None``.
+    """
+    if isinstance(verdicts, list):
+        return verdicts
+    if isinstance(verdicts, dict) and "sequence" in verdicts:
+        seq = verdicts.get("sequence")
+        if isinstance(seq, list):
+            return seq
+    return None
+
+
+def _scripted_entry_verdict(entry) -> str | None:
+    """Pull the verdict name out of a scripted-sequence entry.
+
+    Entries are either bare strings (just the verdict) or dicts carrying
+    per-iteration overrides under arbitrary keys plus a required ``"verdict"``.
+    Returns ``None`` if the entry is malformed.
+    """
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        v = entry.get("verdict")
+        return v if isinstance(v, str) else None
+    return None
+
+
+def validate_session_verdicts(session_type: str, verdicts) -> list[str]:
     """Return a list of error strings for verdicts invalid for *session_type*.
 
-    An empty list means the config is valid.  Raises nothing — callers decide
-    whether to warn or hard-error.
+    Accepts three shapes for *verdicts*:
+
+    * dict (verdict → weight) — existing weighted-random form
+    * list of entries — scripted sequence (bare verdict strings, or dicts
+      carrying per-iteration overrides with a ``"verdict"`` key)
+    * dict with ``"sequence"`` list — scripted with optional ``"wrap": true``
+
+    An empty list/dict means "no verdicts" (still valid for no-verdict
+    session types).  Raises nothing — callers decide whether to warn or
+    hard-error.
     """
     if session_type not in SESSION_TYPE_VERDICTS:
         return [f"Unknown session type {session_type!r}. "
                 f"Valid types: {sorted(SESSION_TYPE_VERDICTS)}"]
     allowed = SESSION_TYPE_VERDICTS[session_type]
-    errors = []
+    errors: list[str] = []
+
+    sequence = _scripted_sequence(verdicts)
+    if sequence is not None:
+        if not allowed and sequence:
+            errors.append(
+                f"Session type {session_type!r} never emits a verdict; "
+                f"'verdicts' should be omitted or empty."
+            )
+            return errors
+        for i, entry in enumerate(sequence):
+            v = _scripted_entry_verdict(entry)
+            if v is None:
+                errors.append(
+                    f"Scripted entry #{i} for {session_type!r} is malformed; "
+                    f"expected a verdict string or a dict with a 'verdict' key."
+                )
+                continue
+            if v not in allowed:
+                errors.append(
+                    f"Verdict {v!r} (scripted entry #{i}) is not valid for "
+                    f"session type {session_type!r}. Allowed: {sorted(allowed)}"
+                )
+        return errors
+
     if not allowed:
         if verdicts:
             errors.append(

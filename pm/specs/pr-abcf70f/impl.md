@@ -87,9 +87,30 @@ loop state machines, and verification transitions without real API calls.
 6. **Launcher integration — `pm_core/claude_launcher.py`**
    - `_pick_fake_verdict(verdicts)` does weighted random selection from the
      verdict→weight dict.
-   - `_fake_claude_args(cfg)` builds the CLI args (verdict, preamble, delay,
-     body_lines, `hold`, …). A config with empty/absent `verdicts` emits
-     `--verdict NONE` (no-verdict session).
+   - **Scripted verdict sequences (per note-530ac2e).** The `verdicts` field
+     is polymorphic: a dict (no `"sequence"` key) is weighted-random as before;
+     a list, or a dict with a `"sequence"` list, is a scripted sequence used
+     to drive multi-iteration loop scenarios (e.g. `NEEDS_WORK` on iter 1,
+     `PASS` on iter 2). Scripted entries are bare verdict strings or dicts
+     `{"verdict": "...", "body": "...", ...}` whose extra keys layer as
+     per-iteration overrides on top of the type's base config. End-of-sequence
+     clamps to the terminal entry by default (so the loop still completes);
+     wrap is opt-in via `{"sequence": [...], "wrap": true}`. The cursor lives
+     in a sidecar `<session_dir>/fake-claude.state` (`{"review": 1, ...}`),
+     advanced atomically under `fcntl.flock` so concurrent panes of the same
+     session-type do not both grab slot 0. `_advance_scripted_cursor` handles
+     the file IO; `_resolve_fake_verdict` selects the form. `validate_session_verdicts`
+     accepts all three shapes — the same error surface guards
+     `set_fake_claude_config` for scripted configs. `peek_fake_verdicts(tag)`
+     is a library helper that reports the next verdict each session-type
+     would emit without advancing cursors.
+   - `_fake_claude_args(cfg, session_type=, session_tag=)` builds the CLI
+     args (verdict, preamble, delay, body_lines, `hold`, …). A config with
+     empty/absent `verdicts` emits `--verdict NONE` (no-verdict session). All
+     four launcher call sites pass `session_type` (and `session_tag` where
+     available — `build_claude_shell_cmd`) so scripted-sequence cursors key
+     correctly. Without a `session_type`, scripted sequences fall back to
+     slot 0 (no persistence) — drift-free for CLI/test use.
    - `watcher` and `impl` launch sites pass `session_type=` so they can be
      faked individually; `merge` already does. `_all` mode additionally fakes
      untyped/unlisted launches without needing each call site threaded.
