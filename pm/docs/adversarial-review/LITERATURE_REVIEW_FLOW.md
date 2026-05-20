@@ -57,6 +57,25 @@ Loop Phases 1 → 2 (with interleaved synthesis) → 3 until a full iteration's 
 
 Track the iteration count, per-iteration funnel ratio, and per-iteration count of pending synthesis claims in the dashboard — that's the audit trail for *when we stopped looking* and *when synthesis was finalized*.
 
+#### Standing whole-document tasks — every cycle
+
+In addition to the per-work tasks the iteration produces (scans, work-reviews, suggester passes, crawls), each cycle runs a set of **standing whole-document tasks** whose concerns are not local to any single work. These run every iteration, regardless of what specific tasks are queued, because waiting for Phase 5 to surface structural problems means waiting until they have compounded across iterations.
+
+The standing tasks:
+
+- **Structural coherence.** Do the clusters still make sense given the latest iteration's additions? Are cluster boundaries well-drawn? Should any work-review move clusters?
+- **Cluster-to-cluster flow.** Does each cluster set up the next? Are there abrupt transitions or missing connective tissue between clusters? Propose specific bridging prose where needed.
+- **Section flow within clusters.** Within each cluster, is the order of works coherent? Does each work's treatment lead into the next?
+- **Synthesis-claim coherence.** Do the accepted synthesis claims still cohere as a worldview? Are there latent tensions or contradictions the iteration's work-reviews surfaced but didn't resolve? Surface them as proposed `contested` claims for the synthesis walker.
+- **Coverage gaps.** Are there thematic areas the artifact's argument needs but that the iteration's crawl didn't surface? Each gap becomes an explicit key-phrase seed for the next iteration's Phase 3.
+- **Whole-document verbosity overview.** Are any clusters growing unduly long? Is redundancy creeping in across clusters that no per-work cut-and-downgrade action caught? Propose cluster-level cuts.
+- **Accessibility flow.** Even with per-work accessibility notes (per `WORK_REVIEW.md` step g), the overall narrative still needs to be navigable — transitions between works of different audiences, glossary consistency across clusters, the artifact's overall reading-pace. Propose adjustments.
+- **Narrative coherence.** Read the assembled draft as a reader would (with the iteration's latest additions integrated). Does the argument hold together? Where does it stall?
+
+Each cycle's standing-tasks output is a `CYCLE_REVIEW_<artifact>_iter<N>.md` doc, walkable in the same way as suggester-pass output. Findings route to the appropriate walker — proposed-edit walker for prose changes, synthesis walker for cluster reorganization or claim coherence, work-review walker for work-relocation moves, crawl-triage walker for coverage-gap seeds.
+
+The standing tasks are dispatched together with the iteration's specific ready tasks (see `plan-litreview-ui.md` § Ready-task execution): one "Fire ready tasks" button click generates a prompt containing both, and the session launches sub-agents for the specific tasks while a dedicated sub-agent runs the standing-tasks pass. The standing-tasks pass is fired even when no specific tasks are ready, so the button is always meaningful in an in-progress iteration.
+
 ### Phase 5 — Assembly and prose
 
 Assemble the lit review from the accepted synthesis claims and their supporting citations' audit entries, organized by cluster. **No new synthesis decisions are made here** — Phase 5 is pure assembly of decisions already gated through `SYNTHESIS.md`'s protocol during Phases 1–3.

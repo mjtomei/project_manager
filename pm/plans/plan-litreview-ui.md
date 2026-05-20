@@ -191,6 +191,10 @@ The walker can identify ready tasks (entries whose dependencies are all satisfie
 
 Ready tasks include both **entry-writing** tasks (for newly-must-include candidates that need scanning, newly-relevant works that need work-reviews, etc.) and **suggester-pass** tasks (queued automatically when an entry-writing task completes). The two task types are dispatched the same way — the inbox carries them as a unified queue, ordered by the dependency graph.
 
+Every "Fire ready tasks" dispatch also bundles the **standing whole-document tasks** for the current cycle (see `LITERATURE_REVIEW_FLOW.md` § Standing whole-document tasks): structural coherence, cluster-to-cluster flow, section flow within clusters, synthesis-claim coherence, coverage gaps, verbosity overview, accessibility flow, and narrative coherence. The standing tasks run every cycle regardless of which specific tasks are queued — even an empty specific-task queue still fires the standing pass, so the button is always meaningful in an in-progress iteration.
+
+The dispatch prompt template has two sections: a *Standing tasks* block (templated boilerplate plus the artifact's current cluster list + accepted synthesis claims as context) and a *Specific tasks* block (the ready entries the walker computed). The session launches sub-agents for the specific tasks in parallel and a dedicated sub-agent for the standing-tasks pass; outputs land in the per-entry markdown for specific tasks, and in `CYCLE_REVIEW_<artifact>_iter<N>.md` for the standing pass.
+
 **Mechanism.** A designated Claude session — typically the session that launched the walker, or one explicitly bound via a `--session-id` flag — listens for ready-task requests from the walker. Two viable transports:
 
 - **Filesystem inbox.** Walker writes a `READY_TASKS_<artifact>.md` file with a structured request (one fenced block per task: artifact, phase, target entries, suggested agent prompt). A Claude-side `Monitor`-style polling loop (or a hook) reads the file, launches sub-agents per the existing parallelization conventions in `INITIAL_SCAN.md` / `WORK_REVIEW.md` / `CITATION_CRAWL.md`, writes back a `READY_TASKS_<artifact>.results.md` when each completes. Walker watches the results file and surfaces updates.
@@ -201,7 +205,8 @@ The plan picks **filesystem inbox** as the default — it's robust, debuggable (
 **UI surface.** At the top of every walker page, a **What's ready to run?** panel:
 - shows the count of tasks newly unblocked by decisions made in the current session (e.g., "3 work-reviews ready, 8 scans ready, 1 crawl ready");
 - shows the *target entries* for each ready task with click-through to inspect what will be acted on;
-- has a **Fire ready tasks** button that writes the inbox file and surfaces a confirmation.
+- shows the standing whole-document tasks that will also fire (always present, with a one-line description of each so the human knows what runs);
+- has a **Fire ready tasks** button that writes the inbox file (with both specific and standing task blocks) and surfaces a confirmation.
 
 A **Don't fire — hold for batch** mode lets the human accumulate accepted decisions for a batch fire later, useful when working through a cluster where firing per-entry would create thrash.
 
