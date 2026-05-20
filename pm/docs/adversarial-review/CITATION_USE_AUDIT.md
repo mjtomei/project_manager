@@ -68,6 +68,42 @@ Burying the audit in a response file loses the structured per-citation form and 
 
 For a moderate-sized review, chunk citations thematically (8–12 per audit agent, 4 parallel agents). Each agent writes one section of the output doc; sections are merged by the artifact's author. Chunks should be roughly orthogonal to avoid two agents writing different verdicts for the same citation.
 
+## Skeptical disposition for audit agents
+
+Every audit agent reads the source paper independently and writes its per-citation entry without deferring to either the reviewer's commentary on the citation (when the citation came from the review's *Missing citations* section) or the prior cycle's treatment of the citation (when re-auditing). The disposition the audit agent's prompt carries:
+
+1. **Assume over-characterization until verified against the source.** Check specifically for elided model-class limitations, domain restrictions, regime caveats, sample-size limits, and alternative perspectives in the source's own discussion section. These are the failure modes prior audits have repeatedly caught.
+2. **Surface alternative verdicts the framing makes invisible.** If a different verdict is defensible — e.g., the artifact's (or reviewer's) framing makes the citation look load-bearing when it's actually background — name it and the rationale.
+3. **Default low-confidence on ambiguity.** Low-confidence is the right answer when the call is genuinely close. It is *not* a fallback for "I didn't read the source carefully" — it is a signal that human attention is mandatory on this entry.
+4. **Propose accept only after independent verification against the source.** Not when the entry "looks reasonable." Reasonable-looking entries are how over-characterization gets through.
+5. **Name specific passages when proposing edits or rejection.** A vague "Section 4 overstates" is half-done; point to the exact sentence in the artifact and the exact source claim it misuses.
+6. **Calibrate confidence explicitly** (high / medium / low). Agents that mark every entry high-confidence are themselves a failure mode.
+
+The reviewer's *Missing citations* commentary (per `METHODOLOGY.md` Block 1's structured format) is **input context, not a verdict**. The audit may agree, refine, or reject; in any case it verifies independently against the source.
+
+### Repo-history failure modes the disposition is built to catch
+
+Each of the following was caught only by retrospective audit, never by self-review or rubber-stamping audits:
+
+- **Cheng et al. 2026 "near-twin" framing** (Cycle 9–10 user-modeling extension): the entry collapsed an attribute-vs-intent distinction the source preserved.
+- **Arora 2023 / Ahmed & Singh 2026 "largely pre-empted"** (Cycle 11 precursor): the entry inherited a lit-search agent's verdict without independently reading the figures.
+- **Quiet-STaR "REINFORCE differential against natural text"** (Cycle 11 precursor): the entry misnamed the reward signal (sibling-rationale-baselined REINFORCE with m-token lookahead, not a likelihood differential against natural text).
+- **FLARE domain conflation** (`CITATION_AUDIT_REGRESSION.md` Tier-2 supplemental): the entry framed FLARE as general-program fuzzing when the source is multi-agent LLM systems.
+
+For each, a confident-sounding entry would have rubber-stamped under a deferential or under-verified audit. The skeptical disposition above is what catches them.
+
+## Consuming the review's missing-citation entries
+
+When the audit step runs at the start of a cycle (per `METHODOLOGY.md` § The augmented cycle, step 2), part of its input is the *Missing citations* section of `REVIEW_CYCLE_N.md` — the structured format the review produces per `METHODOLOGY.md` Block 1.
+
+For each entry the audit loop:
+
+1. **Verifies existence.** Search Scholar / lab pages / OpenReview before treating the citation as not-found (per `CITATION_CRAWL.md` § Recovery from "this citation doesn't exist" — the Choi/Transluce case is the worked example).
+2. **Reads the source** against the reviewer's commentary, applying the skeptical disposition above.
+3. **Produces the per-citation audit entry** in `CITATION_AUDIT_CYCLE_N.md` per *Protocol* below — verdict either confirms the reviewer's framing, refines it ("yes but for a different claim"), or rejects it ("the reviewer's framing doesn't hold up against the source").
+
+These newly-audited citations enter the loop on the same footing as citations already in the artifact — their verdicts can themselves surface further new citations, and the loop converges when no round surfaces new ones.
+
 ## The in-cycle audit loop
 
 Each cycle runs the audit step as a loop until convergence:

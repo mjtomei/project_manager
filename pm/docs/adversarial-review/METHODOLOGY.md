@@ -51,6 +51,19 @@ Ask the reviewer (a Claude session, fresh, blind to previous review cycles):
 - What are the weakest contributions, and what makes them so weak?
 - What additional simulation / validation / empirical work should be done to make this work more relevant and robust?
 - What citations are missing, and how do they factor into the key points and results?
+
+  **Format missing-citation findings as a structured "Missing citations" section at the end of Block 1**, with one entry per proposed citation:
+
+  ```markdown
+  ### Missing citations
+
+  #### [missing-citation-1] Title (Authors Year)
+  - **link**: arXiv URL / DOI URL / publisher URL (if known; leave blank for the audit to derive)
+  - **commentary**: which artifact claim this work would anchor, what the artifact currently elides without it, any specific load-bearing detail the audit should verify against the source
+  - **urgency**: high | medium | low
+  ```
+
+  This is the audit step's input format — the citation audit loop extracts these entries verbatim, pairs each with the commentary as initial context, and runs a per-citation audit per `CITATION_USE_AUDIT.md`. **Prose claims about missing citations made outside this format aren't extractable and may not reach the audit.** The commentary is *input* to the audit, not a constraint — the audit verifies independently against the source and may refine or reject the reviewer's framing (see `CITATION_USE_AUDIT.md` § Skeptical disposition for audit agents).
 - Are existing load-bearing citations characterized faithfully against the source? Where the cited work contains significant alternative perspectives, conditions, or caveats that bear on the argument, are those represented in the artifact?
 - What logical jumps are there in the paper / plan that make up the weakest links in the chain, and how can they be strengthened?
 - What existing work is not receiving the credit it is due, and how is that bias influencing the writing or results?
@@ -159,7 +172,7 @@ Block 4 is **not** load-bearing the way Block 3 is — readers can accept ugly p
 
 7. **Verify accessibility**. If a paper is paywalled with no open-access version, derivative, or report covering the same ground, remove it from the citations and add it to an appendix of "wanted-but-inaccessible" works with a one-line note on what citing it would have changed.
 
-8. **Increase thoroughness each cycle**. Cycle 2 should produce more findings than Cycle 1 with the response from Cycle 1 already incorporated; Cycle 3 should be the hardest pass. If a cycle produces fewer findings than its predecessor, that's a signal — either the work has genuinely improved or the reviewer is starting to agree with the surrounding context.
+8. **Each cycle is independently thorough.** Apply the full prompt unconditionally; don't pace yourself against prior cycles. Whether finding counts go up, down, or sideways across cycles is *output* of the work, not *input* to it — letting it drive expectations biases the reviewer toward whichever direction the methodology prescribes.
 
 9. **Stop when findings get pedantic.** Three cycles was the Omerta paper's natural stopping point. Watch for findings that are nitpicks of phrasing rather than substance — that's the convergence signal.
 
