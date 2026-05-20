@@ -32,13 +32,38 @@ For each work regardless of tier, capture:
 - **What's load-bearing** for the artifact's argument (which specific claim, scope condition, or methodological choice the artifact will use this work to anchor).
 - **Scope and conditions** (model class, domain, regime). These propagate into the synthesis claims the work supports — eliding them is the common Tier-1 failure mode.
 
-### c. Surface alternative perspectives and caveats
+### c. Handle inaccessible sources explicitly
+
+If a source is paywalled with no open-access version, no derivative work covering the same ground, and no archived copy, the work cannot be Tier-1 reviewed. Two choices:
+
+- **Drop the work** from the relevance set entirely. The Phase 1 *relevant* verdict was conditional on the work being readable; an unreadable work doesn't anchor anything.
+- **Defer the work to a "wanted-but-inaccessible" appendix** in the eventual lit review, with a one-line note on *what citing it would have changed* if access were available. This makes the gap visible to readers and to future iterations (when access may open up).
+
+Do not Tier-1 review a work from its abstract alone and call it deep. Abstract-only is Tier-2 by definition; pretending otherwise reintroduces the over-characterization failure mode the tiering was designed to prevent.
+
+The four pre-flow audits flagged inaccessible sources in-place ("Wiley/PNAS 403s, Princeton UP and SEP 404s"); the new flow does the same prospectively.
+
+### d. Narrow the contribution, don't collapse it — when prior art overlaps
+
+When a Tier-1 review surfaces prior art that overlaps with what the artifact claims is novel — a paper that does *some* of what the artifact does — the review must not capitulate to "the prior art preempts our novelty" *or* hold the line with "we're doing something genuinely new." Both are failure modes the old adversarial-review loop kept producing. The correct move is procedural:
+
+1. **List what the prior art actually does**, sourced from the paper itself (verbatim quote from the abstract where load-bearing claims live, or from the relevant body section for Tier-1 reads). Be precise about variable, methodology, dependent measure, scope, and experimental setup.
+2. **List what the artifact does** in the same terms.
+3. **Compute the intersection.** That is what the contribution claim has to give up.
+4. **Compute the residual** — what the artifact does that the prior art doesn't, as specifically as the artifact actually delivers (not what it aspires to). This is the new, narrower contribution claim.
+5. **Produce a synthesis claim that names the residual.** Under the new flow this is the canonical record — the synthesis walker surfaces it for human review, dependents declare against it.
+
+A work-review that accepts prior-art overlap without producing the residual synthesis claim is half-done — it has flagged a problem and not produced the positioning move that resolves it. A work-review that holds the line with "our work is different" without the point-by-point comparison is rejected by the suggester pass (per `SUGGESTION_PASS.md`'s skeptical disposition).
+
+The worked example in repo history is Cycle 3's handling of Choi/Transluce → Deas & McKeown in the user-model lit review: each narrower contribution claim was more defensible than the broader one it replaced. The new flow preserves this discipline by making narrowing-via-synthesis-claim the canonical positioning move.
+
+### e. Surface alternative perspectives and caveats
 
 Does the work contain alternative interpretations, conditions, or caveats that the artifact's intended use elides? Especially: was the work conducted on a model class / domain / regime that does not transfer to the artifact's setting? If yes, that has to enter the per-work entry explicitly — and likely produce a synthesis claim documenting the conditional transfer.
 
 This is the same discipline as audit mode's "surface alternatives" step, applied prospectively rather than retrospectively.
 
-### d. Produce synthesis claims and declare dependencies
+### f. Produce synthesis claims and declare dependencies
 
 Per `SYNTHESIS.md`, after the deep read produce zero or more synthesis claims (positioning / gap / contradiction / terminology) and declare dependencies on prior accepted claims. The per-work entry records both.
 
@@ -46,7 +71,7 @@ If the work would produce a synthesis claim that contradicts a prior accepted cl
 
 Synthesis claim production is the Tier-1 path's defining output. A Tier-1 review with no claims and no dependencies is suspicious — either the work isn't actually load-bearing (downgrade to Tier 2) or the synthesis-shaping content was missed (re-read).
 
-### e. Compose the per-work entry — the lit review material
+### g. Compose the per-work entry — the lit review material
 
 The entry is structured so Phase 5 can assemble it directly into the lit review prose without re-interpretation:
 

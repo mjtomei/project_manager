@@ -85,3 +85,24 @@ A long tail of *not relevant* surfacings is normal — the crawl finds many adja
 ## Output file naming
 
 Save crawl outputs to `pm/docs/adversarial-review/CRAWL_<artifact>_iter<N>.md`, with one section per seed paper. Iteration `N`'s crawl produces iteration `N+1`'s candidate set for Phase 1.
+
+## Coverage reporting
+
+Every crawl output ends with a **Coverage** section listing, per seed: which directions were walked, the date range covered, the count of new citing/cited papers surfaced, and the depth applied. If the walk found nothing new, say so — that is a positive convergence signal in the same shape as a verbosity pass finding nothing to cut, and the dashboard reads it accordingly.
+
+The coverage section is the audit trail for *what was searched* — a later reviewer who finds a key paper that should have been surfaced can check whether the missing paper was *not searched* (gap in the seed list or depth) versus *searched and dropped* (filter decision the reviewer disagrees with).
+
+## Search recipes — by topic cluster
+
+Concrete, named tactics ported from earlier adversarial-review-loop experience (`METHODOLOGY.md` step 5f). Where a relevant work falls into one of these clusters, the recipe is the starting recipe for its crawl. Add new recipes here as new topic clusters emerge in new artifacts.
+
+- **Activation-to-language readout / probing methodology.** Search transformer-circuits.pub, alignment.anthropic.com, transluce.org, and OpenReview for "activation verbalizer," "activation oracle," "patchscope," "latent decoder." Run a Scholar *cited-by* walk on Patchscopes (Ghandeharioun 2024).
+- **Autonomous coding agents / benchmarks.** Search swebench.com, OpenHands' GitHub, and Scholar *cited-by* on SWE-Bench (Jimenez 2024). Check the SWE-Bench Verified leaderboard for recent submissions whose papers haven't yet hit arXiv.
+- **LLM agent integrity / cheating detection.** Search nist.gov/caisi, alignment.anthropic.com, and Scholar *cited-by* on ImpossibleBench (Zhong 2025).
+- **Social-psychology framework for person perception.** Search Scholar *cited-by* on Fiske/Cuddy SCM (2002) and Goodwin 2014 — both have substantial follow-up literature including the dispute over how many dimensions structure person perception.
+
+The recipes are starting points, not exhaustive. The expectation: extract the recipe's first 20–30 hits, scan their titles + abstracts, escalate the topically-proximate ones into the next iteration's Phase 1 candidate set.
+
+## Recovery from "this citation doesn't exist"
+
+When a Phase 2 review or a Phase 5 reviewer flags a citation as unverifiable or hallucinated, the *next* search step must explicitly check Google Scholar, the lab's own page, and OpenReview for the named work before treating it as not-found. The Omerta-era loop produced the worked example: Cycle 1's reviewer flagged "Choi et al. 2025" and the response substituted a different paper — but Choi/Transluce 2025 was real, just not on arXiv. Default to *search more places* before *doesn't exist*.
