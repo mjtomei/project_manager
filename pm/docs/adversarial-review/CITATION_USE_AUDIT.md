@@ -1,6 +1,11 @@
 # Citation-Use Audit (methodology)
 
-The dedicated full-text citation audit. Run between adversarial review cycles after a large citation expansion, or as the final pass before a literature review is considered complete. Companion to `METHODOLOGY.md` (the per-cycle adversarial-review protocol) and `LITERATURE_REVIEW_FLOW.md` (the end-to-end flow).
+The dedicated full-text citation audit. Used in two configurations:
+
+- **As Phase 2 of the literature review flow** (`LITERATURE_REVIEW_FLOW.md`) — applied to every paper Phase 1's initial scan rates *relevant*. This is the primary, ongoing use under the new flow.
+- **As a standalone audit** of an existing literature review whose generation pre-dated the new flow — to catch over-characterizations that slipped past blind adversarial-review cycles.
+
+Companion to `INITIAL_SCAN.md` (Phase 1 — the funnel), `CITATION_CRAWL.md` (Phase 3 — the crawl that feeds the funnel), and `METHODOLOGY.md` (an optional Phase 5 prose adversarial-review cycle).
 
 ## When to run
 

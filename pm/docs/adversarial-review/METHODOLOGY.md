@@ -2,7 +2,9 @@
 
 Ported from the Omerta project's by-hand adversarial review loop (originally at `/home/matt/omerta/plans/notes.txt` and `/home/matt/omerta/plans/reviews/`).
 
-Used there to subject a research paper to systematic criticism through multiple cycles, then respond and incorporate. The same shape applies to plans like `pm/plans/plan-regression.md` and to the literature review at `pm/docs/literature-review.md` — anywhere a long written artifact would benefit from a critical pass before it gets implemented or shipped.
+Used there to subject a research paper to systematic criticism through multiple cycles, then respond and incorporate. The same shape applies to plans like `pm/plans/plan-regression.md` — anywhere a long written artifact would benefit from a critical pass before it gets implemented or shipped.
+
+**Role under the new literature review flow:** with `LITERATURE_REVIEW_FLOW.md` in place, citation discipline (existence, faithfulness, alternative-perspective representation) is enforced by Phases 1–3 of that flow rather than by this protocol. This protocol's role narrows to **prose and structural critique** of the assembled synthesis — Block 2 (structure), Block 3 (accessibility), Block 4 (writing quality), and the substance-questions in Block 1 that are *not* about citations. Citation-related questions in Block 1 still apply when the audit is run on artifacts produced outside the new flow.
 
 ## The prompt
 

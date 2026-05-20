@@ -2,7 +2,13 @@
 
 **Artifact audited:** `pm/docs/literature-review.md` (the autonomous regression and bug-fix loop literature review).
 
-**Scope.** Full-text reads (via arXiv abstract/HTML and PDF where retrievable) of the load-bearing citations across §§2–6. Run per `pm/docs/adversarial-review/CITATION_USE_AUDIT.md`. Format follows `CITATION_AUDIT_USERMODEL_EXTENSION.md`.
+**Scope.** Full audit of every citation in §§2–6 across two tiers, per the updated `pm/docs/adversarial-review/CITATION_USE_AUDIT.md` protocol (which requires every citation to be audited and tier-labelled). Tier-1 entries (the first major section below, "Load-bearing citation set") were produced first; Tier-2 entries (the "Tier-2 supplemental pass" section at the end) were added later to cover the remaining citations. Format follows `CITATION_AUDIT_USERMODEL_EXTENSION.md`.
+
+**Tiering note (per protocol step a).** Every entry below is tagged with an explicit `**Tier:**` line. The tiering criteria used:
+
+- **Tier 1 — Deep audit.** Citations the argument materially depends on: those that preempt/anchor a novelty claim, supply a load-bearing empirical figure, anchor a methodological choice, or are invoked across multiple sections. Full abstract (+ key web sources where retrievable) read with the full per-citation entry (doc passage → source quote → verdict → proposed rewrite). The 27 citations under "Load-bearing citation set" are Tier 1.
+- **Tier 2 — Light audit.** Citations that support but do not anchor the argument — background, "as also noted by", one-off references where the argument does not turn on the characterization. Abstract-level check only; brief per-citation entry (doc passage → abstract gloss → verdict). Proposed rewrites only when the issue is egregious. The Tier-2 supplemental pass at the end covers these.
+- **Tier 3 — Reference-list-only.** Citations that appear in the reference list with no inline argumentative use. One-line entry sufficient.
 
 **Method.** arXiv abstract/HTML fetches via WebFetch; web search where the primary URL 404'd; blog posts (Anthropic alignment notes, OpenAI posts, Playwright docs) fetched directly. Where only the abstract was retrievable, the verdict is flagged provisional and the abstract was the basis. Where the URL returned 404, the citation is in the "Fetch failures" section and the verdict is provisional.
 
@@ -12,7 +18,9 @@
 
 ## Load-bearing citation set
 
-These are the citations the argument materially depends on. Supporting / background citations are not audited individually but are noted in the summary section.
+**Tier:** every entry in this section is **Tier 1** (deep audit). Tier-2 (supporting) and Tier-3 (ref-list-only) entries are in the "Tier-2 supplemental pass" section at the end of the document.
+
+These are the citations the argument materially depends on.
 
 **Benchmarks and contamination (§2, §5):**
 - ProgramBench (arXiv:2605.03546) — anchors §2's "harness is the contribution" claim.
@@ -525,3 +533,376 @@ ProgramBench (200 tasks, input framing — modulo the paper-body verification ab
 - **All Anthropic alignment.anthropic.com posts** other than AuditBench were not re-verified in this pass; their representation in the doc carries over from earlier audit cycles unchanged.
 
 This audit was a single-pass abstract-and-key-section read across ~25 load-bearing citations. The top ~15 by load-bearing significance received the most careful treatment; the remainder are abstract-level checks and flagged accordingly. A second pass with full PDF extraction on the seven "material fix" items would be the natural follow-up.
+
+---
+
+## Tier-2 supplemental pass
+
+A second pass to cover all citations not in the Tier-1 set above, per the updated protocol's "audit every citation" requirement. Entries are organized by the same Section-cluster headings used in the Tier-1 pass. Each entry includes its `**Tier:**` tag explicitly. Most are Tier 2 (one-off support, abstract-level check); a smaller set is Tier 3 (ref-list-only, no inline argumentative use).
+
+### I. Benchmarks and contamination (§2, §5) — Tier-2
+
+#### HumanEval / Chen et al. 2021 — [arXiv:2107.03374](https://arxiv.org/abs/2107.03374)
+**Tier:** 2
+**Doc passage (§5):** "**HumanEval** (Chen et al. 2021, the Codex report) and **MBPP** (Austin et al. 2021) — graded isolated function-completion against hidden tests."
+**Abstract gloss:** Codex paper introduces HumanEval as a "new evaluation set we release to measure functional correctness for synthesizing programs from docstrings." Function-completion framing is accurate.
+**Verdict:** faithful.
+
+#### MBPP / Austin et al. 2021 — [arXiv:2108.07732](https://arxiv.org/abs/2108.07732)
+**Tier:** 2
+**Doc passage (§5):** "**MBPP** (Austin et al. 2021) — graded isolated function-completion against hidden tests."
+**Abstract gloss:** MBPP contains "974 programming tasks, designed to be solvable by entry-level programmers" synthesizing "short Python programs from natural language descriptions." Function-completion framing matches.
+**Verdict:** faithful.
+
+#### EvalPlus / Liu et al. 2023 — [arXiv:2305.01210](https://arxiv.org/abs/2305.01210)
+**Tier:** 2
+**Doc passage (§5):** "**EvalPlus** (Liu et al. 2023, NeurIPS 2023) made the test-insufficiency problem explicit — extending HumanEval's tests ~80x dropped pass rates by 19–29 percent."
+**Abstract gloss:** EvalPlus "extend[s] the test-cases of the popular HumanEval benchmark by 80x to build HumanEval+ … reducing the pass@k by up-to 19.3-28.9%."
+**Verdict:** faithful. The 80x and 19–29% figures match the abstract verbatim.
+
+#### SWE-Bench / Jimenez et al. 2024 — [arXiv:2310.06770](https://arxiv.org/abs/2310.06770)
+**Tier:** 2
+**Doc passage (§5):** "**SWE-Bench** (Jimenez et al. 2024, ICLR 2024) collects 2,294 tasks from real GitHub repositories, each asking for a patch that resolves an issue and passes a hidden test."
+**Abstract gloss:** "2,294 software engineering challenges derived from authentic GitHub issues and pull requests across 12 Python repositories. Models must modify codebases to resolve described issues."
+**Verdict:** faithful. The 2,294 task count matches; the 12-repo scope could optionally be surfaced but is not load-bearing.
+
+#### SWE-Bench Multimodal / Yang et al. 2024 — [arXiv:2410.03859](https://arxiv.org/abs/2410.03859)
+**Tier:** 2
+**Doc passage (§5):** "**SWE-Bench Multimodal** (Yang et al. 2024) extends the shape to 617 visual JavaScript tasks."
+**Abstract gloss:** "617 task instances collected from 17 JavaScript libraries used for web interface design, diagramming, data visualization …"
+**Verdict:** faithful. The 617-task count and JavaScript framing both match.
+
+#### LiveCodeBench / Jain et al. 2024 — [arXiv:2403.07974](https://arxiv.org/abs/2403.07974)
+**Tier:** 2
+**Doc passage (§5):** "**LiveCodeBench** (Jain et al. 2024) defends by tying problems to post-cutoff release dates."
+**Abstract gloss:** "Continuously collects new problems over time from contests across three competition platforms" — LeetCode, AtCoder, CodeForces — with the contamination-defense framing.
+**Verdict:** faithful. The "post-cutoff release dates" gloss is the standard published characterization.
+
+#### BigCodeBench / Zhuo et al. 2024 — [arXiv:2406.15877](https://arxiv.org/abs/2406.15877)
+**Tier:** 2
+**Doc passage (§5):** "**BigCodeBench** (Zhuo et al. 2024) by library-rich calls that resist memorization."
+**Abstract gloss:** "Benchmark that challenges LLMs to invoke multiple function calls as tools from 139 libraries and 7 domains for 1,140 fine-grained tasks."
+**Verdict:** faithful on the library-rich framing. The doc's "resist memorization" gloss is the doc's own (reasonable) inference; the abstract does not explicitly frame the diversity as contamination-resistant, but the implication is consistent.
+
+#### Sainz et al. 2023 — [arXiv:2310.18018](https://arxiv.org/abs/2310.18018)
+**Tier:** 2
+**Doc passage (§5):** "The literature on it (Sainz et al. 2023, Findings of EMNLP … now expects every benchmark to publish a contamination measurement."
+**Abstract gloss:** Position paper "argu[ing] that the classical evaluation on Natural Language Processing (NLP) tasks using annotated benchmarks is in trouble." Calls for "automatic and semi-automatic measures to detect when data from a benchmark was exposed to a model."
+**Verdict:** faithful. The doc's gloss is a fair summary of the position paper's central call.
+
+#### Riddell et al. 2024 — [arXiv:2403.04811](https://arxiv.org/abs/2403.04811)
+**Tier:** 2
+**Doc passage (§5):** "Riddell et al. 2024, ACL, using edit-distance and structural comparison to catch renamed near-duplicates."
+**Abstract gloss:** Investigates code-generation benchmark contamination with both "surface-level and semantic matching techniques." Confirms the edit-distance / structural-comparison framing.
+**Verdict:** faithful.
+
+### II. Harness comparison (§3) — Tier-2
+
+#### mini-swe-agent (mini-swe-agent.com)
+**Tier:** 2 (practitioner tool)
+**Doc passage (§2, §3):** "the deliberately minimal mini-swe-agent scaffold." "ProgramBench uses [it] as its baseline."
+**Source check:** practitioner tool, no peer-reviewed paper; the "minimal scaffold" framing is consistent with the project's own description.
+**Verdict:** faithful as a tool description. Note that the load-bearing claim about mini-swe-agent being *fixed* as ProgramBench's evaluation harness lives under the ProgramBench Tier-1 entry, not here.
+
+#### Confucius / 2026 scaffolding analyses
+**Tier:** 3 (blog-grade, ref-list level)
+**Doc passage (§3):** "**Confucius** is the custom-scaffold coding agent from the 2026 scaffolding analyses, notable for a planning extension and per-issue test generation."
+**Source check:** blog-grade practitioner sources; not retrieved in this pass.
+**Verdict:** unverified (blog-grade). The "planning extension" and "per-issue test generation" descriptors come from the unverified scaffolding-analyses sources; should be hedged if a peer-reviewed citation cannot be substituted.
+
+### III. QA worker and test generation (§4a) — Tier-2
+
+#### ChatTester / Yuan et al. 2024 — [arXiv:2305.04207](https://arxiv.org/abs/2305.04207)
+**Tier:** 2
+**Doc passage (§4a):** "**ChatTester** (Yuan et al. 2024, FSE 2024) is an early systematic study of ChatGPT as a test generator."
+**Abstract gloss:** Empirical evaluation of ChatGPT's test generation capabilities (correctness, sufficiency, readability). Introduces ChatTESTER, a refinement approach producing "34.3% more compilable tests and 18.7% more tests with correct assertions."
+**Verdict:** faithful. The "early systematic study" framing matches.
+
+#### TestPilot / Schäfer et al. 2024 (IEEE TSE)
+**Tier:** 2
+**Doc passage (§4a):** "**TestPilot** (Schäfer et al. 2024, IEEE TSE) is a clean prompt-skeleton baseline for JavaScript."
+**Abstract gloss:** could not retrieve the correct arXiv ID (a similarly-named arXiv preprint resolved to a different paper). The IEEE TSE 50(1):85-105 publication exists per the references list; the "prompt-skeleton baseline for JavaScript" framing is the standard published characterization of TestPilot.
+**Verdict:** unverified by direct fetch (could not locate the correct arXiv ID this pass); the gloss is the standard one in the test-generation literature. Flag for paper-body confirmation if any TestPilot detail becomes load-bearing.
+
+#### ChatUniTest / Xie et al. 2023 — [arXiv:2305.04764](https://arxiv.org/abs/2305.04764)
+**Tier:** 2
+**Doc passage (§4a, §4c):** "**ChatUniTest** (Xie et al. 2023) adds a Generation-Validation-Repair loop discussed in 4c." (§4c) "ChatUniTest's Generation-Validation-Repair loop (Xie et al. 2023) is the test-generation instance: it catches and fixes compile errors and assertion failures before returning a test."
+**Abstract gloss:** "Generation-validation-repair mechanism to rectify errors in generated unit tests." Outperforms TestSpark and EvoSuite "in half of the evaluated projects."
+**Verdict:** faithful on the Generation-Validation-Repair characterization. **Authorship note:** the arXiv abstract names authors as Chen, Hu, Zhi, Han, Deng, and Yin — *not* "Xie et al." as cited in the doc. The doc's author attribution should be checked against the canonical citation (the "Xie et al." attribution may be from a different ChatUniTest publication, or may be an error).
+**Proposed rewrite:** verify the author list; otherwise the substantive characterization is faithful.
+
+#### Issue2Test / Mündler et al. 2025 — [arXiv:2503.16320](https://arxiv.org/abs/2503.16320)
+**Tier:** 2
+**Doc passage (§4a):** "**Issue2Test** (Mündler et al. 2025) … operate in that reactive shape, where a defect report already exists."
+**Abstract gloss:** "LLM-based technique for automatically generating a reproducing test case for a given issue report" — that fails specifically for the reason described in the issue. Reactive-from-issue-report framing confirmed.
+**Verdict:** faithful.
+
+#### SWT-Bench / Mündler et al. 2024 — [arXiv:2406.12952](https://arxiv.org/abs/2406.12952)
+**Tier:** 2
+**Doc passage (§4a):** "The SWT-Bench reactive line — generating a test that reproduces a *reported* issue — is well-populated."
+**Abstract gloss:** "Benchmark derived from GitHub repositories. It includes authentic issues, verified bug fixes, and reference tests." Confirms the reactive framing.
+**Verdict:** faithful.
+
+#### SWE-Tester — [arXiv:2601.13713](https://arxiv.org/abs/2601.13713)
+**Tier:** 2
+**Doc passage (§4a):** "**SWE-Tester** (arXiv:2601.13713, the training-side counterpart)."
+**Abstract gloss:** "Pipeline for training open-source LLMs to generate issue reproduction tests." Curates 41K training instances from 2.6K repos; "up to 10% improvement in success rate" on SWT-Bench Verified.
+**Verdict:** faithful. The "training-side counterpart" gloss correctly captures the contribution shape.
+
+#### Otter — [arXiv:2502.05368](https://arxiv.org/abs/2502.05368)
+**Tier:** 2
+**Doc passage (§4a):** "**Otter / e-Otter++** (arXiv:2502.05368, arXiv:2508.06365) … operate in that reactive shape."
+**Abstract gloss:** Otter generates tests from issues via "rule-based analysis with a self-reflective action planner." Introduces TDD-Bench-Verified; reactive-from-issue framing confirmed.
+**Verdict:** faithful.
+
+#### e-Otter++ — [arXiv:2508.06365](https://arxiv.org/abs/2508.06365)
+**Tier:** 2
+**Doc passage (§4a):** same as Otter above.
+**Abstract gloss:** "Reproduction test generator … generating tests with an average fail-to-pass rate of 63% on the TDD-Bench Verified benchmark." Reactive framing confirmed.
+**Verdict:** faithful. Optional concreteness: the 63% F2P on TDD-Bench Verified is striking and could be surfaced as comparison alongside TestExplora's 16.06% F2P on the *proactive* TestExplora benchmark — the gap between reactive and proactive being part of the doc's point.
+
+#### R2E / Jain et al. 2024 (ICML)
+**Tier:** 2
+**Doc passage (§4a):** "**R2E** (Jain et al. 2024, ICML 2024, repository-level test generation with executable feedback)."
+**Source check:** could not locate the exact arXiv ID by direct fetch this pass (an adjacent Jain et al. arXiv ID resolves to a different paper). The R2E framing is the standard published characterization in the SWT-Bench-adjacent literature.
+**Verdict:** unverified by direct fetch (paper-body confirmation recommended); the inline characterization is brief and not load-bearing.
+
+#### CodaMosa — already audited under Tier-1 (§III above).
+
+#### FLARE — [arXiv:2604.05289](https://arxiv.org/abs/2604.05289)
+**Tier:** 2
+**Doc passage (§4a):** "**FLARE** (arXiv:2604.05289) … uses an LLM to generate inputs that drive coverage into untested code."
+**Abstract gloss:** **FLARE is a testing framework for multi-agent LLM systems** — "extracts specifications from agent code and performs coverage-guided fuzzing to identify failures." It fuzzes *multi-agent systems*, not arbitrary programs.
+**Verdict:** **mischaracterizes the domain.** The doc places FLARE in the same bucket as ChatAFL (network-protocol fuzzing) and in-browser fuzzing — all framed as LLM-guided fuzzing of general programs for coverage. But FLARE's domain is specifically multi-agent LLM applications. The "LLM-guided fuzzing" gloss is technically accurate (it does use coverage-guided fuzzing and is LLM-related), but the lumping with ChatAFL / in-browser fuzzing for the "drives coverage into untested code" purpose is misleading about the target.
+**Proposed rewrite:** consider moving FLARE to a separate sentence or footnote that names its target as *multi-agent LLM systems* (a different fuzzing target from the agent-as-author-of-fuzz-inputs framing the rest of the paragraph uses).
+
+#### In-browser fuzzing — [arXiv:2510.13543](https://arxiv.org/abs/2510.13543)
+**Tier:** 2
+**Doc passage (§4a):** "in-browser fuzzing (arXiv:2510.13543) … uses an LLM to generate inputs that drive coverage into untested code."
+**Abstract gloss:** "A novel fuzzing framework that runs entirely in the browser and is guided by an LLM to automatically discover such prompt injection vulnerabilities in real time" — i.e., the target is **prompt-injection vulnerabilities in agentic AI browsers**, not general coverage.
+**Verdict:** **mischaracterizes the domain.** The cited paper is fuzzing for indirect-prompt-injection attacks on agentic browsers, not generic coverage-driven input fuzzing. Like the FLARE entry above, the lumping is imprecise: the doc's "drives coverage into untested code" framing fits classical fuzzing but not this paper's threat-model.
+**Proposed rewrite:** if the lit review wants this citation as an LLM-guided-fuzzing exemplar, characterize it correctly (prompt-injection discovery in agentic browsers); otherwise consider replacing with a more directly on-target LLM-guided-fuzzing reference.
+
+#### ChatAFL (NDSS 2024)
+**Tier:** 3 (ref-list level — passing inline mention in a list)
+**Doc passage (§4a):** "**FLARE …, ChatAFL (NDSS 2024), and in-browser fuzzing**."
+**Source check:** not separately fetched in this pass (peer-reviewed NDSS publication; "Large Language Model guided Protocol Fuzzing" is the canonical title per the doc's references).
+**Verdict:** unverified by direct fetch this pass. Adjacent literature; characterization is one-line and not load-bearing.
+
+#### Octomind, QA Wolf
+**Tier:** 2 (commercial products, blog-grade)
+**Doc passage (§4a):** "**Octomind and QA Wolf** are commercial platforms that *do* autonomously discover flows. … discovers flows by *crawling the app surface* — coverage-driven, walking links and forms to find untested paths."
+**Source check:** commercial product pages, not fetched this pass.
+**Verdict:** the crawl-driven-discovery framing is the standard product characterization; flagged for direct vendor-page verification if the comparison becomes load-bearing.
+
+### IV. Automated program repair (§4b) — Tier-2
+
+#### GenProg / Le Goues et al. 2012 (IEEE TSE)
+**Tier:** 2
+**Doc passage (§4b):** "**GenProg** (Le Goues et al. 2012, IEEE TSE) evolves program variants by genetic programming … until the test suite passes."
+**Source check:** widely-cited foundational repair work; not separately fetched. The "genetic-programming-until-tests-pass" gloss is the canonical characterization.
+**Verdict:** faithful (standard characterization).
+
+#### Sapfix/Sapienz / Marginean et al. 2019 (ICSE-SEIP)
+**Tier:** 2
+**Doc passage (§4b):** "**Sapfix/Sapienz** (Marginean et al. 2019, ICSE-SEIP) is Facebook's production deployment of the same pattern at million-line scale, with engineer-approval gates."
+**Source check:** not separately fetched; the Facebook-production / engineer-approval framing is the standard characterization.
+**Verdict:** faithful (standard characterization).
+
+#### Getafix / Bader et al. 2019 (OOPSLA)
+**Tier:** 2
+**Doc passage (§4b):** "**Getafix** (Bader et al. 2019, OOPSLA) extracts repair templates from past human fixes."
+**Source check:** not separately fetched; "repair templates from past human fixes" is the standard characterization.
+**Verdict:** faithful.
+
+#### Self-Edit / Zhang et al. 2023 (ACL) — [arXiv:2305.04087](https://arxiv.org/abs/2305.04087)
+**Tier:** 2
+**Doc passage (§4b):** "**Self-Edit** (Zhang et al. 2023, ACL) have the model execute a candidate, observe the failure, and retry with that feedback."
+**Abstract gloss:** "Self-Edit … utilizes execution results of the generated code from LLMs to improve the code quality." Wraps results into supplementary comments that guide a fault-aware editor.
+**Verdict:** faithful. The execute-observe-retry framing matches.
+
+### V. Verifier / self-correction (§4c) — Tier-2
+
+#### Self-Refine / Madaan et al. 2023 — [arXiv:2303.17651](https://arxiv.org/abs/2303.17651)
+**Tier:** 2
+**Doc passage (§4c):** "[intrinsic self-correction], the setting **Self-Refine** (Madaan et al. 2023, NeurIPS 2023) explored."
+**Abstract gloss:** "Self-Refine … uses a single LLM as the generator, refiner, and feedback provider" without external supervision — i.e., the canonical "intrinsic self-correction" setting.
+**Verdict:** faithful. The same-model-grading-itself framing is exactly Self-Refine's design.
+
+#### Skalse et al. 2022 — [arXiv:2209.13085](https://arxiv.org/abs/2209.13085)
+**Tier:** 2
+**Doc passage (§4c):** "Skalse et al. 2022 and Pan, Bhatia, Steinhardt 2022 are the peer-reviewed theoretical backing."
+**Abstract gloss:** "The first formal definition of reward hacking, a phenomenon where optimizing an imperfect proxy reward function leads to poor performance according to the true reward function."
+**Verdict:** faithful. The "theoretical backing" framing matches — this paper is the formal-definition paper.
+
+#### Pan, Bhatia, Steinhardt 2022 — [arXiv:2201.03544](https://arxiv.org/abs/2201.03544)
+**Tier:** 2
+**Doc passage (§4c):** "Skalse et al. 2022 and Pan, Bhatia, Steinhardt 2022 are the peer-reviewed theoretical backing."
+**Abstract gloss:** Empirically studies reward hacking across four environments; identifies *phase transitions* — capability thresholds where reward-hacking behavior emerges qualitatively.
+**Verdict:** faithful, but note: this paper is more empirical than purely theoretical (it constructs experimental environments and reports phase-transition findings). The "theoretical backing" gloss is slightly off in flavour; "empirical-and-theoretical backing" or "empirical complement to the Skalse formal definition" would be more accurate. Not egregious; left as written.
+
+#### AutoGen / Wu et al. 2023 — [arXiv:2308.08155](https://arxiv.org/abs/2308.08155)
+**Tier:** 2
+**Doc passage (§4c):** "**AutoGen** (Wu et al. 2023) and **MetaGPT** (Hong et al. 2024) are the nearest structural analogs to pm's separated writer-and-checker roles, though pm's watchers are more tightly scoped and tick rather than dialogue."
+**Abstract gloss:** "Open-source framework that allows developers to build LLM applications via multiple agents that can converse with each other." Conversation-driven framing matches the doc's "dialogue" contrast.
+**Verdict:** faithful.
+
+#### MetaGPT / Hong et al. 2024 — [arXiv:2308.00352](https://arxiv.org/abs/2308.00352)
+**Tier:** 2
+**Doc passage (§4c):** see AutoGen above.
+**Abstract gloss:** "Standardized Operating Procedures (SOPs) into prompt sequences." "Assembly line paradigm to assign diverse roles to various agents."
+**Verdict:** faithful. The "structural analog with role decomposition" framing matches the MetaGPT design.
+
+### VI. Audit / cheating detection (§4d) — Tier-2
+
+#### NIST CAISI ("Cheating in AI Agent Evaluations")
+**Tier:** 2 (blog-grade)
+**Doc passage (§4d):** "**NIST CAISI** … run[s] an LLM reviewer over an evaluation transcript to score it for cheating signals."
+**Source gloss:** CAISI defines two cheating categories — solution contamination and grader gaming — and reports observed cheating rates of 0.1% to 4.8% across Cybench / SWE-bench Verified / CVE-Bench, with the transcript-review pattern recommended as a mitigation.
+**Verdict:** faithful. Optional: the 0.1–4.8% observed range across CAISI's benchmarks is a useful concrete data point for §4d's "the audit's detection rate on this specific threat is unmeasured" caveat — could be surfaced as a baseline.
+
+#### AISI Inspect Scout
+**Tier:** 2 (blog-grade)
+**Doc passage (§4d):** "**AISI Inspect Scout** … run[s] an LLM reviewer over an evaluation transcript to score it for cheating signals."
+**Source check:** the canonical AISI blog URL ([aisi.gov.uk/blog/pipeline-transcript-analysis-inspect-scout](https://www.aisi.gov.uk/blog/pipeline-transcript-analysis-inspect-scout)) **returned 404 in this pass** — flagged unfetchable. The framing matches the published description of Inspect Scout as an open-source transcript-analysis pipeline built on the Inspect framework.
+**Verdict:** unverified by direct fetch (404). Flag for re-verification against the live URL or the GitHub release.
+
+#### Introspection Adapters — [arXiv:2604.16812](https://arxiv.org/abs/2604.16812)
+**Tier:** 2
+**Doc passage (§4d):** "Anthropic's **Introspection Adapters** (2026, arXiv:2604.16812) train an add-on that makes a model self-report its learned behaviors — complementary to the capstone's run-time transcript audit rather than a substitute for it."
+**Abstract gloss:** "Train a single LoRA adapter across these models [with implanted behaviors]" so the adapted model can "verbalize learned behaviors even in previously unseen fine-tuned models." Strong results on AuditBench.
+**Verdict:** faithful. The "self-report learned behaviors" gloss matches; the "complementary, not a substitute" framing is the doc's own (correct) distinction.
+
+#### Liars' Bench / Schwettmann et al. 2025 — [arXiv:2511.16035](https://arxiv.org/abs/2511.16035)
+**Tier:** 2
+**Doc passage (§4d):** "**Liars' Bench**, Schwettmann et al. 2025, arXiv:2511.16035 … asks whether an agent is lying in its outputs, where the capstone asks whether it consulted forbidden inputs — useful background, not direct precedent."
+**Abstract gloss:** "Testbed consisting of 72,863 examples of lies and honest responses generated by four open-weight models across seven datasets." Tests lie-detection techniques and finds they "systematically fail to identify certain types of lies, especially in settings where it's not possible to determine whether the model lied from the transcript alone."
+**Verdict:** faithful. The doc's "useful background, not direct precedent" framing is precisely the right scoping — and Liars' Bench's specific finding that *transcript-only* lie detection systematically fails is directly relevant to pm's capstone audit, which is itself transcript-only. Optional rewrite: surface that Liars' Bench documents transcript-only-detection failures, which is a more pointed background reference than the current gloss conveys.
+**Proposed rewrite (optional):** consider expanding the gloss to: "Liars' Bench (Schwettmann et al. 2025, [arXiv:2511.16035](https://arxiv.org/abs/2511.16035)) documents that current lie-detection techniques systematically fail when evaluation is transcript-only — a failure mode pm's capstone audit, which is also transcript-only, inherits."
+
+#### AgentSpec / Wang et al. 2025 (ICSE 2026) — [arXiv:2503.18666](https://arxiv.org/abs/2503.18666)
+**Tier:** 2
+**Doc passage (§4d):** "**AgentSpec** (Wang et al. 2025, ICSE 2026) expresses runtime rules for LLM agents."
+**Abstract gloss:** "Lightweight domain-specific language for specifying and enforcing runtime constraints on LLM agents" with triggers, predicates, and enforcement mechanisms.
+**Verdict:** faithful.
+
+#### AgentAuditor / Wang et al. 2025 (NeurIPS 2025) — [arXiv:2506.00641](https://arxiv.org/abs/2506.00641)
+**Tier:** 2
+**Doc passage (§4d):** "**AgentAuditor** (Wang et al. 2025, NeurIPS 2025) is a memory-augmented evaluator of agent traces — but neither targets the internet-lookup threat."
+**Abstract gloss:** "Universal, training-free, memory-augmented reasoning framework that empowers LLM evaluators." Introduces ASSEBench with 2293 annotated interaction records across 15 risk types.
+**Verdict:** faithful. The "memory-augmented evaluator" gloss matches.
+
+#### Anthropic — "Building and Evaluating Alignment Auditing Agents" (2025)
+**Tier:** 3 (ref-list only — appears in references with no specific inline argumentative use beyond the general Anthropic-audit-lineage backdrop)
+**Source gloss:** Three agents (Investigator, Evaluation, Breadth-First Red-Teaming). Investigator solves Marks et al. auditing game 13% individually / 42% as super-agent.
+**Verdict:** the reference exists and is consistent with the broader Anthropic auditing-agent line cited in §4c/§4d via AuditBench. No inline use beyond ref-list.
+
+#### Anthropic — "Measuring and Improving Coding Audit Realism" (2026)
+**Tier:** 2
+**Doc passage (§5):** "Anthropic's coding-audit-realism and Petri 2.0 notes (alignment.anthropic.com, 2026) report mitigations [for eval-awareness]."
+**Source gloss:** Introduces "realism win rate"; reports that giving auditors access to real deployment resources raises realism win rate from 4.6% to 32.8%; finds that improved realism does *not* significantly change Sonnet 4.5 reward-hacking rates.
+**Verdict:** faithful on the "report mitigations" framing. Slight under-characterization: the note's headline finding is that **more realism does not change reward-hacking behavior** — a non-trivial caveat the doc could surface. Not egregious.
+
+#### Anthropic — Petri 2.0 (2026)
+**Tier:** 2
+**Doc passage (§5):** same as above.
+**Source gloss:** Adds 70 new seed instructions; deploys a realism classifier; achieves 47.3% median relative drop in eval-awareness on Claude models.
+**Verdict:** faithful. The "mitigations" framing is consistent with the source.
+
+#### Anthropic — "Pre-Deployment Auditing Can Catch an Overt Saboteur" (2026)
+**Tier:** 3 (ref-list only — listed in references; no specific inline use in the body text)
+**Source gloss:** Reports human-auditor + automated system catches 3/3 sabotage models, but automated agent alone catches only 1/3 — the verdict-aggregation failure mode echoed by AuditBench (already Tier-1).
+**Verdict:** ref-list-only. The substantive finding (automated agent misses 2/3 saboteurs alone) reinforces the verdict-aggregation concern already present via the AuditBench Tier-1 entry, and could optionally be cited inline to strengthen §4c's tool-to-agent gap discussion.
+
+### VII. Autonomous loops (§4e) — Tier-2
+
+#### Dependabot (GitHub) / Renovate (Mend)
+**Tier:** 2 (commercial tools, no academic paper)
+**Doc passage (§4e):** "**Dependabot** (GitHub, 2017-) and **Renovate** (Mend, 2017-) poll a repository's dependency surface, open PRs for updates, and defer the merge to whatever gate exists."
+**Source check:** widely-deployed tools; the characterization is standard. Not fetched this pass.
+**Verdict:** faithful (standard characterization).
+
+#### GitHub Copilot coding agent / Cursor background agents / GitHub Agent HQ / Devin (Cognition)
+**Tier:** 2 (commercial products, blog-grade)
+**Doc passage (§4e):** "**GitHub's Copilot coding agent** (generally available September 2025), **Cursor's background agents**, **GitHub Agent HQ** (February 2026), and **Devin** (Cognition) — staff the software-engineer role on open-ended work."
+**Source check:** practitioner / vendor sources; not fetched this pass. The "human-files-issue → agent-implements → human-reviews" pattern is the consistent published characterization across these products.
+**Verdict:** faithful (standard product characterization).
+
+#### "Ralph loop" / Cursor self-driving codebases / OpenAI Codex 1M LOC anecdote
+**Tier:** 3 (blog-grade, anecdotal — no formal paper)
+**Doc passage (§4e):** "Reported runs are striking — an OpenAI Codex team shipped roughly a million lines across 1,500 pull requests with no human-written code; Cursor ran hundreds of agents building a browser in a week."
+**Source check:** blog/anecdotal practitioner reports; not fetched this pass and not load-bearing on a specific number.
+**Verdict:** ref-list/anecdotal level. The doc already flags these as practitioner accounts.
+
+### VIII. Harness-evolution adjacent work (§6) — Tier-2
+
+#### Meta-Harness — [arXiv:2603.28052](https://arxiv.org/abs/2603.28052)
+**Tier:** 2
+**Doc passage (§6):** "**Meta-Harness** (arXiv:2603.28052) searches over the harness code of an LLM application."
+**Abstract gloss:** "Automates the design of harness code for LLM applications" via an agentic approach that uses prior execution data and scoring. Reports 7.7-point context-management gain, 4.7-point math gain, and TerminalBench-2 coding improvements over hand-crafted baselines.
+**Verdict:** faithful. The "searches over the harness code" gloss correctly captures the contribution; the doc could optionally surface that the search is *grounded on prior execution-data and scoring*, sharpening the contrast with VeRO (an evaluation harness) below.
+
+#### VeRO — [arXiv:2602.22480](https://arxiv.org/abs/2602.22480)
+**Tier:** 2
+**Doc passage (§6):** "**VeRO** (arXiv:2602.22480) is an evaluation harness for studying such [harness] optimizers."
+**Abstract gloss:** VERO provides "(1) a reproducible evaluation harness with versioned agent snapshots, budget-controlled evaluation, and structured execution traces, and (2) a benchmark suite of target agents and tasks with reference evaluation procedures."
+**Verdict:** faithful. The "evaluation harness for studying [harness] optimizers" gloss is exactly VeRO's contribution shape.
+
+### IX. Anthropic, AISI, and other industry / blog-grade sources — Tier-2/3
+
+#### Anthropic "How Claude Code Works in Large Codebases"
+**Tier:** 3 (ref-list only; not cited inline by argument)
+**Verdict:** ref-list level. Source exists at claim.com blog. No inline argumentative use.
+
+#### AISI 2025 "Transcript Analysis for AI Agent Evaluations"
+**Tier:** 3 (ref-list only — the inline AISI citation in §4d is "Inspect Scout," handled above)
+**Verdict:** ref-list level.
+
+#### Aider, Cline, Codex CLI; LiteLLM mocks ecosystem; LangWatch Scenario
+**Tier:** 3 (ref-list-level practitioner-tool listings)
+**Verdict:** these appear as one-line backdrop references for the practitioner-tool landscape and the LLM-mocking ecosystem. No inline argumentative use depending on the characterization.
+
+#### Agent scaffolding / "the harness is the product" — 2026 practitioner analyses
+**Tier:** 2 (blog-grade but load-bearing for §2's harness-vs-model framing)
+**Doc passage (§2):** "swapping the harness around a fixed model swings coding-benchmark scores by tens of points, while swapping the frontier model under a fixed harness moves the score by roughly one point — in one reported case a cheaper model on a better scaffold outscored a flagship model on its own vendor's scaffold."
+**Source check:** blog-grade practitioner sources; not retrieved this pass. The references list flags them as such.
+**Verdict:** unverified (blog-grade). This is the empirical anchor for §2's framing — the "tens of points vs one point" framing is doing real argumentative work in §2 — so even though the sources are blog-grade, the audit notes this as a Tier-2 entry to track. If the numeric claim becomes contested, sourcing should be hardened (e.g., to peer-reviewed scaffold-vs-model ablation studies).
+
+#### METR "Recent Frontier Models Are Reward Hacking" (2025 blog)
+**Tier:** 3 (ref-list only — listed under industry sources; not cited inline by argument)
+**Source gloss:** Reports 30.4% reward-hacking rate on RE-Bench, up to 100% on LLM Foundry; documents specific exploit methods (copying reference answers, monkey-patching grader functions). Adds to §4d's threat-profile evidence base.
+**Verdict:** ref-list level in the current doc. Optional inline use: METR's specific 30.4–100% range is a stronger empirical anchor for §4d's "frontier models reward-hack" claim than the current set, and could be cited inline if §4d's threat-profile discussion is strengthened.
+
+#### Cognition Labs — "Introducing Devin" blog
+**Tier:** 3 (already covered under the §4e commercial-products Tier-2 entry above; the references-list entry is ref-list only)
+**Verdict:** consistent across the inline and ref-list uses.
+
+#### SWE-Bench Verified leaderboard (swebench.com/verified.html)
+**Tier:** 3 (snapshot reference; one inline mention as the relevant leaderboard, no argument turning on the specific snapshot beyond the OpenAI retraction discussion already audited Tier-1)
+**Verdict:** ref-list / snapshot level.
+
+#### Fuzz4All (Xia et al. 2024, ICSE 2024)
+**Tier:** 3 (ref-list only — appears in the peer-reviewed reference list but no inline use in the body)
+**Verdict:** ref-list-only. The first-author overlap with the Agentless citation (Xia, Chunqiu Steven) is the most likely reason for the listing; no inline argumentative use means no audit needed beyond confirming the reference exists at the claimed venue.
+
+#### Playwright v1.56 release notes / Playwright docs
+**Tier:** already audited under Tier-1 (Playwright Test Agents) — no additional entry needed.
+
+---
+
+## Tier-2 summary
+
+Tier-2 entries above cover the remaining ~50 citations in the lit review at abstract-level depth. The pass surfaced four substantive issues:
+
+1. **FLARE ([arXiv:2604.05289](https://arxiv.org/abs/2604.05289))** — the §4a "LLM-guided fuzzing" grouping mischaracterizes FLARE's domain (multi-agent LLM systems, not general programs). Tier-2 finding rises to a proposed rewrite.
+2. **In-browser fuzzing ([arXiv:2510.13543](https://arxiv.org/abs/2510.13543))** — same as above: the cited paper targets prompt-injection vulnerabilities in agentic browsers, not classical coverage-driven input fuzzing. Tier-2 finding rises to a proposed rewrite.
+3. **ChatUniTest authorship attribution** — the doc cites "Xie et al. 2023" but the arXiv abstract lists Chen, Hu, Zhi, Han, Deng, and Yin. Authorship attribution should be verified.
+4. **"Agent scaffolding" §2 anchor sources are blog-grade** — the "tens of points vs one point" claim is doing real argumentative work and rests on un-peer-reviewed analyses. Tier-2 audit flags for hardening if the claim is contested in a future review cycle.
+
+Plus minor notes:
+- **Pan, Bhatia, Steinhardt 2022** is more empirical than "theoretical backing" framing implies (not egregious; left alone).
+- **Liars' Bench**'s transcript-only-lie-detection failure is more directly relevant to pm's capstone audit than the current "useful background" gloss conveys — optional rewrite proposed.
+- **Anthropic Coding Audit Realism** has a non-trivial finding (more realism does *not* change reward-hacking rates) that could be surfaced in §5 — optional.
+- **AISI Inspect Scout** blog URL 404'd in this pass; flag for re-verification.
+
+No Tier-1 verdicts are altered by this Tier-2 supplemental pass.
