@@ -36,17 +36,30 @@ Per relevant paper, apply `CITATION_CRAWL.md`:
 
 **Output:** a list of new candidate papers / sources that feed back into Phase 1.
 
+### Interleaved synthesis (active throughout Phases 1–3)
+
+Synthesis is **not** deferred to a final phase. Each Phase 2 audit may produce **synthesis claims** — first-class artifacts that assert something about the literature and that later citations' treatment can depend on. Claims pass an explicit auto-accept / block gate before downstream audits proceed.
+
+The full protocol is in `SYNTHESIS.md`. The short version:
+
+- Each audit may produce zero or more synthesis claims (positioning, gap, contradiction, terminology).
+- Each audit declares its dependencies on prior claims by claim id.
+- A claim auto-accepts when its supporting audit is `faithful`, it doesn't contradict prior claims, and it's structurally simple. Otherwise it blocks for human review.
+- The scheduler runs audits in topological order with respect to synthesis dependencies: a blocked claim stalls only the audits that depend on it; the rest of the pipeline proceeds in parallel.
+
+This is why Phase 5 is pure assembly rather than synthesis-from-scratch — by the time the funnel is empty, every load-bearing synthesis decision has already been made and gated.
+
 ### Phase 4 — Iterate to convergence
 
-Loop Phases 1 → 2 → 3 until a full iteration's crawls surface zero new candidates that reach the *relevant* threshold in Phase 1. That zero is the convergence signal.
+Loop Phases 1 → 2 (with interleaved synthesis) → 3 until a full iteration's crawls surface zero new candidates that reach the *relevant* threshold in Phase 1 **and** all synthesis claims have a terminal status (no `pending` left). Both conditions are required; the convergence signal alone is necessary but not sufficient (see `SYNTHESIS.md` § Convergence interaction).
 
-Track the iteration count and per-iteration funnel ratio in the scan doc — it's the audit trail for *when we stopped looking*.
+Track the iteration count, per-iteration funnel ratio, and per-iteration count of pending synthesis claims in the dashboard — that's the audit trail for *when we stopped looking* and *when synthesis was finalized*.
 
-### Phase 5 — Synthesis and prose
+### Phase 5 — Assembly and prose
 
-Assemble the relevant works into the literature review document, organized by cluster. Each cluster's entries are drawn from Phase 2's detailed reviews; prose connecting them surfaces the artifact's positioning.
+Assemble the lit review from the accepted synthesis claims and their supporting citations' audit entries, organized by cluster. **No new synthesis decisions are made here** — Phase 5 is pure assembly of decisions already gated through `SYNTHESIS.md`'s protocol during Phases 1–3.
 
-Optionally, run an adversarial-review-cycle pass on the resulting prose using `METHODOLOGY.md` — for prose quality and structural critique only. Citation discipline is already enforced by Phases 1–3, so the older review cycle becomes a prose pass, not a content pass.
+Optionally, run an adversarial-review-cycle pass on the resulting prose using `METHODOLOGY.md` — for prose quality and structural critique only. Citation discipline and synthesis discipline are both already enforced upstream, so the older review cycle becomes a prose pass, not a content or synthesis pass.
 
 ## Why this flow
 
@@ -59,9 +72,10 @@ Optionally, run an adversarial-review-cycle pass on the resulting prose using `M
 ## Companion files
 
 - `INITIAL_SCAN.md` — Phase 1 methodology (abstract + intro + conclusion review, 1–2-sentence summary, relevance verdict).
-- `CITATION_USE_AUDIT.md` — Phase 2 methodology (the full detailed audit; tiered, with standalone audit-doc output).
+- `CITATION_USE_AUDIT.md` — Phase 2 methodology (the full detailed audit; tiered, with standalone audit-doc output; produces synthesis claims and declares dependencies per `SYNTHESIS.md`).
 - `CITATION_CRAWL.md` — Phase 3 methodology (citation graph walk + key-phrase derivation + non-academic search).
-- `METHODOLOGY.md` — optional Phase 5 prose / structure adversarial-review cycle on the assembled synthesis. Citation discipline is no longer this file's primary job under the new flow.
+- `SYNTHESIS.md` — interleaved-synthesis protocol (claim production, dependency declarations, auto-accept / block gate). Active throughout Phases 1–3.
+- `METHODOLOGY.md` — optional Phase 5 prose / structure adversarial-review cycle on the assembled synthesis. Citation and synthesis discipline are no longer this file's job under the new flow.
 
 ## Convergence — what to expect
 
