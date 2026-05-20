@@ -61,17 +61,19 @@ The data layer the UI builds on.
 
 Dependencies: none. Ships independently.
 
-### PR 3: Web server skeleton + dashboard + proposed-changes walker + lock states + cycle navigation + focus polling
+### PR 3: Web server skeleton + dashboard + proposed-changes walker + lock states + cycle navigation + SSE pushes + Apply button
 
-- `pm/review/ui/server.py` — FastAPI single-file. File-discovery routes (artifacts, per-cycle docs), dashboard route, proposed-changes walker route. Reads `STATE_<artifact>.md` on every page load; polls `UI_FOCUS_<artifact>.md` every few seconds via a small SSE/polling endpoint.
+- `pm/review/ui/server.py` — FastAPI single-file. File-discovery routes (artifacts, per-cycle docs), dashboard route, proposed-changes walker route. Watches `STATE_<artifact>.md`, `UI_FOCUS_<artifact>.md`, and the current cycle's `REVIEW_RESPONSE_CYCLE_N.md` via `watchdog` (filesystem inotify) per artifact. Exposes a single `/events?artifact=<id>` SSE endpoint that pushes events when any watched file changes.
 - `templates/dashboard.html` — per-cycle status, mode tag, audit-loop convergence indicator, engagement signals, **cycle selector** (dropdown, latest first; defaults to current cycle).
 - `templates/changes.html` — paginated proposed-changes walker per `plan-litreview-ui.md`. Filterable by provenance, target section, suggested verdict, status. Per-entry accept/edit/skip actions; page-level bulk-accept-per-filter.
-- **Lock-state enforcement.** Walker editable controls (accept / edit / bulk-accept / skip / reopen) are enabled only when `STATE_<artifact>.md`'s `current-phase` is `awaiting-human-review` *and* the rendered cycle is the current cycle. In every other state the controls render as read-only badges. The breadcrumb on every walker page shows cycle number + phase + editable/read-only.
+- **Apply button.** Visible only when `STATE_<artifact>.md`'s `current-phase` is `awaiting-human-review` and the rendered cycle is the current cycle. Clicking it writes `STATE_<artifact>.md`, transitioning the phase to `applying` (using `md_writer.update_state`). The session — watching the same file — sees the transition and proceeds with the apply step. This is the entire UI → session communication channel.
+- **Lock-state enforcement.** Walker editable controls (accept / edit / bulk-accept / skip / reopen / Apply) are enabled only when `current-phase` is `awaiting-human-review` *and* the rendered cycle is the current cycle. In every other state the controls render as read-only badges. The breadcrumb on every walker page shows cycle number + phase + editable/read-only.
 - **Cycle navigation.** The cycle selector on the dashboard, and the breadcrumb on every walker page, lets the user jump between cycles. Prior cycles are always read-only regardless of state.
-- **Focus polling.** Client-side JS polls a `/focus?artifact=<id>` endpoint every few seconds; when the focus file's `timestamp` advances, the page navigates to the indicated view + cycle, and if `target` is set, scrolls to that anchor and highlights it briefly.
-- `static/style.css`, `static/walker.js` — minimal CSS, vanilla JS for hotkeys + bulk-accept + view-time tracking + focus-polling + lock-state UI states (badges vs editable controls).
+- **SSE-pushed updates.** Client-side JS uses `EventSource('/events?artifact=...')` to subscribe. When the server's `watchdog` observer detects a change to `STATE_<artifact>.md`, `UI_FOCUS_<artifact>.md`, or the current `REVIEW_RESPONSE_CYCLE_N.md`, the server pushes an event to all connected clients. On a STATE event the walker locks/unlocks controls; on a FOCUS event the walker navigates to the indicated view + cycle + target; on a RESPONSE event the walker re-fetches and re-renders entries.
+- `static/style.css`, `static/walker.js` — minimal CSS, vanilla JS for hotkeys + bulk-accept + view-time tracking + SSE event handling + lock-state UI states (badges vs editable controls).
+- Dependency: `watchdog` (Python lib, wraps inotify on Linux).
 - CLI: `pm review ui [--port]`.
-- Tests: dashboard renders correctly against a fixture multi-cycle state; proposed-changes walker renders fixture proposed changes and round-trips edits when state is `awaiting-human-review`; walker shows read-only badges (no round-trip) when state is `review` / `audit` / `response` / `applying` / `complete`; cycle selector navigates between cycles; focus-file timestamp advance triggers navigation.
+- Tests: dashboard renders correctly against a fixture multi-cycle state; proposed-changes walker renders fixture proposed changes and round-trips edits when state is `awaiting-human-review`; walker shows read-only badges (no round-trip) when state is `review` / `audit` / `response` / `applying` / `complete`; Apply button writes the state transition correctly and is hidden outside `awaiting-human-review`; cycle selector navigates between cycles; SSE event for a STATE-file change locks the walker in <200ms; SSE event for a FOCUS-file change navigates within <200ms.
 
 Dependencies: PR 2.
 

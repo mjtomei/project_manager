@@ -70,7 +70,13 @@ current-phase: awaiting-human-review
 last-transition: 2026-05-20T14:32:00Z
 ```
 
-The walker reads this file on every page load and polls for changes every few seconds. Editable controls (accept / edit / bulk-accept / skip / reopen) are enabled only when `current-phase` is `awaiting-human-review` *and* the walker is rendering the current cycle. In every other state the same controls render as read-only badges showing what state they would carry if modifications were allowed.
+The walker reads this file on every page load, and the server pushes updates via SSE (see *Server-pushed updates* below) whenever the file changes — so the walker reacts to phase transitions in <100ms. Editable controls (accept / edit / bulk-accept / skip / reopen) are enabled only when `current-phase` is `awaiting-human-review` *and* the walker is rendering the current cycle. In every other state the same controls render as read-only badges showing what state they would carry if modifications were allowed.
+
+### The Apply button — the only UI → session signal
+
+When the human is done editing in `awaiting-human-review` mode, they click an **Apply** button on the walker. The walker writes `STATE_<artifact>.md`, transitioning `current-phase` from `awaiting-human-review` to `applying`. The session — which is itself watching the state file — sees the transition and proceeds with the apply step. That single state-file write is the entire UI → session communication channel for the cycle.
+
+In **auto-run mode** the walker isn't a gate. The session transitions `response` → `applying` directly without waiting for the human; the walker is then post-hoc viewing only. The Apply button is hidden in auto-run mode (there's nothing for it to signal — the apply has already happened or is about to).
 
 The phases:
 - **review** — REVIEW_CYCLE_N.md being written by the review session. Prior cycles viewable; current cycle has no proposed changes yet. Walker fully read-only.
@@ -99,11 +105,23 @@ target: citation-2024-xxxxx   # optional anchor — entry id to scroll to
 timestamp: 2026-05-20T15:30:00Z
 ```
 
-The walker polls the file every few seconds. When `timestamp` advances, the walker navigates to the indicated view + cycle, and if `target` is set, scrolls to that anchor and highlights it briefly.
+The server watches this file via `watchdog` (filesystem inotify) and pushes an SSE event the moment it changes. The walker's client receives the event in <100ms, navigates to the indicated view + cycle, and (if `target` is set) scrolls to the anchor and highlights it briefly.
 
-**Use case.** The human asks the session "why did we end up classifying paper X as low-confidence?" The session reads the audit history, answers in chat, and updates `UI_FOCUS_<artifact>.md` to point at the audit entry for paper X. The walker navigates there automatically; the human sees the entry being discussed without manual navigation.
+**Use case.** The human asks the session "why did we end up classifying paper X as low-confidence?" The session reads the audit history, answers in chat, and updates `UI_FOCUS_<artifact>.md` to point at the audit entry for paper X. The walker navigates there essentially instantly; the human sees the entry being discussed without manual navigation.
 
-This is the inverse of *Fire ready tasks* (which is UI → session). Both use file polling for simplicity and to keep the walker process model trivial (the walker never makes outbound calls).
+## Server-pushed updates (SSE + watchdog)
+
+Walker server uses `watchdog` to watch three files per artifact:
+
+- `STATE_<artifact>.md` — phase transitions; walker locks/unlocks editing controls.
+- `UI_FOCUS_<artifact>.md` — session-directed navigation; walker navigates + scrolls.
+- `REVIEW_RESPONSE_CYCLE_N.md` (for the current cycle) — session-side edits to the response file mid-write; walker refreshes the rendered entries.
+
+When `watchdog` fires on any of these, the server pushes an SSE event to all connected walker clients via a single `/events?artifact=<id>` endpoint. Clients use the browser-native `EventSource` API to react in <100ms.
+
+No polling. The walker still makes no outbound calls — all session → UI updates flow through SSE pushes triggered by filesystem changes.
+
+Symmetrically, the session uses its own filesystem watch (its `watchdog`/`Bash`/`Read` tool calls, or a `Monitor` style polling pattern) to watch `STATE_<artifact>.md` for the Apply button's `applying` transition. That's the entire UI → session channel.
 
 ## What the walker covers
 
@@ -168,7 +186,7 @@ Files: `templates/notes_pane.html`, notes-write endpoint.
 
 Auto-run mode bypasses the walker — response-session recommendations apply directly with interaction-log entries of action `auto-accepted`. CLI flag on the session-launch command toggles auto vs walker-mediated. Walker reads the interaction log for the engagement signals on the dashboard.
 
-Files: `inbox.py` (auto-run trigger format), interaction-log readers in dashboard route.
+Files: state-file write in `md_writer.py` (`update_state` to transition the phase from `awaiting-human-review` to `applying`), interaction-log readers in dashboard route.
 
 ### PR: End-to-end smoke validation
 
