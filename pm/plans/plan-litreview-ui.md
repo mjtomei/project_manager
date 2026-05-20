@@ -7,10 +7,55 @@ The interfaces are **tooling for the process**; the markdown stays canonical. Th
 ## Design constraints
 
 - **Simple.** Static HTML + a thin local Python server (FastAPI or Flask, single file). No build step, no framework, no database. The "state" lives in the markdown files.
-- **Read-canonical, write-structured.** The interfaces never replace the markdown as the source of truth. Human decisions get appended as structured fenced blocks in the same file (e.g., `<!-- human-verdict: relevant; rationale: load-bearing for §3 -->`) or written to a sibling `*.decisions.md` file. The next-phase tooling reads those annotations.
+- **Read-canonical, write-structured.** The interfaces never replace the markdown as the source of truth. Human responses get appended as structured fenced blocks in the same file (see *Interaction model* below). The next-phase tooling reads those annotations.
 - **One interface per phase.** Each phase has its own walker view, tuned to that phase's decision shape. Plus a dashboard tying them together.
 - **Local-only.** Runs on `localhost:<port>`, started by a single `python -m pm.litreview_ui`. No auth, no deployment.
 - **No JS framework.** Vanilla JS + a small CSS file. The pages are content-dense, mostly text and one or two action buttons per entry.
+
+## Interaction model: agent-suggested, human-confirmed-or-edited
+
+Every human-facing decision point in every walker follows the same three-part pattern:
+
+1. **Agent suggestion (pre-populated).** When an agent writes a scan, work-review, crawl, or synthesis-claim entry, it also writes a *suggested response* for the human alongside it — the verdict the agent expects the human will land on, plus a one-line rationale. The walker renders this as a pre-filled, fully-editable field, not as a hidden agent-decision. The human sees Claude's reasoning by default; the prompt is *react to this*, not *answer from scratch*.
+
+2. **Human action.** For each entry the human can:
+   - **Accept Claude's suggestion** with one click (records the suggestion as the human response verbatim).
+   - **Edit** the suggestion freely — both the structured verdict (enum) and the free-text rationale / commentary fields. The edit replaces the suggestion in the written response.
+   - **Add freeform commentary** in a dedicated `**Commentary:**` text field that travels with the entry into downstream phases (the next iteration's relevance scan sees this; the work-review walker sees the scan's commentary; the synthesis walker sees the work-review's commentary).
+   - **Skip** (no action) — the entry stays *pending human review* and the dashboard backlog counts it.
+
+3. **Bulk accept.** Every walker page has a *bulk accept Claude's suggestions* button that records the agent's suggestion as the human response for every entry on the current page (or every entry matching the current filter — e.g., "all faithful Tier-2 work-reviews in this cluster"). One click clears the routine cases; the human's attention concentrates on entries where they actually disagreed and edited.
+
+### Markdown response format
+
+Each entry's response block is a fenced HTML comment with structured fields the parser can round-trip. For an initial-scan entry, the block looks like:
+
+```markdown
+<!-- response
+suggested-verdict: relevant
+suggested-rationale: Load-bearing for §3 sycophancy framing.
+human-verdict:           # blank until human acts
+human-rationale:         # blank
+human-commentary:        # blank
+status: pending          # pending | accepted-as-suggested | edited | skipped
+-->
+```
+
+On *accept Claude's suggestion*: `human-verdict` and `human-rationale` get copied from the suggested fields verbatim; `status` → `accepted-as-suggested`.
+
+On *edit*: `human-verdict` / `human-rationale` / `human-commentary` get whatever the human typed; `status` → `edited`.
+
+On *skip*: nothing changes; `status` stays `pending`.
+
+Downstream tooling always reads `human-verdict` first, falls back to `suggested-verdict` when `status` is `pending`. The fall-through means a pipeline can run without human review for fast iterations (relying on Claude's suggestions throughout), but every fall-through is *visible* — the dashboard counts pending entries as the unresolved backlog so the human can come back to them.
+
+### Why pre-populate
+
+A blank decision field for 150 scan entries is a wall. A pre-filled field with Claude's reasoning visible turns each entry into a quick *yes / no / no-but-actually*. Most entries the human will accept-as-suggested in <1s; the entries that get edited are where the human's attention is actually adding value. The same shape applies to work-review verdicts, synthesis-claim acceptance, and crawl triage — pre-population is the primitive that makes the walker pace match the human's reading pace.
+
+### When suggestions are written
+
+The suggestion is written by the agent at the same time as the entry content — single pass, single file, no separate generation step. This keeps the agent's reasoning context paired with the suggestion (the rationale references the entry's own content), and avoids a walker-time call back to Claude. If a human later wants Claude to *re-suggest* on an edited entry, that's a per-entry "regenerate suggestion" button in the walker (depends on a Claude API call from the server — held to a later PR).
 
 ## Architecture
 
@@ -39,13 +84,15 @@ No save behaviour yet — read-only.
 
 ### PR: Initial-scan walker
 
-Per-entry view of a Phase 1 scan doc. Each entry shows the citation header (with the working link), the 1–2-sentence summary, the agent's verdict + rationale, and four buttons: **accept**, **override → relevant**, **override → partial**, **override → not relevant** (the last three also pop a text field for the overriding rationale).
+Per-entry view of a Phase 1 scan doc. Each entry shows the citation header (with the working link), the 1–2-sentence summary, and the **response block** per the *Interaction model* above — pre-filled with Claude's suggested verdict and rationale, editable in place, plus a free-text `Commentary` field.
 
-Saves write a `<!-- human-verdict: ... -->` line under each entry. The Phase 2 / Phase 3 tooling reads `human-verdict` if present, otherwise falls back to the agent's verdict.
+Per-entry buttons: **accept Claude's suggestion** (one-click), **save edits**, **skip**. Page-level: **bulk-accept all on this page**, **bulk-accept all matching filter** (filter by suggested verdict, by cluster, by un-acted-on, etc.).
 
-A "next-entry" hotkey (j/k or arrow keys) plus an "only show unreviewed" filter make 150-entry scans tractable.
+Saves write the structured response block under the entry per the markdown response format. The Phase 2 / Phase 3 tooling reads `human-verdict` first, falls back to `suggested-verdict` when status is `pending`.
 
-Files: `templates/scan.html`, walker route in `server.py`, `md_parser.parse_scan_doc`, `md_writer.append_scan_verdict`.
+A "next-entry" hotkey (j/k or arrow keys), an "only show un-acted" filter, and a "show only edits / disagreements" filter make 150-entry scans tractable.
+
+Files: `templates/scan.html`, walker route in `server.py`, `md_parser.parse_scan_doc` (parses both entry content and response block), `md_writer.update_response_block`.
 
 ### PR: Work-review walker (with synthesis-claim integration)
 
@@ -73,23 +120,25 @@ Files: `templates/audit.html`, `md_parser.parse_audit_doc`, `md_writer.append_re
 
 ### PR: Crawl triage
 
-Bulk-list view of a Phase 3 crawl doc. One row per surfaced candidate: title + link + the brief "why surfaced" note from the crawl. Three buttons per row: **feed to scan** (default), **skip — known stale**, **must-include**. Multi-select via checkbox + bulk action above the list.
+Bulk-list view of a Phase 3 crawl doc. One row per surfaced candidate: title + link + brief "why surfaced" + the response block per the *Interaction model* (Claude's suggested triage — `feed-to-scan` / `skip` / `must-include` — pre-filled, editable per row, with a free-text rationale column).
 
-Saves write a `<!-- human-triage: ... -->` line per candidate. The next iteration's Phase 1 scan only enqueues candidates marked feed-to-scan or must-include; skipped ones stay in the crawl doc with the rationale visible.
+Multi-select via checkbox + page-level **bulk accept Claude's suggestions**. Common pattern: skim, edit the 3–5 rows where you disagree, bulk-accept the rest.
 
-Files: `templates/crawl.html`, `md_parser.parse_crawl_doc`, `md_writer.append_crawl_triage`.
+Saves write the structured response block per candidate. The next iteration's Phase 1 scan only enqueues candidates with effective verdict `feed-to-scan` or `must-include` (effective = `human-verdict` if present, else `suggested-verdict`).
+
+Files: `templates/crawl.html`, `md_parser.parse_crawl_doc`, `md_writer.update_response_block` (shared).
 
 ### PR: Synthesis-claim walker
 
 Dedicated view of `SYNTHESIS_<artifact>.md`. List of claims, filterable by status (`pending` / `auto-accepted` / `human-accepted` / `contested` / `superseded`) and sortable by dependent-count.
 
-Each claim row shows: id, claim text, supporting citations (with links), status, dependent count + dependents list (click-through to the dependent audit entries).
+Each claim row shows: id, claim text, supporting citations (with links), status, dependent count + dependents list (click-through to the dependent work-review entries), and the response block per the *Interaction model* — Claude's suggested resolution (e.g., "accept as stated"; "merge with `prior-claim-id`"; "contest with `prior-claim-id`") pre-filled, with editable rationale and an open commentary field.
 
-Per-claim actions mirror the audit walker's claim actions (accept / modify / reject / merge / split / contest). A claim being resolved here propagates to the audit walker's block-status display.
+Per-claim actions: **accept Claude's suggestion**, **edit and save**, plus structured-edit shortcuts for the actions that need extra data (modify-text, merge-with, split-into-two, mark-contested-with). Bulk accept available for routine auto-accepted claims when the human is reviewing them retrospectively.
 
 Pending claims sorted by dependent-count descending are the actionable backlog — resolving the most-depended-on claim first unblocks the most downstream work.
 
-Files: `templates/synthesis.html`, `md_parser.parse_synthesis_doc`, `md_writer.update_claim_status` (shared with audit walker), `md_parser.compute_dependent_graph`.
+Files: `templates/synthesis.html`, `md_parser.parse_synthesis_doc`, `md_writer.update_response_block` (shared), `md_writer.update_claim_status`, `md_parser.compute_dependent_graph`.
 
 ### PR: Dashboard with convergence, funnel ratios, and synthesis blocking
 
@@ -121,6 +170,8 @@ These are the choices baked into the plan above; flag any to revisit:
 5. **Block strictness.** Plan picks hard block on pending/contested dependencies (dependent audits cannot proceed). Alternative: soft block (the audit can proceed with a "**Blocked by:** [claim-id]" warning baked in, to be resolved later). Hard block is safer; soft block is faster but creates a class of "claims-pinned" audits that need re-validation when claims resolve.
 6. **Hotkeys.** Plan picks j/k for next/previous, a/r for accept/reject, m for modify, s for "show blocking claim." Alternative: 1–4 number keys for verdict selection.
 7. **Server model.** Plan picks FastAPI single-file. Alternative: pure-stdlib `http.server` (zero dependencies) at the cost of more boilerplate per route.
+8. **Suggestion-generation timing.** Plan picks *agent-time* — the scan / work-review / crawl / synthesis agents write the suggestion in the same pass as the entry, paired with the reasoning context. Alternative: *walker-time* — the server calls Claude on demand when the human opens the walker. Walker-time is more expensive (per-entry Claude calls), more brittle (server needs API keys), and slower at the UI; agent-time is the default. A per-entry **regenerate suggestion** button using walker-time generation is a later optional PR.
+9. **Bulk-accept default scope.** Plan picks *current filter* (only entries matching the active filter get bulk-accepted) — safer than *whole document*. Alternative: whole document with a confirmation modal. The current-filter default makes the bulk path opt-in to the scope, which avoids the "I clicked the wrong button and accepted 80 things" footgun.
 
 ## Non-goals
 
