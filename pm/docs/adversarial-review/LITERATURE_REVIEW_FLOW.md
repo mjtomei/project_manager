@@ -75,32 +75,30 @@ This is why Phase 5 is pure assembly rather than synthesis-from-scratch — by t
 
 ### Phase 4 — Iterate to convergence
 
-Loop Phases 1 → 2 (with interleaved synthesis) → 3 until a full iteration's crawls surface zero new candidates that reach the *relevant* threshold in Phase 1 **and** all synthesis claims have a terminal status (no `pending` left). Both conditions are required; the convergence signal alone is necessary but not sufficient (see `SYNTHESIS.md` § Convergence interaction).
+Loop Phase 0 → Phases 1 → 2 (with interleaved synthesis) → 3 until **three conditions all hold simultaneously**:
 
-Track the iteration count, per-iteration funnel ratio, and per-iteration count of pending synthesis claims in the dashboard — that's the audit trail for *when we stopped looking* and *when synthesis was finalized*.
+1. The iteration's crawls surfaced zero new candidates that reached the *relevant* threshold in Phase 1.
+2. All synthesis claims have a terminal status (no `pending` left). See `SYNTHESIS.md` § Convergence interaction.
+3. The iteration's Phase 0 monolithic review produced no material findings — the reviewer's verdict is "the artifact is at convergence; nothing further to add."
 
-#### Standing whole-document tasks — every cycle
+Track the iteration count, per-iteration funnel ratio, per-iteration count of pending synthesis claims, and per-iteration Phase-0 finding count in the dashboard. That's the audit trail for *when we stopped looking*, *when synthesis was finalized*, and *when the monolithic reviewer ran out of things to flag*.
 
-In addition to the per-work tasks the iteration produces (scans, work-reviews, suggester passes, crawls), each cycle runs a set of **standing whole-document tasks** whose concerns are not local to any single work. These run every iteration, regardless of what specific tasks are queued, because waiting for Phase 5 to surface structural problems means waiting until they have compounded across iterations.
+#### The eight standing tasks (Phase 0's question set)
 
-The standing tasks:
+Phase 0's reviewer answers eight standing whole-document tasks in one monolithic pass. These are the structure of Phase 0's question prompt, not a separate phase:
 
 - **Structural coherence.** Do the clusters still make sense given the latest iteration's additions? Are cluster boundaries well-drawn? Should any work-review move clusters?
 - **Cluster-to-cluster flow.** Does each cluster set up the next? Are there abrupt transitions or missing connective tissue between clusters? Propose specific bridging prose where needed.
 - **Section flow within clusters.** Within each cluster, is the order of works coherent? Does each work's treatment lead into the next?
-- **Synthesis-claim coherence.** Do the accepted synthesis claims still cohere as a worldview? Are there latent tensions or contradictions the iteration's work-reviews surfaced but didn't resolve? Surface them as proposed `contested` claims for the synthesis walker.
-- **Coverage gaps.** Are there thematic areas the artifact's argument needs but that the iteration's crawl didn't surface? Each gap becomes an explicit key-phrase seed for the next iteration's Phase 3.
+- **Synthesis-claim coherence.** Do the accepted synthesis claims still cohere as a worldview? Are there latent tensions or contradictions prior iterations' work-reviews surfaced but didn't resolve? Surface them as proposed `contested` claims for the synthesis walker.
+- **Coverage gaps.** Are there thematic areas the artifact's argument needs but that the prior iteration's crawl didn't surface? Each gap becomes a key-phrase seed for *this* iteration's Phase 3 and a candidate entry in Phase 1 if the reviewer named specific works.
 - **Whole-document verbosity overview.** Are any clusters growing unduly long? Is redundancy creeping in across clusters that no per-work cut-and-downgrade action caught? Propose cluster-level cuts.
 - **Accessibility flow.** Even with per-work accessibility notes (per `WORK_REVIEW.md` step g), the overall narrative still needs to be navigable — transitions between works of different audiences, glossary consistency across clusters, the artifact's overall reading-pace. Propose adjustments.
-- **Narrative coherence.** Read the assembled draft as a reader would (with the iteration's latest additions integrated). Does the argument hold together? Where does it stall?
+- **Narrative coherence.** Read the assembled draft as a reader would (with the latest accepted material integrated). Does the argument hold together? Where does it stall?
 
-The standing tasks are an extension to the same review-cycle shape that `METHODOLOGY.md` already documents. **A single separate reviewer sub-agent answers the whole standing-tasks block in one pass per cycle** — same pattern as METHODOLOGY.md's blind blind-cycle reviewer answering Block 1 / Block 2 / Block 4 together, not separate agents per question. The result is one `CYCLE_REVIEW_<artifact>_iter<N>.md` doc containing the reviewer's responses to each standing task, with proposed actions inline (cluster moves, bridging prose, coverage-gap seeds, coherence-tension flags).
+The reviewer also (per `SUGGESTION_PASS.md` § Phase 0) identifies novel candidate works the prior iteration's crawl didn't surface, triggers re-audits on prior work-reviews it finds suspect, and recommends the convergence verdict when applicable.
 
-That reviewer is *separate from* the entry-writing agents and *separate from* the per-entry suggester sub-agents, for the same independence reasons as `SUGGESTION_PASS.md` — its job is adversarial review of the assembled artifact, not endorsement of its current shape. The reviewer's prompt carries the same skeptical disposition rules as the suggester pass (per `SUGGESTION_PASS.md` § Suggester disposition).
-
-The CYCLE_REVIEW doc is walkable in the same way as suggester-pass output — each standing-task response is a populated response block in the walker, the human accepts / edits / rejects per response. Findings whose proposed actions are walker-typed route through to the appropriate walker (proposed-edit walker for prose changes, synthesis walker for cluster reorganization or claim coherence, work-review walker for work-relocation moves, crawl-triage walker for coverage-gap seeds); findings that are general observations stay in the CYCLE_REVIEW view.
-
-The standing tasks are dispatched together with the iteration's specific ready tasks (see `plan-litreview-ui.md` § Ready-task execution): one "Fire ready tasks" button click generates a prompt containing both, the session launches sub-agents for the specific tasks in parallel and the single standing-tasks reviewer in parallel with them. The standing-tasks pass fires even when no specific tasks are ready, so the button is meaningful at every point in an in-progress iteration.
+**Dispatch.** Phase 0 fires automatically at the start of each iteration's ready-task batch (per `plan-litreview-ui.md` § Ready-task execution). The "Fire ready tasks" button generates a prompt containing both Phase 0's reviewer pass and the iteration's specific per-entry tasks; the session launches Phase 0's reviewer in parallel with whatever entry-writing work was already queued from the prior iteration's findings. Phase 0 fires every iteration, even when no specific tasks are queued, so the button is meaningful at every point in an in-progress flow.
 
 ### Phase 5 — Assembly and prose
 
