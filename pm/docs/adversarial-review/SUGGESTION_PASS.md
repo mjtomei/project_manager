@@ -12,6 +12,32 @@ The entry-writing agent has reasoning context tuned to producing the entry — i
 
 The suggester pass is the same adversarial-independence pattern the four existing citation audits already use. It applies the pattern to every walker decision, not just to retrospective audits.
 
+## Suggester disposition — built-in skepticism
+
+The suggester's default disposition toward the entry under review is **skeptical**, not deferential. Same posture that the adversarial-review cycle (`METHODOLOGY.md`) takes toward the artifact under review and that the citation-use audit (`CITATION_USE_AUDIT.md`) takes toward a citation's characterization. A suggester that defaults to *accept-as-written* converts the walker's pre-fill into a rubber stamp and erases the independence the separation was meant to provide.
+
+The suggester's prompt template explicitly carries these instructions:
+
+- **Assume the entry-writing agent over-characterized.** Specifically: check whether the entry elides a model-class limitation, a domain restriction, a regime caveat, a sample-size limitation, or an alternative perspective the source's own discussion section surfaces. These are the failure modes the existing audits keep finding.
+- **Check against accepted synthesis claims, not just against the source.** An entry can be source-faithful but synthesis-contradicting — a new framing that quietly conflicts with `[[prior-claim]]`. The suggester flags that conflict; it does not silently smooth it over.
+- **Surface alternative verdicts the entry's framing makes invisible.** If a different relevance verdict is defensible, name it and the rationale. The human should see the live alternative, not just the entry-writing agent's preferred call.
+- **Default `suggester-confidence: low` when ambiguous.** Low-confidence is the right answer when the call is genuinely close. It is **not** a fallback for "I didn't read the source carefully" — it's a signal that the human's attention is mandatory. Suggesters that mark everything high-confidence are themselves a failure mode.
+- **Propose `accept` only when the suggester has independently verified the entry against the source.** Not when the entry "looks reasonable." Reasonable-looking-entries are how over-characterization gets through.
+- **Name specific entry passages when proposing `edit` or `reject`.** A vague "the entry overstates" is half-done; the suggester points to the exact sentence and the exact source claim it overstates.
+
+These are the same skepticism rules the existing citation audits applied to existing lit reviews. The suggester pass is that same discipline, applied prospectively to every entry as it lands instead of retrospectively to a finished artifact.
+
+## Audit history that proves the discipline matters
+
+Repo-history failure modes the suggester is built to catch (each previously caught only by retrospective audit, never by self-review):
+
+- **Cheng et al. 2026 "near-twin" framing** (Cycle 9–10 user-modeling extension): entry collapsed an attribute-vs-intent distinction the source preserved.
+- **Arora 2023 / Ahmed & Singh 2026 "largely pre-empted" framing** (Cycle 11 precursor): entry inherited a lit-search agent's verdict without independently reading the figures.
+- **Quiet-STaR "REINFORCE differential against natural text"** (Cycle 11 precursor): entry misnamed the reward signal (which is sibling-rationale-baselined with m-token lookahead, not a likelihood differential).
+- **FLARE domain conflation** (CITATION_AUDIT_REGRESSION Tier-2 supplemental): entry framed FLARE as general-program fuzzing when the source is multi-agent LLM systems.
+
+For each, the entry-writing agent (or a same-agent suggestion) would have rubber-stamped because the framing read smoothly. A skeptical separate suggester catches them at entry-landing time rather than at audit time.
+
 ## What the suggester reads
 
 - The entry itself (the scan summary, the work-review entry, the crawl candidate, the synthesis claim, or the proposed prose edit).
