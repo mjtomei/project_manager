@@ -96,11 +96,13 @@ Files: `templates/scan.html`, walker route in `server.py`, `md_parser.parse_scan
 
 ### PR: Work-review walker (with synthesis-claim integration)
 
-Per-entry view of a Phase 2 `WORK_REVIEW_<artifact>.md` doc — generative, not audit framing. (For the audit-mode walker on the four pre-flow audit docs, the same template renders against the existing `CITATION_AUDIT_*.md` files with the rewrite-acceptance flow.) Shows the citation header, doc passage, what the source actually says, verdict, proposed rewrite, **plus a "Synthesis claims produced" panel and a "Dependencies declared" panel** (see `SYNTHESIS.md`).
+Per-entry view of a Phase 2 `WORK_REVIEW_<artifact>.md` doc — generative, not audit framing. (For the audit-mode walker on the four pre-flow audit docs, the same template renders against the existing `CITATION_AUDIT_*.md` files with the rewrite-acceptance flow.) Shows the citation header, the work's load-bearing content, scope and conditions, alternative perspectives, optional draft prose, **plus a "Synthesis claims produced" panel and a "Dependencies declared" panel** (see `SYNTHESIS.md`).
 
-Buttons on the rewrite: **accept rewrite**, **reject**, **modify**.
+Every editable field in the entry — draft prose, each produced claim's text and proposed status, each dependency declaration — follows the *Interaction model*: Claude pre-fills the suggestion, the human accepts (one click) or edits in place. Page-level **bulk accept** clears routine entries; the human's attention concentrates on the entries with substantive synthesis decisions.
 
-Buttons on each produced claim:
+Buttons on the draft prose / rewrite block: **accept Claude's suggestion**, **edit and save**, **reject** (drops the suggestion entirely).
+
+Buttons on each produced claim (each is a response-block field pre-filled with Claude's suggested resolution):
 - **accept as stated** (status → `human-accepted`, unblocks dependents);
 - **modify** (edit claim text, flag any dependents that need re-validation);
 - **reject** (status → `superseded`, dependent audits get a "re-run" badge);
