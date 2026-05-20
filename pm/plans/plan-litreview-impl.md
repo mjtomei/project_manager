@@ -4,7 +4,7 @@ Implementation plan for `plan-litreview-ui.md`. The augmented cycle (`pm/docs/ad
 
 ## What this implements
 
-- **CLI: `pm review session <target>`** — launches a Claude session in a new tmux pane with the augmented-cycle methodology context (`METHODOLOGY.md` + `CITATION_USE_AUDIT.md` + `CITATION_CRAWL.md` + skepticism rules) and a target artifact. Target is any file or topic string; the session runs the review / audit-loop / response cycle using its normal `Bash` / `Edit` / `Write` / `Agent` tool use.
+- **CLI: `pm review <target>`** — launches a Claude session in a new tmux pane with the augmented-cycle methodology context (`METHODOLOGY.md` + `CITATION_USE_AUDIT.md` + `CITATION_CRAWL.md` + skepticism rules) and a target artifact. Target is any file or topic string; the session runs the review / audit-loop / response cycle using its normal `Bash` / `Edit` / `Write` / `Agent` tool use.
 - **CLI: `pm plan session <plan>`** — launches a discussion session in a new pane within a plan's tmux window. Independent of the review-cycle work; for the conversational mode of working on a plan. Plans pane in the TUI gets a keybinding for the same command.
 - **CLI: `pm review ui [--port]`** — launches the walker server.
 - **Walker UI** — proposed-changes walker + citation-audit browse + dashboard + general-comments surface (per `plan-litreview-ui.md`).
@@ -20,7 +20,7 @@ pm/
     __init__.py
     md_parser.py       # response-block + interaction-log + audit-doc + response-doc parsers
     md_writer.py       # response-block writes, interaction-log appends
-    cli.py             # pm review {session, ui}
+    cli.py             # pm review <target> | pm review ui
     context.py         # methodology-context loader (METHODOLOGY + CITATION_USE_AUDIT + CITATION_CRAWL + skepticism)
     ui/
       server.py        # FastAPI single-file server
@@ -46,14 +46,14 @@ Smallest, independent. Lets you open a discussion session in a plan's window fro
 
 Dependencies: none. Independent of the review work.
 
-### PR 2: `pm review session <target>` + methodology context loader
+### PR 2: `pm review <target>` + methodology context loader
 
 Launches a session with the augmented-cycle context loaded.
 
 - `pm/review/context.py` — concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files."
-- `pm/review/cli.py` — `pm review session <target>` subcommand. Opens a new tmux pane running `claude` with the context as initial input. Target accepts file paths or topic strings.
+- `pm/review/cli.py` — `pm review <target>` subcommand. Opens a new tmux pane running `claude` with the context as initial input. Target accepts file paths or topic strings. The `ui` subcommand (`pm review ui`, PR 4) is the only other dispatch under `pm review` — anything else is treated as a target.
 - Artifact-id derivation: file basename for file targets; slugified prefix for string topics.
-- Tests: context-build produces a valid prompt; file vs string target handled; pane launched in role `review`.
+- Tests: context-build produces a valid prompt; file vs string target handled; pane launched in role `review`; `ui` argument routes to the server rather than being treated as a target named "ui".
 
 Dependencies: none.
 
@@ -107,7 +107,7 @@ Four validation paths, runnable as a long-running auto-run from pm.
 1. **Walker rendering smoke.** Run `pm review ui` against the four existing pre-flow `CITATION_AUDIT_*.md` files. Each renders correctly in the citation-audit browse view; no regressions.
 2. **Citations-status view smoke.** Same four files plus a fixture artifact citation list. The citations status view derives correctly: deduplicated rows, correct most-recent-audit selection per citation, "needs-audit" filter surfaces the right set, click-through opens links in new tabs.
 3. **Proposed-changes round-trip.** Construct a fixture `REVIEW_RESPONSE_CYCLE_N.md` with mixed reviewer-comment and audit-entry proposed changes. The walker renders them, accepts a few, edits a few, skips a few; the written markdown round-trips through the parser correctly.
-4. **End-to-end cycle in auto-run mode.** A small fixture artifact (a markdown document with 5–10 citations is sufficient — the smoke isn't validating literature-review quality, just integration). Launch a `pm review session` on it; instruct the session to run the augmented cycle in auto-run mode. Verify:
+4. **End-to-end cycle in auto-run mode.** A small fixture artifact (a markdown document with 5–10 citations is sufficient — the smoke isn't validating literature-review quality, just integration). Launch a `pm review <target>` on it; instruct the session to run the augmented cycle in auto-run mode. Verify:
    - `REVIEW_CYCLE_1.md`, `CITATION_AUDIT_CYCLE_1.md`, `REVIEW_RESPONSE_CYCLE_1.md` all appear with the right format.
    - The audit loop converges (last round surfaces zero new citations).
    - The response file's proposed changes have `status: auto-accepted` and matching interaction-log entries.
