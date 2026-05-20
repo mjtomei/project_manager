@@ -49,6 +49,19 @@ On *skip*: nothing changes; `status` stays `pending`.
 
 Downstream tooling always reads `human-verdict` first, falls back to `suggested-verdict` when `status` is `pending`. The fall-through means a pipeline can run without human review for fast iterations (relying on Claude's suggestions throughout), but every fall-through is *visible* — the dashboard counts pending entries as the unresolved backlog so the human can come back to them.
 
+### Per-entry blocking view
+
+Every citation entry in every walker carries a **Blocking** section that shows, in real time, what downstream work is currently gated on this entry's decisions. This is what makes the response block first-class per citation: you see *not just* the suggestion to react to, *but also* what reacting unlocks.
+
+For each walker, the Blocking section surfaces:
+
+- **Initial-scan entry** — *if your verdict stays `relevant` this work proceeds to Phase 2 (work-review)*. If `not-relevant`, Phase 2 skips it. The section lists the work-review entry that would be created (or already exists, if the iteration is mid-flight) with a click-through.
+- **Work-review entry** — *synthesis claims this work has produced* (each with its own dependent-count and click-through to the synthesis-walker entry) and *dependencies this work has declared on prior claims* (with click-through). A red badge on any dependency that's still `pending` or `contested` means this work-review is itself blocked.
+- **Crawl entry** — *the iteration-N+1 scan entry this candidate would feed into* (predicted, before realization). Skip-marking removes the candidate from the next iteration's funnel; must-include adds it as a forced relevant.
+- **Synthesis claim** — *the work-reviews that have declared dependencies on this claim* (each with click-through). Sorting the synthesis walker by dependent-count puts the most-blocking claims first.
+
+The Blocking section is a hyperlink hub: the human can pivot from any entry to its dependents to its dependents' dependents, navigating the actual decision graph rather than the file structure. Resolving a high-blocking entry shows the satisfaction propagate — dependent entries' badges flip from red to green as their gates open.
+
 ### Why pre-populate
 
 A blank decision field for 150 scan entries is a wall. A pre-filled field with Claude's reasoning visible turns each entry into a quick *yes / no / no-but-actually*. Most entries the human will accept-as-suggested in <1s; the entries that get edited are where the human's attention is actually adding value. The same shape applies to work-review verdicts, synthesis-claim acceptance, and crawl triage — pre-population is the primitive that makes the walker pace match the human's reading pace.
@@ -142,6 +155,30 @@ Pending claims sorted by dependent-count descending are the actionable backlog �
 
 Files: `templates/synthesis.html`, `md_parser.parse_synthesis_doc`, `md_writer.update_response_block` (shared), `md_writer.update_claim_status`, `md_parser.compute_dependent_graph`.
 
+### PR: Ready-task execution via Claude-session integration
+
+The walker can identify ready tasks (entries whose dependencies are all satisfied, plus newly-must-include crawl candidates that need scanning, plus relevant works that need work-reviews). But the walker doesn't run them — it surfaces them and asks a Claude session to launch the sub-agents.
+
+**Mechanism.** A designated Claude session — typically the session that launched the walker, or one explicitly bound via a `--session-id` flag — listens for ready-task requests from the walker. Two viable transports:
+
+- **Filesystem inbox.** Walker writes a `READY_TASKS_<artifact>.md` file with a structured request (one fenced block per task: artifact, phase, target entries, suggested agent prompt). A Claude-side `Monitor`-style polling loop (or a hook) reads the file, launches sub-agents per the existing parallelization conventions in `INITIAL_SCAN.md` / `WORK_REVIEW.md` / `CITATION_CRAWL.md`, writes back a `READY_TASKS_<artifact>.results.md` when each completes. Walker watches the results file and surfaces updates.
+- **RemoteTrigger to existing session.** Walker uses Claude Code's `RemoteTrigger` (or equivalent) to send a structured prompt to the bound session. The session reads the prompt, launches sub-agents, returns results. Lower-latency than filesystem polling; tighter coupling.
+
+The plan picks **filesystem inbox** as the default — it's robust, debuggable (the inbox file is itself a record of what was requested and when), and doesn't require live coupling between walker and session. The session can be any Claude Code instance the user has open, configured via a one-line hook to read the inbox path.
+
+**UI surface.** At the top of every walker page, a **What's ready to run?** panel:
+- shows the count of tasks newly unblocked by decisions made in the current session (e.g., "3 work-reviews ready, 8 scans ready, 1 crawl ready");
+- shows the *target entries* for each ready task with click-through to inspect what will be acted on;
+- has a **Fire ready tasks** button that writes the inbox file and surfaces a confirmation.
+
+A **Don't fire — hold for batch** mode lets the human accumulate accepted decisions for a batch fire later, useful when working through a cluster where firing per-entry would create thrash.
+
+**Bidirectional surface.** When a sub-agent completes and the session writes its output back into the canonical markdown (`WORK_REVIEW_<artifact>.md`, etc.), the walker's "What's ready to run?" panel refreshes — the just-completed work-review's output becomes a new entry in the work-review walker, and its newly-produced synthesis claims become new pending entries in the synthesis walker. The decision graph extends as the session works.
+
+**No execution in the walker process.** The walker never calls the Claude API or launches sub-agents itself. The session is responsible for execution; the walker is responsible for surfacing decisions and constructing well-formed requests. This keeps the walker's process model trivial (read markdown / write markdown / serve HTML) and pushes the live-coupling complexity into the session, which already has the right context to launch sub-agents.
+
+Files: `templates/_ready_tasks.html` (panel partial included in every walker), `server.py` route `POST /fire-ready-tasks` (writes inbox file), `inbox.py` (request and result formats), `md_parser.compute_ready_tasks` (graph traversal). A companion `.claude/` hook documented in the plan tells the session how to watch the inbox.
+
 ### PR: Dashboard with convergence, funnel ratios, and synthesis blocking
 
 Once the four walkers exist and write back decisions, the dashboard upgrades from a static index to a full status view:
@@ -174,6 +211,8 @@ These are the choices baked into the plan above; flag any to revisit:
 7. **Server model.** Plan picks FastAPI single-file. Alternative: pure-stdlib `http.server` (zero dependencies) at the cost of more boilerplate per route.
 8. **Suggestion-generation timing.** Plan picks *agent-time* — the scan / work-review / crawl / synthesis agents write the suggestion in the same pass as the entry, paired with the reasoning context. Alternative: *walker-time* — the server calls Claude on demand when the human opens the walker. Walker-time is more expensive (per-entry Claude calls), more brittle (server needs API keys), and slower at the UI; agent-time is the default. A per-entry **regenerate suggestion** button using walker-time generation is a later optional PR.
 9. **Bulk-accept default scope.** Plan picks *current filter* (only entries matching the active filter get bulk-accepted) — safer than *whole document*. Alternative: whole document with a confirmation modal. The current-filter default makes the bulk path opt-in to the scope, which avoids the "I clicked the wrong button and accepted 80 things" footgun.
+10. **Session-integration transport.** Plan picks filesystem inbox (`READY_TASKS_<artifact>.md` + `.results.md` files) as the default. Alternative: `RemoteTrigger` to a bound Claude Code session for lower-latency coupling. Filesystem is the default because it's debuggable, doesn't require live coupling, and the inbox is itself an audit record of what was requested. `RemoteTrigger` may be added later for users who want tighter coupling.
+11. **Fire mode.** Plan picks an explicit *Fire ready tasks* button (human-triggered batch). Alternative: *auto-fire on accept* — every time a decision unblocks downstream work, the unblocked tasks fire immediately. Auto-fire is convenient but creates execution thrash and makes the audit trail harder to read (which decision caused which task). Explicit-fire is the default; auto-fire is an opt-in toggle.
 
 ## Non-goals
 
@@ -184,6 +223,8 @@ These are the choices baked into the plan above; flag any to revisit:
 
 ## Sequencing note
 
-PR 1 (skeleton) must land first. PRs 2–5 (scan walker, audit walker with synthesis integration, crawl triage, synthesis-claim walker) can land in any order after the skeleton, though the audit walker and synthesis walker share `md_writer.update_claim_status` so are easier to land together. PR 6 (dashboard upgrade with synthesis blocking) depends on all four walkers being able to write decisions. PR 7 (smoke test) is the final acceptance gate before the new flow is used for a real from-scratch literature review.
+PR 1 (skeleton) must land first. PRs 2–5 (scan walker, work-review walker with synthesis integration, crawl triage, synthesis-claim walker) can land in any order after the skeleton, though the work-review walker and synthesis walker share `md_writer.update_claim_status` so are easier to land together. PR 6 (ready-task execution via Claude-session integration) depends on all four walkers being able to compute ready-task graphs from their entries' Blocking views. PR 7 (dashboard upgrade with synthesis blocking + ready-task counts) depends on PR 6. PR 8 (smoke test) is the final acceptance gate before the new flow is used for a real from-scratch literature review.
 
-The audit walker without synthesis integration is *not* a valid stopping point — the flow's correctness depends on the auto-accept / block gate being live. Either ship the audit walker with synthesis or hold both for the same PR.
+The work-review walker without synthesis integration is *not* a valid stopping point — the flow's correctness depends on the auto-accept / block gate being live. Either ship the work-review walker with synthesis or hold both for the same PR.
+
+The walkers without the session-integration PR are still useful (the human can manually copy ready-task requests into a Claude session as prompts), but the value of the response-block / pre-fill / Blocking primitive compounds with session integration — each accepted decision can immediately propagate into actual sub-agent work, turning the walker into the throttle on the flow's overall pace.
