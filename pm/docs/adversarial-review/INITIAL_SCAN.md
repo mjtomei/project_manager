@@ -1,6 +1,6 @@
 # Initial Scan (methodology)
 
-Phase 1 of the literature review flow (see `LITERATURE_REVIEW_FLOW.md`). The fast funnel: every candidate paper gets a brief look so that the detailed audit (Phase 2) targets only what matters.
+Phase 1 of the literature review flow (see `LITERATURE_REVIEW_FLOW.md`). The fast funnel: every candidate paper gets a brief look so that the per-work review (Phase 2, `WORK_REVIEW.md`) targets only what matters.
 
 ## Input
 
@@ -32,8 +32,8 @@ The summary is for the next-step relevance judgement and for the eventual synthe
 
 Each entry gets one of:
 
-- **relevant** — the paper bears directly on the artifact's argument or topic: it preempts a novelty claim, provides load-bearing empirical support, anchors a methodological choice, or is the nearest published peer on a load-bearing variable. Proceed to Phase 2 (detailed audit) and Phase 3 (citation crawl).
-- **partially relevant** — adjacent or supporting; the artifact may cite it in passing without the argument depending on the characterization. Proceed to a Tier-2 entry under `CITATION_USE_AUDIT.md` if the artifact uses it; skip Phase 3's crawl.
+- **relevant** — the paper bears directly on the artifact's argument or topic: it preempts a novelty claim, provides load-bearing empirical support, anchors a methodological choice, or is the nearest published peer on a load-bearing variable. Proceed to Phase 2 (per-work review, `WORK_REVIEW.md`) and Phase 3 (citation crawl).
+- **partially relevant** — adjacent or supporting; the artifact will likely cite it in passing without the argument depending on the characterization. Proceed to a Tier-2 entry under `WORK_REVIEW.md`; skip Phase 3's crawl.
 - **not relevant** — out of scope for the artifact's argument or topic. Note briefly why so future iterations don't re-surface it (e.g., "different domain — vision, not LLMs"; "subsumed by [X]").
 
 Make the relevance criteria **explicit** at the top of the scan doc, so the verdict is reproducible and contestable. Different artifacts may legitimately draw the relevance line in different places; the scan doc has to say where the line was drawn.

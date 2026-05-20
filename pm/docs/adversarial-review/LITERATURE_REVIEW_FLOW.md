@@ -21,11 +21,13 @@ The flow is runnable on any text artifact — with or without existing reference
 
 The scan is the *funnel*. Most candidates get a few minutes; the relevant ones escalate.
 
-### Phase 2 — Detailed review (relevant works only)
+### Phase 2 — Per-work review (relevant works only)
 
-For each paper rated *relevant* in Phase 1, apply `CITATION_USE_AUDIT.md` — the full audit protocol, tiered by load-bearing significance. Tier 1 (deep, full-text read) for the most load-bearing; Tier 2 (abstract verification) for the rest. *Partially relevant* papers get a Tier-2 entry; *not relevant* papers stop here.
+For each paper rated *relevant* in Phase 1, apply `WORK_REVIEW.md` — the deep-read protocol that **generates the lit review's treatment of the work**. Tier 1 (full text) for the most load-bearing; Tier 2 (abstract + intro + conclusion) for the rest. *Partially relevant* papers get a Tier-2 entry; *not relevant* papers stop here.
 
-**Output:** per-paper detailed audit entries, organized by thematic cluster.
+This phase is **not auditing** — there's no pre-existing treatment to check against. The deep read produces what the lit review will say about the work, plus the synthesis claims the work supports or produces (see `SYNTHESIS.md`).
+
+**Output:** per-work entries in `WORK_REVIEW_<artifact>.md`, organized by thematic cluster, each carrying what the work does, what's load-bearing for the artifact, scope and conditions, alternative perspectives, the synthesis claims produced or supported, the dependencies declared on prior claims, and (for Tier 1) optional draft prose ready for Phase 5 assembly.
 
 ### Phase 3 — Citation crawl + key-phrase search
 
@@ -72,7 +74,8 @@ Optionally, run an adversarial-review-cycle pass on the resulting prose using `M
 ## Companion files
 
 - `INITIAL_SCAN.md` — Phase 1 methodology (abstract + intro + conclusion review, 1–2-sentence summary, relevance verdict).
-- `CITATION_USE_AUDIT.md` — Phase 2 methodology (the full detailed audit; tiered, with standalone audit-doc output; produces synthesis claims and declares dependencies per `SYNTHESIS.md`).
+- `WORK_REVIEW.md` — Phase 2 methodology (deep read of each relevant work; tiered; **generative** — produces the lit review's treatment of the work plus synthesis claims and dependencies per `SYNTHESIS.md`).
+- `CITATION_USE_AUDIT.md` — audit-mode variant for pre-flow artifacts (same deep-reading discipline applied in critique mode against an existing lit review).
 - `CITATION_CRAWL.md` — Phase 3 methodology (citation graph walk + key-phrase derivation + non-academic search).
 - `SYNTHESIS.md` — interleaved-synthesis protocol (claim production, dependency declarations, auto-accept / block gate). Active throughout Phases 1–3.
 - `METHODOLOGY.md` — optional Phase 5 prose / structure adversarial-review cycle on the assembled synthesis. Citation and synthesis discipline are no longer this file's job under the new flow.

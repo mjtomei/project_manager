@@ -1,11 +1,12 @@
-# Citation-Use Audit (methodology)
+# Citation-Use Audit (methodology — audit mode for pre-flow artifacts)
 
-The dedicated full-text citation audit. Used in two configurations:
+The dedicated full-text citation **audit** of an existing literature review whose generation pre-dated the new flow. Catches over-characterizations, missed alternative perspectives, and citation-vs-source mismatches that slipped past blind adversarial-review cycles.
 
-- **As Phase 2 of the literature review flow** (`LITERATURE_REVIEW_FLOW.md`) — applied to every paper Phase 1's initial scan rates *relevant*. This is the primary, ongoing use under the new flow.
-- **As a standalone audit** of an existing literature review whose generation pre-dated the new flow — to catch over-characterizations that slipped past blind adversarial-review cycles.
+**This is not the Phase 2 methodology for the new literature review flow.** Under that flow there is no existing treatment to audit — Phase 2 *generates* the treatment from a deep read. See `WORK_REVIEW.md` for the generative variant. The two files share most of the deep-reading discipline; the difference is whether the per-work entry critiques an existing passage or produces new lit-review material.
 
-Companion to `INITIAL_SCAN.md` (Phase 1 — the funnel), `CITATION_CRAWL.md` (Phase 3 — the crawl that feeds the funnel), and `METHODOLOGY.md` (an optional Phase 5 prose adversarial-review cycle).
+Used in this repo to audit the four pre-flow lit reviews (`literature-review.md`, `literature-review-user-model.md`, `literature-review-user-model-extension.md`, `literature-review-living-artifacts.md`) — see `CITATION_AUDIT_*.md` for the resulting audit docs.
+
+Companion to `WORK_REVIEW.md` (generative variant under the new flow), `INITIAL_SCAN.md`, `CITATION_CRAWL.md`, `SYNTHESIS.md`, and `METHODOLOGY.md`.
 
 ## When to run
 

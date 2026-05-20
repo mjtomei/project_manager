@@ -47,9 +47,9 @@ A "next-entry" hotkey (j/k or arrow keys) plus an "only show unreviewed" filter 
 
 Files: `templates/scan.html`, walker route in `server.py`, `md_parser.parse_scan_doc`, `md_writer.append_scan_verdict`.
 
-### PR: Audit walker (with synthesis-claim integration)
+### PR: Work-review walker (with synthesis-claim integration)
 
-Per-entry view of a Phase 2 audit doc. Shows the citation header, doc passage, what the source actually says, verdict, proposed rewrite, **plus a "Synthesis claims produced" panel and a "Dependencies declared" panel** (see `SYNTHESIS.md`).
+Per-entry view of a Phase 2 `WORK_REVIEW_<artifact>.md` doc — generative, not audit framing. (For the audit-mode walker on the four pre-flow audit docs, the same template renders against the existing `CITATION_AUDIT_*.md` files with the rewrite-acceptance flow.) Shows the citation header, doc passage, what the source actually says, verdict, proposed rewrite, **plus a "Synthesis claims produced" panel and a "Dependencies declared" panel** (see `SYNTHESIS.md`).
 
 Buttons on the rewrite: **accept rewrite**, **reject**, **modify**.
 

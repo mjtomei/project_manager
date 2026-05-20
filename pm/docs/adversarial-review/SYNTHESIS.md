@@ -22,7 +22,7 @@ Claims live in a per-artifact `SYNTHESIS_<artifact>.md` file, one entry per clai
 
 ## Producing claims
 
-After completing a Phase 2 audit on a citation, the audit agent (or human) may produce one or more synthesis claims by noting:
+After completing a Phase 2 review on a work, the review agent (or human) may produce one or more synthesis claims by noting:
 
 - A *positioning* the artifact now takes, anchored to this citation ("X et al. 2024 anchors the choice to frame sycophancy as demand-inference rather than as RLHF preference").
 - A *gap* the citation does not fill ("X et al. 2024 studies Y on model class Z; transfer to our setting is conditional").
@@ -111,5 +111,5 @@ With the gate, every synthesis decision is an explicit artifact with an explicit
 ## Companion files
 
 - `LITERATURE_REVIEW_FLOW.md` — the overall pipeline; this protocol is active throughout Phases 1–3, not just at Phase 5.
-- `CITATION_USE_AUDIT.md` — Phase 2 audit protocol; producing synthesis claims and declaring dependencies are now documented outputs of every Tier-1 audit.
+- `WORK_REVIEW.md` — Phase 2 per-work review protocol; producing synthesis claims and declaring dependencies are documented outputs of every Tier-1 review.
 - `plan-litreview-ui.md` — the HTML interfaces' design; the audit walker and dashboard surface synthesis claims, dependencies, and the block-gate.
