@@ -1,0 +1,55 @@
+# Spec: PR pr-1160366 — Markdown format primitives
+
+Code lives under `pm_core/review/`. New package; no existing module here.
+
+## Requirements
+
+1. **`pm_core/review/md_parser.py`**
+   - `parse_response_blocks(text) -> list[ResponseBlock]` — extract every fenced HTML comment whose body's first non-blank line is `proposed-change`. Body parsed as YAML (so pipe-blocks for `before` / `after` / `suggested-rationale` / `human-*` work natively). Returned record includes the block's byte range in the source so writers can rewrite it in place.
+   - `parse_interaction_log(block) -> list[InteractionEvent]` — split the `interactions:` list out of a parsed block. Each event is `{event, at, ...}`.
+   - `parse_audit_doc(text) -> AuditDoc` — parses `CITATION_AUDIT_CYCLE_N.md` canonical format: `## <cluster>` sections containing `### <citation header>` entries with labeled subsections (`**Tier:**`, `**Doc passage as currently written:**`, `**What the source actually says:**`, `**Verdict:**`, `**Substantive change proposed:**`, optional `**Flag:**`, optional `**Surfaced citations:**` list). Entries are separated by `---` rules.
+   - `parse_response_doc(text) -> ResponseDoc` — top-level wrapper that returns the response file's preamble text + list of response blocks. Each block carries its `provenance` (`reviewer-comment` | `audit-entry`).
+   - `parse_state(text) -> StateFile` — YAML parse of `STATE.md` (`current-cycle`, `current-phase`, `mode`, `last-transition`).
+   - `parse_focus(text) -> FocusFile` — YAML parse of `UI_FOCUS.md` (`view`, `cycle`, `target?`, `timestamp`).
+
+2. **`pm_core/review/md_writer.py`**
+   - `update_response_block(path, change_id, updates)` — atomic in-place rewrite of one block's YAML fields. Read file → find block (by `id`) → merge updates → re-serialize block body → write whole file via temp-file + `os.replace`. Preserves bytes outside the block.
+   - `append_interaction(path, change_id, event)` — concurrency-safe append to that block's `interactions:` list. Uses `fcntl.flock(LOCK_EX)` on the file during read-modify-write so two walker clients can't lose an event.
+   - `append_note(path, section, body, *, timestamp=None)` — concurrency-safe append to `NOTES.md` with a timestamp under the named section. Creates the section if missing.
+   - `update_state(path, state)` — atomic write of the full state file.
+   - `update_focus(path, focus)` — atomic write of the full focus file. Always stamps `timestamp` (now-UTC) if caller doesn't supply one.
+
+3. **Atomicity & concurrency**
+   - All writes write to a sibling `*.tmp` and `os.replace()` for atomicity.
+   - `append_interaction` and `append_note` hold an exclusive flock on the target during the read-modify-write window — this is the spec's "concurrency-safe appends." Pure overwrites (`update_state`, `update_focus`) are atomic via rename only.
+
+4. **Tests** (`tests/review/`)
+   - `test_md_parser.py`, `test_md_writer.py`
+   - Fixtures: `tests/review/fixtures/{response_cycle.md, audit_cycle.md, state.md, focus.md, notes.md}`
+   - Coverage per Task: response-block round-trip; interaction-log append concurrency (two threads); canonical-format audit-doc parsing; response-doc parsing with mixed-provenance changes; state-file phase transition; focus-file timestamp ordering; notes append preserves prior content.
+
+## Implicit requirements
+
+- The block body is YAML; the comment fence is `<!-- proposed-change` opener, `-->` closer on its own line. The YAML body sits between them — no `---` document marker, since it's already framed.
+- `interactions:` field is an empty placeholder when first written by the response session. Parser tolerates both an empty value and a missing-key absence (treat as `[]`).
+- Writer never deletes user-edited content outside the target block. Block rewrite preserves leading/trailing whitespace around the comment fence.
+- Audit doc parsing is line-oriented and tolerant: legacy doc cluster headers and free-form prose between entries do not break parsing; we only extract the entries we recognize.
+- `parse_state` / `parse_focus` accept YAML with `#` comments (the plan's example state file uses inline comments).
+- `update_focus` writes `timestamp` last so the SSE watcher sees a consistent file.
+
+## Ambiguities (resolved)
+
+- **Interactions log location.** Plan says interactions are a field on the response block (`interactions:`). Resolved: store as a YAML list inside the block body. No separate `INTERACTIONS.md` file.
+- **Audit canonical format vs legacy.** Plan PR 4 / Non-goals: legacy four `CITATION_AUDIT_*.md` files are out of scope. Parser targets only the canonical format; legacy file shape is not required to parse.
+- **Notes section schema.** Plan: "section-tagged, append-only with timestamps." Resolved: `## <Section>` headers, each appended entry is preceded by `[<ISO-8601 timestamp>]` on its own line followed by free-text body, separated from prior entries by a blank line.
+- **State file format.** YAML, not YAML-frontmatter. Plan example shows raw YAML with inline `#` comments. Same for focus.
+- **Block id format.** Free-form string. The walker can use `change-<n>` but the parser/writer doesn't constrain it.
+
+## Edge cases
+
+- Multiple response blocks in one file → parsed in document order; updater finds by id, not by order.
+- Block with no `interactions:` key → treated as empty list; `append_interaction` adds the key.
+- File missing entirely → `parse_state` / `parse_focus` return `None`; `update_*` create the file. `append_note` creates `NOTES.md` and the section if missing.
+- Two concurrent `append_interaction` calls → flock serializes them; both events land.
+- YAML pipe-block `before:` / `after:` preserves trailing newline (we use `default_style='|'` on dump to keep them readable).
+- Empty `surfaced-citations:` list in an audit entry → entry parses with `surfaced_citations = []`.
