@@ -64,7 +64,42 @@ On *edit*: `human-verdict` / `human-rationale` / `human-commentary` get whatever
 
 On *skip*: nothing changes; `status` stays `pending`; interaction entry appended (so we can tell "viewed and skipped" from "never opened").
 
-### Interaction recording — the audit log for human decisions
+### Auto-run mode (the default for early iterations)
+
+The goal is **not** for every entry to be human-reviewed. The walker UI is a *consumption surface for when the human wants to review*; the underlying flow runs without it. The typical workflow is several iterations of auto-run to build the artifact up, then careful walker review starting at the iteration where the draft is substantive enough to be worth attending to.
+
+In **auto-run mode**, the flow operates without waiting on walker decisions:
+
+- Every entry-writing pass enqueues its suggester pass per usual.
+- When the suggester pass completes, its suggestion is automatically applied as the human response — `human-verdict` and `human-rationale` copied from `suggested-verdict` and `suggested-rationale`, `status` set to `auto-accepted`, an interaction log entry of action `auto-accepted` appended.
+- Downstream ready tasks fire immediately (no walker gate).
+- Hard blocks still hold — see *Block strictness in auto-run* below.
+
+When the human eventually opens the walker, auto-accepted entries are visible with a distinguishing badge (`auto`). The walker's filters expose "auto-accepted, never human-viewed" as a first-class filter so the human can target exactly the entries that haven't yet received attention. Reopening an auto-accepted entry un-acts it (`status: reopened`), and from that point forward the standard accept / edit / skip flow applies.
+
+#### Block strictness in auto-run
+
+Two settings, configurable per artifact or per iteration:
+
+- **Permissive (default).** Auto-run accepts everything the suggester pass produces, except claims that explicitly `**contradicts:**` a prior `human-accepted` synthesis claim (those always block, even in permissive auto-run, because letting a contradiction silently flip a prior human decision would erase the human's only durable signal). The first-in-cluster rule in `SYNTHESIS.md` is *relaxed* in permissive auto-run — the suggester's resolution is taken. This matches the user's typical workflow of running several iterations to get a substantive draft.
+- **Strict.** Auto-run respects all `SYNTHESIS.md` block criteria — substantive rewrites, first-in-cluster claims, agent-flagged load-bearing claims, and contradictions with prior accepted claims all block as if the human were watching. Useful for late iterations where the human wants the flow to halt at anything substantive.
+
+The setting is per-artifact, modifiable at any time. Switching mid-iteration applies to the next ready-task batch; in-flight tasks complete under their original mode.
+
+#### Per-iteration mode is recorded
+
+Each iteration's dashboard entry records its mode (`auto-run-permissive` / `auto-run-strict` / `human-reviewed` / `mixed`). Mode is part of the audit trail — a future reviewer reconstructing why the artifact has its current shape needs to know which iterations were human-attended versus auto-run. The standing reviewer pass also reads the mode from each prior iteration as context for what to scrutinize this cycle.
+
+#### Standing-reviewer prompts adapt to mode
+
+The standing reviewer (per `SUGGESTION_PASS.md` § Standing whole-document review) gets the current iteration's mode in its context. Its prompt directs it differently depending on mode:
+
+- In **auto-run** mode (no human attention yet), the standing reviewer treats auto-accepted entries as *unvetted* and applies extra scrutiny — every cluster, every synthesis claim, every produced prose draft is treated as potentially over-characterized until something has been independently checked. The standing reviewer is doing the work the walker would do if a human were present.
+- In **human-reviewed** mode, the standing reviewer attends more to the human's interaction patterns (bulk-accept ratios, comment themes, edits) and less to re-verifying entries the human has already worked through.
+
+This adaptation means the standing reviewer carries the load when there's no human to do it, and pivots to a different role when there is one.
+
+### Interaction recording — the audit log for human and automatic decisions
 
 Every walker interaction with an entry is logged into the entry's `interactions:` list, append-only. The log distinguishes a deliberate per-entry accept from a bulk-accept-with-filter, a single edit from a re-edit after second thought, a skip-after-reading from a never-opened entry. Without this distinction the dashboard can't tell engagement from rubber-stamping, and a later reviewer can't tell which entries actually got human attention versus which got swept up in a bulk action.
 
@@ -88,8 +123,9 @@ interactions:
 
 **Logged actions:**
 
+- `auto-accepted` — auto-run mode applied the suggester pass's suggestion. No human attention. `mode` records which auto-run strictness setting was active (`permissive` / `strict`). This is the *most common* action under typical use, since the early iterations are auto-run.
 - `viewed` — the walker rendered this entry and the human spent ≥1s on it (filters out the "scrolled past" case). `duration-ms` captured.
-- `accept-as-suggested` — single-click accept on this entry.
+- `accept-as-suggested` — single-click accept on this entry by a human.
 - `bulk-accept` — accepted as part of a bulk action. `scope` records the filter that drove the bulk (e.g., `filter=cluster-3,suggested-verdict=relevant`); the same `scope` value appears on every entry the bulk action touched, so a later query can reconstruct which entries went together.
 - `edit` — the human modified a field. `field` records which (`human-verdict` / `human-rationale` / `human-commentary` / any synthesis-claim sub-field); the new value is in the response block's main fields. Re-edits append a new `edit` entry; the response block carries the latest value plus the full history.
 - `comment-added` — free-text added to `human-commentary` (or replaced; treated as a logical addition). `note` carries the comment for the log even if commentary is later edited away, so withdrawn comments stay visible in history.
@@ -99,7 +135,7 @@ interactions:
 
 ### Why this matters
 
-- **Dashboard quality signals.** "Of the 38 accepted scan entries this cycle, 31 were bulk-accepted, 4 individually clicked, 3 edited. Median view-time on bulk-accepted entries: 0ms (most were swept up without being opened)." That ratio is a load-bearing engagement indicator. A cycle where the bulk-accept ratio is high *and* the dashboard surfaces zero edited entries is a warning sign — either Claude's suggestions are genuinely exceptional or the human stopped engaging.
+- **Dashboard quality signals.** Iterations are tagged by mode (`auto-run-permissive`, `auto-run-strict`, `human-reviewed`, `mixed`). Mode is not a quality signal in itself — auto-run is the expected mode for early iterations. But within human-reviewed iterations, "of the 38 accepted scan entries this cycle, 31 were bulk-accepted, 4 individually clicked, 3 edited. Median view-time on bulk-accepted entries: 0ms" is a load-bearing engagement indicator: high bulk-accept *plus* zero edited within a nominally-human-reviewed cycle is the warning case (either Claude's suggestions are genuinely exceptional or the human stopped engaging mid-cycle). For auto-run cycles, the analogous signal is the suggester-confidence distribution — what fraction of entries the suggester itself flagged `low-confidence` versus what got auto-accepted anyway.
 - **Standing-reviewer context.** Next cycle's standing whole-document reviewer agent reads each entry's interaction log as part of its context. An entry that was bulk-accepted with `duration-ms: 0` deserves more scrutiny in the standing pass than one that was viewed for 30 seconds and edited. The reviewer can flag "these 12 entries had zero per-entry attention this cycle; recommend the human walk them next iteration."
 - **Replayability and audit.** The log lets a later reviewer reconstruct what the human actually did, not just what the final state of the markdown is. The four pre-flow audits surfaced cases where an over-characterization slipped past blind reviewers because they were rubber-stamping; the interaction log makes that rubber-stamping visible at the time it happens, not retrospectively.
 - **Per-walker history view.** Every walker has a "Show interactions" toggle per entry that surfaces the interaction history inline. The dashboard has an aggregate view (per-cycle, per-walker, per-cluster). The cycle-review walker's iteration-history sidebar pivots on the log to show "compared to last cycle, the human spent more time per entry / less time / similar time."
@@ -339,7 +375,8 @@ These are the choices baked into the plan above; flag any to revisit:
 8. **Suggester-pass independence.** Plan picks *separate suggester sub-agent* per `SUGGESTION_PASS.md` — the entry-writing and suggestion-writing passes run as independent agent invocations, mirroring the adversarial-review pattern. Alternative: *same-agent suggestion* (the entry-writing agent writes both content and suggestion in one pass), which is cheaper but suffers from self-confirmation bias. Separate sub-agent is the default. A per-entry **regenerate suggestion** button (later optional PR) re-fires the suggester pass on demand for entries the human has touched in ways the suggester should know about.
 9. **Bulk-accept default scope.** Plan picks *current filter* (only entries matching the active filter get bulk-accepted) — safer than *whole document*. Alternative: whole document with a confirmation modal. The current-filter default makes the bulk path opt-in to the scope, which avoids the "I clicked the wrong button and accepted 80 things" footgun.
 10. **Session-integration transport.** Plan picks filesystem inbox (`READY_TASKS_<artifact>.md` + `.results.md` files) as the default. Alternative: `RemoteTrigger` to a bound Claude Code session for lower-latency coupling. Filesystem is the default because it's debuggable, doesn't require live coupling, and the inbox is itself an audit record of what was requested. `RemoteTrigger` may be added later for users who want tighter coupling.
-11. **Fire mode.** Plan picks an explicit *Fire ready tasks* button (human-triggered batch). Alternative: *auto-fire on accept* — every time a decision unblocks downstream work, the unblocked tasks fire immediately. Auto-fire is convenient but creates execution thrash and makes the audit trail harder to read (which decision caused which task). Explicit-fire is the default; auto-fire is an opt-in toggle.
+11. **Fire mode.** Plan picks an explicit *Fire ready tasks* button (human-triggered batch) when the artifact is in human-reviewed mode. In **auto-run** mode the dispatch is automatic — each completed task's downstream unblocks fire immediately without waiting for a button. The button is the throttle when a human is present; auto-run drops the throttle so iterations run continuously.
+12. **Auto-run default strictness.** Plan picks **permissive** (relax the first-in-cluster rule, only block on contradictions with prior `human-accepted` claims). This matches the typical workflow of running several iterations to get a substantive draft. Alternative: strict (respect all block criteria as if the human were watching) — useful for late iterations where the human wants the flow to halt at anything substantive. Setting is per-artifact, modifiable at any time.
 
 ## Non-goals
 
