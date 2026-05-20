@@ -7,8 +7,8 @@ Implementation plan for `plan-litreview-ui.md`. The augmented cycle (`pm/docs/ad
 - **CLI: `pm review <target>`** — launches a Claude session in a new tmux pane with the augmented-cycle methodology context (`METHODOLOGY.md` + `CITATION_USE_AUDIT.md` + `CITATION_CRAWL.md` + skepticism rules) and a target artifact. Target is any file or topic string; the session runs the review / audit-loop / response cycle using its normal `Bash` / `Edit` / `Write` / `Agent` tool use.
 - **CLI: `pm plan literature-review <plan>`** — launches a literature-review session in a new pane within a plan's tmux window. Same methodology context as `pm review`, but the session lives inside the plan's existing tmux window (next to any other plan-related panes) rather than its own window. Plans pane in the TUI gets a keybinding for the same command.
 - **`pm review ui [--port]`** — launches the walker server (PR 3).
-- **Walker UI** — proposed-changes walker + citation-audit browse + dashboard + general-comments surface (per `plan-litreview-ui.md`).
-- **Markdown format primitives** — response-block parser/writer, interaction-log appender, audit-doc parser, response-doc parser with provenance tags.
+- **Walker UI** — proposed-changes walker + citation-audit browse + citations status view + dashboard + general-comments side panel (per `plan-litreview-ui.md`).
+- **Markdown format primitives** — response-block parser/writer, interaction-log appender, audit-doc parser, response-doc parser with provenance tags, state-file parser/writer (`STATE_<artifact>.md`), focus-file parser/writer (`UI_FOCUS_<artifact>.md`), notes-file appender (`NOTES_<artifact>.md`).
 
 The Claude session is the runner. No Python runner, no auto-loop driver — auto-run is the human telling the session "run the cycle until convergence."
 
@@ -111,12 +111,6 @@ A reasonable serial path: 1 → 2 → 3 → 4 → 5.
 A parallel-friendly path: PR 1 + PR 2 in parallel; then PR 3; then PR 4; then PR 5.
 
 Each PR's tests cover the slice it ships — there's no separate end-to-end smoke PR. PR 4's tests cover canonical-format audit-doc rendering; PR 5's tests cover the citations-status derivation.
-
-## Open questions to validate during PR 2
-
-1. **Response-block placement.** Plan picks inline-on-the-proposed-change in `REVIEW_RESPONSE_CYCLE_N.md`. Alternative: a sibling `*.decisions.md` file (keeps the response file pristine but detaches decisions from their source). Inline preferred — the response file is canonical.
-2. **Audit-doc canonical format.** PR 2's parser targets only the new canonical format. The four pre-flow `CITATION_AUDIT_*.md` files use an older format and stay in the repo as historical archives but aren't rendered by the walker.
-3. **Inbox file format for UI → session messages.** Some walker actions (regenerate suggestion, re-run audit on a specific citation) need to message the session. Plan defers to a later PR; for the initial UI scope, walker decisions just write back to the markdown and the next cycle picks them up.
 
 ## Non-goals
 

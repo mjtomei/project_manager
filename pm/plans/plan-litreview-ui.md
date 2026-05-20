@@ -55,7 +55,7 @@ The walker reads each proposed-change block, renders it as a paginated entry wit
 
 The walker is not required for the cycle to advance. In auto-run mode, the response session's recommendations apply directly: each proposed change is treated as `auto-accepted`, an interaction log entry is appended, the apply step runs. The walker still shows the changes (with the `auto` badge) if the human later opens it, and a `auto-accepted, never human-viewed` filter exists so the human can target unattended entries.
 
-Per-cycle dashboard records the cycle's mode (`auto-run` / `human-reviewed` / `mixed`) and the engagement signals (bulk-accept ratio, median view-time, suggester-confidence distribution for auto-run cycles).
+Per-cycle dashboard records each cycle's mode (`auto-run` or `human-reviewed`; the `mixed` tag, when shown, applies at the artifact level across multiple cycles — early cycles often `auto-run`, later cycles `human-reviewed`) and the engagement signals (bulk-accept ratio, median view-time, suggester-confidence distribution for auto-run cycles).
 
 ## Lock states — when modifications are allowed
 
@@ -87,6 +87,8 @@ The phases:
 - **complete** — cycle archived. Read-only.
 
 Previous cycles are always read-only regardless of their state — they're history.
+
+**When no cycle has started yet** (`STATE_<artifact>.md` is absent), the walker renders a "no cycles yet" placeholder on each view with a one-line hint to run `pm review <target>` or `pm plan literature-review <plan>` to start one. The dashboard's cycle selector is empty and the status panel shows "no cycles yet."
 
 ## Previous-cycle viewing
 
@@ -142,7 +144,7 @@ Symmetrically, the session uses its own filesystem watch (its `watchdog`/`Bash`/
 
 ## What the walker covers
 
-- **Proposed-changes walker** — paginated view of every proposed change in `REVIEW_RESPONSE_CYCLE_N.md`. Filterable by provenance (`reviewer-comment` / `audit-entry`), target section, suggested verdict, status. Click-through from `source-anchor` to the originating review finding or audit entry.
+- **Proposed-changes walker** — paginated view of every proposed change in `REVIEW_RESPONSE_CYCLE_N.md`. Filterable by provenance (`reviewer-comment` / `audit-entry`), target section, suggested verdict, status. Click-through from `source-anchor` to the originating review finding or audit entry. Pagination is one-entry-per-page for careful review; a denser list view supports bulk-accept passes. Hotkeys: `j` / `k` next/previous, `a` accept Claude's suggestion, `m` modify, `s` skip.
 - **Citation-audit browse view** — per-cycle view of `CITATION_AUDIT_CYCLE_N.md`. One section per audited citation in that cycle, showing the audit entry (tier, doc passage, source content, verdict, proposed rewrite, surfaced citations). Click-through to the proposed change(s) in the proposed-changes walker.
 - **Citations status view** — *cross-cycle*, citation-centric. One row per citation that has ever been considered for the artifact (currently in it, audited, proposed for addition by the review, proposed for removal). Per-citation fields: title + authors + year, **clickable link that opens the source in a new tab**, current tier (1 / 2 / 3), current classification (faithful / over-characterizes / under-characterizes / mischaracterizes / unverified), argument for that classification (verdict rationale + the load-bearing verbatim quote from source), most-recent-audit cycle, and status in the artifact (`in-artifact` / `proposed-addition` / `proposed-removal` / `superseded`). Filterable by any of those fields. Click a row to expand the most recent audit entry inline. The view is *derived* from the union of `CITATION_AUDIT_CYCLE_*.md` files plus the in-artifact citation list — re-derived per request, no separate state file.
 - **Dashboard** — per-cycle status: review / audit-loop convergence / response readiness; mode tag; engagement signals; convergence indicator for the audit loop (zero newly-surfaced citations in the last round).
@@ -150,80 +152,13 @@ Symmetrically, the session uses its own filesystem watch (its `watchdog`/`Bash`/
 
 That's the full scope. No separate scan walker, work-review walker, synthesis walker, crawl-triage walker, cycle-review walker, or proposed-edits walker — the proposed-changes walker subsumes the propose-and-accept flow for both review and audit sources.
 
-## PRs
+## Design decisions
 
-### PR: Walker primitive + proposed-changes walker
+These are the design choices baked into the spec above; the PR breakdown for implementing them lives in `plan-litreview-impl.md`.
 
-The main walker. Renders `REVIEW_RESPONSE_CYCLE_N.md`'s proposed-change blocks. Per-entry buttons: accept Claude's suggestion / save edits / skip. Page-level: bulk-accept-per-filter (provenance, target section, suggested verdict, status).
-
-Pagination one-entry-per-page for review pace; a denser list view for bulk-accept passes. Hotkeys j/k for next/previous, a for accept, m for modify, s for skip.
-
-Files: `templates/changes.html`, walker route in `server.py`, `md_parser.parse_response_doc`, `md_writer.update_response_block`, `md_writer.append_interaction`.
-
-### PR: Citation-audit browse view
-
-Renders `CITATION_AUDIT_CYCLE_N.md` organized per citation in *that cycle*, with click-through to the proposed changes the audit entry produced. Read-only on the audit content itself (the audit is the source of truth; decisions live on the proposed change in the response file).
-
-Files: `templates/audit_browse.html`, route, `md_parser.parse_audit_doc`.
-
-### PR: Citations status view
-
-Cross-cycle citation-centric view. Renders one row per citation that has ever been considered for the artifact, derived from the union of all `CITATION_AUDIT_CYCLE_*.md` files and the artifact's current citation list.
-
-Per-row content:
-- **Title + authors + year**, formatted compactly.
-- **Clickable link** that opens the source in a new tab (`target="_blank" rel="noopener"`).
-- **Current tier** (1 / 2 / 3) — from the most-recent audit entry. Empty if not yet audited.
-- **Current classification** — `faithful` / `over-characterizes` / `under-characterizes` / `mischaracterizes` / `unverified`. From the most-recent audit entry's verdict.
-- **Argument** — the verdict rationale plus the load-bearing verbatim quote from the source (the "what the source actually says" field of the audit entry). Truncated to one line in the table; full text on row expansion.
-- **Most-recent-audit cycle** (e.g., "cycle 2" or "—" if never audited).
-- **Status in artifact** — `in-artifact` (currently cited) / `proposed-addition` (a review or audit proposes adding) / `proposed-removal` (a review proposes removing) / `superseded` (a later citation supersedes this one per a prior accepted change).
-
-Filterable by: tier, classification, status, cycle audited, presence-or-absence of a working link. Sortable by any column. A "needs audit" filter surfaces citations with status `in-artifact` *or* `proposed-addition` that have no audit entry yet.
-
-Click-to-expand a row to show the most recent audit entry inline (doc passage + source content + verdict + proposed rewrite + any surfaced citations) and links to that cycle's `CITATION_AUDIT_CYCLE_N.md` for the full audit context.
-
-The view is *derived* from disk on each request — no separate state file. The cost is one parse pass over all the audit files plus the artifact's citation list, which for moderate-sized reviews is a few hundred KB total and well within a fast page-load budget.
-
-Files: `templates/citations.html`, route, `md_parser.derive_citation_status` (cross-file union), `md_parser.extract_artifact_citations`.
-
-### PR: Dashboard
-
-Per-cycle status view: review readiness (REVIEW_CYCLE_N.md exists), audit-loop convergence (most recent audit-loop round surfaced zero new citations), response readiness (REVIEW_RESPONSE_CYCLE_N.md exists), mode tag (auto-run / human-reviewed / mixed), engagement signals (bulk-accept ratio, median view-time, suggester-confidence distribution for auto-run cycles).
-
-Files: `templates/dashboard.html`, dashboard route in `server.py`.
-
-### PR: General-comments surface
-
-`NOTES_<artifact>.md` collapsible side panel, included in all walker pages. Section-tagged entries with timestamps, append-only. Loaded as response-session context so general comments influence the next cycle's response recommendations.
-
-Files: `templates/notes_pane.html`, notes-write endpoint.
-
-### PR: Auto-run mode + interaction-log integration
-
-Auto-run mode bypasses the walker — response-session recommendations apply directly with interaction-log entries of action `auto-accepted`. CLI flag on the session-launch command toggles auto vs walker-mediated. Walker reads the interaction log for the engagement signals on the dashboard.
-
-Files: state-file write in `md_writer.py` (`update_state` to transition the phase from `awaiting-human-review` to `applying`), interaction-log readers in dashboard route.
-
-### PR: End-to-end smoke validation
-
-Three validation paths:
-
-1. **Walker rendering smoke.** Run the walker against the four existing `CITATION_AUDIT_*.md` files. Each renders correctly in the citation-audit browse view.
-2. **Proposed-changes round-trip.** Construct a fixture `REVIEW_RESPONSE_CYCLE_N.md` with both reviewer-comment and audit-entry proposed changes; verify the walker renders them; accept and edit a few; verify the round-trip writes are correctly formatted.
-3. **End-to-end cycle in auto-run mode.** A small fixture artifact + a session that runs the review / audit-loop / response sequence; verify the dashboard shows convergence; verify the response file's proposed changes have `status: auto-accepted` and a matching interaction-log entry.
-
-Acceptance criteria: all three paths pass; no regressions on the four existing pre-flow audit docs; smoke-test artifact's cycle completes within reasonable wall-clock.
-
-## Sequencing
-
-PR 1 (proposed-changes walker) is the load-bearing piece — everything else depends on its existence or is independent of it. PRs 2 (audit browse) + 3 (dashboard) + 4 (notes) can land in parallel after PR 1. PR 5 (auto-run) needs the interaction-log writes from PR 1. PR 6 (smoke test) needs everything.
-
-## Design decisions to validate during PR 1
-
-1. **Decision storage: inline response-block on the proposed change vs sibling decisions file.** Plan picks inline (the response file is the canonical decision record). Alternative: a sibling `*.decisions.md` file keeps `REVIEW_RESPONSE_CYCLE_N.md` pristine, but the walker has to read two files to render and the decisions detach from their source.
-2. **Bulk-accept default scope.** Plan picks *current filter* (avoid the "accidentally accepted 80 things" footgun).
-3. **Auto-run failure modes.** What happens when the response session's recommendation conflicts with a prior accepted change? Plan: the response session is responsible for noticing prior-cycle commitments; if it produces a change that conflicts, the walker still renders both and the human picks one. Auto-run treats this as a `low-confidence-suggester` flag and the change is left as `pending` instead of applied. Validate during PR 5.
+1. **Decision storage: inline response-block on the proposed change, vs. sibling decisions file.** Plan picks inline — the response file is the canonical decision record. Alternative: a sibling `*.decisions.md` file keeps `REVIEW_RESPONSE_CYCLE_N.md` pristine, but the walker has to read two files to render and decisions detach from their source.
+2. **Bulk-accept default scope.** Plan picks *current filter* (avoid the "accidentally accepted 80 things" footgun); whole-document bulk-accept is opt-in via an explicit "expand scope" toggle.
+3. **Auto-run conflict handling.** When the response session's recommendation conflicts with a prior accepted change, the response session is responsible for noticing prior-cycle commitments. If it produces a change that conflicts, the walker still renders both and the human picks one; in auto-run mode the change is left as `pending` (not applied) with a `low-confidence-suggester` flag.
 
 ## Non-goals
 
