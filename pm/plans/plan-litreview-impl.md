@@ -50,7 +50,7 @@ Dependencies: none. Independent of the review work.
 
 Launches a session with the augmented-cycle context loaded.
 
-- `pm/review/context.py` — concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, the skepticism-rules section of `SUGGESTION_PASS.md`, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files."
+- `pm/review/context.py` — concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files."
 - `pm/review/cli.py` — `pm review session <target>` subcommand. Opens a new tmux pane running `claude` with the context as initial input. Target accepts file paths or topic strings.
 - Artifact-id derivation: file basename for file targets; slugified prefix for string topics.
 - Tests: context-build produces a valid prompt; file vs string target handled; pane launched in role `review`.

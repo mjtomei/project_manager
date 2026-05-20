@@ -27,7 +27,7 @@ The original cycle's three artifacts (review / response / apply) survive unchang
 - **The audit step** is a new sub-process between review and response. It runs to its own internal convergence each cycle. Its output (the audit doc) is a third input to the response session alongside the review.
 - **The walker UI** is a new acceptance surface between response and apply. It is *optional* — auto-run mode skips it and applies the response session's recommendations directly, recording an interaction-log entry per change so the audit trail is preserved.
 
-The skepticism rules from `SUGGESTION_PASS.md` § Suggester disposition apply to the audit agents and to the response session (both are reading prior agents' output adversarially); the citation-graph walk machinery in `CITATION_CRAWL.md` is the sub-methodology audit agents use when an audit needs to surface new citations.
+The audit agents and the response session both read prior agents' output adversarially — same skeptical disposition the cycle's blind reviewer carries (per *The protocol* step 4: fetch every work the prior agent referenced; verify their claims; assume over-characterization until checked against the source). The citation-graph walk machinery in `CITATION_CRAWL.md` is the sub-methodology audit agents use when an audit needs to surface new citations.
 
 ### Standardizations introduced by the augmentation
 
@@ -155,7 +155,7 @@ Block 4 is **not** load-bearing the way Block 3 is — readers can accept ugly p
 
    g. **Report the walk's coverage explicitly in the review.** Include a "Citation graph walk" section listing: which seeds were searched, the date range covered, the count of new citing/cited papers found per seed, and the additions proposed. If the walk found nothing new, say so — that's a positive convergence signal.
 
-6. **Citation-use audit (light, per-cycle) → see `CITATION_USE_AUDIT.md` for the thorough version.** Within each response cycle do a *light* check of any newly-added or reviewer-touched citations against their abstracts. The dedicated full-text audit — full papers read, standalone audit doc with per-citation proposed rewrites — happens between cycles after a large citation expansion, and as the final pass once iterative review converges. It lives in its own methodology file (`CITATION_USE_AUDIT.md`) and is invoked from the top-level flow (`LITERATURE_REVIEW_FLOW.md`, Phase 3). The two are complementary to the citation-graph walk (step 5): the walk finds *what should be cited*; the audit checks *that what is cited is used faithfully*.
+6. **Citation-use audit.** Under the augmented cycle (see § The augmented cycle above), the audit is a first-class cycle step that runs to its own convergence between review and response — see `CITATION_USE_AUDIT.md` for the full protocol. Without the augmentation, do at least a *light* check of newly-added or reviewer-touched citations against their abstracts within each response cycle. The two are complementary to the citation-graph walk (step 5): the walk finds *what should be cited*; the audit checks *that what is cited is used faithfully*.
 
 7. **Verify accessibility**. If a paper is paywalled with no open-access version, derivative, or report covering the same ground, remove it from the citations and add it to an appendix of "wanted-but-inaccessible" works with a one-line note on what citing it would have changed.
 

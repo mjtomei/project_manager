@@ -1,8 +1,6 @@
 # Citation Crawl and Key-Phrase Search (methodology)
 
-Phase 3 of the literature review flow (see `LITERATURE_REVIEW_FLOW.md`). Triggered for each paper Phase 1 / Phase 2 classifies as *relevant*. The job: surface candidate papers and non-academic sources that might also be relevant, feeding them back into the next iteration's Phase 1 funnel.
-
-This file also documents the **key-phrase seed derivation** used for iteration 1 of from-scratch flows — when the artifact has no existing references.
+Sub-methodology for the citation audit (`CITATION_USE_AUDIT.md`) and for the older by-hand citation-graph walk in `METHODOLOGY.md` step 5. The job: surface candidate citations — academic via Scholar walks, non-academic via key-phrase search — when an audit needs to find what *should* be cited but isn't, or when a reviewer is walking from a named seed.
 
 ## Citation crawl (academic)
 
