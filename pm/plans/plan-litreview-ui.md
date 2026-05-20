@@ -57,6 +57,54 @@ The walker is not required for the cycle to advance. In auto-run mode, the respo
 
 Per-cycle dashboard records the cycle's mode (`auto-run` / `human-reviewed` / `mixed`) and the engagement signals (bulk-accept ratio, median view-time, suggester-confidence distribution for auto-run cycles).
 
+## Lock states — when modifications are allowed
+
+The walker enforces a single rule: **modifications to responses are allowed only in the `awaiting-human-review` phase of the current cycle.** Every other state is read-only.
+
+The cycle's phase lives in `STATE_<artifact>.md`, a small markdown file the session updates at phase transitions:
+
+```yaml
+current-cycle: 3
+current-phase: awaiting-human-review
+# one of: review | audit | response | awaiting-human-review | applying | complete
+last-transition: 2026-05-20T14:32:00Z
+```
+
+The walker reads this file on every page load and polls for changes every few seconds. Editable controls (accept / edit / bulk-accept / skip / reopen) are enabled only when `current-phase` is `awaiting-human-review` *and* the walker is rendering the current cycle. In every other state the same controls render as read-only badges showing what state they would carry if modifications were allowed.
+
+The phases:
+- **review** — REVIEW_CYCLE_N.md being written by the review session. Prior cycles viewable; current cycle has no proposed changes yet. Walker fully read-only.
+- **audit** — citation audit loop iterating. Same as review.
+- **response** — REVIEW_RESPONSE_CYCLE_N.md being written. Still read-only — the response is mid-flight.
+- **awaiting-human-review** — response file written. **Modification window.** Accept/edit/bulk-accept/skip/reopen all work; interaction log records every action.
+- **applying** — apply step is consuming the response. Read-only — modifications now would race with the apply.
+- **complete** — cycle archived. Read-only.
+
+Previous cycles are always read-only regardless of their state — they're history.
+
+## Previous-cycle viewing
+
+The dashboard has a cycle selector (dropdown, latest first). Selecting a prior cycle navigates every walker view to that cycle's files. The selector defaults to the current cycle; selecting a prior cycle is the only way to leave it.
+
+A small breadcrumb on every walker page (`Cycle 3 (current) · awaiting human review · editable`) tells the human which cycle they're looking at and whether they can edit. Prior-cycle breadcrumbs read `Cycle 2 · complete · read-only`.
+
+## Session-controlled UI focus
+
+The session can direct the walker's view via a focus file (`UI_FOCUS_<artifact>.md`):
+
+```yaml
+view: audit-browse            # changes | audit-browse | citations | dashboard | notes
+cycle: 3                      # which cycle's data to display
+target: citation-2024-xxxxx   # optional anchor — entry id to scroll to
+timestamp: 2026-05-20T15:30:00Z
+```
+
+The walker polls the file every few seconds. When `timestamp` advances, the walker navigates to the indicated view + cycle, and if `target` is set, scrolls to that anchor and highlights it briefly.
+
+**Use case.** The human asks the session "why did we end up classifying paper X as low-confidence?" The session reads the audit history, answers in chat, and updates `UI_FOCUS_<artifact>.md` to point at the audit entry for paper X. The walker navigates there automatically; the human sees the entry being discussed without manual navigation.
+
+This is the inverse of *Fire ready tasks* (which is UI → session). Both use file polling for simplicity and to keep the walker process model trivial (the walker never makes outbound calls).
+
 ## What the walker covers
 
 - **Proposed-changes walker** — paginated view of every proposed change in `REVIEW_RESPONSE_CYCLE_N.md`. Filterable by provenance (`reviewer-comment` / `audit-entry`), target section, suggested verdict, status. Click-through from `source-anchor` to the originating review finding or audit entry.
@@ -147,4 +195,4 @@ PR 1 (proposed-changes walker) is the load-bearing piece — everything else dep
 - Multi-user collaboration. Single user, local-only.
 - Persistent database. Markdown is the database.
 - A Python iteration runner. The Claude session is the runner — it executes review / audit-loop / response via its normal tool use.
-- Replacing the four existing pre-flow `CITATION_AUDIT_*.md` audits. The citation-audit browse view renders them as the worked examples of cycle-1-style standalone audits.
+- **Backwards compatibility with the four existing pre-flow `CITATION_AUDIT_*.md` files.** They use a format that predates the augmented cycle and are kept in the repo as historical archives, but the audit-browse view targets only the new canonical format. Subsequent audits (`CITATION_AUDIT_CYCLE_N.md` under the new cycle) use the canonical format from the start.

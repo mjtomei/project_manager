@@ -55,29 +55,32 @@ Dependencies: none. Independent of the UI work.
 
 The data layer the UI builds on.
 
-- `md_parser.py` — response-block parser (fenced HTML comment with `proposed-change` header, structured fields), interaction-log parser, audit-doc parser (per-citation entries with `surfaced-citations:` lists), response-doc parser (proposed changes with `provenance:` tags).
-- `md_writer.py` — atomic response-block updates (`update_response_block`), append-only interaction-log entries (`append_interaction`), notes-file appends (`append_note`). All writes through these so format consistency is guaranteed.
-- Tests: response-block round-trip; interaction-log append concurrency; audit-doc parsing on the four existing `CITATION_AUDIT_*.md` files; response-doc parsing with mixed-provenance changes.
+- `md_parser.py` — response-block parser (fenced HTML comment with `proposed-change` header, structured fields), interaction-log parser, audit-doc parser (per-citation entries in the canonical format with `surfaced-citations:` lists), response-doc parser (proposed changes with `provenance:` tags), state-file parser (`STATE_<artifact>.md` — current cycle + phase), focus-file parser (`UI_FOCUS_<artifact>.md` — view + cycle + target + timestamp).
+- `md_writer.py` — atomic response-block updates (`update_response_block`), append-only interaction-log entries (`append_interaction`), notes-file appends (`append_note`), state-file write (`update_state` for the session to call at phase transitions), focus-file write (`update_focus` for the session to call when directing UI attention).
+- Tests: response-block round-trip; interaction-log append concurrency; canonical-format audit-doc parsing; response-doc parsing with mixed-provenance changes; state-file phase transitions; focus-file timestamp ordering.
 
 Dependencies: none. Ships independently.
 
-### PR 3: Web server skeleton + dashboard + proposed-changes walker
+### PR 3: Web server skeleton + dashboard + proposed-changes walker + lock states + cycle navigation + focus polling
 
-- `pm/review/ui/server.py` — FastAPI single-file. File-discovery routes (artifacts, per-cycle docs), dashboard route, proposed-changes walker route.
-- `templates/dashboard.html` — per-cycle status, mode tag, audit-loop convergence indicator, engagement signals.
+- `pm/review/ui/server.py` — FastAPI single-file. File-discovery routes (artifacts, per-cycle docs), dashboard route, proposed-changes walker route. Reads `STATE_<artifact>.md` on every page load; polls `UI_FOCUS_<artifact>.md` every few seconds via a small SSE/polling endpoint.
+- `templates/dashboard.html` — per-cycle status, mode tag, audit-loop convergence indicator, engagement signals, **cycle selector** (dropdown, latest first; defaults to current cycle).
 - `templates/changes.html` — paginated proposed-changes walker per `plan-litreview-ui.md`. Filterable by provenance, target section, suggested verdict, status. Per-entry accept/edit/skip actions; page-level bulk-accept-per-filter.
-- `static/style.css`, `static/walker.js` — minimal CSS, vanilla JS for hotkeys + bulk-accept + view-time tracking.
+- **Lock-state enforcement.** Walker editable controls (accept / edit / bulk-accept / skip / reopen) are enabled only when `STATE_<artifact>.md`'s `current-phase` is `awaiting-human-review` *and* the rendered cycle is the current cycle. In every other state the controls render as read-only badges. The breadcrumb on every walker page shows cycle number + phase + editable/read-only.
+- **Cycle navigation.** The cycle selector on the dashboard, and the breadcrumb on every walker page, lets the user jump between cycles. Prior cycles are always read-only regardless of state.
+- **Focus polling.** Client-side JS polls a `/focus?artifact=<id>` endpoint every few seconds; when the focus file's `timestamp` advances, the page navigates to the indicated view + cycle, and if `target` is set, scrolls to that anchor and highlights it briefly.
+- `static/style.css`, `static/walker.js` — minimal CSS, vanilla JS for hotkeys + bulk-accept + view-time tracking + focus-polling + lock-state UI states (badges vs editable controls).
 - CLI: `pm review ui [--port]`.
-- Tests: dashboard renders correctly against a fixture multi-cycle state; proposed-changes walker renders fixture proposed changes and round-trips edits.
+- Tests: dashboard renders correctly against a fixture multi-cycle state; proposed-changes walker renders fixture proposed changes and round-trips edits when state is `awaiting-human-review`; walker shows read-only badges (no round-trip) when state is `review` / `audit` / `response` / `applying` / `complete`; cycle selector navigates between cycles; focus-file timestamp advance triggers navigation.
 
 Dependencies: PR 2.
 
 ### PR 4: Citation-audit browse view + general-comments surface
 
-- `templates/audit_browse.html` — renders `CITATION_AUDIT_CYCLE_N.md` (per-cycle) organized per citation, with click-through to the proposed changes the entry produced.
+- `templates/audit_browse.html` — renders `CITATION_AUDIT_CYCLE_N.md` (per-cycle) in the canonical format, organized per citation, with click-through to the proposed changes the entry produced. The four pre-flow `CITATION_AUDIT_*.md` files are not targeted (no backwards compat — see `plan-litreview-ui.md` § Non-goals).
 - `templates/notes_pane.html` — collapsible side panel included in all walker pages. Reads/writes `NOTES_<artifact>.md` with section-tagged entries and timestamps.
 - Notes file loadable into the session context so general comments influence next cycle's response.
-- Tests: audit-browse renders all four existing `CITATION_AUDIT_*.md` files correctly with no regressions; notes-pane round-trips edits.
+- Tests: audit-browse renders a fixture `CITATION_AUDIT_CYCLE_N.md` in canonical format correctly; notes-pane round-trips edits.
 
 Dependencies: PR 3.
 
@@ -102,12 +105,12 @@ A reasonable serial path: 1 → 2 → 3 → 4 → 5.
 
 A parallel-friendly path: PR 1 + PR 2 in parallel; then PR 3; then PR 4; then PR 5.
 
-Each PR's tests cover the slice it ships — there's no separate end-to-end smoke PR. The walker-rendering-against-existing-`CITATION_AUDIT_*.md` regression check lives in PR 4's tests (it's the same code path the audit-browse view uses); the citations-status derivation regression check lives in PR 5's tests.
+Each PR's tests cover the slice it ships — there's no separate end-to-end smoke PR. PR 4's tests cover canonical-format audit-doc rendering; PR 5's tests cover the citations-status derivation.
 
 ## Open questions to validate during PR 2
 
 1. **Response-block placement.** Plan picks inline-on-the-proposed-change in `REVIEW_RESPONSE_CYCLE_N.md`. Alternative: a sibling `*.decisions.md` file (keeps the response file pristine but detaches decisions from their source). Inline preferred — the response file is canonical.
-2. **Audit-doc format standardization.** The four existing `CITATION_AUDIT_*.md` files use a similar but not identical format. PR 2's parser should accept both the existing format and the new format-with-`provenance`-tagged proposed-changes; PR 4 may need to render minor variations.
+2. **Audit-doc canonical format.** PR 2's parser targets only the new canonical format. The four pre-flow `CITATION_AUDIT_*.md` files use an older format and stay in the repo as historical archives but aren't rendered by the walker.
 3. **Inbox file format for UI → session messages.** Some walker actions (regenerate suggestion, re-run audit on a specific citation) need to message the session. Plan defers to a later PR; for the initial UI scope, walker decisions just write back to the markdown and the next cycle picks them up.
 
 ## Non-goals
