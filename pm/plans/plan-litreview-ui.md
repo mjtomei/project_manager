@@ -147,6 +147,29 @@ Saves write the structured response block per candidate. The next iteration's Ph
 
 Files: `templates/crawl.html`, `md_parser.parse_crawl_doc`, `md_writer.update_response_block` (shared).
 
+### PR: Cycle-review walker + general-comments surface
+
+Two related additions that handle whole-document concerns the per-entry walkers don't reach.
+
+**Cycle-review walker.** Per-cycle view of `CYCLE_REVIEW_<artifact>_iter<N>.md` — the standing whole-document review output (see `LITERATURE_REVIEW_FLOW.md` § Standing whole-document tasks). One reviewer sub-agent answers the eight standing tasks in a single pass per cycle (matching the existing adversarial-review cycle shape — see `SUGGESTION_PASS.md` § Standing whole-document review). The walker presents each standing-task response as a populated response block, per the *Interaction model*: accept / edit / reject / commentary, with bulk-accept available.
+
+Findings whose proposed actions are walker-typed get a **route to walker X** button (e.g., "route to proposed-edits walker as a prose change," "route to synthesis walker as a cluster-reorganization," "route to crawl-triage as a coverage-gap seed"). Findings that are general observations stay in the cycle-review view.
+
+Iteration history is preserved — the walker shows all prior cycles' CYCLE_REVIEW files in a sidebar so the human can compare what the reviewer flagged last cycle versus this cycle (the convergence signal across iterations is visible here).
+
+Files: `templates/cycle_review.html`, `md_parser.parse_cycle_review_doc`, route-to-walker action endpoints, walker sidebar history component.
+
+**General-comments surface.** A free-text commentary area for thoughts not attached to any specific entry — overall observations, strategic concerns, cross-cutting notes, hypothesis-level reservations the human wants to leave for themselves or for the next iteration. Lives in a `NOTES_<artifact>.md` file alongside the per-walker outputs.
+
+UI surface:
+- **Persistent surface across all walkers.** A "Notes" pane accessible from any walker page (collapsible side panel or modal). The human can dump a thought without losing their place in the current entry.
+- **Section-tagged entries.** Each note can be tagged with a section / cluster / iteration number, so notes about §3 sycophancy-framing don't get lost in a flat list. Untagged notes are allowed for genuinely cross-cutting observations.
+- **Reviewer-visible.** The standing whole-document reviewer pass reads `NOTES_<artifact>.md` as part of its context, so the human's general comments shape what the next cycle's reviewer attends to. A note saying "I'm worried §3 is leaning too hard on Sharma 2023" becomes context the reviewer can use.
+- **Append-only by default with a markdown timestamp prefix.** The human writes a new note as a new paragraph, dated. Older notes stay visible; the file is the running journal.
+- **No suggester pass on the notes surface.** The notes are the human's voice — Claude doesn't pre-fill them. (A "summarize notes since iteration N" button using walker-time generation is a later optional PR.)
+
+Files: `templates/notes_pane.html` (partial, included in all walkers), `md_writer.append_note`, `md_parser.parse_notes_doc` (for the reviewer-context loading), dashboard route to view the notes file.
+
 ### PR: Synthesis-claim walker
 
 Dedicated view of `SYNTHESIS_<artifact>.md`. List of claims, filterable by status (`pending` / `auto-accepted` / `human-accepted` / `contested` / `superseded`) and sortable by dependent-count.
@@ -260,7 +283,7 @@ These are the choices baked into the plan above; flag any to revisit:
 
 ## Sequencing note
 
-PR 1 (skeleton) must land first. PRs 2–5 (scan walker, work-review walker with synthesis integration, crawl triage, synthesis-claim walker) can land in any order after the skeleton, though the work-review walker and synthesis walker share `md_writer.update_claim_status` so are easier to land together. PR 6 (proposed-edits walker) depends on the work-review and synthesis walkers, since its provenance graph reaches into both. PR 7 (ready-task execution via Claude-session integration) depends on all walkers being able to compute ready-task graphs — including suggester-pass tasks for newly-written entries. PR 8 (dashboard upgrade with synthesis blocking + ready-task counts) depends on PR 7. PR 9 (smoke test) is the final acceptance gate before the new flow is used for a real from-scratch literature review.
+PR 1 (skeleton) must land first. PRs 2–5 (scan walker, work-review walker with synthesis integration, crawl triage, synthesis-claim walker) can land in any order after the skeleton, though the work-review walker and synthesis walker share `md_writer.update_claim_status` so are easier to land together. PR 6 (cycle-review walker + general-comments surface) is independent of the per-entry walkers — its consumption is the per-cycle standing-task output and a free-form notes file. PR 7 (proposed-edits walker) depends on the work-review and synthesis walkers, since its provenance graph reaches into both. PR 8 (ready-task execution via Claude-session integration) depends on all walkers being able to compute ready-task graphs — including suggester-pass tasks for newly-written entries and the standing-tasks reviewer pass per cycle. PR 9 (dashboard upgrade with synthesis blocking + ready-task counts + cycle-review history) depends on PR 8. PR 10 (smoke test) is the final acceptance gate before the new flow is used for a real from-scratch literature review.
 
 The work-review walker without synthesis integration is *not* a valid stopping point — the flow's correctness depends on the auto-accept / block gate being live. Either ship the work-review walker with synthesis or hold both for the same PR.
 

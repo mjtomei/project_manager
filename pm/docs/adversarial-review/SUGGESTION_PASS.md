@@ -72,6 +72,14 @@ Proposed edits to the lit review prose (from work-review draft prose, synthesis 
 
 The suggester pass does not run on entries the human has already acted on. Once `status` is `accepted-as-suggested`, `edited`, or `skipped`, the suggestion is fixed (the suggested-* fields stay in the response block as audit history; the human-* fields are canonical). A *regenerate suggestion* button in the walker (later optional PR) can re-trigger the suggester on demand, useful after the human has edited prior synthesis claims that the suggester's reasoning was anchored to.
 
+## Standing whole-document review — one agent, full block
+
+The standing whole-document tasks (`LITERATURE_REVIEW_FLOW.md` § Standing whole-document tasks) use a variant of the suggester pattern: **one separate reviewer sub-agent answers the whole standing-tasks block in a single pass per cycle**, rather than one suggester per question. This matches `METHODOLOGY.md`'s adversarial-review cycle shape where a single blind reviewer answers Block 1 + Block 2 + Block 4 in one document, not separate agents per question.
+
+The independence requirement is the same — the reviewer is separate from the entry-writing agents and separate from the per-entry suggester sub-agents. The skepticism rules above apply unchanged: assume over-characterization at the cluster level, surface alternative organizations the current layout makes invisible, default to low-confidence on ambiguity, name specific passages when proposing changes.
+
+The output (`CYCLE_REVIEW_<artifact>_iter<N>.md`) is structurally identical to a suggester pass output — populated response blocks, click-through to the reviewer's full reasoning artifact, ready for walker consumption.
+
 ## Companion files
 
 - `plan-litreview-ui.md` — the walker UI that consumes suggestions.
