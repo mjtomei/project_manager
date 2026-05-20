@@ -8,6 +8,37 @@ Used there to subject a research paper to systematic criticism through multiple 
 
 Block 3 (accessibility) and the net-cut / verbosity disciplines of steps 10–11 are *retired from Phase 5* under the new flow — they happen per-work in `WORK_REVIEW.md` (accessibility on each entry, cuts and downgrades on every entry's action set). The Block 3 prompts and the steps-10–11 procedures remain in this file for use on **artifacts produced outside the new flow**, where there is no per-work entry to carry those concerns.
 
+## Citation management — the new flow's approach
+
+The way citations are managed under `LITERATURE_REVIEW_FLOW.md` is **qualitatively different** from the by-hand citation-graph walk + lite-audit-per-cycle that steps 5–6 below document. It's not a port of those steps; it's a different mechanism that does what they did and more. This section summarizes what's new, so a reviewer working under the new flow knows which discipline applies and where to find it.
+
+### Five shifts relative to the old steps 5–6
+
+1. **Every candidate gets attention, not just 5–8 named seeds.** Step 5 walked Scholar forward + backward on a small list of seeds the artifact already named — load-bearing prior art that wasn't in that list could go unsurfaced cycle after cycle. The new flow runs `INITIAL_SCAN.md` over *every* candidate (existing references, key-phrase-derived seeds, prior iterations' crawl outputs) with explicit relevance criteria at the top of each scan doc. Nothing is excluded by lack-of-mention; everything is excluded only by *named criterion against named criterion*.
+
+2. **Per-relevant-work review is generative, not retrospective.** Step 6 was the lite version of an audit applied to citations *the artifact already had*. The new flow's Phase 2 (`WORK_REVIEW.md`) reads each *relevant* work in depth and produces the lit review's treatment of it — including what's load-bearing for the artifact's argument, scope conditions, alternative perspectives, target-audience accessibility notes, proposed cuts/downgrades of prior material the new work makes redundant, and draft prose ready for Phase 5 assembly. The deep read *is* the treatment; there's no separate audit step on a draft that doesn't yet exist.
+
+3. **Synthesis claims are first-class artifacts with an auto-accept / block gate.** Step 5–6 produced findings; the response cycle decided what to do with them through prose edits. The new flow's `SYNTHESIS.md` introduces *synthesis claims* — structured artifacts with id, claim text, supporting citations, status (`pending` / `auto-accepted` / `human-accepted` / `contested` / `superseded`), and dependents. Claims auto-accept when their supporting work-review is `faithful` *and* doesn't contradict prior accepted claims *and* is structurally simple; everything else blocks. Later work-reviews declare dependencies on prior claims by id, and the scheduler runs them in topological order. The mechanism makes shape-of-the-argument decisions explicit, gated, and traceable — instead of implicit in prose where a later author can't see what was already decided.
+
+4. **A separate skeptical suggester sub-agent prepares every human-facing decision.** The old loop's adversarial independence was at the *cycle* level — each cycle's reviewer was a fresh blind Claude. The new flow extends that independence to *every entry*: per `SUGGESTION_PASS.md`, the entry-writing agent produces the entry, then a separate sub-agent reads the entry fresh with the skeptical-disposition prompt (assume over-characterization; check against accepted synthesis claims; surface alternative verdicts the framing makes invisible; default low-confidence on ambiguity; propose `accept` only after independent verification). The suggester populates the walker UI's response block; the human reacts. Same pattern, much finer grain. The standing whole-document reviewer (`SUGGESTION_PASS.md` § Standing whole-document review) applies the same disposition to the assembled artifact each cycle.
+
+5. **Anti-growth discipline at entry creation, not at Phase 5.** Steps 10–11 below document the net-cut rule retrospectively — a cycle that flagged length had to net-cut. The new flow's `WORK_REVIEW.md` step h moves this to entry creation: every Phase 2 work-review's output includes proposed cuts and downgrades of prior material, not just additions. The growth bias is countered at the point material lands, not at a final Phase 5 sweep. Pure-addition work-reviews are flagged by the suggester pass — the default expectation is that incorporating a new work reshapes existing treatment.
+
+### New first-class concerns the old loop didn't have
+
+Two pieces of the new flow have no analog in steps 1–11 below — they're genuinely new mechanisms, not ports:
+
+- **Interaction log on every entry.** Every walker action (and every auto-accept under auto-run mode) appends a structured event to the entry's `interactions:` log: `viewed` with duration, `accept-as-suggested`, `bulk-accept` with scope, `edit` with field, `comment-added` with note, `skip`, `reopen`, `auto-accepted` with mode. The standing reviewer reads the log as part of its context and flags entries that got swept up in a bulk action with zero view time, especially when synthesis claims depend on them. The old loop relied on the cycle's final state of the markdown; the new flow records *what the human (or auto-run) actually did to get there*, so rubber-stamping is visible at the time it happens.
+
+- **Per-cycle standing whole-document tasks.** Eight standing tasks (`LITERATURE_REVIEW_FLOW.md` § Standing whole-document tasks) run every cycle alongside whatever per-work tasks are queued — structural coherence, cluster-to-cluster flow, synthesis-claim coherence, coverage gaps that become next-iteration key-phrase seeds, accessibility flow, narrative coherence, whole-doc verbosity overview, section flow within clusters. One single separate reviewer sub-agent answers the whole block in one pass per cycle, mirroring the existing Block 1 / Block 2 / Block 4 cycle shape. Findings route to the appropriate walker (proposed-edit, synthesis, work-review, crawl-triage), and the standing pass fires every cycle regardless of whether any specific tasks are queued, so structural problems are caught at landing time instead of compounding across iterations.
+
+### When to use which
+
+- Running a literature review on a target text → the new flow (`LITERATURE_REVIEW_FLOW.md`). Steps 5–6 below are superseded; their content is realized in `CITATION_CRAWL.md` (step 5) and `WORK_REVIEW.md` + `SUGGESTION_PASS.md` (step 6) as part of the new pipeline.
+- Reviewing a plan, a research proposal, an Omerta-style paper, or another artifact for which a full literature review isn't the deliverable → this file's Blocks 1, 2, 4 and steps 1–11. The citation-graph walk in step 5 and the per-cycle audit pointer in step 6 still apply because no Phase-1-through-3 pipeline is operating on the artifact.
+
+The two configurations don't conflict — they target different artifact types, and the methodology files describe the same underlying discipline applied at different grains.
+
 ## The prompt
 
 Two thematic blocks. Block 1 attacks substance; Block 2 attacks structure and readability.
