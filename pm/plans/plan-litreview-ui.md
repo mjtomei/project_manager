@@ -1,8 +1,24 @@
 # Plan: Simple HTML Interfaces for the Literature Review Flow
 
-The literature review flow (`pm/docs/adversarial-review/LITERATURE_REVIEW_FLOW.md`) produces structured markdown artifacts at each phase: initial-scan docs (Phase 1), audit docs (Phase 2), crawl-output docs (Phase 3). Walking those docs by eye works but doesn't scale — a moderately sized review can produce 150+ scan entries, 50+ Tier-1 audit entries, and several iterations of crawl output. Simple HTML interfaces let a human consume and intervene on each phase at speed, with the verdicts saved back into the markdown.
+The literature review flow (`pm/docs/adversarial-review/LITERATURE_REVIEW_FLOW.md`) produces structured markdown artifacts at each phase: initial-scan docs (Phase 1), per-work review docs (Phase 2, plus the four pre-flow `CITATION_AUDIT_*.md` artifacts in audit mode), crawl-output docs (Phase 3), synthesis-claim docs, per-cycle whole-document review docs, proposed-edit docs, and a free-form notes file. Walking those docs by eye works but doesn't scale — a moderately sized review can produce 150+ scan entries, 50+ Tier-1 work-review entries, eight standing-task responses per cycle, and several iterations of crawl output.
+
+The interface covers **the full review cycle**, not just one phase. The original framing was citation-audit-only — for the four existing pre-flow audit docs — but the same walker primitive (read entry / pre-filled response / human accept-edit-comment / bulk-accept / write back to markdown) generalizes to every phase of the new flow. The citation-audit walker is preserved as one configuration of the work-review walker (against `CITATION_AUDIT_*.md` files instead of `WORK_REVIEW_*.md` files, with the rewrite-acceptance variant of the entry shape); the rest of the walkers handle the new flow's phases under the same primitive.
 
 The interfaces are **tooling for the process**; the markdown stays canonical. The HTML reads the docs, surfaces the human-decision points, and writes the decisions back as structured annotations in the same docs (or as side files the next phase picks up).
+
+## What the interface covers (full scope)
+
+- **Citation-audit walker** (mode of work-review walker; reads `CITATION_AUDIT_*.md`) — preserved for the four existing pre-flow audits and any future standalone audits of pre-flow artifacts. Rewrite-acceptance flow lands on these.
+- **Initial-scan walker** (Phase 1) — page through scan verdicts, edit/bulk-accept.
+- **Work-review walker** (Phase 2) — read per-work entries, accept/edit synthesis claims, declare dependencies; same template renders citation-audit docs in audit mode.
+- **Crawl-triage walker** (Phase 3) — bulk-tag crawl outputs before they feed the next iteration.
+- **Synthesis-claim walker** — dedicated view of pending / contested / accepted claims, sortable by dependent-count.
+- **Cycle-review walker** — per-cycle standing whole-document review responses (the new equivalent of running an adversarial-review cycle on the in-progress artifact).
+- **Proposed-edits walker** — diff-review for prose changes flowing from work-reviews, synthesis claims, and audit-mode rewrites; bidirectional provenance.
+- **General-comments surface** (`NOTES_<artifact>.md`) — free-text journal across all walkers.
+- **Dashboard** — convergence indicators, funnel ratios, blocking dependencies, ready-task counts, cycle-review iteration history.
+
+Every walker shares the same primitive: agent-suggested responses (per `SUGGESTION_PASS.md`), pre-filled into editable response blocks, with bulk-accept and per-entry Blocking views.
 
 ## Design constraints
 
