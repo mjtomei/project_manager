@@ -61,23 +61,15 @@ Track the iteration count, per-iteration funnel ratio, and per-iteration count o
 
 Assemble the lit review from the accepted synthesis claims and their supporting citations' audit entries, organized by cluster. **No new synthesis decisions are made here** — Phase 5 is pure assembly of decisions already gated through `SYNTHESIS.md`'s protocol during Phases 1–3.
 
-Run an adversarial-review-cycle pass on the resulting prose using `METHODOLOGY.md` — for prose quality, structural critique, and (load-bearing) accessibility per Block 3. Citation discipline and synthesis discipline are both already enforced upstream, so the older review cycle becomes a prose-and-accessibility pass, not a content or synthesis pass.
+Optionally, run an adversarial-review-cycle pass on the resulting prose using `METHODOLOGY.md` — for prose quality and structural critique. Citation discipline, synthesis discipline, **and accessibility** are all already enforced upstream (accessibility lives on the per-work review per `WORK_REVIEW.md`'s target-audience and gloss-notes fields), so the older review cycle is a prose-cleanup pass on an already-disciplined artifact.
 
-#### Net-cut and verbosity discipline (mandatory under Phase 5)
+#### Anti-growth discipline is in Phase 2, not Phase 5
 
-The flow has a structural bias toward growth: every iteration's Phase 2 produces more work-reviews; every accepted synthesis claim is material that wants to live in the lit review's prose. Without an explicit anti-growth rule, the assembled artifact will accumulate exactly the bloat failure mode the old adversarial-review loop kept producing — `METHODOLOGY.md` steps 10–11 documented this with a worked example (`literature-review-living-artifacts.md` grew from ~13k to ~16k words across cycles while its accessibility obligation got worse).
+The flow has a structural bias toward growth: every iteration's Phase 2 produces more work-reviews; every accepted synthesis claim is material that wants to live in the lit review's prose. Without an explicit anti-growth rule, the assembled artifact will accumulate exactly the bloat failure mode the old adversarial-review loop kept producing (`literature-review-living-artifacts.md` grew from ~13k to ~16k words across cycles while its readability got worse).
 
-The new flow inherits the same risk. The mandatory disciplines, ported from `METHODOLOGY.md`:
+The new flow handles this **at entry-creation time, not at Phase 5 cleanup time**: every Phase 2 work-review's proposed actions include not just *additions* (draft prose, new synthesis claims) but also *cuts and downgrades* of existing material that the new work makes redundant or supersedes (see `WORK_REVIEW.md` step g). The growth bias is countered at the point material lands, not retrospectively.
 
-- **Whole-document verbosity pass every Phase 5 iteration.** Independent of whether any reviewer flagged length. The pass reads the document start to finish and, for every paragraph and sentence, asks *can this same point be made with less text?* — applied to original-assembly prose as readily as to recent additions. The pass records its word count before / after and the kinds of cuts made. A pass that found nothing to cut says so explicitly — that is a convergence signal in the same shape as a crawl finding zero new candidates.
-- **Net-cut once length is flagged.** Once any reviewer (the Phase 5 adversarial cycle, or the human) flags the assembled artifact as too long, the next iteration's Phase 5 pass **must produce a net word reduction**. New material from newly-accepted synthesis claims goes in tersely (one sentence per claim where possible); every addition is paired with a larger cut; dense survey material moves to an appendix. If the apply pass nets positive or flat, the iteration has failed and is redone.
-- **Cut against the whole narrative, not just recent additions.** The net-cut is *not* satisfied by trimming whatever the latest iteration added. Every cut pass is a fresh whole-document hunt for text that is unnecessary or verbose *relative to the point it makes*, regardless of which iteration wrote it.
-
-A document that converges on substance but bloats on length has not converged.
-
-#### Iteration thoroughness — later iterations should be harder, not easier
-
-Ported from `METHODOLOGY.md` step 8: later Phase 5 review iterations should produce more findings than earlier ones with the earlier findings already incorporated. If a later iteration produces fewer findings than its predecessor on the same artifact, two possibilities — the artifact has genuinely improved (convergence signal), or the reviewer is starting to agree with the surrounding context (failure mode). The Phase 5 cycle's review file should state which it believes is happening, with one sentence of justification. The suggester pass on each Phase 5 finding also applies its skeptical disposition (per `SUGGESTION_PASS.md`) — the suggestion is allowed to disagree with the reviewer when the reviewer has slid toward agreement.
+Phase 5 still runs a final whole-document verbosity sanity pass — read the assembled document start to finish, ask *can this same point be made with less text?* paragraph by paragraph, and report the word count before / after with the kinds of cuts made. A pass that finds nothing to cut says so explicitly. But this is a final-check sanity pass, not the primary anti-growth mechanism — the primary mechanism is the per-work cut-and-downgrade actions in Phase 2.
 
 ## Why this flow
 

@@ -81,11 +81,26 @@ The entry is structured so Phase 5 can assemble it directly into the lit review 
 - **load-bearing for the artifact** (which claim / scope condition / methodological choice; one or two sentences). Tier-2 entries may have a single short line here.
 - **scope and conditions** (model class, domain, regime — explicit even when obvious; the obvious-elision is the common failure mode).
 - **alternative perspectives** (the discussion-section caveats and competing interpretations the artifact's treatment has to engage with). Tier-2 entries may omit.
+- **target audience and accessibility notes** — who the lit review's treatment of this work is writing for, and the specific glosses / scale anchors / motivations needed for that audience. Different works in the same lit review legitimately have different target audiences (a foundational philosophy reference is read by a more general reader than a technical methodology paper); the notes are per work. Specifically list: undefined jargon to gloss on first use, prior-art dependencies to summarize inline or mark optional, named entities (papers / tools / methods) that need a one-line "what it is and why we mention it," quantitative claims that need a scale anchor in plain English. Tier-2 entries may use a one-line note.
 - **synthesis claims produced** — list of claim ids with their text (full claim recorded in `SYNTHESIS_<artifact>.md`; here just the cross-reference).
 - **dependencies declared** — list of claim ids this review depends on, with one-line rationale per dependency.
-- **draft prose** (optional, Tier 1) — a 2–3 sentence draft of how the lit review will treat this work, ready to drop into Phase 5 assembly. The draft is provisional and gets edited during prose synthesis; producing it now while the source is fresh is cheap and avoids re-reading.
+- **proposed cuts and downgrades of prior material** — the anti-growth action set (see step h).
+- **draft prose** (optional, Tier 1) — a 2–3 sentence draft of how the lit review will treat this work, *using the target-audience and accessibility notes above*, ready to drop into Phase 5 assembly. The draft is provisional and gets edited during prose synthesis; producing it now while the source is fresh is cheap and avoids re-reading.
 
 Save the collected reviews to `WORK_REVIEW_<artifact>.md` (per artifact, all iterations append to the same file with iteration markers).
+
+### h. Propose cuts and downgrades — the anti-growth action set
+
+Every Phase 2 work-review's output includes not just *additions* (draft prose, new synthesis claims) but also *cuts and downgrades* of existing material that this new work makes redundant or supersedes. The flow's structural growth bias is countered at the point material lands, not at a Phase 5 cleanup.
+
+For each new relevant work, propose:
+
+- **Prior work-reviews to downgrade.** If this new work covers the same load-bearing ground as a prior Tier-1 entry but at greater scope or rigor, propose dropping the prior entry to Tier 2. If a prior Tier-2 entry is now redundant entirely, propose dropping it to Tier 3 (ref-list-only) or removing it from the lit review's scope. Each downgrade carries rationale ("X et al. 2025 covers the same demand-inference framing with a larger sample and a more recent model; Y et al. 2023 demoted to Tier 2"). These downgrades are synthesis-level positioning moves and route through the synthesis walker for human review.
+- **Prior synthesis claims to supersede.** If this work changes a prior claim's framing or makes it conditional, propose marking the prior claim `superseded` with rationale, and produce the replacement claim. The block-gate handles dependent work-reviews that anchored to the old claim — they get re-validated against the replacement.
+- **Existing prose to cut.** If draft prose from a prior work-review (or Phase 5 assembled prose) makes a point that this new work makes more crisply, propose cutting the prior prose in favor of the new treatment. Cuts target *redundancy and supersession*, not the new work's own additions.
+- **Sections to consolidate.** When two clusters of work-reviews have drifted into making overlapping arguments, propose merging the clusters. Consolidation moves are also synthesis-level — route through the synthesis walker.
+
+If a work-review proposes no cuts or downgrades and adds new material, the suggester pass per `SUGGESTION_PASS.md` flags it: a new work that is genuinely additive (nothing prior is redundant or superseded) is plausible but not the default expectation. The default expectation is that incorporating a new work reshapes the existing treatment, and a work-review whose action set is *pure addition* needs the rationale stated explicitly. This is the per-work counterpart to the old loop's "net-cut once length is flagged" rule, applied prospectively at every work-review rather than retrospectively at Phase 5.
 
 ## Why this differs from auditing
 
