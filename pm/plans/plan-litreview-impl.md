@@ -5,7 +5,7 @@ Implementation plan for `plan-litreview-ui.md`. The augmented cycle (`pm/docs/ad
 ## What this implements
 
 - **CLI: `pm review <target>`** — launches a Claude session in a new tmux pane with the augmented-cycle methodology context (`METHODOLOGY.md` + `CITATION_USE_AUDIT.md` + `CITATION_CRAWL.md` + skepticism rules) and a target artifact. Target is any file or topic string; the session runs the review / audit-loop / response cycle using its normal `Bash` / `Edit` / `Write` / `Agent` tool use.
-- **CLI: `pm plan session <plan>`** — launches a discussion session in a new pane within a plan's tmux window. Independent of the review-cycle work; for the conversational mode of working on a plan. Plans pane in the TUI gets a keybinding for the same command.
+- **CLI: `pm plan literature-review <plan>`** — launches a literature-review session in a new pane within a plan's tmux window. Same methodology context as `pm review`, but the session lives inside the plan's existing tmux window (next to any other plan-related panes) rather than its own window. Plans pane in the TUI gets a keybinding for the same command.
 - **`pm review ui [--port]`** — launches the walker server (PR 3).
 - **Walker UI** — proposed-changes walker + citation-audit browse + dashboard + general-comments surface (per `plan-litreview-ui.md`).
 - **Markdown format primitives** — response-block parser/writer, interaction-log appender, audit-doc parser, response-doc parser with provenance tags.
@@ -27,29 +27,31 @@ pm/
       templates/       # Jinja2 walker templates (changes, audit_browse, dashboard, notes_pane)
       static/          # one CSS file, one JS file
   cli/
-    plan.py            # pm plan session
+    plan.py            # pm plan literature-review
   tui/
-    plans_pane.py      # keybinding for plan-session launch (existing file)
+    plans_pane.py      # keybinding for plan literature-review launch (existing file)
 ```
 
 State is purely file-backed. Markdown files under `pm/docs/adversarial-review/` are canonical; no JSON cache, no database.
 
 ## PRs
 
-### PR 1: Session-launching CLI commands — `pm plan session` + `pm review <target>`
+### PR 1: Session-launching CLI commands — `pm plan literature-review` + `pm review <target>`
 
-Two CLI commands that launch Claude sessions in new tmux panes. Share the pane-management code so they land together.
+Two CLI commands that launch literature-review sessions in new tmux panes. Share both the pane-management code and the methodology-context loader, so they land together.
 
-- `pm/cli/plan.py` — `pm plan session <plan>` subcommand. Resolves the plan's tmux window via existing pane-management code; opens a new pane running `claude`. Role: `plan-session`. For the conversational mode of working on a plan, independent of any review work.
-- `pm/tui/plans_pane.py` — TUI keybinding (default `s`) on the plans pane invokes `pm plan session` for the selected plan.
-- `pm/review/context.py` — methodology-context loader. Concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files."
-- `pm/review/cli.py` — `pm review <target>` subcommand. Opens a new tmux pane running `claude` with the methodology context as initial input. Target accepts file paths or topic strings. The `ui` subcommand (`pm review ui`, PR 3) is the only other dispatch under `pm review` — anything else is treated as a target. Role: `review`.
-- Artifact-id derivation (for `pm review`): file basename for file targets; slugified prefix for string topics.
+- `pm/review/context.py` — methodology-context loader (shared by both commands). Concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files."
+- `pm/cli/plan.py` — `pm plan literature-review <plan>` subcommand. Resolves the plan's existing tmux window via the existing pane-management code; opens a new pane in *that* window running `claude` with the methodology context loaded against the plan as the target. Role: `literature-review`. Use case: launch a review session next to the plan's other panes so the conversation lives with the plan.
+- `pm/tui/plans_pane.py` — TUI keybinding (default `r`) on the plans pane invokes `pm plan literature-review` for the selected plan.
+- `pm/review/cli.py` — `pm review <target>` subcommand. Opens a new tmux pane (not bound to any existing plan window) running `claude` with the methodology context as initial input. Target accepts file paths or topic strings. The `ui` subcommand (`pm review ui`, PR 3) is the only other dispatch under `pm review` — anything else is treated as a target. Role: `literature-review` (same role as `pm plan literature-review`).
+- Artifact-id derivation: file basename for file targets; slugified prefix for string topics. For `pm plan literature-review`, the artifact id is the plan's filename stem.
 - Tests:
-  - `pm plan session`: pane created with the right role; plans-pane keybinding routes correctly.
-  - `pm review <target>`: context-build produces a valid prompt; file vs string target handled; pane launched in role `review`; `ui` argument routes to the server rather than being treated as a target named "ui".
+  - `pm plan literature-review`: pane created in the plan's window with the right role; methodology context loaded; plans-pane keybinding routes correctly.
+  - `pm review <target>`: context-build produces a valid prompt; file vs string target handled; pane launched in role `literature-review`; `ui` argument routes to the server rather than being treated as a target named "ui".
 
 Dependencies: none. Independent of the UI work.
+
+**Why both commands.** `pm review` and `pm plan literature-review` do the same conceptual thing (start a review session against a target) but differ in *where* the pane lands. `pm review` opens its own pane; `pm plan literature-review` opens inside an existing plan's window so the review session sits alongside the plan's other panes. Same code path, different pane parent.
 
 ### PR 2: Markdown format primitives
 
