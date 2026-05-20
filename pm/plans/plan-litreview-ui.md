@@ -54,14 +54,65 @@ human-verdict:           # blank until human acts
 human-rationale:         # blank
 human-commentary:        # blank
 status: pending          # pending | accepted-as-suggested | edited | skipped
+interactions:            # append-only log of every walker interaction with this entry
 -->
 ```
 
-On *accept Claude's suggestion*: `human-verdict` and `human-rationale` get copied from the suggested fields verbatim; `status` → `accepted-as-suggested`.
+On *accept Claude's suggestion*: `human-verdict` and `human-rationale` get copied from the suggested fields verbatim; `status` → `accepted-as-suggested`; an interaction entry is appended (see below).
 
-On *edit*: `human-verdict` / `human-rationale` / `human-commentary` get whatever the human typed; `status` → `edited`.
+On *edit*: `human-verdict` / `human-rationale` / `human-commentary` get whatever the human typed; `status` → `edited`; interaction entry appended.
 
-On *skip*: nothing changes; `status` stays `pending`.
+On *skip*: nothing changes; `status` stays `pending`; interaction entry appended (so we can tell "viewed and skipped" from "never opened").
+
+### Interaction recording — the audit log for human decisions
+
+Every walker interaction with an entry is logged into the entry's `interactions:` list, append-only. The log distinguishes a deliberate per-entry accept from a bulk-accept-with-filter, a single edit from a re-edit after second thought, a skip-after-reading from a never-opened entry. Without this distinction the dashboard can't tell engagement from rubber-stamping, and a later reviewer can't tell which entries actually got human attention versus which got swept up in a bulk action.
+
+Each interaction entry has a fixed shape:
+
+```yaml
+interactions:
+  - at: 2026-05-20T14:32:11Z
+    action: bulk-accept
+    scope: filter=cluster-3,suggested-verdict=relevant
+  - at: 2026-05-20T15:01:43Z
+    action: comment-added
+    note: "still need to verify against §3 sycophancy framing"
+  - at: 2026-05-20T15:02:18Z
+    action: edit
+    field: human-rationale
+  - at: 2026-05-20T15:04:01Z
+    action: viewed
+    duration-ms: 4200
+```
+
+**Logged actions:**
+
+- `viewed` — the walker rendered this entry and the human spent ≥1s on it (filters out the "scrolled past" case). `duration-ms` captured.
+- `accept-as-suggested` — single-click accept on this entry.
+- `bulk-accept` — accepted as part of a bulk action. `scope` records the filter that drove the bulk (e.g., `filter=cluster-3,suggested-verdict=relevant`); the same `scope` value appears on every entry the bulk action touched, so a later query can reconstruct which entries went together.
+- `edit` — the human modified a field. `field` records which (`human-verdict` / `human-rationale` / `human-commentary` / any synthesis-claim sub-field); the new value is in the response block's main fields. Re-edits append a new `edit` entry; the response block carries the latest value plus the full history.
+- `comment-added` — free-text added to `human-commentary` (or replaced; treated as a logical addition). `note` carries the comment for the log even if commentary is later edited away, so withdrawn comments stay visible in history.
+- `skip` — the human explicitly skipped (button click), as distinct from never having viewed.
+- `reopen` — the human reopened an already-`accepted-as-suggested` / `edited` entry. The block status changes to `reopened` and the entry shows in the un-acted filter again until the human re-acts.
+- `downgrade-to-contested`, `upgrade-from-contested`, `merge`, `split`, `route-to-walker` — the structured synthesis / cycle-review actions that have their own semantics; each appended with its `target` (e.g., the merged-with claim id) for replay.
+
+### Why this matters
+
+- **Dashboard quality signals.** "Of the 38 accepted scan entries this cycle, 31 were bulk-accepted, 4 individually clicked, 3 edited. Median view-time on bulk-accepted entries: 0ms (most were swept up without being opened)." That ratio is a load-bearing engagement indicator. A cycle where the bulk-accept ratio is high *and* the dashboard surfaces zero edited entries is a warning sign — either Claude's suggestions are genuinely exceptional or the human stopped engaging.
+- **Standing-reviewer context.** Next cycle's standing whole-document reviewer agent reads each entry's interaction log as part of its context. An entry that was bulk-accepted with `duration-ms: 0` deserves more scrutiny in the standing pass than one that was viewed for 30 seconds and edited. The reviewer can flag "these 12 entries had zero per-entry attention this cycle; recommend the human walk them next iteration."
+- **Replayability and audit.** The log lets a later reviewer reconstruct what the human actually did, not just what the final state of the markdown is. The four pre-flow audits surfaced cases where an over-characterization slipped past blind reviewers because they were rubber-stamping; the interaction log makes that rubber-stamping visible at the time it happens, not retrospectively.
+- **Per-walker history view.** Every walker has a "Show interactions" toggle per entry that surfaces the interaction history inline. The dashboard has an aggregate view (per-cycle, per-walker, per-cluster). The cycle-review walker's iteration-history sidebar pivots on the log to show "compared to last cycle, the human spent more time per entry / less time / similar time."
+
+### What the standing reviewer agent does with the log
+
+The standing pass (one reviewer sub-agent per cycle, see `LITERATURE_REVIEW_FLOW.md`) gets the interaction log as part of its context window. Its standing-tasks prompt explicitly directs it to:
+
+- Flag entries with zero or near-zero view time that were bulk-accepted, especially if any synthesis claims depend on them.
+- Compare engagement patterns across clusters — if §3 entries are getting careful per-entry treatment but §5 entries are sweeping bulk-accepts, that asymmetry is itself a finding ("the human is engaging differently with cluster X").
+- Notice when comments cluster around specific themes — a recurring concern in commentary across multiple entries is likely a structural issue the cycle-review should engage with.
+
+This is the same skeptical disposition (per `SUGGESTION_PASS.md`) applied to *how the human is interacting with the artifact*, not just to the artifact itself. The interaction log is the data; the standing reviewer is the analyst.
 
 Downstream tooling always reads `human-verdict` first, falls back to `suggested-verdict` when `status` is `pending`. The fall-through means a pipeline can run without human review for fast iterations (relying on Claude's suggestions throughout), but every fall-through is *visible* — the dashboard counts pending entries as the unresolved backlog so the human can come back to them.
 
