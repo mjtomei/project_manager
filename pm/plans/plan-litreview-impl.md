@@ -6,7 +6,7 @@ Implementation plan for `plan-litreview-ui.md`. The augmented cycle (`pm/docs/ad
 
 - **CLI: `pm review <target>`** — launches a Claude session in a new tmux pane with the augmented-cycle methodology context (`METHODOLOGY.md` + `CITATION_USE_AUDIT.md` + `CITATION_CRAWL.md` + skepticism rules) and a target artifact. Target is any file or topic string; the session runs the review / audit-loop / response cycle using its normal `Bash` / `Edit` / `Write` / `Agent` tool use.
 - **CLI: `pm plan session <plan>`** — launches a discussion session in a new pane within a plan's tmux window. Independent of the review-cycle work; for the conversational mode of working on a plan. Plans pane in the TUI gets a keybinding for the same command.
-- **CLI: `pm review ui [--port]`** — launches the walker server.
+- **`pm review ui [--port]`** — launches the walker server (PR 3).
 - **Walker UI** — proposed-changes walker + citation-audit browse + dashboard + general-comments surface (per `plan-litreview-ui.md`).
 - **Markdown format primitives** — response-block parser/writer, interaction-log appender, audit-doc parser, response-doc parser with provenance tags.
 
@@ -36,28 +36,22 @@ State is purely file-backed. Markdown files under `pm/docs/adversarial-review/` 
 
 ## PRs
 
-### PR 1: `pm plan session <plan>` + TUI keybinding
+### PR 1: Session-launching CLI commands — `pm plan session` + `pm review <target>`
 
-Smallest, independent. Lets you open a discussion session in a plan's window from CLI or the plans pane.
+Two CLI commands that launch Claude sessions in new tmux panes. Share the pane-management code so they land together.
 
-- `pm/cli/plan.py` — `pm plan session <plan>` subcommand. Resolves the plan's tmux window via existing pane-management code; opens a new pane running `claude`. Role: `plan-session`.
-- `pm/tui/plans_pane.py` — keybinding (default `s`) invokes the same command for the selected plan.
-- Tests: pane created with the right role; keybinding routes correctly.
+- `pm/cli/plan.py` — `pm plan session <plan>` subcommand. Resolves the plan's tmux window via existing pane-management code; opens a new pane running `claude`. Role: `plan-session`. For the conversational mode of working on a plan, independent of any review work.
+- `pm/tui/plans_pane.py` — TUI keybinding (default `s`) on the plans pane invokes `pm plan session` for the selected plan.
+- `pm/review/context.py` — methodology-context loader. Concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files."
+- `pm/review/cli.py` — `pm review <target>` subcommand. Opens a new tmux pane running `claude` with the methodology context as initial input. Target accepts file paths or topic strings. The `ui` subcommand (`pm review ui`, PR 3) is the only other dispatch under `pm review` — anything else is treated as a target. Role: `review`.
+- Artifact-id derivation (for `pm review`): file basename for file targets; slugified prefix for string topics.
+- Tests:
+  - `pm plan session`: pane created with the right role; plans-pane keybinding routes correctly.
+  - `pm review <target>`: context-build produces a valid prompt; file vs string target handled; pane launched in role `review`; `ui` argument routes to the server rather than being treated as a target named "ui".
 
-Dependencies: none. Independent of the review work.
+Dependencies: none. Independent of the UI work.
 
-### PR 2: `pm review <target>` + methodology context loader
-
-Launches a session with the augmented-cycle context loaded.
-
-- `pm/review/context.py` — concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files."
-- `pm/review/cli.py` — `pm review <target>` subcommand. Opens a new tmux pane running `claude` with the context as initial input. Target accepts file paths or topic strings. The `ui` subcommand (`pm review ui`, PR 4) is the only other dispatch under `pm review` — anything else is treated as a target.
-- Artifact-id derivation: file basename for file targets; slugified prefix for string topics.
-- Tests: context-build produces a valid prompt; file vs string target handled; pane launched in role `review`; `ui` argument routes to the server rather than being treated as a target named "ui".
-
-Dependencies: none.
-
-### PR 3: Markdown format primitives
+### PR 2: Markdown format primitives
 
 The data layer the UI builds on.
 
@@ -67,7 +61,7 @@ The data layer the UI builds on.
 
 Dependencies: none. Ships independently.
 
-### PR 4: Web server skeleton + dashboard + proposed-changes walker
+### PR 3: Web server skeleton + dashboard + proposed-changes walker
 
 - `pm/review/ui/server.py` — FastAPI single-file. File-discovery routes (artifacts, per-cycle docs), dashboard route, proposed-changes walker route.
 - `templates/dashboard.html` — per-cycle status, mode tag, audit-loop convergence indicator, engagement signals.
@@ -76,18 +70,18 @@ Dependencies: none. Ships independently.
 - CLI: `pm review ui [--port]`.
 - Tests: dashboard renders correctly against a fixture multi-cycle state; proposed-changes walker renders fixture proposed changes and round-trips edits.
 
-Dependencies: PR 3.
+Dependencies: PR 2.
 
-### PR 5: Citation-audit browse view + general-comments surface
+### PR 4: Citation-audit browse view + general-comments surface
 
 - `templates/audit_browse.html` — renders `CITATION_AUDIT_CYCLE_N.md` (per-cycle) organized per citation, with click-through to the proposed changes the entry produced.
 - `templates/notes_pane.html` — collapsible side panel included in all walker pages. Reads/writes `NOTES_<artifact>.md` with section-tagged entries and timestamps.
 - Notes file loadable into the session context so general comments influence next cycle's response.
 - Tests: audit-browse renders all four existing `CITATION_AUDIT_*.md` files correctly with no regressions; notes-pane round-trips edits.
 
-Dependencies: PR 4.
+Dependencies: PR 3.
 
-### PR 6: Citations status view (cross-cycle citation dashboard)
+### PR 5: Citations status view (cross-cycle citation dashboard)
 
 The cross-cycle citation-centric view per `plan-litreview-ui.md`. One row per citation that has ever been considered for the artifact, derived from the union of all per-cycle audit files plus the artifact's current citation list.
 
@@ -98,40 +92,22 @@ The cross-cycle citation-centric view per `plan-litreview-ui.md`. One row per ci
 - No state file; view is derived per request.
 - Tests: deduplication on a fixture with the same citation in two cycles' audit files; correct most-recent selection; "needs-audit" filter surfaces the right set on a fixture artifact.
 
-Dependencies: PR 3, PR 5.
-
-### PR 7: End-to-end smoke validation (auto-runnable target)
-
-Four validation paths, runnable as a long-running auto-run from pm.
-
-1. **Walker rendering smoke.** Run `pm review ui` against the four existing pre-flow `CITATION_AUDIT_*.md` files. Each renders correctly in the citation-audit browse view; no regressions.
-2. **Citations-status view smoke.** Same four files plus a fixture artifact citation list. The citations status view derives correctly: deduplicated rows, correct most-recent-audit selection per citation, "needs-audit" filter surfaces the right set, click-through opens links in new tabs.
-3. **Proposed-changes round-trip.** Construct a fixture `REVIEW_RESPONSE_CYCLE_N.md` with mixed reviewer-comment and audit-entry proposed changes. The walker renders them, accepts a few, edits a few, skips a few; the written markdown round-trips through the parser correctly.
-4. **End-to-end cycle in auto-run mode.** A small fixture artifact (a markdown document with 5–10 citations is sufficient — the smoke isn't validating literature-review quality, just integration). Launch a `pm review <target>` on it; instruct the session to run the augmented cycle in auto-run mode. Verify:
-   - `REVIEW_CYCLE_1.md`, `CITATION_AUDIT_CYCLE_1.md`, `REVIEW_RESPONSE_CYCLE_1.md` all appear with the right format.
-   - The audit loop converges (last round surfaces zero new citations).
-   - The response file's proposed changes have `status: auto-accepted` and matching interaction-log entries.
-   - The dashboard shows cycle 1 complete with mode `auto-run`.
-   - All walker views (proposed-changes, audit-browse, citations-status, dashboard) render every produced file without errors.
-
-Idempotent and re-runnable: re-running validates that the existing artifact state still parses and renders correctly after any incremental changes.
-
-Acceptance criteria: all four paths pass; no regressions on the four existing pre-flow audit docs; smoke-test cycle completes within reasonable wall-clock.
-
-Dependencies: PR 1–6.
+Dependencies: PR 2, PR 4.
 
 ## Sequencing
 
-PR 1 + PR 2 + PR 3 are independent and can land in any order. PR 4 needs PR 3. PR 5 needs PR 4. PR 6 needs PR 5 (citations-status view shares the cross-file derivation work with the audit browse). PR 7 needs everything.
+PR 1 and PR 2 are independent of each other and can land in any order. PR 3 needs PR 2. PR 4 needs PR 3. PR 5 needs PR 2 and PR 4 (the citations-status view shares the cross-file derivation work with the audit browse).
 
-A reasonable serial path: 1 → 2 → 3 → 4 → 5 → 6 → 7.
+A reasonable serial path: 1 → 2 → 3 → 4 → 5.
 
-A parallel-friendly path: PR 1 + PR 2 + PR 3 in parallel; then PR 4; then PR 5; then PR 6; then PR 7.
+A parallel-friendly path: PR 1 + PR 2 in parallel; then PR 3; then PR 4; then PR 5.
 
-## Open questions to validate during PR 3
+Each PR's tests cover the slice it ships — there's no separate end-to-end smoke PR. The walker-rendering-against-existing-`CITATION_AUDIT_*.md` regression check lives in PR 4's tests (it's the same code path the audit-browse view uses); the citations-status derivation regression check lives in PR 5's tests.
+
+## Open questions to validate during PR 2
 
 1. **Response-block placement.** Plan picks inline-on-the-proposed-change in `REVIEW_RESPONSE_CYCLE_N.md`. Alternative: a sibling `*.decisions.md` file (keeps the response file pristine but detaches decisions from their source). Inline preferred — the response file is canonical.
-2. **Audit-doc format standardization.** The four existing `CITATION_AUDIT_*.md` files use a similar but not identical format. PR 3's parser should accept both the existing format and the new format-with-`provenance`-tagged proposed-changes; PR 5 may need to render minor variations.
+2. **Audit-doc format standardization.** The four existing `CITATION_AUDIT_*.md` files use a similar but not identical format. PR 2's parser should accept both the existing format and the new format-with-`provenance`-tagged proposed-changes; PR 4 may need to render minor variations.
 3. **Inbox file format for UI → session messages.** Some walker actions (regenerate suggestion, re-run audit on a specific citation) need to message the session. Plan defers to a later PR; for the initial UI scope, walker decisions just write back to the markdown and the next cycle picks them up.
 
 ## Non-goals
