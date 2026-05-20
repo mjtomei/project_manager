@@ -1,5 +1,13 @@
 # Suggestion Pass (methodology)
 
+> **⚠ PARTIALLY SUPERSEDED.** Per-entry suggester sub-agents (one per scan / work-review / crawl / synthesis-claim entry) were part of the retired multi-phase flow. The augmented cycle in `METHODOLOGY.md` uses the response session as the equivalent of the suggester — separate from review, separate from audit agents, with the same skeptical disposition.
+>
+> **What survives:** the skeptical-disposition rules (§ "Suggester disposition — built-in skepticism") apply unchanged to audit agents under `CITATION_USE_AUDIT.md` and to the response session under `METHODOLOGY.md`. The rest is draft history.
+
+---
+
+# Suggestion Pass (DRAFT — partially superseded; skepticism rules retained)
+
 The walker UI's response block (see `plan-litreview-ui.md` § Interaction model) is pre-filled with a *suggested response* for each decision point. The suggestion is written by a **separate sub-agent** — a "suggester pass" — that runs *after* the entry-writing agent has produced the entry. The two agents are independent, mirroring the adversarial-review pattern that the rest of this directory uses: the entry-writing agent produces material; a separate reviewer agent looks at it and proposes how the human should respond.
 
 ## Why a separate sub-agent

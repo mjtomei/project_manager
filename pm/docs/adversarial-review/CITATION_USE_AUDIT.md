@@ -1,18 +1,17 @@
-# Citation-Use Audit (methodology — audit mode for pre-flow artifacts)
+# Citation Audit (methodology)
 
-The dedicated full-text citation **audit** of an existing literature review whose generation pre-dated the new flow. Catches over-characterizations, missed alternative perspectives, and citation-vs-source mismatches that slipped past blind adversarial-review cycles.
+The per-citation audit step inserted into the augmented adversarial-review cycle (`METHODOLOGY.md` § The augmented cycle). Runs after the review and before the response. Catches over-characterizations, missed alternative perspectives, scope-elisions, and citation-vs-source mismatches at the time they would otherwise land, instead of cycles later.
 
-**This is not the Phase 2 methodology for the new literature review flow.** Under that flow there is no existing treatment to audit — Phase 2 *generates* the treatment from a deep read. See `WORK_REVIEW.md` for the generative variant. The two files share most of the deep-reading discipline; the difference is whether the per-work entry critiques an existing passage or produces new lit-review material.
+The audit is **per-citation**, **iterates to convergence within each cycle**, and produces a single doc (`CITATION_AUDIT_CYCLE_N.md`) whose entries carry proposed changes that flow into the response session as additional input alongside the review.
 
-Used in this repo to audit the four pre-flow lit reviews (`literature-review.md`, `literature-review-user-model.md`, `literature-review-user-model-extension.md`, `literature-review-living-artifacts.md`) — see `CITATION_AUDIT_*.md` for the resulting audit docs.
+## When the audit runs
 
-Companion to `WORK_REVIEW.md` (generative variant under the new flow), `INITIAL_SCAN.md`, `CITATION_CRAWL.md`, `SYNTHESIS.md`, and `METHODOLOGY.md`.
+- **Cycle 1 of a literature review**: every existing citation in the artifact gets audited.
+- **Cycle 2+ of a literature review**: every *new* citation the review proposes adding gets audited. Already-audited citations that are unchanged don't get re-audited.
+- **An audit can surface new citations** — work the artifact should also cite (more recent, missed prior art, more authoritative source for an existing claim). Each surfaced citation triggers its own audit *within the same cycle*. The loop converges when an audit pass surfaces no new citations.
+- The response session does not start until the audit loop has converged for the cycle.
 
-## When to run
-
-- **Between cycles, after a large citation expansion** — for example, the bulk addition of references via a lit-search agent. The first-pass audit catches abstract-level over-characterization before the next blind reviewer sees the doc.
-- **As the final pass**, once iterative adversarial-review cycles have converged on substance and structure (METHODOLOGY's "stop when findings get pedantic" signal). The final pass reads full papers on every load-bearing citation.
-- The audit can run multiple times in a project's lifetime; the final one is the publication-readiness gate.
+Historical standalone use of this methodology (the four pre-flow `CITATION_AUDIT_*.md` files on existing lit reviews) is a special case of the in-cycle audit: each was effectively "cycle 1, audit every existing citation, no review preceded it." The mechanics are identical.
 
 ## What it does — and doesn't
 
@@ -68,6 +67,29 @@ Burying the audit in a response file loses the structured per-citation form and 
 ## Parallelization
 
 For a moderate-sized review, chunk citations thematically (8–12 per audit agent, 4 parallel agents). Each agent writes one section of the output doc; sections are merged by the artifact's author. Chunks should be roughly orthogonal to avoid two agents writing different verdicts for the same citation.
+
+## The in-cycle audit loop
+
+Each cycle runs the audit step as a loop until convergence:
+
+1. **Determine the audit set** for this cycle: cycle 1 includes every existing citation in the artifact; cycle ≥ 2 includes every new citation the review proposes adding.
+2. **Run audits in parallel** on the audit set (per *Parallelization* above). Each audit produces a per-citation entry; entries' proposed changes carry `provenance: audit-entry`. Entries that surface *new* citations (works the artifact should also cite) list them in a `surfaced-citations:` field.
+3. **Gather newly-surfaced citations** from the round's entries.
+4. **If newly-surfaced is non-empty**: add them to the audit set and goto step 2.
+5. **If newly-surfaced is empty**: the audit loop has converged for this cycle. Write the final `CITATION_AUDIT_CYCLE_N.md` and proceed to the response step (`METHODOLOGY.md` § The augmented cycle).
+
+Use `CITATION_CRAWL.md` as the sub-methodology when an audit needs to surface new citations (Scholar forward/backward walk, key-phrase derivation). The crawl is *internal to the audit step* under the augmented cycle — there's no separate crawl phase.
+
+A practical bound: in real cycles the loop converges in 1–3 rounds for moderate-sized reviews. If it hasn't converged in 5 rounds, the new-citations the audits are surfacing are likely off-topic or the audit set is too broad — escalate to the human.
+
+## What each audit entry produces
+
+The per-citation audit entry's output (per *Protocol step e* above) feeds two consumers:
+
+- **The response session** reads the entry as additional input alongside the review's findings. The response session decides agree/disagree/partial per proposed change and recommends the apply action.
+- **The walker UI** surfaces the proposed change with provenance tagged `audit-entry` (vs `reviewer-comment` for review-sourced changes). The walker can pivot from any proposed change to its source entry for context.
+
+The two share format — proposed changes are response-block-shaped (suggested-* / human-* / status / interactions) regardless of which source they came from.
 
 ## Why this is necessary
 

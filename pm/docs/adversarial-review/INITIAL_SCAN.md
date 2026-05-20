@@ -1,5 +1,11 @@
 # Initial Scan (methodology)
 
+> **⚠ SUPERSEDED.** Part of the multi-phase from-scratch flow in `LITERATURE_REVIEW_FLOW.md` that has been retired. The current canonical methodology is the augmented adversarial-review cycle in `METHODOLOGY.md`, which does not have a separate initial-scan phase — the review reads the artifact and the audit reads citations. Keeping as draft history.
+
+---
+
+# Initial Scan (DRAFT — superseded)
+
 Phase 1 of the literature review flow (see `LITERATURE_REVIEW_FLOW.md`). The fast funnel: every candidate paper gets a brief look so that the per-work review (Phase 2, `WORK_REVIEW.md`) targets only what matters.
 
 ## Input

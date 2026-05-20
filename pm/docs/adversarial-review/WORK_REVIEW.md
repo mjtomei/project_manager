@@ -1,5 +1,11 @@
 # Per-Work Review (methodology)
 
+> **⚠ SUPERSEDED.** Generative per-relevant-work phase from the retired multi-phase flow. The augmented cycle in `METHODOLOGY.md` does not generate the lit review's treatment per-work; it uses the review/response cycle plus per-citation audits via `CITATION_USE_AUDIT.md`. The narrow-don't-collapse procedural rule in step d below survived to METHODOLOGY.md; the rest is draft history.
+
+---
+
+# Per-Work Review (DRAFT — superseded)
+
 Phase 2 of the literature review flow (see `LITERATURE_REVIEW_FLOW.md`). The detailed deep read of each work Phase 1's initial scan rates *relevant* — and the **primary source of material** for the eventual lit review.
 
 This is not an audit. There is no pre-existing artifact to check against. The per-work review *generates* the lit review's treatment of the work: what the work does, what's load-bearing for the artifact's argument, how the artifact will position itself relative to it, and what synthesis claims the work produces or supports. Composition in Phase 5 is *assembly* of these reviews, not interpretation of them.

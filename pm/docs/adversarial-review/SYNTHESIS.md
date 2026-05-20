@@ -1,5 +1,11 @@
 # Interleaved Synthesis (methodology)
 
+> **⚠ SUPERSEDED.** First-class synthesis claims with an auto-accept / block gate were part of the retired multi-phase flow. The augmented cycle in `METHODOLOGY.md` treats synthesis as response prose, not as gated structured artifacts. The narrow-don't-collapse positioning move that this file motivated survives in METHODOLOGY.md's *Principle* section. Keeping as draft history.
+
+---
+
+# Interleaved Synthesis (DRAFT — superseded)
+
 The literature review's synthesis is built **during** the iterative scan-audit-crawl loop, not after it. Earlier citations' findings produce **synthesis claims** that become part of the in-progress review; later citations' treatment may depend on those claims. The flow handles this by treating synthesis claims as first-class artifacts with explicit auto-accept / block gates.
 
 ## Why interleaved synthesis

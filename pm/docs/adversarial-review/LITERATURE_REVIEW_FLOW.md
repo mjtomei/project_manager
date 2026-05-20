@@ -1,5 +1,13 @@
 # Literature Review Flow
 
+> **⚠ SUPERSEDED.** This file describes a multi-phase from-scratch flow (scan → per-work review → crawl → synthesis claims → standing tasks) that proved to be wrong-shaped. The current canonical methodology is the **augmented adversarial-review cycle** in `METHODOLOGY.md` (review → citation audit loop → response → walker → apply). The per-citation audit step is documented in `CITATION_USE_AUDIT.md`; the citation-graph walk sub-methodology is in `CITATION_CRAWL.md`; the skepticism rules apply to audit agents and the response session.
+>
+> Keeping this file as draft history of the design iteration. **Do not run the flow this file describes**; consult `METHODOLOGY.md` instead.
+
+---
+
+# Literature Review Flow (DRAFT — superseded)
+
 The end-to-end pipeline for producing a literature review using this repo's methodology. This flow **replaces** the earlier draft-then-review-then-audit pipeline with a more consistent, thorough, and auditable iterative process built *from sources* rather than from an LLM first draft.
 
 The flow is runnable on any text artifact — with or without existing references — and on a bare topic or research question. It produces a literature review whose every citation has been seen at least once, whose relevant works have been read in full, and whose adjacent prior art has been surfaced by walked citation graphs and key-phrase searches across both academic and non-academic sources.
