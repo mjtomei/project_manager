@@ -72,13 +72,19 @@ Proposed edits to the lit review prose (from work-review draft prose, synthesis 
 
 The suggester pass does not run on entries the human has already acted on. Once `status` is `accepted-as-suggested`, `edited`, or `skipped`, the suggestion is fixed (the suggested-* fields stay in the response block as audit history; the human-* fields are canonical). A *regenerate suggestion* button in the walker (later optional PR) can re-trigger the suggester on demand, useful after the human has edited prior synthesis claims that the suggester's reasoning was anchored to.
 
-## Standing whole-document review — one agent, full block
+## Phase 0 — cycle-opening monolithic review (one agent, full block)
 
-The standing whole-document tasks (`LITERATURE_REVIEW_FLOW.md` § Standing whole-document tasks) use a variant of the suggester pattern: **one separate reviewer sub-agent answers the whole standing-tasks block in a single pass per cycle**, rather than one suggester per question. This matches `METHODOLOGY.md`'s adversarial-review cycle shape where a single blind reviewer answers Block 1 + Block 2 + Block 4 in one document, not separate agents per question.
+`LITERATURE_REVIEW_FLOW.md`'s Phase 0 fires **one separate reviewer sub-agent at the start of each iteration** that answers the eight standing whole-document tasks in a single pass. This is the direct analog of `METHODOLOGY.md`'s old-loop blind reviewer producing `REVIEW_CYCLE_N.md`: one fresh blind session, the same monolithic output covering substance / structure / coverage / faithfulness / accessibility / coherence, applied at the start of the cycle so its findings drive that iteration's per-entry work.
 
-The independence requirement is the same — the reviewer is separate from the entry-writing agents and separate from the per-entry suggester sub-agents. The skepticism rules above apply unchanged: assume over-characterization at the cluster level, surface alternative organizations the current layout makes invisible, default to low-confidence on ambiguity, name specific passages when proposing changes.
+The Phase 0 reviewer is a *reviewer*, not a *suggester for an existing entry*. Its role is to look at the artifact state holistically and produce findings; the per-entry suggester pattern (above) handles the entries those findings spawn. Both passes are independent of entry-writing agents and of each other; both carry the skepticism rules.
 
-The output (`CYCLE_REVIEW_<artifact>_iter<N>.md`) is structurally identical to a suggester pass output — populated response blocks, click-through to the reviewer's full reasoning artifact, ready for walker consumption.
+The Phase 0 reviewer's specific responsibilities, beyond the eight standing tasks:
+
+- **Identify novel candidate works** that the prior iteration's crawl didn't surface and that the reviewer's own background (or quick lookups during the pass) suggests should be in the candidate set. These flow into this iteration's Phase 1 directly.
+- **Trigger re-audits of prior work-reviews** the reviewer finds suspect — over-characterizing the source, eliding scope, or contradicting a prior accepted synthesis claim. The prior work-review's status flips to `pending re-audit` until the new agent runs.
+- **Recommend the artifact's stopping condition** when the reviewer believes Phase 0 has nothing material to add. A reviewer that finds no novel candidates, no faithfulness concerns, no structural or coverage gaps, and no coherence tensions has provided one of the three convergence conditions (the others are the citation-funnel empty and all synthesis claims terminal).
+
+The output (`CYCLE_REVIEW_<artifact>_iter<N>.md`) is structurally identical to a suggester pass output — populated response blocks, click-through to the reviewer's full reasoning artifact, ready for walker consumption. **What's structurally different from the old loop** is what happens next: instead of one sequential response session addressing every finding, the new flow routes findings into per-entry queues (Phase 1 scan, Phase 2 work-review, Phase 3 crawl, proposed-edits walker, synthesis walker), and parallel sub-agents handle them. The Phase 0 review is one monolithic input that fans out to many parallel actions.
 
 ## Companion files
 

@@ -6,6 +6,28 @@ The flow is runnable on any text artifact — with or without existing reference
 
 ## Phases
 
+### Phase 0 — Cycle-opening monolithic review
+
+Every iteration begins with **one generic review agent** that reads the current state of the artifact (in iteration 1: the target text / plan / topic; in iteration N > 1: the in-progress lit review plus all prior work-reviews, synthesis claims, and the notes file) and produces a **single monolithic review document** — `CYCLE_REVIEW_<artifact>_iter<N>.md` — with many findings.
+
+This is the direct analog of the old adversarial-review loop's `REVIEW_CYCLE_N.md`. Same shape: a fresh blind Claude session, the same skeptical disposition (per `SUGGESTION_PASS.md`), the same kind of monolithic output covering substance, structure, coverage gaps, faithfulness concerns about prior work-reviews, accessibility flow, narrative coherence, verbosity overview, and the synthesis-claim coherence-as-worldview check. The eight standing whole-document tasks are the questions this reviewer answers.
+
+**What's new is what happens to the findings.** The old loop fed `REVIEW_CYCLE_N.md` into a single sequential response session that handled every finding in one pass. The new flow routes findings into **per-entry queues** that drive parallel sub-agent work for the rest of the iteration:
+
+- *Coverage gap* → key-phrase seed appended to the iteration's Phase 3 crawl input set, and to the Phase 1 candidate set if the reviewer named specific works.
+- *Novel candidate work* the reviewer surfaces → entry in iteration's Phase 1 candidate set.
+- *Faithfulness concern about a prior work-review* → re-audit task queued for the work-review walker; the prior work-review's status flips to `pending re-audit` until the new agent runs.
+- *Synthesis-claim contradiction or incoherence* → proposed `contested` or `superseded` status on the affected claim in the synthesis walker.
+- *Cluster reorganization* → proposed work-relocation moves in the work-review walker.
+- *Prose edit* → proposed-edit entry in the proposed-edits walker.
+- *Verbosity finding* → proposed cut entries in the proposed-edits walker, routed to the cluster the reviewer named.
+
+Each routed finding lands as a response-block entry in its target walker, with the monolithic review's rationale as the suggester-rationale (the suggester pass per entry adds independent verification per `SUGGESTION_PASS.md`). Findings without a walker-typed action stay in the cycle-review view as general observations.
+
+The cycle-opening review is what tells iteration N what work to do. The per-entry agents that fire in Phases 1–3 are driven by the union of (the prior iteration's crawl output) and (this cycle's monolithic review's findings).
+
+In auto-run mode, the monolithic review's findings auto-accept (subject to block criteria) and immediately fan out to per-entry queues; in human-reviewed mode the cycle-review walker is the human's first stop each iteration before specific tasks fire.
+
 ### Phase 1 — Initial scan
 
 **Input:** the artifact (a literature review draft, a research plan, a topic seed, or a bare research question), plus a candidate paper set:
