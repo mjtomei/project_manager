@@ -81,16 +81,16 @@ Every audit agent reads the source paper independently and writes its per-citati
 
 The reviewer's *Missing citations* commentary (per `METHODOLOGY.md` Block 1's structured format) is **input context, not a verdict**. The audit may agree, refine, or reject; in any case it verifies independently against the source.
 
-### Repo-history failure modes the disposition is built to catch
+### Failure-mode classes the disposition is built to catch
 
-Each of the following was caught only by retrospective audit, never by self-review or rubber-stamping audits:
+Four recurring classes of over-characterization that confident-sounding entries slip through under deferential or under-verified audits. The skeptical disposition above is what catches them.
 
-- **Cheng et al. 2026 "near-twin" framing** (Cycle 9–10 user-modeling extension): the entry collapsed an attribute-vs-intent distinction the source preserved.
-- **Arora 2023 / Ahmed & Singh 2026 "largely pre-empted"** (Cycle 11 precursor): the entry inherited a lit-search agent's verdict without independently reading the figures.
-- **Quiet-STaR "REINFORCE differential against natural text"** (Cycle 11 precursor): the entry misnamed the reward signal (sibling-rationale-baselined REINFORCE with m-token lookahead, not a likelihood differential against natural text).
-- **FLARE domain conflation** (`CITATION_AUDIT_REGRESSION.md` Tier-2 supplemental): the entry framed FLARE as general-program fuzzing when the source is multi-agent LLM systems.
+1. **Distinction-collapsing framing.** An entry treats a prior work as "near-twin" with the artifact, eliding a distinction the prior work itself preserves. Pattern: the artifact probes one dimension while the prior work probes a different one, and the source paper explicitly preserves the distinction — but the entry's framing collapses it into sameness, making the artifact's residual contribution look smaller than it actually is.
+2. **Inherited-verdict laundering.** An entry takes a prior agent's characterization (e.g., a lit-search summary) at face value without independently reading the source. Symptoms: confident "largely pre-empted by X" claims that vanish when the figures and methodology in X are checked against the artifact's actual scope. The verdict reads as a verification but the verification never happened.
+3. **Mechanism misnaming.** An entry uses a plausible-sounding label for a source's mechanism that doesn't match what the source describes. Pattern: the entry says the source did *method-name-A* (which would land cleanly in the artifact's argument) when the source actually does *method-name-B* (which lands differently or not at all). The methodology section of the source explicitly contradicts the entry, but the entry never reads that far.
+4. **Scope conflation.** An entry generalizes a method's domain beyond what the source claims — applying a method developed for one setting (e.g., a narrow benchmark) as if it covers a broader setting (e.g., general programs). Pattern: the entry summarizes the headline result correctly but elides the scope condition that determines whether the result transfers.
 
-For each, a confident-sounding entry would have rubber-stamped under a deferential or under-verified audit. The skeptical disposition above is what catches them.
+Each class is "the entry sounds right; the source contradicts when checked." The skepticism rules (above) close the gap by requiring the audit to do the check before proposing accept.
 
 ## Consuming the review's missing-citation entries
 
