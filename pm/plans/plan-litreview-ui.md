@@ -66,9 +66,13 @@ The Blocking section is a hyperlink hub: the human can pivot from any entry to i
 
 A blank decision field for 150 scan entries is a wall. A pre-filled field with Claude's reasoning visible turns each entry into a quick *yes / no / no-but-actually*. Most entries the human will accept-as-suggested in <1s; the entries that get edited are where the human's attention is actually adding value. The same shape applies to work-review verdicts, synthesis-claim acceptance, and crawl triage — pre-population is the primitive that makes the walker pace match the human's reading pace.
 
-### When suggestions are written
+### Where suggestions come from
 
-The suggestion is written by the agent at the same time as the entry content — single pass, single file, no separate generation step. This keeps the agent's reasoning context paired with the suggestion (the rationale references the entry's own content), and avoids a walker-time call back to Claude. If a human later wants Claude to *re-suggest* on an edited entry, that's a per-entry "regenerate suggestion" button in the walker (depends on a Claude API call from the server — held to a later PR).
+Suggestions are written by a **separate suggester sub-agent**, not by the entry-writing agent — see `SUGGESTION_PASS.md` for the methodology. After the entry-writing pass produces a scan summary, work-review, crawl candidate, synthesis claim, or proposed edit, a separate suggester pass reads the entry fresh, looks at the source against the artifact's current state and accepted synthesis claims, and writes the suggested response into the entry's response block.
+
+The separation mirrors the adversarial-review pattern this directory uses elsewhere — different agents for entry-writing and reviewing avoid self-confirmation bias on the suggestion. The walker does not show an entry until its suggester pass has also completed (otherwise there's nothing to pre-fill against, defeating the primitive).
+
+Each suggestion carries a pointer to the suggester pass's full reasoning artifact (`SUGGESTIONS_<artifact>_<phase>_iter<N>.md`), so the human can audit the suggester's reasoning by clicking through, the same way they would audit any other agent's output.
 
 ## Architecture
 
@@ -155,9 +159,37 @@ Pending claims sorted by dependent-count descending are the actionable backlog �
 
 Files: `templates/synthesis.html`, `md_parser.parse_synthesis_doc`, `md_writer.update_response_block` (shared), `md_writer.update_claim_status`, `md_parser.compute_dependent_graph`.
 
+### PR: Proposed-edits walker
+
+A dedicated walker view for proposed edits to the lit review prose itself. Standard propose-and-accept diff-review, plus provenance links from each edit back to the work-review entry, synthesis claim, or audit finding that produced it.
+
+**Sources of proposed edits.** Three, all flowing into the same walker:
+1. **Work-review draft prose.** Tier-1 work-review entries' optional draft-prose lines become candidate edits to the lit review when the artifact moves toward Phase 5 assembly. Each draft is a proposed insertion (or replacement of an existing passage) anchored to a cluster and section.
+2. **Synthesis-claim prose implications.** When a synthesis claim is accepted (or contested with a documented disagreement), the lit review's prose has to reflect it. The synthesis walker can emit proposed edits to existing prose that the claim contradicts, with the synthesis claim's id as provenance.
+3. **Audit-mode rewrite proposals.** The four existing `CITATION_AUDIT_*.md` files contain proposed rewrites of existing pre-flow lit-review passages. These flow into the same walker so the same UI handles audit-mode and new-flow edits.
+
+**Per-edit view.** Shows:
+- **before** (verbatim passage from the lit review, with line-range anchor);
+- **after** (the proposed text);
+- **provenance** — a *Why this edit?* section with click-through links to the originating work-review entry, synthesis claim, or audit finding (often more than one — an edit may be supported by multiple work-reviews / claims);
+- **diff visualization** — inline word-level diff so the human sees what actually changed without re-reading the whole passage;
+- **response block** — Claude's suggester pass result, pre-filled with `accept` / `modify` / `reject` plus rationale and optional commentary, per the *Interaction model*.
+
+**Provenance links from works to changes.** This is the inverse direction the user asked for — from a work-review entry, the walker shows *all proposed edits that descend from this work-review*. Click-through both directions: walk from "this edit" → "the work-reviews that produced it" and from "this work-review" → "the edits it produced." The decision graph becomes navigable from any node to any of its consequences.
+
+**Cluster/section grouping.** Proposed edits are grouped by lit-review section (the section they target), so the human can review all edits to §3 together rather than scattering attention. Bulk-accept-within-section is the common pattern.
+
+**Apply flow.** Accepted edits collect into a sibling `EDITS_<artifact>.applied.md` file. An **Apply accepted edits** action produces a unified diff against the lit review document for human review before commit (no direct write-through; the diff-review gate is preserved). The diff lands as a PR-ready set of changes, with edit provenance preserved as comments in the commit message.
+
+**Conflict detection.** Two accepted edits that target overlapping line ranges flag a conflict at apply-time, blocking the apply action until the human resolves which edit wins (typically by editing one of them or by accepting both as a sequential pair the apply step orders).
+
+Files: `templates/edits.html`, `md_parser.parse_proposed_edits` (pulls from work-review drafts, synthesis-claim implications, audit-mode rewrites), `md_parser.compute_edit_provenance` (graph traversal back to originators), `md_writer.update_response_block` (shared), `apply-edits` CLI command (produces unified diff with provenance in commit message).
+
 ### PR: Ready-task execution via Claude-session integration
 
 The walker can identify ready tasks (entries whose dependencies are all satisfied, plus newly-must-include crawl candidates that need scanning, plus relevant works that need work-reviews). But the walker doesn't run them — it surfaces them and asks a Claude session to launch the sub-agents.
+
+Ready tasks include both **entry-writing** tasks (for newly-must-include candidates that need scanning, newly-relevant works that need work-reviews, etc.) and **suggester-pass** tasks (queued automatically when an entry-writing task completes). The two task types are dispatched the same way — the inbox carries them as a unified queue, ordered by the dependency graph.
 
 **Mechanism.** A designated Claude session — typically the session that launched the walker, or one explicitly bound via a `--session-id` flag — listens for ready-task requests from the walker. Two viable transports:
 
@@ -209,7 +241,7 @@ These are the choices baked into the plan above; flag any to revisit:
 5. **Block strictness.** Plan picks hard block on pending/contested dependencies (dependent audits cannot proceed). Alternative: soft block (the audit can proceed with a "**Blocked by:** [claim-id]" warning baked in, to be resolved later). Hard block is safer; soft block is faster but creates a class of "claims-pinned" audits that need re-validation when claims resolve.
 6. **Hotkeys.** Plan picks j/k for next/previous, a/r for accept/reject, m for modify, s for "show blocking claim." Alternative: 1–4 number keys for verdict selection.
 7. **Server model.** Plan picks FastAPI single-file. Alternative: pure-stdlib `http.server` (zero dependencies) at the cost of more boilerplate per route.
-8. **Suggestion-generation timing.** Plan picks *agent-time* — the scan / work-review / crawl / synthesis agents write the suggestion in the same pass as the entry, paired with the reasoning context. Alternative: *walker-time* — the server calls Claude on demand when the human opens the walker. Walker-time is more expensive (per-entry Claude calls), more brittle (server needs API keys), and slower at the UI; agent-time is the default. A per-entry **regenerate suggestion** button using walker-time generation is a later optional PR.
+8. **Suggester-pass independence.** Plan picks *separate suggester sub-agent* per `SUGGESTION_PASS.md` — the entry-writing and suggestion-writing passes run as independent agent invocations, mirroring the adversarial-review pattern. Alternative: *same-agent suggestion* (the entry-writing agent writes both content and suggestion in one pass), which is cheaper but suffers from self-confirmation bias. Separate sub-agent is the default. A per-entry **regenerate suggestion** button (later optional PR) re-fires the suggester pass on demand for entries the human has touched in ways the suggester should know about.
 9. **Bulk-accept default scope.** Plan picks *current filter* (only entries matching the active filter get bulk-accepted) — safer than *whole document*. Alternative: whole document with a confirmation modal. The current-filter default makes the bulk path opt-in to the scope, which avoids the "I clicked the wrong button and accepted 80 things" footgun.
 10. **Session-integration transport.** Plan picks filesystem inbox (`READY_TASKS_<artifact>.md` + `.results.md` files) as the default. Alternative: `RemoteTrigger` to a bound Claude Code session for lower-latency coupling. Filesystem is the default because it's debuggable, doesn't require live coupling, and the inbox is itself an audit record of what was requested. `RemoteTrigger` may be added later for users who want tighter coupling.
 11. **Fire mode.** Plan picks an explicit *Fire ready tasks* button (human-triggered batch). Alternative: *auto-fire on accept* — every time a decision unblocks downstream work, the unblocked tasks fire immediately. Auto-fire is convenient but creates execution thrash and makes the audit trail harder to read (which decision caused which task). Explicit-fire is the default; auto-fire is an opt-in toggle.
@@ -223,7 +255,7 @@ These are the choices baked into the plan above; flag any to revisit:
 
 ## Sequencing note
 
-PR 1 (skeleton) must land first. PRs 2–5 (scan walker, work-review walker with synthesis integration, crawl triage, synthesis-claim walker) can land in any order after the skeleton, though the work-review walker and synthesis walker share `md_writer.update_claim_status` so are easier to land together. PR 6 (ready-task execution via Claude-session integration) depends on all four walkers being able to compute ready-task graphs from their entries' Blocking views. PR 7 (dashboard upgrade with synthesis blocking + ready-task counts) depends on PR 6. PR 8 (smoke test) is the final acceptance gate before the new flow is used for a real from-scratch literature review.
+PR 1 (skeleton) must land first. PRs 2–5 (scan walker, work-review walker with synthesis integration, crawl triage, synthesis-claim walker) can land in any order after the skeleton, though the work-review walker and synthesis walker share `md_writer.update_claim_status` so are easier to land together. PR 6 (proposed-edits walker) depends on the work-review and synthesis walkers, since its provenance graph reaches into both. PR 7 (ready-task execution via Claude-session integration) depends on all walkers being able to compute ready-task graphs — including suggester-pass tasks for newly-written entries. PR 8 (dashboard upgrade with synthesis blocking + ready-task counts) depends on PR 7. PR 9 (smoke test) is the final acceptance gate before the new flow is used for a real from-scratch literature review.
 
 The work-review walker without synthesis integration is *not* a valid stopping point — the flow's correctness depends on the auto-accept / block gate being live. Either ship the work-review walker with synthesis or hold both for the same PR.
 
