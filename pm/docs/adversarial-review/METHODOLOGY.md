@@ -39,6 +39,37 @@ The audit agents and the response session both read prior agents' output adversa
 
 The augmentations apply when running this cycle to produce or maintain a literature review. They are not required when running the cycle on a plan, a research proposal, or another artifact for which the citation audit is not the load-bearing concern — those configurations can use the original cycle without the audit step.
 
+### Operational mechanics — how the session drives the cycle
+
+The session drives the cycle. After writing each artifact, the session updates `STATE_<artifact>.md` to reflect the new phase, then proceeds automatically to the next step — except at `awaiting-human-review`, where it waits for the human to signal via the walker's Apply button.
+
+The state file (`STATE_<artifact>.md`):
+
+```yaml
+current-cycle: 3
+current-phase: review        # review | audit | response | awaiting-human-review | applying | complete
+mode: human-reviewed         # auto-run | human-reviewed
+last-transition: 2026-05-20T14:32:00Z
+```
+
+The session writes this file at every phase transition; the walker reads it on every page load and reacts to live changes via SSE pushes (per `plan-litreview-ui.md`).
+
+**Transitions per cycle:**
+
+1. **Cycle start.** Session sets `current-phase: review`, increments `current-cycle` (or initializes it to 1). Writes `REVIEW_CYCLE_N.md` via a fresh blind sub-agent answering Block 1 / Block 2 / Block 3 / Block 4 in one pass (with Block 1 emitting the *Missing citations* structured section per the prompt).
+2. **Review complete.** Session sets `current-phase: audit`. Invokes the citation audit loop per `CITATION_USE_AUDIT.md` § The in-cycle audit loop — typically as a `/loop` (Claude Code's dynamic-mode `/loop` is the natural fit for the audit's iterate-until-no-new-citations-surface convergence; see `CITATION_USE_AUDIT.md` § The in-cycle audit loop). Loop iterates until convergence; produces `CITATION_AUDIT_CYCLE_N.md`.
+3. **Audit converged.** Session sets `current-phase: response`. Writes `REVIEW_RESPONSE_CYCLE_N.md` via a separate fresh sub-agent reading the review *and* the audit doc together; each proposed change gets a response-block with `suggested-verdict`, `suggested-rationale`, and `provenance: reviewer-comment | audit-entry`.
+4. **Response complete.** Session sets `current-phase` based on mode:
+   - `mode: auto-run` → `current-phase: applying` (no walker gate; proceed directly).
+   - `mode: human-reviewed` → `current-phase: awaiting-human-review` (wait for the Apply signal).
+5. **Awaiting-human-review (human-reviewed only).** Session schedules a `ScheduleWakeup` at a generous interval (e.g., 1800–3600 seconds) and yields. Each wakeup re-reads `STATE_<artifact>.md`; if `current-phase` is still `awaiting-human-review`, schedule another wakeup; if it's `applying`, proceed to step 6. The walker's Apply button is what writes that transition. The session does not burn tokens while waiting — wakeups are infrequent and short.
+6. **Applying.** Session reads `REVIEW_RESPONSE_CYCLE_N.md`, applies accepted changes to the artifact (changes whose effective verdict — `human-verdict` if present, else `suggested-verdict` — is `accept` or `modify`), commits the result.
+7. **Complete.** Session sets `current-phase: complete`. The cycle is archived; the walker can still render it read-only. Next cycle starts at step 1 with `current-cycle: N+1`.
+
+**Why ScheduleWakeup not active polling.** Active polling during `awaiting-human-review` would burn Claude tokens continuously while the human is away from the keyboard. ScheduleWakeup yields control until the next wakeup fires; each wakeup is a single short check against the state file. The cache TTL trade-off matters (per Claude Code's ScheduleWakeup guidance, delays of 1200s+ are appropriate when waiting on external state that changes on human timescales — minutes to hours).
+
+**Mode is per-cycle.** The mode field can change between cycles. Early cycles typically run `auto-run` (build the artifact up); later cycles switch to `human-reviewed` once the draft is substantive enough to be worth attending to.
+
 ## The prompt
 
 Two thematic blocks. Block 1 attacks substance; Block 2 attacks structure and readability.

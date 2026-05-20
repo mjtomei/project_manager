@@ -92,7 +92,24 @@ Previous cycles are always read-only regardless of their state — they're histo
 
 The dashboard has a cycle selector (dropdown, latest first). Selecting a prior cycle navigates every walker view to that cycle's files. The selector defaults to the current cycle; selecting a prior cycle is the only way to leave it.
 
-A small breadcrumb on every walker page (`Cycle 3 (current) · awaiting human review · editable`) tells the human which cycle they're looking at and whether they can edit. Prior-cycle breadcrumbs read `Cycle 2 · complete · read-only`.
+## Phase indication — breadcrumb and status panel
+
+A small breadcrumb on every walker page tells the human three things at once: which cycle they're looking at, what phase the session is in, and what (if anything) the human can do right now. The breadcrumb is phase-aware:
+
+| Phase | Breadcrumb (current cycle) | What the human can do |
+|---|---|---|
+| `review` | `Cycle 3 · review in progress` | Wait or browse prior cycles. |
+| `audit` | `Cycle 3 · audit loop running · N citations audited` | Wait or browse prior cycles. |
+| `response` | `Cycle 3 · response in progress` | Wait or browse prior cycles. |
+| `awaiting-human-review` | `Cycle 3 · ready for your review · editable` | Walk the proposed changes; click **Apply** when done. |
+| `applying` | `Cycle 3 · applying accepted changes` | Wait or browse prior cycles. |
+| `complete` | `Cycle 3 · complete · read-only` | Browse this cycle's history, or move to cycle 4 when it starts. |
+
+Prior-cycle breadcrumbs are always `Cycle N · <phase> · read-only` regardless of how the cycle ended.
+
+The dashboard mirrors this with a larger **Status** panel: the current phase, what's happening, a one-line indication of what the human can do, and (when applicable) a progress hint such as the audit-loop round count. The panel updates instantly via SSE when phase transitions land in `STATE_<artifact>.md`.
+
+This is also where the conversation surface (the session, in the tmux pane) and the visual surface (the walker) stay in sync — the human can see at a glance whether they're being asked to look or to act, without having to context-switch into the session to find out.
 
 ## Session-controlled UI focus
 
