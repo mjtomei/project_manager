@@ -18,24 +18,26 @@ The Claude session is the runner. No Python runner, no auto-loop driver — auto
 
 ## Architecture
 
+**Code lives under `pm_core/`** (Python). **`pm/` is the per-project data directory** — `project.yaml`, plans, docs (including the per-review directories under `pm/docs/adversarial-review/reviews/`). No Python under `pm/`.
+
 ```
-pm/
+pm_core/
   review/
     __init__.py
     md_parser.py       # response-block + interaction-log + audit-doc + response-doc + state + focus parsers
     md_writer.py       # response-block writes, interaction-log appends, state/focus/notes writes
-    registry.py        # project.yaml reviews-list read/write (resume vs create logic)
-    paths.py           # review-id → directory resolution; per-review file paths
-    cli.py             # pm review <target> | pm review ui
+    registry.py        # pm/project.yaml reviews-list read/write (resume vs create logic)
+    paths.py           # review-id → directory resolution; per-review file paths under pm/docs/adversarial-review/reviews/<id>/
+    cli.py             # pm review <target> | pm review ui (subcommand impl; pm CLI router routes here)
     context.py         # methodology-context loader (METHODOLOGY + CITATION_USE_AUDIT + CITATION_CRAWL)
     ui/
       server.py        # FastAPI single-file server with SSE
       templates/       # Jinja2 walker templates (changes, audit_browse, citations, dashboard, notes_pane)
       static/          # one CSS file, one JS file
   cli/
-    plan.py            # pm plan literature-review
+    plan.py            # existing file; gains the `literature-review` subcommand under `pm plan`
   tui/
-    plans_pane.py      # keybinding for plan literature-review launch (existing file)
+    plans_pane.py      # existing file; gains the keybinding for plan literature-review launch
 ```
 
 State is purely file-backed. Markdown files (under each review's directory; see *Project registration and directory layout* below) are canonical; no JSON cache, no database.
@@ -275,12 +277,12 @@ Symmetrically, the session uses its own filesystem watch (its `watchdog`/`Bash`/
 
 Two CLI commands that launch literature-review sessions in new tmux panes plus the `project.yaml`-backed review registry. Share the pane-management code, the methodology-context loader, and the registry / path resolution, so they land together.
 
-- `pm/review/registry.py` — read/write `project.yaml`'s `reviews:` list. APIs: `get_review(id)`, `create_review(id, target, target-type)`, `set_status(id, status)`, `list_active()`. Round-trip-preserves the surrounding yaml structure (other top-level keys like `plans`, `prs` remain untouched).
-- `pm/review/paths.py` — review-id → directory resolution and per-review file paths. Constants: `REVIEWS_ROOT = pm/docs/adversarial-review/reviews/`. Functions: `dir_for(id)`, `state_path(id)`, `focus_path(id)`, `notes_path(id)`, `cycle_paths(id, n)`. Creates the per-review directory on first access.
-- `pm/review/context.py` — methodology-context loader (shared by both commands). Concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, the review's `STATE.md` if it exists, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files. State lives in your review's directory at `<review-dir>/`."
-- `pm/cli/plan.py` — `pm plan literature-review <plan>` subcommand. Resolves the artifact id from the plan's filename stem. Looks up the review in the registry (resume if found and active; create if not found; warn if archived). Resolves the plan's existing tmux window via the existing pane-management code; opens a new pane in *that* window running `claude` with the methodology context. Role: `literature-review`.
-- `pm/tui/plans_pane.py` — TUI keybinding (default `r`) on the plans pane invokes `pm plan literature-review` for the selected plan. The pane also surfaces a small badge next to each plan that has an active review.
-- `pm/review/cli.py` — `pm review <target>` subcommand. Target can be a file path (`target-type: file`), a plan id (`target-type: plan`, resolved via the plans registry), or a topic string (`target-type: topic`). Same resume-or-create flow against the registry. Opens a new tmux pane (not bound to any plan window) with the methodology context. `pm review ui` is the only other dispatch under `pm review` — anything else is treated as a target.
+- `pm_core/review/registry.py` — read/write `project.yaml`'s `reviews:` list. APIs: `get_review(id)`, `create_review(id, target, target-type)`, `set_status(id, status)`, `list_active()`. Round-trip-preserves the surrounding yaml structure (other top-level keys like `plans`, `prs` remain untouched).
+- `pm_core/review/paths.py` — review-id → directory resolution and per-review file paths. Constants: `REVIEWS_ROOT = pm/docs/adversarial-review/reviews/`. Functions: `dir_for(id)`, `state_path(id)`, `focus_path(id)`, `notes_path(id)`, `cycle_paths(id, n)`. Creates the per-review directory on first access.
+- `pm_core/review/context.py` — methodology-context loader (shared by both commands). Concatenates `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md`, the review's `STATE.md` if it exists, and a target preamble. The framing instruction: "you are running the augmented adversarial-review cycle on the target below; produce REVIEW_CYCLE_N.md, then the audit loop, then REVIEW_RESPONSE_CYCLE_N.md, per the methodology files. State lives in your review's directory at `<review-dir>/`."
+- `pm_core/cli/plan.py` — `pm plan literature-review <plan>` subcommand. Resolves the artifact id from the plan's filename stem. Looks up the review in the registry (resume if found and active; create if not found; warn if archived). Resolves the plan's existing tmux window via the existing pane-management code; opens a new pane in *that* window running `claude` with the methodology context. Role: `literature-review`.
+- `pm_core/tui/plans_pane.py` — TUI keybinding (default `r`) on the plans pane invokes `pm plan literature-review` for the selected plan. The pane also surfaces a small badge next to each plan that has an active review.
+- `pm_core/review/cli.py` — `pm review <target>` subcommand. Target can be a file path (`target-type: file`), a plan id (`target-type: plan`, resolved via the plans registry), or a topic string (`target-type: topic`). Same resume-or-create flow against the registry. Opens a new tmux pane (not bound to any plan window) with the methodology context. `pm review ui` is the only other dispatch under `pm review` — anything else is treated as a target.
 - **Artifact-id derivation:** file basename (slugified) for file targets; plan filename stem for plan targets; slugified topic for topic targets.
 - **Resume vs create.** When `pm review` or `pm plan literature-review` is invoked, the registry decides:
   - registry has `id` with `status: active` → resume (open pane against the existing directory).
@@ -306,7 +308,7 @@ Dependencies: none. Ships independently.
 
 ### PR 3: Web server skeleton + dashboard + proposed-changes walker + lock states + cycle navigation + SSE pushes + Apply button
 
-- `pm/review/ui/server.py` — FastAPI single-file. Reads `project.yaml`'s `reviews:` list to enumerate reviews. Per-review routes (dashboard, walkers) keyed by review id; resolves files via `pm/review/paths.py`. Watches each review's `STATE.md`, `UI_FOCUS.md`, and the current cycle's `REVIEW_RESPONSE_CYCLE_N.md` via `watchdog` (filesystem inotify). Exposes a single `/events?review=<id>` SSE endpoint that pushes events when any watched file changes.
+- `pm_core/review/ui/server.py` — FastAPI single-file. Reads `project.yaml`'s `reviews:` list to enumerate reviews. Per-review routes (dashboard, walkers) keyed by review id; resolves files via `pm_core/review/paths.py`. Watches each review's `STATE.md`, `UI_FOCUS.md`, and the current cycle's `REVIEW_RESPONSE_CYCLE_N.md` via `watchdog` (filesystem inotify). Exposes a single `/events?review=<id>` SSE endpoint that pushes events when any watched file changes.
 - `templates/dashboard.html` — top-level list of all reviews from the registry (active first, archived collapsed). Per-review row: name + target + current cycle + current phase + mode tag + engagement signals. Click into a review for the per-cycle status view: review/audit-loop/response readiness, audit-loop convergence indicator, **cycle selector** (dropdown, latest first; defaults to current cycle).
 - `templates/changes.html` — paginated proposed-changes walker per the *What the walker covers* section. Filterable by provenance, target section, suggested verdict, status. Per-entry accept/edit/skip actions; page-level bulk-accept-per-filter.
 - **Apply button.** Visible only when `STATE.md`'s `current-phase` is `awaiting-human-review` and the rendered cycle is the current cycle. Clicking it writes `STATE.md`, transitioning the phase to `applying` (using `md_writer.update_state`). The session — watching the same file — sees the transition and proceeds with the apply step. This is the entire UI → session communication channel.
