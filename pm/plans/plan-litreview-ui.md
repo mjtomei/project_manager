@@ -60,7 +60,8 @@ Per-cycle dashboard records the cycle's mode (`auto-run` / `human-reviewed` / `m
 ## What the walker covers
 
 - **Proposed-changes walker** — paginated view of every proposed change in `REVIEW_RESPONSE_CYCLE_N.md`. Filterable by provenance (`reviewer-comment` / `audit-entry`), target section, suggested verdict, status. Click-through from `source-anchor` to the originating review finding or audit entry.
-- **Citation-audit browse view** — per-citation view of `CITATION_AUDIT_CYCLE_N.md`. One section per audited citation, showing the audit entry (tier, doc passage, source content, verdict, proposed rewrite, surfaced citations). Click-through to the proposed change(s) in the proposed-changes walker.
+- **Citation-audit browse view** — per-cycle view of `CITATION_AUDIT_CYCLE_N.md`. One section per audited citation in that cycle, showing the audit entry (tier, doc passage, source content, verdict, proposed rewrite, surfaced citations). Click-through to the proposed change(s) in the proposed-changes walker.
+- **Citations status view** — *cross-cycle*, citation-centric. One row per citation that has ever been considered for the artifact (currently in it, audited, proposed for addition by the review, proposed for removal). Per-citation fields: title + authors + year, **clickable link that opens the source in a new tab**, current tier (1 / 2 / 3), current classification (faithful / over-characterizes / under-characterizes / mischaracterizes / unverified), argument for that classification (verdict rationale + the load-bearing verbatim quote from source), most-recent-audit cycle, and status in the artifact (`in-artifact` / `proposed-addition` / `proposed-removal` / `superseded`). Filterable by any of those fields. Click a row to expand the most recent audit entry inline. The view is *derived* from the union of `CITATION_AUDIT_CYCLE_*.md` files plus the in-artifact citation list — re-derived per request, no separate state file.
 - **Dashboard** — per-cycle status: review / audit-loop convergence / response readiness; mode tag; engagement signals; convergence indicator for the audit loop (zero newly-surfaced citations in the last round).
 - **General-comments surface** (`NOTES_<artifact>.md`) — free-text journal across all walkers, section-tagged, append-only with timestamps. The response session reads the notes file as part of its context.
 
@@ -78,9 +79,30 @@ Files: `templates/changes.html`, walker route in `server.py`, `md_parser.parse_r
 
 ### PR: Citation-audit browse view
 
-Renders `CITATION_AUDIT_CYCLE_N.md` organized per citation, with click-through to the proposed changes the audit entry produced. Read-only on the audit content itself (the audit is the source of truth; decisions live on the proposed change in the response file).
+Renders `CITATION_AUDIT_CYCLE_N.md` organized per citation in *that cycle*, with click-through to the proposed changes the audit entry produced. Read-only on the audit content itself (the audit is the source of truth; decisions live on the proposed change in the response file).
 
 Files: `templates/audit_browse.html`, route, `md_parser.parse_audit_doc`.
+
+### PR: Citations status view
+
+Cross-cycle citation-centric view. Renders one row per citation that has ever been considered for the artifact, derived from the union of all `CITATION_AUDIT_CYCLE_*.md` files and the artifact's current citation list.
+
+Per-row content:
+- **Title + authors + year**, formatted compactly.
+- **Clickable link** that opens the source in a new tab (`target="_blank" rel="noopener"`).
+- **Current tier** (1 / 2 / 3) — from the most-recent audit entry. Empty if not yet audited.
+- **Current classification** — `faithful` / `over-characterizes` / `under-characterizes` / `mischaracterizes` / `unverified`. From the most-recent audit entry's verdict.
+- **Argument** — the verdict rationale plus the load-bearing verbatim quote from the source (the "what the source actually says" field of the audit entry). Truncated to one line in the table; full text on row expansion.
+- **Most-recent-audit cycle** (e.g., "cycle 2" or "—" if never audited).
+- **Status in artifact** — `in-artifact` (currently cited) / `proposed-addition` (a review or audit proposes adding) / `proposed-removal` (a review proposes removing) / `superseded` (a later citation supersedes this one per a prior accepted change).
+
+Filterable by: tier, classification, status, cycle audited, presence-or-absence of a working link. Sortable by any column. A "needs audit" filter surfaces citations with status `in-artifact` *or* `proposed-addition` that have no audit entry yet.
+
+Click-to-expand a row to show the most recent audit entry inline (doc passage + source content + verdict + proposed rewrite + any surfaced citations) and links to that cycle's `CITATION_AUDIT_CYCLE_N.md` for the full audit context.
+
+The view is *derived* from disk on each request — no separate state file. The cost is one parse pass over all the audit files plus the artifact's citation list, which for moderate-sized reviews is a few hundred KB total and well within a fast page-load budget.
+
+Files: `templates/citations.html`, route, `md_parser.derive_citation_status` (cross-file union), `md_parser.extract_artifact_citations`.
 
 ### PR: Dashboard
 
