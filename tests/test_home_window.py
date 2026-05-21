@@ -5,12 +5,14 @@ from unittest.mock import patch
 import pm_core.home_window as home_window
 from pm_core.cli.helpers import format_pr_line
 from pm_core.home_window.pr_list import (
+    DEFAULT_SIZE,
     PrListProvider,
     _PaintState,
     _compose,
     _format_relative,
     _hash,
     _render_content,
+    _terminal_size,
     _truncate,
 )
 
@@ -227,6 +229,51 @@ class TestRenderHelpers:
         lines = screen.split("\n")
         assert len(lines) == 5
         assert lines[0] == "header"
+
+    def test_terminal_size_falls_back_when_not_a_tty(self):
+        # os.get_terminal_size raises OSError when stdout isn't a TTY
+        # (e.g. captured under pytest); the loop must keep rendering.
+        with patch("pm_core.home_window.pr_list.os.get_terminal_size",
+                   side_effect=OSError):
+            assert _terminal_size() == DEFAULT_SIZE
+
+    def test_render_content_empty_list(self):
+        with patch("pm_core.store.find_project_root", return_value="/tmp"), \
+             patch("pm_core.store.load",
+                   return_value={"prs": [], "project": {}}):
+            body = _render_content(80, 24)
+        assert body == "No open PRs."
+
+    def test_render_content_load_failure_truncated_to_width(self):
+        # Error path must respect width too (it goes straight to stdout).
+        with patch("pm_core.store.find_project_root",
+                   side_effect=FileNotFoundError("boom")):
+            wide = _render_content(80, 24)
+            narrow = _render_content(20, 24)
+        assert "error loading project" in wide
+        # Narrow render is truncated to width with an ellipsis, never overflows.
+        assert all(len(line) <= 20 for line in narrow.split("\n"))
+        assert narrow.endswith("…")
+
+    def test_tiny_pane_still_emits_header_no_crash(self):
+        # Spec edge case: height < 3 (header + ruler) must not crash and
+        # must still surface at least the (truncated) header line.
+        prs = [
+            {"id": f"pr-{i}", "title": f"Title number {i}",
+             "status": "in_progress",
+             "updated_at": f"2026-01-{i:02d}T10:00:00+00:00"}
+            for i in range(1, 6)
+        ]
+        for height in (1, 2):
+            with patch("pm_core.store.find_project_root", return_value="/tmp"), \
+                 patch("pm_core.store.load", return_value={"prs": prs,
+                                                           "project": {}}):
+                body = _render_content(80, height)
+            screen = _compose("pm pr list -t --open  (updated just now)",
+                              body, 80, height)
+            lines = screen.split("\n")
+            assert len(lines) <= height
+            assert lines[0].startswith("pm pr list")
 
 
 class TestPaintState:
