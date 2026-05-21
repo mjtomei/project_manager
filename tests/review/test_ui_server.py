@@ -362,6 +362,22 @@ def test_filter_by_provenance(tmp_path):
         assert "change-2" in page.text and "change-1" not in page.text
 
 
+def test_engagement_signals_span_whole_cycle_not_filtered_set(tmp_path):
+    # Engagement is "across the rendered cycle's response blocks" (R4), so it must
+    # reflect every block even when the displayed set is narrowed by a filter.
+    pm, _ = _seed_review(tmp_path)
+    ctx_all = server.build_review_context(pm, "reg")
+    ctx_filtered = server.build_review_context(
+        pm, "reg", filters={"provenance": "reviewer-comment"})
+    # The filter narrows the rendered blocks…
+    assert len(ctx_filtered["blocks"]) == 1
+    assert len(ctx_all["blocks"]) == 2
+    # …but the suggester-confidence distribution still covers both blocks.
+    assert ctx_filtered["engagement"]["suggester-confidence"] == \
+        ctx_all["engagement"]["suggester-confidence"]
+    assert sum(ctx_filtered["engagement"]["suggester-confidence"].values()) == 2
+
+
 def test_bulk_accept_current_filter(tmp_path):
     pm, d = _seed_review(tmp_path, phase="awaiting-human-review")
     with _client(pm) as c:

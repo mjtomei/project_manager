@@ -274,7 +274,7 @@ def _select_body(
     is parsed once and reused for entries, the audited count, and convergence.
     """
     out: dict[str, Any] = {
-        "body_mode": "empty", "blocks": [], "review_md": "",
+        "body_mode": "empty", "blocks": [], "all_blocks": [], "review_md": "",
         "audit_entries": [], "audited": 0, "convergence": None,
     }
 
@@ -289,7 +289,11 @@ def _select_body(
     if paths.response_cycle(rendered_cycle).exists():
         out["body_mode"] = "changes"
         doc = md_parser.parse_response_doc(paths.response_cycle(rendered_cycle).read_text())
-        out["blocks"] = [b for b in (_block_view(x) for x in doc.blocks) if _block_matches(b, filters)]
+        # `all_blocks` feeds the engagement signals (which are over the whole
+        # cycle per R4); `blocks` is the filtered subset the walker renders.
+        all_blocks = [_block_view(x) for x in doc.blocks]
+        out["all_blocks"] = all_blocks
+        out["blocks"] = [b for b in all_blocks if _block_matches(b, filters)]
     elif is_current and phase == "review" and paths.review_cycle(rendered_cycle).exists():
         out["body_mode"] = "review"
         out["review_md"] = paths.review_cycle(rendered_cycle).read_text()
@@ -381,7 +385,7 @@ def build_review_context(
         "breadcrumb": breadcrumb(rendered_cycle, phase, is_current, audited),
         "hint": human_action_hint(phase, is_current),
         "convergence": body["convergence"],
-        "engagement": engagement_signals(body["blocks"]),
+        "engagement": engagement_signals(body["all_blocks"]),
         "body_mode": body["body_mode"],
         "blocks": body["blocks"],
         "review_md": body["review_md"],
