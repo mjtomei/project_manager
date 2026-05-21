@@ -2306,7 +2306,8 @@ _VERIFICATION_MAX_PANE_LINES = 500
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
                                 pane_output: str | None = None,
-                                pane_output_path: str | None = None) -> str:
+                                pane_output_path: str | None = None,
+                                captures_scenario_dir: str | None = None) -> str:
     """Build a prompt for Claude to verify a single scenario's verdict.
 
     The prompt asks Claude to determine whether the scenario genuinely
@@ -2315,6 +2316,12 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
     If *pane_output_path* is provided the prompt tells the verifier to
     read the file (keeps the prompt small).  Otherwise *pane_output* is
     inlined (truncated to ``_VERIFICATION_MAX_PANE_LINES``).
+
+    If the scenario was assigned artifact recipes (``scenario.artifact_paths``)
+    the prompt also tells the verifier to confirm the expected captures
+    actually landed in *captures_scenario_dir* — a recording recipe that
+    only produced a static text dump, or no capture at all, is flagged
+    unless the transcript states a valid reason it could not be produced.
     """
     if pane_output_path:
         is_jsonl = pane_output_path.endswith(".jsonl")
@@ -2348,6 +2355,55 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
             f"Here is the full output from the scenario session:\n\n"
             f"<scenario_output>\n{text}\n</scenario_output>"
         )
+
+    # Artifact-completeness check — only when the scenario was assigned one
+    # or more capture recipes. A recipe declares the artifacts it must
+    # produce; the verifier confirms they actually landed in the captures
+    # dir (and are the real thing, not a downgraded substitute) before it
+    # can VERIFIED. This catches scenarios that drove the surface correctly
+    # but silently skipped or weakened the prescribed capture.
+    artifact_names = [Path(p).name for p in (scenario.artifact_paths or [])]
+    artifact_check_block = ""
+    artifact_judgment_bullet = ""
+    if artifact_names:
+        recipe_bullets = "\n".join(f"- {n}" for n in artifact_names)
+        where = captures_scenario_dir or (
+            "the per-scenario captures directory the scenario worker was given")
+        artifact_check_block = f"""
+### Step 3: Confirm the expected artifacts were produced
+
+This scenario was assigned the following capture recipe(s):
+
+{recipe_bullets}
+
+Each recipe documents, under its "What this recipe produces" section, the
+artifact(s) the scenario was supposed to save. They should have landed in:
+
+  {where}
+
+List that directory and confirm, for every assigned recipe, that the
+artifact(s) it requires are actually present **and are the real thing the
+recipe calls for** — not a weaker substitute. In particular, a recipe that
+calls for a replayable recording (e.g. an asciinema `.cast`) is **not**
+satisfied by a plain-text scrollback dump alone; a static `.log` or
+`.txt` capture does not stand in for the required recording.
+
+A missing or downgraded artifact is acceptable **only** if the transcript
+states a specific, valid reason it could not be produced — for example the
+required tool (asciinema, a display, etc.) was genuinely unavailable in the
+environment, or the exercised surface produced nothing observable to
+capture. "I used `capture-pane` instead", "I forgot", or simple absence of
+the artifact with no explanation are **not** valid reasons.
+
+"""
+        artifact_judgment_bullet = (
+            "\n- If any required artifact (Step 3) is missing or downgraded to a "
+            "weaker substitute without a stated, valid reason in the transcript, "
+            "the verdict is **FLAGGED**.")
+
+    # When an artifact-check step is present it takes the "Step 3" slot, so
+    # the judgment step shifts to Step 4.
+    judgment_step_no = 4 if artifact_names else 3
 
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 
@@ -2389,12 +2445,12 @@ Mark each part as:
 - **SKIPPED** — no evidence it was attempted
 - **SUBSTITUTED** — the scenario verified it a different way (unit test, code reading, string-grep against generated output instead of running it)
 - **FAILED** — it was attempted but produced errors or wrong results
-
-### Step 3: Make your judgment
+{artifact_check_block}
+### Step {judgment_step_no}: Make your judgment
 
 - If any Given, When, or Then in any triple is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that worked around missing tools by substituting methodology (unit tests, code review, harnessed source dumps) has not exercised the behavior — it should have reported INPUT_REQUIRED instead of PASS.
-- If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.
-- Only if every part of every triple is DONE and matched is the verdict **VERIFIED**.
+- If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.{artifact_judgment_bullet}
+- Only if every part of every triple is DONE and matched (and every required artifact is present or validly excused) is the verdict **VERIFIED**.
 
 ### Common false-pass patterns to watch for
 
@@ -2494,10 +2550,27 @@ def _verify_single_scenario(
                          "falling back to pane output",
                          scenario.index, scenario.transcript_path)
 
+    # Resolve the host captures dir for this scenario so the verifier can
+    # confirm the scenario's assigned artifact recipes actually produced
+    # their captures there.
+    captures_scenario_dir: str | None = None
+    if scenario.artifact_paths:
+        try:
+            from pm_core.paths import captures_dir
+            _pr_id = pr_data.get("id") if pr_data else None
+            base = captures_dir(_pr_id, session_tag=session_tag) if _pr_id else None
+            if base:
+                captures_scenario_dir = str(
+                    Path(base) / "scenarios" / str(scenario.index))
+        except Exception:
+            _log.debug("Verification: could not resolve captures dir for "
+                       "scenario %d", scenario.index, exc_info=True)
+
     prompt = _build_verification_prompt(
         scenario, verdict,
         pane_output_path=transcript_path,
         pane_output=pane_output if not transcript_path else None,
+        captures_scenario_dir=captures_scenario_dir,
     )
 
     pane_alive = bool(scenario.verifier_pane_id) and tmux_mod.pane_exists(
