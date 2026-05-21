@@ -519,6 +519,19 @@ class WatcherManager:
         self._leaders.clear()
 
     # -- leadership --
+    def peek_leader(self, review_id: str) -> bool:
+        """Report current leadership *without* creating or acquiring a lock.
+
+        Read-only status views (the dashboard's SSE-driven ``/api/status``
+        refresh) must not claim write-leadership just by polling status — doing
+        so would block Apply from any other concurrent UI, even for reviews the
+        dashboard user never opens. Acquisition is reserved for the walker page
+        (``GET …/changes``) and Apply; those routes call :meth:`leader_for`.
+        Returns ``False`` when no lock has been built for this review yet.
+        """
+        lock = self._leaders.get(review_id)
+        return bool(lock and lock.is_leader)
+
     def leader_for(self, review_id: str) -> LeaderLock:
         lock = self._leaders.get(review_id)
         if lock is not None:
@@ -768,8 +781,12 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
     @app.get("/review/{review_id}/api/status")
     def api_status(review_id: str, cycle: int | None = None):
         _require_known_review(review_id)
+        # Peek at leadership rather than acquiring it: this endpoint is polled by
+        # the read-only dashboard's SSE refresh, which must never claim the leader
+        # lock. The walker page (GET …/changes) acquires it on load, so a real
+        # walker client already holds it before its first status poll.
         ctx = build_review_context(
-            pm_root, review_id, cycle=cycle, is_leader=_is_leader(review_id)
+            pm_root, review_id, cycle=cycle, is_leader=manager.peek_leader(review_id)
         )
         keys = (
             "no_cycles", "current_cycle", "rendered_cycle", "is_current", "phase",

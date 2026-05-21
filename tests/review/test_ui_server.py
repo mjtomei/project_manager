@@ -187,11 +187,27 @@ def test_dashboard_does_not_claim_leadership(tmp_path):
             assert holder.acquire() is True
         finally:
             holder.release()
-    # Opening the walker, by contrast, does claim leadership.
+    # Opening the walker page, by contrast, does claim leadership.
     app2 = server.build_app(pm)
     with TestClient(app2) as c:
-        assert c.get("/review/reg/api/status").status_code == 200
+        assert c.get("/review/reg/changes").status_code == 200
         assert "reg" in app2.state.manager._leaders
+
+    # Polling /api/status (what the dashboard's SSE refresh does) must NOT claim
+    # leadership: a read-only dashboard left open while a state event fires would
+    # otherwise become the writer for every active review and block Apply on
+    # walkers opened elsewhere. It only reports leadership the walker page claimed.
+    app3 = server.build_app(pm)
+    with TestClient(app3) as c:
+        s = c.get("/review/reg/api/status").json()
+        assert s["is_leader"] is False
+        assert "reg" not in app3.state.manager._leaders
+        # An external process can still win the writer role for that review.
+        holder = server.LeaderLock(server.ReviewPaths(pm, "reg").leader_lock)
+        try:
+            assert holder.acquire() is True
+        finally:
+            holder.release()
 
 
 def test_no_cycles_placeholder(tmp_path):
@@ -449,10 +465,14 @@ def test_cycle_selector_navigates(tmp_path):
 def test_status_api_reports_available_cycles(tmp_path):
     pm, _ = _seed_review(tmp_path, cycle=3, extra_cycles=(1, 2))
     with _client(pm) as c:
+        # Load the walker page first (as a real client does) so this process
+        # claims the leader lock; api_status only peeks at leadership.
+        assert c.get("/review/reg/changes").status_code == 200
         s = c.get("/review/reg/api/status").json()
         assert s["cycles"] == [3, 2, 1]
         assert s["editable"] is True
         assert s["can_apply"] is True
+        assert s["is_leader"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -603,8 +623,11 @@ def test_leader_event_pushed_on_takeover(tmp_path):
     assert holder.acquire() is True
     try:
         with _LiveServer(pm) as srv:
-            # Touch a route so the server builds its (follower) LeaderLock for
-            # "reg" — leader_loop only retries reviews it already tracks.
+            # Load the walker page so the server builds its (follower) LeaderLock
+            # for "reg" — leader_loop only retries reviews it already tracks, and
+            # api_status now only peeks (never acquires), so it wouldn't register
+            # the lock on its own.
+            assert httpx.get(f"{srv.base}/review/reg/changes").status_code == 200
             s = httpx.get(f"{srv.base}/review/reg/api/status").json()
             assert s["is_leader"] is False
             with httpx.stream("GET", f"{srv.base}/events?review=reg", timeout=10) as resp:
