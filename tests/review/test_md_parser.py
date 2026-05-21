@@ -88,6 +88,42 @@ def test_parse_focus_timestamp():
     assert focus.timestamp == "2026-05-20T15:30:00Z"
 
 
+def test_parse_response_block_with_arrow_in_value():
+    # A `-->` inside a YAML value (research passages contain arrows like
+    # "input --> output") must not be mistaken for the closing fence: YAML
+    # indents the value under its key, so the real close is the bare `-->` line.
+    text = (
+        "<!-- proposed-change\n"
+        "id: change-x\n"
+        "provenance: reviewer-comment\n"
+        "after: |\n"
+        "  The pipeline maps input --> output across stages.\n"
+        "status: pending\n"
+        "-->\n"
+    )
+    blocks = md_parser.parse_response_blocks(text)
+    assert len(blocks) == 1
+    assert blocks[0].id == "change-x"
+    assert "input --> output" in blocks[0].fields["after"]
+    assert blocks[0].fields["status"] == "pending"
+
+
+def test_parse_response_blocks_skips_unclosed_trailing_block():
+    # A trailing block still being written (no closing fence yet) is skipped,
+    # and earlier complete blocks still parse.
+    text = (
+        "<!-- proposed-change\n"
+        "id: change-1\n"
+        "status: pending\n"
+        "-->\n\n"
+        "<!-- proposed-change\n"
+        "id: change-2\n"
+        "status: pen"
+    )
+    blocks = md_parser.parse_response_blocks(text)
+    assert [b.id for b in blocks] == ["change-1"]
+
+
 def test_parse_interaction_log_from_block():
     text = """<!-- proposed-change
 id: x

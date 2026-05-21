@@ -39,6 +39,11 @@ def _yaml_load(text: str):
 
 BLOCK_OPEN_RE = re.compile(r"<!--\s*proposed-change\b[^\n]*\n", re.MULTILINE)
 BLOCK_CLOSE = "-->"
+# The closing fence is a line that is exactly `-->`. Matching the bare
+# substring would misfire on a `-->` inside a YAML value (e.g. a research
+# passage like "input --> output"), which YAML always indents under its key,
+# so it never appears at column 0.
+BLOCK_CLOSE_RE = re.compile(r"^-->[ \t]*$", re.MULTILINE)
 
 
 @dataclass
@@ -107,12 +112,13 @@ def parse_response_blocks(text: str) -> list[ResponseBlock]:
     blocks: list[ResponseBlock] = []
     for m in BLOCK_OPEN_RE.finditer(text):
         body_start = m.end()
-        close_idx = text.find(BLOCK_CLOSE, body_start)
-        if close_idx == -1:
+        close_m = BLOCK_CLOSE_RE.search(text, body_start)
+        if close_m is None:
+            # No closing fence (e.g. a trailing block still being written) —
+            # skip it rather than swallowing the rest of the file.
             continue
-        body = text[body_start:close_idx]
-        # Strip the trailing newline before --> if any.
-        full_end = close_idx + len(BLOCK_CLOSE)
+        body = text[body_start : close_m.start()]
+        full_end = close_m.end()
         try:
             data = _yaml_load(body) or {}
         except yaml.YAMLError:
