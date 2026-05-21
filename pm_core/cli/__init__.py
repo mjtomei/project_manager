@@ -684,6 +684,12 @@ def getting_started_cmd():
 # ---------------------------------------------------------------------------
 from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project  # noqa: E402, F401
 
+# The review walker lives under pm_core.review (not pm_core.cli); attach its
+# Click group explicitly rather than via the self-registering import pattern.
+from pm_core.review.cli import review as _review_group  # noqa: E402
+
+cli.add_command(_review_group)
+
 
 def main():
     try:

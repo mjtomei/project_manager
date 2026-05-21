@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adversarial-review walker — dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="dashboard">
+  <header class="topbar">
+    <h1>Adversarial-review walker</h1>
+    <span class="subtle">{{ active|length }} active · {{ archived|length }} archived</span>
+  </header>
+
+  <main class="dashboard">
+    {% if not active and not archived %}
+      <p class="placeholder">No reviews registered. Run
+        <code>pm review &lt;target&gt;</code> or
+        <code>pm plan literature-review &lt;plan&gt;</code> to start one.</p>
+    {% endif %}
+
+    {% macro review_row(row) %}
+      {% set r = row.review %}
+      {% set c = row.ctx %}
+      <article class="review-row" data-review="{{ r.id }}">
+        <div class="review-head">
+          <a class="review-name" href="/review/{{ r.id }}/changes">{{ r.name or r.id }}</a>
+          <span class="target subtle">{{ r.target }}</span>
+          {% if r['target-type'] %}<span class="tag tag-type">{{ r['target-type'] }}</span>{% endif %}
+        </div>
+        {% if c.no_cycles %}
+          <div class="status-panel no-cycles">
+            <span class="phase-badge idle">no cycles yet</span>
+            <p class="subtle">{{ c.hint }}</p>
+          </div>
+        {% else %}
+          <div class="status-panel" data-review="{{ r.id }}">
+            <span class="phase-badge {{ 'animating' if c.animating else 'idle' }}"
+                  data-phase="{{ c.phase }}" data-animating="{{ 'true' if c.animating else 'false' }}">
+              <span class="dot"></span>{{ c.phase }}
+            </span>
+            <span class="tag tag-mode">{{ c.mode }}</span>
+            <span class="breadcrumb">{{ c.breadcrumb }}</span>
+          </div>
+          <div class="signals subtle">
+            <span>cycle {{ c.current_cycle }}</span>
+            {% if c.convergence %}<span class="conv">· {{ c.convergence }}</span>{% endif %}
+            {% if c.engagement %}
+              <span>· bulk-accept {{ c.engagement['bulk-accept-ratio'] if c.engagement['bulk-accept-ratio'] is not none else '—' }}</span>
+              <span>· median view {{ (c.engagement['median-view-ms'] ~ 'ms') if c.engagement['median-view-ms'] is not none else '—' }}</span>
+            {% endif %}
+            <span class="cycle-select-wrap">
+              · cycle
+              <select class="cycle-select" data-review="{{ r.id }}">
+                {% for cy in c.cycles %}
+                  <option value="{{ cy }}" {{ 'selected' if cy == c.rendered_cycle else '' }}>{{ cy }}</option>
+                {% endfor %}
+              </select>
+            </span>
+          </div>
+        {% endif %}
+      </article>
+    {% endmacro %}
+
+    {% if active %}
+      <section class="reviews active">
+        <h2>Active</h2>
+        {% for row in active %}{{ review_row(row) }}{% endfor %}
+      </section>
+    {% endif %}
+
+    {% if archived %}
+      <details class="reviews archived">
+        <summary>Archived ({{ archived|length }})</summary>
+        {% for row in archived %}{{ review_row(row) }}{% endfor %}
+      </details>
+    {% endif %}
+  </main>
+
+  <script>
+    document.querySelectorAll('.cycle-select').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        location.href = '/review/' + sel.dataset.review + '/changes?cycle=' + sel.value;
+      });
+    });
+  </script>
+</body>
+</html>
