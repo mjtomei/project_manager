@@ -191,6 +191,31 @@ def test_walker_edit_action_writes_fields_and_log(tmp_path):
     assert "edit" in actions and "comment-added" in actions
 
 
+def test_viewed_action_records_interaction_and_feeds_engagement(tmp_path):
+    pm, d = _seed_review(tmp_path, phase="awaiting-human-review")
+    with _client(pm) as c:
+        r = c.post("/review/reg/change/change-1",
+                   json={"action": "viewed", "duration-ms": 1500})
+        assert r.status_code == 200
+        # The view-time signal now has data to summarize.
+        s = c.get("/review/reg/api/status").json()
+        assert s["engagement"]["median-view-ms"] == 1500
+    blocks = md_parser.parse_response_blocks((d / "REVIEW_RESPONSE_CYCLE_3.md").read_text())
+    b1 = next(b for b in blocks if b.id == "change-1")
+    viewed = [ev for ev in b1.interactions if ev["action"] == "viewed"]
+    assert viewed and viewed[0]["duration-ms"] == 1500
+    # Telemetry must not mutate the block's verdict/status.
+    assert b1.fields["status"] == "pending"
+
+
+def test_viewed_action_rejected_outside_awaiting(tmp_path):
+    pm, _ = _seed_review(tmp_path, phase="review")
+    with _client(pm) as c:
+        r = c.post("/review/reg/change/change-1",
+                   json={"action": "viewed", "duration-ms": 1500})
+        assert r.status_code == 409
+
+
 @pytest.mark.parametrize("phase", ["review", "audit", "response", "applying", "complete"])
 def test_walker_read_only_outside_awaiting(tmp_path, phase):
     pm, d = _seed_review(tmp_path, phase=phase)
@@ -261,6 +286,21 @@ def test_apply_writes_transition(tmp_path):
     assert st.current_phase == "applying"
     assert st.current_cycle == 3  # preserved
     assert st.mode == "human-reviewed"  # preserved
+
+
+def test_apply_preserves_extra_state_fields(tmp_path):
+    pm, d = _seed_review(tmp_path, phase="awaiting-human-review")
+    # A field outside the 4-field parsed view (a shape PR 1 may add later).
+    (d / "STATE.md").write_text(
+        "current-cycle: 3\ncurrent-phase: awaiting-human-review\n"
+        "mode: human-reviewed\naudit-round: 2\n"
+        "last-transition: 2026-05-20T14:32:00Z\n"
+    )
+    with _client(pm) as c:
+        assert c.post("/review/reg/apply").status_code == 200
+    raw = md_parser.parse_state((d / "STATE.md").read_text()).raw
+    assert raw["current-phase"] == "applying"
+    assert raw["audit-round"] == 2  # not dropped
 
 
 def test_apply_hidden_outside_awaiting(tmp_path):

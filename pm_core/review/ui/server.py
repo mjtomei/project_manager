@@ -614,6 +614,15 @@ def _apply_change(paths: ReviewPaths, cycle: int, change_id: str, action: str, p
         md_writer.update_response_block(resp, change_id, {"status": "skipped"})
         md_writer.append_interaction(resp, change_id, {"action": "skip"})
         return {"status": "skipped"}
+    if action == "viewed":
+        # View-time telemetry only — append the interaction (so engagement
+        # signals have data) without touching the block's verdict/status.
+        dur = payload.get("duration-ms")
+        event: dict[str, Any] = {"action": "viewed"}
+        if isinstance(dur, (int, float)):
+            event["duration-ms"] = dur
+        md_writer.append_interaction(resp, change_id, event)
+        return {"status": "viewed"}
     if action == "reopen":
         md_writer.update_response_block(resp, change_id, {"status": "pending"})
         md_writer.append_interaction(resp, change_id, {"action": "reopen"})
@@ -708,7 +717,10 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="auto-run mode: apply not available")
         if not manager.leader_for(review_id).is_leader:
             raise HTTPException(status_code=409, detail="another UI owns this session")
-        new_state = dict(state)
+        # Re-read the raw doc so any fields beyond the parsed view (which PR 1 may
+        # add to STATE.md's schema) survive the round-trip — R8's full-state write,
+        # not a 4-field patch.
+        new_state = dict(md_parser.parse_state(paths.state.read_text()).raw)
         new_state["current-phase"] = "applying"
         new_state.pop("last-transition", None)  # let md_writer re-stamp
         md_writer.update_state(paths.state, new_state)
