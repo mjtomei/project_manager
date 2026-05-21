@@ -200,6 +200,13 @@ def parse_audit_doc(text: str) -> AuditDoc:
         tier_m = _TIER_RE.search(body)
         verdict_m = _VERDICT_RE.search(body)
         flag_m = _FLAG_RE.search(body)
+        # Skip an incomplete entry — the live audit-browse view reads this file
+        # while the audit loop is still writing it, so the trailing entry may be
+        # mid-write. `**Verdict:**` is the last required field in canonical order,
+        # so its absence means the entry isn't done yet; drop it rather than
+        # surface a half-populated record.
+        if verdict_m is None:
+            continue
         entries.append(
             AuditEntry(
                 citation_header=header,
@@ -207,7 +214,7 @@ def parse_audit_doc(text: str) -> AuditDoc:
                 tier=tier_m.group(1).strip() if tier_m else None,
                 doc_passage=_extract_section(body, "Doc passage as currently written"),
                 source_says=_extract_section(body, "What the source actually says"),
-                verdict=verdict_m.group(1).strip() if verdict_m else "",
+                verdict=verdict_m.group(1).strip(),
                 change_proposed=_extract_section(body, "Substantive change proposed"),
                 flag=flag_m.group(1).strip() if flag_m else None,
                 surfaced_citations=_extract_surfaced(body),

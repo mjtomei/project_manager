@@ -20588,11 +20588,34 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-20T22:53:20.224365+00:00'
-  updated_at: '2026-05-20T22:53:20.224365+00:00'
+  updated_at: '2026-05-21T02:44:25.978737+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-3b45e04
+    text: 'Multi-UI state ownership: allow multiple ''pm review ui'' processes against
+      the same review (read/render is fine — reads are lock-free and torn-read-safe
+      via atomic-rename writes), but only ONE process may write STATE.md (the Apply
+      transition). Non-writers render Apply disabled with an ''another UI owns this
+      session'' hint even in awaiting-human-review. Reason: the Apply transition is
+      a check-then-write (awaiting-human-review -> applying); two UIs racing it could
+      both pass the check and double-fire apply, so designate a single state-writer
+      rather than rely on lock ordering. Failover: each process tries flock(LOCK_EX|LOCK_NB)
+      on a stable leader lockfile (e.g. STATE.md.leader) and holds it for its lifetime;
+      whoever holds it is the writer. The OS releases the flock on process death,
+      so if the leader dies a follower''s periodic LOCK_NB retry succeeds and it takes
+      the mantle automatically (no stale-PID heartbeat to reap). Winner is ''first
+      to retry after release'', not strictly the oldest survivor, which is fine since
+      exactly one takes over; push an SSE event on leadership change so Apply enables/disables
+      on the right clients. This leader lock is distinct from md_writer''s per-write
+      flock (PR 2): the leader lock decides who MAY write state; md_writer serializes
+      the write itself. They compose — the leader still calls md_writer.update_state,
+      which must do its check-then-write inside md_writer''s file lock. Tests: two
+      UI processes elect exactly one state-writer (second sees Apply disabled); when
+      leader exits, its lock releases and a follower takes over.'
+    created_at: '2026-05-21T02:44:24Z'
+    last_edited: '2026-05-21T02:44:24Z'
 - id: pr-215ee19
   plan: plan-3119574
   title: Citation-audit browse view + general-comments notes pane

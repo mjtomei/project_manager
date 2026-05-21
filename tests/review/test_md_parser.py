@@ -47,6 +47,29 @@ def test_parse_audit_doc_canonical_format():
     assert openai.cluster.startswith("II. §3")
 
 
+def test_parse_audit_doc_skips_incomplete_trailing_entry():
+    # The live audit-browse view reads this file while the audit loop is still
+    # writing it. A trailing entry that has a header (and partial body) but no
+    # `**Verdict:**` yet must be skipped, not surfaced half-populated — and the
+    # parse must not raise.
+    text = (FIXTURES / "audit_cycle.md").read_text()
+    partial = text + (
+        "\n---\n\n"
+        "### Lu 2026, \"Assistant Axis\" — [arXiv:2601.00001](https://arxiv.org/abs/2601.00001)\n\n"
+        "**Tier:** 1\n\n"
+        "**Doc passage as currently written:**\n\n"
+        "> The model has a single assistant axis.\n\n"
+        "**What the source actually says:**\n\n"
+        "> (still being written by the audit agent...)\n"
+    )
+    doc = md_parser.parse_audit_doc(partial)
+    headers = [e.citation_header for e in doc.entries]
+    assert not any("Lu 2026" in h for h in headers)
+    # The complete entries are still parsed.
+    assert len(doc.entries) == 3
+    assert all(e.verdict for e in doc.entries)
+
+
 def test_parse_state_phase_transition():
     text = (FIXTURES / "state.md").read_text()
     state = md_parser.parse_state(text)

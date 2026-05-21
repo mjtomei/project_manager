@@ -53,3 +53,4 @@ Code lives under `pm_core/review/`. New package; no existing module here.
 - Two concurrent `append_interaction` calls → flock serializes them; both events land.
 - YAML pipe-block `before:` / `after:` preserves trailing newline. The block dumper registers a per-value `str` representer that selects literal `|` style only for multi-line strings (a blanket `default_style='|'` would wreck short scalars), and a `None` representer that emits bare keys (`human-verdict:`) instead of `null` to match the response session's convention.
 - Empty `surfaced-citations:` list in an audit entry → entry parses with `surfaced_citations = []`.
+- Partial/in-progress `CITATION_AUDIT_CYCLE_N.md` (live audit-browse reads it while the audit loop is still writing, per note-987b0a0) → `parse_audit_doc` never raises and skips any entry lacking a `**Verdict:**` (the last required field in canonical order), so a mid-write trailing entry is dropped rather than surfaced half-populated.
