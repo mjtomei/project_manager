@@ -74,9 +74,10 @@ def _advance_scripted_cursor(session_tag: str | None, session_type: str,
         if wrap:
             nxt = (cur + 1) % sequence_len
         else:
-            # Clamp toward the terminal slot; a one-entry sequence stays at 0
-            # (the ``else 0`` branch) so the state file does not churn.
-            nxt = min(cur + 1, sequence_len - 1) if sequence_len > 1 else 0
+            # Clamp toward the terminal slot; a one-entry sequence keeps
+            # resolving to 0 (cur is already clamped above, so cur + 1 caps
+            # at sequence_len - 1 == 0).
+            nxt = min(cur + 1, sequence_len - 1)
         state[session_type] = nxt
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
