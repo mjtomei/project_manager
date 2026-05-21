@@ -94,7 +94,12 @@ concatenates, in order:
 3. The review's `STATE.md` if it exists (resume case), under its own header.
 4. A target preamble: the resolved `target` plus `target-type`, and for
    file/plan targets the file contents (or a pointer to read it) so the session
-   knows what artifact it reviews.
+   knows what artifact it reviews. Per PR note (2026-05-21): `_target_preamble`
+   stats the file first and only inlines when under `_MAX_INLINE_BYTES`
+   (80 KB) — larger targets get a "read it yourself" pointer so the assembled
+   prompt stays under the argv/shell limit. `UnicodeDecodeError`/`OSError` on
+   read (e.g. a PDF/binary target) degrades to a pointer rather than crashing
+   `run_review`.
 
 Factor the file list so the test can assert "concatenates expected files" by
 checking each present fixture's content appears in the output and missing ones
