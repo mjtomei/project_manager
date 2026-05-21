@@ -127,6 +127,22 @@ def test_review_non_ui_target_calls_run_review(tmp_path):
     run.assert_called_once()
 
 
+def test_review_honors_project_override(tmp_path):
+    """`pm -C <root> review <target>` resolves the root via state_root (the
+    global override), not bare find_project_root."""
+    from click.testing import CliRunner
+    from pm_core.cli import cli, helpers
+    runner = CliRunner()
+    # find_project_root would point elsewhere; the -C override must win.
+    with patch.object(review_cli, "run_review") as run, \
+         patch("pm_core.store.find_project_root", return_value=tmp_path / "wrong"), \
+         patch.object(helpers, "_project_override", tmp_path), \
+         patch("pm_core.cli.helpers._verify_pm_repo_matches_cwd"):
+        result = runner.invoke(cli, ["review", "topic"])
+    assert result.exit_code == 0, result.output
+    assert run.call_args.kwargs["root"] == tmp_path
+
+
 # --- pane launch invokes tmux with the role --------------------------------
 
 def test_launch_review_session_splits_pane_with_role(tmp_path):

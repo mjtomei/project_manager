@@ -213,4 +213,7 @@ def review(target: str, port: int):
     if target == "ui":
         _run_ui_server(port)
         return
-    run_review(target, root=store.find_project_root())
+    # Honor the global -C / PM_PROJECT override (state_root), same as every
+    # other command — find_project_root alone would ignore it.
+    from pm_core.cli.helpers import state_root
+    run_review(target, root=state_root())
