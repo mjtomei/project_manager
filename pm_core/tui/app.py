@@ -1144,10 +1144,39 @@ class ProjectManagerApp(App):
         self._update_plans_status_bar()
         self.call_after_refresh(self._capture_frame, "show_plans_view")
 
+    def _active_review_plan_ids(self) -> set[str]:
+        """Return ids of plans that have an active literature-review.
+
+        A plan is matched when an active ``reviews:`` entry of target-type
+        ``plan`` points at the plan's file (or its derived id matches the
+        plan's filename stem).
+        """
+        from pathlib import Path
+
+        reviews = self._data.get("reviews") or []
+        plans = self._data.get("plans") or []
+        targets = set()
+        review_ids = set()
+        for r in reviews:
+            if r.get("status") != "active" or r.get("target-type") != "plan":
+                continue
+            if r.get("target"):
+                targets.add(r["target"])
+            if r.get("id"):
+                review_ids.add(r["id"])
+        matched = set()
+        for plan in plans:
+            plan_file = plan.get("file", "")
+            if plan_file in targets or Path(plan_file).stem in review_ids:
+                matched.add(plan.get("id", ""))
+        return matched
+
     def _refresh_plans_pane(self) -> None:
         """Refresh the plans pane with current data."""
         plans = self._data.get("plans") or []
         prs = self._data.get("prs") or []
+        # Plans that have an active review pointing at them (badge source).
+        reviewed_ids = self._active_review_plan_ids()
         enriched = []
         for plan in plans:
             plan_id = plan.get("id", "")
@@ -1168,6 +1197,7 @@ class ProjectManagerApp(App):
                 "status": plan.get("status", "draft"),
                 "intro": intro,
                 "pr_count": pr_count,
+                "active_review": plan_id in reviewed_ids,
             })
         plans_pane = self.query_one("#plans-pane", PlansPane)
         plans_pane.update_plans(enriched)

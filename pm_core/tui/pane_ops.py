@@ -633,6 +633,11 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
     elif action == "review":
         if plan_id:
             _launch_in_plans_window(app, plan_id, f"pm plan review {plan_id}", "plan-review")
+    elif action == "literature-review":
+        if plan_id:
+            _launch_in_plans_window(
+                app, plan_id,
+                f"pm plan literature-review {plan_id}", "literature-review")
 
 
 def handle_plan_add(app, result: tuple[str, str] | None) -> None:

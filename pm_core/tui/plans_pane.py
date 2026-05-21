@@ -86,6 +86,8 @@ class PlansPane(Widget):
                 suffix = f"  [{status}]"
                 if pr_count:
                     suffix += f"  {pr_count} PR{'s' if pr_count != 1 else ''}"
+                if plan.get("active_review"):
+                    suffix += "  ✿ review"
                 header = f"{plan_id}: {name}"
                 header = self._truncate(header, content_width - 2 - len(suffix))
                 output.append(header, style="bold cyan" if is_selected else "")
@@ -113,6 +115,8 @@ class PlansPane(Widget):
         output.append("=load  ", style="dim")
         output.append("e", style="bold")
         output.append("=edit  ", style="dim")
+        output.append("r", style="bold")
+        output.append("=review  ", style="dim")
         output.append("D", style="bold")
         output.append("=deps  ", style="dim")
         output.append("p", style="bold")
@@ -152,6 +156,7 @@ class PlansPane(Widget):
         "l": "load",
         "e": "edit",
         "c": "review",
+        "r": "literature-review",
     }
 
     def on_key(self, event) -> None:
