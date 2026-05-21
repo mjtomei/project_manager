@@ -203,6 +203,21 @@ def validate_session_verdicts(session_type: str, verdicts) -> list[str]:
                 f"Verdict {v!r} is not valid for session type {session_type!r}. "
                 f"Allowed: {sorted(allowed)}"
             )
+    # Weighted-random form maps verdict → weight; a non-numeric or negative
+    # weight passes the name check above but later crashes unhelpfully in
+    # _pick_fake_verdict (float() / random.choices), so reject it here.
+    if isinstance(verdicts, dict):
+        for v, weight in verdicts.items():
+            if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+                errors.append(
+                    f"Weight for verdict {v!r} (session type {session_type!r}) "
+                    f"must be a number, got {weight!r}."
+                )
+            elif weight < 0:
+                errors.append(
+                    f"Weight for verdict {v!r} (session type {session_type!r}) "
+                    f"must be non-negative, got {weight!r}."
+                )
     return errors
 
 # ---------------------------------------------------------------------------

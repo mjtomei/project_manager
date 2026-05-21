@@ -648,6 +648,28 @@ class TestSessionTypeVerdicts:
         # impl with empty verdicts = fine (nothing to fake)
         assert validate_session_verdicts("impl", {}) == []
 
+    def test_validate_non_numeric_weight_rejected(self):
+        # A non-numeric weight passes the name check but would crash later in
+        # _pick_fake_verdict (float()), so validation must reject it.
+        errors = validate_session_verdicts("review", {"PASS": "lots"})
+        assert errors
+        assert "PASS" in errors[0]
+        assert "number" in errors[0]
+
+    def test_validate_negative_weight_rejected(self):
+        errors = validate_session_verdicts("review", {"PASS": -1})
+        assert errors
+        assert "non-negative" in errors[0]
+
+    def test_validate_bool_weight_rejected(self):
+        # bool is an int subclass — exclude it explicitly.
+        errors = validate_session_verdicts("review", {"PASS": True})
+        assert errors
+        assert "number" in errors[0]
+
+    def test_validate_float_weight_ok(self):
+        assert validate_session_verdicts("review", {"PASS": 0.5, "NEEDS_WORK": 1.5}) == []
+
 
 # ---------------------------------------------------------------------------
 # Session-file fake-claude override (paths.py)
