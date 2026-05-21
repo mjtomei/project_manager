@@ -490,6 +490,31 @@ def test_leader_lock_elects_one_writer(tmp_path):
         b.release()
 
 
+def test_leader_event_pushed_on_takeover(tmp_path):
+    # R10: when the leader exits, a follower's periodic flock retry succeeds and an
+    # SSE `leader` event flips Apply on its clients. Drive that path end-to-end:
+    # hold the lock externally so the server starts as a follower, then release it
+    # and assert the server pushes the `leader` event over SSE within a couple of
+    # leader_loop intervals (default 2s).
+    pm, _ = _seed_review(tmp_path, phase="awaiting-human-review")
+    holder = server.LeaderLock(server.ReviewPaths(pm, "reg").leader_lock)
+    assert holder.acquire() is True
+    try:
+        with _LiveServer(pm) as srv:
+            # Touch a route so the server builds its (follower) LeaderLock for
+            # "reg" — leader_loop only retries reviews it already tracks.
+            s = httpx.get(f"{srv.base}/review/reg/api/status").json()
+            assert s["is_leader"] is False
+            with httpx.stream("GET", f"{srv.base}/events?review=reg", timeout=10) as resp:
+                lines = resp.iter_lines()
+                _next_event(lines, "ping", time.monotonic() + 5)
+                holder.release()  # leader exits → follower's next retry takes over
+                data = _next_event(lines, "leader", time.monotonic() + 8)
+                assert data["is_leader"] is True
+    finally:
+        holder.release()
+
+
 def test_unknown_review_is_404(tmp_path):
     pm, _ = _seed_review(tmp_path)
     with _client(pm) as c:

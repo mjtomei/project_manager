@@ -534,9 +534,16 @@ class WatcherManager:
         """Followers retry the flock periodically; on takeover, push a leader event."""
         while True:
             await asyncio.sleep(self.leader_interval)
-            for review_id, lock in list(self._leaders.items()):
-                if not lock.is_leader and lock.acquire():
-                    self._broadcast(review_id, {"type": "leader", "data": {"is_leader": True}})
+            # A transient error acquiring one review's lock (e.g. an OSError from
+            # the lockfile's mkdir/open) must not kill the periodic failover retry
+            # for every other review; swallow it and keep looping. CancelledError
+            # comes from asyncio.sleep above and propagates for clean shutdown.
+            try:
+                for review_id, lock in list(self._leaders.items()):
+                    if not lock.is_leader and lock.acquire():
+                        self._broadcast(review_id, {"type": "leader", "data": {"is_leader": True}})
+            except Exception:
+                continue
 
     # -- subscriptions --
     def subscribe(self, review_id: str, queue: asyncio.Queue) -> None:
