@@ -20489,7 +20489,7 @@ prs:
   plan: plan-3119574
   title: Session-launching CLI commands + project.yaml review registry
   branch: pm/pr-a6ef6be-session-launching-cli-commands-project-yaml-review
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Two CLI commands (`pm review <target>` and `pm plan literature-review
     <plan>`) that launch literature-review sessions in tmux panes, plus the `project.yaml`-backed
@@ -20514,15 +20514,16 @@ prs:
     Files: `pm_core/review/registry.py`, `pm_core/review/paths.py`, `pm_core/review/context.py`,
     `pm_core/review/cli.py`, `pm_core/cli/plan.py`, `pm_core/tui/plans_pane.py`, test
     fixtures under `tests/review/`.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/211
+  gh_pr_number: 211
   created_at: '2026-05-20T22:53:20.224284+00:00'
-  updated_at: '2026-05-20T22:53:20.224284+00:00'
-  started_at: null
+  updated_at: '2026-05-21T04:08:35.118589+00:00'
+  started_at: '2026-05-21T04:08:35.118589+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a6ef6be-session-launching-cli-commands-proje-a17683d9
 - id: pr-1160366
   plan: plan-3119574
   title: Markdown format primitives
@@ -20613,10 +20614,10 @@ prs:
     `pm_core/review/ui/static/walker.js`, `pm_core/review/cli.py` (add `ui` subdispatch),
     `pyproject.toml` (add `watchdog`, `fastapi`, `jinja2`, `sse-starlette`).'
   agent_machine: spark-424d
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/210
+  gh_pr_number: 210
   created_at: '2026-05-20T22:53:20.224365+00:00'
-  updated_at: '2026-05-21T04:07:44.855651+00:00'
+  updated_at: '2026-05-21T04:17:31.145929+00:00'
   started_at: '2026-05-21T04:07:44.855651+00:00'
   reviewed_at: null
   merged_at: null
@@ -20778,8 +20779,50 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-21T04:06:05.061620+00:00'
+  updated_at: '2026-05-21T04:28:23.226210+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-4b81277
+    text: 'Confirmed a second instance of this lock-contention failure class while
+      merging/starting PRs on 2026-05-21.
+
+
+      Case: pr-d887f4c (gh #210). ''pr start'' ran ''gh pr create'' which SUCCEEDED
+      and created draft PR #210 (createdAt 04:06:07Z), but the immediately-following
+      write of gh_pr_number back to project.yaml lost the race for project.yaml.lock
+      (''Could not acquire lock on project.yaml.lock within 2.0s — another pm process
+      may be writing project.yaml'') and the process exited 1. Result: PR #210 created
+      on GitHub but ORPHANED — pm record left gh_pr_number=None, status in_progress.
+      Three near-simultaneous ''pr start d887f4c'' invocations were observed (21:06:05,
+      21:07:42, 21:09:26), so concurrent pm operations were contending on the lock.
+
+
+      Two compounding defects:
+
+      1. Ordering: ''gh pr create'' (irreversible external side effect) runs BEFORE
+      the project.yaml persist. If the persist fails (here: lock timeout), the external
+      PR is orphaned with no record. Fix direction: make creation atomic with the
+      record, or reserve/record first, or recover on next run.
+
+      2. Non-idempotent retry (now fixed in gh_ops.create_draft_pr): on re-run the
+      gh_pr_number guard was still None so it re-ran ''gh pr create'', which failed
+      rc=1 (''a pull request ... already exists''); create_draft_pr swallowed every
+      non-zero rc as a flat failure and returned None, so pm never reconciled the
+      existing #210. Also note pm pr sync-github does NOT reconcile orphans — it matches
+      by existing gh_pr_number, not by branch, so it can''t backfill.
+
+
+      Fix applied this session: create_draft_pr now detects the ''already exists''
+      failure and recovers the existing PR via ''gh pr view HEAD'', returning its
+      url/number so the caller records it and continues (with tests). The #210 record
+      was manually reconciled (gh_pr_number=210).
+
+
+      Still open for THIS bug: the underlying project.yaml.lock contention / 2.0s
+      timeout under concurrent pm operations, and the create-before-persist ordering
+      that can orphan external side effects. Consider: longer/backoff lock acquisition,
+      serializing pr-start, and create-after-reserve ordering.'
+    created_at: '2026-05-21T04:28:22Z'
+    last_edited: '2026-05-21T04:28:22Z'
