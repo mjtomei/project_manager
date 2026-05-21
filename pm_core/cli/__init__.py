@@ -533,10 +533,12 @@ def _getting_started_text() -> str:
      pm plan add "name"          Add a plan (launches Claude)
      pm plan breakdown           Break plan into PRs (launches Claude)
      pm plan review              Review plan consistency (launches Claude)
+     pm plan literature-review   Launch a literature-review session for a plan
      pm plan load                Load PRs from plan file
+     pm review <target>          Launch a literature-review session (plan/file/topic)
 
   In the TUI, press p to open the plans view.  Plan action keys:
-     a=add  w=breakdown  c=review  l=load  e=edit  v=view
+     a=add  w=breakdown  c=review  r=lit-review  l=load  e=edit  v=view
 
   Working with PRs:
      pm pr start                 Clone, branch, launch Claude session
@@ -570,11 +572,14 @@ COMMANDS
   pm plan list                  List plans
   pm plan breakdown [plan-id]   Launch Claude to break plan into PRs
   pm plan review [plan-id]      Launch Claude to review plan-PR consistency
+  pm plan literature-review [plan-id]  Launch a literature-review session for a plan
   pm plan deps                  Launch Claude to review/fix PR dependencies
   pm plan load [plan-id]        Create PRs from plan file (non-interactive)
   pm plan import [--name NAME]  Bootstrap PR graph from existing repo (interactive)
   pm plan fixes                 List pending review files with fix commands
   pm plan fix --review <file>   Fix issues found by any review
+
+  pm review <target>            Launch a literature-review session (plan id, file, or topic)
 
   pm pr add <title>             Add a PR (becomes active) [--plan, --depends-on]
   pm pr edit <pr-id>            Edit PR title, description, or dependencies
