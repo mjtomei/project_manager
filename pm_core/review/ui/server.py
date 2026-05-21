@@ -32,6 +32,7 @@ from typing import Any, Iterable
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -665,6 +666,25 @@ def _apply_change(paths: ReviewPaths, cycle: int, change_id: str, action: str, p
     raise HTTPException(status_code=400, detail=f"unknown action {action!r}")
 
 
+def _bulk_accept(paths: ReviewPaths, cycle: int, filters: dict[str, str], scope: str) -> int:
+    """Accept every pending block matching ``filters``; return the count accepted."""
+    resp = paths.response_cycle(cycle)
+    blocks = [_block_view(b) for b in md_parser.parse_response_blocks(resp.read_text())]
+    accepted = 0
+    for b in blocks:
+        if b["status"] != "pending":
+            continue
+        if not _block_matches(b, filters):
+            continue
+        md_writer.update_response_block(
+            resp, b["id"],
+            {"human-verdict": b["suggested-verdict"], "status": "accepted-as-suggested"},
+        )
+        md_writer.append_interaction(resp, b["id"], {"action": "bulk-accept", "scope": scope})
+        accepted += 1
+    return accepted
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -777,8 +797,12 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
         paths, state = _require_editable(pm_root, review_id)
         payload = await _json_body(request)
         action = payload.get("action", "")
+        # md_writer takes a blocking flock + fsync; run it off the event loop so a
+        # contended write can't stall SSE delivery to every other client.
         try:
-            result = _apply_change(paths, state["current-cycle"], change_id, action, payload)
+            result = await run_in_threadpool(
+                _apply_change, paths, state["current-cycle"], change_id, action, payload
+            )
         except KeyError:
             raise HTTPException(status_code=404, detail=f"no change {change_id!r}")
         return {"ok": True, **result}
@@ -794,22 +818,11 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
         scope = payload.get("scope") or (
             ", ".join(f"{k}={v}" for k, v in filters.items()) if filters else "all"
         )
-        resp = paths.response_cycle(state["current-cycle"])
-        blocks = [_block_view(b) for b in md_parser.parse_response_blocks(resp.read_text())]
-        accepted = 0
-        for b in blocks:
-            if b["status"] != "pending":
-                continue
-            if not _block_matches(b, filters):
-                continue
-            md_writer.update_response_block(
-                resp, b["id"],
-                {"human-verdict": b["suggested-verdict"], "status": "accepted-as-suggested"},
-            )
-            md_writer.append_interaction(
-                resp, b["id"], {"action": "bulk-accept", "scope": scope}
-            )
-            accepted += 1
+        # Offload the blocking flock/fsync writes (one pair per accepted block) so
+        # a bulk accept can't stall the event loop's SSE delivery.
+        accepted = await run_in_threadpool(
+            _bulk_accept, paths, state["current-cycle"], filters, scope
+        )
         return {"ok": True, "accepted": accepted}
 
     # -- SSE --

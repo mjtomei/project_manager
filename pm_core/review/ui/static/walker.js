@@ -107,7 +107,11 @@
   });
 
   // ---- view-time tracking: log a `viewed` interaction (>=1s) per entry ----
+  // Debounced to one log per entry per page session: the observer fires on every
+  // scroll-out, so without this guard scrolling an entry in and out repeatedly
+  // would append a `viewed` interaction each time and bloat the response file.
   const viewStart = {};
+  const viewLogged = {};
   const viewIo = new IntersectionObserver(function (ents) {
     ents.forEach(function (it) {
       const id = it.target.dataset.id;
@@ -116,7 +120,8 @@
       } else if (viewStart[id] != null) {
         const dur = performance.now() - viewStart[id];
         delete viewStart[id];
-        if (dur >= 1000 && isEditable()) {
+        if (dur >= 1000 && isEditable() && !viewLogged[id]) {
+          viewLogged[id] = true;
           fetch(`/review/${reviewId}/change/${id}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
