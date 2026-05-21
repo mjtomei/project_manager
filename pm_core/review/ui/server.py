@@ -734,7 +734,14 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
         rows = []
         for r in list_reviews(pm_root):
             rid = r.get("id", "")
-            ctx = build_review_context(pm_root, rid, is_leader=_is_leader(rid), review=r)
+            # The dashboard is read-only — it never renders Apply, so it must not
+            # call _is_leader (which acquires the per-review leader flock for the
+            # process lifetime). Claiming write-leadership for every listed review
+            # just to render a status page would block Apply from any other
+            # concurrent UI, even for reviews this user never opens. Leadership is
+            # claimed lazily when a walker/status/apply route actually touches a
+            # specific review.
+            ctx = build_review_context(pm_root, rid, is_leader=False, review=r)
             rows.append({"review": r, "ctx": ctx})
         active = [row for row in rows if row["review"].get("status") != "archived"]
         archived = [row for row in rows if row["review"].get("status") == "archived"]

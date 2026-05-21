@@ -170,6 +170,30 @@ def test_dashboard_exposes_sse_refresh_contract(tmp_path):
         assert s["breadcrumb"] and "Cycle 3" in s["breadcrumb"]
 
 
+def test_dashboard_does_not_claim_leadership(tmp_path):
+    # The read-only dashboard never renders Apply, so loading it must not acquire
+    # the per-review leader flock: doing so would claim write-leadership for every
+    # listed review for this process's lifetime, blocking Apply from any other
+    # concurrent UI even on reviews this user never opens. Leadership is claimed
+    # lazily when a walker/status/apply route touches a specific review.
+    pm, _ = _seed_review(tmp_path, phase="awaiting-human-review")
+    app = server.build_app(pm)
+    with TestClient(app) as c:
+        assert c.get("/").status_code == 200
+        assert "reg" not in app.state.manager._leaders
+        # An external process can still become the writer for a dashboard-only review.
+        holder = server.LeaderLock(server.ReviewPaths(pm, "reg").leader_lock)
+        try:
+            assert holder.acquire() is True
+        finally:
+            holder.release()
+    # Opening the walker, by contrast, does claim leadership.
+    app2 = server.build_app(pm)
+    with TestClient(app2) as c:
+        assert c.get("/review/reg/api/status").status_code == 200
+        assert "reg" in app2.state.manager._leaders
+
+
 def test_no_cycles_placeholder(tmp_path):
     pm = _make_pm(tmp_path, [
         {"id": "fresh", "name": "Fresh", "target": "x", "target-type": "topic", "status": "active"},
