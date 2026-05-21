@@ -236,6 +236,10 @@ def test_prior_cycle_is_read_only_even_when_current_is_editable(tmp_path):
         page = c.get("/review/reg/changes?cycle=2")
         assert 'data-editable="false"' in page.text
         assert "read-only" in page.text
+        # The breadcrumb names this prior cycle as read-only history, not the
+        # review's live cycle-global phase (which is unrelated to cycle 2).
+        assert "Cycle 2 · read-only" in page.text
+        assert "Cycle 2 · awaiting-human-review" not in page.text
 
 
 # ---------------------------------------------------------------------------

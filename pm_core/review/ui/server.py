@@ -203,7 +203,10 @@ def _block_matches(view: dict[str, Any], filters: dict[str, str]) -> bool:
 
 def breadcrumb(cycle: Any, phase: str | None, is_current: bool, audited: int = 0) -> str:
     if not is_current:
-        return f"Cycle {cycle} · {phase} · read-only"
+        # A prior cycle is finished history; `phase` here is the *review's* live
+        # phase (cycle-global), which is unrelated to this superseded cycle, so
+        # surfacing it would mislead (e.g. "Cycle 2 · audit" while cycle 3 audits).
+        return f"Cycle {cycle} · read-only"
     table = {
         "review": f"Cycle {cycle} · review in progress",
         "audit": f"Cycle {cycle} · audit loop running · {audited} citations audited",
@@ -484,6 +487,11 @@ class WatcherManager:
         self._subs: dict[str, set[asyncio.Queue]] = {}
         self._watches: dict[str, Any] = {}
         self._leaders: dict[str, LeaderLock] = {}
+        # subscribe()/unsubscribe() mutate _subs/_watches from the event-loop
+        # thread while the watchdog thread iterates _subs in _broadcast(); guard
+        # both so a concurrent add/discard can't trip "set changed size during
+        # iteration" (and drop an SSE event) on the watcher thread.
+        self._subs_guard = threading.Lock()
         # leader_for() runs in the sync-route threadpool; serialize its
         # get-or-create so two concurrent first-touches for the same review
         # can't each build a LeaderLock (the second's flock would fail and
@@ -532,25 +540,27 @@ class WatcherManager:
 
     # -- subscriptions --
     def subscribe(self, review_id: str, queue: asyncio.Queue) -> None:
-        subs = self._subs.setdefault(review_id, set())
-        subs.add(queue)
-        if review_id not in self._watches and self._observer is not None:
-            d = ReviewPaths(self.pm_root, review_id).dir
-            d.mkdir(parents=True, exist_ok=True)
-            handler = _ReviewEventHandler(review_id, self._on_change)
-            self._watches[review_id] = self._observer.schedule(handler, str(d), recursive=False)
+        with self._subs_guard:
+            subs = self._subs.setdefault(review_id, set())
+            subs.add(queue)
+            if review_id not in self._watches and self._observer is not None:
+                d = ReviewPaths(self.pm_root, review_id).dir
+                d.mkdir(parents=True, exist_ok=True)
+                handler = _ReviewEventHandler(review_id, self._on_change)
+                self._watches[review_id] = self._observer.schedule(handler, str(d), recursive=False)
 
     def unsubscribe(self, review_id: str, queue: asyncio.Queue) -> None:
-        subs = self._subs.get(review_id)
-        if subs is None:
-            return
-        subs.discard(queue)
-        if not subs:
-            self._subs.pop(review_id, None)
-            watch = self._watches.pop(review_id, None)
-            if watch is not None and self._observer is not None:
-                with contextlib.suppress(Exception):
-                    self._observer.unschedule(watch)
+        with self._subs_guard:
+            subs = self._subs.get(review_id)
+            if subs is None:
+                return
+            subs.discard(queue)
+            if not subs:
+                self._subs.pop(review_id, None)
+                watch = self._watches.pop(review_id, None)
+                if watch is not None and self._observer is not None:
+                    with contextlib.suppress(Exception):
+                        self._observer.unschedule(watch)
 
     # -- event classification + broadcast (runs in watchdog thread) --
     def _on_change(self, review_id: str, basename: str) -> None:
@@ -580,7 +590,11 @@ class WatcherManager:
         loop = self._loop
         if loop is None:
             return
-        for q in list(self._subs.get(review_id, ())):
+        # Snapshot under the guard so a concurrent (un)subscribe can't mutate the
+        # set mid-iteration; schedule the puts outside it to keep the lock brief.
+        with self._subs_guard:
+            queues = list(self._subs.get(review_id, ()))
+        for q in queues:
             loop.call_soon_threadsafe(q.put_nowait, event)
 
 

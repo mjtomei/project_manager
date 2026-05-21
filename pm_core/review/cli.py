@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import click
 
-from pm_core.cli.helpers import state_root
+# NB: pm_core.cli imports are done lazily inside the command body. Importing them
+# at module top would create a cycle — pm_core.cli.__init__ registers this group
+# at its bottom, so resolving `pm_core.cli.helpers` here while review.cli is still
+# initializing would fail (review.cli not yet defined).
 
 
 @click.group("review")
@@ -24,6 +27,7 @@ def ui(port: int, host: str):
     """Launch the walker web server (dashboard + proposed-changes walker)."""
     import uvicorn
 
+    from pm_core.cli.helpers import state_root
     from pm_core.review.ui.server import build_app
 
     pm_root = state_root()
