@@ -53,3 +53,19 @@ def test_large_file_target_is_not_inlined(tmp_path):
     assert marker not in out  # body not inlined
     assert "is large" in out  # pointer note instead
     assert "Target (file): big.md" in out
+
+
+def test_binary_file_target_degrades_gracefully(tmp_path):
+    # A non-UTF-8 file target (e.g. `pm review paper.pdf`) must not crash the
+    # context build — it points the session at the file instead.
+    root = tmp_path
+    (root / "paper.pdf").write_bytes(b"%PDF-1.4\n\xff\xfe\x00\x01binary\x80\x90")
+    out = context.build_context(root, "paper-pdf", "paper.pdf", "file")
+    assert "could not read" in out
+    assert "Target (file): paper.pdf" in out
+
+
+def test_missing_file_target_is_noted(tmp_path):
+    out = context.build_context(tmp_path, "gone-md", "gone.md", "file")
+    assert "file not found" in out
+    assert "Target (file): gone.md" in out

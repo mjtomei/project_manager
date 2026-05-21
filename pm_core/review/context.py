@@ -33,28 +33,32 @@ def _target_preamble(root: Path, target: str, target_type: str) -> str:
     session has the artifact in hand; otherwise point at the path.
     """
     lines = [f"Target ({target_type}): {target}"]
-    if target_type in ("file", "plan"):
-        path = root / target if not Path(target).is_absolute() else Path(target)
-        if not path.exists():
-            # target may be repo-relative rather than pm-root-relative
-            alt = Path.cwd() / target
-            if alt.exists():
-                path = alt
-        if path.exists():
-            try:
-                body = path.read_text()
-                if len(body.encode()) > _MAX_INLINE_BYTES:
-                    lines.append(
-                        f"(target at {path} is large — read it yourself rather "
-                        "than relying on an inlined copy)")
-                else:
-                    lines.append(f"\n--- contents of {target} ---\n{body}")
-            except OSError:
-                lines.append(f"(could not read {path}; read it yourself)")
-        else:
-            lines.append(f"(file not found at {path}; locate and read it yourself)")
-    else:
+    if target_type not in ("file", "plan"):
         lines.append("This is a from-topic review with no starting file.")
+        return "\n".join(lines)
+
+    path = root / target if not Path(target).is_absolute() else Path(target)
+    if not path.exists():
+        # target may be repo-relative rather than pm-root-relative
+        alt = Path.cwd() / target
+        if alt.exists():
+            path = alt
+    if not path.exists():
+        lines.append(f"(file not found at {path}; locate and read it yourself)")
+        return "\n".join(lines)
+
+    try:
+        # Stat before reading so a huge target isn't slurped into memory just to
+        # be rejected for inlining. UnicodeDecodeError (e.g. a PDF/binary target)
+        # is non-fatal — point the session at the file instead of crashing.
+        if path.stat().st_size > _MAX_INLINE_BYTES:
+            lines.append(
+                f"(target at {path} is large — read it yourself rather "
+                "than relying on an inlined copy)")
+        else:
+            lines.append(f"\n--- contents of {target} ---\n{path.read_text()}")
+    except (OSError, UnicodeDecodeError):
+        lines.append(f"(could not read {path}; read it yourself)")
     return "\n".join(lines)
 
 
