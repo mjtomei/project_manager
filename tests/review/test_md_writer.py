@@ -245,6 +245,19 @@ def test_update_state_concurrent_writes_never_corrupt(tmp_path):
     assert not list(tmp_path.glob("STATE.md.*tmp*"))
 
 
+def test_update_response_block_unknown_id_raises(tmp_path):
+    # Updating a block whose id isn't present must raise KeyError, not silently
+    # no-op — a walker writing to a stale/typo'd id should fail loudly.
+    import pytest
+
+    path = _copy_fixture("response_cycle.md", tmp_path)
+    before = path.read_text()
+    with pytest.raises(KeyError):
+        md_writer.update_response_block(path, "change-404", {"status": "accepted"})
+    # The file is left untouched on the failed lookup.
+    assert path.read_text() == before
+
+
 def test_update_response_block_preserves_literal_blocks(tmp_path):
     # Multi-line fields must round-trip as readable `|` blocks, not
     # single-quoted scalars with embedded blank lines.

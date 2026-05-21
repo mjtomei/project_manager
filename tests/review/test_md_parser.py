@@ -88,6 +88,41 @@ def test_parse_focus_timestamp():
     assert focus.timestamp == "2026-05-20T15:30:00Z"
 
 
+def test_parse_state_empty_input_all_none():
+    # Documented edge case: parse_state/parse_focus take text (not a path), so a
+    # missing file the caller reads as "" must parse to an all-None record rather
+    # than raising — the walker reads these before the first write.
+    for text in ("", "   \n\n"):
+        state = md_parser.parse_state(text)
+        assert state.current_cycle is None
+        assert state.current_phase is None
+        assert state.mode is None
+        assert state.last_transition is None
+        assert state.raw == {}
+
+        focus = md_parser.parse_focus(text)
+        assert focus.view is None
+        assert focus.cycle is None
+        assert focus.target is None
+        assert focus.timestamp is None
+        assert focus.raw == {}
+
+
+def test_parse_state_tolerates_inline_comments():
+    # The plan's example state file carries inline `#` comments; YAML handles
+    # them natively but the contract is documented, so pin it.
+    text = (
+        "current-cycle: 3  # third pass\n"
+        "current-phase: applying  # mid-apply\n"
+        "mode: human-reviewed\n"
+        "last-transition: 2026-05-20T14:32:00Z\n"
+    )
+    state = md_parser.parse_state(text)
+    assert state.current_cycle == 3
+    assert state.current_phase == "applying"
+    assert state.mode == "human-reviewed"
+
+
 def test_parse_response_block_with_arrow_in_value():
     # A `-->` inside a YAML value (research passages contain arrows like
     # "input --> output") must not be mistaken for the closing fence: YAML
