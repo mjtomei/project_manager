@@ -76,6 +76,18 @@ def test_resume_existing_active_review_no_new_entry(tmp_path):
     launch.assert_called_once()
 
 
+def test_empty_slug_target_is_rejected(tmp_path, capsys):
+    root = _seed_root(tmp_path)
+    with patch.object(review_cli, "launch_review_session") as launch:
+        rid = review_cli.run_review("???", root=root, target_type="topic")
+    assert rid is None
+    launch.assert_not_called()
+    # nothing registered and no STATE.md leaked into the reviews root
+    assert (store.load(root).get("reviews") or []) == []
+    assert not (paths.reviews_root(root) / "STATE.md").exists()
+    assert "review id" in capsys.readouterr().err
+
+
 def test_archived_review_warns_and_does_not_launch(tmp_path, capsys):
     root = _seed_root(tmp_path, reviews=[
         {"id": "topic-x", "target": "topic x", "target-type": "topic", "status": "archived"},

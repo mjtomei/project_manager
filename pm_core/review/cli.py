@@ -155,6 +155,13 @@ def run_review(target: str, *, root: Path, target_type: str | None = None,
         stored_target = _resolve_plan_file(data, target)
 
     review_id = derive_artifact_id(stored_target, target_type)
+    if not review_id:
+        click.echo(
+            f"Could not derive a review id from target {target!r} — it has no "
+            "alphanumeric characters. Pick a more descriptive target.",
+            err=True,
+        )
+        return None
     existing = registry.get_review(data, review_id)
 
     if existing and existing.get("status") == "archived":

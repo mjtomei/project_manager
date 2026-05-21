@@ -395,7 +395,10 @@ No **[UNRESOLVED]** ambiguities.
   §1.4.
 - **Topic strings with shell-special chars / spaces.** Passed as a single argv
   entry; `slugify` sanitizes for the id; the raw topic is stored verbatim in
-  `target`.
+  `target`. A target with *no* alphanumerics (e.g. `"???"`) slugifies to the
+  empty string; `run_review` rejects this up front (clear error, no registry
+  entry / dir / `STATE.md`) rather than creating a degenerate review whose
+  empty id collapses `dir_for` onto the shared `reviews/` root.
 - **Resume after the review directory was deleted.** Registry hit but dir
   missing → `dir_for(create=True)` recreates it; `STATE.md` won't exist so
   `build_context` omits it (degrades to a fresh-start prompt). Acceptable.
