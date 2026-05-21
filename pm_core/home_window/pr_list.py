@@ -132,7 +132,11 @@ def _render_content(width: int, height: int) -> str:
         reverse=True,
     )
 
-    active_pr = data.get("project", {}).get("active_pr")
+    # `or {}` (not a `{}` default) so a present-but-null `project:` key
+    # in project.yaml doesn't blow up with AttributeError — mirrors the
+    # `data.get("prs") or []` guard above. store.load returns raw YAML,
+    # so null values are possible.
+    active_pr = (data.get("project") or {}).get("active_pr")
     body_lines: list[str] = []
 
     if not prs:

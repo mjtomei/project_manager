@@ -237,6 +237,19 @@ class TestRenderHelpers:
                    side_effect=OSError):
             assert _terminal_size() == DEFAULT_SIZE
 
+    def test_render_content_null_project_key(self):
+        # A present-but-null `project:` in project.yaml (store.load returns
+        # raw YAML) must not blow up with AttributeError — it should render
+        # the PR list with no active marker, not surface a "render error".
+        prs = [{"id": "pr-1", "title": "Open PR", "status": "in_progress",
+                "updated_at": "2026-01-01T10:00:00+00:00"}]
+        with patch("pm_core.store.find_project_root", return_value="/tmp"), \
+             patch("pm_core.store.load",
+                   return_value={"prs": prs, "project": None}):
+            body = _render_content(80, 24)
+        assert "Open PR" in body
+        assert "error" not in body
+
     def test_render_content_empty_list(self):
         with patch("pm_core.store.find_project_root", return_value="/tmp"), \
              patch("pm_core.store.load",
