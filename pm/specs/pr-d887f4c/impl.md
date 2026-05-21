@@ -235,8 +235,10 @@ the tree, so this PR must be self-contained.
    cycle); they are not additionally mode-gated since the phase won't coincide in auto-run.
 3. **Does the SSE response/review/audit event carry content or just a signal?** → State/focus
    events carry parsed payloads (cheap, avoids a round-trip, helps the <200ms budget). Cycle-file
-   events (`response`/`review`/`audit`) carry `{cycle, …}`; the client re-fetches the body
-   fragment (`GET …/api/body?cycle=N`) to re-render. Audit events also carry the live `audited`
+   events (`response`/`review`/`audit`) carry `{cycle, …}`; the client re-fetches the rendered
+   walker page (`GET …/review/{id}/changes?cycle=N`, preserving the active filters) and swaps in
+   its `#walker-body` fragment to re-render — rather than a dedicated `/api/body` endpoint, the
+   page route doubles as the fragment source. Audit events also carry the live `audited`
    count for the indicator.
 4. **Default port for `pm review ui`.** → `8765` (arbitrary, high, unlikely to collide), `--port`
    overridable; host `127.0.0.1` (local-only per plan).
