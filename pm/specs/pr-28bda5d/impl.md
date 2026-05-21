@@ -1,5 +1,14 @@
 # pr-28bda5d — home window: redraw only on actual content change
 
+> **Implementation note (as built):** `_render_once` was realized as
+> two functions — `_render_content(width, height)` (the size-fitted
+> body) and `_compose(header, body, width, height)` (header + ruler +
+> body, clamped to height). The split lets the loop hash size+content
+> independently of the relative-time staleness phrasing, so the
+> "last changed" clock only resets on real content changes (not on a
+> staleness-bucket flip). All requirements below are satisfied by this
+> pair; read both where the spec says `_render_once`.
+
 ## Requirements
 
 1. **Hash-diff redraw in `_loop_main`** (`pm_core/home_window/pr_list.py:109`).
