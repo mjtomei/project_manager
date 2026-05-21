@@ -47,9 +47,8 @@
             title="{{ 'Write the applying transition to STATE.md' if can_apply else ('another UI owns this session' if (editable and mode != 'auto-run' and not is_leader) else '') }}">
       Apply
     </button>
-    {% if editable and mode != 'auto-run' and not is_leader %}
-      <span class="subtle owner-hint">another UI owns this session</span>
-    {% endif %}
+    <span class="subtle owner-hint{{ '' if (editable and mode != 'auto-run' and not is_leader) else ' hidden' }}"
+          id="owner-hint">another UI owns this session</span>
   </section>
   <p class="hint subtle" id="hint">{{ hint }}</p>
 

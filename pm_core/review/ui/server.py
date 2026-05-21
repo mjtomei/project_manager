@@ -821,8 +821,3 @@ async def _json_body(request: Request) -> dict[str, Any]:
     except Exception:
         return {}
     return body if isinstance(body, dict) else {}
-
-
-# Module-level app for `uvicorn pm_core.review.ui.server:app` style invocation.
-def _default_app() -> FastAPI:
-    return build_app()

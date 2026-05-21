@@ -175,6 +175,14 @@
       applyBtn.classList.toggle("hidden", !s.can_apply);
       applyBtn.disabled = !s.can_apply;
     }
+    // Keep the "another UI owns this session" hint consistent with leadership:
+    // a follower promoted to leader (leader SSE event) must drop the stale hint,
+    // and it lives outside #walker-body so refreshBody() can't fix it.
+    const ownerHint = document.querySelector("#owner-hint");
+    if (ownerHint) {
+      const owned = s.editable && s.mode !== "auto-run" && !s.is_leader;
+      ownerHint.classList.toggle("hidden", !owned);
+    }
     // The lock state changed — re-render the body so controls/badges match.
     if (wasEditable !== !!s.editable) refreshBody();
   }
