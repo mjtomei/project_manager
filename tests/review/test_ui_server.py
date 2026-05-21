@@ -248,6 +248,23 @@ def test_viewed_action_rejected_outside_awaiting(tmp_path):
         assert r.status_code == 409
 
 
+def test_reopen_action_resets_status_and_logs(tmp_path):
+    # The Reopen button (rendered for any non-pending entry) round-trips a block
+    # back to `pending` and logs a `reopen` interaction so a mistaken accept/skip
+    # can be undone in-place.
+    pm, d = _seed_review(tmp_path, phase="awaiting-human-review")
+    with _client(pm) as c:
+        assert c.post("/review/reg/change/change-1", json={"action": "accept"}).status_code == 200
+        r = c.post("/review/reg/change/change-1", json={"action": "reopen"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "pending"
+    blocks = md_parser.parse_response_blocks((d / "REVIEW_RESPONSE_CYCLE_3.md").read_text())
+    b1 = next(b for b in blocks if b.id == "change-1")
+    assert b1.fields["status"] == "pending"
+    actions = [ev["action"] for ev in b1.interactions]
+    assert "accept-as-suggested" in actions and "reopen" in actions
+
+
 @pytest.mark.parametrize("phase", ["review", "audit", "response", "applying", "complete"])
 def test_walker_read_only_outside_awaiting(tmp_path, phase):
     pm, d = _seed_review(tmp_path, phase=phase)
