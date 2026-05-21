@@ -229,8 +229,21 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
 
     runtime = _get_runtime()
     git_name, git_email = _host_git_identity()
-    cmd = [
-        runtime, "build", "-t", tag,
+    cmd = [runtime, "build"]
+    # Nested rootless podman: build RUN steps otherwise create a fresh UTS
+    # namespace and call sethostname(2), which a nested env lacks
+    # CAP_SYS_ADMIN for — every RUN dies with "sethostname: Operation not
+    # permitted" before the image can be built (and create_container
+    # auto-builds pm-dev on first use, so this blocks the whole flow).
+    # Share the host UTS namespace (skipping the sethostname call), exactly
+    # mirroring the --uts=host accommodation _nested_podman_run_args()
+    # applies to the corresponding `podman run`.  (chroot isolation also
+    # skips the namespace but breaks node's libuv fd handling at build time,
+    # so --uts=host on the default OCI isolation is the right lever here.)
+    if "podman" in runtime and _nested_podman_enabled():
+        cmd.extend(["--uts", "host"])
+    cmd += [
+        "-t", tag,
         "--build-arg", f"GIT_USER_NAME={git_name}",
         "--build-arg", f"GIT_USER_EMAIL={git_email}",
         "-f", str(dockerfile), str(dockerfile.parent),
@@ -621,8 +634,18 @@ def create_container(
     cmd = [
         "run", "-d",
         "--name", name,
-        "--memory", config.memory_limit,
-        "--cpus", config.cpu_limit,
+    ]
+    # Resource caps need delegated cgroup controllers.  Under nested
+    # rootless podman the controllers usually aren't delegated to the
+    # inner user's subtree (cgroupfs manager, empty cgroupControllers), so
+    # crun can't create the container cgroup and ``podman run`` dies with
+    # "could not find cgroup mount in /proc/self/cgroup" before the
+    # workload starts.  Skip the limits there — they're unenforceable in
+    # that environment anyway — matching the relaxed-sandbox intent of the
+    # nested_podman opt-in (see _nested_podman_run_args).
+    if not ("podman" in runtime and _nested_podman_enabled()):
+        cmd += ["--memory", config.memory_limit, "--cpus", config.cpu_limit]
+    cmd += [
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
         "-w", _CONTAINER_WORKDIR,
     ]

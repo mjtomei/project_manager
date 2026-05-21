@@ -69,6 +69,45 @@ class TestBuildImage:
         with pytest.raises(RuntimeError, match="Image build failed"):
             build_image(quiet=True)
 
+    @patch("subprocess.run")
+    @patch("pm_core.container._nested_podman_enabled", return_value=True)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_nested_podman_build_shares_uts_namespace(
+        self, mock_runtime, mock_nested, mock_run
+    ):
+        # Under nested rootless podman the default isolation makes RUN
+        # steps create a UTS namespace and call sethostname(2), which dies
+        # with EPERM.  --uts=host shares the host UTS namespace, skipping
+        # the syscall (mirrors _nested_podman_run_args' run accommodation).
+        mock_run.return_value = MagicMock(returncode=0)
+        build_image(tag="pm-dev:test", quiet=True)
+        args = mock_run.call_args[0][0]
+        assert "--uts" in args
+        assert args[args.index("--uts") + 1] == "host"
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._nested_podman_enabled", return_value=False)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_non_nested_build_omits_uts_host(
+        self, mock_runtime, mock_nested, mock_run
+    ):
+        mock_run.return_value = MagicMock(returncode=0)
+        build_image(tag="pm-dev:test", quiet=True)
+        args = mock_run.call_args[0][0]
+        assert "--uts" not in args
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._nested_podman_enabled", return_value=True)
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_docker_build_omits_uts_host(
+        self, mock_runtime, mock_nested, mock_run
+    ):
+        # --uts=host is applied only for podman; docker's nested story differs.
+        mock_run.return_value = MagicMock(returncode=0)
+        build_image(tag="pm-dev:test", quiet=True)
+        args = mock_run.call_args[0][0]
+        assert "--uts" not in args
+
 
 class TestImageExists:
     def setup_method(self):
@@ -310,6 +349,48 @@ class TestCreateContainerPodman:
         run_call = mock_runtime_cmd.call_args_list[0]
         args = run_call[0]
         assert "--userns=keep-id" in args
+
+    @patch("pm_core.container._nested_podman_enabled", return_value=True)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_nested_podman_omits_cgroup_limits(self, mock_runtime_cmd, mock_rm,
+                                               mock_exists, mock_get_runtime,
+                                               mock_nested, _mock_running):
+        """Nested podman drops --memory/--cpus (no delegated cgroup
+        controllers → ``podman run`` would die finding the cgroup mount)."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args = mock_runtime_cmd.call_args_list[0][0]
+        assert "--memory" not in args
+        assert "--cpus" not in args
+        # The relaxed-sandbox accommodations still apply.
+        assert "--uts=host" in args
+
+    @patch("pm_core.container._nested_podman_enabled", return_value=False)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_non_nested_podman_keeps_cgroup_limits(self, mock_runtime_cmd,
+                                                   mock_rm, mock_exists,
+                                                   mock_get_runtime,
+                                                   mock_nested, _mock_running):
+        """Without nested podman, resource caps are passed as usual."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args = mock_runtime_cmd.call_args_list[0][0]
+        assert "--memory" in args
+        assert "--cpus" in args
 
     @patch("pm_core.container._get_runtime", return_value="podman")
     @patch("pm_core.container.image_exists", return_value=True)
