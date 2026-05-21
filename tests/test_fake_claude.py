@@ -990,6 +990,29 @@ class TestFakeClaudeLauncher:
         assert captured[0][0] == fake_bin
         assert "--verdict" in captured[0]
 
+    def test_launch_claude_print_closes_stdin(self, monkeypatch):
+        """Print mode must close stdin so a no-verdict fake hits EOF instead
+        of blocking forever in _hold_open on inherited stdin (e.g. _all mode)."""
+        import subprocess
+        from pm_core import claude_launcher
+        # No-verdict fake config (what _all mode resolves to for any type).
+        fc_config = {"binary": "/custom/fake-claude"}
+        monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
+                            lambda st: fc_config)
+        captured_kw = {}
+
+        class _FakeResult:
+            returncode = 0
+            stdout = ""
+
+        def _fake_run(cmd, **kw):
+            captured_kw.update(kw)
+            return _FakeResult()
+
+        monkeypatch.setattr("subprocess.run", _fake_run)
+        claude_launcher.launch_claude_print("prompt", session_type="impl")
+        assert captured_kw.get("stdin") == subprocess.DEVNULL
+
     def test_launch_claude_print_works_without_real_claude_on_path(self, monkeypatch):
         """launch_claude_print must not require real claude when fake is configured."""
         from pm_core import claude_launcher

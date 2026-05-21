@@ -520,12 +520,17 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
 
     try:
         log_shell_command(cmd, prefix="claude-print")
+        # Print mode is one-shot; close stdin so a no-verdict fake-claude
+        # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
+        # forever on inherited stdin.  Real `claude -p` gets its prompt via
+        # argument, so it never needs stdin either.
         result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
             env=run_env,
+            stdin=subprocess.DEVNULL,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
@@ -797,12 +802,17 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
                 cmd.extend(["--model", model_flag])
             cmd.extend(["-p", prompt])
         log_shell_command(cmd, prefix="claude-print")
+        # Print mode is one-shot; close stdin so a no-verdict fake-claude
+        # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
+        # forever on inherited stdin.  Real `claude -p` gets its prompt via
+        # argument, so it never needs stdin either.
         result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
             env=run_env,
+            stdin=subprocess.DEVNULL,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
