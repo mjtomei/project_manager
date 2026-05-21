@@ -214,13 +214,18 @@ def _loop_main(session: str) -> None:
         screen = _compose(header, body, width, height)
 
         # Paint hash includes the bucketed staleness so we repaint when
-        # the bucket flips (Ns -> N+1s, Nm -> N+1m), without burning a
-        # repaint every sub-second tick when content hasn't changed.
+        # the bucket flips ("just now" -> "1m ago" -> "2m ago" -> ...),
+        # without burning a repaint every sub-second tick when content
+        # hasn't changed.
         paint_hash = _hash(content_hash, _format_relative(age))
         if paint_hash != last_paint_hash:
+            # No trailing newline: `screen` is already clamped to the
+            # pane height, so writing one more newline on the bottom row
+            # would scroll the terminal up by one line and push the
+            # header off-screen — defeating the most-recent-at-top goal
+            # exactly when the list fills the pane.
             sys.stdout.write("\033[2J\033[H")
             sys.stdout.write(screen)
-            sys.stdout.write("\n")
             sys.stdout.flush()
             last_paint_hash = paint_hash
 

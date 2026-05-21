@@ -6,6 +6,7 @@ import pm_core.home_window as home_window
 from pm_core.cli.helpers import format_pr_line
 from pm_core.home_window.pr_list import (
     PrListProvider,
+    _compose,
     _format_relative,
     _render_content,
     _truncate,
@@ -159,6 +160,25 @@ class TestRenderHelpers:
         # most recent (highest date) should be visible, oldest hidden
         assert "T10" in body  # most recent
         assert "T1:" not in body  # oldest hidden (no plain "T1:" form)
+
+    def test_compose_clamps_to_pane_height(self):
+        # The composed screen must never exceed `height` lines. The loop
+        # writes it with NO trailing newline, so a screen of exactly
+        # `height` lines lands on the bottom row without scrolling the
+        # header off the top.
+        prs = [
+            {"id": f"pr-{i}", "title": f"T{i}", "status": "in_progress",
+             "updated_at": f"2026-01-{i:02d}T10:00:00+00:00"}
+            for i in range(1, 11)
+        ]
+        height = 6
+        with patch("pm_core.store.find_project_root", return_value="/tmp"), \
+             patch("pm_core.store.load", return_value={"prs": prs,
+                                                       "project": {}}):
+            body = _render_content(80, height)
+        screen = _compose("pm pr list -t --open  (updated just now)",
+                          body, 80, height)
+        assert len(screen.split("\n")) <= height
 
 
 class TestFormatPrLine:

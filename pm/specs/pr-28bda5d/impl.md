@@ -63,13 +63,23 @@
 
 ## Resolutions to implementation choices
 
-- **Header staleness format**: `(updated Ns ago)` for N<60,
-  `(updated Nm ago)` for 1≤N<60, `(updated Nh ago)` beyond. Use
-  monotonic-tracked `last_content_change` time updated when hash
-  diffs.
+- **Header staleness format** (as built): `(updated just now)` for
+  N<60, `(updated Nm ago)` for 1≤N<60min, `(updated Nh ago)` beyond.
+  Uses monotonic-tracked `last_content_change` time updated when the
+  content hash diffs. The first-minute bucket is `just now` rather
+  than per-second `Ns ago` *deliberately*: the paint hash includes the
+  staleness phrasing, so a per-second `Ns ago` would flip the paint
+  hash every tick and re-introduce the exact idle flicker this PR
+  removes (see the implicit requirement above and
+  `test_format_relative_buckets_sub_minute_to_just_now`).
 - **Width truncation**: simple character truncation with `…`
-  appended when the line is over width; no ANSI/wide-char awareness
-  — `format_pr_line` produces plain ASCII per current code.
+  appended when the line is over width; no ANSI/wide-char awareness.
+  NOTE: the original premise that `format_pr_line` is plain ASCII is
+  incorrect — it prepends a 2-cell status emoji, so a line truncated
+  to exactly `width` code points renders `width+1` cells and can
+  soft-wrap on a narrow pane. Tracked as a follow-up bug
+  (`pr-9330dec`); proper display-width measurement (wcwidth or a
+  unicodedata helper) is its own change with a dependency decision.
 - **Footer**: `(… and M more)` only when M > 0.
 - **Refresh wiring**: rather than touching every CLI mutation site,
   hook `refresh_home()` into the existing `trigger_tui_reload`

@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d887f4c
+  active_pr: pr-9330dec
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -20826,3 +20826,40 @@ prs:
       serializing pr-start, and create-after-reserve ordering.'
     created_at: '2026-05-21T04:28:22Z'
     last_edited: '2026-05-21T04:28:22Z'
+- id: pr-9330dec
+  plan: bugs
+  title: 'Bug: home-window line truncation undercounts emoji width, can soft-wrap
+    on narrow panes'
+  branch: pm/pr-9330dec-bug-home-window-line-truncation-undercounts-emoji-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/home_window/pr_list.py:_truncate (and callers in
+    _render_content/_compose).
+
+
+    _truncate uses len() (code-point count) to fit lines to the pane width, but format_pr_line
+    (pm_core/cli/helpers.py:280) prepends a status emoji from PR_STATUS_ICONS (⏳🔨👀🧪✅🚫),
+    each rendered as 2 cells in most terminals. A line truncated to exactly `width`
+    code points therefore renders as width+1 cells (more if the title also contains
+    wide chars), overflowing the last column and soft-wrapping on a narrow pane.
+
+
+    Repro: shrink the pm-home pane to mobile-mode width with at least one long PR
+    title so lines truncate; the truncated line wraps, producing a stray trailing
+    character / extra row at the bottom — exactly the "no soft-wrap artifacts" case
+    the pr-28bda5d acceptance test calls out.
+
+
+    Fix needs display-width measurement (wcwidth dependency, or a unicodedata-based
+    helper with an emoji heuristic). Deferred from pr-28bda5d, whose spec explicitly
+    scoped wide-char awareness out (its premise that format_pr_line is plain ASCII
+    is incorrect — it carries emoji).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T15:56:55.362547+00:00'
+  updated_at: '2026-05-21T15:56:55.362547+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
