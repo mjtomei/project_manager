@@ -21,7 +21,7 @@ from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
-from pm_core.plan_parser import extract_plan_intro
+from pm_core.plans.parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (

@@ -9,8 +9,8 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
-from pm_core.plan_parser import parse_plan_prs
-from pm_core import review as review_mod
+from pm_core.plans.parser import parse_plan_prs
+from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_gen import tui_section
 

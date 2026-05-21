@@ -1,6 +1,12 @@
 # Spec: PR pr-1160366 — Markdown format primitives
 
-Code lives under `pm_core/review/`. NOTE: an existing `pm_core/review.py` module (post-step plan-review logic, imported by `pm_core/cli/plan.py` and `tests/test_review.py`) already occupied this name. The whole litreview plan (plan-3119574) puts its code under `pm_core/review/`, so the collision is resolved by turning the old module into `pm_core/review/__init__.py` verbatim (preserving every existing `pm_core.review` import) and adding the new primitives as submodules (`md_parser.py`, `md_writer.py`). Two unrelated "review" concepts now share the package; a future cleanup could rename the old module to e.g. `pm_core/plan_review.py`, but that is out of scope here.
+Code lives under `pm_core/review/` (walker primitives only). NOTE: an existing `pm_core/review.py` module (post-step plan-command review logic) already occupied this name, an unrelated "review" concept. Rather than share the package, this PR moves the plan-related top-level modules into a new `pm_core/plans/` package so `pm_core/review/` is owned cleanly by the litreview walker:
+
+- `pm_core/plan_parser.py` → `pm_core/plans/parser.py`
+- `pm_core/review.py` (post-step plan-command review) → `pm_core/plans/review.py`
+- `tests/test_review.py` → `tests/test_plan_review.py`
+
+All importers updated accordingly (`pm_core/cli/plan.py`, `pm_core/guide.py`, `pm_core/tui/{app,watcher_ui}.py`, and the moved tests). `pm_core/review/` then contains only `__init__.py` (walker docstring) plus the new primitives `md_parser.py` / `md_writer.py`. Both `pm_core.review` and `pm_core.plans` are added to `pyproject.toml`'s package list.
 
 ## Requirements
 
