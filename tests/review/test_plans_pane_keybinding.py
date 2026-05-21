@@ -36,3 +36,38 @@ def test_active_review_badge_renders():
     # render() returns a rich Text; its plain string should carry the badge
     out = pane.render()
     assert "review" in out.plain
+
+
+def test_active_review_plan_ids_matches_target_and_stem():
+    """The badge-source builder matches active plan reviews by target or id.
+
+    Only active ``target-type: plan`` reviews count; archived reviews and
+    topic/file reviews are ignored. Matches either by the stored target file
+    path or by the review id == the plan-file stem.
+    """
+    from types import SimpleNamespace
+    from pm_core.tui.app import ProjectManagerApp
+
+    stub = SimpleNamespace(_data={
+        "reviews": [
+            # active plan review, matches p1 by target (and by stem)
+            {"id": "plan-1", "target": "plans/plan-1.md",
+             "target-type": "plan", "status": "active"},
+            # archived → excluded even though it points at p2
+            {"id": "plan-2", "target": "plans/plan-2.md",
+             "target-type": "plan", "status": "archived"},
+            # active but a topic review → excluded
+            {"id": "topic-x", "target": "some topic",
+             "target-type": "topic", "status": "active"},
+            # active plan review matched only by stem (target uses a bare id)
+            {"id": "plan-4", "target": "plan-4",
+             "target-type": "plan", "status": "active"},
+        ],
+        "plans": [
+            {"id": "p1", "file": "plans/plan-1.md"},
+            {"id": "p2", "file": "plans/plan-2.md"},
+            {"id": "p3", "file": "plans/plan-3.md"},
+            {"id": "p4", "file": "plans/plan-4.md"},
+        ],
+    })
+    assert ProjectManagerApp._active_review_plan_ids(stub) == {"p1", "p4"}

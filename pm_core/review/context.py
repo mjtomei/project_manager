@@ -60,8 +60,12 @@ def _target_preamble(root: Path, target: str, target_type: str) -> str:
 
 def build_context(root: Path, review_id: str, target: str,
                   target_type: str) -> str:
-    """Return the full session prompt for a review against ``target``."""
-    review_dir = paths.dir_for(root, review_id)
+    """Return the full session prompt for a review against ``target``.
+
+    Read-only: the review directory is referenced for the framing text but not
+    created here (``run_review`` creates it before calling this).
+    """
+    review_dir = paths.dir_for(root, review_id, create=False)
     sections: list[str] = [_framing(review_dir)]
 
     # Shared methodology docs (skip missing with a note).
