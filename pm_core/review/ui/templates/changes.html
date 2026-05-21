@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Walker — {{ review.name or review_id }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="changes"
+      data-review="{{ review_id }}"
+      data-cycle="{{ rendered_cycle if rendered_cycle is not none else '' }}"
+      data-editable="{{ 'true' if editable else 'false' }}">
+
+  <header class="topbar">
+    <a class="back" href="/">← reviews</a>
+    <h1>{{ review.name or review_id }}</h1>
+  </header>
+
+  {% if no_cycles %}
+    <main class="placeholder-main">
+      <p class="placeholder" id="breadcrumb">no cycles yet</p>
+      <p class="subtle">{{ hint }}</p>
+    </main>
+  {% else %}
+  <section class="statusbar">
+    <span class="phase-badge {{ 'animating' if animating else 'idle' }}"
+          id="activity-indicator"
+          data-phase="{{ phase }}"
+          data-animating="{{ 'true' if animating else 'false' }}">
+      <span class="dot"></span><span id="phase-text">{{ phase }}</span>
+    </span>
+    <span class="breadcrumb" id="breadcrumb">{{ breadcrumb }}</span>
+    <span class="tag tag-mode">{{ mode }}</span>
+
+    <span class="cycle-select-wrap">
+      cycle
+      <select class="cycle-select" id="cycle-select" data-review="{{ review_id }}">
+        {% for cy in cycles %}
+          <option value="{{ cy }}" {{ 'selected' if cy == rendered_cycle else '' }}>{{ cy }}{{ ' (current)' if cy == current_cycle else '' }}</option>
+        {% endfor %}
+      </select>
+    </span>
+
+    <button id="apply-btn" class="apply{{ '' if can_apply else ' hidden' }}"
+            {{ '' if can_apply else 'disabled' }}
+            data-review="{{ review_id }}"
+            title="{{ 'Write the applying transition to STATE.md' if can_apply else ('another UI owns this session' if (editable and mode != 'auto-run' and not is_leader) else '') }}">
+      Apply
+    </button>
+    {% if editable and mode != 'auto-run' and not is_leader %}
+      <span class="subtle owner-hint">another UI owns this session</span>
+    {% endif %}
+  </section>
+  <p class="hint subtle" id="hint">{{ hint }}</p>
+
+  <div id="walker-body">
+  {% if body_mode == 'changes' %}
+    <form class="filters" id="filters" method="get" action="/review/{{ review_id }}/changes">
+      <input type="hidden" name="cycle" value="{{ rendered_cycle }}">
+      <select name="provenance">
+        <option value="">provenance: any</option>
+        {% for v in ['reviewer-comment', 'audit-entry'] %}
+          <option value="{{ v }}" {{ 'selected' if raw_filters.get('provenance') == v else '' }}>{{ v }}</option>
+        {% endfor %}
+      </select>
+      <select name="suggested_verdict">
+        <option value="">verdict: any</option>
+        {% for v in ['accept', 'reject', 'modify'] %}
+          <option value="{{ v }}" {{ 'selected' if raw_filters.get('suggested-verdict') == v else '' }}>{{ v }}</option>
+        {% endfor %}
+      </select>
+      <select name="status">
+        <option value="">status: any</option>
+        {% for v in ['pending', 'accepted-as-suggested', 'edited', 'skipped', 'auto-accepted'] %}
+          <option value="{{ v }}" {{ 'selected' if raw_filters.get('status') == v else '' }}>{{ v }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="target_section" placeholder="target section"
+             value="{{ raw_filters.get('target-section', '') }}">
+      <button type="submit">Filter</button>
+      {% if editable %}
+        <button type="button" id="bulk-accept" class="bulk">Bulk-accept (current filter)</button>
+      {% endif %}
+    </form>
+
+    <p class="count subtle">{{ blocks|length }} change(s)</p>
+
+    <ol class="entries" id="entries">
+      {% for b in blocks %}
+        <li class="entry" data-id="{{ b.id }}" data-status="{{ b.status }}" tabindex="0">
+          <div class="entry-head">
+            <span class="tag tag-prov">{{ b.provenance }}</span>
+            <span class="entry-target">{{ b['target-section'] }}</span>
+            <span class="tag tag-verdict">suggests: {{ b['suggested-verdict'] }}</span>
+            <span class="tag tag-status status-{{ b.status }}">{{ b.status }}</span>
+          </div>
+          <div class="diff">
+            <pre class="before"><b>before</b>
+{{ b.before }}</pre>
+            <pre class="after"><b>after</b>
+{{ b.after }}</pre>
+          </div>
+          {% if b['suggested-rationale'] %}
+            <p class="rationale"><b>rationale:</b> {{ b['suggested-rationale'] }}</p>
+          {% endif %}
+          {% if b['source-anchor'] %}
+            <p class="anchor subtle">source: {{ b['source-anchor'] }}</p>
+          {% endif %}
+
+          {% if editable %}
+            <div class="actions" data-id="{{ b.id }}">
+              <button class="act-accept" data-action="accept">Accept (a)</button>
+              <button class="act-modify" data-action="modify">Modify (m)</button>
+              <button class="act-skip" data-action="skip">Skip (s)</button>
+              {% if b.status != 'pending' %}
+                <button class="act-reopen" data-action="reopen">Reopen</button>
+              {% endif %}
+            </div>
+            <div class="edit-form hidden" data-id="{{ b.id }}">
+              <textarea class="edit-after" placeholder="revised after…">{{ b.after }}</textarea>
+              <select class="edit-verdict">
+                {% for v in ['accept', 'reject', 'modify'] %}
+                  <option value="{{ v }}" {{ 'selected' if b['human-verdict'] == v else '' }}>{{ v }}</option>
+                {% endfor %}
+              </select>
+              <input class="edit-rationale" type="text" placeholder="your rationale"
+                     value="{{ b['human-rationale'] }}">
+              <input class="edit-commentary" type="text" placeholder="commentary"
+                     value="{{ b['human-commentary'] }}">
+              <button class="edit-save" data-action="edit">Save</button>
+            </div>
+          {% else %}
+            <div class="readonly-badges">
+              <span class="badge" title="modifications are locked outside awaiting-human-review on the current cycle">read-only</span>
+              <span class="badge badge-verdict">{{ b['human-verdict'] or b['suggested-verdict'] }}</span>
+              <span class="badge badge-status">{{ b.status }}</span>
+            </div>
+          {% endif %}
+        </li>
+      {% else %}
+        <li class="placeholder">No changes match the current filter.</li>
+      {% endfor %}
+    </ol>
+
+  {% elif body_mode == 'review' %}
+    <section class="inprogress" id="inprogress">
+      <p class="subtle">Current cycle's review is in progress (read-only).</p>
+      <pre class="raw-md">{{ review_md }}</pre>
+    </section>
+
+  {% elif body_mode == 'audit' %}
+    <section class="inprogress" id="inprogress">
+      <p class="subtle"><span id="audited-count">{{ audited }}</span> citations audited (read-only, streaming).</p>
+      <ol class="audit-entries">
+        {% for e in audit_entries %}
+          <li class="audit-entry">
+            <div class="entry-head"><b>{{ e.citation_header }}</b>
+              <span class="tag">tier {{ e.tier }}</span>
+              <span class="tag tag-verdict">{{ e.verdict }}</span>
+            </div>
+            <p class="subtle">{{ e.cluster }}</p>
+            <pre class="passage"><b>doc passage:</b>
+{{ e.doc_passage }}</pre>
+            <pre class="passage"><b>source says:</b>
+{{ e.source_says }}</pre>
+            {% if e.change_proposed %}<p><b>proposed:</b> {{ e.change_proposed }}</p>{% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+    </section>
+
+  {% elif body_mode == 'response-pending' %}
+    <section class="inprogress" id="inprogress">
+      <p class="placeholder">Response in progress — proposed changes will appear when written.</p>
+    </section>
+  {% else %}
+    <section class="inprogress" id="inprogress">
+      <p class="placeholder">Nothing to show for this cycle yet.</p>
+    </section>
+  {% endif %}
+  </div><!-- /walker-body -->
+  {% endif %}
+
+  <script src="/static/walker.js"></script>
+</body>
+</html>
