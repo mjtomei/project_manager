@@ -63,6 +63,35 @@ def test_append_interaction_concurrency(tmp_path):
     assert seen == {(t, k) for t in range(N_THREADS) for k in range(N_PER_THREAD)}
 
 
+def test_append_interaction_creates_key_and_stamps_at(tmp_path):
+    # Documented edge case: appending to a block with no `interactions:` key
+    # must create the key. And an event without an explicit `at` must be
+    # auto-stamped with a UTC timestamp so the log is always orderable.
+    path = tmp_path / "response.md"
+    path.write_text(
+        "<!-- proposed-change\n"
+        "id: change-1\n"
+        "provenance: reviewer-comment\n"
+        "status: pending\n"
+        "-->\n"
+    )
+    md_writer.append_interaction(path, "change-1", {"event": "viewed"})
+    blocks = md_parser.parse_response_blocks(path.read_text())
+    log = md_parser.parse_interaction_log(blocks[0])
+    assert len(log) == 1
+    assert log[0]["event"] == "viewed"
+    # `at` was auto-stamped (caller omitted it) in ISO-8601 UTC form.
+    assert log[0]["at"].endswith("Z")
+    # An explicit `at` is preserved verbatim.
+    md_writer.append_interaction(
+        path, "change-1", {"event": "accept", "at": "2026-05-20T10:00:00Z"}
+    )
+    log2 = md_parser.parse_interaction_log(
+        md_parser.parse_response_blocks(path.read_text())[0]
+    )
+    assert log2[1]["at"] == "2026-05-20T10:00:00Z"
+
+
 def test_update_state_atomic(tmp_path):
     path = tmp_path / "STATE.md"
     md_writer.update_state(

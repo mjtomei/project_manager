@@ -159,6 +159,24 @@ def test_parse_response_blocks_skips_unclosed_trailing_block():
     assert [b.id for b in blocks] == ["change-1"]
 
 
+def test_parse_block_missing_interactions_key_is_empty():
+    # Documented edge case: a block written before any interaction has no
+    # `interactions:` key at all (distinct from `interactions: []`). It must
+    # still parse to an empty log, not raise or return None.
+    text = (
+        "<!-- proposed-change\n"
+        "id: change-x\n"
+        "provenance: reviewer-comment\n"
+        "status: pending\n"
+        "-->\n"
+    )
+    blocks = md_parser.parse_response_blocks(text)
+    assert len(blocks) == 1
+    assert "interactions" not in blocks[0].fields
+    assert blocks[0].interactions == []
+    assert md_parser.parse_interaction_log(blocks[0]) == []
+
+
 def test_parse_interaction_log_from_block():
     text = """<!-- proposed-change
 id: x
