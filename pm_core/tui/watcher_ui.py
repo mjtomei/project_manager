@@ -91,7 +91,7 @@ def load_watcher_plan_prs(app) -> int:
 
     Returns the number of PRs created.
     """
-    from pm_core.plan_parser import parse_plan_prs
+    from pm_core.plans.parser import parse_plan_prs
     from pm_core.cli.helpers import _make_pr_entry
     from pm_core.cli.plan import _build_pr_description
     from pm_core.cli.meta import ensure_meta_workdir

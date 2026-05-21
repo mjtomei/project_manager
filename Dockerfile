@@ -29,6 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     slirp4netns \
     uidmap \
     libcap2-bin \
+    tmux \
+    sudo \
+    asciinema \
     && rm -rf /var/lib/apt/lists/*
 
 # Nested rootless podman: replace setuid bit on newuidmap/newgidmap with
@@ -44,7 +47,9 @@ RUN chmod u-s /usr/bin/newuidmap /usr/bin/newgidmap && \
 # Pre-create the pm user (UID 1000) so /etc/subuid below can reference it
 # by name. container.py's runtime ``useradd`` is idempotent (|| true) so
 # existing-user errors are swallowed when host UID also happens to be 1000.
-RUN groupadd -g 1000 pm && useradd -m -u 1000 -g 1000 -s /bin/bash pm
+RUN groupadd -g 1000 pm && useradd -m -u 1000 -g 1000 -s /bin/bash pm \
+    && echo 'pm ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/pm \
+    && chmod 0440 /etc/sudoers.d/pm
 
 # Constrain pm's subuid/subgid range to what fits inside the *inner*
 # (outer-container's) user namespace. The outer namespace is 65536 wide
@@ -86,3 +91,23 @@ RUN pip3 install \
 # source at /opt/pm-src is the single source of truth.
 RUN printf '#!/bin/sh\nexec python3 -m pm_core.wrapper "$@"\n' > /usr/local/bin/pm \
     && chmod 755 /usr/local/bin/pm
+
+# Git identity baked from host git config at base-build time. Both env
+# vars (for tools that read GIT_AUTHOR_*/GIT_COMMITTER_*) and a system-wide
+# /etc/gitconfig (for tools that query `git config`) so any user inside the
+# container — pm or otherwise — gets a usable identity.
+ARG GIT_USER_NAME=""
+ARG GIT_USER_EMAIL=""
+ENV GIT_AUTHOR_NAME="${GIT_USER_NAME}" \
+    GIT_AUTHOR_EMAIL="${GIT_USER_EMAIL}" \
+    GIT_COMMITTER_NAME="${GIT_USER_NAME}" \
+    GIT_COMMITTER_EMAIL="${GIT_USER_EMAIL}"
+RUN if [ -n "$GIT_USER_NAME" ]; then \
+        git config --system user.name "$GIT_USER_NAME"; \
+    fi \
+    && if [ -n "$GIT_USER_EMAIL" ]; then \
+        git config --system user.email "$GIT_USER_EMAIL"; \
+    fi
+
+USER pm
+WORKDIR /home/pm

@@ -3,87 +3,14 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
-from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
-                               get_spec_mocks_section)
-
-
-def _is_bug_pr(pr: dict) -> bool:
-    """Return True when this PR should follow the bug-fix flow.
-
-    Triggers on `plan == "bugs"` (today's signal) or `type == "bug"`
-    (forward-looking schema). Keeps detection in one place so impl/review/QA
-    prompts stay in sync.
-    """
-    return pr.get("plan") == "bugs" or pr.get("type") == "bug"
-
-
-_BUG_FIX_FLOW_BLOCK = """
-## Bug Fix Flow (reproduce → fix → verify → reconcile)
-
-This PR is a bug fix. Follow this sequence rather than a feature-style
-implementation:
-
-1. **Reproduce** — Write or identify a failing test that demonstrates the
-   bug. The test must fail *for the right reason* (matching the reported
-   symptom) before you change any product code.
-   - If the bug involves Claude session behavior, prefer a Claude-guided
-     integration test using `FakeClaudeSession` (or the `fake-claude`
-     binary) so the reproduction is deterministic.
-   - For non-Claude bugs, a plain unit or integration test is fine.
-   - If the bug is genuinely untestable in code (e.g. a visual TUI
-     regression), record a manual repro in a PR note and, if appropriate,
-     a regression instruction file under `pm/qa/regression/`. The reviewer
-     will accept that as a substitute, but the substitute must exist.
-
-2. **Fix** — Implement the smallest change that addresses the root cause.
-   Avoid drive-by refactors.
-
-3. **Verify** — Re-run the reproduction test to confirm it now passes.
-   Run any related suite to check for regressions.
-
-4. **Reconcile** (verification-only, at session end) — Scan this PR's notes
-   (`pm pr note list <pr-id>` or read the PR Notes section above) for
-   cross-references the discovery supervisor (`pr-271cb3a`) may have filed
-   linking overlapping bug PRs. For each linked overlap:
-   - Check whether the linked bug still reproduces against the current code.
-   - If it's *also* resolved by your fix, append a confirmation note:
-     ```
-     pm pr note add <this-pr-id> 'confirmed-overlap: <other-pr-id>'
-     ```
-   - If you independently notice an overlap that the supervisor did **not**
-     link, append a pointer note:
-     ```
-     pm pr note add <this-pr-id> 'noticed-overlap: <other-pr-id> — <one-line reason>'
-     ```
-   If the PR has no cross-references and you noticed no overlaps, do
-   nothing for this step — it's a backstop, not the primary dedup
-   mechanism. The discovery supervisor handles dedup at file time with
-   work-log context the session does not have.
-"""
-
-
-_BUG_FIX_REVIEW_BLOCK = """
-
-## Bug Fix Review Checklist
-
-This PR is a bug fix. In addition to the generic checks above, verify:
-
-- **Reproduction test exists** — the diff includes a new (or modified)
-  test that fails without the fix and passes with it. Prefer tests that
-  exercise the same surface a user hits (Claude-guided via
-  `FakeClaudeSession` for session bugs, plain unit/integration tests
-  otherwise).
-- **The test fails for the right reason** — read the test and confirm
-  it would have caught the original bug, not just any change in the
-  area.
-- **Acceptable substitute** — if no automated reproduction is possible
-  (e.g. visual TUI regression), the PR should include a manual repro
-  PR note and ideally a regression instruction file. A bug fix with no
-  reproduction artifact at all is **NEEDS_WORK**.
-- **Scope discipline** — the diff should be focused on the bug. Flag
-  drive-by refactors that aren't part of the fix.
-"""
-
+from pm_core.spec_gen import (format_spec_for_prompt,
+                               spec_generation_preamble)
+# Bug-fix prompt blocks live in their own module; re-exported here so
+# existing call sites and tests (which use prompt_gen._is_bug_pr) keep
+# working without an import path change.
+from pm_core.bug_fix_prompts import (
+    _is_bug_pr, _bug_fix_flow_block, _bug_fix_review_block,
+)
 
 _OUT_OF_SCOPE_BUGS_BLOCK = """
 ## Incidental Bugs
@@ -233,7 +160,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     impl_spec_block = format_spec_for_prompt(pr, "impl")
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
-    bug_fix_block = _BUG_FIX_FLOW_BLOCK if _is_bug_pr(pr) else ""
+    bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -379,7 +306,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
     base = prompt.strip()
     if _is_bug_pr(pr):
-        base += _BUG_FIX_REVIEW_BLOCK
+        base += _bug_fix_review_block(pr)
     base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     base += review_specific_block
     base += _beginner_addendum()
@@ -1403,28 +1330,25 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
 
+    pr_path_seg = pr["id"]
+
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
     branch = pr.get("branch", f"pm/{pr_id}")
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Get instruction library summary, mocks library, and notes
+    # Get instruction library summary and notes
     library_summary = "No instruction library found."
-    mocks_summary = ""
     general_notes_block = ""
     qa_specific_block = ""
+    has_artifact_recipes = False
     root = None
     try:
         root = store.find_project_root()
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
-        mocks_list = qa_instructions.list_mocks(root)
-        if mocks_list:
-            mocks_lines = []
-            for m in mocks_list:
-                desc = f" — {m['description']}" if m["description"] else ""
-                mocks_lines.append(f"- **{m['id']}**{desc}")
-            mocks_summary = "\n".join(mocks_lines)
+        artifacts = qa_instructions.list_artifacts(root)
+        has_artifact_recipes = bool(artifacts)
         general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
     except FileNotFoundError:
         pass
@@ -1435,29 +1359,6 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     # Include QA spec if already generated, or preamble to generate one
     qa_spec_block = format_spec_for_prompt(pr, "qa")
     qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root)
-
-    mocks_library_section = ""
-    if mocks_summary:
-        mocks_library_section = f"""
-## Mock Library
-
-These shared mock definitions are available.  Reference them by ID in each
-scenario's MOCKS field.  Each mock is injected into the scenario prompt so
-all agents share the same contracts.
-
-{mocks_summary}
-
-If a scenario needs to mock an external dependency that is NOT listed above,
-declare it as a NEW_MOCK before the scenarios so it can be generated first.
-"""
-    else:
-        mocks_library_section = """
-## Mock Library
-
-No shared mocks are defined yet.  If any scenarios need to mock external
-dependencies (Claude sessions, git operations, tmux, network calls, etc.),
-declare them as NEW_MOCK blocks before the scenarios.
-"""
 
     bug_fix_qa_block = ""
     if _is_bug_pr(pr):
@@ -1472,25 +1373,68 @@ user-visible surface that triggered it. Other scenarios should cover
 adjacent regressions the fix could have introduced.
 """
 
+    artifact_recipes_block = ""
+    if has_artifact_recipes:
+        artifact_recipes_block = f"""
+
+**Artifact Recipes are the basis for driving the WHEN action and
+capturing the THEN evidence.** Each recipe spells out how to perform
+the user action on a surface and how to record the result —
+recordings, logs, screenshots — consumable by both humans and
+downstream agents.
+**Every scenario should produce every applicable artifact.** Set
+the **ARTIFACT** field to any recipe(s) from the library above
+whose description matches the surface the scenario drives. Multiple
+recipes are welcome, comma-separated. `ARTIFACT: none` is only for
+scenarios that exercise pure code-level or library-internal
+behavior with no observable surface. The runner copies each recipe
+into the scenario's scratch dir and surfaces a path to it in the
+worker's prompt; the worker reads the recipe and saves captures
+under a per-PR captures directory bind-mounted from the host (the
+worker's prompt names the exact path)."""
+
+    artifact_field_1 = (
+        '\nARTIFACT: <comma-separated artifact-recipe filenames from the library above, or "none">'
+        if has_artifact_recipes else ""
+    )
+    artifact_field_2 = (
+        '\nARTIFACT: <recipe filenames or "none">'
+        if has_artifact_recipes else ""
+    )
+
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
 
-Analyze this PR's changes and the available QA instruction library to generate
-a structured test plan. Your goal is to fully exercise the impacted code
-to verify this PR works correctly.
+Analyze this PR's changes and the available QA library (instructions,
+regression tests, and artifact recipes) to generate a structured test plan.
+Your goal is to generate scenarios in the style of user stories which
+fully exercise the impacted code as well as surrounding code. Even when the 
+changes are narrow and could be covered by unit tests, this phase is looking
+for issues in how the new code integrates with everything around it,
+and for problems in either the new or the existing code that only
+surface when something is exercised the way a user would.
 {bug_fix_qa_block}
 
 Each scenario runs in its own isolated container — scenarios cannot share
-state or depend on each other's side effects. STEPS must include all setup
-the scenario needs; do not reference other scenarios' projects, PRs, or
-side effects.
+state or depend on **another scenario's** side effects, and STEPS must
+include all setup the scenario needs. Within a single scenario you *can*
+spawn nested containers, background processes, or parallel actors to drive
+the system under test from multiple contexts at once — use that capability
+whenever the surface being tested is shared across users or workers.
 
 Prefer fewer, broader scenarios over many narrow ones. Group related checks
 that share setup into one scenario with multi-step STEPS, including edge
 cases that may expose bugs. Split scenarios only when code paths are
 unrelated or setup differs materially enough that combining them would
 bloat the steps.
+
+Plan along three axes: nominal use, error / edge cases, and concurrent use
+(two or more actors invoking the surface at once). Before listing scenarios,
+inventory the shared resources the diff touches — filesystem paths, sockets,
+daemons, network endpoints, on-disk state, anything with a single name
+accessed from multiple callers. Make sure each is exercised by a
+concurrent-use scenario.
 
 ## PR Context
 
@@ -1502,6 +1446,9 @@ bloat the steps.
 
 Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
 to see what changed.  Read source files as needed to understand the context.
+Make sure to not get bogged down too much in the details and method names. Try
+to abstract out user stories that exercise the changes.
+
 {pr_notes_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
@@ -1511,45 +1458,80 @@ at the paths shown below.
 
 {library_summary}
 
-Instructions tell scenario agents how to set up a test environment.  Without
-one, agents fall back to reading code and auto-passing.  Try to assign an instruction
-to every scenario.
-{mocks_library_section}
+**Instructions are the basis for a scenario's GIVEN clause** — they
+describe the user steps to establish a starting state (set up a project,
+start a session, install fixtures). Without one, scenario workers fall
+back to reading code and auto-passing.  Try to assign an instruction to
+every scenario. Make sure functionality is exercised with every
+supported user-facing surface.
+{artifact_recipes_block}
+
 ## Output Format
 
 Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
 Do NOT use markdown headings or code fences — output the plain-text markers
 directly at the start of a line.
 
-First declare any new mocks needed (omit this section if all needed mocks
-already exist in the Mock Library above):
+Structure each scenario as one or more Given / When / Then user
+stories. Each story is a complete triple:
 
-NEW_MOCK: <mock-id e.g. "claude-session">
-DEPENDENCY: <the external system being mocked e.g. "Anthropic Claude API">
-REASON: <why scenarios need this mocked rather than real>
+- **GIVEN**: the starting state the user is in — environment,
+  project state, prior actions — described as user-visible context,
+  not fixtures or mocks.
+- **WHEN**: the single user action that triggers the behavior under
+  test.
+- **THEN**: one or more observable outcomes from the user's surface.
+  Each Then should be something a human watching the screen could
+  point at — a pane render, a command output, a created file, an
+  error message, a status change.
 
-Then list the scenarios:
+A scenario can carry several Given/When/Then triples back-to-back —
+that's how related stories get grouped under one scenario without
+paying for a separate scenario each time. The triples are
+independent: each can have its own Given, its own When, its own
+Then. Treat them as a small batch of user stories that happen to
+share a focus.
+
+Describe what the user does and observes, not the exact keystrokes
+or commands — the worker decides how to drive. "User opens the
+settings page" is better than naming the keystroke that opens it;
+"the form lists three options" is better than asserting a specific
+string appears at a specific row index in some captured output.
 
 QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
-MOCKS: <comma-separated mock IDs this scenario uses, or "none">
-STEPS: <concrete test steps to perform>
+INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>{artifact_field_1}
+STEPS:
+  GIVEN: <starting state the user is in>
+  WHEN: <user action>
+  THEN: <observable outcome(s); use sub-bullets if multiple>
+  # Add more GIVEN/WHEN/THEN triples below as needed; each is an
+  # independent user story. New GIVEN means a fresh starting state.
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <filename or "none">
-MOCKS: <mock IDs or "none">
-STEPS: <concrete test steps>
+INSTRUCTION: <filename or "none">{artifact_field_2}
+STEPS:
+  GIVEN: <starting state>
+  WHEN: <user action>
+  THEN: <observable outcome(s)>
 
 QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
 
 {_OUT_OF_SCOPE_BUGS_BLOCK}
-{general_notes_block}{qa_specific_block}"""
+{general_notes_block}{qa_specific_block}
+
+Don't forget that the goal of these scenarios should not be to exercise
+individual methods or check for existence of blocks of text. It is to exercise
+the code in the same way it would be exercised by an end user consuming the
+project. Any step that does things a user wouldn't do, like directly
+importing sub-sections of code or searching for strings in code, is likely
+not accomplishing this goal.
+"""
     return prompt.strip()
 
 
@@ -1586,19 +1568,24 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Get instruction library summary for Scenario 0 (instructions only, not regression)
+    # QA library summary for Scenario 0 (instructions + artifact recipes;
+    # regression is excluded by default in instruction_summary_for_prompt).
     instruction_library_block = ""
     try:
         root = store.find_project_root()
         from pm_core import qa_instructions
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
         if library_summary and "No QA instructions" not in library_summary:
+            has_artifacts = bool(qa_instructions.list_artifacts(root))
+            kinds = "QA instructions and artifact recipes" if has_artifacts else "QA instructions"
+            purpose = ("Read any of these files to understand what's being "
+                       "tested or how to capture evidence.") if has_artifacts else \
+                      "Read any of these files to understand what's being tested."
             instruction_library_block = f"""
-## QA Instruction Library
+## QA Library
 
-The project has user-defined QA instructions and regression tests that the
-automated scenarios may be running.  You can read any of these files to
-understand what's being tested:
+The project has user-defined {kinds} that the automated scenarios may
+be running or referencing. {purpose}
 
 {library_summary}
 """
@@ -1653,7 +1640,8 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
                              scenario, workdir: str,
                              session_name: str | None = None,
                              worktree_mode: bool = False,
-                             scratch_dir: str | None = None) -> str:
+                             scratch_dir: str | None = None,
+                             captures_root: str = "") -> str:
     """Generate a prompt for a QA child session executing one scenario.
 
     Args:
@@ -1682,19 +1670,69 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
         # (set by _install_instruction_file during launch).
         instr_display = scenario.instruction_path
         instruction_block = f"""
-## Instruction Reference
+## Instruction Reference (establishes the GIVEN)
 
 Test setup instructions are available at: `{instr_display}`
 
+This instruction is the basis for the scenario's **Given** state.
+Follow its steps to set up the environment the user is in before
+performing the When action.
+
 If a setup step fails or a required tool is unavailable, report
-**INPUT_REQUIRED** with an explanation of what blocked you. 
+**INPUT_REQUIRED** with an explanation of what blocked you.
+"""
+
+    artifact_block = ""
+    artifact_paths = getattr(scenario, "artifact_paths", None) or []
+    if artifact_paths:
+        # Each path is what the agent will see (set by
+        # _install_artifact_files during launch).
+        bullets = "\n".join(f"- `{p}`" for p in artifact_paths)
+        heading = "Capture Recipe" if len(artifact_paths) == 1 else "Capture Recipes"
+        artifact_block = f"""
+## Artifact {heading} (drive the WHEN, capture the THEN)
+
+Available at:
+{bullets}
+
+Captures-root (where to save all artifacts produced this run):
+`{captures_root}` (writable; bind-mounted from the host).
+
+These recipes are the basis for performing the scenario's **When**
+action — the recipe describes how to drive the surface — and for
+capturing the **Then** evidence (transcripts, recordings,
+screenshots, logs). Read the recipe(s) and follow their driver +
+capture commands. Save resulting captures under
+`{captures_root}/scenarios/{scenario.index}/` (each recipe's
+manifest format applies; if more than one recipe is listed, use a
+named subdirectory per capture). Captures are how reviewers confirm
+what the test demonstrated, so produce one even if the scenario
+itself passes.
+
+Aim for the capture to look as close as possible to a user actually
+exercising the feature. A couple of things to watch out for: status
+strings that read like real results but don't depend on one (printed
+unconditionally rather than derived from the command), and narration
+of steps in place of driving them. If a step is hard to reproduce,
+note that in the manifest rather than working around it in the
+recording.
+
+**If you identify and fix a bug during this scenario, capture both
+states.** Save the pre-fix recording under
+`{captures_root}/scenarios/{scenario.index}/pre-fix/` and the
+post-fix recording under `.../post-fix/`. Cross-link the two in each
+manifest's `## Files` section, and (per Incidental Bugs below) still
+file a PR for the bug.
+
+The captures directory above is bind-mounted from the host (a pm-
+managed location at `~/.pm/sessions/<session-tag>/captures/<pr-id>/`),
+so anything you write there is durable on the host without being
+committed to the project repo. You do **not** need to `git add` or
+push captures — they're not part of the PR branch.
 """
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
-
-    # Include mocks section from QA spec so every scenario uses the same strategy
-    mocks_block = get_spec_mocks_section(pr)
 
     # Workdir description and execution instructions differ by mode
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -1757,7 +1795,7 @@ the fix.
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
 {workdir_block}
-{pr_notes_block}{mocks_block}{bug_fix_scenario_block}
+{pr_notes_block}{bug_fix_scenario_block}
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own
@@ -1783,7 +1821,30 @@ final verdict.
 
 **Steps**:
 {scenario.steps}
-{instruction_block}
+
+The steps are framed as one or more Given / When / Then user
+stories. A scenario may bundle several triples that share a focus;
+drive each triple in turn. For each:
+
+- Establish the **Given** state by driving the user-facing surface
+  (start a session, set up a project, open a pane) — not by
+  hand-editing files or monkeypatching internals. If a later triple
+  needs a different starting state, reset to its Given before
+  performing the When.
+- Perform the **When** action the way a real user would (run the
+  command, press the key, submit the form). Use whatever driver
+  gets the action to the right place — the mechanic is yours to
+  choose, but the action itself must be the real user action.
+- Check the **Then** by observing the surface, not by inspecting
+  source or asserting strings in generated output. If the Then is
+  about something visible on screen, confirm by viewing it; if it's
+  about a file or command output, confirm by reading that file or
+  command output — not by reading the code that produces it.
+
+If you can't drive the user surface in this environment, report
+INPUT_REQUIRED with a specific blocker instead of substituting a
+different methodology.
+{instruction_block}{artifact_block}
 ## Execution
 
 {execution_block}

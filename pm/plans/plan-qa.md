@@ -1,5 +1,13 @@
 # Fully Specified Project from project.yaml
 
+> **Cross-plan note (2026-05-14):** plan-regression now contains substantial QA-internals work (Phase 7 evidence/coverage gates, Phase 10 QA surface improvements). Several plan-qa pending PRs overlap directly — reconcile before starting any of them:
+> - `pr-2c67d50` ↔ `pr-0b14f2c` (regression) — both re-run INPUT_REQUIRED scenarios with verdict re-aggregation
+> - `pr-25681a9` ↔ `pr-8422dea` (regression) — user-story metadata vs user-story coverage signal
+> - `pr-dea90b5` ↔ `pr-f4dc8a2` (regression) — both grow the QA library automatically (different sources)
+> - `pr-4a89e52` ↔ `pr-b59f0c7` (regression) — both touch verdict-storage shape
+>
+> Each plan-qa PR has a note pointing at its regression-plan counterpart. Look here when picking up either plan to avoid duplicate work.
+
 Goal: a project fully specified by project.yaml where auto-starting the final PR
 yields a high probability of producing fully user-ready software with all planned
 features. Once an initial iteration is working, enable automated proposals and

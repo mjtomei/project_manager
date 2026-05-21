@@ -27,6 +27,7 @@ boring, repetitive parts so they can focus on what matters.
 - **Smart mobile mode** — auto-zooms the active pane on narrow terminals, usable over SSH from phones and tablets
 - **Guided setup** — step-by-step guide for new users to initialize projects, create plans, and start working
 - **Meta-development** — open a Claude session targeting the pm codebase itself, to fix pain points as you encounter them
+- **QA library** — write reusable test recipes, regression tests, mock contracts, and evidence-capture procedures as Markdown files; agents pick them up automatically. See [pm_core/docs/qa_library.md](pm_core/docs/qa_library.md).
 
 ## Demo
 

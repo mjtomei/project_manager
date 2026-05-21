@@ -9,10 +9,16 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
-from pm_core.plan_parser import parse_plan_prs
-from pm_core import review as review_mod
+from pm_core.plans.parser import parse_plan_prs
+from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_gen import tui_section
+
+# claude receives a session's prompt as a single argv entry.  Linux caps a
+# single argument at MAX_ARG_STRLEN (128 KiB / 131072 bytes, including the
+# terminating NUL); exceeding it makes execve fail with E2BIG.  Stay well
+# under that so prompts that inline per-PR detail degrade gracefully.
+_PROMPT_ARG_LIMIT = 120_000
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -289,6 +295,19 @@ def plan_review(plan_id: str | None, fresh: bool):
         workdir_str = f"\n    workdir: {workdir}" if workdir else ""
         return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{gh_str}{branch_str}{workdir_str}{desc_str}{tests_str}{files_str}"
 
+    def _format_pr_brief(pr):
+        """One-line PR summary — no description/tests/files inlined.
+
+        Used as a fallback when inlining full detail for every PR would push
+        the prompt past the argv size limit.
+        """
+        deps = pr.get("depends_on") or []
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        status = pr.get("status", "pending")
+        gh_num = pr.get("gh_pr_number")
+        gh_str = f" PR #{gh_num}" if gh_num else ""
+        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{gh_str}{dep_str}"
+
     pr_list = "\n".join(_format_pr(pr) for pr in plan_prs) if plan_prs else "(no PRs linked to this plan)"
 
     other_prs_context = ""
@@ -302,7 +321,8 @@ def plan_review(plan_id: str | None, fresh: bool):
 
     if plan_prs:
         # Post-load: PRs exist in project.yaml — review with progress awareness
-        prompt = f"""\
+        def _post_load_prompt(pr_list: str, pr_detail_note: str) -> str:
+            return f"""\
 Your goal: Review the plan's progress, iterate on both the plan and its PRs,
 and help the user understand where things stand.
 
@@ -313,7 +333,7 @@ Read the plan file at: {plan_path}
 
 PRs belonging to this plan:
 {pr_list}
-
+{pr_detail_note}
 {other_prs_context}\
 First, assess progress:
 - How many PRs are done (merged/in_review) vs remaining (pending/in_progress)?
@@ -343,8 +363,37 @@ For any issues found, you can propose a fix. Fixes can be applied as follows:
 - For plan updates: edit the plan file directly at {plan_path}
 - To add new PRs: use `pm pr add`
 
+IMPORTANT: keep the three sources of truth in sync. Whenever you change
+a PR's functionality, scope, or dependencies:
+1. Run `pm pr edit` (the canonical update — writes to project.yaml).
+2. Update the corresponding section in the plan file at {plan_path}
+   so the human-readable plan reflects the change.
+3. If the PR is already merged or in_review (i.e. its body cannot be
+   meaningfully rewritten anymore), add a `pm pr note add <id> "..."`
+   describing the change in context (e.g. "Phase N redesign: this PR's
+   <feature> is now consumed at <new surface> by <other PR>") instead
+   of editing the description.
+
+Apply the same rule when you reference a merged PR's behavior from a
+new pending PR — add a note on the merged PR pointing back, so future
+sessions reading either side find the connection.
+
 After fixing, summarize what was changed.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+
+        # Inline full per-PR detail by default, but if doing so pushes the
+        # prompt past the argv size limit (large plans), fall back to a brief
+        # one-line listing and let the session pull detail with `pm pr show`.
+        prompt = _post_load_prompt(pr_list, "")
+        if len(prompt.encode()) > _PROMPT_ARG_LIMIT:
+            brief = "\n".join(_format_pr_brief(pr) for pr in plan_prs)
+            note = (
+                "\n(This plan has too many PRs to inline each description here. "
+                "The list above is abbreviated — run `pm pr show <id>` to read "
+                "the full description, tests, and files of any PR before "
+                "reviewing it.)\n"
+            )
+            prompt = _post_load_prompt(brief, note)
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\

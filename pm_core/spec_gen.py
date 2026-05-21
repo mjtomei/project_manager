@@ -162,18 +162,48 @@ State what needs to be implemented in terms of specific code changes:
 
         "qa": """Generate a **QA spec** (spec_qa).
 
-State what to test and how, grounded in the actual implementation and
-the system's runtime behavior:
-- Key behaviors to exercise and expected outcomes
-- Setup requirements for testing
-- Edge cases and failure modes to probe
-- Integration points with other system components
-- What constitutes a passing vs failing test
-- Mocks: what external dependencies need mocking (e.g. Claude sessions, git
-  operations, tmux), the contract for each mock (what it simulates), and
-  what scripted responses they should return — this prevents each scenario
-  agent from independently deciding how to mock, which leads to
-  inconsistency""",
+Describe what to test in terms of **user-facing behaviors** — what a
+user does and what they observe. Each requirement should read like a
+user story with a Given / When / Then acceptance criterion:
+
+  **Given** <starting state the user is in>
+  **When** <single concrete action the user takes>
+  **Then** <observable outcome from the user's surface>
+
+That structure forces three things the spec must answer: who is the
+user, what action triggers the behavior, and what should they see as
+a result. One requirement may bundle several Given/When/Then triples
+when the stories share a focus — downstream scenarios can batch
+related triples together for efficiency. Each triple still keeps its
+own Given, When, and Then.
+
+- All user flows the PR's changes affect, each captured as one or
+  more Given/When/Then behaviors. Frame the Then in user-observable
+  terms — what appears on screen, what gets printed, what file is
+  created — rather than function-level claims.
+- Setup the user needs to reach each behavior — described as user
+  steps, not as fixtures. This belongs in each behavior's Given,
+  and downstream scenarios will lean on QA *instructions* (under
+  `pm/qa/instructions/`) to perform that setup; if the spec implies
+  a Given that no existing instruction covers, note it so a new
+  instruction can be authored.
+- Edge cases and failure modes from the user's perspective: what
+  inputs / states cause surprising or wrong behavior. Each becomes
+  its own Given/When/Then.
+- Surface coverage: which user-facing surfaces exist as alternatives
+  to exercise the same behavior, and how expectations differ across
+  them. All supported surfaces should be exercised.
+- Pass/Fail criteria from the user's point of view — the Then clauses
+  effectively answer this; restate any cross-cutting ones explicitly.
+
+Downstream scenarios will use *artifact recipes* (under
+`pm/qa/artifacts/`) to drive each When and capture each Then's
+evidence. If a behavior implies a surface no existing recipe covers,
+note it so a new recipe can be authored.
+
+If a behavior is only checkable at the function level with no
+user-observable surface, leave it to the unit test suite and don't
+include it in the QA spec.""",
     }
 
     diff_instruction = ""
@@ -182,15 +212,6 @@ the system's runtime behavior:
 Run `git diff {base_branch}...HEAD` in the workdir to see what changed.
 Read source files as needed to understand the implementation.
 """
-
-    # QA spec gets an extra section for mocks planning
-    mocks_section = ""
-    if phase == "qa":
-        mocks_section = """5. **Mocks** — For each external dependency that scenarios should mock \
-(e.g. Claude sessions, git operations, tmux): the contract (what it \
-simulates), the scripted responses it should return, and what remains \
-unmocked (uses the real implementation).  This section is included in \
-every scenario prompt so agents know exactly what is and isn't simulated.\n"""
 
     mode = pr_spec_mode(pr)
     ambiguity_instruction = ""
@@ -226,8 +247,11 @@ The user will confirm, correct, or expand on your proposals.
 {diff_instruction}{ambiguity_instruction}
 ## Output Format
 
-Write a clear, structured spec.  Use markdown.  Be specific — reference
-actual code paths, function names, and file locations where possible.
+Write a clear, structured spec.  Use markdown.  Be specific — for an
+implementation spec that means concrete code paths, function names,
+and file locations; for a QA spec that means concrete user actions
+(exact commands, key sequences, observable outputs) rather than
+internal function references.
 Do NOT include preamble or meta-commentary — output only the spec content.
 
 The spec should contain:
@@ -235,7 +259,7 @@ The spec should contain:
 2. **Implicit Requirements** — What must also be true for stated requirements to hold
 3. **Ambiguities** — Identified ambiguities with proposed resolutions
 4. **Edge Cases** — Interactions with existing behavior not addressed in the description
-{mocks_section}"""
+"""
     return prompt.strip()
 
 
@@ -508,16 +532,18 @@ Analyze the codebase to understand the relevant code, then write a spec covering
 
         "qa": """\
 Review the implementation (run `git diff` and read source files), then write a spec covering:
-1. **Requirements** — Key behaviors to exercise and expected outcomes
-2. **Setup** — Setup requirements for testing
-3. **Edge Cases** — Edge cases and failure modes to probe
-4. **Pass/Fail Criteria** — What constitutes a passing vs failing test
-5. **Ambiguities** — Any ambiguities you resolved and how
-6. **Mocks** — For each external dependency that scenarios should mock \
-(e.g. Claude sessions, git operations, tmux): the contract (what it simulates), \
-the scripted responses it should return, and what remains unmocked. \
-This section is included in every scenario prompt so all agents share the \
-same mocking strategy.""",
+1. **Requirements** — Each user-facing behavior framed as a Given /
+   When / Then user story. Given = starting state, When = single user
+   action, Then = observable outcome from the user's surface. Split
+   multi-action behaviors into separate requirements.
+2. **Setup** — Setup requirements for testing, described as user
+   steps (this folds into each requirement's Given but cross-cutting
+   setup goes here).
+3. **Edge Cases** — Edge cases and failure modes framed the same way
+   (Given / When / Then).
+4. **Pass/Fail Criteria** — What constitutes a passing vs failing
+   test; the Then clauses largely answer this.
+5. **Ambiguities** — Any ambiguities you resolved and how""",
     }
 
     instructions = spec_instructions.get(phase, spec_instructions["impl"])

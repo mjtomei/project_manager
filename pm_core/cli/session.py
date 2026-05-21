@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, notes, guide
+from pm_core import store, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
@@ -145,29 +145,26 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
             check=False)
-    # Also rebalance on window switch.  With aggressive-resize on (or when
-    # different windows have different pane layouts), tmux defers the
-    # resize until the next input event after a switch — panes appear
-    # stale until the user presses a key.  Hooking after-select-window
-    # forces a rebalance immediately so the new window renders at the
-    # current client size.  The _window-resized handler is debounced and
-    # no-ops when the size hasn't actually changed, so this is cheap on
-    # plain window switches.
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-select-window",
-             "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
-            check=False)
-    # Client-level hooks for the same staleness symptom on cross-session
-    # switches and on attach/detach (which can change the smallest-client
-    # window size when window-size=smallest is set).  Same handler — the
-    # debounce keeps it cheap when nothing actually changed.
-    for client_hook in ("client-session-changed", "client-attached",
-                        "client-detached"):
-        subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", client_hook,
-                 "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
+    # Clean up stale hooks from earlier versions:
+    # - after-resize-window: never the right hook name; only fired after the
+    #   resize-window command.
+    # - after-select-window + client-attached/detached/session-changed: added
+    #   on 2026-05-03 as defensive companions to window-resized for cases
+    #   where window-resized alone misses (aggressive-resize deferral,
+    #   smallest-client recompute). In practice they formed a feedback loop —
+    #   pm's _window-resized handler ended up re-triggering one of them and
+    #   the cycle fired every 1-2s, pegging the session. Removed; the bare
+    #   window-resized hook + prefix+R manual rebalance cover the remaining
+    #   edge cases.
+    for stale_hook, scope in (
+        ("after-resize-window", "-gu"),
+        ("after-select-window", "-guw"),
+        ("client-session-changed", "-gu"),
+        ("client-attached", "-gu"),
+        ("client-detached", "-gu"),
+    ):
+        subprocess.run(tmux_mod._tmux_cmd("set-hook", scope, stale_hook),
                 check=False)
-    # Clean up stale hook from earlier versions that used the wrong name
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
-            check=False)
 
     # Popup bindings: PR action picker (prefix+P) and pm command runner
     # (prefix+M).  Width is resolved dynamically by ``pm _popup-show``
@@ -302,9 +299,6 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         # Prefer the actual tmux session if we're already inside one (e.g. meta
         # workdirs whose git-root hash differs from the session they belong to).
         session_name = _get_current_pm_session() or _get_session_name_for_cwd()
-
-    expected_root = root or (Path.cwd() / "pm")
-    notes_path = expected_root / notes.NOTES_FILENAME
 
     _log.info("checking if session exists: %s (socket=%s)", session_name, socket_path)
     if tmux_mod.session_exists(session_name, socket_path=socket_path):
@@ -480,16 +474,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
                 f"{escaped}'")
 
-    # Only auto-start the notes pane when the guide will NOT auto-launch.
-    # Having both the guide and notes panes open overwhelms the initial layout.
-    if not guide.needs_guide(root):
-        _log.info("guide will not auto-launch, creating notes pane")
-        notes.ensure_notes_file(root)
-        notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
-        pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
-        _log.info("created notes_pane=%s", notes_pane)
-    else:
-        _log.info("guide will auto-launch, skipping notes pane")
+    # Notes pane is no longer auto-started — press `n` in the TUI to
+    # open it on demand, or run `pm notes` in a pane manually.
 
     # Apply initial balanced layout
     pane_layout.rebalance(session_name, window_id)

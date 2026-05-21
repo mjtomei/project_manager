@@ -130,6 +130,7 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         idx = sc.get("index", "?")
         title = _truncate(sc.get("title", ""), title_width)
         verdict = sc.get("verdict", "")
+        verdict_reason = sc.get("verdict_reason", "")
 
         if "(verifying" in verdict:
             # Animated spinner for verdicts being verified
@@ -161,6 +162,14 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             suffix = _RESET
 
         lines.append(f"{prefix}{idx:>3}  {title:<{title_width}}  {verdict_display}{suffix}")
+        if verdict_reason:
+            # Render the reason on a continuation line, indented to align
+            # under the title column and dimmed so it doesn't compete with
+            # the verdict colour above.
+            reason_indent = " " * (2 + 3 + 2)  # prefix + idx col + gap
+            reason_text = _truncate(verdict_reason,
+                                    max(cols - len(reason_indent) - 4, 10))
+            lines.append(f"{reason_indent}{_DIM}↳ {reason_text}{_RESET}")
 
     lines.append("")
 

@@ -454,6 +454,110 @@ class PlanAddScreen(ModalScreen):
         self.dismiss(None)
 
 
+class QACreatePickerScreen(ModalScreen):
+    """Modal for picking which kind of QA file to author.
+
+    Returns ``(category, mode, name)`` on confirm, where category is one
+    of ``"instructions" / "regression" / "artifacts"``, mode is always
+    ``"author"`` (guided Claude session — the TUI does not expose the
+    scaffold-stub flow; use ``pm qa add-*`` from the CLI for that), and
+    name is the file name the user typed. Returns ``None`` on cancel.
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    QACreatePickerScreen {
+        align: center middle;
+    }
+    #qa-create-container {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #qa-create-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .qa-create-label {
+        margin-top: 1;
+    }
+    #qa-create-container Input {
+        border: none;
+        height: 1;
+        padding: 0 1;
+        background: #333333;
+    }
+    #qa-create-container Input:focus {
+        background: #444444;
+    }
+    """
+
+    _OPTIONS = [
+        ("instructions", "author", "Instruction"),
+        ("regression",   "author", "Regression test"),
+        ("artifacts",    "author", "Artifact recipe"),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self._selected = 0
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Input
+        with Vertical(id="qa-create-container"):
+            yield Label("Create QA file", id="qa-create-title")
+            yield Label("Name", classes="qa-create-label")
+            yield Input(placeholder="e.g. login-flow-setup", id="qa-create-name")
+            yield Label("Kind", classes="qa-create-label")
+            yield Label("", id="qa-create-options")
+            yield Label(
+                "[dim]↑↓ change kind · Enter create · Esc cancel[/]",
+                classes="qa-create-label",
+            )
+
+    def on_mount(self) -> None:
+        from textual.widgets import Input
+        self._refresh_options()
+        self.query_one("#qa-create-name", Input).focus()
+
+    def _refresh_options(self) -> None:
+        lines = []
+        for i, (_cat, _mode, label) in enumerate(self._OPTIONS):
+            pointer = "▸ " if i == self._selected else "  "
+            lines.append(f"{pointer}{label}")
+        self.query_one("#qa-create-options", Label).update("\n".join(lines))
+
+    def on_key(self, event) -> None:
+        # Arrow keys move the radio selection even while the Input is focused.
+        if event.key in ("up",):
+            self._selected = max(0, self._selected - 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+        elif event.key in ("down",):
+            self._selected = min(len(self._OPTIONS) - 1, self._selected + 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+
+    def on_input_submitted(self, event) -> None:
+        from textual.widgets import Input
+        name = self.query_one("#qa-create-name", Input).value.strip()
+        if not name:
+            return
+        category, mode, _label = self._OPTIONS[self._selected]
+        self.dismiss((category, mode, name))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ConfirmCleanupScreen(ModalScreen):
     """Confirm tearing down all live resources for a PR."""
 

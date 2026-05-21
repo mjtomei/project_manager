@@ -200,8 +200,8 @@ class TestQPaneEmptyInstructions:
     def test_qa_pane_flatten_empty(self):
         """Flatten with empty data produces only headers."""
         from tests.test_qa_pane import _flatten_items
-        flat = _flatten_items({"instructions": [], "regression": []})
-        assert len(flat) == 2  # Just 2 section headers
+        flat = _flatten_items({"instructions": [], "regression": [], "artifacts": []})
+        assert len(flat) == 3  # 3 section headers
         selectable = [i for i, item in enumerate(flat) if "_section" not in item]
         assert selectable == []
 

@@ -158,6 +158,20 @@ def _get_dockerfile_path() -> Path:
     return Path(__file__).resolve().parent.parent / "Dockerfile"
 
 
+def _host_git_identity() -> tuple[str, str]:
+    """Return (name, email) from the host's global git config, or empty strings."""
+    def _read(key: str) -> str:
+        try:
+            r = subprocess.run(
+                ["git", "config", "--global", key],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return ""
+    return _read("user.name"), _read("user.email")
+
+
 def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
     """Build the pm developer base image from the bundled Dockerfile.
 
@@ -170,7 +184,13 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
         raise FileNotFoundError(f"Dockerfile not found: {dockerfile}")
 
     runtime = _get_runtime()
-    cmd = [runtime, "build", "-t", tag, "-f", str(dockerfile), str(dockerfile.parent)]
+    git_name, git_email = _host_git_identity()
+    cmd = [
+        runtime, "build", "-t", tag,
+        "--build-arg", f"GIT_USER_NAME={git_name}",
+        "--build-arg", f"GIT_USER_EMAIL={git_email}",
+        "-f", str(dockerfile), str(dockerfile.parent),
+    ]
     _log.info("Building image %s from %s", tag, dockerfile)
     result = subprocess.run(
         cmd,
@@ -550,7 +570,7 @@ def create_container(
         raise ContainerError(
             f"Image '{config.image}' not found in {runtime}. "
             f"Run 'pm container build' to rebuild it, or "
-            f"'pm container build-image' for the base image."
+            f"'pm container build-base' for the base image."
         )
 
     runtime = _get_runtime()
@@ -562,6 +582,24 @@ def create_container(
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
         "-w", _CONTAINER_WORKDIR,
     ]
+
+    # Captures bind-mount: ~/.pm/sessions/<tag>/captures/<pr_id>/ on host
+    # → /pm-captures inside the container. Lets QA scenario workers (and
+    # any other in-container workers for the same PR) write recordings,
+    # transcripts, manifests, and verdicts to a path that's durable on
+    # the host without committing them to the project repo. Workers
+    # resolve the path via :func:`paths.captures_dir`, which falls
+    # through to the mount when the host path isn't visible.
+    if session_tag and pr_id:
+        try:
+            from pm_core.paths import captures_dir, CONTAINER_CAPTURES_MOUNT
+            host_captures = captures_dir(pr_id, session_tag=session_tag)
+            if host_captures is not None:
+                cmd.extend(["-v",
+                            f"{host_captures}:{CONTAINER_CAPTURES_MOUNT}"])
+        except Exception:
+            _log.warning("Failed to resolve captures dir for pr=%s tag=%s",
+                         pr_id, session_tag, exc_info=True)
 
     # Podman rootless: map host UID into the container without manual
     # useradd/groupadd.  Harmless under Podman rootful (no-op).
