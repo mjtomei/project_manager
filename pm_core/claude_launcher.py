@@ -74,11 +74,9 @@ def _advance_scripted_cursor(session_tag: str | None, session_type: str,
         if wrap:
             nxt = (cur + 1) % sequence_len
         else:
+            # Clamp toward the terminal slot; a one-entry sequence stays at 0
+            # (the ``else 0`` branch) so the state file does not churn.
             nxt = min(cur + 1, sequence_len - 1) if sequence_len > 1 else 0
-            # When sequence has one entry, clamp means: always emit slot 0;
-            # cursor stays at 0 so the file content does not churn.
-            if sequence_len == 1:
-                nxt = 0
         state[session_type] = nxt
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
@@ -209,7 +207,9 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
 
     out: dict = {}
     for key, value in raw.items():
-        if key in ("_defaults", "binary") or not isinstance(value, dict):
+        # Skip non-session-type keys: _defaults, _all, binary (mirrors the
+        # filtering in set_fake_claude_config).
+        if key.startswith("_") or key == "binary" or not isinstance(value, dict):
             continue
         verdicts = value.get("verdicts") or {}
         if not verdicts:
