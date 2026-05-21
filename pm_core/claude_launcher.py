@@ -31,6 +31,19 @@ def _pick_fake_verdict(verdicts: dict) -> str:
     return random.choices(names, weights=weights, k=1)[0]
 
 
+def _clamp_cursor(raw, length: int, wrap: bool) -> int:
+    """Normalise a stored cursor value into a valid index for a sequence.
+
+    Coerces non-int / negative values to 0, then handles an out-of-range
+    cursor (e.g. the config was edited to a shorter sequence): wrap → 0,
+    clamp → the terminal slot.
+    """
+    cur = raw if isinstance(raw, int) and raw >= 0 else 0
+    if cur >= length:
+        cur = 0 if wrap else length - 1
+    return cur
+
+
 def _advance_scripted_cursor(session_tag: str | None, session_type: str,
                              sequence_len: int, wrap: bool) -> int:
     """Atomically advance the scripted-verdict cursor for *session_type*.
@@ -66,11 +79,7 @@ def _advance_scripted_cursor(session_tag: str | None, session_type: str,
                 state = {}
         except (ValueError, OSError):
             state = {}
-        cur = state.get(session_type, 0)
-        if not isinstance(cur, int) or cur < 0:
-            cur = 0
-        if cur >= sequence_len:
-            cur = 0 if wrap else sequence_len - 1
+        cur = _clamp_cursor(state.get(session_type, 0), sequence_len, wrap)
         if wrap:
             nxt = (cur + 1) % sequence_len
         else:
@@ -224,11 +233,7 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
             out[key] = "NONE"
             continue
         wrap = isinstance(verdicts, dict) and bool(verdicts.get("wrap"))
-        cur = state.get(key, 0)
-        if not isinstance(cur, int) or cur < 0:
-            cur = 0
-        if cur >= len(seq):
-            cur = 0 if wrap else len(seq) - 1
+        cur = _clamp_cursor(state.get(key, 0), len(seq), wrap)
         out[key] = _scripted_entry_verdict(seq[cur]) or "NONE"
     return out
 
