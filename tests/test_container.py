@@ -27,6 +27,8 @@ from pm_core.container import (
     _build_git_setup_script,
     _get_dockerfile_path,
     _get_runtime,
+    _detect_default_runtime,
+    _nested_podman_run_args,
     _make_container_name,
     _resolve_claude_binary,
     DEFAULT_IMAGE,
@@ -186,14 +188,16 @@ class TestLoadContainerConfig:
         assert cfg.cpu_limit == "8.0"
         assert cfg.runtime == "podman"
 
+    @patch("pm_core.container._detect_default_runtime", return_value="podman")
     @patch("pm_core.paths.get_global_setting_value")
-    def test_falls_back_to_defaults(self, mock_get):
+    def test_falls_back_to_defaults(self, mock_get, mock_detect):
         mock_get.side_effect = lambda name, default="": default
         cfg = load_container_config()
         assert cfg.image == DEFAULT_IMAGE
         assert cfg.memory_limit == DEFAULT_MEMORY_LIMIT
         assert cfg.cpu_limit == DEFAULT_CPU_LIMIT
-        assert cfg.runtime == DEFAULT_RUNTIME
+        # No explicit container-runtime → auto-detected (prefers podman).
+        assert cfg.runtime == "podman"
 
 
 class TestIsContainerModeEnabled:
@@ -237,15 +241,52 @@ class TestRuntimeAvailable:
         assert mock_run.call_args[0][0][0] == "podman"
 
 
+class TestDetectDefaultRuntime:
+    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/podman" if cmd == "podman" else None)
+    def test_prefers_podman(self, mock_which):
+        assert _detect_default_runtime() == "podman"
+
+    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/docker" if cmd == "docker" else None)
+    def test_falls_back_to_docker(self, mock_which):
+        assert _detect_default_runtime() == "docker"
+
+    @patch("shutil.which", side_effect=lambda cmd: f"/usr/bin/{cmd}")
+    def test_podman_over_docker_when_both(self, mock_which):
+        assert _detect_default_runtime() == "podman"
+
+    @patch("shutil.which", return_value=None)
+    def test_returns_default_when_neither(self, mock_which):
+        assert _detect_default_runtime() == DEFAULT_RUNTIME
+
+
 class TestGetRuntime:
-    @patch("pm_core.paths.get_global_setting_value", return_value="podman")
+    @patch("pm_core.paths.get_global_setting_value", return_value="docker")
     def test_explicit_setting_wins(self, mock_get):
+        # Explicit setting overrides auto-detection (which would pick podman).
+        assert _get_runtime() == "docker"
+
+    @patch("pm_core.paths.get_global_setting_value", return_value="")
+    @patch("pm_core.container._detect_default_runtime", return_value="podman")
+    def test_auto_detects_when_unset(self, mock_detect, mock_get):
         assert _get_runtime() == "podman"
 
-    @patch("pm_core.paths.get_global_setting_value")
-    def test_defaults_to_docker(self, mock_get):
-        mock_get.side_effect = lambda name, default: default
-        assert _get_runtime() == "docker"
+
+class TestNestedPodmanRunArgs:
+    @patch("pm_core.container._selinux_enabled", return_value=False)
+    @patch("pm_core.container._apparmor_enforcing", return_value=False)
+    def test_includes_uts_host(self, mock_apparmor, mock_selinux):
+        # Sharing the host UTS namespace skips podman's sethostname() call,
+        # which a restrictive outer sandbox denies — without it every nested
+        # podman run dies before any workload starts.
+        args = _nested_podman_run_args()
+        assert "--uts=host" in args
+
+    @patch("pm_core.container._selinux_enabled", return_value=False)
+    @patch("pm_core.container._apparmor_enforcing", return_value=False)
+    def test_includes_fuse_and_unmask(self, mock_apparmor, mock_selinux):
+        args = _nested_podman_run_args()
+        assert "/dev/fuse" in args
+        assert "unmask=ALL" in args
 
 
 @patch("pm_core.container.container_is_running", return_value=False)
