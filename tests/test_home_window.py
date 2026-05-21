@@ -69,6 +69,41 @@ class TestParkIfOnSafety:
             assert home_window.park_if_on("pm-x", "@1") == []
 
 
+class TestRefreshHome:
+    def test_no_op_when_session_unresolvable(self):
+        # No explicit session and none resolvable -> silent no-op, no
+        # provider lookup attempted.
+        with patch("pm_core.cli.helpers._get_pm_session", return_value=None), \
+             patch("pm_core.home_window.get_active_provider") as gp:
+            home_window.refresh_home()
+            gp.assert_not_called()
+
+    def test_no_op_outside_tmux(self):
+        with patch("pm_core.home_window.tmux_mod.has_tmux", return_value=False), \
+             patch("pm_core.home_window.get_active_provider") as gp:
+            home_window.refresh_home("pm-x")
+            gp.assert_not_called()
+
+    def test_no_op_when_session_missing(self):
+        with patch("pm_core.home_window.tmux_mod.has_tmux", return_value=True), \
+             patch("pm_core.home_window.tmux_mod.session_exists",
+                   return_value=False), \
+             patch("pm_core.home_window.get_active_provider") as gp:
+            home_window.refresh_home("pm-x")
+            gp.assert_not_called()
+
+    def test_touches_provider_when_session_live(self):
+        from unittest.mock import MagicMock
+        provider = MagicMock()
+        with patch("pm_core.home_window.tmux_mod.has_tmux", return_value=True), \
+             patch("pm_core.home_window.tmux_mod.session_exists",
+                   return_value=True), \
+             patch("pm_core.home_window.get_active_provider",
+                   return_value=provider):
+            home_window.refresh_home("pm-x")
+            provider.refresh.assert_called_once_with("pm-x")
+
+
 class TestEnsureHomeWindow:
     def test_no_op_outside_tmux(self):
         with patch("pm_core.home_window.tmux_mod.in_tmux", return_value=False):
@@ -179,6 +214,17 @@ class TestRenderHelpers:
         screen = _compose("pm pr list -t --open  (updated just now)",
                           body, 80, height)
         assert len(screen.split("\n")) <= height
+
+    def test_compose_clamps_oversized_body_by_line_count(self):
+        # Guards against clamping by element count instead of line count:
+        # a multi-line body that exceeds the height must still be cut to
+        # `height` lines, even if _render_content's own budgeting is
+        # bypassed (here we hand _compose a deliberately oversized body).
+        body = "\n".join(f"row{i}" for i in range(20))
+        screen = _compose("header", body, 80, height=5)
+        lines = screen.split("\n")
+        assert len(lines) == 5
+        assert lines[0] == "header"
 
 
 class TestFormatPrLine:

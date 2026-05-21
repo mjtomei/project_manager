@@ -159,12 +159,15 @@ def _render_content(width: int, height: int) -> str:
 def _compose(header_text: str, body: str, width: int, height: int) -> str:
     head = _truncate(header_text, width)
     ruler = _truncate("=" * len(head), width)
-    parts = [head, ruler]
+    # Clamp by *line* count, not element count: `body` is a multi-line
+    # string, so it must be split before the height clamp can act as a
+    # genuine safety net (independent of _render_content's own budgeting).
+    lines = [head, ruler]
     if body:
-        parts.append(body)
-    if height >= 1 and len(parts) > height:
-        parts = parts[:height]
-    return "\n".join(parts)
+        lines.extend(body.split("\n"))
+    if height >= 1 and len(lines) > height:
+        lines = lines[:height]
+    return "\n".join(lines)
 
 
 def _hash(*parts: str) -> str:
@@ -202,7 +205,7 @@ def _loop_main(session: str) -> None:
         try:
             body = _render_content(width, height)
         except Exception as e:
-            body = f"pm pr list (home): render error: {e}"
+            body = _truncate(f"pm pr list (home): render error: {e}", width)
 
         content_hash = _hash(f"{width}x{height}", body)
         if content_hash != last_content_hash:
