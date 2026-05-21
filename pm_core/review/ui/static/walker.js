@@ -235,7 +235,10 @@
     });
     es.addEventListener("audit", function (ev) {
       const d = safeParse(ev.data);
-      if (String(d.cycle) === String(cycle)) { updateAudited(d.audited); refreshBody(); }
+      // refreshStatus re-syncs the breadcrumb's "K citations audited" hint (which
+      // embeds the count too); without it the body's #audited-count would tick up
+      // live while the breadcrumb stayed frozen until the next state change.
+      if (String(d.cycle) === String(cycle)) { updateAudited(d.audited); refreshStatus(); refreshBody(); }
     });
     es.addEventListener("focus", function (ev) {
       const d = safeParse(ev.data);

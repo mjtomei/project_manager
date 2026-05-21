@@ -121,6 +121,10 @@
       var es = new EventSource('/events?review=' + encodeURIComponent(reviewId));
       es.addEventListener('state', refresh);
       es.addEventListener('leader', refresh);
+      // The breadcrumb embeds the live "K citations audited" hint during the audit
+      // phase; refresh it on audit events too so the panel doesn't sit on a stale
+      // count between state transitions.
+      es.addEventListener('audit', refresh);
     });
   </script>
 </body>

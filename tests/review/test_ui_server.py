@@ -339,6 +339,34 @@ def test_audit_content_viewable_during_audit_phase(tmp_path):
         assert 'data-editable="false"' in page.text
 
 
+def test_status_breadcrumb_tracks_live_audit_count(tmp_path):
+    # R9: during the audit phase the breadcrumb embeds the live "K citations
+    # audited" hint, and the client refreshes it from /api/status on each `audit`
+    # SSE event. Anchor that contract server-side: the status breadcrumb must
+    # report the count currently on disk, so it tracks the file as it grows.
+    pm, d = _seed_review(tmp_path, phase="audit", cycle=4, with_response=False)
+    audit = d / "CITATION_AUDIT_CYCLE_4.md"
+    audit.write_text((FIXTURES / "audit_cycle.md").read_text())
+    with _client(pm) as c:
+        s = c.get("/review/reg/api/status").json()
+        assert s["audited"] == 3
+        assert "3 citations audited" in s["breadcrumb"]
+        # Rewrite with a single entry; the next status read must reflect the drop,
+        # proving the count is recomputed per request rather than cached.
+        audit.write_text(
+            "# Citation audit — cycle 4\n\n## I. §1\n\n"
+            "### Solo 2024, \"Only One\"\n\n**Tier:** 1\n\n"
+            "**Doc passage as currently written:**\n\n> x\n\n"
+            "**What the source actually says:**\n\n> y\n\n"
+            "**Verdict:** faithful\n\n"
+            "**Substantive change proposed:** none required.\n"
+        )
+        assert len(md_parser.parse_audit_doc(audit.read_text()).entries) == 1
+        s2 = c.get("/review/reg/api/status").json()
+        assert s2["audited"] == 1
+        assert "1 citations audited" in s2["breadcrumb"]
+
+
 def test_response_in_progress_during_response_phase(tmp_path):
     pm, d = _seed_review(tmp_path, phase="response", cycle=4, with_response=False)
     # cycle 4 has no response file yet → "response in progress"
