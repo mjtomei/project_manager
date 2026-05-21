@@ -44,10 +44,37 @@ def _locked(path: Path) -> Iterator[None]:
         os.close(fd)
 
 
+class _BlockDumper(yaml.SafeDumper):
+    """SafeDumper that renders multi-line strings as literal `|` blocks.
+
+    Without this, PyYAML re-serializes a `|`-style `before:`/`after:` field
+    (which carries a trailing newline) as a single-quoted scalar with an
+    embedded blank line — valid YAML but unreadable for the humans who
+    review these files. `default_style='|'` would fix the multi-line fields
+    but force every short scalar into literal style too, so we select per
+    value instead.
+    """
+
+
+def _represent_str(dumper: yaml.Dumper, data: str):
+    style = "|" if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+def _represent_none(dumper: yaml.Dumper, _data):
+    # Match the response session's convention: empty `human-verdict:` over `null`.
+    return dumper.represent_scalar("tag:yaml.org,2002:null", "")
+
+
+_BlockDumper.add_representer(str, _represent_str)
+_BlockDumper.add_representer(type(None), _represent_none)
+
+
 def _dump_block_body(data: dict[str, Any]) -> str:
     """Serialize a response-block body to YAML — pipe-block strings for multi-line."""
-    return yaml.safe_dump(
+    return yaml.dump(
         data,
+        Dumper=_BlockDumper,
         sort_keys=False,
         default_flow_style=False,
         allow_unicode=True,
@@ -166,11 +193,18 @@ def append_note(
             j = insert_at
             while j > 0 and lines[j - 1].strip() == "":
                 j -= 1
-            new_lines = lines[:j] + ["\n", entry] + lines[insert_at:]
+            # Keep a blank line before a following header so it stays a heading.
+            tail_sep = ["\n"] if insert_at < len(lines) else []
+            new_lines = lines[:j] + ["\n", entry] + tail_sep + lines[insert_at:]
             new_text = "".join(new_lines)
             if not new_text.endswith("\n"):
                 new_text += "\n"
+        elif text == "":
+            new_text = f"{header}\n\n{entry}"
         else:
-            sep = "" if text == "" or text.endswith("\n") else "\n"
-            new_text = f"{text}{sep}{header}\n\n{entry}"
+            # Ensure exactly one blank line before the new header.
+            base = text if text.endswith("\n") else text + "\n"
+            if not base.endswith("\n\n"):
+                base += "\n"
+            new_text = f"{base}{header}\n\n{entry}"
         _atomic_write_text(path, new_text)

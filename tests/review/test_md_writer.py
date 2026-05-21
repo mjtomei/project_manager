@@ -160,3 +160,31 @@ def test_append_note_creates_file(tmp_path):
     assert "## General" in text
     assert "[2026-05-20T18:00:00Z]" in text
     assert "First note." in text
+
+
+def test_append_note_keeps_blank_line_before_following_header(tmp_path):
+    # Appending to a non-last section must not glue the new entry onto the
+    # next `## ` header (which would stop it rendering as a heading).
+    path = _copy_fixture("notes.md", tmp_path)
+    md_writer.append_note(path, "General", "Walker started.", timestamp="T1")
+    text = path.read_text()
+    assert "Walker started.\n\n## Citations" in text
+
+
+def test_append_note_new_section_keeps_blank_line_before_header(tmp_path):
+    path = _copy_fixture("notes.md", tmp_path)
+    md_writer.append_note(path, "Process", "New entry.", timestamp="T1")
+    text = path.read_text()
+    assert "\n\n## Process\n" in text
+
+
+def test_update_response_block_preserves_literal_blocks(tmp_path):
+    # Multi-line fields must round-trip as readable `|` blocks, not
+    # single-quoted scalars with embedded blank lines.
+    path = _copy_fixture("response_cycle.md", tmp_path)
+    md_writer.update_response_block(path, "change-1", {"human-verdict": "accept"})
+    text = path.read_text()
+    assert "after: |" in text
+    assert "before: |" in text
+    # Empty fields stay bare, not `null`.
+    assert "human-rationale: null" not in text

@@ -51,5 +51,5 @@ Code lives under `pm_core/review/`. New package; no existing module here.
 - Block with no `interactions:` key → treated as empty list; `append_interaction` adds the key.
 - File missing entirely → `parse_state` / `parse_focus` return `None`; `update_*` create the file. `append_note` creates `NOTES.md` and the section if missing.
 - Two concurrent `append_interaction` calls → flock serializes them; both events land.
-- YAML pipe-block `before:` / `after:` preserves trailing newline (we use `default_style='|'` on dump to keep them readable).
+- YAML pipe-block `before:` / `after:` preserves trailing newline. The block dumper registers a per-value `str` representer that selects literal `|` style only for multi-line strings (a blanket `default_style='|'` would wreck short scalars), and a `None` representer that emits bare keys (`human-verdict:`) instead of `null` to match the response session's convention.
 - Empty `surfaced-citations:` list in an audit entry → entry parses with `surfaced_citations = []`.
