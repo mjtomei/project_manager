@@ -191,6 +191,32 @@ def test_append_note_section_prefix_creates_distinct_section(tmp_path):
     assert "Need to revisit Andreas 2022 in cycle 4." in text
 
 
+def test_update_state_concurrent_writes_never_corrupt(tmp_path):
+    # update_state is a lock-free atomic-rename overwrite. With a per-write temp
+    # file, many concurrent writers can race on the rename (last wins) but must
+    # never leave a torn/half-written file behind.
+    path = tmp_path / "STATE.md"
+    md_writer.update_state(path, {"current-cycle": 0, "current-phase": "init"})
+
+    def worker(n: int):
+        for _ in range(40):
+            md_writer.update_state(
+                path, {"current-cycle": n, "current-phase": f"phase-{n}"}
+            )
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    state = md_parser.parse_state(path.read_text())
+    assert state.current_cycle in range(6)
+    assert state.current_phase == f"phase-{state.current_cycle}"
+    # No temp files left lying around.
+    assert not list(tmp_path.glob("STATE.md.*tmp*"))
+
+
 def test_update_response_block_preserves_literal_blocks(tmp_path):
     # Multi-line fields must round-trip as readable `|` blocks, not
     # single-quoted scalars with embedded blank lines.

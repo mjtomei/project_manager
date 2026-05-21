@@ -10,9 +10,10 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import yaml
 
@@ -25,17 +26,26 @@ def _utc_now() -> str:
 
 def _atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content)
-    # fsync the temp file before the rename so the bytes are durable, not just
-    # the rename — matches the repo's established atomic-write pattern
-    # (pm_core.pane_registry.locked_read_modify_write).
-    fd = os.open(str(tmp), os.O_RDONLY)
+    # Unique temp name per write: the lock-free overwrite paths (update_state,
+    # update_focus) share a target, so a fixed `<name>.tmp` would let two
+    # concurrent writers clobber each other's temp file before the rename. A
+    # per-write temp keeps each os.replace atomic and independent.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
     try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            # fsync before the rename so the bytes are durable, not just the
+            # rename — matches the repo's atomic-write pattern
+            # (pm_core.pane_registry.locked_read_modify_write).
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
 
 
 @contextlib.contextmanager
@@ -97,10 +107,15 @@ def _render_block(data: dict[str, Any]) -> str:
 # ---------- response blocks ----------
 
 
-def update_response_block(
-    path: Path, change_id: str, updates: dict[str, Any]
+def _rewrite_block(
+    path: Path, change_id: str, mutate: Callable[[dict[str, Any]], None]
 ) -> None:
-    """Merge `updates` into the block whose `id` matches `change_id`. Atomic."""
+    """Locked read-modify-write of one block's body, found by `id`.
+
+    Reads the file, locates the block whose `id` matches `change_id`, applies
+    `mutate` to a copy of its fields, then re-renders the block in place and
+    writes the whole file atomically. Outside-block bytes are preserved.
+    """
     path = Path(path)
     with _locked(path):
         text = path.read_text()
@@ -109,11 +124,17 @@ def update_response_block(
         if target is None:
             raise KeyError(f"no response block with id={change_id!r}")
         merged = dict(target.fields)
-        merged.update(updates)
-        new_block = _render_block(merged)
+        mutate(merged)
         start, end = target.span
-        new_text = text[:start] + new_block + text[end:]
+        new_text = text[:start] + _render_block(merged) + text[end:]
         _atomic_write_text(path, new_text)
+
+
+def update_response_block(
+    path: Path, change_id: str, updates: dict[str, Any]
+) -> None:
+    """Merge `updates` into the block whose `id` matches `change_id`. Atomic."""
+    _rewrite_block(path, change_id, lambda fields: fields.update(updates))
 
 
 def append_interaction(
@@ -122,22 +143,14 @@ def append_interaction(
     """Append an event to the block's `interactions:` list. Concurrency-safe."""
     event = dict(event)
     event.setdefault("at", _utc_now())
-    path = Path(path)
-    with _locked(path):
-        text = path.read_text()
-        blocks = parse_response_blocks(text)
-        target = next((b for b in blocks if b.id == change_id), None)
-        if target is None:
-            raise KeyError(f"no response block with id={change_id!r}")
-        merged = dict(target.fields)
-        existing = merged.get("interactions")
+
+    def _append(fields: dict[str, Any]) -> None:
+        existing = fields.get("interactions")
         log = list(existing) if isinstance(existing, list) else []
         log.append(event)
-        merged["interactions"] = log
-        new_block = _render_block(merged)
-        start, end = target.span
-        new_text = text[:start] + new_block + text[end:]
-        _atomic_write_text(path, new_text)
+        fields["interactions"] = log
+
+    _rewrite_block(path, change_id, _append)
 
 
 # ---------- state + focus ----------
