@@ -178,6 +178,39 @@ def _hash(*parts: str) -> str:
     return h.hexdigest()
 
 
+class _PaintState:
+    """Paint-decision state machine for the home loop.
+
+    Tracks the last painted hash and the monotonic time the *content*
+    last changed (used to phrase staleness). ``step`` folds in the
+    freshly-computed content hash and reports whether a repaint is due —
+    i.e. whether either the content or the bucketed staleness label moved
+    since the last paint. Pulled out of ``_loop_main`` so the central
+    "quiet pm -> quiet pm-home" invariant is unit-testable: the loop body
+    itself is an infinite select/sleep that resists direct testing.
+    """
+
+    def __init__(self, now: float) -> None:
+        self.last_paint_hash: str | None = None
+        self.last_content_hash: str | None = None
+        self.last_change_mono: float = now
+
+    def step(self, content_hash: str, now: float) -> tuple[bool, str]:
+        """Advance one tick; return (should_paint, staleness_label)."""
+        if content_hash != self.last_content_hash:
+            self.last_change_mono = now
+            self.last_content_hash = content_hash
+        label = _format_relative(now - self.last_change_mono)
+        # Paint hash includes the bucketed staleness so we repaint when
+        # the bucket flips ("just now" -> "1m ago" -> "2m ago" -> ...),
+        # without burning a repaint every sub-second tick when content
+        # hasn't changed.
+        paint_hash = _hash(content_hash, label)
+        should_paint = paint_hash != self.last_paint_hash
+        self.last_paint_hash = paint_hash
+        return should_paint, label
+
+
 def _loop_main(session: str) -> None:
     sentinel = _refresh_sentinel(session)
     try:
@@ -195,9 +228,7 @@ def _loop_main(session: str) -> None:
     except (ValueError, OSError):
         pass
 
-    last_paint_hash: str | None = None
-    last_content_hash: str | None = None
-    last_change_mono: float = time.monotonic()
+    paint = _PaintState(time.monotonic())
 
     while True:
         width, height = _terminal_size()
@@ -208,20 +239,10 @@ def _loop_main(session: str) -> None:
             body = _truncate(f"pm pr list (home): render error: {e}", width)
 
         content_hash = _hash(f"{width}x{height}", body)
-        if content_hash != last_content_hash:
-            last_change_mono = time.monotonic()
-            last_content_hash = content_hash
-
-        age = time.monotonic() - last_change_mono
-        header = f"pm pr list -t --open  (updated {_format_relative(age)})"
-        screen = _compose(header, body, width, height)
-
-        # Paint hash includes the bucketed staleness so we repaint when
-        # the bucket flips ("just now" -> "1m ago" -> "2m ago" -> ...),
-        # without burning a repaint every sub-second tick when content
-        # hasn't changed.
-        paint_hash = _hash(content_hash, _format_relative(age))
-        if paint_hash != last_paint_hash:
+        should_paint, label = paint.step(content_hash, time.monotonic())
+        if should_paint:
+            header = f"pm pr list -t --open  (updated {label})"
+            screen = _compose(header, body, width, height)
             # No trailing newline: `screen` is already clamped to the
             # pane height, so writing one more newline on the bottom row
             # would scroll the terminal up by one line and push the
@@ -230,7 +251,6 @@ def _loop_main(session: str) -> None:
             sys.stdout.write("\033[2J\033[H")
             sys.stdout.write(screen)
             sys.stdout.flush()
-            last_paint_hash = paint_hash
 
         deadline = time.monotonic() + TICK_SECONDS
         while True:

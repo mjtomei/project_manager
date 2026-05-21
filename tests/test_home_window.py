@@ -6,8 +6,10 @@ import pm_core.home_window as home_window
 from pm_core.cli.helpers import format_pr_line
 from pm_core.home_window.pr_list import (
     PrListProvider,
+    _PaintState,
     _compose,
     _format_relative,
+    _hash,
     _render_content,
     _truncate,
 )
@@ -225,6 +227,62 @@ class TestRenderHelpers:
         lines = screen.split("\n")
         assert len(lines) == 5
         assert lines[0] == "header"
+
+
+class TestPaintState:
+    """Guards the PR's headline invariant: a quiet pm is a quiet pm-home.
+
+    The loop body that drives this is an infinite select/sleep, so the
+    decision lives in _PaintState.step() where it can be exercised
+    deterministically with injected monotonic times.
+    """
+
+    def _ch(self, body: str, size: str = "80x24") -> str:
+        return _hash(size, body)
+
+    def test_first_step_paints(self):
+        st = _PaintState(now=1000.0)
+        should, label = st.step(self._ch("body"), 1000.0)
+        assert should is True
+        assert label == "just now"
+
+    def test_no_repaint_when_content_and_bucket_stable(self):
+        st = _PaintState(now=1000.0)
+        ch = self._ch("body")
+        assert st.step(ch, 1000.0)[0] is True   # first paint
+        # Same content, still inside the "just now" bucket -> no repaint,
+        # even across many sub-second ticks. This is the anti-flicker core.
+        assert st.step(ch, 1000.75)[0] is False
+        assert st.step(ch, 1030.0)[0] is False
+        assert st.step(ch, 1059.0)[0] is False
+
+    def test_repaint_on_staleness_bucket_flip(self):
+        st = _PaintState(now=1000.0)
+        ch = self._ch("body")
+        st.step(ch, 1000.0)                      # paint, "just now"
+        assert st.step(ch, 1059.0)[0] is False   # still "just now"
+        should, label = st.step(ch, 1061.0)      # 61s -> "1m ago"
+        assert should is True
+        assert label == "1m ago"
+
+    def test_content_change_resets_staleness_to_just_now(self):
+        st = _PaintState(now=1000.0)
+        st.step(self._ch("body1"), 1000.0)
+        should, label = st.step(self._ch("body1"), 1061.0)  # drift into 1m
+        assert should is True and label == "1m ago"
+        # New content at t=1100 -> the "last changed" clock resets, so the
+        # staleness phrasing snaps back to "just now".
+        should, label = st.step(self._ch("body2"), 1100.0)
+        assert should is True
+        assert label == "just now"
+
+    def test_resize_changes_content_hash_and_repaints(self):
+        # Width/height are folded into content_hash by the loop, so a
+        # resize is a genuine content change -> repaint.
+        st = _PaintState(now=1000.0)
+        st.step(self._ch("b", "80x24"), 1000.0)
+        should, _ = st.step(self._ch("b", "100x40"), 1000.5)
+        assert should is True
 
 
 class TestFormatPrLine:
