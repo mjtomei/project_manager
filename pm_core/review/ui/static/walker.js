@@ -179,9 +179,17 @@
     if (wasEditable !== !!s.editable) refreshBody();
   }
 
+  // Preserve the active filters (and cycle) when re-fetching the body, so an
+  // SSE event or a per-entry action doesn't silently reset a filtered view.
+  function bodyUrl() {
+    const params = new URLSearchParams(location.search);
+    if (cycle) params.set("cycle", cycle);
+    const qs = params.toString();
+    return `/review/${reviewId}/changes` + (qs ? `?${qs}` : "");
+  }
+
   async function refreshBody() {
-    const url = `/review/${reviewId}/changes` + (cycle ? `?cycle=${cycle}` : "");
-    const res = await fetch(url);
+    const res = await fetch(bodyUrl());
     if (!res.ok) return;
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, "text/html");

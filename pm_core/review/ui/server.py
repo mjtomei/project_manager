@@ -25,6 +25,7 @@ import json
 import os
 import re
 import statistics
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -479,6 +480,11 @@ class WatcherManager:
         self._subs: dict[str, set[asyncio.Queue]] = {}
         self._watches: dict[str, Any] = {}
         self._leaders: dict[str, LeaderLock] = {}
+        # leader_for() runs in the sync-route threadpool; serialize its
+        # get-or-create so two concurrent first-touches for the same review
+        # can't each build a LeaderLock (the second's flock would fail and
+        # clobber the real holder, wedging Apply off for its own session).
+        self._leaders_guard = threading.Lock()
 
     # -- lifecycle --
     def start(self) -> None:
@@ -502,11 +508,15 @@ class WatcherManager:
     # -- leadership --
     def leader_for(self, review_id: str) -> LeaderLock:
         lock = self._leaders.get(review_id)
-        if lock is None:
-            lock = LeaderLock(ReviewPaths(self.pm_root, review_id).leader_lock)
-            lock.acquire()
-            self._leaders[review_id] = lock
-        return lock
+        if lock is not None:
+            return lock
+        with self._leaders_guard:
+            lock = self._leaders.get(review_id)
+            if lock is None:
+                lock = LeaderLock(ReviewPaths(self.pm_root, review_id).leader_lock)
+                lock.acquire()
+                self._leaders[review_id] = lock
+            return lock
 
     async def leader_loop(self) -> None:
         """Followers retry the flock periodically; on takeover, push a leader event."""
@@ -667,6 +677,12 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
     def _is_leader(review_id: str) -> bool:
         return manager.leader_for(review_id).is_leader
 
+    def _require_known_review(review_id: str) -> None:
+        """404 for ids absent from the registry, so a typo'd or crafted id can't
+        spin up a watch / leader lock against an arbitrary on-disk directory."""
+        if get_review(pm_root, review_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown review {review_id!r}")
+
     # -- dashboard --
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
@@ -684,6 +700,7 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
     # -- per-review walker page --
     @app.get("/review/{review_id}/changes", response_class=HTMLResponse)
     def changes(request: Request, review_id: str, cycle: int | None = None):
+        _require_known_review(review_id)
         # Query params use snake_case (form field names); filter keys use dashes.
         qp = request.query_params
         raw_filters = {k: qp.get(k.replace("-", "_"), "") for k in FILTER_KEYS}
@@ -698,6 +715,7 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
     # -- JSON status (SSE-driven breadcrumb / lock / activity refresh) --
     @app.get("/review/{review_id}/api/status")
     def api_status(review_id: str, cycle: int | None = None):
+        _require_known_review(review_id)
         ctx = build_review_context(
             pm_root, review_id, cycle=cycle, is_leader=_is_leader(review_id)
         )
@@ -712,6 +730,7 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
     # -- Apply: the only UI → session signal --
     @app.post("/review/{review_id}/apply")
     def apply(review_id: str):
+        _require_known_review(review_id)
         paths, state = _require_editable(pm_root, review_id)
         if state["mode"] == "auto-run":
             raise HTTPException(status_code=409, detail="auto-run mode: apply not available")
@@ -729,15 +748,20 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
     # -- per-entry action --
     @app.post("/review/{review_id}/change/{change_id}")
     async def change_action(review_id: str, change_id: str, request: Request):
+        _require_known_review(review_id)
         paths, state = _require_editable(pm_root, review_id)
         payload = await _json_body(request)
         action = payload.get("action", "")
-        result = _apply_change(paths, state["current-cycle"], change_id, action, payload)
+        try:
+            result = _apply_change(paths, state["current-cycle"], change_id, action, payload)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"no change {change_id!r}")
         return {"ok": True, **result}
 
     # -- page-level bulk-accept (default scope = current filter) --
     @app.post("/review/{review_id}/bulk-accept")
     async def bulk_accept(review_id: str, request: Request):
+        _require_known_review(review_id)
         paths, state = _require_editable(pm_root, review_id)
         payload = await _json_body(request)
         filters = {k: payload.get(k) for k in FILTER_KEYS if payload.get(k)}
@@ -766,6 +790,7 @@ def build_app(pm_root: Path | str | None = None) -> FastAPI:
     # -- SSE --
     @app.get("/events")
     async def events(request: Request, review: str):
+        _require_known_review(review)
         queue: asyncio.Queue = asyncio.Queue()
         manager.set_loop(asyncio.get_running_loop())
         manager.subscribe(review, queue)

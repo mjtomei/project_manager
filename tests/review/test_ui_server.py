@@ -470,6 +470,22 @@ def test_leader_lock_elects_one_writer(tmp_path):
         b.release()
 
 
+def test_unknown_review_is_404(tmp_path):
+    pm, _ = _seed_review(tmp_path)
+    with _client(pm) as c:
+        # Ids absent from the registry never reach a watch / leader lock.
+        assert c.get("/review/nope/changes").status_code == 404
+        assert c.get("/review/nope/api/status").status_code == 404
+        assert c.post("/review/nope/apply").status_code == 404
+
+
+def test_unknown_change_id_is_404(tmp_path):
+    pm, _ = _seed_review(tmp_path, phase="awaiting-human-review")
+    with _client(pm) as c:
+        r = c.post("/review/reg/change/no-such-change", json={"action": "accept"})
+        assert r.status_code == 404
+
+
 def test_non_leader_cannot_apply(tmp_path):
     pm, d = _seed_review(tmp_path, phase="awaiting-human-review")
     # Hold the leader lock from outside so the server process is a follower.
