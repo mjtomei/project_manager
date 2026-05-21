@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-1160366
+  active_pr: pr-440c3e7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -20686,6 +20686,86 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-20T22:53:20.224402+00:00'
   updated_at: '2026-05-20T22:53:20.224402+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-440c3e7
+  plan: null
+  title: Run built-in code-review skill in the review loop before the verdict
+  branch: pm/pr-440c3e7-run-built-in-code-review-skill-in-the-review-loop-
+  status: pending
+  depends_on: []
+  description: 'Integrate Claude Code''s built-in `code-review` skill into pm''s automated
+    review loop so the looped review session gets a parallel reuse/quality/efficiency
+    pass (with fixes) on top of pm''s existing architectural/correctness review.
+
+
+    ## Behavior
+
+    In review-loop mode, when the runner is Claude Code, the review session FIRST
+    runs the built-in `code-review` skill (fans out reuse/quality/efficiency sub-agents
+    and applies its own fixes), THEN continues with the existing pm review prompt
+    and delivers a verdict.
+
+
+    ## Verdict semantics (unified)
+
+    Changes from the built-in skill are treated identically to changes pm prompted
+    for:
+
+    - Any changes this iteration (skill OR reviewer) -> NEEDS_WORK; commit (with the
+    review-loop prefix) and push, so the loop re-reviews.
+
+    - Anything the review surfaced but could not resolve -> INPUT_REQUIRED.
+
+    - No changes at all (skill made no edits, reviewer found nothing, nothing unresolved)
+    -> PASS.
+
+    This makes the verdict a deterministic function of ''did this iteration change
+    anything,'' which also damps NEEDS_WORK false-positive churn and gives a clean
+    convergence signal: a zero-change re-run is the PASS confirmation. (So the skill
+    must run on EVERY loop iteration, not just the first.)
+
+
+    ## Gating
+
+    - Loop-only: the addition lives in _review_loop_addendum (pm_core/prompt_gen.py:319),
+    so one-shot/manual/watcher reviews do NOT auto-run a fixing skill.
+
+    - Claude-only: skills are a Claude Code feature; gate on the resolved provider.
+    The review launch site (pm_core/cli/pr.py:~1161) already resolves model/provider
+    before generate_review_prompt(), so thread a boolean (e.g. use_code_review_skill=is_claude)
+    into generate_review_prompt -> _review_loop_addendum. Also pass it through the
+    convenience caller at prompt_gen.py:1312.
+
+
+    ## Implementation sketch
+
+    - _review_loop_addendum: add a ''First, run the built-in code-review skill...''
+    preamble and reword the existing NEEDS_WORK/PASS items so the skill''s fixes count
+    as changes.
+
+    - generate_review_prompt + caller: thread the is_claude/use_code_review_skill
+    flag.
+
+
+    ## Notes / caveats
+
+    - Use the BUILT-IN code-review skill (shipped with Claude Code, present in every
+    launched claude session, and it applies fixes). NOT the marketplace claude-plugins-official
+    ''code-review'' command, which is not enabled here and only posts a gh PR comment
+    without fixing.
+
+    - Verify the exact provider value from resolve_model_and_provider when wiring
+    the gate.
+
+    - Independent of the litreview/walker work; standalone PR.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T05:03:07.396331+00:00'
+  updated_at: '2026-05-21T05:03:07.396331+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
