@@ -10,6 +10,7 @@ indicator, the 'no cycles yet' placeholder, and leader-lock election/failover.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 import time
@@ -45,10 +46,25 @@ def _review_dir(pm: Path, review_id: str) -> Path:
     return d
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via temp-file + os.replace, mirroring md_writer's atomic writes.
+
+    The directory watcher reads STATE.md on every filesystem event; a plain
+    (truncate-then-write) write can be observed mid-write as an empty/partial
+    file, surfacing a `state` SSE event with null fields. Production never does
+    this — md_writer.update_state replaces the file atomically — so the fixtures
+    must too, or the SSE tests race on a torn read.
+    """
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def _write_state(d: Path, cycle: int, phase: str, mode: str = "human-reviewed") -> None:
-    (d / "STATE.md").write_text(
+    _atomic_write(
+        d / "STATE.md",
         f"current-cycle: {cycle}\ncurrent-phase: {phase}\nmode: {mode}\n"
-        "last-transition: 2026-05-20T14:32:00Z\n"
+        "last-transition: 2026-05-20T14:32:00Z\n",
     )
 
 
@@ -451,7 +467,8 @@ def test_sse_pushes_change_under_200ms(tmp_path, trigger, want):
             if trigger == "state":
                 _write_state(d, 3, "applying")
             elif trigger == "focus":
-                (d / "UI_FOCUS.md").write_text(
+                _atomic_write(
+                    d / "UI_FOCUS.md",
                     "view: changes\ncycle: 3\ntarget: change-1\n"
                     "timestamp: 2026-05-20T16:00:00Z\n")
             elif trigger == "response":
