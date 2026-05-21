@@ -37,7 +37,7 @@
           <div class="status-panel" data-review="{{ r.id }}">
             <span class="phase-badge {{ 'animating' if c.animating else 'idle' }}"
                   data-phase="{{ c.phase }}" data-animating="{{ 'true' if c.animating else 'false' }}">
-              <span class="dot"></span>{{ c.phase }}
+              <span class="dot"></span><span class="phase-text">{{ c.phase }}</span>
             </span>
             <span class="tag tag-mode">{{ c.mode }}</span>
             <span class="breadcrumb">{{ c.breadcrumb }}</span>
@@ -82,6 +82,45 @@
       sel.addEventListener('change', function () {
         location.href = '/review/' + sel.dataset.review + '/changes?cycle=' + sel.value;
       });
+    });
+
+    // R9: the dashboard status panel mirrors the walker breadcrumb and must
+    // update via SSE on `state` events. Open one EventSource per active review
+    // (the rows the user can see) and refresh that row's phase badge + breadcrumb
+    // from /api/status when its state (or leadership) changes. The watch is
+    // ref-counted server-side and released when this page is closed.
+    //
+    // Scoped to active rows on purpose: archived reviews are collapsed and rarely
+    // changing, and browsers cap concurrent EventSource connections per host
+    // (~6 over HTTP/1.1), so we spend that budget on the rows the user is looking
+    // at. A project with more active reviews than the cap still renders correct
+    // state on load; only the surplus rows wait for a reload to re-sync.
+    document.querySelectorAll('.reviews.active .status-panel[data-review]').forEach(function (panel) {
+      var reviewId = panel.dataset.review;
+
+      function refresh() {
+        fetch('/review/' + encodeURIComponent(reviewId) + '/api/status')
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (s) {
+            if (!s) return;
+            var badge = panel.querySelector('.phase-badge');
+            if (badge) {
+              badge.classList.toggle('animating', !!s.animating);
+              badge.classList.toggle('idle', !s.animating);
+              badge.dataset.animating = s.animating ? 'true' : 'false';
+              if (s.phase) badge.dataset.phase = s.phase;
+              var text = badge.querySelector('.phase-text');
+              if (text && s.phase) text.textContent = s.phase;
+            }
+            var bc = panel.querySelector('.breadcrumb');
+            if (bc && s.breadcrumb) bc.textContent = s.breadcrumb;
+          })
+          .catch(function () {});
+      }
+
+      var es = new EventSource('/events?review=' + encodeURIComponent(reviewId));
+      es.addEventListener('state', refresh);
+      es.addEventListener('leader', refresh);
     });
   </script>
 </body>

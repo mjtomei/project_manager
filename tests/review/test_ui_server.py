@@ -154,6 +154,22 @@ def test_dashboard_renders_multi_cycle_state(tmp_path):
         assert "cycle 3" in r.text or "cycle\n" in r.text
 
 
+def test_dashboard_exposes_sse_refresh_contract(tmp_path):
+    # R9: the dashboard status panel updates via SSE on `state` events. The
+    # client-side wiring targets a `.phase-text` span and the breadcrumb, and
+    # refreshes them from /api/status, so anchor that contract server-side: the
+    # markup must carry the targetable span + the SSE connect, and the status API
+    # must return the breadcrumb the JS writes back into the panel.
+    pm, _ = _seed_review(tmp_path, cycle=3)
+    with _client(pm) as c:
+        page = c.get("/").text
+        assert 'class="phase-text"' in page
+        assert "/events?review=" in page  # dashboard opens an EventSource
+        assert "addEventListener('state'" in page
+        s = c.get("/review/reg/api/status").json()
+        assert s["breadcrumb"] and "Cycle 3" in s["breadcrumb"]
+
+
 def test_no_cycles_placeholder(tmp_path):
     pm = _make_pm(tmp_path, [
         {"id": "fresh", "name": "Fresh", "target": "x", "target-type": "topic", "status": "active"},
