@@ -64,6 +64,22 @@ def test_create_new_review_writes_entry_dir_and_state(tmp_path):
     launch.assert_called_once()
 
 
+def test_run_review_launches_with_repo_root_cwd_and_pm_root(tmp_path):
+    """Claude runs from the repo root (parent of ``pm/``) so prompt files land
+    in ``<repo>/pm/prompts/`` and the session can reach the whole repo; the pm
+    dir stays the session-registry home (``pm_root``)."""
+    repo = tmp_path
+    pm_root = repo / "pm"
+    pm_root.mkdir()
+    store.save({"project": {"name": "demo", "repo": "x", "base_branch": "master"},
+                "plans": [], "prs": []}, pm_root)
+    with patch.object(review_cli, "launch_review_session") as launch:
+        review_cli.run_review("Some Topic", root=pm_root, target_type="topic")
+    kwargs = launch.call_args.kwargs
+    assert kwargs["cwd"] == str(repo)        # repo root, not the pm dir
+    assert kwargs["pm_root"] == pm_root      # session registry stays under pm/
+
+
 def test_run_review_plan_id_target_resolves_to_file_and_stem(tmp_path):
     """`pm review <plan-id>` auto-classifies as a plan: the registry stores the
     plan *file* path and the review id is the file stem (not the slugified id)."""

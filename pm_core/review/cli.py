@@ -79,7 +79,8 @@ def write_initial_state(root: Path, review_id: str) -> None:
 
 # --- pane launch ------------------------------------------------------------
 
-def launch_review_session(prompt: str, *, cwd: str, role: str = REVIEW_ROLE,
+def launch_review_session(prompt: str, *, cwd: str, pm_root: Path | None = None,
+                          role: str = REVIEW_ROLE,
                           target_window: str | None = None,
                           session_key: str = "review") -> None:
     """Launch a Claude review session in a tmux pane (or foreground).
@@ -90,11 +91,16 @@ def launch_review_session(prompt: str, *, cwd: str, role: str = REVIEW_ROLE,
     still works from a plain terminal.  ``pm review`` passes
     ``target_window=None`` (its own pane); ``pm plan literature-review`` passes
     the plan's window id (same code path, different pane parent).
+
+    ``cwd`` is Claude's working directory (the repo root — where the prompt
+    file lands under ``pm/prompts/`` and where the session operates).
+    ``pm_root`` is the pm dir used for Claude's session registry; it defaults to
+    ``cwd`` for callers that don't distinguish the two.
     """
     from pm_core import tmux
     from pm_core.claude_launcher import build_claude_shell_cmd, launch_claude, find_claude
 
-    root = Path(cwd)
+    pm_root = Path(pm_root) if pm_root is not None else Path(cwd)
 
     if not find_claude():
         click.echo("Claude CLI not found. Copy-paste this prompt into Claude Code:")
@@ -102,7 +108,7 @@ def launch_review_session(prompt: str, *, cwd: str, role: str = REVIEW_ROLE,
         return
 
     if not tmux.in_tmux():
-        launch_claude(prompt, session_key=session_key, pm_root=root, cwd=cwd)
+        launch_claude(prompt, session_key=session_key, pm_root=pm_root, cwd=cwd)
         return
 
     try:
@@ -110,7 +116,7 @@ def launch_review_session(prompt: str, *, cwd: str, role: str = REVIEW_ROLE,
     except Exception:
         session = None
     if not session:
-        launch_claude(prompt, session_key=session_key, pm_root=root, cwd=cwd)
+        launch_claude(prompt, session_key=session_key, pm_root=pm_root, cwd=cwd)
         return
 
     # Already inside the target window — e.g. the TUI created this pane in the
@@ -118,7 +124,7 @@ def launch_review_session(prompt: str, *, cwd: str, role: str = REVIEW_ROLE,
     # current pane instead of splitting an extra one, matching `pm plan review`.
     # (The standalone `pm review` / terminal path falls through and splits.)
     if target_window is not None and tmux.current_window_id() == target_window:
-        launch_claude(prompt, session_key=session_key, pm_root=root, cwd=cwd)
+        launch_claude(prompt, session_key=session_key, pm_root=pm_root, cwd=cwd)
         return
 
     cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd)
@@ -182,8 +188,13 @@ def run_review(target: str, *, root: Path, target_type: str | None = None,
         click.echo(f"Created review '{review_id}'.")
 
     prompt = context.build_context(root, review_id, stored_target, target_type)
+    # Claude runs from the repo root (the dir containing ``pm/``), matching every
+    # other launcher — so prompt files land in ``<repo>/pm/prompts/`` and the
+    # session can reach the whole repo. ``root`` itself (the pm dir) stays the
+    # session-registry home. (Standalone PM repos keep root == repo root.)
+    claude_cwd = root.parent if root.name == "pm" else root
     launch_review_session(
-        prompt, cwd=str(root), role=REVIEW_ROLE,
+        prompt, cwd=str(claude_cwd), pm_root=root, role=REVIEW_ROLE,
         target_window=target_window, session_key=f"review:{review_id}",
     )
     return review_id
