@@ -1,6 +1,6 @@
 # Spec: PR pr-1160366 — Markdown format primitives
 
-Code lives under `pm_core/review/`. New package; no existing module here.
+Code lives under `pm_core/review/`. NOTE: an existing `pm_core/review.py` module (post-step plan-review logic, imported by `pm_core/cli/plan.py` and `tests/test_review.py`) already occupied this name. The whole litreview plan (plan-3119574) puts its code under `pm_core/review/`, so the collision is resolved by turning the old module into `pm_core/review/__init__.py` verbatim (preserving every existing `pm_core.review` import) and adding the new primitives as submodules (`md_parser.py`, `md_writer.py`). Two unrelated "review" concepts now share the package; a future cleanup could rename the old module to e.g. `pm_core/plan_review.py`, but that is out of scope here.
 
 ## Requirements
 

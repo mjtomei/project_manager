@@ -191,6 +191,34 @@ def test_append_note_section_prefix_creates_distinct_section(tmp_path):
     assert "Need to revisit Andreas 2022 in cycle 4." in text
 
 
+def test_append_note_concurrency(tmp_path):
+    # append_note holds an flock for its read-modify-write, so concurrent
+    # appends to the same section must not lose any entry (the PR contract:
+    # "interaction-log and notes appends are concurrency-safe").
+    path = _copy_fixture("notes.md", tmp_path)
+    N_PER_THREAD = 25
+    N_THREADS = 4
+
+    def worker(tid: int):
+        for k in range(N_PER_THREAD):
+            md_writer.append_note(
+                path, "General", f"entry-{tid}-{k}", timestamp=f"T-{tid}-{k}"
+            )
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(N_THREADS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    text = path.read_text()
+    for tid in range(N_THREADS):
+        for k in range(N_PER_THREAD):
+            assert f"entry-{tid}-{k}" in text
+    # Prior content survives every interleaving.
+    assert "Need to revisit Andreas 2022 in cycle 4." in text
+
+
 def test_update_state_concurrent_writes_never_corrupt(tmp_path):
     # update_state is a lock-free atomic-rename overwrite. With a per-write temp
     # file, many concurrent writers can race on the rename (last wins) but must
