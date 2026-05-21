@@ -1,5 +1,6 @@
 """YAML read/write for project.yaml state management."""
 
+import asyncio
 import errno
 import fcntl
 import hashlib
@@ -7,10 +8,11 @@ import logging
 import os
 import re
 import stat
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Hashable, Optional
 
 import yaml
 
@@ -264,6 +266,118 @@ def locked_update(
         fn(data)
         save(data, root)
     return data
+
+
+class WriteQueue:
+    """Coalescing write queue for project.yaml mutations.
+
+    The TUI keeps its working state in memory (``app._data``) and must not
+    block the asyncio event loop on a file lock + full-yaml parse + rewrite
+    for every mutation (e.g. the per-keypress ``active_pr`` persist).  This
+    queue decouples in-memory updates from disk:
+
+    * ``enqueue(key, fn)`` records a pending mutation closure tagged by
+      *key* and returns immediately.  Re-enqueuing the same *key* replaces
+      the pending closure (coalescing), so a burst of rapid updates to the
+      same field collapses to a single disk write of the final value.
+    * A background worker (``run``) drains the queue after a short
+      *debounce* window and applies all pending closures in one
+      :func:`locked_update`, which re-reads fresh on-disk state under the
+      lock first — so concurrent external edits from other pm processes are
+      respected, not clobbered.
+    * The blocking ``locked_update`` runs on a thread (``to_thread``) so the
+      event loop stays responsive even while a write is in flight.
+    * ``flush_sync`` drains synchronously for shutdown paths (``on_unmount``,
+      ``restart``) where the worker may not get another chance to run.
+
+    The worker writes to disk only; it never mutates ``app._data``.  In-memory
+    state is the source of truth for the running TUI and is re-synced from disk
+    by the existing background-sync / reload paths.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        validate: bool = True,
+        timeout: float = LOCK_TIMEOUT_SECONDS,
+        debounce: float = 0.1,
+    ) -> None:
+        self._root = root
+        self._validate = validate
+        self._timeout = timeout
+        self._debounce = debounce
+        self._pending: "dict[Hashable, Callable[[dict], None]]" = {}
+        self._lock = threading.Lock()
+        self._event = asyncio.Event()
+        self._stopped = False
+
+    def enqueue(self, key: Hashable, fn: Callable[[dict], None]) -> None:
+        """Record a pending mutation, replacing any prior op with the same key."""
+        with self._lock:
+            self._pending[key] = fn
+        # Wake the worker.  set() is safe to call from the event-loop thread;
+        # enqueue is only ever called there (TUI key handling).
+        self._event.set()
+
+    def _take_pending(self) -> "dict[Hashable, Callable[[dict], None]]":
+        """Atomically swap out and return the pending ops."""
+        with self._lock:
+            ops = self._pending
+            self._pending = {}
+        return ops
+
+    def _drain_once(self) -> None:
+        """Apply all currently-pending ops in one locked read-modify-write.
+
+        Swaps the pending map out under the lock first, so a concurrent
+        drainer (e.g. the worker thread vs. a ``flush_sync`` on shutdown)
+        only ever applies a given op once.  No-op when nothing is pending.
+        """
+        ops = self._take_pending()
+        if not ops:
+            return
+
+        def apply(data: dict) -> None:
+            for op in ops.values():
+                op(data)
+
+        locked_update(self._root, apply, validate=self._validate,
+                      timeout=self._timeout)
+
+    async def run(self) -> None:
+        """Worker coroutine: debounce bursts, then drain off the event loop."""
+        while not self._stopped:
+            await self._event.wait()
+            # Resetting debounce: keep waiting while new enqueues keep
+            # arriving within the debounce window, so a held key collapses
+            # to a single write of the final value once input goes quiet.
+            while not self._stopped:
+                self._event.clear()
+                try:
+                    await asyncio.wait_for(self._event.wait(), timeout=self._debounce)
+                except asyncio.TimeoutError:
+                    break
+            try:
+                await asyncio.to_thread(self._drain_once)
+            except (StoreLockTimeout, ProjectYamlParseError) as e:
+                _log.warning("WriteQueue drain failed: %s", e)
+            except Exception:
+                _log.exception("WriteQueue drain raised")
+
+    def stop(self) -> None:
+        """Signal the worker to exit after its current cycle."""
+        self._stopped = True
+        self._event.set()
+
+    def flush_sync(self) -> None:
+        """Drain any pending ops synchronously (for shutdown / restart paths)."""
+        try:
+            self._drain_once()
+        except (StoreLockTimeout, ProjectYamlParseError) as e:
+            _log.warning("WriteQueue flush failed: %s", e)
+        except Exception:
+            _log.exception("WriteQueue flush raised")
 
 
 def locked_edit(root: Path, timeout: float = 30.0) -> dict:
