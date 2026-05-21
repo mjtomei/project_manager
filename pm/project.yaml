@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-1d8b2b7
+  active_pr: pr-abcf70f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -7061,9 +7061,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-18T21:03:45.382234+00:00'
+  updated_at: '2026-05-21T05:42:54.769787+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
-  reviewed_at: '2026-03-19T16:25:44.605020+00:00'
+  reviewed_at: '2026-05-21T05:42:54.769787+00:00'
   merged_at: null
   notes:
   - id: note-abd8475
@@ -7162,6 +7162,85 @@ prs:
       refactor request in note-30c1a2e.
     created_at: '2026-05-18T21:03:43Z'
     last_edited: '2026-05-18T21:03:43Z'
+  - id: note-530ac2e
+    text: "FOLLOW-UP REQUEST (QA planning, 2026-05-19): the current fake-claude config\
+      \ only supports weighted random verdict selection (claude_launcher._pick_fake_verdict\
+      \ → random.choices on a {\"verdicts\": {\"PASS\": 70, ...}} map). That makes\
+      \ multi-iteration loop scenarios (e.g. \"NEEDS_WORK on iter 1, PASS on iter\
+      \ 2\") unexpressible — you can only bias weights and hope, which is flaky in\
+      \ CI and silently mis-models the very state-machine transitions FakeClaudeSession\
+      \ was built to exercise.\n\nPROPOSAL: add a scripted-sequence form to the per-type\
+      \ \"verdicts\" field, alongside the existing weighted map:\n\n  {\n    \"review\"\
+      : { \"verdicts\": [\"NEEDS_WORK\", \"PASS\"] },\n    \"qa_verification\": {\n\
+      \      \"verdicts\": [\n        {\"verdict\": \"FLAGGED\", \"body\": \"Step\
+      \ 3: FAILED\"},\n        {\"verdict\": \"VERIFIED\"}\n      ]\n    }\n  }\n\n\
+      Design points:\n- Polymorphic field: dict = weighted (existing); list = scripted.\
+      \ List entries may be bare strings or objects carrying per-iteration overrides\
+      \ (body / delay / preamble / etc.) layered over the type's _defaults.\n- Cursor\
+      \ lives in a sidecar (~/.pm/sessions/<tag>/fake-claude.state with {\"review\"\
+      : 1, ...}), not the config — config stays declarative. Advance under flock (or\
+      \ O_CREAT|O_EXCL + rename) so two panes of the same session-type launching concurrently\
+      \ do not both grab slot 0.\n- End-of-sequence: clamp-to-last by default (extra\
+      \ iterations keep emitting the terminal verdict, so the loop still completes).\
+      \ Opt-in wrap via {\"sequence\": [...], \"wrap\": true} for the rare cycling\
+      \ case. Clamp is safer — wrap can silently mask iteration-count bugs.\n- Validation:\
+      \ extend validate_session_verdicts to walk the list form and check each entry's\
+      \ verdict against SESSION_TYPE_VERDICTS — same error surface in set_fake_claude_config.\n\
+      - Optional debug aid: pm fake-claude peek <tag> printing the next verdict each\
+      \ session type would emit.\n\nWhy now: pr-fbda1a8 (the bridge PR) will start\
+      \ asserting on loop iteration counts and verdict ordering. Without scripted\
+      \ sequences those tests can only express \"eventually PASS\", which defeats\
+      \ the point of replacing real Claude with a fake. The QA plan for this PR has\
+      \ a multi-iteration scenario (NEEDS_WORK → PASS, FLAGGED → VERIFIED) that is\
+      \ currently unexpressible against the existing schema.\n\nScope: ~50 LOC in\
+      \ claude_launcher.py + paths.py + tests. Small enough to land in this PR, or\
+      \ split as a follow-up improvement PR linked as a prerequisite of pr-fbda1a8\
+      \ (same pattern used for the deferred VerdictRegistry refactor in pr-1d8b2b7)."
+    created_at: '2026-05-19T22:53:52Z'
+    last_edited: '2026-05-19T22:53:52Z'
+  - id: note-5711350
+    text: 'QA INPUT_REQUIRED: fake-claude CLI emits each verdict shape correctly:
+      PASS; fake-claude drives a real pm loop end-to-end via session config: INPUT_REQUIRED;
+      _all catch-all + per-type override + validation rejection: PASS; Concurrent
+      fake panes under one session tag (shared-resource sweep): PASS; Multi-iteration
+      loop scripted by the fake (NEEDS_WORK → PASS): INPUT_REQUIRED; model_config
+      gains qa_concretize/qa_finalize + validator warnings: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-529ffa683bdc994f)'
+    created_at: '2026-05-19T23:04:47Z'
+    last_edited: '2026-05-19T23:04:47Z'
+  - id: note-c3f8404
+    text: 'QA PASS: fake-claude CLI emits every verdict shape and honors timing/hold/error
+      flags: PASS; Redirecting a real pm review loop to the fake via a dropped session
+      config: PASS; Fake-claude config validation and the per-session-type verdict
+      catalogue: PASS; Multi-iteration scripted sequences and concurrent cursor advancement:
+      PASS; Concurrent fake panes of different session types share the config without
+      colliding: PASS; model_config gains qa_concretize/qa_finalize and surfaces validation
+      warnings: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-18bc503772a8f513)'
+    created_at: '2026-05-21T04:31:55Z'
+    last_edited: '2026-05-21T04:31:55Z'
+  - id: note-4d91f42
+    text: 'NEXT QA RUN should generate: a scenario driving a full container-mode QA
+      loop end-to-end with fake-claude, to cover the verdict surfaces only validated
+      at config level so far -- qa_planning (QA_PLAN), qa_concretize (REFINED_STEPS/REFINER_REJECT),
+      qa_scenario (PASS/NEEDS_WORK), qa_verification (VERIFIED/FLAGGED), qa_finalize
+      (FINALIZE_DONE/FINALIZE_BLOCKED). GIVEN: throwaway project + session, container
+      mode enabled (we run podman and support podman-in-podman), fake-claude config
+      scripting each phase verdict, no real claude. WHEN: start the QA loop. THEN:
+      each phase pane runs the fake in its container and the loop walks planning->concretize->scenario->verification->finalize
+      to FINALIZE_DONE; a second pass scripting REFINER_REJECT / FLAGGED / FINALIZE_BLOCKED
+      exercises the alternate branches (scenario rejected / verification routed back
+      / finalize halted). INSTRUCTION tui-manual-test.md, ARTIFACT tmux-screen-recording.md.
+      Could not be added to the current QA run -- scenarios had already started. (An
+      earlier version of this note wrongly cited docker-in-docker as a blocker; podman-in-podman
+      is supported, so this IS achievable here -- it just needs a fresh QA run.) Broad
+      re-validation of each Phase 1-5 feature own logic stays pr-fbda1a8 charter.'
+    created_at: '2026-05-21T04:41:55Z'
+    last_edited: '2026-05-21T04:53:49Z'
+  - id: note-b27fbc6
+    text: 'QA INPUT_REQUIRED: Full container-mode QA loop happy path, every phase
+      driven by the fake: INPUT_REQUIRED; Container-mode QA loop alternate-branch
+      routing (reject / re-verify / blocked finalize): INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-68332b60c76366c9)'
+    created_at: '2026-05-21T05:13:06Z'
+    last_edited: '2026-05-21T05:13:06Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa

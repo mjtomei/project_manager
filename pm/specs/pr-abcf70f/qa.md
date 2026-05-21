@@ -196,3 +196,31 @@ None unresolved. Resolutions taken:
   recording) rather than numerically.
 - Whether `_all` overrides explicit per-type entries → resolved per code:
   explicit entries win.
+- Config-writing surface (R7–R10, E1): there is NO `pm` CLI subcommand that
+  writes the fake-claude config. The user-facing surfaces are (a) dropping a
+  JSON file at `~/.pm/sessions/<tag>/fake-claude` directly — read verbatim, NOT
+  validated; and (b) the documented `paths.set_fake_claude_config(tag, cfg)`
+  helper that a test author calls from a setup script — this is the only path
+  that validates and raises `ValueError` on bad verdict/session-type pairings
+  or `verdicts` under `_all`. Validation-rejection THENs (R10/E1) are therefore
+  observed against the helper (the realistic surface for this test-infra
+  feature), not a CLI.
+- No `pm fake-claude peek` CLI shipped. The proposed peek debug aid exists only
+  as the library helper `claude_launcher.peek_fake_verdicts(tag)`; do not plan a
+  peek CLI scenario.
+- End-to-end loop driver (R7, R13, E7): the lightweight, container-free driver
+  is the **review loop** — it launches a Claude pane in a tmux window in the same
+  session and polls the verdict via the hook+transcript path, no Docker needed.
+  Used for the review-loop redirect scenarios (covered by prior runs).
+- Container-mode QA loop driver (R10 verdict surfaces end-to-end): the full QA
+  loop (`pm pr qa-run-bg <pr_id>` / TUI `/pr qa <pr_id>`) walks
+  planning → concretize → scenario → verification → finalize, spawning a nested
+  container per scenario when the `container-enabled` global setting is on.
+  Nesting IS supported in this environment (pm runs podman and supports
+  podman-in-podman), so the container-mode QA loop is achievable here and is the
+  realistic surface for the qa-phase verdicts (qa_planning QA_PLAN,
+  qa_concretize REFINED_STEPS/REFINER_REJECT, qa_scenario PASS/NEEDS_WORK,
+  qa_verification VERIFIED/FLAGGED, qa_finalize FINALIZE_DONE/FINALIZE_BLOCKED).
+  Earlier runs only validated these at config level; this run drives them
+  through the live loop. (An earlier note wrongly cited docker-in-docker as a
+  blocker — corrected: podman-in-podman works.)
