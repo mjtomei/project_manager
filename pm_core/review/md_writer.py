@@ -27,6 +27,14 @@ def _atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content)
+    # fsync the temp file before the rename so the bytes are durable, not just
+    # the rename — matches the repo's established atomic-write pattern
+    # (pm_core.pane_registry.locked_read_modify_write).
+    fd = os.open(str(tmp), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     os.replace(tmp, path)
 
 
@@ -177,9 +185,14 @@ def append_note(
     with _locked(path):
         text = path.read_text() if path.exists() else ""
         header = f"## {section}"
-        if header in text:
+        lines = text.splitlines(keepends=True)
+        # Match the header by exact line, not substring: a substring check would
+        # false-match a requested section that is a prefix of a longer existing
+        # header (e.g. "Cit" against "## Citations"), then silently append with
+        # no header of its own.
+        has_section = any(line.rstrip() == header for line in lines)
+        if has_section:
             # Find the next header (any `## `) after our section; insert just before it.
-            lines = text.splitlines(keepends=True)
             in_section = False
             insert_at = len(lines)
             for i, line in enumerate(lines):

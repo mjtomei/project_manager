@@ -178,6 +178,19 @@ def test_append_note_new_section_keeps_blank_line_before_header(tmp_path):
     assert "\n\n## Process\n" in text
 
 
+def test_append_note_section_prefix_creates_distinct_section(tmp_path):
+    # A requested section whose name is a prefix of an existing header
+    # ("Cit" vs "## Citations") must get its own header, not be silently
+    # appended at EOF under the longer section.
+    path = _copy_fixture("notes.md", tmp_path)
+    md_writer.append_note(path, "Cit", "distinct section body.", timestamp="T1")
+    text = path.read_text()
+    assert "## Cit\n" in text
+    assert "distinct section body." in text
+    # The original Citations section is untouched.
+    assert "Need to revisit Andreas 2022 in cycle 4." in text
+
+
 def test_update_response_block_preserves_literal_blocks(tmp_path):
     # Multi-line fields must round-trip as readable `|` blocks, not
     # single-quoted scalars with embedded blank lines.
