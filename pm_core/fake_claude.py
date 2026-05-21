@@ -138,6 +138,15 @@ def _scripted_entry_verdict(entry) -> str | None:
     return None
 
 
+def _scripted_wrap(verdicts) -> bool:
+    """Return whether a scripted-sequence config opts into wrap-around.
+
+    Only the dict form (``{"sequence": [...], "wrap": true}``) can request
+    wrap; a bare list always clamps to its terminal entry.
+    """
+    return isinstance(verdicts, dict) and bool(verdicts.get("wrap"))
+
+
 def validate_session_verdicts(session_type: str, verdicts) -> list[str]:
     """Return a list of error strings for verdicts invalid for *session_type*.
 

@@ -110,7 +110,8 @@ def _resolve_fake_verdict(verdicts, session_type: str | None,
 
     ``"NONE"`` is returned when verdicts is empty/absent.
     """
-    from pm_core.fake_claude import _scripted_sequence, _scripted_entry_verdict
+    from pm_core.fake_claude import (_scripted_sequence, _scripted_entry_verdict,
+                                      _scripted_wrap)
 
     if not verdicts:
         return "NONE", {}
@@ -123,12 +124,12 @@ def _resolve_fake_verdict(verdicts, session_type: str | None,
     if not sequence:
         return "NONE", {}
 
-    wrap = isinstance(verdicts, dict) and bool(verdicts.get("wrap"))
     # No persistent cursor without a session_type to key it under: emit slot 0.
     if not session_type:
         idx = 0
     else:
-        idx = _advance_scripted_cursor(session_tag, session_type, len(sequence), wrap)
+        idx = _advance_scripted_cursor(session_tag, session_type, len(sequence),
+                                       _scripted_wrap(verdicts))
     entry = sequence[idx]
     name = _scripted_entry_verdict(entry) or "NONE"
     overrides: dict = {}
@@ -197,7 +198,8 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
     configs report ``"<random>"`` since the pick is non-deterministic.
     Session types whose verdicts are empty/absent report ``"NONE"``.
     """
-    from pm_core.fake_claude import _scripted_sequence, _scripted_entry_verdict
+    from pm_core.fake_claude import (_scripted_sequence, _scripted_entry_verdict,
+                                      _scripted_wrap)
     from pm_core.paths import fake_claude_config, session_dir
 
     raw = fake_claude_config(session_tag)
@@ -232,8 +234,7 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
         if not seq:
             out[key] = "NONE"
             continue
-        wrap = isinstance(verdicts, dict) and bool(verdicts.get("wrap"))
-        cur = _clamp_cursor(state.get(key, 0), len(seq), wrap)
+        cur = _clamp_cursor(state.get(key, 0), len(seq), _scripted_wrap(verdicts))
         out[key] = _scripted_entry_verdict(seq[cur]) or "NONE"
     return out
 
