@@ -113,6 +113,14 @@ def launch_review_session(prompt: str, *, cwd: str, role: str = REVIEW_ROLE,
         launch_claude(prompt, session_key=session_key, pm_root=root, cwd=cwd)
         return
 
+    # Already inside the target window — e.g. the TUI created this pane in the
+    # plan's window and ran the command here. Run claude foreground in the
+    # current pane instead of splitting an extra one, matching `pm plan review`.
+    # (The standalone `pm review` / terminal path falls through and splits.)
+    if target_window is not None and tmux.current_window_id() == target_window:
+        launch_claude(prompt, session_key=session_key, pm_root=root, cwd=cwd)
+        return
+
     cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd)
     window = target_window if target_window is not None else tmux.get_window_id(session)
     try:

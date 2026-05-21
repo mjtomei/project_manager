@@ -116,7 +116,7 @@ class PlansPane(Widget):
         output.append("e", style="bold")
         output.append("=edit  ", style="dim")
         output.append("r", style="bold")
-        output.append("=review  ", style="dim")
+        output.append("=lit-review  ", style="dim")
         output.append("D", style="bold")
         output.append("=deps  ", style="dim")
         output.append("p", style="bold")

@@ -43,3 +43,13 @@ def test_file_target_inlines_contents(tmp_path):
     out = context.build_context(root, "art-md", "art.md", "file")
     assert "THE ARTIFACT TEXT" in out
     assert "Target (file): art.md" in out
+
+
+def test_large_file_target_is_not_inlined(tmp_path):
+    root = tmp_path
+    marker = "UNIQUE_BODY_MARKER"
+    (root / "big.md").write_text(marker + "x" * (context._MAX_INLINE_BYTES + 10))
+    out = context.build_context(root, "big-md", "big.md", "file")
+    assert marker not in out  # body not inlined
+    assert "is large" in out  # pointer note instead
+    assert "Target (file): big.md" in out

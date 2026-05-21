@@ -10,6 +10,11 @@ from pathlib import Path
 
 from pm_core.review import paths
 
+# Cap inlined target-file size so the assembled prompt stays well under the
+# argv/shell-command size limit when launched in a tmux pane (see
+# ``plan._PROMPT_ARG_LIMIT``). Larger targets are pointed at, not inlined.
+_MAX_INLINE_BYTES = 80_000
+
 
 def _framing(review_dir: Path) -> str:
     return (
@@ -37,7 +42,13 @@ def _target_preamble(root: Path, target: str, target_type: str) -> str:
                 path = alt
         if path.exists():
             try:
-                lines.append(f"\n--- contents of {target} ---\n{path.read_text()}")
+                body = path.read_text()
+                if len(body.encode()) > _MAX_INLINE_BYTES:
+                    lines.append(
+                        f"(target at {path} is large — read it yourself rather "
+                        "than relying on an inlined copy)")
+                else:
+                    lines.append(f"\n--- contents of {target} ---\n{body}")
             except OSError:
                 lines.append(f"(could not read {path}; read it yourself)")
         else:

@@ -1151,8 +1151,6 @@ class ProjectManagerApp(App):
         ``plan`` points at the plan's file (or its derived id matches the
         plan's filename stem).
         """
-        from pathlib import Path
-
         reviews = self._data.get("reviews") or []
         plans = self._data.get("plans") or []
         targets = set()

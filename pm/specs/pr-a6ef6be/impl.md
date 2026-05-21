@@ -351,6 +351,17 @@ runs claude foreground) so it matches `pm plan review` exactly; the standalone
 pane with `role="literature-review"`. This satisfies both the "own pane" and
 "plan window" requirements and keeps the unit tests at the tmux boundary.
 
+**Implementation note (review-loop 2909 i1).** `launch_review_session`
+distinguishes the two cases with `tmux.current_window_id()`: when the command
+is already running *inside* the target window (the TUI `r` path — the pane was
+created by `_launch_in_plans_window` in the plan window), it runs claude
+**foreground** in that pane rather than splitting a second one. Only the
+standalone path (`target_window=None`, or a terminal whose current window is not
+the plan window) splits + registers a new pane. The earlier draft always split
+when in tmux, which produced a transient extra "launcher" pane in the TUI flow
+that self-closed via its EXIT trap — functionally tolerable but divergent from
+`pm plan review`. The foreground-detection restores parity.
+
 ### A2 — Plan-target artifact id: `stem` vs the example `regression`. **[RESOLVED]**
 Plan's example shows `id: regression` for `target: pm/plans/plan-regression.md`,
 but the task says "plan filename stem" (= `plan-regression`). The example is

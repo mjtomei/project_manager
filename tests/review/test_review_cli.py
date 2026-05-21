@@ -137,6 +137,7 @@ def test_launch_review_session_splits_pane_with_role(tmp_path):
 def test_launch_review_session_targets_given_window(tmp_path):
     with patch("pm_core.tmux.in_tmux", return_value=True), \
          patch("pm_core.tmux.get_session_name", return_value="sess"), \
+         patch("pm_core.tmux.current_window_id", return_value="@1"), \
          patch("pm_core.tmux.split_pane", return_value="%5") as split, \
          patch("pm_core.tmux.select_pane"), \
          patch("pm_core.pane_registry.register_pane") as reg, \
@@ -147,6 +148,20 @@ def test_launch_review_session_targets_given_window(tmp_path):
     # split targeted @9; register recorded the same window
     assert split.call_args.kwargs.get("window") == "@9"
     assert reg.call_args.args[1] == "@9"
+
+
+def test_launch_review_session_foreground_when_in_target_window(tmp_path):
+    # TUI case: the command runs in a pane already inside the target window, so
+    # it should run claude foreground (no extra split), matching `pm plan review`.
+    with patch("pm_core.tmux.in_tmux", return_value=True), \
+         patch("pm_core.tmux.get_session_name", return_value="sess"), \
+         patch("pm_core.tmux.current_window_id", return_value="@9"), \
+         patch("pm_core.tmux.split_pane") as split, \
+         patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude"), \
+         patch("pm_core.claude_launcher.launch_claude") as fg:
+        review_cli.launch_review_session("P", cwd=str(tmp_path), target_window="@9")
+    split.assert_not_called()
+    fg.assert_called_once()
 
 
 def test_launch_review_session_foreground_when_not_in_tmux(tmp_path):
