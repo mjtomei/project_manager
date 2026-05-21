@@ -70,6 +70,30 @@ def test_parse_audit_doc_skips_incomplete_trailing_entry():
     assert all(e.verdict for e in doc.entries)
 
 
+def test_parse_audit_doc_skips_entry_written_only_through_verdict():
+    # The audit agent writes fields in canonical order, so a mid-write entry can
+    # have `**Verdict:**` filled but not yet `**Substantive change proposed:**`
+    # (the last required field). Such an entry is still incomplete and must be
+    # dropped, not surfaced with an empty change_proposed.
+    text = (FIXTURES / "audit_cycle.md").read_text()
+    partial = text + (
+        "\n---\n\n"
+        "### Lu 2026, \"Assistant Axis\" — [arXiv:2601.00001](https://arxiv.org/abs/2601.00001)\n\n"
+        "**Tier:** 1\n\n"
+        "**Doc passage as currently written:**\n\n"
+        "> The model has a single assistant axis.\n\n"
+        "**What the source actually says:**\n\n"
+        "> The axis is contested.\n\n"
+        "**Verdict:** over-characterizes\n"
+    )
+    doc = md_parser.parse_audit_doc(partial)
+    headers = [e.citation_header for e in doc.entries]
+    assert not any("Lu 2026" in h for h in headers)
+    assert len(doc.entries) == 3
+    # Every surfaced entry has a non-empty change_proposed (no half-populated records).
+    assert all(e.change_proposed for e in doc.entries)
+
+
 def test_parse_state_phase_transition():
     text = (FIXTURES / "state.md").read_text()
     state = md_parser.parse_state(text)

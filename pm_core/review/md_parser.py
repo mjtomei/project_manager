@@ -151,6 +151,7 @@ def parse_response_doc(text: str) -> ResponseDoc:
 _TIER_RE = re.compile(r"^\*\*Tier:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _VERDICT_RE = re.compile(r"^\*\*Verdict:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _FLAG_RE = re.compile(r"^\*\*Flag:\*\*\s*(.+?)\s*$", re.MULTILINE)
+_CHANGE_LABEL_RE = re.compile(r"^\*\*Substantive change proposed:\*\*", re.MULTILINE)
 
 
 def _extract_section(body: str, label: str) -> str:
@@ -208,10 +209,13 @@ def parse_audit_doc(text: str) -> AuditDoc:
         flag_m = _FLAG_RE.search(body)
         # Skip an incomplete entry — the live audit-browse view reads this file
         # while the audit loop is still writing it, so the trailing entry may be
-        # mid-write. `**Verdict:**` is the last required field in canonical order,
-        # so its absence means the entry isn't done yet; drop it rather than
-        # surface a half-populated record.
-        if verdict_m is None:
+        # mid-write. The canonical field order is Tier → Doc passage → source
+        # says → Verdict → Substantive change proposed → [Flag] → [Surfaced], so
+        # `**Substantive change proposed:**` is the last *required* field. Gate on
+        # both it and `**Verdict:**` being present (Verdict feeds a non-optional
+        # field): only once the last required label has been written is the entry
+        # complete. Drop it otherwise rather than surface a half-populated record.
+        if verdict_m is None or _CHANGE_LABEL_RE.search(body) is None:
             continue
         entries.append(
             AuditEntry(

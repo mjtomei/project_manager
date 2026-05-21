@@ -26,8 +26,8 @@ All importers updated accordingly (`pm_core/cli/plan.py`, `pm_core/guide.py`, `p
    - `update_focus(path, focus)` — atomic write of the full focus file. Always stamps `timestamp` (now-UTC) if caller doesn't supply one.
 
 3. **Atomicity & concurrency**
-   - All writes write to a sibling `*.tmp` and `os.replace()` for atomicity.
-   - `append_interaction` and `append_note` hold an exclusive flock on the target during the read-modify-write window — this is the spec's "concurrency-safe appends." Pure overwrites (`update_state`, `update_focus`) are atomic via rename only.
+   - All writes go to a per-write temp file (`tempfile.mkstemp`, fsync'd) and `os.replace()` for atomicity.
+   - Every read-modify-write path holds an exclusive flock on a sibling `<path>.lock` during its read-modify-write window — `append_interaction`, `append_note`, *and* `update_response_block` (which merges into an existing block, so it must read before it writes). This is the spec's "concurrency-safe appends." Pure overwrites (`update_state`, `update_focus`) take no lock; they are atomic via rename only and are last-writer-wins.
 
 4. **Tests** (`tests/review/`)
    - `test_md_parser.py`, `test_md_writer.py`
@@ -59,4 +59,4 @@ All importers updated accordingly (`pm_core/cli/plan.py`, `pm_core/guide.py`, `p
 - Two concurrent `append_interaction` calls → flock serializes them; both events land.
 - YAML pipe-block `before:` / `after:` preserves trailing newline. The block dumper registers a per-value `str` representer that selects literal `|` style only for multi-line strings (a blanket `default_style='|'` would wreck short scalars), and a `None` representer that emits bare keys (`human-verdict:`) instead of `null` to match the response session's convention.
 - Empty `surfaced-citations:` list in an audit entry → entry parses with `surfaced_citations = []`.
-- Partial/in-progress `CITATION_AUDIT_CYCLE_N.md` (live audit-browse reads it while the audit loop is still writing, per note-987b0a0) → `parse_audit_doc` never raises and skips any entry lacking a `**Verdict:**` (the last required field in canonical order), so a mid-write trailing entry is dropped rather than surfaced half-populated.
+- Partial/in-progress `CITATION_AUDIT_CYCLE_N.md` (live audit-browse reads it while the audit loop is still writing, per note-987b0a0) → `parse_audit_doc` never raises and skips any entry that has not yet been written through its last required field. Canonical field order is Tier → Doc passage → source says → Verdict → Substantive change proposed → [Flag] → [Surfaced], so the gate requires both `**Verdict:**` and `**Substantive change proposed:**` to be present; a mid-write trailing entry (even one already past `**Verdict:**`) is dropped rather than surfaced half-populated.
