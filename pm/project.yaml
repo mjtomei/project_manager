@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0cf3626
+  active_pr: pr-1160366
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -105,6 +105,16 @@ plans:
 - id: plan-66d430f
   name: user-modeling
   file: plans/plan-66d430f.md
+  status: draft
+  parent: null
+- id: plan-984dfeb
+  name: 'Living artifacts: plans and PRs as negotiating-task workspaces'
+  file: plans/plan-984dfeb.md
+  status: draft
+  parent: null
+- id: plan-3119574
+  name: plans/plan-litreview.md
+  file: plans/plan-3119574.md
   status: draft
   parent: null
 prs:
@@ -7061,7 +7071,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-14T14:46:11.378857+00:00'
+  updated_at: '2026-05-17T21:40:04.626162+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
@@ -12402,7 +12412,8 @@ prs:
   title: 'QA: refinement prompt asks for additional steps that would improve coverage'
   branch: pm/pr-c2397e2-qa-refinement-prompt-asks-for-additional-steps-tha
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-0b14f2c
   description: "The QA scenario steps-refinement pass today focuses on tightening\
     \ existing steps (clarity, ordering, deduplication, tying to the implementation's\
     \ actual behavior). It does not explicitly ask whether the scenario is *missing*\
@@ -12427,7 +12438,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T22:37:37.188399+00:00'
-  updated_at: '2026-05-03T22:37:37.188399+00:00'
+  updated_at: '2026-05-17T20:19:56.103935+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12513,7 +12524,8 @@ prs:
   title: 'QA: extended coverage measures (path coverage, user-story coverage)'
   branch: pm/pr-8422dea-qa-extended-coverage-measures-path-coverage-user-s
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-8ed578d
   description: 'Beyond line coverage (see sibling PR), add two richer measures so
     PASS / NEEDS_WORK reflects test rigor more honestly:
 
@@ -12553,7 +12565,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T22:38:01.007060+00:00'
-  updated_at: '2026-05-03T22:38:01.007060+00:00'
+  updated_at: '2026-05-17T20:19:59.903412+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13770,7 +13782,8 @@ prs:
     artifacts'
   branch: pm/pr-eb450a0-bug-fix-flow-persist-pre-fix-repro-and-post-fix-ve
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-6be8ee6
   description: 'Make the bug-fix loop''s reproduce / fix / verify steps produce machine-checkable
     artifacts on disk, so the watcher and merge gate can confirm each step actually
     happened (not just that the prompt asked for it).
@@ -13850,7 +13863,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T14:32:28.076697+00:00'
-  updated_at: '2026-05-04T14:32:28.076697+00:00'
+  updated_at: '2026-05-17T20:19:52.362922+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -19104,7 +19117,7 @@ prs:
   plan: plan-regression
   title: GitHub backend mock for regression tests
   branch: pm/pr-9603d04-github-backend-mock-for-regression-tests
-  status: pending
+  status: in_review
   depends_on: []
   description: 'Provide a mock/fake GitHub backend so regression tests can exercise
     the github-backend code paths (PR create, status sync, comments, merges, post-merge
@@ -19151,21 +19164,26 @@ prs:
 
     Consumed by pr-7d5d036 (regression-runner cleanup), which adds it as a dep alongside
     pr-abcf70f so regression tests can drive both Claude and GitHub deterministically.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/208
+  gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-14T01:46:56.386043+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-17T22:36:47.323283+00:00'
+  started_at: '2026-05-17T21:39:46.867540+00:00'
+  reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
   title: Mocks awareness in the new-regression authoring flow
   branch: pm/pr-51586d2-shared-mock-library-scenario-created-mocks-become-
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-abcf70f
+  - pr-9603d04
+  - pr-06a96fa
+  - pr-2680fbf
   description: '## Context
 
 
@@ -19301,7 +19319,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T01:49:12.189951+00:00'
-  updated_at: '2026-05-14T02:00:12.259431+00:00'
+  updated_at: '2026-05-17T20:19:48.936285+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -19311,7 +19329,8 @@ prs:
   title: QA scenario planner creates new regression test when none fits
   branch: pm/pr-2680fbf-qa-scenario-planner-creates-new-regression-test-wh
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-06a96fa
   description: '## Goal
 
 
@@ -19429,7 +19448,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T01:59:40.177233+00:00'
-  updated_at: '2026-05-14T01:59:40.177233+00:00'
+  updated_at: '2026-05-17T20:19:45.579340+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -19873,132 +19892,36 @@ prs:
   plan: plan-cb4ef69
   title: Gated coherence review for plan edits during plan-review conversations
   branch: pm/pr-418acc2-gated-coherence-review-for-plan-edits-during-plan-
-  status: pending
+  status: closed
   depends_on: []
-  description: '## Problem
+  description: 'Superseded by plan-984dfeb (Living artifacts: plans and PRs as negotiating-task
+    workspaces).
 
 
-    During plan review, the back-and-forth between user and review agent produces
-    edits to the plan markdown. Those edits trend toward incoherence: the review conversation
-    operates at a local scope ("change this section," "rephrase this PR''s spec,"
-    "add a note here"), while the plan as a whole has a higher-level shape (motivation,
-    dependencies, sequencing, the story the plan tells across its PRs). Local edits
-    accumulate without anyone enforcing that the whole plan still hangs together.
-    Symptoms include: PRs whose spec drifts from the plan''s stated intent; new notes
-    that contradict earlier sections; inconsistent terminology between PR descriptions
-    and the plan overview; PRs added or removed without the surrounding plan text
-    being updated to match.
+    The gated-edit framing assumed two things that the user has since reframed:
 
 
-    The existing plan-review PRs in this plan (pr-8e6bc47 parent-context, pr-6f04a57
-    summary-accuracy, pr-dadf4b3 external-children) all address scoping/visibility
-    — making sure the review sees the right material. None of them gate the *writing*
-    side. This PR addresses the write side: every plan edit produced during review
-    should pass through a coherence gate before it lands.
+    1. That edits are the atom — proposed, then validated, then either accepted or
+    rejected. The newer framing treats the *task itself* as the live object; its proposal
+    evolves through negotiation with other in-flight tasks and is only an edit once
+    it has converged. There is no single moment when ''a finished edit is under review.''
 
 
-    ## Shape of the gate (to be decided as part of this PR)
+    2. That coherence is enforced by an observer (the gate). The newer framing treats
+    artifact integrity as a constraint each task is accountable to during its negotiation,
+    not as a rule enforced by a central manager. There is no bottleneck observer —
+    multiple tasks act in parallel, each prompted with integrity-relevant context,
+    and convergence emerges from negotiation, not from adjudication.
 
 
-    The high-level idea is a sub-agent that holds the plan''s higher-level intent
-    in working memory and validates each edit (or batch of edits) against it. Multiple
-    plausible ways to implement that sub-agent — the right choice depends on cost,
-    integration overhead, latency tolerance, and how tightly we want to couple the
-    gate to the review agent. **Exploring this is part of the PR.**
-
-
-    Candidate implementations to investigate:
-
-
-    1. **Claude skill (e.g. a custom /coherence-review).** Cheapest to call from inside
-    the review agent''s session; runs in the same context budget; we don''t maintain
-    a separate session lifecycle. Downsides: a skill is invoked by the parent agent,
-    so it can''t enforce a gate the parent forgets to call; the gate becomes advisory
-    rather than mandatory.
-
-
-    2. **Prompt-only — add a "before every plan edit, re-read the whole plan and check
-    coherence" instruction to the review agent''s system prompt.** Zero infrastructure;
-    instruction-following only. Downsides: same enforcement problem as skill — the
-    agent may skip the step when under context pressure or when an edit feels obviously
-    local. Doesn''t buy the higher-level-awareness property we want.
-
-
-    3. **Sibling pane sub-agent (mirrors pr-35df22a''s /simplify pattern).** A separate
-    Claude session in a sibling pane sharing the workdir. The review agent makes edits;
-    the sibling agent watches the plan file, validates each commit against the plan''s
-    overall shape, and either approves silently or posts a structured "coherence concern"
-    back into the review pane. Enforces coherence at the file-boundary level instead
-    of trusting the review agent to invoke a skill. Downsides: another concurrent
-    Claude session per plan-review window (cost, complexity, coordination).
-
-
-    4. **Pre-commit-style gate at the file-write boundary.** pm intercepts every Write/Edit
-    to a plan markdown file; before applying, it spawns a sub-agent that sees the
-    proposed diff plus the surrounding plan and either accepts or returns a rejection
-    reason for the review agent to incorporate. Tightest enforcement but the most
-    invasive integration (needs to hook the agent''s tool calls).
-
-
-    5. **Per-turn diff review.** At the end of each review-agent turn, diff the plan
-    file against the turn''s baseline, hand the cumulative diff + plan context to
-    a sub-agent, and post the verdict back into the review pane before the next turn
-    begins. Cheaper than per-edit gating; tolerates a turn''s worth of incoherent
-    intermediate state but catches it before it persists.
-
-
-    The exploration should produce: a one-page comparison of (1)–(5) with rough cost
-    estimates, an experimental run of the two most promising options on a real plan-review
-    session, and a recommendation. The implementation then follows the recommendation.
-
-
-    ## Considerations to weigh during the exploration
-
-
-    - **Advisory vs. mandatory.** Skills/prompts are advisory; pane-based and pre-commit
-    gates can be mandatory. Pick deliberately.
-
-    - **Latency.** A per-edit gate adds seconds per edit; a per-turn gate adds seconds
-    per turn; a sibling-pane gate adds nothing on the critical path but coordinates
-    asynchronously. Match latency to the review experience we want.
-
-    - **What the gate actually checks.** Coherence-with-plan-overview is the headline,
-    but candidates include: terminology consistency across PRs within the plan, sequencing/dependency
-    consistency, motivation drift, "is this edit at the right level of abstraction
-    for this plan" (the higher-level awareness the user wants preserved).
-
-    - **Failure mode.** When the gate flags an incoherence, does it block the edit,
-    surface the concern to the user, surface to the review agent only, or write a
-    structured note into the plan?
-
-
-    ## Out of scope
-
-
-    - Coherence checks across plans (parent/child summary accuracy is pr-6f04a57''s
-    domain).
-
-    - Coherence for PR specs that aren''t plan markdown (PR-spec edits during review
-    have their own flow).
-
-
-    ## Acceptance criteria
-
-
-    - A written comparison of at least three sub-agent implementation candidates with
-    rough cost and a chosen recommendation.
-
-    - Working implementation of the chosen approach, exercised on at least one real
-    plan-review session in this project.
-
-    - Evidence: a plan-review session log showing the gate firing on a real edit,
-    with the verdict (accept or coherence concern) visible in the review window or
-    the plan diff.'
+    The coherence concern this PR raised is real and motivates plan-984dfeb''s work.
+    The mechanism this PR proposed (a gate over individual edits) is not the right
+    shape.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:59:40.187547+00:00'
-  updated_at: '2026-05-14T14:59:40.187547+00:00'
+  updated_at: '2026-05-14T16:12:34.633768+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -20008,7 +19931,9 @@ prs:
   title: 'Offshoot: exact ProgramBench task as a separate runnable'
   branch: pm/pr-0cf3626-offshoot-exact-programbench-task-as-a-separate-run
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-e2b7fdf
+  - pr-b3b8df0
   description: '## Goal
 
 
@@ -20116,7 +20041,651 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T15:11:58.897160+00:00'
-  updated_at: '2026-05-14T15:11:58.897160+00:00'
+  updated_at: '2026-05-17T20:23:20.059833+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-752db66
+  plan: plan-984dfeb
+  title: Prior-work survey and design vocabulary
+  branch: pm/pr-752db66-prior-work-survey-and-design-vocabulary
+  status: pending
+  depends_on: []
+  description: 'A short writeup (2–4 pages) synthesizing what''s worth borrowing from
+    each of actor model, contract-net, blackboard systems, Linda tuple spaces, Engelbart
+    NLS, Bret Victor / Dynamicland, CRDTs/OT, MemGPT, AutoGen group chat, Karpathy''s
+    LLM-OS framing, and other relevant references. For each: the negotiation/coordination
+    primitive it offers, the constraint that limited it historically, and how generally
+    intelligent tasks change the picture. Produces the shared vocabulary subsequent
+    PRs use. Inspiration-not-blueprint framing.
+
+
+    Tests: Writeup is reviewable and concise; each reference contributes a named primitive
+    or vocabulary term used in later PRs.
+
+
+    Files: pm/plans/artifacts/prior-work.md (new)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:10:03.254829+00:00'
+  updated_at: '2026-05-14T16:10:03.254829+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-29ce111
+  plan: plan-984dfeb
+  title: Artifact schema sketch — concrete proposal for plan artifacts
+  branch: pm/pr-29ce111-artifact-schema-sketch-concrete-proposal-for-plan-
+  status: pending
+  depends_on:
+  - pr-752db66
+  description: 'Concrete schema (not prose) for a plan artifact: document body, task
+    queue with lifecycle states, negotiation history, self-maintenance schedule, rejection
+    log. Decide representation (markdown + sidecar JSON vs. single structured file
+    vs. SQLite) with tradeoffs argued. Output: a real example artifact for an existing
+    plan in this project, rendered both in structured form and as a human-readable
+    markdown view.
+
+
+    Tests: Round-trip a real plan through the proposed schema. Human-readable view
+    matches the structured-form source. Schema validates with a small linter.
+
+
+    Files: pm/plans/artifacts/schema.md (new), prototype schema definition under pm_core/artifacts/
+    (new)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:10:03.254867+00:00'
+  updated_at: '2026-05-14T16:10:03.254867+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ef5cc48
+  plan: plan-984dfeb
+  title: Negotiation protocol — peer-to-peer, integrity-as-constraint
+  branch: pm/pr-ef5cc48-task-lifecycle-and-negotiation-protocol-minimum-vi
+  status: pending
+  depends_on:
+  - pr-29ce111
+  description: 'Define how in-flight tasks see and respond to each other. No central
+    arbiter — each task''s prompt scaffold includes (a) the artifact''s integrity-relevant
+    context, (b) other in-flight proposals nearby, (c) recent self-maintenance concerns.
+    Output shapes that emerge as worth naming (PARALLEL_OK, COUNTER_PROPOSAL, ABSORB_INTO_MINE,
+    DISSIPATE, and others from the survey PR) — each defined as what a task sees and
+    what it returns. Phase transitions (entry → specialization → in-flight → landed/folded/dropped)
+    are described as trajectories, not adjudications. Walk through three concrete
+    scenarios: a self-maintenance task running alongside an in-flight user task; two
+    overlapping proposals converging into one (folded); an in-flight proposal that
+    drifts away from integrity and dissipates without anyone ''rejecting'' it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:10:03.254877+00:00'
+  updated_at: '2026-05-14T16:12:22.651700+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9be551c
+  plan: plan-984dfeb
+  title: Single-plan prototype — replace one plan file with the artifact
+  branch: pm/pr-9be551c-single-plan-prototype-replace-one-plan-file-with-t
+  status: pending
+  depends_on:
+  - pr-4f503b7
+  description: Pick one existing plan (small, e.g. this plan itself or another modest
+    one) and replace its plan file with the living-artifact representation. Wire pm
+    so the TUI can read the artifact and render its markdown view. Demonstrate at
+    least one self-maintenance task firing (driven by the wants infrastructure from
+    the previous PR) and one task-to-task negotiation. PR entries continue to use
+    the legacy format — this PR is plan-side only.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:10:03.254885+00:00'
+  updated_at: '2026-05-14T16:28:24.778999+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d142801
+  plan: plan-984dfeb
+  title: Extend to all plans, keep PRs legacy
+  branch: pm/pr-d142801-extend-to-all-plans-keep-prs-legacy
+  status: pending
+  depends_on:
+  - pr-9be551c
+  description: 'Migrate every plan file in this project to the artifact representation.
+    PR entries remain legacy. Mostly migration plus shaking out edge cases (huge plans,
+    plans with many tasks, plans that depend on other plans, external plans).
+
+
+    Tests: All plan files load and render correctly post-migration. No regression
+    in plans pane / TUI / plan review. Edge cases (external plans, hierarchical parent
+    plans) handled.
+
+
+    Files: pm/plans/ (all migrated), pm_core/artifacts/ (edge-case handling)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:10:03.254891+00:00'
+  updated_at: '2026-05-14T16:10:03.254891+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-41a64cf
+  plan: plan-984dfeb
+  title: PR entries become artifacts of the same kind
+  branch: pm/pr-41a64cf-pr-entries-become-artifacts-of-the-same-kind
+  status: pending
+  depends_on:
+  - pr-d142801
+  description: 'Fold PR entries into the same artifact model. The PR spec markdown
+    becomes the document; impl/review/QA/merge work becomes tasks in the artifact
+    queue. pm''s existing orchestration paths (pr start / pr review / pr merge / watchers
+    / sync) become task types that negotiate inside the PR artifact.
+
+
+    Tests: PR lifecycle (start → review → QA → merge) runs end-to-end through the
+    artifact protocol on a real PR. Watchers and sync interact with PR artifacts via
+    the same task primitives.
+
+
+    Files: pm_core/artifacts/, pm_core/cli/pr.py, pm_core/watcher_*.py, pm_core/pr_sync.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:10:03.254910+00:00'
+  updated_at: '2026-05-14T16:10:12.613186+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-022012f
+  plan: plan-984dfeb
+  title: pm as artifact host, not state machine
+  branch: pm/pr-022012f-pm-as-artifact-host-not-state-machine
+  status: pending
+  depends_on:
+  - pr-41a64cf
+  description: 'Refactor pm''s remaining orchestration into the artifact protocol.
+    pm becomes a renderer for artifacts and a host for tasks running against them;
+    it no longer owns workflow state directly. Every piece of state pm currently tracks
+    (project.yaml, plan files, PR specs, pane registry, watcher state) is either an
+    artifact or a task acting on one.
+
+
+    Tests: project.yaml as today no longer holds workflow state; all flows expressible
+    as artifact + tasks. Existing TUI/CLI surfaces still work. No regressions in the
+    demo flows used elsewhere in this project.
+
+
+    Files: pm_core/ (broad refactor), pm_core/store.py (becomes thin), project.yaml
+    migration'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:10:03.254917+00:00'
+  updated_at: '2026-05-14T16:10:03.254917+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-16602ee
+  plan: plan-984dfeb
+  title: Stretch study — code as living artifacts for autonomous program optimization
+  branch: pm/pr-16602ee-stretch-study-code-as-living-artifacts-for-autonom
+  status: pending
+  depends_on:
+  - pr-022012f
+  description: 'Once the artifact substrate is proven for plans, PRs, and pm''s own
+    state, study whether the same framing can be applied to **code itself** — treating
+    functions, modules, or other units of code as living artifacts that negotiate
+    with each other to autonomously optimize a program. Research questions to investigate:
+    do the same primitives (specialization, negotiation, integrity-as-constraint,
+    self-maintenance) translate when the artifact is a piece of running code? What
+    does "integrity" mean for code (correctness preservation, performance bounds,
+    interface stability)? What does a self-maintenance task look like for code (profiling-driven
+    hot-spot identification, refactor proposals, dead-code dissipation)? Can two code-artifacts
+    negotiate a change to their shared interface? Does the system converge on optimization
+    improvements without human intervention, and over what timescales?
+
+
+    **Concrete scenario to drive the design:** code-artifact A observes (via its own
+    self-maintenance task running over profiling data) that it spends most of its
+    time on task X originating from artifact Y. A opens a negotiation directly with
+    Y — not via a central optimizer — proposing alternatives like "send me X less
+    often," "send X pre-aggregated," "let me cache X across calls," or "fold a piece
+    of your work into me to avoid the round trip." Y, who has its own integrity concerns
+    and its own in-flight tasks, counter-proposes or absorbs the request into its
+    own self-maintenance. The optimization that results is whatever shape the two
+    artifacts negotiate, not what a centralized profiler-plus-optimizer would have
+    prescribed.
+
+
+    **Upshot if it works:** this is a demonstration that optimization of an engineered
+    system can proceed without the human as bottleneck. The system''s pieces manage
+    themselves in parallel; the human interface becomes a surfacing of desires from
+    artifacts that couldn''t be auto-resolved — not a control point every optimization
+    has to route through. The negotiation infrastructure built earlier in this plan
+    generalizes from "managing the work that builds the system" to "the system managing
+    itself," with the human present at the boundary rather than along the critical
+    path.
+
+
+    This is exploratory — produces a writeup with a small-scale demonstration (one
+    program, a handful of code-artifacts, an autonomous optimization run with observable
+    trajectory including at least the A-talks-to-Y scenario above) and a recommendation
+    on whether the framing generalizes or hits limits specific to code-as-artifact.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:20:42.887725+00:00'
+  updated_at: '2026-05-14T16:23:38.737157+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4f503b7
+  plan: plan-984dfeb
+  title: Want-inference — anthropomorphized artifacts that surface their own desires
+  branch: pm/pr-4f503b7-want-inference-anthropomorphized-artifacts-that-su
+  status: pending
+  depends_on:
+  - pr-ef5cc48
+  description: 'Make the "what would this artifact want, if it were alive and wanted
+    the higher structure to improve" question operational. First-pass scaffolding:
+    per-artifact-type prompt scaffolds that, given the artifact''s current state,
+    produce a set of named wants — concrete things the artifact would want done —
+    which become in-flight tasks negotiating alongside human/agent-spawned ones. The
+    plan artifact wants its PRs coherent with its motivation; the PR artifact wants
+    its spec consistent with workdir reality; etc. Each artifact type ships with a
+    hand-authored "wants prompt" in this PR, and we observe whether the wants it generates
+    feel right when surfaced as tasks. Future work (separate PR): automate the want-inference
+    itself so artifacts don''t need a hand-authored prompt per type.
+
+
+    Tests: For at least two artifact types (plan and one other), running the wants
+    prompt against a real artifact produces plausible named wants. Each named want
+    becomes an actual in-flight task that the protocol can negotiate. Wants are renderable
+    in the markdown view so humans can audit what the artifact is asking for.
+
+
+    Files: pm_core/artifacts/wants.py (new), per-artifact wants-prompt files under
+    pm_core/artifacts/wants/'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:28:12.613330+00:00'
+  updated_at: '2026-05-14T16:28:22.458499+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0885fc9
+  plan: plan-984dfeb
+  title: Automated want-inference — remove the hand-authored wants prompt
+  branch: pm/pr-0885fc9-automated-want-inference-remove-the-hand-authored-
+  status: pending
+  depends_on:
+  - pr-d142801
+  description: 'Replace the per-artifact-type hand-authored "wants prompt" from the
+    want-inference PR with a dedicated task class that observes an artifact and synthesizes
+    wants automatically. The task sees the artifact''s current state, its history
+    of in-flight tasks and their negotiations, and the surrounding artifacts it interacts
+    with, and produces the same shape of named wants that the hand-authored prompt
+    did — without per-type templates. Closes the loop on "intentional anthropomorphization
+    is itself automated." After this PR, adding a new artifact type doesn''t require
+    authoring a new wants prompt; the inference task generalizes.
+
+
+    Tests: For each artifact type already migrated, the automated wants-inference
+    produces wants that are at least as good as the hand-authored prompt produced
+    (judged against a small evaluation set of artifacts where we know what wants we''d
+    want). Adding a fresh, unseen artifact type produces sensible wants without any
+    new hand-authored content.
+
+
+    Files: pm_core/artifacts/wants_inference.py (new), retirement of per-type wants
+    prompts under pm_core/artifacts/wants/'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-14T16:28:46.873664+00:00'
+  updated_at: '2026-05-14T16:29:00.657124+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ace66e5
+  plan: bugs
+  title: Audit prompt builders for unbounded enumeration
+  branch: pm/pr-ace66e5-audit-prompt-builders-for-unbounded-enumeration
+  status: pending
+  depends_on: []
+  description: 'Follow-up to the plan-review E2BIG crash: `pm plan review` inlined
+    all 39 of a plan''s PR descriptions into the prompt (~150 KB), which is passed
+    to claude as a single argv entry and exceeded Linux''s MAX_ARG_STRLEN (128 KiB),
+    failing with OSError [Errno 7] Argument list too long. That specific case is now
+    fixed in pm_core/cli/plan.py (conditional fallback to a brief PR listing above
+    _PROMPT_ARG_LIMIT).
+
+
+    This PR: audit every other prompt builder for the same class of bug — any place
+    a collection (PRs, plans, sibling PRs, notes, files, transcripts, QA items, etc.)
+    is enumerated/inlined into a prompt string with no bound on element count or total
+    size.
+
+
+    Scope:
+
+    - Grep prompt construction across pm_core/prompt_gen.py, pm_core/cli/*.py, pm_core/regression_prompts.py,
+    pm_core/bug_fix_prompts.py, pm_core/qa_*.py, pm_core/review.py, and anything calling
+    launch_claude / build_claude_shell_cmd.
+
+    - Flag each spot that does an unbounded join/loop over a collection into a prompt.
+
+    - For each, decide: cap count, summarize instead of inlining full detail, or have
+    the session fetch detail on demand (the pattern used by the plan-review fix).
+
+
+    Consider a shared helper: a size-aware prompt assembler, or a guard in launch_claude/build_claude_shell_cmd
+    that detects an over-limit prompt and fails with a clear error instead of a raw
+    OSError. Note that the existing pm/prompts file + \$(cat file) trick does NOT
+    solve this — command substitution still yields one oversized argv entry.
+
+
+    tests: cover the audited builders with a many-element collection and assert the
+    prompt stays within _PROMPT_ARG_LIMIT.
+
+
+    files: pm_core/prompt_gen.py, pm_core/cli/plan.py, pm_core/claude_launcher.py,
+    plus whichever builders the audit flags.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-17T20:17:14.811858+00:00'
+  updated_at: '2026-05-17T20:17:14.811858+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-93b9aa9
+  plan: bugs
+  title: Stop telling out-of-container sessions not to run pm commands
+  branch: pm/pr-93b9aa9-stop-telling-out-of-container-sessions-not-to-run-
+  status: pending
+  depends_on: []
+  description: 'Many generated prompts include a blanket warning not to run pm commands
+    that spawn Claude sessions (`pm pr start`, `pm pr done`, `pm plan add`, `pm plan
+    breakdown`, `pm plan review`), instructing the session to drive the TUI instead.
+    This is overly broad.
+
+
+    The constraint is only genuinely needed in two situations:
+
+    1. Sessions running inside a container, which cannot/should not reach back out
+    to manage the host pm session.
+
+    2. The PR implementation prompt specifically must NOT run `pm pr done` or `pm
+    pr review` on its own PR — completing/reviewing itself is the orchestrator''s
+    job, not the implementer''s.
+
+
+    Anything running outside a container (e.g. a meta/advisor session, or an ad-hoc
+    session in the main project) can safely run pm commands directly against the main
+    project — as this very session demonstrated by running `pm pr start` successfully.
+    The blanket prohibition makes those sessions needlessly press TUI keys instead
+    of just running the command.
+
+
+    Scope:
+
+    - `pm_core/prompt_gen.py`: `tui_section()` (line ~47) emits the blanket ''Do not
+    run commands that spawn new Claude sessions'' block; `generate_watcher_review_prompt()`
+    (line ~2025/2033) repeats it as ''Forbidden (must always be done via the TUI by
+    the human)''. Audit every caller of `tui_section()` (prompt_gen.py, guide.py,
+    cli/cluster.py, cli/plan.py) and the watcher-review prompt.
+
+    - Replace the blanket warning with a container-conditional one: only emit the
+    ''drive the TUI instead'' guidance for in-container sessions. Out-of-container
+    sessions should be told they may run pm commands directly against the main project.
+
+    - Keep, and if anything sharpen, the rule in the PR implementation prompt that
+    the implementer must not run `pm pr done`/`pm pr review` on its own PR.
+
+    - Check the guide text in `guide.py` for the same over-broad framing.
+
+
+    tests: cover prompt generation for in-container vs out-of-container and assert
+    the TUI-only restriction appears only in the container case; assert the impl prompt
+    still forbids self done/review.
+
+
+    files: pm_core/prompt_gen.py, pm_core/guide.py, pm_core/cli/cluster.py, pm_core/cli/plan.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-17T21:49:17.795998+00:00'
+  updated_at: '2026-05-17T21:49:17.795998+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a6ef6be
+  plan: plan-3119574
+  title: Session-launching CLI commands + project.yaml review registry
+  branch: pm/pr-a6ef6be-session-launching-cli-commands-project-yaml-review
+  status: pending
+  depends_on: []
+  description: 'Two CLI commands (`pm review <target>` and `pm plan literature-review
+    <plan>`) that launch literature-review sessions in tmux panes, plus the `project.yaml`-backed
+    review registry, path resolution, and methodology-context loader. `pm review`
+    opens its own pane; `pm plan literature-review` opens inside the plan''s existing
+    tmux window. Resume-or-create logic: registry hit + active → resume; hit + archived
+    → warn; miss → create entry + directory + initial `STATE.md`. Artifact-id derivation:
+    file basename slugified / plan filename stem / slugified topic. Adds a `r` keybinding
+    on the TUI plans pane and a small badge next to plans with an active review. **Human-guided
+    testing needed** — exercising the TUI keybinding and observing the new tmux pane
+    is environment-specific and benefits from interactive verification beyond unit
+    tests.
+
+
+    Tests: registry round-trip preserves other yaml keys; resume vs create vs archived-warn
+    against fixture registry states; artifact-id derivation across file/plan/topic
+    targets; methodology-context loader concatenates expected files; `pm review ui`
+    routes to the server (not treated as a target named "ui"); plans-pane keybinding
+    dispatches correctly; pane-launch invokes tmux with the expected role.
+
+
+    Files: `pm_core/review/registry.py`, `pm_core/review/paths.py`, `pm_core/review/context.py`,
+    `pm_core/review/cli.py`, `pm_core/cli/plan.py`, `pm_core/tui/plans_pane.py`, test
+    fixtures under `tests/review/`.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-20T22:53:20.224284+00:00'
+  updated_at: '2026-05-20T22:53:20.224284+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1160366
+  plan: plan-3119574
+  title: Markdown format primitives
+  branch: pm/pr-1160366-markdown-format-primitives
+  status: pending
+  depends_on: []
+  description: 'Parsers and writers for every markdown surface the walker touches:
+    response-block (fenced HTML comment with structured fields), interaction-log entries,
+    audit-doc canonical format with `surfaced-citations:`, response-doc with `provenance:`
+    tags, `STATE.md`, `UI_FOCUS.md`, `NOTES.md`. Writes are atomic; interaction-log
+    and notes appends are concurrency-safe. The data layer the UI builds on. Pure
+    library code; no human-guided testing needed.
+
+
+    Tests: response-block round-trip; interaction-log append concurrency; canonical-format
+    audit-doc parsing; response-doc parsing with mixed-provenance changes; state-file
+    phase transitions; focus-file timestamp ordering; notes-file append preserves
+    prior content.
+
+
+    Files: `pm_core/review/md_parser.py`, `pm_core/review/md_writer.py`, fixture markdown
+    under `tests/review/fixtures/`.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-20T22:53:20.224338+00:00'
+  updated_at: '2026-05-20T22:53:20.224338+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d887f4c
+  plan: plan-3119574
+  title: Web server skeleton + dashboard + proposed-changes walker + lock states +
+    cycle nav + SSE + Apply button
+  branch: pm/pr-d887f4c-web-server-skeleton-dashboard-proposed-changes-wal
+  status: pending
+  depends_on:
+  - pr-1160366
+  description: 'FastAPI single-file server that enumerates reviews from `project.yaml`,
+    watches per-review `STATE.md` / `UI_FOCUS.md` / current `REVIEW_RESPONSE_CYCLE_N.md`
+    via `watchdog`, and pushes filesystem events to clients over a single `/events?review=<id>`
+    SSE endpoint. Dashboard lists all reviews with per-cycle status, mode tag, engagement
+    signals, audit-loop convergence indicator, and cycle-selector dropdown. Proposed-changes
+    walker is paginated, filterable by provenance/target-section/suggested-verdict/status,
+    with per-entry accept/edit/skip, page-level bulk-accept-per-filter, and hotkeys
+    (`j`/`k`/`a`/`m`/`s`). Apply button visible only in `awaiting-human-review` on
+    the current cycle; click writes the `applying` transition to `STATE.md`. Lock-state
+    enforcement renders editable controls outside the modification window as read-only
+    badges. Phase-aware breadcrumb and Status panel update via SSE. Includes `pm review
+    ui [--port]` CLI. **Human-guided testing needed** — the SSE-driven reactivity,
+    hotkeys, lock-state UI, and Apply-button → session round-trip benefit from interactive
+    browser verification.
+
+
+    Tests: dashboard renders fixture multi-cycle state; proposed-changes walker round-trips
+    edits in `awaiting-human-review`; walker shows read-only badges in `review`/`audit`/`response`/`applying`/`complete`;
+    Apply button writes the state transition and is hidden outside `awaiting-human-review`
+    and in auto-run mode; cycle selector navigates between cycles; SSE event for a
+    STATE-file change locks the walker in <200ms; SSE event for a FOCUS-file change
+    navigates within <200ms; "no cycles yet" placeholder renders when `STATE.md` absent.
+
+
+    Files: `pm_core/review/ui/server.py`, `pm_core/review/ui/templates/dashboard.html`,
+    `pm_core/review/ui/templates/changes.html`, `pm_core/review/ui/static/style.css`,
+    `pm_core/review/ui/static/walker.js`, `pm_core/review/cli.py` (add `ui` subdispatch),
+    `pyproject.toml` (add `watchdog`, `fastapi`, `jinja2`, `sse-starlette`).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-20T22:53:20.224365+00:00'
+  updated_at: '2026-05-21T02:44:25.978737+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-3b45e04
+    text: 'Multi-UI state ownership: allow multiple ''pm review ui'' processes against
+      the same review (read/render is fine — reads are lock-free and torn-read-safe
+      via atomic-rename writes), but only ONE process may write STATE.md (the Apply
+      transition). Non-writers render Apply disabled with an ''another UI owns this
+      session'' hint even in awaiting-human-review. Reason: the Apply transition is
+      a check-then-write (awaiting-human-review -> applying); two UIs racing it could
+      both pass the check and double-fire apply, so designate a single state-writer
+      rather than rely on lock ordering. Failover: each process tries flock(LOCK_EX|LOCK_NB)
+      on a stable leader lockfile (e.g. STATE.md.leader) and holds it for its lifetime;
+      whoever holds it is the writer. The OS releases the flock on process death,
+      so if the leader dies a follower''s periodic LOCK_NB retry succeeds and it takes
+      the mantle automatically (no stale-PID heartbeat to reap). Winner is ''first
+      to retry after release'', not strictly the oldest survivor, which is fine since
+      exactly one takes over; push an SSE event on leadership change so Apply enables/disables
+      on the right clients. This leader lock is distinct from md_writer''s per-write
+      flock (PR 2): the leader lock decides who MAY write state; md_writer serializes
+      the write itself. They compose — the leader still calls md_writer.update_state,
+      which must do its check-then-write inside md_writer''s file lock. Tests: two
+      UI processes elect exactly one state-writer (second sees Apply disabled); when
+      leader exits, its lock releases and a follower takes over.'
+    created_at: '2026-05-21T02:44:24Z'
+    last_edited: '2026-05-21T02:44:24Z'
+- id: pr-215ee19
+  plan: plan-3119574
+  title: Citation-audit browse view + general-comments notes pane
+  branch: pm/pr-215ee19-citation-audit-browse-view-general-comments-notes-
+  status: pending
+  depends_on:
+  - pr-d887f4c
+  description: 'Per-cycle `audit_browse.html` view that renders `CITATION_AUDIT_CYCLE_N.md`
+    in the canonical format, organized per citation with tier/passage/verdict/proposed-rewrite/surfaced-citations
+    and click-through to the proposed change(s) the entry produced. Collapsible `notes_pane.html`
+    side panel included on all walker pages, reading/writing `NOTES.md` with section-tagged
+    timestamped entries. Notes file is loadable into session context so general comments
+    influence the next cycle''s response. Targets only the new canonical format; pre-flow
+    audit files are out of scope. **Human-guided testing needed** — the notes pane
+    interaction and the click-through navigation are UI-heavy and benefit from browser
+    verification.
+
+
+    Tests: audit-browse renders a fixture `CITATION_AUDIT_CYCLE_N.md` correctly; click-through
+    anchors resolve to the right proposed changes; notes-pane round-trips edits and
+    preserves prior entries with timestamps.
+
+
+    Files: `pm_core/review/ui/templates/audit_browse.html`, `pm_core/review/ui/templates/notes_pane.html`,
+    `pm_core/review/ui/static/walker.js` (notes-pane behavior), `pm_core/review/ui/server.py`
+    (audit-browse + notes routes).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-20T22:53:20.224384+00:00'
+  updated_at: '2026-05-20T22:53:20.224384+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-35a95a8
+  plan: plan-3119574
+  title: Citations status view (cross-cycle citation dashboard)
+  branch: pm/pr-35a95a8-citations-status-view-cross-cycle-citation-dashboa
+  status: pending
+  depends_on:
+  - pr-1160366
+  - pr-215ee19
+  description: 'Cross-cycle citation-centric view derived per request from the union
+    of all `CITATION_AUDIT_CYCLE_*.md` files plus the artifact''s current citation
+    list. One row per citation ever considered, with title + authors + year, clickable
+    source link (opens in new tab), current tier, current classification (faithful
+    / over-characterizes / under-characterizes / mischaracterizes / unverified), argument
+    (verdict rationale + load-bearing verbatim quote), most-recent-audit cycle, and
+    status (`in-artifact` / `proposed-addition` / `proposed-removal` / `superseded`).
+    Sortable + filterable by any field including a `needs-audit` filter. Click-to-expand
+    shows the most recent audit entry inline. No state file — view is derived per
+    request. **Human-guided testing needed** — sort/filter/expand interactions and
+    the external-link behavior benefit from browser verification.
+
+
+    Tests: deduplication across two cycles'' audit files with the same citation; correct
+    most-recent-audit selection; `needs-audit` filter surfaces in-artifact + proposed-addition
+    rows with no audit entry; filter combinations narrow correctly; `extract_artifact_citations`
+    parses inline citations + bibliography on a fixture literature review.
+
+
+    Files: `pm_core/review/ui/templates/citations.html`, `pm_core/review/md_parser.py`
+    (add `derive_citation_status` + `extract_artifact_citations`), `pm_core/review/ui/server.py`
+    (citations route), `pm_core/review/ui/static/walker.js` (citations filter/sort).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-20T22:53:20.224402+00:00'
+  updated_at: '2026-05-20T22:53:20.224402+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
