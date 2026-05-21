@@ -64,6 +64,26 @@ def test_create_new_review_writes_entry_dir_and_state(tmp_path):
     launch.assert_called_once()
 
 
+def test_run_review_plan_id_target_resolves_to_file_and_stem(tmp_path):
+    """`pm review <plan-id>` auto-classifies as a plan: the registry stores the
+    plan *file* path and the review id is the file stem (not the slugified id)."""
+    data = {
+        "project": {"name": "demo", "repo": "x", "base_branch": "master"},
+        "plans": [{"id": "plan-1", "name": "P", "file": "plans/plan-1.md",
+                   "status": "draft", "parent": None}],
+        "prs": [],
+    }
+    store.save(data, tmp_path)
+    with patch.object(review_cli, "launch_review_session") as launch:
+        rid = review_cli.run_review("plan-1", root=tmp_path)
+    # id derived from the plan-file stem, target stored as the file path
+    assert rid == "plan-1"
+    entry = registry.get_review(store.load(tmp_path), "plan-1")
+    assert entry["target-type"] == "plan"
+    assert entry["target"] == "plans/plan-1.md"
+    launch.assert_called_once()
+
+
 def test_resume_existing_active_review_no_new_entry(tmp_path):
     root = _seed_root(tmp_path, reviews=[
         {"id": "topic-x", "target": "topic x", "target-type": "topic", "status": "active"},
