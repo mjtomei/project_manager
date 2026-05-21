@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-1160366
+  active_pr: pr-d887f4c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -115,6 +115,12 @@ plans:
 - id: plan-3119574
   name: plans/plan-litreview.md
   file: plans/plan-3119574.md
+  status: draft
+  parent: null
+- id: plan-b6aac3d
+  name: /BackSpaceBackSpaceBackSpaceBackSpaceBackSpaceBackSpaceBackSpaceBackSpaceBackSpaceBackSpacepr
+    start pr-1160366
+  file: plans/plan-b6aac3d.md
   status: draft
   parent: null
 prs:
@@ -20521,7 +20527,7 @@ prs:
   plan: plan-3119574
   title: Markdown format primitives
   branch: pm/pr-1160366-markdown-format-primitives
-  status: pending
+  status: merged
   depends_on: []
   description: 'Parsers and writers for every markdown surface the walker touches:
     response-block (fenced HTML comment with structured fields), interaction-log entries,
@@ -20539,57 +20545,79 @@ prs:
 
     Files: `pm_core/review/md_parser.py`, `pm_core/review/md_writer.py`, fixture markdown
     under `tests/review/fixtures/`.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/209
+  gh_pr_number: 209
   created_at: '2026-05-20T22:53:20.224338+00:00'
-  updated_at: '2026-05-20T22:53:20.224338+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  updated_at: '2026-05-21T04:00:07.977363+00:00'
+  started_at: '2026-05-20T23:08:34.057680+00:00'
+  reviewed_at: '2026-05-21T02:50:59.091391+00:00'
+  merged_at: '2026-05-21T04:00:07.977363+00:00'
+  notes:
+  - id: note-987b0a0
+    text: 'Live-view addendum (plan-3119574): the audit-doc parser must tolerate a
+      partial/in-progress CITATION_AUDIT_CYCLE_N.md — skip or ignore an incomplete
+      trailing entry rather than raising — because the live audit-browse view (pr-215ee19)
+      feeds it partial files while the audit loop is still running. Same robustness
+      applies to any structured parser read during a phase that is still being written.'
+    created_at: '2026-05-21T02:52:39Z'
+    last_edited: '2026-05-21T02:52:39Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1160366-markdown-format-primitives-105e5305
 - id: pr-d887f4c
   plan: plan-3119574
   title: Web server skeleton + dashboard + proposed-changes walker + lock states +
     cycle nav + SSE + Apply button
   branch: pm/pr-d887f4c-web-server-skeleton-dashboard-proposed-changes-wal
-  status: pending
+  status: in_progress
   depends_on:
   - pr-1160366
   description: 'FastAPI single-file server that enumerates reviews from `project.yaml`,
-    watches per-review `STATE.md` / `UI_FOCUS.md` / current `REVIEW_RESPONSE_CYCLE_N.md`
-    via `watchdog`, and pushes filesystem events to clients over a single `/events?review=<id>`
-    SSE endpoint. Dashboard lists all reviews with per-cycle status, mode tag, engagement
-    signals, audit-loop convergence indicator, and cycle-selector dropdown. Proposed-changes
-    walker is paginated, filterable by provenance/target-section/suggested-verdict/status,
-    with per-entry accept/edit/skip, page-level bulk-accept-per-filter, and hotkeys
-    (`j`/`k`/`a`/`m`/`s`). Apply button visible only in `awaiting-human-review` on
-    the current cycle; click writes the `applying` transition to `STATE.md`. Lock-state
-    enforcement renders editable controls outside the modification window as read-only
-    badges. Phase-aware breadcrumb and Status panel update via SSE. Includes `pm review
+    watches per-review `STATE.md` / `UI_FOCUS.md` / current cycle''s `REVIEW_CYCLE_N.md`
+    / `CITATION_AUDIT_CYCLE_N.md` / `REVIEW_RESPONSE_CYCLE_N.md` via `watchdog`, and
+    pushes filesystem events to clients over a single `/events?review=<id>` SSE endpoint.
+    Watching the review and audit files (not just the response) lets the current cycle''s
+    in-progress content stream to clients during the `review`/`audit`/`response` phases
+    — the human can read findings before the response and Apply gate exist. Dashboard
+    lists all reviews with per-cycle status, mode tag, engagement signals, audit-loop
+    convergence indicator, and cycle-selector dropdown. Proposed-changes walker is
+    paginated, filterable by provenance/target-section/suggested-verdict/status, with
+    per-entry accept/edit/skip, page-level bulk-accept-per-filter, and hotkeys (`j`/`k`/`a`/`m`/`s`).
+    Apply button visible only in `awaiting-human-review` on the current cycle; click
+    writes the `applying` transition to `STATE.md`. Lock-state enforcement renders
+    editable controls outside the modification window as read-only badges — but viewing
+    in-progress current-cycle artifacts is always allowed (the lock governs modification,
+    not visibility). Phase-aware breadcrumb and Status panel update via SSE, with
+    an animated activity indicator while a stage is running (`review`/`audit`/`response`/`applying`);
+    the audit phase animates a live ''K citations audited'' count. Includes `pm review
     ui [--port]` CLI. **Human-guided testing needed** — the SSE-driven reactivity,
-    hotkeys, lock-state UI, and Apply-button → session round-trip benefit from interactive
-    browser verification.
+    live current-cycle streaming, progress animation, hotkeys, lock-state UI, and
+    Apply-button → session round-trip benefit from interactive browser verification.
 
 
     Tests: dashboard renders fixture multi-cycle state; proposed-changes walker round-trips
     edits in `awaiting-human-review`; walker shows read-only badges in `review`/`audit`/`response`/`applying`/`complete`;
+    current-cycle review/audit content is viewable (read-only) during `review`/`audit`/`response`;
     Apply button writes the state transition and is hidden outside `awaiting-human-review`
     and in auto-run mode; cycle selector navigates between cycles; SSE event for a
     STATE-file change locks the walker in <200ms; SSE event for a FOCUS-file change
-    navigates within <200ms; "no cycles yet" placeholder renders when `STATE.md` absent.
+    navigates within <200ms; SSE event for a current-cycle `REVIEW_CYCLE_N.md` change
+    pushes within <200ms during the `review` phase; SSE event for a current-cycle
+    `CITATION_AUDIT_CYCLE_N.md` change pushes within <200ms during the `audit` phase;
+    activity indicator animates during `review`/`audit`/`response`/`applying` and
+    is idle at `awaiting-human-review`/`complete`; ''no cycles yet'' placeholder renders
+    when `STATE.md` absent.
 
 
     Files: `pm_core/review/ui/server.py`, `pm_core/review/ui/templates/dashboard.html`,
     `pm_core/review/ui/templates/changes.html`, `pm_core/review/ui/static/style.css`,
     `pm_core/review/ui/static/walker.js`, `pm_core/review/cli.py` (add `ui` subdispatch),
     `pyproject.toml` (add `watchdog`, `fastapi`, `jinja2`, `sse-starlette`).'
-  agent_machine: null
+  agent_machine: spark-424d
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-20T22:53:20.224365+00:00'
-  updated_at: '2026-05-21T02:44:25.978737+00:00'
-  started_at: null
+  updated_at: '2026-05-21T04:07:44.855651+00:00'
+  started_at: '2026-05-21T04:07:44.855651+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -20616,37 +20644,48 @@ prs:
       leader exits, its lock releases and a follower takes over.'
     created_at: '2026-05-21T02:44:24Z'
     last_edited: '2026-05-21T02:44:24Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d887f4c-web-server-skeleton-dashboard-propos-46660f49
 - id: pr-215ee19
   plan: plan-3119574
-  title: Citation-audit browse view + general-comments notes pane
+  title: Review-comments browse + citation-audit browse + general-comments notes pane
   branch: pm/pr-215ee19-citation-audit-browse-view-general-comments-notes-
   status: pending
   depends_on:
   - pr-d887f4c
-  description: 'Per-cycle `audit_browse.html` view that renders `CITATION_AUDIT_CYCLE_N.md`
-    in the canonical format, organized per citation with tier/passage/verdict/proposed-rewrite/surfaced-citations
-    and click-through to the proposed change(s) the entry produced. Collapsible `notes_pane.html`
-    side panel included on all walker pages, reading/writing `NOTES.md` with section-tagged
-    timestamped entries. Notes file is loadable into session context so general comments
-    influence the next cycle''s response. Targets only the new canonical format; pre-flow
-    audit files are out of scope. **Human-guided testing needed** — the notes pane
-    interaction and the click-through navigation are UI-heavy and benefit from browser
-    verification.
+  description: 'Per-cycle `review_browse.html` view that renders the current (or any
+    prior) cycle''s `REVIEW_CYCLE_N.md` review findings as read-only markdown, available
+    during the `review` phase before any response exists. Per-cycle `audit_browse.html`
+    view that renders `CITATION_AUDIT_CYCLE_N.md` in the canonical format, organized
+    per citation with tier/passage/verdict/proposed-rewrite/surfaced-citations and
+    click-through to the proposed change(s) the entry produced. Both views render
+    partial/in-progress content and live-update via SSE as the session writes — review
+    comments stream during the `review` phase, audit entries appear one-by-one during
+    the `audit` loop — so the human reads findings before the Apply gate. Collapsible
+    `notes_pane.html` side panel included on all walker pages, reading/writing `NOTES.md`
+    with section-tagged timestamped entries. Notes file is loadable into session context
+    so general comments influence the next cycle''s response. Targets only the new
+    canonical format; pre-flow audit files are out of scope. **Human-guided testing
+    needed** — the live-streaming views, notes pane interaction, and click-through
+    navigation are UI-heavy and benefit from browser verification.
 
 
-    Tests: audit-browse renders a fixture `CITATION_AUDIT_CYCLE_N.md` correctly; click-through
-    anchors resolve to the right proposed changes; notes-pane round-trips edits and
-    preserves prior entries with timestamps.
+    Tests: review-browse renders a fixture `REVIEW_CYCLE_N.md`; audit-browse renders
+    a fixture `CITATION_AUDIT_CYCLE_N.md` correctly; audit-browse renders a partial/in-progress
+    `CITATION_AUDIT_CYCLE_N.md` (incomplete trailing entry) without error; review-browse
+    and audit-browse live-update on an SSE event during the `review`/`audit` phases;
+    click-through anchors resolve to the right proposed changes; notes-pane round-trips
+    edits and preserves prior entries with timestamps.
 
 
-    Files: `pm_core/review/ui/templates/audit_browse.html`, `pm_core/review/ui/templates/notes_pane.html`,
-    `pm_core/review/ui/static/walker.js` (notes-pane behavior), `pm_core/review/ui/server.py`
-    (audit-browse + notes routes).'
+    Files: `pm_core/review/ui/templates/review_browse.html`, `pm_core/review/ui/templates/audit_browse.html`,
+    `pm_core/review/ui/templates/notes_pane.html`, `pm_core/review/ui/static/walker.js`
+    (review/audit live-update + notes-pane behavior), `pm_core/review/ui/server.py`
+    (review-browse + audit-browse + notes routes).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-20T22:53:20.224384+00:00'
-  updated_at: '2026-05-20T22:53:20.224384+00:00'
+  updated_at: '2026-05-21T02:52:27.414656+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -20686,6 +20725,60 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-20T22:53:20.224402+00:00'
   updated_at: '2026-05-20T22:53:20.224402+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ca6981c
+  plan: bugs
+  title: 'Bug: pm merge''s git stash/pop corrupts project.yaml with conflict markers
+    and leaks un-popped stashes'
+  branch: pm/pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupts-project-yaml
+  status: pending
+  depends_on: []
+  description: "Observed while merging PR #209 (gh #209 / pr-1160366). The merge left\
+    \ pm/project.yaml containing raw git conflict markers:\n\n    <<<<<<< Updated\
+    \ upstream\n      updated_at: '...02:44:25...'\n    =======\n      updated_at:\
+    \ '...02:52:11...'\n    >>>>>>> Stashed changes\n\nwhich is invalid YAML, so store.load()\
+    \ raised ProjectYamlParseError and EVERY pm command (list, tui, sync, merge) broke\
+    \ until hand-fixed. Two distinct failure modes from the same root cause:\n\n1.\
+    \ CORRUPTION: pm merge auto-stashes local project.yaml edits (commit msg 'pm:\
+    \ auto-stash for merge'), performs the git merge, then 'git stash pop'. When another\
+    \ session has updated project.yaml in the meantime, the pop conflicts on a line\
+    \ (here a single updated_at timestamp) and git writes textual conflict markers\
+    \ straight into project.yaml. Because project.yaml is the lock-protected source\
+    \ of truth for all of pm, corrupting it halts the whole tool. The git merge of\
+    \ #209 itself SUCCEEDED (commit 46660f49) — only the bookkeeping pop failed —\
+    \ yet the failure left the PR stuck in_review with merged_at=null even though\
+    \ it was merged on GitHub.\n\n2. STASH LEAK: a conflicted 'git stash pop' does\
+    \ NOT drop the stash, and the merge flow doesn't detect/resolve this, so stashes\
+    \ accumulate silently. This incident left 8 stale stashes ('pm: auto-stash for\
+    \ merge' x several, plus old WIP snapshots), one of which (a 2-month-old model_config\
+    \ refactor) had been sitting unrecovered.\n\nRoot problem: using git's TEXT stash/merge\
+    \ to reconcile concurrent project.yaml edits. project.yaml is structured data\
+    \ already guarded by store.locked_update — text-level 3-way merge is the wrong\
+    \ tool and is inherently fragile to interleaved writes.\n\nFix direction (pick\
+    \ one, discuss in review):\n- Don't stash project.yaml across the merge at all.\
+    \ Capture the pre-merge bookkeeping change as structured data and re-apply it\
+    \ AFTER the git merge via store.locked_update (which already serializes writes\
+    \ and re-reads current state), so there's never a text conflict.\n- OR if a stash\
+    \ is unavoidable, detect a conflicted pop: abort with a clear pm-level error,\
+    \ never leave conflict markers in project.yaml, and either auto-resolve structurally\
+    \ (parse both sides as YAML, merge the dict, drop the stash) or roll back cleanly.\n\
+    - Add a guard in store.load (or a 'pm doctor' check) that detects git conflict\
+    \ markers in project.yaml and reports them with the offending line + remediation,\
+    \ instead of a raw YAML scanner traceback.\n- Reap leaked 'auto-stash for merge'\
+    \ stashes after a successful merge.\n\ntests: simulate concurrent project.yaml\
+    \ edits across a merge and assert (a) project.yaml stays valid YAML, (b) no conflict\
+    \ markers are ever written, (c) no stash is left behind, (d) the merged PR ends\
+    \ up status=merged with merged_at set.\n\nfiles: the pm merge implementation (pm_core/git_ops.py\
+    \ / pm_core/pr_sync.py / wherever 'auto-stash for merge' is created — grep that\
+    \ string), pm_core/store.py (load guard / locked_update), and merge-flow tests."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T04:06:05.061620+00:00'
+  updated_at: '2026-05-21T04:06:05.061620+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
