@@ -17,7 +17,7 @@ from textual.containers import ScrollableContainer
 from pm_core.pane_idle import PaneIdleTracker
 from pm_core.tui.tech_tree import (
     TechTree, PRNode, PlanGroup, EdgeCanvas,
-    compute_neighbors, _node_y, NODE_H,
+    compute_neighbors, _node_y, NODE_H, SORT_FIELD_KEYS,
 )
 
 
@@ -49,6 +49,13 @@ class _TreeApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         tree.update_plans(self._plans)
         tree.update_prs(self._prs)
+
+    # Stubs for hooks pr_view.* helpers call on the host app.
+    def log_message(self, *args, **kwargs) -> None:
+        pass
+
+    def _update_filter_status(self) -> None:
+        pass
 
 
 def _pr(pid, title="t", status="pending", plan=None, depends_on=None, **extra):
@@ -389,6 +396,52 @@ async def test_all_bands_visible_when_content_fits():
 # ---------------------------------------------------------------------------
 # J/K plan jump — bottom is the visual bottom, not a mid-plan root
 # ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_all_plans_hidden_keeps_navigable_labels():
+    # When every plan is hidden the layout must still emit navigable hidden
+    # labels so the user can select one and unhide it.
+    prs = [
+        _pr("pr-a", plan="plan-001"),
+        _pr("pr-b", plan="plan-002"),
+    ]
+    app = _TreeApp(prs, plans=[{"id": "plan-001", "name": "One"},
+                               {"id": "plan-002", "name": "Two"}])
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        tree._hidden_plans.update({"plan-001", "plan-002"})
+        tree._recompute()
+        await pilot.pause()
+        assert tree._ordered_ids == ["_hidden:plan-001", "_hidden:plan-002"]
+        assert "_hidden:plan-001" in tree._label_widgets
+        assert tree.selected_is_hidden_label
+
+
+@async_test
+async def test_cycle_sort_preserves_selected_pr():
+    from pm_core.tui import pr_view
+    # Two PRs whose order flips between created_at and updated_at sorts.
+    prs = [
+        _pr("pr-old", created_at="2020-01-01T00:00:00",
+            updated_at="2024-01-01T00:00:00"),
+        _pr("pr-new", created_at="2024-01-01T00:00:00",
+            updated_at="2020-01-01T00:00:00"),
+    ]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 60)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        tree.select_pr("pr-new")
+        await pilot.pause()
+        assert tree.selected_pr_id == "pr-new"
+        # Cycle the sort field a few times; selection must stay on pr-new even
+        # as its index in _ordered_ids changes.
+        for _ in range(len(SORT_FIELD_KEYS)):
+            pr_view.cycle_sort(app)
+            await pilot.pause()
+            assert tree.selected_pr_id == "pr-new"
 
 
 @async_test
