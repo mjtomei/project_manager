@@ -109,11 +109,13 @@ ENV NODE_PATH=/usr/lib/node_modules
 RUN npm install -g playwright \
     && npx playwright install --with-deps chromium \
     && chmod -R a+rx "$PLAYWRIGHT_BROWSERS_PATH" \
+    && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
-# Verify Playwright + Chromium: CLI version, module require, ffmpeg, and a
-# headless Chromium smoke launch with the container-safe flags (about:blank
-# → dump DOM).  Fails the build if Chromium can't start in the container.
+# Verify Playwright + Chromium: CLI version, module require, and a headless
+# Chromium smoke launch with the container-safe flags (about:blank → dump
+# DOM).  Fails the build if Chromium can't start in the container.  (ffmpeg
+# is verified above with the other apt tools.)
 RUN npx playwright --version \
     && node -e "require('playwright')" \
     && node -e "const {chromium}=require('playwright');(async()=>{const b=await chromium.launch({args:['--no-sandbox','--disable-dev-shm-usage']});const p=await b.newPage();await p.goto('about:blank');console.log('chromium-smoke-dom:',await p.content());await b.close();})().catch(e=>{console.error(e);process.exit(1)})"
