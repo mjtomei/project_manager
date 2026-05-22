@@ -661,6 +661,8 @@ class PlanGroup(Widget):
         super().__init__(*children, **kwargs)
         self.plan_id = plan_id
         self._offset = (x, y)
+        self._band_top = y               # viewport-culling extents (set in _rebuild)
+        self._band_bottom = y + height
         self.styles.width = width
         self.styles.height = height
 
@@ -709,14 +711,35 @@ class TechTree(Widget):
         # Child-widget bookkeeping
         self._node_widgets: dict[str, PRNode] = {}
         self._label_widgets: dict[str, PlanLabel] = {}
+        self._plan_groups: list[PlanGroup] = []      # for viewport culling
         self._neighbors: dict[str, dict[str, str | None]] = {}
         self._layout_sig: tuple | None = None
         self._cached_layout = None
         self._built: bool = False
+        self._scroll_watch_installed: bool = False
 
     def on_mount(self) -> None:
         self.prs = self._prs
         self._recompute()
+        self._install_scroll_cull()
+
+    def _install_scroll_cull(self) -> None:
+        """Watch the scroll container so off-screen plan bands can be culled.
+
+        Hiding a band's ``PlanGroup`` removes its nodes from Textual's
+        compositor pass, which otherwise reflows *every* mounted widget on each
+        keystroke — the dominant nav cost with a large tree.  Driven by the
+        scroller's ``scroll_y`` so it covers keyboard, mouse-wheel and
+        programmatic scrolling alike.
+        """
+        scroller = self.parent
+        if scroller is None or self._scroll_watch_installed:
+            return
+        try:
+            self.watch(scroller, "scroll_y", self._cull_offscreen_bands, init=False)
+            self._scroll_watch_installed = True
+        except Exception:
+            pass
 
     def apply_project_settings(self, project: dict) -> None:
         """Apply per-project display settings (overrides globals if present)."""
@@ -924,6 +947,7 @@ class TechTree(Widget):
         self.remove_children()
         self._node_widgets = {}
         self._label_widgets = {}
+        self._plan_groups = []
         self._neighbors = {}
 
         msg = self._empty_message()
@@ -1013,6 +1037,9 @@ class TechTree(Widget):
                 self._plan_group_order[0] if self._plan_group_order else "_standalone")
             group = PlanGroup(plan_label, 0, band_top, width, band_h,
                               canvas, *members)
+            group._band_top = band_top
+            group._band_bottom = band_bottom
+            self._plan_groups.append(group)
             new_widgets.append(group)
 
         # Hidden plan labels appended below the grid (navigable, selectable)
@@ -1036,6 +1063,36 @@ class TechTree(Widget):
                 new_widgets.append(label)
 
         self.mount_all(new_widgets)
+        # Cull bands outside the viewport once the new widgets are laid out.
+        self.call_after_refresh(self._cull_offscreen_bands)
+
+    def _cull_offscreen_bands(self, *args) -> None:
+        """Show only plan bands intersecting the viewport (+ a margin).
+
+        Off-screen ``PlanGroup``s are hidden so Textual's compositor skips
+        their nodes; this keeps per-keystroke cost proportional to *visible*
+        nodes rather than the whole tree.  The tree's content size is fixed
+        (set in ``_rebuild``), so hiding bands never changes the scroll extent.
+        """
+        if not self._plan_groups:
+            return
+        scroller = self.parent
+        if scroller is None or not hasattr(scroller, "scroll_offset"):
+            return
+        try:
+            top = scroller.scroll_offset.y
+            vh = scroller.size.height
+        except Exception:
+            return
+        if vh <= 0:
+            return
+        margin = NODE_H + V_GAP  # one node-row of look-ahead on each side
+        vtop = top - margin
+        vbot = top + vh + margin
+        for group in self._plan_groups:
+            visible = not (group._band_bottom < vtop or group._band_top > vbot)
+            if bool(group.display) != visible:
+                group.display = visible
 
     # -- selection / animation ----------------------------------------------
 
@@ -1217,7 +1274,13 @@ class TechTree(Widget):
         return None
 
     def _jump_plan_bottom(self) -> int | None:
-        """Return the index of the last root PR (no dependencies) in the plan."""
+        """Return the index of the bottom-most PR (greatest row) in the plan.
+
+        Used when ``J`` is pressed on the last plan: advance to the visual
+        bottom of the tree instead of dead-ending on a mid-plan root (the
+        previous behavior returned the last *root* PR, which could sit above
+        other nodes and leave ``J`` looking stuck).
+        """
         if not self._ordered_ids:
             return None
         current_id = self._ordered_ids[self.selected_index]
@@ -1229,15 +1292,18 @@ class TechTree(Widget):
             current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
 
         pr_map = {pr["id"]: pr for pr in self._prs}
-        last_root = None
+        best_i = None
+        best_row = -1
         for i, pid in enumerate(self._ordered_ids):
             if pid.startswith("_hidden:"):
                 continue
             pr = pr_map.get(pid)
             if pr and (pr.get("plan") or "_standalone") == current_plan:
-                if not pr.get("depends_on"):
-                    last_root = i
-        return last_root
+                row = self._node_positions.get(pid, (0, 0))[1]
+                if row >= best_row:
+                    best_row = row
+                    best_i = i
+        return best_i
 
     def _jump_plan(self, direction: int) -> int | None:
         """Jump to the first PR of the next/previous plan group."""

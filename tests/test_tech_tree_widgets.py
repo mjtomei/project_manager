@@ -331,3 +331,83 @@ async def test_prnode_carries_neighbor_ids():
         nodes = {n.pr_id: n for n in app.query(PRNode)}
         assert nodes["pr-a"].neighbor_right == "pr-b"
         assert nodes["pr-b"].neighbor_left == "pr-a"
+
+
+# ---------------------------------------------------------------------------
+# Viewport band culling
+# ---------------------------------------------------------------------------
+
+
+def _many_plans(n_plans=6, per_plan=2):
+    prs, plans = [], []
+    for p in range(n_plans):
+        pid = f"plan-{p:03d}"
+        plans.append({"id": pid, "name": f"P{p}"})
+        prs.append(_pr(f"pr-{p}a", plan=pid))
+        prs.append(_pr(f"pr-{p}b", plan=pid, depends_on=[f"pr-{p}a"]))
+    return prs, plans
+
+
+@async_test
+async def test_offscreen_bands_are_culled():
+    prs, plans = _many_plans(6)
+    app = _TreeApp(prs, plans=plans)
+    async with app.run_test(size=(120, 16)) as pilot:  # viewport << full content
+        await pilot.pause(); await pilot.pause()
+        tree = app.query_one(TechTree)
+        groups = tree._plan_groups
+        assert len(groups) == 6
+        displayed = [g for g in groups if g.display]
+        assert 0 < len(displayed) < len(groups)
+
+
+@async_test
+async def test_selected_band_visible_after_plan_jump():
+    prs, plans = _many_plans(6)
+    app = _TreeApp(prs, plans=plans)
+    async with app.run_test(size=(120, 16)) as pilot:
+        await pilot.pause(); await pilot.pause()
+        tree = app.query_one(TechTree); tree.focus()
+        await pilot.press("J"); await pilot.pause()
+        await pilot.press("J"); await pilot.pause()
+        sid = tree.selected_pr_id
+        node = tree._node_widgets[sid]
+        owner = next(g for g in tree._plan_groups if node in g.children)
+        assert owner.display  # the band holding the selection is never culled
+
+
+@async_test
+async def test_all_bands_visible_when_content_fits():
+    prs, plans = _many_plans(2)
+    app = _TreeApp(prs, plans=plans)
+    async with app.run_test(size=(160, 80)) as pilot:  # everything fits
+        await pilot.pause(); await pilot.pause()
+        tree = app.query_one(TechTree)
+        assert all(g.display for g in tree._plan_groups)
+
+
+# ---------------------------------------------------------------------------
+# J/K plan jump — bottom is the visual bottom, not a mid-plan root
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_jump_plan_bottom_selects_visual_bottom():
+    # Single (standalone) plan with a fan-out: the bottom-most row is a child,
+    # not the root.  J on the last/only plan must land on the visual bottom.
+    prs = [
+        _pr("root"),
+        _pr("c1", depends_on=["root"]),
+        _pr("c2", depends_on=["root"]),
+        _pr("c3", depends_on=["root"]),
+    ]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(200, 80)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree); tree.focus()
+        tree.selected_index = tree._ordered_ids.index("root")
+        await pilot.press("J"); await pilot.pause()
+        sid = tree.selected_pr_id
+        assert sid != "root"  # not stuck on the root
+        max_row = max(r for _, (c, r) in tree._node_positions.items())
+        assert tree._node_positions[sid][1] == max_row
