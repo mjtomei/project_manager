@@ -78,6 +78,7 @@ stream:
 
 ```bash
 # Placeholders: set these for your capture.
+PR_ID=pr-xxxxxxx             # the PR under QA (keys the captures dir)
 CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<short-name>
 ID=regression-fixture        # the registered review id
 PORT=8765                    # an ephemeral free port
