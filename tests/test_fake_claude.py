@@ -670,6 +670,24 @@ class TestSessionTypeVerdicts:
     def test_validate_float_weight_ok(self):
         assert validate_session_verdicts("review", {"PASS": 0.5, "NEEDS_WORK": 1.5}) == []
 
+    def test_validate_all_zero_weights_rejected(self):
+        # Each weight is individually valid (non-negative number) but the map
+        # sums to zero, which crashes random.choices at pick time — reject it
+        # up front like the other deferred-crash cases.
+        errors = validate_session_verdicts("review", {"PASS": 0, "NEEDS_WORK": 0})
+        assert errors
+        assert "zero" in errors[0]
+
+    def test_validate_single_zero_weight_rejected(self):
+        errors = validate_session_verdicts("review", {"PASS": 0})
+        assert errors
+        assert "zero" in errors[0]
+
+    def test_validate_one_positive_weight_ok(self):
+        # A zero alongside a positive weight is fine — random.choices only
+        # needs a positive total.
+        assert validate_session_verdicts("review", {"PASS": 1, "NEEDS_WORK": 0}) == []
+
 
 # ---------------------------------------------------------------------------
 # Session-file fake-claude override (paths.py)

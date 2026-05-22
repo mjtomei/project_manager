@@ -143,13 +143,14 @@ def config_set_cmd(config_json: str | None, file_path: str | None,
       pm fake-claude config set < cfg.json
     """
     import json
+    from pathlib import Path
     from pm_core.paths import set_fake_claude_config
 
     if config_json is not None:
         raw = config_json
         source = "argument"
     elif file_path is not None:
-        raw = open(file_path).read()
+        raw = Path(file_path).read_text()
         source = file_path
     else:
         if click.get_text_stream("stdin").isatty():

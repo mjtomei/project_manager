@@ -207,6 +207,7 @@ def validate_session_verdicts(session_type: str, verdicts) -> list[str]:
     # weight passes the name check above but later crashes unhelpfully in
     # _pick_fake_verdict (float() / random.choices), so reject it here.
     if isinstance(verdicts, dict):
+        numeric_weights: list[float] = []
         for v, weight in verdicts.items():
             if isinstance(weight, bool) or not isinstance(weight, (int, float)):
                 errors.append(
@@ -218,6 +219,18 @@ def validate_session_verdicts(session_type: str, verdicts) -> list[str]:
                     f"Weight for verdict {v!r} (session type {session_type!r}) "
                     f"must be non-negative, got {weight!r}."
                 )
+            else:
+                numeric_weights.append(float(weight))
+        # All-zero weights also clear the per-weight checks above but blow up
+        # in random.choices ("Total of weights must be greater than zero") —
+        # the same class of deferred crash this block exists to prevent.
+        if (verdicts and not errors
+                and len(numeric_weights) == len(verdicts)
+                and sum(numeric_weights) == 0):
+            errors.append(
+                f"All verdict weights for session type {session_type!r} are "
+                f"zero; at least one must be positive."
+            )
     return errors
 
 # ---------------------------------------------------------------------------
