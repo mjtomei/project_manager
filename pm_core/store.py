@@ -16,6 +16,39 @@ from typing import Callable, Hashable, Optional
 
 import yaml
 
+# libyaml (C) loader/dumper are ~14-16x faster than the pure-Python ones on a
+# large project.yaml (e.g. ~1MB/350-PR: load 1480ms -> 93ms, dump 1130ms ->
+# 80ms). The WriteQueue drains run via ``asyncio.to_thread``; pure-Python
+# (de)serialization holds the GIL except for the ~5ms switch interval, so it
+# contends with the event loop for CPU and throttles TUI repaints while a write
+# is in flight. The C path releases the GIL, so background drains are fast and
+# don't steal CPU from the UI.
+#
+# Loader: always prefer C when available — parsing is byte-irrelevant and the C
+# loader produces identical objects, so there is no compatibility risk.
+#
+# Dumper: the C dumper wraps long scalars (e.g. multi-line PR descriptions)
+# differently from the pure-Python dumper. Both are valid YAML and parse
+# identically, but the bytes differ, which would churn the committed
+# project.yaml whenever a save lands on an environment with a different backend.
+# So the C dumper is gated by the per-project ``project.libyaml`` flag (default
+# on): set ``libyaml: false`` to pin pure-Python output for byte-stability
+# across mixed environments. Switching the default on rewrites project.yaml once.
+try:
+    from yaml import CSafeLoader as _CSafeLoader, CSafeDumper as _CSafeDumper
+except ImportError:  # pragma: no cover - depends on the PyYAML build
+    _CSafeLoader = _CSafeDumper = None
+
+
+def _yaml_loader():
+    return _CSafeLoader or yaml.SafeLoader
+
+
+def _yaml_dumper(data: dict):
+    if _CSafeDumper is not None and (data.get("project") or {}).get("libyaml", True):
+        return _CSafeDumper
+    return yaml.SafeDumper
+
 _log = logging.getLogger("pm.store")
 
 _YAML_HEADER = (
@@ -74,7 +107,7 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     path = root / "project.yaml"
     try:
         with open(path) as f:
-            data = yaml.safe_load(f)
+            data = yaml.load(f, Loader=_yaml_loader())
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
@@ -168,7 +201,10 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     tmp = path.with_suffix(".yaml.tmp")
     with open(tmp, "w") as f:
         f.write(_YAML_HEADER)
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        yaml.dump(
+            data, f, Dumper=_yaml_dumper(data),
+            default_flow_style=False, sort_keys=False, allow_unicode=True,
+        )
         f.flush()
         os.fsync(f.fileno())
     tmp.rename(path)
