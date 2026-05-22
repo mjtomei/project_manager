@@ -1,6 +1,6 @@
 ---
 title: Web UI Recording (browser video + HTTP/SSE)
-description: Record the walker web UI end-to-end with Playwright (Chromium video + trace + screenshots) and capture the HTTP/SSE protocol underneath
+description: Record a rendered web UI end-to-end with Playwright (Chromium video + trace + screenshots) and capture the HTTP/SSE protocol underneath
 ---
 
 ## When to use
@@ -47,28 +47,25 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   step through with `npx playwright show-trace trace.zip`.
 - `*.png` — key-state screenshots (one per demonstrated state).
 - `dom.html` — a DOM dump at a representative state (grep/diff target).
-- `http.log` — curl snapshots of the canonical walker routes.
+- `http.log` — curl snapshots of the UI's routes.
 - `sse.log` — `curl -N` transcript of `/events?review=<id>`.
 - `manifest.md` — frontmatter + prose per the standard recipe format,
   with a `## Files` section listing every file above.
 
-## Canonical routes
+## Routes (walker example)
 
-The walker server serves per-review views keyed by the review id, plus
-one SSE endpoint (this is the example UI's contract; substitute your
-own). The driver prefers click-through
-navigation (role/text locators auto-track the server's real routes), and
-uses these constants only for the initial dashboard load and the SSE
-stream:
+The walker UI's routes — substitute your own. The driver navigates by
+clicking (role/text locators auto-track the real routes) and uses these
+constants only for the first load and the SSE stream:
 
 | View | Route | Notes |
 |---|---|---|
-| dashboard | `/` | lists every review; click into one |
-| changes (review / proposed-changes walker) | `/review/<id>/changes` | the main walker; "review browse" of proposed changes |
-| audit browse | `/review/<id>/audit` | per-cycle `CITATION_AUDIT_CYCLE_N.md` |
+| dashboard | `/` | lists items; click into one |
+| changes | `/review/<id>/changes` | the main walker view |
+| audit browse | `/review/<id>/audit` | per-cycle audit entries |
 | citations | `/review/<id>/citations` | cross-cycle citation status |
 | notes pane | `/review/<id>/notes` | collapsible side panel |
-| SSE events | `/events?review=<id>` | `EventSource`; STATE / FOCUS / RESPONSE pushes |
+| SSE events | `/events?review=<id>` | `EventSource` push stream |
 
 ## Capture — Layer 1: rendered browser recording
 
@@ -81,9 +78,7 @@ CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<s
 ID=regression-fixture        # the registered review id
 PORT=8765                    # an ephemeral free port
 BASE="http://localhost:$PORT"
-# The review's STATE.md is the source of truth for cycle/phase (see
-# plan-litreview): writing current-phase is the entire phase-transition
-# channel. Editing this file is what drives the SSE-pushed UI updates.
+# Editing STATE.md's current-phase is what drives the SSE-pushed updates.
 STATE_FILE="pm/docs/adversarial-review/reviews/$ID/STATE.md"
 mkdir -p "$CAPDIR"
 
@@ -108,15 +103,13 @@ CAPDIR="$CAPDIR" REVIEW_ID="$ID" WALKER_URL="$BASE" STATE_FILE="$STATE_FILE" \
     node driver.mjs
 ```
 
-The driver records the video and trace, walks the views, exercises the
-hotkeys, and proves SSE-driven live updates. It uses role/text locators
-with auto-wait — no brittle `sleep`s — so it tolerates render timing.
+The driver records video + trace, walks the views, exercises the hotkeys,
+and proves SSE-driven updates — all via auto-waiting locators, no sleeps.
 
 ```javascript
-// driver.mjs — Playwright walker-UI recording driver (skeleton).
-// Records context-level video + a trace, walks dashboard -> changes
-// (review) -> audit browse -> citations, exercises hotkeys, and proves
-// SSE-driven live updates by mutating STATE.md in a side process.
+// driver.mjs — Playwright web-UI recording skeleton (walker example).
+// Records context-level video + a trace, walks the views, exercises
+// hotkeys, and proves SSE updates by mutating STATE.md.
 import { chromium } from 'playwright';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -124,13 +117,11 @@ import path from 'path';
 const capDir = process.env.CAPDIR;
 const reviewId = process.env.REVIEW_ID;
 const base = process.env.WALKER_URL || 'http://localhost:8765';
-// The review's STATE.md — writing current-phase here is the phase channel
-// the walker reacts to over SSE (see plan-litreview "Server-pushed updates").
+// The side channel that triggers live updates: editing STATE.md's
+// current-phase makes the server push an SSE event.
 const stateFile = process.env.STATE_FILE;
 
-// Canonical routes (see the recipe's "Canonical routes" table). The
-// driver prefers click-through via locators; these back the initial load
-// and the SSE endpoint, and document the contract being exercised.
+// Routes the driver references (first load + SSE; nav is by locator).
 const routes = {
   dashboard: `${base}/`,
   changes: `${base}/review/${reviewId}/changes`,
@@ -158,9 +149,7 @@ const shot = (page, name) =>
 
   const page = await context.newPage();
 
-  // Write current-phase into STATE.md (the walker's phase channel) so the
-  // server's watchdog turns each write into an SSE push; callers wait on the
-  // resulting DOM, never on a sleep.
+  // Editing STATE.md drives an SSE push; callers then wait on the DOM.
   const setPhase = async (phase) => {
     const state = await fs.readFile(stateFile, 'utf8');
     await fs.writeFile(
@@ -168,23 +157,18 @@ const shot = (page, name) =>
       state.replace(/^current-phase:.*$/m, `current-phase: ${phase}`));
   };
 
-  // 1. Dashboard. Screenshot it *before* clicking into the review, then
-  // click through (role/text locators auto-track the server's real routes).
+  // 1. Dashboard, screenshot, then click into the review.
   await page.goto(routes.dashboard);
   await page.getByRole('heading', { name: /review/i }).first().waitFor();
   await shot(page, '01-dashboard');
   await page.getByRole('link', { name: new RegExp(reviewId, 'i') }).click();
 
-  // 2. Proposed-changes (review) walker — reached by the click above; the
-  // review's default view is the changes walker. Auto-waiting locator, no
-  // sleep. (routes.changes documents the canonical path / fallback.)
+  // 2. The changes walker (reached by the click above). Auto-wait, no sleep.
   await page.getByRole('heading', { name: /proposed change/i }).waitFor();
   await shot(page, '02-changes');
 
-  // Hotkeys: j/k navigate, a accept, m modify, s skip. These act only in
-  // the awaiting-human-review phase of the current cycle (lock state), so
-  // drive STATE.md into that phase first and wait for the editable affordance
-  // (the Apply button) to render rather than assuming the fixture default.
+  // Hotkeys j/k/a/m/s only act in the editable phase, so unlock first and
+  // wait for the Apply affordance before pressing them.
   await setPhase('awaiting-human-review');
   await page.getByRole('button', { name: /apply/i }).waitFor();
   for (const key of ['j', 'j', 'k']) await page.keyboard.press(key);
@@ -193,25 +177,18 @@ const shot = (page, name) =>
   await page.keyboard.press('m');           // modify
   await page.keyboard.press('s');           // skip
 
-  // 3. SSE-driven live update. Flip current-phase in STATE.md; the server's
-  // watchdog observer pushes the change on /events?review=<id> and the walker
-  // reacts. Wait on the DOM reflecting the new phase instead of sleeping.
-  // (A concurrently-running side shell editing STATE.md works identically —
-  // see Layer 2; either drives the same SSE push.)
+  // 3. Live SSE update: flip the phase, wait for the DOM to react (a side
+  // shell editing STATE.md works identically — see Layer 2).
   await setPhase('applying');
   await page
     .getByText(/applying accepted changes/i)
     .waitFor({ timeout: 5000 });
   await shot(page, '04-sse-phase-applying');
 
-  // Activity indicator animating + Apply / lock-state transition: capture
-  // the editable -> read-only flip the phase change produced.
+  // The phase change flips the UI editable -> read-only (Apply disappears).
   await page.getByRole('button', { name: /apply/i }).waitFor({ state: 'hidden' });
 
-  // 4. Audit browse, then citations — click through the walker's own nav
-  // (auto-tracks the server's real routes). routes.auditBrowse / routes.citations
-  // stay as the documented contract and the fallback if the nav element
-  // differs (then swap a click for `page.goto(routes.auditBrowse)`).
+  // 4. Audit browse, then citations — via the UI's own nav links.
   await page.getByRole('link', { name: /audit/i }).click();
   await page.getByRole('heading', { name: /audit/i }).waitFor();
   await shot(page, '05-audit-browse');
@@ -256,7 +233,7 @@ fi
 Greppable proof of the server contract underneath the rendered demo.
 
 ```bash
-# http.log — snapshot each canonical route. -sS keeps it quiet but shows
+# http.log — snapshot each route. -sS keeps it quiet but shows
 # errors; -w records the status line per route.
 {
   for route in "/" "/review/$ID/changes" "/review/$ID/audit" \
@@ -266,10 +243,8 @@ Greppable proof of the server contract underneath the rendered demo.
   done
 } > "$CAPDIR/http.log" 2>&1
 
-# sse.log — transcript of the SSE stream while a side shell drives phase
-# transitions. Start the reader in the background, mutate STATE.md (the
-# walker's watchdog turns each write into an SSE push), give the pushes a
-# moment to land, then stop the reader.
+# sse.log — record the SSE stream while a side shell flips the phase in
+# STATE.md (each write becomes a push), then stop the reader.
 curl -sS -N --max-time 15 "$BASE/events?review=$ID" > "$CAPDIR/sse.log" 2>&1 &
 SSE_PID=$!
 sed -i 's/^current-phase:.*/current-phase: awaiting-human-review/' "$STATE_FILE"
@@ -308,10 +283,9 @@ fencing deep:
 
     ## What this demonstrates
 
-    <one paragraph: which walker behavior is shown — the hotkey
-    navigation, the SSE-driven phase transition and the lock-state /
-    Apply flip, the activity indicator — and what to look for in the
-    recording, trace, and sse.log.>
+    <one paragraph: which UI behavior is shown — the hotkey navigation,
+    the SSE-driven update and any lock-state transition — and what to
+    look for in the recording, trace, and sse.log.>
 
     ## Files
 
@@ -320,7 +294,7 @@ fencing deep:
     - `trace.zip` — Playwright trace; `npx playwright show-trace trace.zip`.
     - `01-dashboard.png` … `06-citations.png` — key-state screenshots.
     - `dom.html` — DOM dump at a representative state.
-    - `http.log` — curl snapshots of the canonical routes.
+    - `http.log` — curl snapshots of the UI's routes.
     - `sse.log` — `/events?review=<id>` event-stream transcript.
 
 ## Reviewing
