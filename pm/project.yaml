@@ -15886,11 +15886,18 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/207
   gh_pr_number: 207
   created_at: '2026-05-05T13:29:33.145323+00:00'
-  updated_at: '2026-05-21T15:48:35.324999+00:00'
+  updated_at: '2026-05-21T16:31:35.818900+00:00'
   started_at: '2026-05-05T17:44:35.482235+00:00'
   reviewed_at: '2026-05-05T17:54:24.906576+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5900335
+    text: 'review i6: made _render_content null-safe on a present-but-null project:
+      key in project.yaml (was data.get("project", {}).get(...) outside the load try/except,
+      raising AttributeError -> persistent "render error"). Switched to the `or {}`
+      idiom already used for prs; added test_render_content_null_project_key.'
+    created_at: '2026-05-21T16:31:34Z'
+    last_edited: '2026-05-21T16:31:34Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-28bda5d-improvement-home-window-redraws-only-a288d60a
 - id: pr-6f542a2
   plan: improvements
@@ -21045,6 +21052,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-21T17:46:24.839379+00:00'
   updated_at: '2026-05-22T17:27:08.904320+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9330dec
+  plan: bugs
+  title: 'Bug: home-window line truncation undercounts emoji width, can soft-wrap
+    on narrow panes'
+  branch: pm/pr-9330dec-bug-home-window-line-truncation-undercounts-emoji-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/home_window/pr_list.py:_truncate (and callers in
+    _render_content/_compose).
+
+
+    _truncate uses len() (code-point count) to fit lines to the pane width, but format_pr_line
+    (pm_core/cli/helpers.py:280) prepends a status emoji from PR_STATUS_ICONS (⏳🔨👀🧪✅🚫),
+    each rendered as 2 cells in most terminals. A line truncated to exactly `width`
+    code points therefore renders as width+1 cells (more if the title also contains
+    wide chars), overflowing the last column and soft-wrapping on a narrow pane.
+
+
+    Repro: shrink the pm-home pane to mobile-mode width with at least one long PR
+    title so lines truncate; the truncated line wraps, producing a stray trailing
+    character / extra row at the bottom — exactly the "no soft-wrap artifacts" case
+    the pr-28bda5d acceptance test calls out.
+
+
+    Fix needs display-width measurement (wcwidth dependency, or a unicodedata-based
+    helper with an emoji heuristic). Deferred from pr-28bda5d, whose spec explicitly
+    scoped wide-char awareness out (its premise that format_pr_line is plain ASCII
+    is incorrect — it carries emoji).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T15:56:55.362547+00:00'
+  updated_at: '2026-05-21T15:56:55.362547+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
