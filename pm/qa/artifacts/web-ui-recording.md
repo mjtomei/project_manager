@@ -159,13 +159,16 @@ const shot = (page, name) =>
 
   const page = await context.newPage();
 
-  // 1. Dashboard -> click into the review.
+  // 1. Dashboard. Screenshot it *before* clicking into the review, then
+  // click through (role/text locators auto-track PR 3's real routes).
   await page.goto(routes.dashboard);
-  await page.getByRole('link', { name: new RegExp(reviewId, 'i') }).click();
+  await page.getByRole('heading', { name: /review/i }).first().waitFor();
   await shot(page, '01-dashboard');
+  await page.getByRole('link', { name: new RegExp(reviewId, 'i') }).click();
 
-  // 2. Proposed-changes (review) walker. Auto-waiting locator, no sleep.
-  await page.goto(routes.changes);
+  // 2. Proposed-changes (review) walker — reached by the click above; the
+  // review's default view is the changes walker. Auto-waiting locator, no
+  // sleep. (routes.changes documents the canonical path / fallback.)
   await page.getByRole('heading', { name: /proposed change/i }).waitFor();
   await shot(page, '02-changes');
 
@@ -195,12 +198,15 @@ const shot = (page, name) =>
   // the editable -> read-only flip the phase change produced.
   await page.getByRole('button', { name: /apply/i }).waitFor({ state: 'hidden' });
 
-  // 4. Audit browse, then citations (click-through where the UI links).
-  await page.goto(routes.auditBrowse);
+  // 4. Audit browse, then citations — click through the walker's own nav
+  // (auto-tracks PR 3's real routes). routes.auditBrowse / routes.citations
+  // stay as the documented contract and the fallback if the nav element
+  // differs (then swap a click for `page.goto(routes.auditBrowse)`).
+  await page.getByRole('link', { name: /audit/i }).click();
   await page.getByRole('heading', { name: /audit/i }).waitFor();
   await shot(page, '05-audit-browse');
 
-  await page.goto(routes.citations);
+  await page.getByRole('link', { name: /citation/i }).click();
   await page.getByRole('table').waitFor();
   await shot(page, '06-citations');
 
@@ -254,7 +260,7 @@ Greppable proof of the server contract underneath the rendered demo.
 # transitions. Start the reader in the background, mutate STATE.md (the
 # walker's watchdog turns each write into an SSE push), give the pushes a
 # moment to land, then stop the reader.
-curl -N --max-time 15 "$BASE/events?review=$ID" > "$CAPDIR/sse.log" 2>&1 &
+curl -sS -N --max-time 15 "$BASE/events?review=$ID" > "$CAPDIR/sse.log" 2>&1 &
 SSE_PID=$!
 sed -i 's/^current-phase:.*/current-phase: awaiting-human-review/' "$STATE_FILE"
 sleep 0.5
