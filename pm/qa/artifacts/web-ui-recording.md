@@ -34,7 +34,12 @@ For terminal/CLI surfaces use `cli-recording.md`; for the pm TUI use
   `UI_FOCUS.md`, `NOTES.md`, and per-cycle `REVIEW_CYCLE_N.md` /
   `CITATION_AUDIT_CYCLE_N.md` / `REVIEW_RESPONSE_CYCLE_N.md`), then launch
   `pm review ui --port <ephemeral>`. Drive behavior by editing `STATE.md`
-  to walk phases and by appending to the review/audit files.
+  to walk phases and by appending to the review-response file. The server's
+  `watchdog` push-watches exactly `STATE.md`, `UI_FOCUS.md`, and the current
+  cycle's `REVIEW_RESPONSE_CYCLE_N.md` (plan-litreview § Server-pushed
+  updates), so those edits drive **live** SSE updates; appending to the
+  audit file changes content but only surfaces on the next navigation, not
+  via a push.
 
 ## What this recipe produces
 
