@@ -5,7 +5,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Ensure the pm user's ~/.local/bin (where the git push-proxy wrapper is
 # installed at container startup) is on PATH for non-login shells —
 # ``docker exec bash -c`` doesn't source profile files.
-ENV PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# /opt/pm-src/bin (the pm source bind-mounted at runtime) is on PATH so the
+# integration-test ``fake-claude`` stand-in resolves by bare name, exactly as
+# the launcher invokes it on the host (no build-time path baking needed).
+ENV PATH=/home/pm/.local/bin:/opt/pm-src/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Make pm's source tree (bind-mounted at /opt/pm-src by container.py)
 # importable without a per-container pip install.  The /usr/local/bin/pm
 # shim below runs ``python3 -m pm_core.wrapper`` which picks up pm_core

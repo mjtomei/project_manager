@@ -267,8 +267,6 @@ def fake_claude_config(session_tag: str | None = None) -> dict | None:
 
     Returns the raw dict.  Use ``fake_claude_config_for_type()`` to get the
     fully-merged config for a specific session type.
-
-    An optional top-level ``"binary"`` key overrides the fake-claude path.
     """
     import json
     sd = session_dir(session_tag)
@@ -314,10 +312,7 @@ def fake_claude_config_for_type(
         # Catch-all is always a no-verdict session — strip any stray verdicts.
         type_config = {k: v for k, v in all_config.items() if k != "verdicts"}
     defaults = raw.get("_defaults", {})
-    binary = raw.get("binary")
     merged = {**defaults, **type_config}
-    if binary:
-        merged.setdefault("binary", binary)
     return merged
 
 
@@ -341,8 +336,8 @@ def set_fake_claude_config(session_tag: str, config: dict) -> None:
                     "'_all' is a no-verdict catch-all; remove its 'verdicts'."
                 )
             continue
-        if key.startswith("_") or key == "binary":
-            continue  # _defaults, binary — not session-type entries
+        if key.startswith("_"):
+            continue  # _defaults — not a session-type entry
         if not isinstance(value, dict):
             errors.append(f"Config entry {key!r} must be a dict, got {type(value).__name__}")
             continue

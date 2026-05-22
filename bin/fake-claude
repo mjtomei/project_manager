@@ -17,9 +17,11 @@ Usage:
 import argparse
 import sys
 
-# Allow running from the repo root without installing the package.
+# Allow running from the repo root without installing the package.  Resolve
+# the real path first so a PATH symlink (e.g. ~/.local/bin/fake-claude created
+# by install.sh) still points sys.path at the repo root, not the symlink dir.
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pm_core.fake_claude import ALL_VERDICT_CHOICES, run_fake_claude
 

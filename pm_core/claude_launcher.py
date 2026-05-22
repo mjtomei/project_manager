@@ -11,17 +11,15 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger, log_shell_command, pm_core_path
+from pm_core.paths import configure_logger, log_shell_command
 _log = configure_logger("pm.claude_launcher")
 
-# Default path to the fake-claude executable bundled with pm.  Resolved from
-# the active ``pm_core`` package the same way ``pm which`` resolves the install
-# in use (``pm_core_path()``), so a checkout under test uses *its own* copy of
-# the binary.  This is also the single source of truth shared with the
-# container bind-mount (``container._pm_src = pm_core_path().parent``) and the
-# host->container path rewrite (``container._rewrite_pm_src_path``), so the
-# rewrite is guaranteed to match the emitted path rather than coincidentally so.
-_FAKE_CLAUDE_BIN = str(pm_core_path().parent / "bin" / "fake-claude")
+# The fake-claude executable is invoked by bare name and resolved from PATH —
+# exactly like the real ``claude`` binary.  ``install.sh`` symlinks it onto the
+# host PATH and the container image puts ``/opt/pm-src/bin`` (the bind-mounted
+# pm source) on PATH, so the same command resolves correctly in *both*
+# environments with no build-time path baking and no host->container rewrite.
+_FAKE_CLAUDE_BIN = "fake-claude"
 
 
 def _fake_claude_config_for_type(session_type: str | None) -> dict | None:
@@ -225,9 +223,9 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
 
     out: dict = {}
     for key, value in raw.items():
-        # Skip non-session-type keys: _defaults, _all, binary (mirrors the
+        # Skip non-session-type keys: _defaults, _all (mirrors the
         # filtering in set_fake_claude_config).
-        if key.startswith("_") or key == "binary" or not isinstance(value, dict):
+        if key.startswith("_") or not isinstance(value, dict):
             continue
         verdicts = value.get("verdicts") or {}
         if not verdicts:
@@ -406,7 +404,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
     if fc_config is not None:
-        cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
+        cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
         cmd = [claude]
@@ -492,7 +490,7 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     # Resolve provider
     _, model_flag, run_env = _resolve_provider(provider)
     if fc_config is not None:
-        cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
+        cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
         cmd = [claude]
@@ -630,7 +628,6 @@ def build_claude_shell_cmd(
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)
     if fc_config is not None:
-        binary = fc_config.get("binary", _FAKE_CLAUDE_BIN)
         # Thread the session_id (generated above for transcript=, or passed
         # by the caller) so the fake writes the JSONL transcript + hook event
         # the verdict poller reads.  None for interactive panes that aren't
@@ -638,7 +635,7 @@ def build_claude_shell_cmd(
         fake_args = _fake_claude_args(fc_config, session_id=session_id,
                                       session_type=session_type,
                                       session_tag=session_tag)
-        cmd = env_prefix + shlex.quote(binary) + " " + " ".join(shlex.quote(a) for a in fake_args)
+        cmd = env_prefix + shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
         log_shell_command(cmd, prefix="claude")
         return cmd
     else:
@@ -793,7 +790,7 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
 
     def _run():
         if fc_config is not None:
-            cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
+            cmd = [_FAKE_CLAUDE_BIN]
             cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
         else:
             claude = find_claude()

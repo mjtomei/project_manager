@@ -74,9 +74,9 @@ loop state machines, and verification transitions without real API calls.
      raises `ValueError` on invalid verdict / unknown session type / `verdicts`
      placed inside the `_all` catch-all.
    - `clear_fake_claude(tag)` removes the file.
-   - `fake_claude_config_for_type(session_type, tag)` merges `_defaults`,
-     per-type overrides, and propagates top-level `binary`. `_defaults`,
-     `binary`, and `_all` keys are not validated as session types.
+   - `fake_claude_config_for_type(session_type, tag)` merges `_defaults` with
+     the per-type overrides. `_defaults` and `_all` keys are not validated as
+     session types.
    - **`_all` catch-all ("fake everything"):** when the config has an `_all`
      key, any session type without its own entry — and any call with
      `session_type=None` — falls back to `_all`, always treated as a
@@ -136,43 +136,36 @@ loop state machines, and verification transitions without real API calls.
      configured (real claude not required).
    - `find_claude()` itself does not consult fake config — session_type is the
      trigger.
-   - **Binary path resolution (single source of truth).** `_FAKE_CLAUDE_BIN`
-     is resolved from `paths.pm_core_path()` — the *same* helper `pm which`
-     prints — as `pm_core_path().parent / "bin" / "fake-claude"`. This means a
-     checkout under test resolves to its *own* `bin/fake-claude` (iterating on
-     the fake picks up the latest copy), and the path shares its source of
-     truth with the container bind-mount (`container._pm_src =
-     pm_core_path().parent`) and the host→container rewrite
-     (`container._rewrite_pm_src_path`, which keys on the same
-     `pm_core_path().parent / "bin"`). A per-tag `binary` config key still
-     overrides this default.
+   - **Binary resolution — bare name on PATH (identical host & container).**
+     `_FAKE_CLAUDE_BIN` is the bare string `"fake-claude"`; the launcher emits
+     it unqualified and lets PATH resolve it **at runtime in-context**, exactly
+     as it does for the real `claude` binary. No absolute path is baked at
+     build time, so the *same* command string works on the host and inside a
+     container with no host→container translation. There is no per-tag `binary`
+     config override (removed — see "Scope extensions" / requirement 6b).
 
-6b. **Container-mode binary resolution — host path rewritten at the exec
-   boundary.** `build_claude_shell_cmd` runs on the *host* orchestrator, so it
-   always emits the host absolute path `<pm_src>/bin/fake-claude` even for a
-   command destined to run inside a container. Inside the container the pm
-   source is bind-mounted read-only at `_CONTAINER_PM_SRC` (`/opt/pm-src`)
-   while `/workspace` is the mounted *project* clone — so the host path does
-   not exist there and the exec'd command would die with
-   `No such file or directory`.
-   - `container.build_exec_cmd` calls `_rewrite_pm_src_path(shell_cmd)` before
-     wrapping, replacing the host pm-source bin prefix
-     (`pm_core_path().parent / "bin/"`) with the container mount
-     (`/opt/pm-src/bin/`). `build_exec_cmd` is the single chokepoint both the
-     QA-direct path (`qa_loop` builds the cmd then calls `build_exec_cmd`
-     itself, container already created) and the impl/review/finalize path
-     (via `wrap_claude_cmd`) funnel through, so coverage is uniform.
-   - This mirrors the existing host→container translation `wrap_claude_cmd`
-     already does for the prompt-file prefix (`$(cat <workdir>/…)` →
-     `$(cat /workspace/…)`); the pm-src rewrite is container.py translating its
-     *own* mount, keyed on the same `pm_core_path().parent` that the mount uses.
-   - `bin/fake-claude` runs correctly from `/opt/pm-src/bin/` because it does
-     `sys.path.insert(0, parent.parent)` (→ `/opt/pm-src`, the repo root on the
-     RO mount), and the container sets `PYTHONPATH=/opt/pm-src`.
-   - **Known limitation:** the rewrite is scoped to paths under the pm-source
-     `bin/` dir, so a per-tag `binary` override pointing *outside* that dir is
-     NOT translated and would be host-only (broken under container mode). The
-     default bundled binary is the supported container path.
+6b. **Container-mode binary resolution — bare name, no rewrite.** Because the
+   fake is invoked by bare name, the only requirement is that `fake-claude` is
+   on PATH in both execution contexts:
+   - **Host:** `install.sh --local` symlinks `~/.local/bin/fake-claude` →
+     `<repo>/bin/fake-claude` (alongside the `pm` symlink). `bin/fake-claude`
+     does `sys.path.insert(0, Path(__file__).resolve().parent.parent)` — the
+     `.resolve()` makes the symlink point sys.path at the real repo root, so it
+     imports `pm_core` without an install. (`fake_claude.py` is stdlib-only, so
+     the script runs under the system `python3` from its `#!/usr/bin/env
+     python3` shebang — no venv/deps needed.)
+   - **Container:** the image puts `/opt/pm-src/bin` (the read-only pm-source
+     bind-mount) on `PATH` (Dockerfile `ENV PATH=…:/opt/pm-src/bin:…`). Bare
+     `fake-claude` resolves to `/opt/pm-src/bin/fake-claude`, which
+     `sys.path.insert`s `/opt/pm-src` (the repo root on the mount); the image
+     also sets `PYTHONPATH=/opt/pm-src`.
+   - This removes the earlier host-path-rewrite hack: `build_claude_shell_cmd`
+     no longer bakes `<pm_src>/bin/fake-claude`, so `build_exec_cmd` no longer
+     needs `_rewrite_pm_src_path` (deleted). The fake command now reaches the
+     container verbatim, the same way bare `claude` does. The previous approach
+     baked a host path that didn't exist inside the container; resolving by
+     name at runtime is the principled fix and also removes the
+     custom-`binary`-override gap (the override no longer exists).
 
 7. **Companion fixtures — `tests/fixtures/fake_claude/*.txt`**
    - One file per verdict — `pass.txt`, `needs_work.txt`, `input_required.txt`,
@@ -262,13 +255,12 @@ loop state machines, and verification transitions without real API calls.
 - **`--verdict` required on the CLI?** Required for `pm fake-claude` (Click);
   optional with default `PASS` on the standalone `bin/fake-claude` so it can be
   invoked as a drop-in claude replacement with no arguments.
-- **Where does the binary path come from?** `_FAKE_CLAUDE_BIN` is resolved
-  from `pm_core_path()` (the `pm which` helper) as
-  `pm_core_path().parent / "bin" / "fake-claude"`, so it tracks the active
-  install/checkout and shares its source of truth with the container mount and
-  rewrite (see requirements 6 and 6b); a per-tag config can override via the
-  top-level `binary` key. Container resolution rewrites the host pm-src bin
-  prefix to the `/opt/pm-src` mount at the exec boundary (requirement 6b).
+- **Where does the binary path come from?** `_FAKE_CLAUDE_BIN` is the bare
+  name `"fake-claude"`, resolved from PATH at runtime in-context — exactly like
+  the real `claude` binary (requirements 6 and 6b). `install.sh` puts it on the
+  host PATH; the container image puts `/opt/pm-src/bin` on PATH. There is no
+  per-tag `binary` override (removed — bare-name resolution makes it
+  unnecessary and it could not be made container-correct).
 
 ## Edge Cases / Interactions
 

@@ -4,6 +4,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$HOME/.local/share/pm/venv"
 BIN_LINK="$HOME/.local/bin/pm"
+# fake-claude is a standalone integration-test stand-in for real Claude.  It is
+# resolved by bare name from PATH (exactly like ``claude``) by the launcher, so
+# it must be on PATH.  Symlink the repo script directly — it self-resolves its
+# repo root via Path(__file__).resolve(), so a symlink works.
+FAKE_LINK="$HOME/.local/bin/fake-claude"
 
 FORCE=false
 MODE=""
@@ -28,8 +33,9 @@ done
 
 if [ "$MODE" = "uninstall" ]; then
     rm -f "$BIN_LINK"
+    rm -f "$FAKE_LINK"
     rm -rf "$VENV_DIR"
-    echo "Removed $BIN_LINK and $VENV_DIR"
+    echo "Removed $BIN_LINK, $FAKE_LINK and $VENV_DIR"
     exit 0
 fi
 
@@ -59,9 +65,11 @@ if [ "$MODE" = "local" ]; then
 
     mkdir -p "$HOME/.local/bin"
     ln -sf "$VENV_DIR/bin/pm" "$BIN_LINK"
+    ln -sf "$SCRIPT_DIR/bin/fake-claude" "$FAKE_LINK"
 
     echo ""
     echo "Installed pm -> $BIN_LINK"
+    echo "Installed fake-claude -> $FAKE_LINK"
     echo "Run 'pm help' to get started."
     exit 0
 fi

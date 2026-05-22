@@ -739,13 +739,12 @@ class TestFakeClaudeConfig:
         with pytest.raises(ValueError):
             set_fake_claude_config(tag, {"impl": {"verdicts": {"PASS": 1}}})
 
-    def test_defaults_and_binary_keys_are_not_validated_as_session_types(self, tmp_path, monkeypatch):
+    def test_defaults_key_is_not_validated_as_session_type(self, tmp_path, monkeypatch):
         from pm_core.paths import set_fake_claude_config
         tag = self._setup(tmp_path, monkeypatch)
         # Should not raise
         set_fake_claude_config(tag, {
             "_defaults": {"preamble": 3},
-            "binary": "/path/to/fake-claude",
             "review": {"verdicts": {"PASS": 1}},
         })
 
@@ -787,16 +786,6 @@ class TestFakeClaudeConfig:
         assert result["preamble"] == 2   # per-type wins
         assert result["delay"] == 1.0    # from defaults
 
-    def test_for_type_propagates_top_level_binary(self, tmp_path, monkeypatch):
-        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
-        tag = self._setup(tmp_path, monkeypatch)
-        config = {
-            "binary": "/custom/fake",
-            "review": {"verdicts": {"PASS": 1}},
-        }
-        set_fake_claude_config(tag, config)
-        result = fake_claude_config_for_type("review", tag)
-        assert result["binary"] == "/custom/fake"
 
     # _all catch-all ("fake everything") mode
 
@@ -918,14 +907,12 @@ class TestFakeClaudeLauncher:
                             lambda st, tag=None: None)
         assert claude_launcher._fake_claude_config_for_type(None) is None
 
-    def test_fake_bin_resolved_via_pm_core_path(self):
-        """The default binary is derived from pm_core_path() (the `pm which`
-        helper), sharing its source of truth with the container mount + rewrite.
-        Guards against regressing to a separate __file__-based derivation."""
+    def test_fake_bin_is_bare_name(self):
+        """The fake binary is invoked by bare name and resolved from PATH —
+        exactly like real `claude` — so the same command works on the host and
+        inside a container with no path baking / no host->container rewrite."""
         from pm_core import claude_launcher
-        from pm_core.paths import pm_core_path
-        assert claude_launcher._FAKE_CLAUDE_BIN == str(
-            pm_core_path().parent / "bin" / "fake-claude")
+        assert claude_launcher._FAKE_CLAUDE_BIN == "fake-claude"
 
     def test_build_shell_cmd_uses_fake_binary_with_session_type(self, monkeypatch):
         from pm_core import claude_launcher
@@ -970,8 +957,8 @@ class TestFakeClaudeLauncher:
     def test_launch_claude_uses_fake_binary(self, monkeypatch, tmp_path):
         """launch_claude must invoke fake-claude binary, not the real claude."""
         from pm_core import claude_launcher
-        fake_bin = "/custom/fake-claude"
-        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        fake_bin = "fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}}
         monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
                             lambda st: fc_config if st == "review" else None)
         captured = []
@@ -987,8 +974,8 @@ class TestFakeClaudeLauncher:
     def test_launch_claude_works_without_real_claude_on_path(self, monkeypatch, tmp_path):
         """launch_claude must not require the real claude binary when fake is configured."""
         from pm_core import claude_launcher
-        fake_bin = "/custom/fake-claude"
-        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        fake_bin = "fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}}
         monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
                             lambda st: fc_config if st == "review" else None)
         monkeypatch.setattr("pm_core.claude_launcher.find_claude", lambda: None)
@@ -1004,8 +991,8 @@ class TestFakeClaudeLauncher:
     def test_launch_claude_print_uses_fake_binary(self, monkeypatch):
         """launch_claude_print must invoke fake-claude binary, not the real claude."""
         from pm_core import claude_launcher
-        fake_bin = "/custom/fake-claude"
-        fc_config = {"verdicts": {"NEEDS_WORK": 1}, "binary": fake_bin}
+        fake_bin = "fake-claude"
+        fc_config = {"verdicts": {"NEEDS_WORK": 1}}
         monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
                             lambda st: fc_config if st == "review" else None)
         captured = []
@@ -1027,7 +1014,7 @@ class TestFakeClaudeLauncher:
         import subprocess
         from pm_core import claude_launcher
         # No-verdict fake config (what _all mode resolves to for any type).
-        fc_config = {"binary": "/custom/fake-claude"}
+        fc_config = {}  # no-verdict (_all-style) config
         monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
                             lambda st: fc_config)
         captured_kw = {}
@@ -1047,8 +1034,8 @@ class TestFakeClaudeLauncher:
     def test_launch_claude_print_works_without_real_claude_on_path(self, monkeypatch):
         """launch_claude_print must not require real claude when fake is configured."""
         from pm_core import claude_launcher
-        fake_bin = "/custom/fake-claude"
-        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        fake_bin = "fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}}
         monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
                             lambda st: fc_config if st == "review" else None)
         monkeypatch.setattr("pm_core.claude_launcher.find_claude", lambda: None)
@@ -1068,8 +1055,8 @@ class TestFakeClaudeLauncher:
         """launch_claude_print_background must invoke fake-claude binary."""
         import threading
         from pm_core import claude_launcher
-        fake_bin = "/custom/fake-claude"
-        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        fake_bin = "fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}}
         monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
                             lambda st: fc_config if st == "review" else None)
         captured = []

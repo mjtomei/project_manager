@@ -933,32 +933,6 @@ def create_container(
     return container_id
 
 
-def _rewrite_pm_src_path(shell_cmd: str) -> str:
-    """Rewrite host pm-source paths in *shell_cmd* to their in-container path.
-
-    The pm source tree is bind-mounted read-only at ``_CONTAINER_PM_SRC``
-    inside the container (see ``create_container``).  Commands built on the
-    host may embed an absolute path under that tree — most notably the bundled
-    fake-claude binary, which ``build_claude_shell_cmd`` resolves to
-    ``<host_pm_src>/bin/fake-claude``.  Inside the container that host path
-    does not exist (``/workspace`` is the mounted *project* clone, not the pm
-    source), so the exec'd command dies with "No such file or directory".
-    Translate the host prefix to the container mount so containerised fake
-    panes find the binary.
-
-    Only a path that is unambiguously the pm-source bin (``<pm_src>/bin/``) is
-    rewritten, so the project clone's own ``/workspace`` references — cwd,
-    prompt-file paths — are left untouched even when the host pm-source tree
-    happens to coincide with the QA agent's ``/workspace`` checkout.
-    """
-    from pm_core.paths import pm_core_path
-    host_bin_dir = str(pm_core_path().parent / "bin") + "/"
-    container_bin_dir = f"{_CONTAINER_PM_SRC}/bin/"
-    if host_bin_dir in shell_cmd:
-        return shell_cmd.replace(host_bin_dir, container_bin_dir)
-    return shell_cmd
-
-
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
                    proxy_socket_path: str | None = None) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
@@ -972,7 +946,6 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     proxy daemon thread to self-terminate (it checks for socket existence).
     """
     runtime = _get_runtime()
-    shell_cmd = _rewrite_pm_src_path(shell_cmd)
     escaped = shlex.quote(shell_cmd)
     # Under Podman with --userns=keep-id, the default user is already the
     # host user (correct UID).  The "pm" username doesn't exist in
