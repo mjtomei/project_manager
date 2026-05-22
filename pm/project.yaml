@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d887f4c
+  active_pr: pr-37073ad
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -15886,7 +15886,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/207
   gh_pr_number: 207
   created_at: '2026-05-05T13:29:33.145323+00:00'
-  updated_at: '2026-05-05T17:54:24.906576+00:00'
+  updated_at: '2026-05-21T15:48:35.324999+00:00'
   started_at: '2026-05-05T17:44:35.482235+00:00'
   reviewed_at: '2026-05-05T17:54:24.906576+00:00'
   merged_at: null
@@ -19552,7 +19552,7 @@ prs:
   title: 'Bug: decouple TUI in-memory state from project.yaml via a coalescing write
     queue'
   branch: pm/pr-b4b68f3-bug-decouple-tui-in-memory-state-from-project-yaml
-  status: pending
+  status: in_review
   depends_on: []
   description: "## Symptom\n\nTUI key handling exhibits a \"first press lags, next\
     \ few queue, results appear all at once\" pattern when navigating PR selection\
@@ -19608,15 +19608,16 @@ prs:
     \ selection batches; visible lag.\n- Post-fix: smooth nav; check `git diff project.yaml`\
     \ shows a single `active_pr:` change to the final selected PR, not an in-flight\
     \ intermediate."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/212
+  gh_pr_number: 212
   created_at: '2026-05-14T14:37:18.381479+00:00'
-  updated_at: '2026-05-14T14:38:43.017620+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-21T16:17:51.414473+00:00'
+  started_at: '2026-05-21T15:47:09.402440+00:00'
+  reviewed_at: '2026-05-21T16:17:51.414473+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b4b68f3-bug-decouple-tui-in-memory-state-fro-d07aaad6
 - id: pr-70d02ed
   plan: plan-regression
   title: 'Regression coverage: watcher behavior and review session'
@@ -20489,7 +20490,7 @@ prs:
   plan: plan-3119574
   title: Session-launching CLI commands + project.yaml review registry
   branch: pm/pr-a6ef6be-session-launching-cli-commands-project-yaml-review
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Two CLI commands (`pm review <target>` and `pm plan literature-review
     <plan>`) that launch literature-review sessions in tmux panes, plus the `project.yaml`-backed
@@ -20518,9 +20519,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/211
   gh_pr_number: 211
   created_at: '2026-05-20T22:53:20.224284+00:00'
-  updated_at: '2026-05-21T04:08:35.118589+00:00'
+  updated_at: '2026-05-21T04:43:53.080388+00:00'
   started_at: '2026-05-21T04:08:35.118589+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-21T04:43:53.080388+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a6ef6be-session-launching-cli-commands-proje-a17683d9
@@ -20569,7 +20570,7 @@ prs:
   title: Web server skeleton + dashboard + proposed-changes walker + lock states +
     cycle nav + SSE + Apply button
   branch: pm/pr-d887f4c-web-server-skeleton-dashboard-proposed-changes-wal
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-1160366
   description: 'FastAPI single-file server that enumerates reviews from `project.yaml`,
@@ -20617,9 +20618,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/210
   gh_pr_number: 210
   created_at: '2026-05-20T22:53:20.224365+00:00'
-  updated_at: '2026-05-21T04:17:31.145929+00:00'
+  updated_at: '2026-05-21T05:05:57.683633+00:00'
   started_at: '2026-05-21T04:07:44.855651+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-21T05:05:57.683633+00:00'
   merged_at: null
   notes:
   - id: note-3b45e04
@@ -20826,3 +20827,225 @@ prs:
       serializing pr-start, and create-after-reserve ordering.'
     created_at: '2026-05-21T04:28:22Z'
     last_edited: '2026-05-21T04:28:22Z'
+- id: pr-c41f029
+  plan: bugs
+  title: 'Bug: capture originating tmux session when the PR actions pane opens, not
+    at action-execution time'
+  branch: pm/pr-c41f029-bug-capture-originating-tmux-session-when-the-pr-a
+  status: pending
+  depends_on: []
+  description: 'When a TUI action (pr start/review/qa/merge, review-loop, qa-loop)
+    creates or replaces a window, pm tries to move the session that initiated the
+    action onto the new window so the user follows their action. Today that originating
+    session is determined LATE — at action-execution time — via tmux.sessions_on_window(base,
+    window_id), which queries each grouped session''s current window (''tmux display
+    -p #{window_id}'') and matches it against the old window id. switch_sessions_to_window()
+    then moves the matches.
+
+
+    Problem: there is a delay/race between the user triggering the action from the
+    PR actions pane (picker/popup) and the code running sessions_on_window. By the
+    time detection runs, the active window/session can have changed (the popup closed,
+    another session navigated, the old window was already killed/recreated), so the
+    wrong session — or no session — gets switched to the new window. The detection
+    is also several tmux round-trips of latency on the action''s critical path.
+
+
+    Fix: determine the originating session ONCE, at the moment the PR actions pane
+    / picker is opened (when we still know which client/session invoked it), and pass
+    it explicitly through to the action instead of re-detecting at execution time.
+    The action then hands that captured session straight to switch_sessions_to_window()
+    rather than calling sessions_on_window().
+
+
+    Concretely:
+
+    - At pane/picker open, resolve the invoking session (e.g. from the client tty
+    -> session via tmux list-clients, or PM_TMUX/session env, or the active client)
+    and store it on the action context.
+
+    - Thread the captured session through the dispatch path (command bar / SIGUSR2
+    command queue / picker result handlers in pm_core/tui/pr_view.py and screens.py)
+    into the action implementations (review_loop_ui, qa_loop_ui, pr start/merge flows).
+
+    - switch_sessions_to_window() should accept the captured originating session(s)
+    directly; keep sessions_on_window() only as a fallback when no captured session
+    is available (legacy/CLI paths).
+
+
+    This builds directly on pr-291e891 (action source metadata: session/window/task)
+    — that PR defines the action-context structure; this one ensures the session field
+    is captured at pane-open time and actually used for window-following, eliminating
+    the late-detection race.
+
+
+    Files: pm_core/tmux.py (sessions_on_window / switch_sessions_to_window), pm_core/qa_loop.py
+    (~2739 sessions_on_window call site), pm_core/tui/review_loop_ui.py, pm_core/tui/qa_loop_ui.py,
+    pm_core/tui/pr_view.py, pm_core/tui/app.py (command dispatch / _drain_command_queue),
+    pm_core/tui/screens.py (picker screens).
+
+
+    tests: simulate an action where the active window changes between pane-open and
+    action-execution and assert the originally-capturing session is the one switched
+    to the new window; assert switch_sessions_to_window uses the captured session
+    without calling sessions_on_window when context is present.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T15:56:33.458586+00:00'
+  updated_at: '2026-05-21T15:56:33.458586+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5db0e85
+  plan: plan-3119574
+  title: 'QA instruction: review walker UI fixture setup'
+  branch: pm/pr-5db0e85-qa-instruction-review-walker-ui-fixture-setup
+  status: pending
+  depends_on: []
+  description: 'New QA instruction file `pm/qa/instructions/review-walker-ui.md` telling
+    scenario workers how to stand up the walker UI for Claude-driven QA. Setup procedure:
+    install pm with the correct `PYTHONPATH` (per `tui-manual-test.md`); create a
+    throwaway pm project; register a review and materialize a fixture per-review directory
+    under `pm/docs/adversarial-review/reviews/<id>/` with multi-cycle artifacts in
+    the canonical formats — `STATE.md`, `UI_FOCUS.md`, `NOTES.md`, and per-cycle `REVIEW_CYCLE_N.md`
+    / `CITATION_AUDIT_CYCLE_N.md` / `REVIEW_RESPONSE_CYCLE_N.md` (response-blocks
+    with mixed provenance); launch `pm review ui --port <ephemeral>`. Drive behavior
+    deterministically by editing `STATE.md` to walk phases (review -> audit -> response
+    -> awaiting-human-review -> applying -> complete) and by appending to the review/audit
+    files to exercise live-update + the activity indicator; interact over HTTP/SSE
+    with `curl` (no browser driver — Claude-driven testing only). Fixtures must match
+    pr-1160366''s canonical format so the server''s parsers accept them. Heavy deps:
+    none beyond the server''s own (`fastapi`/`watchdog`/`jinja2`/`sse-starlette`),
+    which the project container image already gets from pyproject; for scenarios that
+    want rendered snapshots/video, point at the Playwright-based path (Chromium pre-installed
+    by pr-37073ad) and the web-ui-recording artifact recipe (pr-ac58803) rather than
+    reinventing capture here. Pure QA-doc PR; QA *execution* against this instruction
+    requires pr-d887f4c (server) to be implemented, but the doc itself can land independently.
+
+
+    Tests: instruction file has valid frontmatter and is discoverable via the QA instruction-library
+    loader; the fixture-generation commands in the doc produce a directory the markdown
+    primitives (pr-1160366) parse without error.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T17:20:14.578902+00:00'
+  updated_at: '2026-05-22T17:27:38.736245+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ac58803
+  plan: plan-3119574
+  title: 'QA artifact recipe: web UI recording (browser video + HTTP/SSE)'
+  branch: pm/pr-ac58803-qa-artifact-recipe-web-ui-recording-http-sse
+  status: pending
+  depends_on:
+  - pr-5db0e85
+  - pr-37073ad
+  description: 'New QA artifact recipe `pm/qa/artifacts/web-ui-recording.md` for capturing
+    evidence of walker UI behavior under Claude-driven QA. Two complementary layers:
+
+
+    1. **Rendered browser recording (primary).** Drive headless Chromium with Playwright
+    (Node `playwright`, pre-installed by pr-37073ad) to demo the functionality end-to-end
+    — navigate dashboard → changes walker → review_browse → audit_browse → citations;
+    exercise hotkeys (`j`/`k`/`a`/`m`/`s`); trigger SSE-driven updates by editing
+    `STATE.md` / appending audit entries in a side shell and show the view react live;
+    show the activity indicator animating and the Apply / lock-state transitions.
+    Capture with Playwright''s native context-level video (`browser.newContext({ recordVideo:
+    { dir } })`) → `recording.webm`, transcoded to `recording.mp4` with ffmpeg if
+    desired. Also capture a Playwright **trace** (`context.tracing.start({ screenshots:
+    true, snapshots: true })` → `trace.zip`) for step-through evidence, plus key-state
+    `*.png` screenshots and a DOM dump (a still can''t show motion). Launch Chromium
+    with `chromium.launch({ args: [''--no-sandbox'', ''--disable-dev-shm-usage'']
+    })`. A Claude-authored Playwright driver-script skeleton is included — role/text
+    locators with auto-wait, no brittle sleeps — reusing the fixture / phase-driving
+    setup from pr-5db0e85.
+
+
+    2. **Protocol capture (supplementary).** `http.log` (curl route snapshots) and
+    `sse.log` (`curl -N ''/events?review=<id>''` transcript) as lightweight, greppable
+    proof of the server contract underneath the rendered demo.
+
+
+    `manifest.md` per the standard recipe format lists `recording.mp4`/`.webm`, `trace.zip`,
+    the screenshots, the DOM dump, `http.log`, and `sse.log`. Requires pr-37073ad''s
+    Playwright/Chromium/ffmpeg; pairs with pr-5db0e85 (fixture setup).
+
+
+    Tests: artifact recipe has valid frontmatter and is discoverable via the QA artifact-library
+    loader; documented commands are well-formed (shell/node parse); the Playwright
+    driver-script skeleton references the canonical routes and the `/events?review=<id>`
+    endpoint, records both video and trace, and launches Chromium with container-safe
+    flags.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T17:20:27.511304+00:00'
+  updated_at: '2026-05-22T17:27:23.922651+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-37073ad
+  plan: plan-3119574
+  title: 'Container: pre-install Playwright + Chromium + ffmpeg for browser QA recordings'
+  branch: pm/pr-37073ad-container-pre-install-headless-chrome-ffmpeg-puppe
+  status: pending
+  depends_on: []
+  description: 'Add browser video-recording tooling to the QA container image so the
+    walker UI PRs can be recorded under Claude-driven QA. Today the base `pm-dev`
+    image (`Dockerfile`) ships curl/asciinema/tmux — protocol- and terminal-level
+    capture only, no browser engine — so rendered UI, `walker.js` behavior (hotkeys,
+    SSE→DOM reactivity), and the activity-indicator animation cannot be recorded.
+    This PR pre-installs Playwright (Node, Chromium only):
+
+    - The `playwright` npm package (Node 22 already present) plus its bundled Chromium,
+    installed via `npx playwright install --with-deps chromium`. `--with-deps` pulls
+    Chromium''s runtime shared libs (libnss3, libatk-bridge2.0-0, libgtk-3-0, libgbm1,
+    libasound2, …) and fonts automatically, replacing the hand-maintained apt list.
+    Chromium only — skip Firefox/WebKit to limit image size.
+
+    - `ffmpeg` (apt). Playwright records video natively (it bundles its own ffmpeg),
+    so system ffmpeg is only needed to transcode the resulting `.webm` to `.mp4` and
+    for the existing asciinema workflow; keep it.
+
+
+    Why Playwright instead of puppeteer: native context-level video recording (no
+    third-party screen-recorder), built-in trace capture (`trace.zip` — DOM snapshots
+    + network + console, viewable in the trace viewer), auto-waiting + role/text locators
+    that suit LLM-driven live re-execution (no brittle sleeps), and `install --with-deps`
+    which owns the system-library problem. A single Chromium build keeps the size
+    hit comparable to a bare Google Chrome install.
+
+
+    Single base image (no per-project / multi-image split). Lands in the base `Dockerfile`
+    alongside the existing asciinema/tmux QA-recording tooling, with a build-time
+    verification step. Flag the image-size increase (Chromium + Playwright is heavy).
+    Runtime note for callers: Playwright launches Chromium with `chromium.launch({
+    args: [''--no-sandbox'', ''--disable-dev-shm-usage''] })` in the rootless container;
+    call out a mount/flag in `pm_core/container.py` only if one is actually required.
+    **No human-guided testing** — verified by the build + smoke-launch.
+
+
+    Tests: image builds with the new layer; `npx playwright --version` exits 0; a
+    headless Chromium smoke script (`chromium.launch({args:[''--no-sandbox'',''--disable-dev-shm-usage'']})`
+    → `page.goto(''about:blank'')` → dump DOM) exits 0 inside the container; `ffmpeg
+    -version` and `node -e "require(''playwright'')"` succeed; existing asciinema/tmux/curl
+    tooling still present.
+
+
+    Files: `Dockerfile`, `pm_core/container.py` (only if a runtime flag/mount for
+    Chromium is required).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T17:46:24.839379+00:00'
+  updated_at: '2026-05-22T17:27:08.904320+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
