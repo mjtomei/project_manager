@@ -443,6 +443,9 @@ class ProjectManagerApp(App):
                 self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
+        # Opt-in keystroke-latency instrumentation (PM_PERF_DEBUG=1).
+        from pm_core.tui import perf
+        perf.setup_event_loop(self._session_name)
         # External-reload IPC: write a pidfile and install a SIGUSR1 handler
         # so CLI commands can ask us to reload state without depending on
         # tmux send-keys (which gets eaten by whichever widget has focus).

@@ -12,13 +12,15 @@ Compositional architecture (refactored from a single grid-rendering widget):
   arrows once and caches them, so spinner ticks never repaint edges.
 """
 
+import time
+
 from textual.widget import Widget
 from textual.reactive import reactive
 from rich.text import Text
 from rich.cells import cell_len
 from rich.console import RenderableType
 
-from pm_core.tui import item_message
+from pm_core.tui import item_message, perf
 from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
 
 
@@ -717,6 +719,7 @@ class TechTree(Widget):
         self._cached_layout = None
         self._built: bool = False
         self._scroll_watch_installed: bool = False
+        self._perf_phases: dict = {}  # populated only when perf.ENABLED
 
     def on_mount(self) -> None:
         self.prs = self._prs
@@ -1086,6 +1089,7 @@ class TechTree(Widget):
             return
         if vh <= 0:
             return
+        _t = time.perf_counter() if perf.ENABLED else 0.0
         margin = NODE_H + V_GAP  # one node-row of look-ahead on each side
         vtop = top - margin
         vbot = top + vh + margin
@@ -1093,6 +1097,8 @@ class TechTree(Widget):
             visible = not (group._band_bottom < vtop or group._band_top > vbot)
             if bool(group.display) != visible:
                 group.display = visible
+        if perf.ENABLED:
+            self._perf_phases["cull"] = (time.perf_counter() - _t) * 1000
 
     # -- selection / animation ----------------------------------------------
 
@@ -1156,6 +1162,39 @@ class TechTree(Widget):
     # -- keyboard navigation -------------------------------------------------
 
     def on_key(self, event) -> None:
+        if not perf.ENABLED:
+            return self._on_key_impl(event)
+        # Instrumented path: time the synchronous handler, then report the
+        # full key->repaint latency once the deferred scroll/cull callbacks
+        # (scheduled below) have run.
+        self._perf_phases = {}
+        t0 = time.perf_counter()
+        self._on_key_impl(event)
+        self._perf_phases["on_key"] = (time.perf_counter() - t0) * 1000
+        self.call_after_refresh(self._perf_report_key, event.key, t0)
+
+    def _perf_report_key(self, key: str, t0: float) -> None:
+        total = (time.perf_counter() - t0) * 1000
+        if total < perf.THRESHOLD_MS:
+            return
+        ph = self._perf_phases
+        on_key = ph.get("on_key", 0.0)
+        scroll = ph.get("scroll", 0.0)
+        cull = ph.get("cull", 0.0)
+        framework = total - on_key - scroll - cull
+        vis = sum(1 for g in self._plan_groups if g.display)
+        perf.log(f"key={key} total={total:.0f}ms on_key={on_key:.0f} "
+                 f"scroll={scroll:.0f} cull={cull:.0f} framework~={framework:.0f} "
+                 f"visible_bands={vis}/{len(self._plan_groups)} "
+                 f"nodes={len(self._node_widgets)}")
+        try:
+            self.app.log_message(
+                f"⏱ {key} {total:.0f}ms (scroll {scroll:.0f}, cull {cull:.0f}, "
+                f"fw {framework:.0f})", sticky=4)
+        except Exception:
+            pass
+
+    def _on_key_impl(self, event) -> None:
         if not self.has_focus:
             return
         if not self._ordered_ids:
@@ -1338,6 +1377,15 @@ class TechTree(Widget):
         return None
 
     def _scroll_selected_into_view(self) -> None:
+        if not perf.ENABLED:
+            return self._scroll_selected_into_view_impl()
+        _t = time.perf_counter()
+        try:
+            self._scroll_selected_into_view_impl()
+        finally:
+            self._perf_phases["scroll"] = (time.perf_counter() - _t) * 1000
+
+    def _scroll_selected_into_view_impl(self) -> None:
         """Scroll the parent container to keep the selected node visible."""
         if not self._ordered_ids:
             return
