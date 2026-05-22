@@ -256,6 +256,14 @@ dominant nav cost is NOT the repaint: `pr_view.handle_pr_selected` calls
 YAML that dump alone is ~1.2 s, and the full lock+read+fsync round-trip
 measures ~2.7 s/key — so end-to-end nav is ~3 s/key regardless of the repaint
 fix. Measured: with the persistence write nav = ~3026 ms/key; with it mocked
-out = ~259 ms/key. If a debounce/async fix for that write is not on this
-branch, QA will still see laggy nav on big projects; test on a large
-project.yaml and attribute the lag correctly (persistence write vs repaint).
+out = ~259 ms/key.
+
+**Update (2026-05-22):** the complementary disk-decouple PR **pr-b4b68f3**
+("decouple TUI in-memory state from project.yaml via coalescing write queue",
+commit 6003301e) has now **landed in master** and is merged into this branch.
+The persistence write is no longer synchronous — it goes through
+`store.WriteQueue`, so the ~2.7 s/key disk cost is off the keystroke path. QA
+should therefore see *both* fixes together and measure end-to-end nav near the
+~0.26 s/key repaint floor. Still test on a large `project.yaml`; if nav is
+slow, attribute the lag correctly (repaint vs write-queue drain vs something
+new).

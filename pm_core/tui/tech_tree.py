@@ -871,7 +871,12 @@ class TechTree(Widget):
 
         if layout_changed or not self._built:
             self._rebuild()
-            self._built = True
+            # Only mark built once a real rebuild happened.  ``_rebuild`` bails
+            # out when the widget isn't mounted yet; setting ``_built`` there
+            # would make a later (post-mount) ``_recompute`` with unchanged data
+            # skip the build entirely and leave the tree blank.
+            if self.is_mounted:
+                self._built = True
 
     # -- content sizing ------------------------------------------------------
 

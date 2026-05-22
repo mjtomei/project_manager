@@ -248,6 +248,16 @@ async def test_auto_start_toggle_rebuilds_for_marker():
         assert before != after  # rebuilt so the ◎ marker can render
 
 
+def test_recompute_before_mount_does_not_mark_built():
+    # _recompute on an unmounted tree must NOT set _built — otherwise the
+    # post-mount build (with identical data, so layout_changed is False) would
+    # be skipped and the tree would render blank.
+    tree = TechTree([_pr("pr-a")])
+    assert not tree.is_mounted
+    tree._recompute()
+    assert tree._built is False
+
+
 @async_test
 async def test_status_change_rebuilds():
     app = _TreeApp([_pr("pr-a", status="pending")])
