@@ -374,7 +374,29 @@ class ProjectManagerApp(App):
     # --- Frame capture forwarder (called from ~15 sites) ---
 
     def _capture_frame(self, trigger: str = "unknown") -> None:
-        frame_capture.capture_frame(self, trigger)
+        # Frame capture shells out to ``tmux capture-pane`` (subprocess, up to a
+        # 5s timeout).  Run it off the event-loop thread so a momentarily busy
+        # tmux server can't stall navigation — this was an intermittent
+        # multi-second freeze on a single PR move.  A single-flight guard drops
+        # overlapping captures (a move triggers two: the log_message and the
+        # explicit pr_selected capture), which also throttles bursts.
+        if not tmux_mod.in_tmux():
+            return
+        if getattr(self, "_capture_in_flight", False):
+            return
+        self._capture_in_flight = True
+
+        def _work() -> None:
+            try:
+                frame_capture.capture_frame(self, trigger)
+            finally:
+                self._capture_in_flight = False
+
+        try:
+            self.run_worker(_work, thread=True, exclusive=False, group="frame-capture")
+        except Exception:
+            self._capture_in_flight = False
+            frame_capture.capture_frame(self, trigger)
 
     # --- Command execution forwarder (called from pane_ops.py) ---
 
