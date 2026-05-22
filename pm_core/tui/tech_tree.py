@@ -547,9 +547,14 @@ class PRNode(Widget):
 
         title = pr.get("title", "???")
         max_title_len = NODE_W - 4
-        if len(title) > max_title_len:
-            title = title[:max_title_len - 1] + "…"
-        title_line = f"{side} {title:<{NODE_W - 4}} {side}"
+        # Pad/truncate by display cell width (not char count) so double-width
+        # cells (e.g. emoji) don't push the right border off the box.
+        if cell_len(title) > max_title_len:
+            while title and cell_len(title) > max_title_len - 1:
+                title = title[:-1]
+            title = title + "…"
+        title_pad = NODE_W - 4 - cell_len(title)
+        title_line = f"{side} {title}{' ' * max(0, title_pad)} {side}"
 
         status_text = f"{icon} {status}"
         loop_marker, loop_style = self._get_loop_marker()
