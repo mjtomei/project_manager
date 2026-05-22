@@ -5,12 +5,12 @@ description: Record the walker web UI end-to-end with Playwright (Chromium video
 
 ## When to use
 
-A scenario needs evidence of the **rendered** walker web UI
-(plan-litreview: `pm review ui`) behaving correctly — not a terminal
-transcript but the actual browser: hotkey navigation, SSE → DOM
-reactivity, the activity indicator animating, the Apply / lock-state
-transitions. A still screenshot can't show motion and a curl log can't
-show the render, so this recipe captures both layers:
+A scenario needs evidence of a **rendered** web UI behaving correctly —
+not a terminal transcript but the actual browser: navigation, hotkeys,
+live server-pushed updates (SSE / websockets) reflected in the DOM,
+animations, and state / lock transitions. A still screenshot can't show
+motion and a curl log can't show the render, so this recipe captures both
+layers:
 
 1. **Rendered browser recording (primary)** — headless Chromium driven
    by Playwright, captured as context-level video + a step-through
@@ -19,27 +19,19 @@ show the render, so this recipe captures both layers:
    lightweight, greppable proof of the server contract underneath.
 
 For terminal/CLI surfaces use `cli-recording.md`; for the pm TUI use
-`tmux-screen-recording.md`. This recipe is specifically for the web UI.
+`tmux-screen-recording.md`. This recipe is for any browser-rendered UI.
 
-## Requirements
+The worked example throughout drives the walker UI (`pm review ui`):
+register a review, materialize a fixture directory, launch the server,
+and walk it. Adapt the routes, locators, and the side channel that
+triggers live updates to whatever UI you're capturing.
 
-- **pr-37073ad** — the QA container image pre-installs Playwright + its
-  bundled Chromium (`npx playwright install --with-deps chromium`) and
-  `ffmpeg`. Node 22 is already present. Outside that image, install with
-  `npm i -D playwright && npx playwright install --with-deps chromium`.
-- **pr-5db0e85** (`review-walker-ui` instruction) — the fixture / phase-
-  driving setup this recipe reuses: register a review, materialize a
-  multi-cycle fixture directory under
-  `pm/docs/adversarial-review/reviews/<id>/` (canonical-format `STATE.md`,
-  `UI_FOCUS.md`, `NOTES.md`, and per-cycle `REVIEW_CYCLE_N.md` /
-  `CITATION_AUDIT_CYCLE_N.md` / `REVIEW_RESPONSE_CYCLE_N.md`), then launch
-  `pm review ui --port <ephemeral>`. Drive behavior by editing `STATE.md`
-  to walk phases and by appending to the review-response file. The server's
-  `watchdog` push-watches exactly `STATE.md`, `UI_FOCUS.md`, and the current
-  cycle's `REVIEW_RESPONSE_CYCLE_N.md` (plan-litreview § Server-pushed
-  updates), so those edits drive **live** SSE updates; appending to the
-  audit file changes content but only surfaces on the next navigation, not
-  via a push.
+## Tooling
+
+Needs Playwright + its bundled Chromium, and (optionally) `ffmpeg` for the
+`.webm` → `.mp4` transcode. The QA container image ships these; elsewhere
+install with `npm i -D playwright && npx playwright install --with-deps
+chromium`.
 
 ## What this recipe produces
 
@@ -62,8 +54,9 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
 
 ## Canonical routes
 
-The walker server (plan-litreview PR 3) serves per-review views keyed by
-the review id, plus one SSE endpoint. The driver prefers click-through
+The walker server serves per-review views keyed by the review id, plus
+one SSE endpoint (this is the example UI's contract; substitute your
+own). The driver prefers click-through
 navigation (role/text locators auto-track the server's real routes), and
 uses these constants only for the initial dashboard load and the SSE
 stream:
@@ -79,7 +72,7 @@ stream:
 
 ## Capture — Layer 1: rendered browser recording
 
-### 1. Stand up the fixture + server (per pr-5db0e85)
+### 1. Stand up the fixture + server
 
 ```bash
 # Placeholders: set these for your capture.
@@ -94,8 +87,8 @@ BASE="http://localhost:$PORT"
 STATE_FILE="pm/docs/adversarial-review/reviews/$ID/STATE.md"
 mkdir -p "$CAPDIR"
 
-# Follow the review-walker-ui instruction (pr-5db0e85) to register the
-# review and materialize a multi-cycle fixture directory, then launch the
+# Follow the review-walker-ui instruction to register the review and
+# materialize a multi-cycle fixture directory, then launch the
 # server bound to the ephemeral port. Background it; capture its pid so we
 # can stop it at the end.
 pm review ui --port "$PORT" &
@@ -151,7 +144,7 @@ const shot = (page, name) =>
   page.screenshot({ path: path.join(capDir, `${name}.png`), fullPage: true });
 
 (async () => {
-  // Container-safe launch flags (pr-37073ad): no sandbox, no /dev/shm.
+  // Container-safe launch flags: no sandbox, no /dev/shm.
   const browser = await chromium.launch({
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
@@ -176,7 +169,7 @@ const shot = (page, name) =>
   };
 
   // 1. Dashboard. Screenshot it *before* clicking into the review, then
-  // click through (role/text locators auto-track PR 3's real routes).
+  // click through (role/text locators auto-track the server's real routes).
   await page.goto(routes.dashboard);
   await page.getByRole('heading', { name: /review/i }).first().waitFor();
   await shot(page, '01-dashboard');
@@ -216,7 +209,7 @@ const shot = (page, name) =>
   await page.getByRole('button', { name: /apply/i }).waitFor({ state: 'hidden' });
 
   // 4. Audit browse, then citations — click through the walker's own nav
-  // (auto-tracks PR 3's real routes). routes.auditBrowse / routes.citations
+  // (auto-tracks the server's real routes). routes.auditBrowse / routes.citations
   // stay as the documented contract and the fallback if the nav element
   // differs (then swap a click for `page.goto(routes.auditBrowse)`).
   await page.getByRole('link', { name: /audit/i }).click();
