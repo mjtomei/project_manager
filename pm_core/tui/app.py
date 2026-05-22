@@ -84,8 +84,6 @@ class ProjectManagerApp(App):
         margin-bottom: 1;
     }
     TechTree {
-        height: auto;
-        width: auto;
         padding: 1 2;
     }
     GuideProgress {
