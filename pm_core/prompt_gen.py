@@ -1522,6 +1522,18 @@ QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
 
+## Changing or replacing a scenario that already ran
+
+Scenarios are locked once a QA run has started: they cannot be edited or
+replaced mid-run, and the support for changing/replacing scenarios within a
+plan is not yet implemented. If you find that an already-run scenario was
+wrong, undriveable, or contradicts the implementation (e.g. it assumed loop
+behavior the code does not actually have), do NOT silently rewrite or re-emit
+it here. Instead leave a note for the next QA run with
+`pm pr note add {pr_id} '<what was wrong + the corrected scenario>'`, and the
+next planning pass will pick it up. Only emit fresh scenarios (numbered from
+{scenario_start}) in this output.
+
 {_OUT_OF_SCOPE_BUGS_BLOCK}
 {general_notes_block}{qa_specific_block}
 

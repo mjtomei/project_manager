@@ -224,3 +224,20 @@ None unresolved. Resolutions taken:
   Earlier runs only validated these at config level; this run drives them
   through the live loop. (An earlier note wrongly cited docker-in-docker as a
   blocker — corrected: podman-in-podman works.)
+- Container-mode prerequisites (resolved since the 2026-05-21 05:13 run, which
+  came back INPUT_REQUIRED because the QA refiner judged the flow undriveable):
+  that rejection was caused by two pm bugs that are now FIXED on-branch in
+  commit 0597dc1 — (a) the default runtime now auto-detects podman instead of
+  hardcoding docker (so `is_container_mode_enabled() and _runtime_available()`
+  is true with only podman present), and (b) the nested `podman run` now emits
+  `--uts=host`, which skips the `sethostname(2)` syscall that previously failed
+  with "Operation not permitted" one container deep. The `--uts=host` flags are
+  gated behind a per-project opt-in: the **test project** must set
+  `nested_podman: true` under its `project:` block (bootstrap-only project.yaml
+  edit, per tui-manual-test.md) before launching the QA loop, otherwise the
+  inner `podman run` still dies on `sethostname`. Container mode itself is
+  enabled through the normal surface (`pm container enable`). The `pm-dev:latest`
+  worker image is present on the host (with auto-build fallback in
+  container.py), so image availability is no longer a blocker. Container-mode QA
+  loop scenarios are therefore drivable in this run; their STEPS must include
+  the `nested_podman: true` opt-in and `pm container enable` as setup.

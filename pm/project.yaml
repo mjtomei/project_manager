@@ -7061,7 +7061,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-21T05:42:54.769787+00:00'
+  updated_at: '2026-05-22T17:36:13.202398+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-05-21T05:42:54.769787+00:00'
   merged_at: null
@@ -7241,6 +7241,52 @@ prs:
       routing (reject / re-verify / blocked finalize): INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-68332b60c76366c9)'
     created_at: '2026-05-21T05:13:06Z'
     last_edited: '2026-05-21T05:13:06Z'
+  - id: note-16be5fb
+    text: 'QA NEEDS_WORK: Container-mode QA loop happy path — every phase driven by
+      the fake to FINALIZE_DONE: NEEDS_WORK; Container-mode QA loop alternate-branch
+      routing — reject, re-verify, blocked finalize: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-6f15be0165c692cd)'
+    created_at: '2026-05-21T16:41:40Z'
+    last_edited: '2026-05-21T16:41:40Z'
+  - id: note-029f2a2
+    text: 'NEXT QA RUN — corrections for the container-mode alternate-branch scenario
+      (could not be applied to the 2026-05-21 run; scenarios are locked once started).
+      The alternate-branch QA-loop scenario as previously planned contradicts the
+      loop code in two places; both arcs assumed the loop retries a phase and that
+      the fake can supply a second verdict on demand, neither of which holds with
+      the one-shot fake.
+
+
+      (1) qa_concretize REFINER_REJECT does NOT retry/re-concretize — it DEFERS. qa_loop.py:1439-1450
+      marks the scenario INPUT_REQUIRED ("refiner rejected: ...") and returns, skipping
+      the worker launch entirely (refiner prompt itself: "A rejected scenario is deferred,
+      not silently converted", :949). So a scripted REFINER_REJECT->REFINED_STEPS
+      sequence for one scenario never consumes the second entry; do NOT plan a reject-then-recover
+      arc.
+
+
+      (2) qa_verification FLAGGED routes back to the SCENARIO WORKER pane, not a fresh
+      verifier process. qa_loop.py:2090-2133 sends a tmux follow-up to the worker
+      pane, clears the verdict to pending, and waits for a fresh idle_prompt; the
+      verifier pane is REUSED not relaunched (:142-144). The one-shot fake emits exactly
+      one verdict per process and ignores stdin/tmux input, so it never fires a fresh
+      idle_prompt -> the scenario STALLS in pending instead of recovering to VERIFIED.
+      A scripted FLAGGED->VERIFIED also never advances (no new qa_verification process
+      launches). The FLAGGED->re-evaluate->VERIFIED recovery path is therefore UNDRIVEABLE
+      by the current fake — known fake-vs-production drift (relevant to the pr-fbda1a8
+      bridge). Filed/track separately.
+
+
+      CORRECTED alternate-branch scenario (single forward verdicts only, all drivable):
+      plan two scenarios; scenario A qa_concretize->REFINER_REJECT (deferred, INPUT_REQUIRED,
+      no worker pane spawned); scenario B qa_concretize->REFINED_STEPS then qa_scenario->NEEDS_WORK
+      (fails outright); qa_finalize->FINALIZE_BLOCKED. Finalize runs unconditionally
+      after aggregation (qa_loop.py:3161; only an unverified PASS skips it, :408-415),
+      so FINALIZE_BLOCKED is reachable even when scenarios fail. Expect overall verdict
+      NEEDS_WORK with a blocked finalize (not a clean FINALIZE_DONE). GIVEN/INSTRUCTION/ARTIFACT
+      same as the happy-path scenario (tui-manual-test.md + tmux-screen-recording.md,
+      container mode + nested_podman:true).'
+    created_at: '2026-05-22T17:36:12Z'
+    last_edited: '2026-05-22T17:36:12Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
@@ -18911,7 +18957,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T21:02:19.201672+00:00'
-  updated_at: '2026-05-14T02:06:09.002431+00:00'
+  updated_at: '2026-05-22T17:38:14.689335+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -18924,6 +18970,17 @@ prs:
       and don''t affect the running batch.'
     created_at: '2026-05-13T21:04:40Z'
     last_edited: '2026-05-13T21:04:40Z'
+  - id: note-2312cc1
+    text: 'WHEN IMPLEMENTING: remove the stop-gap added in pr-abcf70f (#148). Until
+      scenarios can be changed/replaced mid-run, generate_qa_planner_prompt() in pm_core/prompt_gen.py
+      carries a "## Changing or replacing a scenario that already ran" block instructing
+      planners NOT to rewrite an already-run scenario and to instead leave a `pm pr
+      note add` for the next run. Once this PR lands (scenarios become editable/replaceable
+      within a plan), delete or rewrite that prompt block so planners actually use
+      the new in-plan change/replace flow instead of the note-for-next-run workaround.
+      Grep for "Changing or replacing a scenario that already ran" to find it.'
+    created_at: '2026-05-22T17:38:13Z'
+    last_edited: '2026-05-22T17:38:13Z'
 - id: pr-2181ccd
   plan: plan-regression
   title: Move QA captures out of git into ~/.pm/captures/ alongside workdirs
