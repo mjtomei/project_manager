@@ -962,8 +962,12 @@ class TechTree(Widget):
 
         msg = self._empty_message()
         if msg is not None:
-            self.styles.width = "auto"
-            self.styles.height = "auto"
+            # Fill the scroll viewport rather than sizing to content: a plain
+            # Widget does not auto-size to its children, so "auto" here collapses
+            # the tree to 0x0 and the message never renders (blank grid).  A
+            # percentage size gives the mounted Static a real region to draw in.
+            self.styles.width = "100%"
+            self.styles.height = "100%"
             from textual.widgets import Static
             self.mount(Static(Text(msg, style="dim")))
             return

@@ -13,6 +13,7 @@ import functools
 
 from textual.app import App, ComposeResult
 from textual.containers import ScrollableContainer
+from textual.widgets import Static
 
 from pm_core.pane_idle import PaneIdleTracker
 from pm_core.tui.tech_tree import (
@@ -111,9 +112,41 @@ async def test_one_plangroup_per_plan():
 @async_test
 async def test_empty_state_shows_message():
     app = _TreeApp([])
-    async with app.run_test(size=(120, 40)):
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
         assert len(app.query(PRNode)) == 0
         assert len(app.query(EdgeCanvas)) == 0
+        # The message Static must actually render: a plain Widget does not
+        # auto-size to its children, so the empty-state container must take a
+        # real (non-zero) region or the message stays invisible (blank grid).
+        tree = app.query_one("#tech-tree", TechTree)
+        statics = list(tree.query(Static))
+        assert statics, "empty state should mount a message Static"
+        msg = statics[0]
+        assert "No PRs defined" in msg.render().plain
+        assert msg.region.width > 0 and msg.region.height > 0, (
+            f"empty-state message collapsed to {tuple(msg.region)}")
+
+
+@async_test
+async def test_filter_empty_state_renders():
+    # Filtering to a status no PR has empties the grid; the message must still
+    # render with a real region (regression: it collapsed to 0x0 under "auto").
+    app = _TreeApp([_pr("pr-a", status="merged")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one("#tech-tree", TechTree)
+        tree._status_filter = "qa"
+        tree._recompute()
+        tree.refresh(layout=True)
+        await pilot.pause()
+        await pilot.pause()
+        statics = list(tree.query(Static))
+        assert statics, "filter empty state should mount a message Static"
+        msg = statics[0]
+        assert "No qa PRs" in msg.render().plain
+        assert msg.region.width > 0 and msg.region.height > 0, (
+            f"filter empty-state message collapsed to {tuple(msg.region)}")
 
 
 @async_test
