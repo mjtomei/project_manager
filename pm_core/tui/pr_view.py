@@ -138,6 +138,21 @@ def start_pr(app, companion: bool = False) -> None:
         cmd_parts.append("--fresh")
     if companion:
         cmd_parts.append("--companion")
+    # Pass --transcript so the resulting Claude session writes a hook
+    # transcript symlink that ``_poll_impl_idle`` can register in the
+    # PaneIdleTracker.  Without it a manually-started PR is never tracked,
+    # so its in_progress node shows a static ``◎`` with no live spinner /
+    # ⏸ marker.  Mirrors review_pr and auto_start._start_pr_quiet, which
+    # both use the canonical ``impl-{pr_id}.jsonl`` name.  (Auto-advance on
+    # idle stays gated on auto-start being enabled, so this only animates
+    # the marker — it does not force a manual start to auto-review.)
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        tdir = _auto_start.get_transcript_dir(app)
+    except Exception:
+        tdir = None
+    if tdir:
+        cmd_parts.append(f"--transcript {tdir}/impl-{pr_id}.jsonl")
     cmd_parts.append(pr_id)
     cmd = " ".join(cmd_parts)
     run_command(app, cmd, working_message=action_key, action_key=action_key)
