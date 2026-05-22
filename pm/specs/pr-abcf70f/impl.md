@@ -367,5 +367,7 @@ description but are needed for FakeClaudeSession to faithfully model production.
    `paths.captures_dir`) and threads it through. **Note:** this overlaps the
    charter of pending sibling PR pr-98f670e ("QA scenario quality supervisor:
    judge artifact depth and amend before next run"); the two are complementary
-   (a verification-time gate here vs. a between-run amendment supervisor there)
-   but the boundary should be confirmed so the work isn't duplicated.
+   (a verification-time gate here vs. a between-run amendment supervisor there).
+   **Decision (user, review-loop 6b61 i2): keep this change in this PR.** The
+   verification-time gate stays here; pr-98f670e remains the between-run
+   amendment supervisor.
