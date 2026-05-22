@@ -9,13 +9,14 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-37073ad
+  active_pr: pr-cfb0b3a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
   skip_qa: true
   nested_podman: true
+  libyaml: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -15722,7 +15723,7 @@ prs:
   title: 'Improvement: home window redraws only on actual content change, not on a
     5s timer'
   branch: pm/pr-28bda5d-improvement-home-window-redraws-only-on-actual-con
-  status: in_review
+  status: merged
   depends_on: []
   description: '## Goal
 
@@ -15886,10 +15887,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/207
   gh_pr_number: 207
   created_at: '2026-05-05T13:29:33.145323+00:00'
-  updated_at: '2026-05-21T16:31:35.818900+00:00'
+  updated_at: '2026-05-22T22:19:03.131617+00:00'
   started_at: '2026-05-05T17:44:35.482235+00:00'
   reviewed_at: '2026-05-05T17:54:24.906576+00:00'
-  merged_at: null
+  merged_at: '2026-05-22T22:19:03.131617+00:00'
   notes:
   - id: note-5900335
     text: 'review i6: made _render_content null-safe on a present-but-null project:
@@ -21098,7 +21099,7 @@ prs:
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
     and prefer them over GitHub notes'
   branch: pm/pr-cfb0b3a-improvement-prompt-sessions-to-use-pm-pr-notes-for
-  status: pending
+  status: in_progress
   depends_on: []
   description: '## Goal
 
@@ -21177,12 +21178,13 @@ prs:
 
     - Tests assert the block appears in `generate_prompt` / `generate_review_prompt`
     output and is not gated on `session_name`.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/215
+  gh_pr_number: 215
   created_at: '2026-05-22T22:11:57.970441+00:00'
-  updated_at: '2026-05-22T22:13:22.206484+00:00'
-  started_at: null
+  updated_at: '2026-05-22T22:17:38.855645+00:00'
+  started_at: '2026-05-22T22:17:38.855645+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfb0b3a-improvement-prompt-sessions-to-use-p-9021c2a2
