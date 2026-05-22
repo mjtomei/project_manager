@@ -21093,3 +21093,96 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-cfb0b3a
+  plan: improvements
+  title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
+    and prefer them over GitHub notes'
+  branch: pm/pr-cfb0b3a-improvement-prompt-sessions-to-use-pm-pr-notes-for
+  status: pending
+  depends_on: []
+  description: '## Goal
+
+    Make Claude sessions aware that `pm pr note add <pr-id> ''<text>''` is the canonical
+    mechanism for handing off context to other sessions/PRs, and instruct them to
+    prefer pm PR notes over GitHub PR comments/review notes for that purpose.
+
+
+    pm PR notes serve two handoff directions, both via `pm pr note add <pr-id> ''<text>''`
+    (the target pr-id need not be the session''s own PR):
+
+    1. **Same-PR, next session** — immediate cross-session handoff: leave context
+    for whoever resumes this PR.
+
+    2. **Cross-PR** — whenever the session is leaving work or context for a *different*
+    PR to pick up, add the note to that target PR''s id.
+
+
+    ## Why
+
+    The user uses pm PR notes to hand off information between sessions and between
+    PRs. Two problems today:
+
+    - **Ambiguity**: when the user says "leave a note" / "add a note" / "notes", sessions
+    often assume GitHub PR comments unless carefully told otherwise. They should default
+    to pm PR notes.
+
+    - **Discoverability**: the handoff workflow is undocumented in the prompts, so
+    sessions — especially containerized ones — don''t know `pm pr note add` exists,
+    that it can target any PR, or that it''s the expected channel.
+
+
+    pm PR notes are already persistent (stored on the PR in project.yaml) and are
+    surfaced into future sessions'' prompts as the `## PR Notes` section (see `prompt_gen._format_pr_notes`),
+    so they are the correct handoff medium; GitHub comments are for external review
+    communication, not internal handoff.
+
+
+    ## Implementation
+
+    Add a short, ungated "PR Notes / handoff" guidance block to the session-prompt
+    generators in `pm_core/prompt_gen.py` (`generate_prompt`, `generate_review_prompt`)
+    and any other session prompts that should carry it (QA, bug-fix, watcher prompts).
+    The block should explain:
+
+    - PR notes persist on the PR and are injected into future sessions'' prompts for
+    that PR.
+
+    - Same-PR handoff: to leave context for the next session on this PR, run `pm pr
+    note add <this-pr-id> ''<text>''`.
+
+    - Cross-PR handoff: when leaving work/context for another PR, run `pm pr note
+    add <other-pr-id> ''<text>''` — the note attaches to that PR and surfaces in its
+    sessions.
+
+    - Prefer pm PR notes over GitHub PR comments/description edits for any handoff.
+    Treat unqualified "notes" from the user as pm PR notes, not GitHub.
+
+
+    Key constraint: the `tui_block` is gated on `session_name`, so this guidance must
+    live in an **ungated** block so it also reaches containerized sessions (which
+    may not receive the TUI section). Cross-reference, don''t duplicate, the existing
+    `_OUT_OF_SCOPE_BUGS_BLOCK`, which already mentions `pm pr note add` for recording
+    incidental fixes (and relate it to the cross-PR case: prefer a note on the relevant
+    existing PR over a brand-new PR when the work belongs to one that already exists).
+
+
+    ## Acceptance
+
+    - Generated impl, review, QA, and container prompts all contain the pm-notes handoff
+    guidance, both handoff directions (same-PR and cross-PR), and the "prefer pm notes
+    over GitHub" instruction.
+
+    - The guidance is present even when `session_name` is None (the container/non-TUI
+    path).
+
+    - Tests assert the block appears in `generate_prompt` / `generate_review_prompt`
+    output and is not gated on `session_name`.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-22T22:11:57.970441+00:00'
+  updated_at: '2026-05-22T22:13:22.206484+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
