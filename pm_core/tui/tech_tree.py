@@ -711,6 +711,7 @@ class TechTree(Widget):
         self._anim_frame: int = 0                                  # animation frame counter
 
         # Child-widget bookkeeping
+        self._pr_map: dict[str, dict] = {}            # id -> pr dict (rebuilt in _recompute)
         self._node_widgets: dict[str, PRNode] = {}
         self._label_widgets: dict[str, PlanLabel] = {}
         self._plan_groups: list[PlanGroup] = []      # for viewport culling
@@ -760,8 +761,7 @@ class TechTree(Widget):
             return
         if pr_id not in self._ordered_ids:
             # PR might be in a hidden/collapsed plan group — find and expand it
-            pr_map = {pr["id"]: pr for pr in self._prs}
-            pr_entry = pr_map.get(pr_id)
+            pr_entry = self._pr_map.get(pr_id)
             if pr_entry:
                 plan_id = pr_entry.get("plan") or "_standalone"
                 if plan_id in self._hidden_plans:
@@ -791,8 +791,7 @@ class TechTree(Widget):
         sel = self._ordered_ids[self.selected_index]
         if sel.startswith("_hidden:"):
             return sel[len("_hidden:"):]
-        pr_map = {pr["id"]: pr for pr in self._prs}
-        pr = pr_map.get(sel)
+        pr = self._pr_map.get(sel)
         if not pr:
             return None
         return pr.get("plan") or "_standalone"
@@ -870,6 +869,9 @@ class TechTree(Widget):
 
     def _recompute(self) -> None:
         """Recompute layout positions, rebuilding child widgets if anything changed."""
+        # Cached id->pr lookup reused by selection / navigation / refresh paths,
+        # so they don't each rebuild a dict over all PRs on every keystroke.
+        self._pr_map = {pr["id"]: pr for pr in self._prs}
         sig = self._signature()
         layout_changed = sig != self._layout_sig
         if layout_changed:
@@ -973,7 +975,7 @@ class TechTree(Widget):
         real_node_ids = [nid for nid in self._node_positions
                          if not nid.startswith("_hidden:")]
 
-        pr_map = {pr["id"]: pr for pr in self._prs}
+        pr_map = self._pr_map
 
         # Assign each node to a *band* — the contiguous row range owned by one
         # plan group.  The layout places every connected component (and thus
@@ -1134,7 +1136,7 @@ class TechTree(Widget):
 
     def refresh_active_nodes(self) -> None:
         """Repaint only the nodes whose markers/spinners may have changed."""
-        pr_map = {pr["id"]: pr for pr in self._prs}
+        pr_map = self._pr_map
         for nid, node in self._node_widgets.items():
             pr = pr_map.get(nid)
             if pr is not None and self._is_active_pr(pr):
@@ -1295,15 +1297,14 @@ class TechTree(Widget):
         """Return the index of the first PR in the current plan group."""
         if not self._ordered_ids:
             return None
+        pr_map = self._pr_map
         current_id = self._ordered_ids[self.selected_index]
         if current_id.startswith("_hidden:"):
             current_plan = current_id[len("_hidden:"):]
         else:
-            pr_map = {pr["id"]: pr for pr in self._prs}
             pr = pr_map.get(current_id)
             current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
 
-        pr_map = {pr["id"]: pr for pr in self._prs}
         for i, pid in enumerate(self._ordered_ids):
             if pid.startswith("_hidden:"):
                 continue
@@ -1322,15 +1323,14 @@ class TechTree(Widget):
         """
         if not self._ordered_ids:
             return None
+        pr_map = self._pr_map
         current_id = self._ordered_ids[self.selected_index]
         if current_id.startswith("_hidden:"):
             current_plan = current_id[len("_hidden:"):]
         else:
-            pr_map = {pr["id"]: pr for pr in self._prs}
             pr = pr_map.get(current_id)
             current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
 
-        pr_map = {pr["id"]: pr for pr in self._prs}
         best_i = None
         best_row = -1
         for i, pid in enumerate(self._ordered_ids):
@@ -1349,11 +1349,11 @@ class TechTree(Widget):
         if not self._plan_group_order or len(self._plan_group_order) < 2:
             return None
 
+        pr_map = self._pr_map
         current_id = self._ordered_ids[self.selected_index]
         if current_id.startswith("_hidden:"):
             current_plan = current_id[len("_hidden:"):]
         else:
-            pr_map = {pr["id"]: pr for pr in self._prs}
             pr = pr_map.get(current_id)
             current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
 
@@ -1367,7 +1367,6 @@ class TechTree(Widget):
             return None
 
         target_plan = self._plan_group_order[target_idx]
-        pr_map = {pr["id"]: pr for pr in self._prs}
         for i, pid in enumerate(self._ordered_ids):
             if pid.startswith("_hidden:"):
                 continue
@@ -1437,8 +1436,7 @@ class TechTree(Widget):
     def _scroll_plan_label_to_top(self, pr_id: str) -> None:
         """Scroll so the plan label header for the given PR is at the top."""
         from textual.geometry import Region
-        pr_map = {pr["id"]: pr for pr in self._prs}
-        pr = pr_map.get(pr_id)
+        pr = self._pr_map.get(pr_id)
         if not pr:
             return
         plan_id = pr.get("plan") or "_standalone"
