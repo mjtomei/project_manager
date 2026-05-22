@@ -1,6 +1,6 @@
 ---
 title: TUI Manual Testing
-description: Test TUI changes against a throwaway project in the workdir
+description: Test TUI changes against a throwaway project in the workdir. Includes how to drive review/QA loops without real Claude using the bundled fake-claude stand-in (see "Driving Claude sessions with the fake").
 ---
 ## Setup
 
@@ -64,6 +64,40 @@ description: Test TUI changes against a throwaway project in the workdir
    ```
    cd "$TEST_DIR" && pm session 2>/dev/null || true
    ```
+
+## Driving Claude sessions with the fake (no real API calls)
+
+pm ships a scriptable Claude stand-in, **fake-claude**, so a scenario can drive
+flows that normally spawn Claude — review loops, QA loops, watcher/impl panes —
+without a real Claude binary or API calls. Use it whenever your scenario needs a
+loop to reach a verdict deterministically (e.g. `NEEDS_WORK` then `PASS`)
+instead of waiting on a real model.
+
+To make a flow use the fake, write a config for the session with
+`pm fake-claude config set` (validates and writes to
+`~/.pm/sessions/<tag>/fake-claude`); with no config the flow uses real Claude.
+Pass the JSON inline, with `--file`, or on stdin, and `--tag` to target a
+session other than the current one:
+```
+pm fake-claude config set --file my-config.json      # current session
+pm fake-claude config set < my-config.json
+pm fake-claude config set '{"_all": {}, "review": {"verdicts": ["PASS"]}}'
+pm fake-claude config show     # inspect; config clear removes it
+```
+The config maps each session type to the verdict(s) it should emit. Start from
+the reference config at `tests/fixtures/fake_claude/example-config.json` (covers
+the loop session types and all three verdict forms) and trim it to what your
+scenario drives:
+- weighted random — `{"verdicts": {"PASS": 100}}`
+- scripted sequence — `{"verdicts": ["NEEDS_WORK", "PASS"]}` emits one verdict
+  per loop iteration (clamps to the last when iterations run out)
+- per-iteration overrides — list entries may be objects, e.g.
+  `{"verdict": "READY", "delay": 1}`, layering `body`/`delay`/`preamble` over the
+  type's defaults
+- `_all: {}` makes every other session a no-verdict mock
+
+`config set` rejects verdict/session-type pairings that aren't in the catalogue
+(e.g. `PASS` on `qa_verification`) and writes nothing in that case.
 
 ## Test Steps
 

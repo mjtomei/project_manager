@@ -21,6 +21,9 @@ flags unknown keys and bad effort levels.
 - `~/.claude/projects/<mangled-cwd>/<session-id>.jsonl` transcript files
 - `~/.pm/hooks/<session-id>.json` hook event files (read by poller across panes)
 - `bin/fake-claude` executable on the resolved Claude path
+- `~/.local/bin/fake-claude` shim (host via install.sh, container via
+  `_build_git_setup_script`) resolving the real binary through `pm which` — the
+  current PATH-based resolution surface, replacing the old baked host path
 - `project.yaml` `model_config` block (validated by new validator, written by
   `pm model set`)
 
@@ -28,31 +31,31 @@ flags unknown keys and bad effort levels.
 
 ### R1 — Run fake-claude CLI with a single-line verdict
 - GIVEN the user has installed pm with the fake-claude binary available
-- WHEN the user runs `pm fake-claude --verdict PASS`
+- WHEN the user runs `pm fake-claude emit --verdict PASS`
 - THEN the command exits 0, prints preamble prose lines, a blank line, and the
   bare keyword `PASS` on its own line.
 
 ### R2 — Run fake-claude CLI with a block verdict and custom body
 - GIVEN the user has installed pm
-- WHEN the user runs `pm fake-claude --verdict FLAGGED --body "Step 1: FAILED"`
+- WHEN the user runs `pm fake-claude emit --verdict FLAGGED --body "Step 1: FAILED"`
 - THEN the output contains a `FLAGGED_START` line, then `Step 1: FAILED`, then
   `FLAGGED_END` on its own line.
 
 ### R3 — Run fake-claude with timing controls
 - GIVEN the user wants to simulate a slow session
-- WHEN they run `pm fake-claude --verdict NEEDS_WORK --preamble 5 --delay 2`
+- WHEN they run `pm fake-claude emit --verdict NEEDS_WORK --preamble 5 --delay 2`
 - THEN five preamble lines stream out, the process sleeps ~2 seconds, then the
   verdict `NEEDS_WORK` is written before exit.
 
 ### R4 — Streamed character output
 - GIVEN the user wants to simulate character-by-character streaming
-- WHEN they run `pm fake-claude --verdict PASS --stream --char-delay 0.005`
+- WHEN they run `pm fake-claude emit --verdict PASS --stream --char-delay 0.005`
 - THEN the output arrives gradually (visible character pacing in the recording)
   and ends with the `PASS` keyword.
 
 ### R5 — No-verdict session stays open
 - GIVEN the user wants to fake an impl/watcher/merge-style session
-- WHEN they run `pm fake-claude --verdict NONE --hold 2`
+- WHEN they run `pm fake-claude emit --verdict NONE --hold 2`
 - THEN preamble prose is written, no verdict keyword is emitted, and the
   process exits ~2 seconds later (not immediately).
 
@@ -160,7 +163,7 @@ THEN the fake is not used; the launch follows the normal path (and surfaces a
 real error if Claude is not installed).
 
 ### E5 — Hold semantics
-GIVEN the user runs `pm fake-claude --verdict NONE` with no `--hold`.
+GIVEN the user runs `pm fake-claude emit --verdict NONE` with no `--hold`.
 WHEN stdin remains open.
 THEN the process blocks until stdin closes; with `--hold 0` it exits
 immediately; with `--hold N` it exits after N seconds.
@@ -196,15 +199,16 @@ None unresolved. Resolutions taken:
   recording) rather than numerically.
 - Whether `_all` overrides explicit per-type entries → resolved per code:
   explicit entries win.
-- Config-writing surface (R7–R10, E1): there is NO `pm` CLI subcommand that
-  writes the fake-claude config. The user-facing surfaces are (a) dropping a
-  JSON file at `~/.pm/sessions/<tag>/fake-claude` directly — read verbatim, NOT
-  validated; and (b) the documented `paths.set_fake_claude_config(tag, cfg)`
-  helper that a test author calls from a setup script — this is the only path
-  that validates and raises `ValueError` on bad verdict/session-type pairings
-  or `verdicts` under `_all`. Validation-rejection THENs (R10/E1) are therefore
-  observed against the helper (the realistic surface for this test-infra
-  feature), not a CLI.
+- Config-writing surface (R7–R10, E1): the user-facing surface is the
+  `pm fake-claude config` command group — `set` (inline JSON arg, `--file`, or
+  stdin; `--tag` to target a non-current session), `show`, and `clear`. `set`
+  validates verdict/session-type pairings and refuses to write on bad pairings
+  or `verdicts` under `_all` (it wraps `paths.set_fake_claude_config`, which
+  still exists for programmatic callers). Validation-rejection THENs (R10/E1)
+  are observed against `pm fake-claude config set` (non-zero exit + error
+  listing the offending pairs). Dropping a raw JSON file at
+  `~/.pm/sessions/<tag>/fake-claude` directly still works and is read verbatim
+  (NOT validated) — the CLI is the validated path.
 - No `pm fake-claude peek` CLI shipped. The proposed peek debug aid exists only
   as the library helper `claude_launcher.peek_fake_verdicts(tag)`; do not plan a
   peek CLI scenario.
@@ -212,6 +216,28 @@ None unresolved. Resolutions taken:
   is the **review loop** — it launches a Claude pane in a tmux window in the same
   session and polls the verdict via the hook+transcript path, no Docker needed.
   Used for the review-loop redirect scenarios (covered by prior runs).
+- FAKE-CLAUDE RESOLUTION MECHANISM CHANGED since the last QA run (2026-05-22,
+  commits 5e6e0bd1 → 586b8fd8 → 70d1d4e0, all AFTER the 05-22 18:32 run). The
+  fake is no longer invoked by a baked host absolute path
+  (`<pm_src>/bin/fake-claude`) and there is no longer a build_exec_cmd string
+  rewrite (the `_rewrite_pm_src_path` fix from commit 6964ab8d that the 05-22
+  happy-path scenario landed was DROPPED). Instead the launcher invokes the bare
+  name `fake-claude`, resolved at runtime from PATH like real `claude`. A tiny
+  POSIX shim is installed at `~/.local/bin/fake-claude` BOTH on the host
+  (`install.sh`) AND inside every container (`container._build_git_setup_script`,
+  at container start — no image rebuild). The shim runs
+  `core="$(pm which 2>/dev/null | tail -n1)"; exec "$(dirname "$core")/bin/fake-claude" "$@"`,
+  i.e. it resolves to the `bin/fake-claude` of whatever pm install `pm which`
+  selects — crucially the **/workspace checkout under test** inside a pm-on-pm QA
+  container, not the orchestrator's `/opt/pm-src` copy. CONSEQUENCE for this run:
+  the container-mode QA-loop scenarios must be RE-RUN on current HEAD — the two
+  scenarios that came back NEEDS_WORK/INPUT_REQUIRED in the 05-22 18:32 run did
+  so because of the now-superseded host-path bug, and their alt-branch arc was
+  never confirmed against the live loop. The re-run validates a different
+  mechanism (the `pm which` shim on PATH) than any prior run. NEW shared surface
+  to exercise: `~/.local/bin/fake-claude` shim + `pm which` resolution, in BOTH
+  host panes (planning/verification/finalize) and container panes
+  (concretize/scenario worker) of the same loop.
 - Container-mode QA loop driver (R10 verdict surfaces end-to-end): the full QA
   loop (`pm pr qa-run-bg <pr_id>` / TUI `/pr qa <pr_id>`) walks
   planning → concretize → scenario → verification → finalize, spawning a nested

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Standalone fake-claude executable for integration tests.
 
-Accepts the same flags as ``pm fake-claude`` and can be placed on PATH
+Accepts the same flags as ``pm fake-claude emit`` and can be placed on PATH
 so that any code calling ``find_claude()`` or ``shutil.which("claude")``
 can be redirected to this script.
 

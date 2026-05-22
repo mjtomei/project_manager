@@ -1493,3 +1493,92 @@ class TestPeekFakeVerdicts:
         for _ in range(3):
             assert peek_fake_verdicts(tag)["review"] == "NEEDS_WORK"
         assert not (tmp_path / tag / "fake-claude.state").exists()
+
+
+class TestFakeClaudeConfigCLI:
+    """Tests for the `pm fake-claude config set/show/clear` CLI commands."""
+
+    def _setup(self, tmp_path, monkeypatch, tag="test-tag"):
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+        return tag
+
+    def _run(self, args, **kw):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        return CliRunner().invoke(cli, ["fake-claude", "config", *args], **kw)
+
+    def test_set_inline_then_show(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"_all": {}, "review": {"verdicts": ["NEEDS_WORK", "PASS"]}}
+        res = self._run(["set", "--tag", tag, json.dumps(cfg)])
+        assert res.exit_code == 0, res.output
+        assert fake_claude_config(tag) == cfg
+        show = self._run(["show", "--tag", tag])
+        assert show.exit_code == 0
+        assert json.loads(show.output) == cfg
+
+    def test_set_from_file(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"qa_verification": {"verdicts": {"VERIFIED": 100}}}
+        f = tmp_path / "cfg.json"
+        f.write_text(json.dumps(cfg))
+        res = self._run(["set", "--tag", tag, "--file", str(f)])
+        assert res.exit_code == 0, res.output
+        assert fake_claude_config(tag) == cfg
+
+    def test_set_from_stdin(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        cfg = {"review": {"verdicts": {"PASS": 100}}}
+        res = self._run(["set", "--tag", tag], input=json.dumps(cfg))
+        assert res.exit_code == 0, res.output
+        assert fake_claude_config(tag) == cfg
+
+    def test_set_uses_current_session_when_no_tag(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        res = self._run(["set", '{"review": {"verdicts": ["PASS"]}}'])
+        assert res.exit_code == 0, res.output
+        assert fake_claude_config(tag) is not None
+
+    def test_set_rejects_bad_pairing_and_writes_nothing(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        res = self._run(["set", "--tag", tag,
+                         '{"qa_verification": {"verdicts": {"PASS": 100}}}'])
+        assert res.exit_code != 0
+        assert "PASS" in res.output and "qa_verification" in res.output
+        assert fake_claude_config(tag) is None
+
+    def test_set_rejects_invalid_json(self, tmp_path, monkeypatch):
+        tag = self._setup(tmp_path, monkeypatch)
+        res = self._run(["set", "--tag", tag, "not json"])
+        assert res.exit_code != 0
+        assert "JSON" in res.output
+
+    def test_show_when_absent(self, tmp_path, monkeypatch):
+        tag = self._setup(tmp_path, monkeypatch)
+        res = self._run(["show", "--tag", tag])
+        assert res.exit_code == 0
+        assert "No fake-claude config" in res.output
+
+    def test_clear_removes_config(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {"review": {"verdicts": ["PASS"]}})
+        assert fake_claude_config(tag) is not None
+        res = self._run(["clear", "--tag", tag])
+        assert res.exit_code == 0
+        assert fake_claude_config(tag) is None
+
+    def test_reference_example_config_is_valid(self, tmp_path, monkeypatch):
+        """The shipped reference config writes cleanly through the CLI."""
+        from pm_core.paths import fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        example = FIXTURES_DIR / "example-config.json"
+        res = self._run(["set", "--tag", tag, "--file", str(example)])
+        assert res.exit_code == 0, res.output
+        assert fake_claude_config(tag) is not None

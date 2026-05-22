@@ -33,8 +33,18 @@ loop state machines, and verification transitions without real API calls.
      transcript-derived assistant text.
 
 2. **CLI — `pm fake-claude`** (`pm_core/cli/fake_claude.py`)
-   - Click command exposing all engine parameters; `--verdict` required, all
-     others have sensible defaults matching the engine signature.
+   - A Click group with two parts:
+     - `pm fake-claude emit` — exposes all engine parameters; `--verdict`
+       required, all others have sensible defaults matching the engine
+       signature. (This is the stand-in's verdict-emitting behaviour; the
+       launcher itself invokes the standalone `bin/fake-claude`, not this.)
+     - `pm fake-claude config set/show/clear` — manages the per-session config
+       at `~/.pm/sessions/<tag>/fake-claude`. `set` accepts JSON inline, via
+       `--file`, or on stdin, defaults the tag to the current session
+       (`--tag` to override), validates verdict/session-type pairings (wraps
+       `set_fake_claude_config`), and exits non-zero without writing on invalid
+       pairings or bad JSON. `show` prints the config (or notes its absence);
+       `clear` removes it.
 
 3. **Standalone executable — `bin/fake-claude`**
    - `argparse`-based, executable bit set, shebang `python3`.
@@ -242,7 +252,7 @@ loop state machines, and verification transitions without real API calls.
      `launch_claude` / `launch_claude_print*` do not thread it — they are
      interactive / print-mode and are not verdict-polled (print mode reads
      stdout directly).
-   - `bin/fake-claude` and `pm fake-claude` expose `--session-id`;
+   - `bin/fake-claude` and `pm fake-claude emit` expose `--session-id`;
      `bin/fake-claude` now *recognises* it rather than discarding it via
      `parse_known_args`.
 
@@ -264,7 +274,7 @@ loop state machines, and verification transitions without real API calls.
 - **What does "VERIFIED" count as?** Treated as a single-line verdict (matches
   `qa_verification`'s pass keyword), with `FLAGGED_END` as its block-style
   counterpart. Consistent with the QA verification loop's keyword set.
-- **`--verdict` required on the CLI?** Required for `pm fake-claude` (Click);
+- **`--verdict` required on the CLI?** Required for `pm fake-claude emit` (Click);
   optional with default `PASS` on the standalone `bin/fake-claude` so it can be
   invoked as a drop-in claude replacement with no arguments.
 - **Where does the binary path come from?** `_FAKE_CLAUDE_BIN` is the bare
