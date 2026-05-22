@@ -6,7 +6,9 @@ import subprocess
 import sys
 from typing import Optional
 
-from pm_core.paths import log_shell_command
+from pm_core.paths import configure_logger, log_shell_command
+
+_log = configure_logger("pm.gh")
 
 
 def _check_gh():
@@ -120,6 +122,21 @@ def create_draft_pr(workdir: str, title: str, base: str, body: str = "") -> Opti
         check=False,
     )
     if result.returncode != 0:
+        # `gh pr create` fails with rc=1 when a PR already exists for this
+        # branch (e.g. a prior `pr start` created the PR on GitHub but then
+        # crashed before persisting the number to project.yaml — see
+        # https://github.com/.../pull/N orphans).  Recover idempotently by
+        # looking up the existing PR for the current branch instead of
+        # reporting failure, so the caller can record it and continue.
+        stderr = (result.stderr or "").lower()
+        if "already exists" in stderr:
+            existing = get_pr_status(workdir, "HEAD")
+            if existing and existing.get("number"):
+                _log.info(
+                    "create_draft_pr: PR already exists for branch, recovering #%s",
+                    existing["number"],
+                )
+                return {"url": existing.get("url", ""), "number": existing["number"]}
         return None
 
     pr_url = result.stdout.strip()

@@ -2,7 +2,73 @@
 
 Ported from the Omerta project's by-hand adversarial review loop (originally at `/home/matt/omerta/plans/notes.txt` and `/home/matt/omerta/plans/reviews/`).
 
-Used there to subject a research paper to systematic criticism through multiple cycles, then respond and incorporate. The same shape applies to plans like `pm/plans/plan-regression.md` and to the literature review at `pm/docs/literature-review.md` — anywhere a long written artifact would benefit from a critical pass before it gets implemented or shipped.
+Used there to subject a research paper to systematic criticism through multiple cycles, then respond and incorporate. The same shape applies to plans like `pm/plans/plan-regression.md` — anywhere a long written artifact would benefit from a critical pass before it gets implemented or shipped.
+
+## The augmented cycle (current canonical model)
+
+The current model augments the original review / response / apply cycle with **two additions**: a per-cycle citation audit step between review and response, and a walker UI for human acceptance of proposed changes before apply. Files per cycle remain `REVIEW_CYCLE_N.md`, `CITATION_AUDIT_CYCLE_N.md` (new), `REVIEW_RESPONSE_CYCLE_N.md` — same shape we already have.
+
+### Cycle steps
+
+1. **Review.** Fresh blind Claude session reads the artifact, produces `REVIEW_CYCLE_N.md` (per *The prompt* below, *The protocol* steps 1–4 and 8–11). The findings include proposed changes — substance edits, citation additions/removals, structural feedback. No edits are applied yet.
+
+2. **Citation audit loop.** *New step.* For each citation that requires audit this cycle (cycle 1: every existing citation; cycle ≥ 2: every new citation the review proposes), run a per-citation audit per `CITATION_USE_AUDIT.md`. An audit can surface *additional* citations that should be added (more recent work, missed prior art, a more authoritative source); each surfaced citation is itself audited. The loop converges *within the cycle* when an audit pass surfaces no new citations. Produces `CITATION_AUDIT_CYCLE_N.md` with one entry per audited citation, each entry's proposed changes tagged with `provenance: audit-entry`. Until this loop converges the next step does not start.
+
+3. **Response.** Fresh blind Claude session reads the review *and* the audit doc together, produces `REVIEW_RESPONSE_CYCLE_N.md` per the protocol below. Proposed changes in the response carry their provenance: `reviewer-comment` for changes flowing from the review's findings, `audit-entry` for changes flowing from the audit's per-citation findings. The response session's job is to verify, decide agree/disagree/partial per finding (narrow-don't-collapse for prior-art findings — see *Principle* below), and recommend the apply action for each proposed change.
+
+4. **Walker UI — optional human acceptance.** *New surface.* The walker reads the response doc's proposed changes and surfaces them for human accept / reject / modify per change. Pre-populated with the response session's recommendations (same pre-fill + bulk-accept + auto-run primitive `plan-litreview-ui.md` documents). Each proposed change's provenance link routes back to the originating review finding or audit entry. In auto-run mode the walker is bypassed and the response session's recommendations apply directly.
+
+5. **Apply.** Accepted changes flow into the artifact. Commit. Onto cycle N+1.
+
+### What changed from the original cycle
+
+The original cycle's three artifacts (review / response / apply) survive unchanged in shape. The two additions slot in cleanly:
+
+- **The audit step** is a new sub-process between review and response. It runs to its own internal convergence each cycle. Its output (the audit doc) is a third input to the response session alongside the review.
+- **The walker UI** is a new acceptance surface between response and apply. It is *optional* — auto-run mode skips it and applies the response session's recommendations directly, recording an interaction-log entry per change so the audit trail is preserved.
+
+The audit agents and the response session both read prior agents' output adversarially — same skeptical disposition the cycle's blind reviewer carries (per *The protocol* step 4: fetch every work the prior agent referenced; verify their claims; assume over-characterization until checked against the source). The citation-graph walk machinery in `CITATION_CRAWL.md` is the sub-methodology audit agents use when an audit needs to surface new citations.
+
+### Standardizations introduced by the augmentation
+
+- **Response-block format** on every proposed change (suggested-* / human-* / status / interactions) so the walker can render and write back consistently.
+- **Provenance tagging** on proposed changes (`reviewer-comment` vs `audit-entry`).
+- **Citation characterization format** in audit entries — each entry carries the citation header (with working clickable link), tier, doc passage as currently written, what the source actually says (verbatim quote on load-bearing claims), verdict, proposed rewrite. See `CITATION_USE_AUDIT.md` for the full format.
+
+### When the augmentations apply
+
+The augmentations apply when running this cycle to produce or maintain a literature review. They are not required when running the cycle on a plan, a research proposal, or another artifact for which the citation audit is not the load-bearing concern — those configurations can use the original cycle without the audit step.
+
+### Operational mechanics — how the session drives the cycle
+
+The session drives the cycle. After writing each artifact, the session updates `STATE_<artifact>.md` to reflect the new phase, then proceeds automatically to the next step — except at `awaiting-human-review`, where it waits for the human to signal via the walker's Apply button.
+
+The state file (`STATE_<artifact>.md`):
+
+```yaml
+current-cycle: 3
+current-phase: review        # review | audit | response | awaiting-human-review | applying | complete
+mode: human-reviewed         # auto-run | human-reviewed
+last-transition: 2026-05-20T14:32:00Z
+```
+
+The session writes this file at every phase transition; the walker reads it on every page load and reacts to live changes via SSE pushes (per `plan-litreview-ui.md`).
+
+**Transitions per cycle:**
+
+1. **Cycle start.** Session sets `current-phase: review`, increments `current-cycle` (or initializes it to 1). Writes `REVIEW_CYCLE_N.md` via a fresh blind sub-agent answering Block 1 / Block 2 / Block 3 / Block 4 in one pass (with Block 1 emitting the *Missing citations* structured section per the prompt).
+2. **Review complete.** Session sets `current-phase: audit`. Invokes the citation audit loop per `CITATION_USE_AUDIT.md` § The in-cycle audit loop — typically as a `/loop` (Claude Code's dynamic-mode `/loop` is the natural fit for the audit's iterate-until-no-new-citations-surface convergence; see `CITATION_USE_AUDIT.md` § The in-cycle audit loop). Loop iterates until convergence; produces `CITATION_AUDIT_CYCLE_N.md`.
+3. **Audit converged.** Session sets `current-phase: response`. Writes `REVIEW_RESPONSE_CYCLE_N.md` via a separate fresh sub-agent reading the review *and* the audit doc together; each proposed change gets a response-block with `suggested-verdict`, `suggested-rationale`, and `provenance: reviewer-comment | audit-entry`.
+4. **Response complete.** Session sets `current-phase` based on mode:
+   - `mode: auto-run` → `current-phase: applying` (no walker gate; proceed directly).
+   - `mode: human-reviewed` → `current-phase: awaiting-human-review` (wait for the Apply signal).
+5. **Awaiting-human-review (human-reviewed only).** Session schedules a `ScheduleWakeup` at a generous interval (e.g., 1800–3600 seconds) and yields. Each wakeup re-reads `STATE_<artifact>.md`; if `current-phase` is still `awaiting-human-review`, schedule another wakeup; if it's `applying`, proceed to step 6. The walker's Apply button is what writes that transition. The session does not burn tokens while waiting — wakeups are infrequent and short.
+6. **Applying.** Session reads `REVIEW_RESPONSE_CYCLE_N.md`, applies accepted changes to the artifact (changes whose effective verdict — `human-verdict` if present, else `suggested-verdict` — is `accept` or `modify`), commits the result.
+7. **Complete.** Session sets `current-phase: complete`. The cycle is archived; the walker can still render it read-only. Next cycle starts at step 1 with `current-cycle: N+1`.
+
+**Why ScheduleWakeup not active polling.** Active polling during `awaiting-human-review` would burn Claude tokens continuously while the human is away from the keyboard. ScheduleWakeup yields control until the next wakeup fires; each wakeup is a single short check against the state file. The cache TTL trade-off matters (per Claude Code's ScheduleWakeup guidance, delays of 1200s+ are appropriate when waiting on external state that changes on human timescales — minutes to hours).
+
+**Mode is per-cycle.** The mode field can change between cycles. Early cycles typically run `auto-run` (build the artifact up); later cycles switch to `human-reviewed` once the draft is substantive enough to be worth attending to.
 
 ## The prompt
 
@@ -16,6 +82,20 @@ Ask the reviewer (a Claude session, fresh, blind to previous review cycles):
 - What are the weakest contributions, and what makes them so weak?
 - What additional simulation / validation / empirical work should be done to make this work more relevant and robust?
 - What citations are missing, and how do they factor into the key points and results?
+
+  **Format missing-citation findings as a structured "Missing citations" section at the end of Block 1**, with one entry per proposed citation:
+
+  ```markdown
+  ### Missing citations
+
+  #### [missing-citation-1] Title (Authors Year)
+  - **link**: arXiv URL / DOI URL / publisher URL (if known; leave blank for the audit to derive)
+  - **commentary**: which artifact claim this work would anchor, what the artifact currently elides without it, any specific load-bearing detail the audit should verify against the source
+  - **urgency**: high | medium | low
+  ```
+
+  This is the audit step's input format — the citation audit loop extracts these entries verbatim, pairs each with the commentary as initial context, and runs a per-citation audit per `CITATION_USE_AUDIT.md`. **Prose claims about missing citations made outside this format aren't extractable and may not reach the audit.** The commentary is *input* to the audit, not a constraint — the audit verifies independently against the source and may refine or reject the reviewer's framing (see `CITATION_USE_AUDIT.md` § Skeptical disposition for audit agents).
+- Are existing load-bearing citations characterized faithfully against the source? Where the cited work contains significant alternative perspectives, conditions, or caveats that bear on the argument, are those represented in the artifact?
 - What logical jumps are there in the paper / plan that make up the weakest links in the chain, and how can they be strengthened?
 - What existing work is not receiving the credit it is due, and how is that bias influencing the writing or results?
 - What are the methodological flaws in the simulations / experiments / implementation plan, missing parameters or unrealistic assumptions, and how should they be addressed?
@@ -119,17 +199,19 @@ Block 4 is **not** load-bearing the way Block 3 is — readers can accept ugly p
 
    g. **Report the walk's coverage explicitly in the review.** Include a "Citation graph walk" section listing: which seeds were searched, the date range covered, the count of new citing/cited papers found per seed, and the additions proposed. If the walk found nothing new, say so — that's a positive convergence signal.
 
-6. **Verify accessibility**. If a paper is paywalled with no open-access version, derivative, or report covering the same ground, remove it from the citations and add it to an appendix of "wanted-but-inaccessible" works with a one-line note on what citing it would have changed.
+6. **Citation-use audit.** Under the augmented cycle (see § The augmented cycle above), the audit is a first-class cycle step that runs to its own convergence between review and response — see `CITATION_USE_AUDIT.md` for the full protocol. Without the augmentation, do at least a *light* check of newly-added or reviewer-touched citations against their abstracts within each response cycle. The two are complementary to the citation-graph walk (step 5): the walk finds *what should be cited*; the audit checks *that what is cited is used faithfully*.
 
-7. **Increase thoroughness each cycle**. Cycle 2 should produce more findings than Cycle 1 with the response from Cycle 1 already incorporated; Cycle 3 should be the hardest pass. If a cycle produces fewer findings than its predecessor, that's a signal — either the work has genuinely improved or the reviewer is starting to agree with the surrounding context.
+7. **Verify accessibility**. If a paper is paywalled with no open-access version, derivative, or report covering the same ground, remove it from the citations and add it to an appendix of "wanted-but-inaccessible" works with a one-line note on what citing it would have changed.
 
-8. **Stop when findings get pedantic.** Three cycles was the Omerta paper's natural stopping point. Watch for findings that are nitpicks of phrasing rather than substance — that's the convergence signal.
+8. **Each cycle is independently thorough.** Apply the full prompt unconditionally; don't pace yourself against prior cycles. Whether finding counts go up, down, or sideways across cycles is *output* of the work, not *input* to it — letting it drive expectations biases the reviewer toward whichever direction the methodology prescribes.
 
-9. **Once length is flagged, the response cycle must net-cut.** The loop has a structural bias toward growth: each cycle surfaces new prior art and new findings, and the natural response is to *add* — a citation, a rebuttal paragraph, a clarifying gloss. Across the living-artifacts review, every cycle flagged the document as too long and every response added material anyway; it grew from ~13,000 to ~16,000 words while its load-bearing accessibility obligation got worse. The remedy is a hard rule: once any reviewer flags length, that cycle's response must produce a **net word reduction**, and the apply pass must count words before and after to confirm it. New citations go in tersely (one sentence each); every addition is paired with a larger cut; dense survey material moves to an appendix rather than sitting in the body. If the apply pass nets positive or flat, it has failed and must be redone. A document that converges on substance but bloats on length has not converged.
+9. **Stop when findings get pedantic.** Three cycles was the Omerta paper's natural stopping point. Watch for findings that are nitpicks of phrasing rather than substance — that's the convergence signal.
+
+10. **Once length is flagged, the response cycle must net-cut.** The loop has a structural bias toward growth: each cycle surfaces new prior art and new findings, and the natural response is to *add* — a citation, a rebuttal paragraph, a clarifying gloss. Across the living-artifacts review, every cycle flagged the document as too long and every response added material anyway; it grew from ~13,000 to ~16,000 words while its load-bearing accessibility obligation got worse. The remedy is a hard rule: once any reviewer flags length, that cycle's response must produce a **net word reduction**, and the apply pass must count words before and after to confirm it. New citations go in tersely (one sentence each); every addition is paired with a larger cut; dense survey material moves to an appendix rather than sitting in the body. If the apply pass nets positive or flat, it has failed and must be redone. A document that converges on substance but bloats on length has not converged.
 
    **Cut against the whole narrative, not just the recent additions.** The net-cut is not satisfied by trimming whatever the latest cycle added. Every cut pass is a fresh whole-document hunt for text that is unnecessary or verbose *relative to the point it makes* — regardless of which cycle wrote it. If a paragraph from the original draft makes a point that a sentence could carry, cut it down; if a point is made twice in different sections, keep the stronger statement and delete the other; if a sentence survives only on familiarity, cut it. The standing question on every pass is: *can this same point be made with less text?* If yes, do it. Length budget is spent on points, not on prose that surrounds them.
 
-10. **Run a whole-document verbosity pass every cycle.** Independently of whether a reviewer flagged length, every cycle includes one pass over the *entire* artifact whose only job is to find text that is verbose relative to the point it makes and cut it tighter. This is a standing step, not a contingency: it runs even on cycles where no length finding was raised, because verbosity accumulates everywhere, not only in new material. The pass reads the document start to finish and, for every paragraph and sentence, asks *can this same point be made with less text?* — applying it to original-draft prose as readily as to recent additions. Record the pass in the response file: the word count before and after, and the kinds of cuts made (redundant restatement, hedge stacking, deadwood, a paragraph that a sentence carries). A cycle whose verbosity pass found nothing to cut should say so explicitly — like the citation walk finding nothing, that is a convergence signal.
+11. **Run a whole-document verbosity pass every cycle.** Independently of whether a reviewer flagged length, every cycle includes one pass over the *entire* artifact whose only job is to find text that is verbose relative to the point it makes and cut it tighter. This is a standing step, not a contingency: it runs even on cycles where no length finding was raised, because verbosity accumulates everywhere, not only in new material. The pass reads the document start to finish and, for every paragraph and sentence, asks *can this same point be made with less text?* — applying it to original-draft prose as readily as to recent additions. Record the pass in the response file: the word count before and after, and the kinds of cuts made (redundant restatement, hedge stacking, deadwood, a paragraph that a sentence carries). A cycle whose verbosity pass found nothing to cut should say so explicitly — like the citation walk finding nothing, that is a convergence signal.
 
 ## Principle: narrow the contribution; don't collapse it
 

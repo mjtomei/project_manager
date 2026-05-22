@@ -7,7 +7,7 @@ from typing import Optional
 
 from pm_core import store, graph, notes
 from pm_core.paths import get_global_setting, has_global_setting
-from pm_core.plan_parser import parse_plan_prs
+from pm_core.plans.parser import parse_plan_prs
 
 
 STEP_ORDER = [
