@@ -5,10 +5,8 @@ description: Record a rendered web UI end-to-end with Playwright (Chromium video
 
 ## When to use
 
-A scenario needs evidence of a **rendered** web UI behaving correctly —
-the actual browser, not a terminal transcript: navigation, hotkeys, live
-server-pushed updates (SSE / websockets) reflected in the DOM, animations,
-and state / lock transitions. This recipe captures two layers:
+A scenario needs evidence of a web UI behaving correctly. This recipe
+captures two layers:
 
 1. **Rendered browser recording (primary)** — headless Chromium driven
    by Playwright, captured as context-level video + a step-through
