@@ -9,13 +9,14 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-37073ad
+  active_pr: pr-b764a0c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
   skip_qa: true
   nested_podman: true
+  libyaml: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -4540,7 +4541,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-04-24T17:09:32.729022+00:00'
+  updated_at: '2026-05-22T22:08:14.655171+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4555,6 +4556,40 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:32Z'
     last_edited: '2026-04-24T17:09:32Z'
+  - id: note-93cda0f
+    text: 'QA: verify reduced TUI navigation lag. This branch now has BOTH halves:
+      (1) render refactor from this PR — spinner ticks + selection repaint only the
+      affected node widgets, not the whole ~349-node grid; (2) disk decouple merged
+      from master (pr-b4b68f3) — handle_pr_selected updates in-memory state and enqueues
+      a coalesced background write via _write_queue instead of a synchronous full
+      project.yaml rewrite per keystroke. Before this merge, nav on a large project
+      was ~3s/key, dominated by the per-key 1MB YAML write. Test nav on a LARGE project.yaml
+      on the real tmux surface (headless run_test timing is unreliable: pilot.pause
+      waits for the background write thread).'
+    created_at: '2026-05-22T20:58:11Z'
+    last_edited: '2026-05-22T20:58:11Z'
+  - id: note-377600e
+    text: 'PERF DEBUG HANDOFF (nav latency): Big wins landed — widget split (per-node
+      repaint), disk decouple (coalescing _write_queue, merged from master pr-b4b68f3),
+      write-queue debounce raised to 1.5s, band-level viewport culling (hide off-screen
+      PlanGroups via scroll_y watcher), and frame capture moved off the event-loop
+      thread (it shelled out to tmux capture-pane on every move, up to a 5s timeout
+      — a prime cause of intermittent multi-second freezes). Within-band j/k went
+      ~3s -> ~170ms headless. REMAINING: occasional multi-second freeze still reported
+      on the real tmux surface (headless run_test timing is unreliable, so it couldn''t
+      be reproduced in-sandbox). Added opt-in instrumentation to pinpoint it: launch
+      with PM_PERF_DEBUG=1 (threshold via PM_PERF_DEBUG_MS, default 50). It logs per-key
+      end-to-end latency with a phase breakdown (on_key/scroll/cull vs Textual ''framework~=''),
+      shows slow keys live in the TUI log line, and lowers loop.slow_callback_duration
+      so asyncio names the blocking callback. Output: ~/.pm/debug/<session>-perf.log
+      (grep -E ''total=|took''). NEXT: reproduce a freeze with a tmux-capable session;
+      if it''s ''framework~='' -> reduce MOUNTED widget count (lazy-mount bands, not
+      just display:none); if it''s an asyncio ''took N seconds'' callback -> move
+      that blocking call (subprocess/lock/sync I/O) off the main thread. Also still
+      open: J/K plan jumps not yet ''instantaneous''; pre-existing periodic suspects
+      not yet audited (_background_sync every 5min, 1s poll _poll_impl_idle).'
+    created_at: '2026-05-22T22:08:14Z'
+    last_edited: '2026-05-22T22:08:14Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
@@ -15722,7 +15757,7 @@ prs:
   title: 'Improvement: home window redraws only on actual content change, not on a
     5s timer'
   branch: pm/pr-28bda5d-improvement-home-window-redraws-only-on-actual-con
-  status: in_review
+  status: merged
   depends_on: []
   description: '## Goal
 
@@ -15886,10 +15921,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/207
   gh_pr_number: 207
   created_at: '2026-05-05T13:29:33.145323+00:00'
-  updated_at: '2026-05-21T16:31:35.818900+00:00'
+  updated_at: '2026-05-22T21:00:55.902280+00:00'
   started_at: '2026-05-05T17:44:35.482235+00:00'
   reviewed_at: '2026-05-05T17:54:24.906576+00:00'
-  merged_at: null
+  merged_at: '2026-05-22T21:00:55.902280+00:00'
   notes:
   - id: note-5900335
     text: 'review i6: made _render_content null-safe on a present-but-null project:
