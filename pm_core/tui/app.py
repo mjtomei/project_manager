@@ -447,8 +447,19 @@ class ProjectManagerApp(App):
         self._update_orientation()
         # Start the coalescing write queue now that the project root is known.
         # TUI mutations enqueue here instead of writing to disk inline.
+        #
+        # Debounce is set well above human navigation cadence so a nav burst
+        # collapses to a single write.  The only enqueued mutations are
+        # low-stakes UI state (selected PR, hide_merged toggle) already applied
+        # to ``self._data`` in memory immediately, so disk only needs to catch
+        # up once navigation settles.  At the default 0.1s, scrolling through a
+        # large project.yaml fires a full read+dump of the whole file after
+        # nearly every keystroke — wasteful disk/CPU churn (the dump itself runs
+        # on a worker thread, so it does not block the UI).  ``flush_sync`` on
+        # exit/restart still persists the final state, so a longer window only
+        # risks losing the last selection on an unclean crash.
         if self._root is not None:
-            self._write_queue = store.WriteQueue(self._root)
+            self._write_queue = store.WriteQueue(self._root, debounce=1.5)
             self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
