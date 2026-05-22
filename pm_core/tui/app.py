@@ -558,6 +558,18 @@ class ProjectManagerApp(App):
 
     def _load_state(self) -> None:
         """Load project state from disk."""
+        # Persist any pending in-memory mutations (e.g. a still-debouncing
+        # active_pr from a nav burst) BEFORE re-reading disk.  Otherwise a
+        # reload — including the SIGUSR1 state-only reload that an external
+        # ``pm pr edit`` triggers — would replace ``self._data`` with stale
+        # on-disk state, clobbering the user's un-flushed navigation, while
+        # the write queue later flushes the navigated value to disk and leaves
+        # the display and ``project.yaml`` permanently out of sync.  Flushing
+        # first means the reload re-reads (and re-applies) what the user
+        # actually navigated to.  No-op when nothing is pending.
+        wq = getattr(self, "_write_queue", None)
+        if wq is not None:
+            wq.flush_sync()
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
