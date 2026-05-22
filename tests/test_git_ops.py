@@ -122,8 +122,10 @@ class TestConfigureDualRemote:
         configure_dual_remote("/wd", "/local/repo", "https://gh/org/repo.git")
 
         calls = [c[0] for c in mock_rg.call_args_list]
-        # 1) fetch URL -> upstream (no --push), and it must come first so the
-        #    push-URL config below isn't clobbered by the plain set-url.
+        # 1) fetch URL -> upstream (no --push).  A plain `set-url` only touches
+        #    remote.origin.url, not the separate remote.origin.pushurl entries,
+        #    so it's emitted first purely to mirror the helper's documented
+        #    order (base URL, then push fan-out).
         assert calls[0] == (
             "remote", "set-url", "origin", "https://gh/org/repo.git")
         assert "--push" not in calls[0]
