@@ -32,8 +32,11 @@ import yaml
 # identically, but the bytes differ, which would churn the committed
 # project.yaml whenever a save lands on an environment with a different backend.
 # So the C dumper is gated by the per-project ``project.libyaml`` flag (default
-# on): set ``libyaml: false`` to pin pure-Python output for byte-stability
-# across mixed environments. Switching the default on rewrites project.yaml once.
+# OFF): pure-Python output is byte-stable across mixed environments, so it is the
+# safe default. Set ``libyaml: true`` to opt into the faster C dumper where every
+# writer is known to share the C backend. Defaulting off (rather than on) means a
+# dropped/absent flag degrades to stable output instead of silently reformatting
+# the whole file the next time a writer with the C backend saves.
 try:
     from yaml import CSafeLoader as _CSafeLoader, CSafeDumper as _CSafeDumper
 except ImportError:  # pragma: no cover - depends on the PyYAML build
@@ -45,7 +48,7 @@ def _yaml_loader():
 
 
 def _yaml_dumper(data: dict):
-    if _CSafeDumper is not None and (data.get("project") or {}).get("libyaml", True):
+    if _CSafeDumper is not None and (data.get("project") or {}).get("libyaml", False):
         return _CSafeDumper
     return yaml.SafeDumper
 
