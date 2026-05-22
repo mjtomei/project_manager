@@ -45,15 +45,29 @@ def handle_pr_selected(app, pr_id: str) -> None:
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
 
-    # Persist selection so TUI restarts on this PR
+    # Persist selection so TUI restarts on this PR.  Update in-memory state
+    # immediately (source of truth for the running TUI), then enqueue the
+    # disk write so rapid navigation doesn't block the event loop on a full
+    # yaml read-modify-write per keypress.
     if app._data.get("project", {}).get("active_pr") != pr_id:
-        try:
-            app._data = store.locked_update(
-                app._root, lambda d: d["project"].__setitem__("active_pr", pr_id)
+        app._data.setdefault("project", {})["active_pr"] = pr_id
+        wq = getattr(app, "_write_queue", None)
+        if wq is not None:
+            wq.enqueue(
+                ("set", "active_pr"),
+                lambda d: d.setdefault("project", {}).__setitem__("active_pr", pr_id),
             )
-        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-            _log.warning("handle_pr_selected: %s", e)
-            app.log_message(f"Error: {e}")
+        else:
+            # No queue yet (e.g. early events or tests): fall back to a
+            # synchronous write.
+            try:
+                app._data = store.locked_update(
+                    app._root,
+                    lambda d: d.setdefault("project", {}).__setitem__("active_pr", pr_id),
+                )
+            except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+                _log.warning("handle_pr_selected: %s", e)
+                app.log_message(f"Error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -251,15 +265,25 @@ def toggle_merged(app) -> None:
 
     tree = app.query_one("#tech-tree", TechTree)
     tree._hide_merged = not tree._hide_merged
-    # Persist to project.yaml (per-project, overrides global)
+    # Persist to project.yaml (per-project, overrides global).  Update memory
+    # immediately and route the disk write through the coalescing queue.
     hide = tree._hide_merged
-    try:
-        app._data = store.locked_update(
-            app._root, lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide)
+    app._data.setdefault("project", {})["hide_merged"] = hide
+    wq = getattr(app, "_write_queue", None)
+    if wq is not None:
+        wq.enqueue(
+            ("set", "hide_merged"),
+            lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide),
         )
-    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-        _log.warning("toggle_merged: %s", e)
-        app.log_message(f"Error: {e}")
+    else:
+        try:
+            app._data = store.locked_update(
+                app._root,
+                lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide),
+            )
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("toggle_merged: %s", e)
+            app.log_message(f"Error: {e}")
     tree._recompute()
     tree.refresh(layout=True)
     app._update_filter_status()

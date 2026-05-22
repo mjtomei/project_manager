@@ -1,5 +1,6 @@
 """YAML read/write for project.yaml state management."""
 
+import asyncio
 import errno
 import fcntl
 import hashlib
@@ -7,12 +8,46 @@ import logging
 import os
 import re
 import stat
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Hashable, Optional
 
 import yaml
+
+# libyaml (C) loader/dumper are ~14-16x faster than the pure-Python ones on a
+# large project.yaml (e.g. ~1MB/350-PR: load 1480ms -> 93ms, dump 1130ms ->
+# 80ms). The WriteQueue drains run via ``asyncio.to_thread``; pure-Python
+# (de)serialization holds the GIL except for the ~5ms switch interval, so it
+# contends with the event loop for CPU and throttles TUI repaints while a write
+# is in flight. The C path releases the GIL, so background drains are fast and
+# don't steal CPU from the UI.
+#
+# Loader: always prefer C when available — parsing is byte-irrelevant and the C
+# loader produces identical objects, so there is no compatibility risk.
+#
+# Dumper: the C dumper wraps long scalars (e.g. multi-line PR descriptions)
+# differently from the pure-Python dumper. Both are valid YAML and parse
+# identically, but the bytes differ, which would churn the committed
+# project.yaml whenever a save lands on an environment with a different backend.
+# So the C dumper is gated by the per-project ``project.libyaml`` flag (default
+# on): set ``libyaml: false`` to pin pure-Python output for byte-stability
+# across mixed environments. Switching the default on rewrites project.yaml once.
+try:
+    from yaml import CSafeLoader as _CSafeLoader, CSafeDumper as _CSafeDumper
+except ImportError:  # pragma: no cover - depends on the PyYAML build
+    _CSafeLoader = _CSafeDumper = None
+
+
+def _yaml_loader():
+    return _CSafeLoader or yaml.SafeLoader
+
+
+def _yaml_dumper(data: dict):
+    if _CSafeDumper is not None and (data.get("project") or {}).get("libyaml", True):
+        return _CSafeDumper
+    return yaml.SafeDumper
 
 _log = logging.getLogger("pm.store")
 
@@ -72,7 +107,7 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     path = root / "project.yaml"
     try:
         with open(path) as f:
-            data = yaml.safe_load(f)
+            data = yaml.load(f, Loader=_yaml_loader())
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
@@ -166,7 +201,10 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     tmp = path.with_suffix(".yaml.tmp")
     with open(tmp, "w") as f:
         f.write(_YAML_HEADER)
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        yaml.dump(
+            data, f, Dumper=_yaml_dumper(data),
+            default_flow_style=False, sort_keys=False, allow_unicode=True,
+        )
         f.flush()
         os.fsync(f.fileno())
     tmp.rename(path)
@@ -264,6 +302,118 @@ def locked_update(
         fn(data)
         save(data, root)
     return data
+
+
+class WriteQueue:
+    """Coalescing write queue for project.yaml mutations.
+
+    The TUI keeps its working state in memory (``app._data``) and must not
+    block the asyncio event loop on a file lock + full-yaml parse + rewrite
+    for every mutation (e.g. the per-keypress ``active_pr`` persist).  This
+    queue decouples in-memory updates from disk:
+
+    * ``enqueue(key, fn)`` records a pending mutation closure tagged by
+      *key* and returns immediately.  Re-enqueuing the same *key* replaces
+      the pending closure (coalescing), so a burst of rapid updates to the
+      same field collapses to a single disk write of the final value.
+    * A background worker (``run``) drains the queue after a short
+      *debounce* window and applies all pending closures in one
+      :func:`locked_update`, which re-reads fresh on-disk state under the
+      lock first — so concurrent external edits from other pm processes are
+      respected, not clobbered.
+    * The blocking ``locked_update`` runs on a thread (``to_thread``) so the
+      event loop stays responsive even while a write is in flight.
+    * ``flush_sync`` drains synchronously for shutdown paths (``on_unmount``,
+      ``restart``) where the worker may not get another chance to run.
+
+    The worker writes to disk only; it never mutates ``app._data``.  In-memory
+    state is the source of truth for the running TUI and is re-synced from disk
+    by the existing background-sync / reload paths.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        validate: bool = True,
+        timeout: float = LOCK_TIMEOUT_SECONDS,
+        debounce: float = 0.1,
+    ) -> None:
+        self._root = root
+        self._validate = validate
+        self._timeout = timeout
+        self._debounce = debounce
+        self._pending: "dict[Hashable, Callable[[dict], None]]" = {}
+        self._lock = threading.Lock()
+        self._event = asyncio.Event()
+        self._stopped = False
+
+    def enqueue(self, key: Hashable, fn: Callable[[dict], None]) -> None:
+        """Record a pending mutation, replacing any prior op with the same key."""
+        with self._lock:
+            self._pending[key] = fn
+        # Wake the worker.  set() is safe to call from the event-loop thread;
+        # enqueue is only ever called there (TUI key handling).
+        self._event.set()
+
+    def _take_pending(self) -> "dict[Hashable, Callable[[dict], None]]":
+        """Atomically swap out and return the pending ops."""
+        with self._lock:
+            ops = self._pending
+            self._pending = {}
+        return ops
+
+    def _drain_once(self) -> None:
+        """Apply all currently-pending ops in one locked read-modify-write.
+
+        Swaps the pending map out under the lock first, so a concurrent
+        drainer (e.g. the worker thread vs. a ``flush_sync`` on shutdown)
+        only ever applies a given op once.  No-op when nothing is pending.
+        """
+        ops = self._take_pending()
+        if not ops:
+            return
+
+        def apply(data: dict) -> None:
+            for op in ops.values():
+                op(data)
+
+        locked_update(self._root, apply, validate=self._validate,
+                      timeout=self._timeout)
+
+    async def run(self) -> None:
+        """Worker coroutine: debounce bursts, then drain off the event loop."""
+        while not self._stopped:
+            await self._event.wait()
+            # Resetting debounce: keep waiting while new enqueues keep
+            # arriving within the debounce window, so a held key collapses
+            # to a single write of the final value once input goes quiet.
+            while not self._stopped:
+                self._event.clear()
+                try:
+                    await asyncio.wait_for(self._event.wait(), timeout=self._debounce)
+                except asyncio.TimeoutError:
+                    break
+            try:
+                await asyncio.to_thread(self._drain_once)
+            except (StoreLockTimeout, ProjectYamlParseError) as e:
+                _log.warning("WriteQueue drain failed: %s", e)
+            except Exception:
+                _log.exception("WriteQueue drain raised")
+
+    def stop(self) -> None:
+        """Signal the worker to exit after its current cycle."""
+        self._stopped = True
+        self._event.set()
+
+    def flush_sync(self) -> None:
+        """Drain any pending ops synchronously (for shutdown / restart paths)."""
+        try:
+            self._drain_once()
+        except (StoreLockTimeout, ProjectYamlParseError) as e:
+            _log.warning("WriteQueue flush failed: %s", e)
+        except Exception:
+            _log.exception("WriteQueue flush raised")
 
 
 def locked_edit(root: Path, timeout: float = 30.0) -> dict:
