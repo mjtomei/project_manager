@@ -11,11 +11,17 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger, log_shell_command
+from pm_core.paths import configure_logger, log_shell_command, pm_core_path
 _log = configure_logger("pm.claude_launcher")
 
-# Default path to the fake-claude executable bundled with pm.
-_FAKE_CLAUDE_BIN = str(Path(__file__).parent.parent / "bin" / "fake-claude")
+# Default path to the fake-claude executable bundled with pm.  Resolved from
+# the active ``pm_core`` package the same way ``pm which`` resolves the install
+# in use (``pm_core_path()``), so a checkout under test uses *its own* copy of
+# the binary.  This is also the single source of truth shared with the
+# container bind-mount (``container._pm_src = pm_core_path().parent``) and the
+# host->container path rewrite (``container._rewrite_pm_src_path``), so the
+# rewrite is guaranteed to match the emitted path rather than coincidentally so.
+_FAKE_CLAUDE_BIN = str(pm_core_path().parent / "bin" / "fake-claude")
 
 
 def _fake_claude_config_for_type(session_type: str | None) -> dict | None:

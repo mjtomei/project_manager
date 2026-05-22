@@ -918,6 +918,15 @@ class TestFakeClaudeLauncher:
                             lambda st, tag=None: None)
         assert claude_launcher._fake_claude_config_for_type(None) is None
 
+    def test_fake_bin_resolved_via_pm_core_path(self):
+        """The default binary is derived from pm_core_path() (the `pm which`
+        helper), sharing its source of truth with the container mount + rewrite.
+        Guards against regressing to a separate __file__-based derivation."""
+        from pm_core import claude_launcher
+        from pm_core.paths import pm_core_path
+        assert claude_launcher._FAKE_CLAUDE_BIN == str(
+            pm_core_path().parent / "bin" / "fake-claude")
+
     def test_build_shell_cmd_uses_fake_binary_with_session_type(self, monkeypatch):
         from pm_core import claude_launcher
         review_config = {"verdicts": {"PASS": 1}, "preamble": 3}
