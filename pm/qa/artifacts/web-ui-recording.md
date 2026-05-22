@@ -165,6 +165,16 @@ const shot = (page, name) =>
 
   const page = await context.newPage();
 
+  // Write current-phase into STATE.md (the walker's phase channel) so the
+  // server's watchdog turns each write into an SSE push; callers wait on the
+  // resulting DOM, never on a sleep.
+  const setPhase = async (phase) => {
+    const state = await fs.readFile(stateFile, 'utf8');
+    await fs.writeFile(
+      stateFile,
+      state.replace(/^current-phase:.*$/m, `current-phase: ${phase}`));
+  };
+
   // 1. Dashboard. Screenshot it *before* clicking into the review, then
   // click through (role/text locators auto-track PR 3's real routes).
   await page.goto(routes.dashboard);
@@ -179,7 +189,11 @@ const shot = (page, name) =>
   await shot(page, '02-changes');
 
   // Hotkeys: j/k navigate, a accept, m modify, s skip. These act only in
-  // the awaiting-human-review phase of the current cycle (lock state).
+  // the awaiting-human-review phase of the current cycle (lock state), so
+  // drive STATE.md into that phase first and wait for the editable affordance
+  // (the Apply button) to render rather than assuming the fixture default.
+  await setPhase('awaiting-human-review');
+  await page.getByRole('button', { name: /apply/i }).waitFor();
   for (const key of ['j', 'j', 'k']) await page.keyboard.press(key);
   await page.keyboard.press('a');           // accept Claude's suggestion
   await shot(page, '03-after-accept');
@@ -191,10 +205,7 @@ const shot = (page, name) =>
   // reacts. Wait on the DOM reflecting the new phase instead of sleeping.
   // (A concurrently-running side shell editing STATE.md works identically —
   // see Layer 2; either drives the same SSE push.)
-  const state = await fs.readFile(stateFile, 'utf8');
-  await fs.writeFile(
-    stateFile,
-    state.replace(/^current-phase:.*$/m, 'current-phase: applying'));
+  await setPhase('applying');
   await page
     .getByText(/applying accepted changes/i)
     .waitFor({ timeout: 5000 });
