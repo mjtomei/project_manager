@@ -4,9 +4,9 @@ Validates the shipped recipe at pm/qa/artifacts/web-ui-recording.md:
 - valid frontmatter and discoverability via the QA artifact-library loader;
 - documented commands are well-formed (shell blocks parse with `bash -n`,
   the Node Playwright driver parses with `node --check`);
-- the Playwright driver-script skeleton references the canonical routes and
-  the /events?review=<id> endpoint, records both video and trace, and
+- the Playwright driver-script skeleton records both video and trace and
   launches Chromium with container-safe flags;
+- the recipe captures the HTTP/SSE protocol layer;
 - the manifest/files section lists the required artifacts.
 """
 
@@ -139,14 +139,6 @@ class TestCommandsParse:
 # ---------------------------------------------------------------------------
 
 class TestDriverContract:
-    def test_references_sse_endpoint(self, recipe_text):
-        assert "/events?review=" in recipe_text
-
-    def test_references_canonical_views(self, recipe_text):
-        code = _driver_block(recipe_text)
-        for view in ("dashboard", "changes", "audit", "citations"):
-            assert view in code, f"driver should reference the {view} view"
-
     def test_records_video(self, recipe_text):
         code = _driver_block(recipe_text)
         assert "recordVideo" in code
@@ -163,10 +155,24 @@ class TestDriverContract:
         assert "--no-sandbox" in code
         assert "--disable-dev-shm-usage" in code
 
-    def test_exercises_hotkeys(self, recipe_text):
+    def test_navigates_and_interacts(self, recipe_text):
         code = _driver_block(recipe_text)
-        for key in ("j", "k", "a", "m", "s"):
-            assert f"'{key}'" in code, f"driver should press hotkey {key}"
+        assert "page.goto" in code
+        assert "page.screenshot" in code or "shot(page" in code
+        assert "page.keyboard" in code or "click" in code
+
+    def test_dumps_dom(self, recipe_text):
+        code = _driver_block(recipe_text)
+        assert "page.content()" in code
+
+
+class TestProtocolCapture:
+    def test_captures_http_and_sse(self, recipe_text):
+        # Layer 2: curl HTTP snapshots + an SSE (-N) stream transcript.
+        assert "http.log" in recipe_text
+        assert "sse.log" in recipe_text
+        assert "curl" in recipe_text
+        assert "-N" in recipe_text  # SSE streaming flag
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +181,6 @@ class TestDriverContract:
 
 class TestManifestArtifacts:
     @pytest.mark.parametrize("artifact", [
-        "recording.mp4",
         "recording.webm",
         "trace.zip",
         "dom.html",

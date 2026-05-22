@@ -9,7 +9,7 @@ A scenario needs evidence of a **rendered** web UI behaving correctly —
 not a terminal transcript but the actual browser: navigation, hotkeys,
 live server-pushed updates (SSE / websockets) reflected in the DOM,
 animations, and state / lock transitions. A still screenshot can't show
-motion and a curl log can't show the render, so this recipe captures both
+motion and a curl log can't show the render, so this recipe captures two
 layers:
 
 1. **Rendered browser recording (primary)** — headless Chromium driven
@@ -21,17 +21,11 @@ layers:
 For terminal/CLI surfaces use `cli-recording.md`; for the pm TUI use
 `tmux-screen-recording.md`. This recipe is for any browser-rendered UI.
 
-The worked example throughout drives the walker UI (`pm review ui`):
-register a review, materialize a fixture directory, launch the server,
-and walk it. Adapt the routes, locators, and the side channel that
-triggers live updates to whatever UI you're capturing.
-
 ## Tooling
 
-Needs Playwright + its bundled Chromium, and (optionally) `ffmpeg` for the
-`.webm` → `.mp4` transcode. The QA container image ships these; elsewhere
-install with `npm i -D playwright && npx playwright install --with-deps
-chromium`.
+Needs Playwright + its bundled Chromium. The QA container image ships
+these; elsewhere install with `npm i -D playwright && npx playwright
+install --with-deps chromium`.
 
 ## What this recipe produces
 
@@ -39,97 +33,66 @@ Write into `<capture-dir>/<short-name>/` (the scenario prompt
 substitutes the per-PR captures directory — `$(pm qa captures-path
 <pr-id>)/...` — for `<capture-dir>`):
 
-- `recording.mp4` — the rendered walk-through (transcoded from
-  `recording.webm` if `ffmpeg` is available).
-- `recording.webm` — Playwright's native context-level video
-  (**load-bearing** — keep it even when you also produce the mp4).
+- `recording.webm` — Playwright's native context-level video; the
+  rendered walk-through (**load-bearing**).
 - `trace.zip` — Playwright trace (DOM snapshots + network + console);
   step through with `npx playwright show-trace trace.zip`.
 - `*.png` — key-state screenshots (one per demonstrated state).
 - `dom.html` — a DOM dump at a representative state (grep/diff target).
 - `http.log` — curl snapshots of the UI's routes.
-- `sse.log` — `curl -N` transcript of `/events?review=<id>`.
+- `sse.log` — `curl -N` transcript of the SSE endpoint (if the UI is
+  SSE-driven).
 - `manifest.md` — frontmatter + prose per the standard recipe format,
   with a `## Files` section listing every file above.
 
-## Routes (walker example)
-
-The walker UI's routes — substitute your own. The driver navigates by
-clicking (role/text locators auto-track the real routes) and uses these
-constants only for the first load and the SSE stream:
-
-| View | Route | Notes |
-|---|---|---|
-| dashboard | `/` | lists items; click into one |
-| changes | `/review/<id>/changes` | the main walker view |
-| audit browse | `/review/<id>/audit` | per-cycle audit entries |
-| citations | `/review/<id>/citations` | cross-cycle citation status |
-| notes pane | `/review/<id>/notes` | collapsible side panel |
-| SSE events | `/events?review=<id>` | `EventSource` push stream |
-
 ## Capture — Layer 1: rendered browser recording
 
-### 1. Stand up the fixture + server
+### 1. Start the UI under test
 
 ```bash
 # Placeholders: set these for your capture.
 PR_ID=pr-xxxxxxx             # the PR under QA (keys the captures dir)
 CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<short-name>
-ID=regression-fixture        # the registered review id
-PORT=8765                    # an ephemeral free port
-BASE="http://localhost:$PORT"
-# Editing STATE.md's current-phase is what drives the SSE-pushed updates.
-STATE_FILE="pm/docs/adversarial-review/reviews/$ID/STATE.md"
+PORT=8000                    # the port your app serves on
+APP_URL="http://localhost:$PORT"
 mkdir -p "$CAPDIR"
 
-# Follow the review-walker-ui instruction to register the review and
-# materialize a multi-cycle fixture directory, then launch the
-# server bound to the ephemeral port. Background it; capture its pid so we
-# can stop it at the end.
-pm review ui --port "$PORT" &
+# Launch the web UI on the chosen port and background it; keep the pid so
+# we can stop it in teardown. Replace APP_START with your app's command.
+APP_START="my-app serve"
+$APP_START --port "$PORT" &
 SERVER_PID=$!
 
 # Wait for the server to answer before driving it (no fixed sleep).
-until curl -sf -o /dev/null "$BASE/"; do sleep 0.2; done
+until curl -sf -o /dev/null "$APP_URL/"; do sleep 0.2; done
 ```
 
 ### 2. Drive Chromium with the Playwright driver
 
-Save the skeleton below as `driver.mjs`, then run it with the capture
-dir, review id, and base URL in the environment:
+Save the skeleton below as `driver.mjs`, then run it with the capture dir
+and base URL in the environment:
 
 ```bash
-CAPDIR="$CAPDIR" REVIEW_ID="$ID" WALKER_URL="$BASE" STATE_FILE="$STATE_FILE" \
-    node driver.mjs
+CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs
 ```
 
-The driver records video + trace, walks the views, exercises the hotkeys,
-and proves SSE-driven updates — all via auto-waiting locators, no sleeps.
+It records video and trace, walks the UI, and (for SSE/websocket UIs)
+proves a server-pushed update reaches the DOM. Adapt the marked spots —
+locators, interactions, and the side channel that triggers live updates —
+to your UI. It uses auto-waiting role/text locators, not sleeps, so it
+tolerates render timing.
 
 ```javascript
-// driver.mjs — Playwright web-UI recording skeleton (walker example).
-// Records context-level video + a trace, walks the views, exercises
-// hotkeys, and proves SSE updates by mutating STATE.md.
+// driver.mjs — Playwright web-UI recording skeleton.
+// Records context-level video + a trace, walks the UI, exercises an
+// interaction, and (if the UI is server-pushed) proves a live update
+// reaches the DOM. Replace the marked spots with your UI's specifics.
 import { chromium } from 'playwright';
 import { promises as fs } from 'fs';
 import path from 'path';
 
 const capDir = process.env.CAPDIR;
-const reviewId = process.env.REVIEW_ID;
-const base = process.env.WALKER_URL || 'http://localhost:8765';
-// The side channel that triggers live updates: editing STATE.md's
-// current-phase makes the server push an SSE event.
-const stateFile = process.env.STATE_FILE;
-
-// Routes the driver references (first load + SSE; nav is by locator).
-const routes = {
-  dashboard: `${base}/`,
-  changes: `${base}/review/${reviewId}/changes`,
-  auditBrowse: `${base}/review/${reviewId}/audit`,
-  citations: `${base}/review/${reviewId}/citations`,
-  notes: `${base}/review/${reviewId}/notes`,
-  events: `${base}/events?review=${reviewId}`,
-};
+const appUrl = process.env.APP_URL || 'http://localhost:8000';
 
 const shot = (page, name) =>
   page.screenshot({ path: path.join(capDir, `${name}.png`), fullPage: true });
@@ -149,53 +112,24 @@ const shot = (page, name) =>
 
   const page = await context.newPage();
 
-  // Editing STATE.md drives an SSE push; callers then wait on the DOM.
-  const setPhase = async (phase) => {
-    const state = await fs.readFile(stateFile, 'utf8');
-    await fs.writeFile(
-      stateFile,
-      state.replace(/^current-phase:.*$/m, `current-phase: ${phase}`));
-  };
+  // 1. Load the UI and capture the entry state. Prefer auto-waiting
+  // role/text locators over sleeps. (Adapt the locator to your UI.)
+  await page.goto(appUrl);
+  await page.getByRole('heading').first().waitFor();
+  await shot(page, '01-loaded');
 
-  // 1. Dashboard, screenshot, then click into the review.
-  await page.goto(routes.dashboard);
-  await page.getByRole('heading', { name: /review/i }).first().waitFor();
-  await shot(page, '01-dashboard');
-  await page.getByRole('link', { name: new RegExp(reviewId, 'i') }).click();
+  // 2. Exercise the behavior under test — clicks, keyboard shortcuts, form
+  // input. (Replace with your UI's interactions.)
+  await page.keyboard.press('j');           // e.g. a navigation hotkey
+  await shot(page, '02-after-interaction');
 
-  // 2. The changes walker (reached by the click above). Auto-wait, no sleep.
-  await page.getByRole('heading', { name: /proposed change/i }).waitFor();
-  await shot(page, '02-changes');
-
-  // Hotkeys j/k/a/m/s only act in the editable phase, so unlock first and
-  // wait for the Apply affordance before pressing them.
-  await setPhase('awaiting-human-review');
-  await page.getByRole('button', { name: /apply/i }).waitFor();
-  for (const key of ['j', 'j', 'k']) await page.keyboard.press(key);
-  await page.keyboard.press('a');           // accept Claude's suggestion
-  await shot(page, '03-after-accept');
-  await page.keyboard.press('m');           // modify
-  await page.keyboard.press('s');           // skip
-
-  // 3. Live SSE update: flip the phase, wait for the DOM to react (a side
-  // shell editing STATE.md works identically — see Layer 2).
-  await setPhase('applying');
-  await page
-    .getByText(/applying accepted changes/i)
-    .waitFor({ timeout: 5000 });
-  await shot(page, '04-sse-phase-applying');
-
-  // The phase change flips the UI editable -> read-only (Apply disappears).
-  await page.getByRole('button', { name: /apply/i }).waitFor({ state: 'hidden' });
-
-  // 4. Audit browse, then citations — via the UI's own nav links.
-  await page.getByRole('link', { name: /audit/i }).click();
-  await page.getByRole('heading', { name: /audit/i }).waitFor();
-  await shot(page, '05-audit-browse');
-
-  await page.getByRole('link', { name: /citation/i }).click();
-  await page.getByRole('table').waitFor();
-  await shot(page, '06-citations');
+  // 3. Server-pushed (SSE/websocket) UIs: prove a live update reaches the
+  // DOM. Trigger the change through whatever side channel your app exposes
+  // (a mutating request, a watched-file write — see Layer 2 for a
+  // curl-driven equivalent), then wait on the resulting DOM, not a sleep:
+  //   await triggerServerSideChange();
+  //   await page.getByText(/updated/i).waitFor({ timeout: 5000 });
+  await shot(page, '03-after-update');
 
   // DOM dump at a representative state.
   await fs.writeFile(path.join(capDir, 'dom.html'), await page.content());
@@ -216,40 +150,27 @@ const shot = (page, name) =>
 });
 ```
 
-### 3. Transcode webm -> mp4 (optional)
-
-```bash
-# Playwright records .webm natively. Transcode to .mp4 for convenience;
-# if ffmpeg is unavailable, keep recording.webm as the load-bearing
-# artifact and note the fallback in the manifest.
-if command -v ffmpeg >/dev/null; then
-    ffmpeg -y -i "$CAPDIR/recording.webm" -c:v libx264 -pix_fmt yuv420p \
-        "$CAPDIR/recording.mp4"
-fi
-```
-
 ## Capture — Layer 2: protocol capture
 
 Greppable proof of the server contract underneath the rendered demo.
 
 ```bash
-# http.log — snapshot each route. -sS keeps it quiet but shows
-# errors; -w records the status line per route.
+# http.log — snapshot each route you care about. -sS keeps it quiet but
+# shows errors; -w records the status line per route.
 {
-  for route in "/" "/review/$ID/changes" "/review/$ID/audit" \
-               "/review/$ID/citations"; do
+  for route in "/" "/some-view" "/another-view"; do
     echo "===== GET $route ====="
-    curl -sS -w '\n[HTTP %{http_code}]\n' "$BASE$route"
+    curl -sS -w '\n[HTTP %{http_code}]\n' "$APP_URL$route"
   done
 } > "$CAPDIR/http.log" 2>&1
 
-# sse.log — record the SSE stream while a side shell flips the phase in
-# STATE.md (each write becomes a push), then stop the reader.
-curl -sS -N --max-time 15 "$BASE/events?review=$ID" > "$CAPDIR/sse.log" 2>&1 &
+# sse.log — for an SSE-driven UI, record the event stream while a side
+# shell triggers a server-pushed change, then stop the reader. Point
+# SSE_URL at your app's event endpoint.
+SSE_URL="$APP_URL/events"
+curl -sS -N --max-time 15 "$SSE_URL" > "$CAPDIR/sse.log" 2>&1 &
 SSE_PID=$!
-sed -i 's/^current-phase:.*/current-phase: awaiting-human-review/' "$STATE_FILE"
-sleep 0.5
-sed -i 's/^current-phase:.*/current-phase: applying/' "$STATE_FILE"
+# ... trigger a change here (a mutating request, a watched-file write) ...
 sleep 2
 kill "$SSE_PID" 2>/dev/null || true
 ```
@@ -271,31 +192,29 @@ fencing deep:
     workdir: <absolute path>
     captured_at: <ISO date>
     recipe: pm/qa/artifacts/web-ui-recording.md
-    review_id: <review id the capture targeted>
-    walker_url: <base URL the driver used>
+    app_url: <base URL the driver used>
     ---
 
     ## Commands
 
-        CAPDIR=... REVIEW_ID=... WALKER_URL=... node driver.mjs
-        ffmpeg -i recording.webm ... recording.mp4   # if transcoded
-        curl -N "$BASE/events?review=$ID" > sse.log   # protocol layer
+        CAPDIR=... APP_URL=... node driver.mjs
+        curl -N "$SSE_URL" > sse.log   # protocol layer
 
     ## What this demonstrates
 
-    <one paragraph: which UI behavior is shown — the hotkey navigation,
-    the SSE-driven update and any lock-state transition — and what to
+    <one paragraph: which UI behavior is shown — the navigation, the
+    interaction, any SSE-driven update / state transition — and what to
     look for in the recording, trace, and sse.log.>
 
     ## Files
 
-    - `recording.mp4` — rendered walk-through (transcoded).
-    - `recording.webm` — Playwright native context video (load-bearing).
+    - `recording.webm` — Playwright native context video; the rendered
+      walk-through (load-bearing).
     - `trace.zip` — Playwright trace; `npx playwright show-trace trace.zip`.
-    - `01-dashboard.png` … `06-citations.png` — key-state screenshots.
+    - `01-loaded.png` … `NN-*.png` — key-state screenshots.
     - `dom.html` — DOM dump at a representative state.
     - `http.log` — curl snapshots of the UI's routes.
-    - `sse.log` — `/events?review=<id>` event-stream transcript.
+    - `sse.log` — SSE event-stream transcript.
 
 ## Reviewing
 
@@ -303,7 +222,7 @@ fencing deep:
 npx playwright show-trace "$CAPDIR/trace.zip"   # step through every action
 ```
 
-Or play `recording.mp4` / `recording.webm` directly, read `sse.log` to
-confirm the push events arrived, and grep `http.log` / `dom.html` for the
-rendered contract. The manifest tells reviewers what they're looking at
-without re-deriving it from the driver script.
+Or play `recording.webm` directly, read `sse.log` to confirm the push
+events arrived, and grep `http.log` / `dom.html` for the rendered
+contract. The manifest tells reviewers what they're looking at without
+re-deriving it from the driver script.
