@@ -352,15 +352,24 @@ def set_fake_claude_config(session_tag: str, config: dict) -> None:
     sd = session_dir(session_tag)
     if sd:
         (sd / "fake-claude").write_text(json.dumps(config, indent=2) + "\n")
+        # Re-declaring the config resets scripted-sequence cursors: the
+        # sidecar is stale state for the *previous* config, and a fresh
+        # config should start its sequences at slot 0 (otherwise a shorter
+        # new sequence resumes mid-stream, silently mis-modelling iteration
+        # order — the exact flakiness scripted sequences exist to avoid).
+        state = sd / "fake-claude.state"
+        if state.exists():
+            state.unlink()
 
 
 def clear_fake_claude(session_tag: str) -> None:
-    """Remove the fake-claude config file for a session."""
+    """Remove the fake-claude config file (and scripted-cursor sidecar) for a session."""
     sd = session_dir(session_tag)
     if sd:
-        f = sd / "fake-claude"
-        if f.exists():
-            f.unlink()
+        for name in ("fake-claude", "fake-claude.state"):
+            f = sd / name
+            if f.exists():
+                f.unlink()
 
 
 def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10_000_000) -> logging.Logger:

@@ -712,6 +712,32 @@ class TestFakeClaudeConfig:
         clear_fake_claude(tag)
         assert fake_claude_config(tag) is None
 
+    def test_clear_removes_scripted_cursor_sidecar(self, tmp_path, monkeypatch):
+        # A scripted-sequence config advances a cursor stored in
+        # fake-claude.state; clear must remove it too, otherwise a later
+        # config inherits a stale cursor.
+        from pm_core.paths import set_fake_claude_config, clear_fake_claude
+        from pm_core.claude_launcher import _advance_scripted_cursor
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {"review": {"verdicts": ["NEEDS_WORK", "PASS"]}})
+        _advance_scripted_cursor(tag, "review", 2, False)
+        assert (tmp_path / tag / "fake-claude.state").exists()
+        clear_fake_claude(tag)
+        assert not (tmp_path / tag / "fake-claude.state").exists()
+
+    def test_set_resets_scripted_cursor_sidecar(self, tmp_path, monkeypatch):
+        # Re-declaring a config should start sequences fresh at slot 0, not
+        # resume the previous run's cursor.
+        from pm_core.paths import set_fake_claude_config
+        from pm_core.claude_launcher import _advance_scripted_cursor, peek_fake_verdicts
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {"review": {"verdicts": ["NEEDS_WORK", "PASS"]}})
+        _advance_scripted_cursor(tag, "review", 2, False)  # cursor → PASS
+        assert peek_fake_verdicts(tag)["review"] == "PASS"
+        set_fake_claude_config(tag, {"review": {"verdicts": ["NEEDS_WORK", "PASS"]}})
+        assert not (tmp_path / tag / "fake-claude.state").exists()
+        assert peek_fake_verdicts(tag)["review"] == "NEEDS_WORK"
+
     def test_invalid_json_returns_none(self, tmp_path, monkeypatch):
         from pm_core.paths import fake_claude_config
         tag = self._setup(tmp_path, monkeypatch)
