@@ -82,6 +82,10 @@ CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<s
 ID=regression-fixture        # the registered review id
 PORT=8765                    # an ephemeral free port
 BASE="http://localhost:$PORT"
+# The review's STATE.md is the source of truth for cycle/phase (see
+# plan-litreview): writing current-phase is the entire phase-transition
+# channel. Editing this file is what drives the SSE-pushed UI updates.
+STATE_FILE="pm/docs/adversarial-review/reviews/$ID/STATE.md"
 mkdir -p "$CAPDIR"
 
 # Follow the review-walker-ui instruction (pr-5db0e85) to register the
@@ -101,7 +105,8 @@ Save the skeleton below as `driver.mjs`, then run it with the capture
 dir, review id, and base URL in the environment:
 
 ```bash
-CAPDIR="$CAPDIR" REVIEW_ID="$ID" WALKER_URL="$BASE" node driver.mjs
+CAPDIR="$CAPDIR" REVIEW_ID="$ID" WALKER_URL="$BASE" STATE_FILE="$STATE_FILE" \
+    node driver.mjs
 ```
 
 The driver records the video and trace, walks the views, exercises the
@@ -115,15 +120,14 @@ with auto-wait — no brittle `sleep`s — so it tolerates render timing.
 // SSE-driven live updates by mutating STATE.md in a side process.
 import { chromium } from 'playwright';
 import { promises as fs } from 'fs';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import path from 'path';
-
-const execFileP = promisify(execFile);
 
 const capDir = process.env.CAPDIR;
 const reviewId = process.env.REVIEW_ID;
 const base = process.env.WALKER_URL || 'http://localhost:8765';
+// The review's STATE.md — writing current-phase here is the phase channel
+// the walker reacts to over SSE (see plan-litreview "Server-pushed updates").
+const stateFile = process.env.STATE_FILE;
 
 // Canonical routes (see the recipe's "Canonical routes" table). The
 // driver prefers click-through via locators; these back the initial load
@@ -173,11 +177,15 @@ const shot = (page, name) =>
   await page.keyboard.press('m');           // modify
   await page.keyboard.press('s');           // skip
 
-  // 3. SSE-driven live update. A side process mutates STATE.md; the walker
-  // receives the push on /events?review=<id> and reacts. Wait on the DOM
-  // reflecting the new phase instead of sleeping. (Swap this execFile for
-  // a concurrently-running side shell if you prefer; either works.)
-  await execFileP('pm', ['review', 'set-phase', reviewId, 'applying']);
+  // 3. SSE-driven live update. Flip current-phase in STATE.md; the server's
+  // watchdog observer pushes the change on /events?review=<id> and the walker
+  // reacts. Wait on the DOM reflecting the new phase instead of sleeping.
+  // (A concurrently-running side shell editing STATE.md works identically —
+  // see Layer 2; either drives the same SSE push.)
+  const state = await fs.readFile(stateFile, 'utf8');
+  await fs.writeFile(
+    stateFile,
+    state.replace(/^current-phase:.*$/m, 'current-phase: applying'));
   await page
     .getByText(/applying accepted changes/i)
     .waitFor({ timeout: 5000 });
@@ -243,12 +251,14 @@ Greppable proof of the server contract underneath the rendered demo.
 } > "$CAPDIR/http.log" 2>&1
 
 # sse.log — transcript of the SSE stream while a side shell drives phase
-# transitions. Start the reader in the background, mutate STATE.md, give
-# the pushes a moment to land, then stop the reader.
+# transitions. Start the reader in the background, mutate STATE.md (the
+# walker's watchdog turns each write into an SSE push), give the pushes a
+# moment to land, then stop the reader.
 curl -N --max-time 15 "$BASE/events?review=$ID" > "$CAPDIR/sse.log" 2>&1 &
 SSE_PID=$!
-pm review set-phase "$ID" awaiting-human-review
-pm review set-phase "$ID" applying
+sed -i 's/^current-phase:.*/current-phase: awaiting-human-review/' "$STATE_FILE"
+sleep 0.5
+sed -i 's/^current-phase:.*/current-phase: applying/' "$STATE_FILE"
 sleep 2
 kill "$SSE_PID" 2>/dev/null || true
 ```
