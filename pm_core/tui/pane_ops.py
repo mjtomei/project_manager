@@ -701,6 +701,11 @@ def restart_app(app) -> None:
     import sys
     import shutil
     _log.info("restart_app")
+    # execvp replaces the process without firing on_unmount, so flush any
+    # pending writes here or the final in-memory mutations would be lost.
+    wq = getattr(app, "_write_queue", None)
+    if wq is not None:
+        wq.flush_sync()
     # Restore terminal state (raw mode, alt screen, etc.) before
     # replacing the process so the new TUI starts clean.
     try:
