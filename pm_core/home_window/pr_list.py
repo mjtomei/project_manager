@@ -15,6 +15,7 @@ import os
 import signal
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 from pm_core import tmux as tmux_mod
@@ -82,14 +83,41 @@ def _terminal_size() -> tuple[int, int]:
         return DEFAULT_SIZE
 
 
+def _char_width(ch: str) -> int:
+    # Display columns a single character occupies in a terminal.
+    # Combining marks add nothing; East-Asian Wide/Fullwidth glyphs
+    # (including the PR status emoji like ⏳/🔨/👀) take two cells.
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def _display_width(s: str) -> int:
+    return sum(_char_width(c) for c in s)
+
+
 def _truncate(line: str, width: int) -> str:
+    # Truncate by *display width*, not code-point count: format_pr_line
+    # prepends a 2-cell status emoji, so a line cut to `width` code
+    # points would render `width+1` cells and soft-wrap on the pane —
+    # scrolling the header off-screen. Measure in cells so the result
+    # never exceeds the pane width.
     if width <= 0:
         return ""
-    if len(line) <= width:
+    if _display_width(line) <= width:
         return line
     if width == 1:
         return "…"
-    return line[: width - 1] + "…"
+    budget = width - 1  # reserve one cell for the trailing ellipsis
+    out: list[str] = []
+    used = 0
+    for ch in line:
+        w = _char_width(ch)
+        if used + w > budget:
+            break
+        out.append(ch)
+        used += w
+    return "".join(out) + "…"
 
 
 def _format_relative(seconds: float) -> str:
@@ -162,7 +190,7 @@ def _render_content(width: int, height: int) -> str:
 
 def _compose(header_text: str, body: str, width: int, height: int) -> str:
     head = _truncate(header_text, width)
-    ruler = _truncate("=" * len(head), width)
+    ruler = _truncate("=" * _display_width(head), width)
     # Clamp by *line* count, not element count: `body` is a multi-line
     # string, so it must be split before the height clamp can act as a
     # genuine safety net (independent of _render_content's own budgeting).

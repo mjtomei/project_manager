@@ -184,6 +184,22 @@ class TestRenderHelpers:
     def test_truncate_width_one(self):
         assert _truncate("abcdef", 1) == "…"
 
+    def test_truncate_measures_display_width_not_codepoints(self):
+        # The PR status emoji (⏳) is a 2-cell glyph. Truncating by
+        # code-point count would yield a string that renders one cell
+        # wider than the pane and soft-wraps, scrolling the header off
+        # screen. Measure in display cells so the result never exceeds
+        # the requested width.
+        from pm_core.home_window.pr_list import _display_width
+
+        line = "  ⏳ pr-1234567: a really long PR title that overflows"
+        for width in (1, 5, 10, 20, 40):
+            out = _truncate(line, width)
+            assert _display_width(out) <= width, (width, out)
+        # A line that fits in cells (even if it contains a wide glyph) is
+        # returned unchanged.
+        assert _truncate("⏳ ok", 5) == "⏳ ok"
+
     def test_render_content_overflow_emits_more_footer(self):
         prs = [
             {"id": f"pr-{i}", "title": f"T{i}", "status": "in_progress",
