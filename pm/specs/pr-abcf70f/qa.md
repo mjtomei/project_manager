@@ -241,3 +241,26 @@ None unresolved. Resolutions taken:
   container.py), so image availability is no longer a blocker. Container-mode QA
   loop scenarios are therefore drivable in this run; their STEPS must include
   the `nested_podman: true` opt-in and `pm container enable` as setup.
+- Alternate-branch driveability (corrected 2026-05-22 against current qa_loop.py;
+  the originally-planned single "reject / re-verify / blocked finalize" arc
+  contradicts the loop code in two places, both because the one-shot fake emits
+  exactly one verdict per process and ignores stdin/tmux follow-ups):
+  (1) `qa_concretize` REFINER_REJECT does NOT retry/re-concretize — it DEFERS.
+  `qa_loop.py` marks the scenario INPUT_REQUIRED ("refiner rejected: …") and
+  returns, skipping the worker launch entirely. A scripted REFINER_REJECT →
+  REFINED_STEPS sequence never consumes the second entry, so a reject-then-recover
+  arc is unplannable.
+  (2) `qa_verification` FLAGGED routes back to the SCENARIO WORKER pane (a tmux
+  follow-up + verdict cleared to pending), not a fresh verifier process. The
+  one-shot fake never fires a fresh `idle_prompt`, so the scenario STALLS in
+  pending instead of recovering to VERIFIED. The FLAGGED → re-evaluate → VERIFIED
+  recovery path is therefore UNDRIVEABLE by the current fake — known
+  fake-vs-production drift, tracked for the pr-fbda1a8 bridge; do not plan it.
+  Corrected alternate-branch coverage uses single forward verdicts only: one
+  scenario hits qa_concretize → REFINER_REJECT (deferred, INPUT_REQUIRED, no
+  worker pane spawned); another runs qa_concretize → REFINED_STEPS then
+  qa_scenario → NEEDS_WORK (fails outright) and reaches qa_finalize →
+  FINALIZE_BLOCKED. Finalize runs unconditionally after aggregation (only an
+  unverified PASS skips it), so FINALIZE_BLOCKED is reachable even when scenarios
+  fail; expect an overall NEEDS_WORK with a blocked finalize, not a clean
+  FINALIZE_DONE.

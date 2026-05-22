@@ -7287,6 +7287,12 @@ prs:
       container mode + nested_podman:true).'
     created_at: '2026-05-22T17:36:12Z'
     last_edited: '2026-05-22T17:36:12Z'
+  - id: note-7bcb706
+    text: 'QA NEEDS_WORK: Container-mode QA loop happy path — every phase driven by
+      the fake to FINALIZE_DONE: NEEDS_WORK; Container-mode QA loop alternate branches
+      — deferred-on-reject and blocked finalize: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-0db9fa7703787d66)'
+    created_at: '2026-05-22T18:32:36Z'
+    last_edited: '2026-05-22T18:32:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
