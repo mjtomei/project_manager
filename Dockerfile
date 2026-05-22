@@ -92,7 +92,8 @@ RUN git --version && python3 --version && pip3 --version \
 # than ~/.cache/ms-playwright: this RUN executes as root (USER pm is set
 # below, and `--with-deps` apt installs need root), so a home-relative cache
 # would land in /root and be invisible to the runtime `pm` user.  The ENV
-# persists into the runtime layer and `chmod -R a+rx` lets `pm` launch the
+# persists into the runtime layer and `chmod -R a+rX` (read everywhere,
+# traverse dirs + keep the browser binaries executable) lets `pm` launch the
 # browser.  NODE_PATH points at the global npm dir so `require('playwright')`
 # resolves from node scripts the `pm` user runs.
 #
@@ -108,7 +109,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 ENV NODE_PATH=/usr/lib/node_modules
 RUN npm install -g playwright \
     && npx playwright install --with-deps chromium \
-    && chmod -R a+rx "$PLAYWRIGHT_BROWSERS_PATH" \
+    && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH" \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
