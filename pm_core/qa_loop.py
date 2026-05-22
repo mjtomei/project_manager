@@ -1960,6 +1960,7 @@ def _poll_tmux_verdicts(
                 scenario, verdict, content, pr_data, data,
                 session=session, stop_check=_stop,
                 qa_workdir=state.qa_workdir,
+                pr_workdir=workdir_path,
             )
         except Exception:
             _log.warning("Verification thread crashed for scenario %d — "
@@ -2424,6 +2425,7 @@ def _verify_single_scenario(
     session: str | None = None,
     stop_check: Callable[[], bool] | None = None,
     qa_workdir: str | None = None,
+    pr_workdir: str | None = None,
 ) -> tuple[bool, str, str | None]:
     """Verify a single scenario's verdict in its dedicated verifier pane.
 
@@ -2491,16 +2493,18 @@ def _verify_single_scenario(
             _log.warning("Verification: cannot find scenario %d pane, "
                          "marking unverified", scenario.index)
             return False, "scenario pane not found", None
-        verify_cwd: str | None = None
-        if scenario.transcript_path:
-            verify_cwd = str(Path(scenario.transcript_path).parent)
-        elif scenario.worktree_path:
-            verify_cwd = str(Path(scenario.worktree_path).parent.parent)
-        elif qa_workdir:
-            verify_cwd = qa_workdir
+        # Run the verifier in the PR's canonical workdir.  That directory
+        # is already trusted (the planner/impl/review sessions live there),
+        # so the verifier inherits its trust and never stalls on Claude's
+        # interactive workspace-trust dialog.  The verifier reads the
+        # scenario transcript by absolute path and does no repo work in its
+        # cwd, so this directory is otherwise functionally arbitrary.  We do
+        # NOT fall back to the per-run hashed QA dir: that path is never
+        # trusted and would silently re-introduce the trust-dialog stall.
+        verify_cwd = pr_workdir
         if not verify_cwd:
-            _log.warning("Verification: no cwd available for scenario %d, "
-                         "marking unverified", scenario.index)
+            _log.warning("Verification: no PR workdir available for scenario "
+                         "%d, marking unverified", scenario.index)
             return False, "no verification cwd", None
         import uuid as _uuid
         verify_session_id = str(_uuid.uuid4())
