@@ -17,9 +17,10 @@ Usage:
 import argparse
 import sys
 
-# Allow running from the repo root without installing the package.  Resolve
-# the real path first so a PATH symlink (e.g. ~/.local/bin/fake-claude created
-# by install.sh) still points sys.path at the repo root, not the symlink dir.
+# Allow running from the repo root without installing the package.  The on-PATH
+# ``fake-claude`` shim (written by install.sh / container setup) execs this file
+# by its real path, so __file__ already points here; resolve() additionally
+# follows any symlink so sys.path lands on the repo root, not a link dir.
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

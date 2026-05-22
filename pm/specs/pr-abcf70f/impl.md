@@ -353,3 +353,19 @@ description but are needed for FakeClaudeSession to faithfully model production.
    parameter for the same reason. These extra keys are **not** in
    `model_config.SESSION_TYPES` — they are fake-claude routing only, not
    model-targetable (`SESSION_TYPES ⊆ SESSION_TYPE_VERDICTS` still holds).
+
+7. **QA verifier flags missing / downgraded scenario artifacts.** Not part of
+   the FakeClaudeSession plan, but added on this branch (commit 90eb6848):
+   `_build_verification_prompt` gained an artifact-completeness step, present
+   only when the scenario carries `artifact_paths`. The verifier lists the
+   per-scenario captures dir, confirms each assigned recipe's documented
+   artifact is actually present *and is the real thing* (a recording recipe is
+   not satisfied by a `.log`/`.txt` scrollback dump), and FLAGs a
+   missing/downgraded artifact unless the transcript states a specific valid
+   reason. The judgment step renumbers to Step 4 when present.
+   `_verify_single_scenario` resolves the host captures dir (via
+   `paths.captures_dir`) and threads it through. **Note:** this overlaps the
+   charter of pending sibling PR pr-98f670e ("QA scenario quality supervisor:
+   judge artifact depth and amend before next run"); the two are complementary
+   (a verification-time gate here vs. a between-run amendment supervisor there)
+   but the boundary should be confirmed so the work isn't duplicated.

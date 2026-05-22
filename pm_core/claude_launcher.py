@@ -15,10 +15,13 @@ from pm_core.paths import configure_logger, log_shell_command
 _log = configure_logger("pm.claude_launcher")
 
 # The fake-claude executable is invoked by bare name and resolved from PATH —
-# exactly like the real ``claude`` binary.  ``install.sh`` symlinks it onto the
-# host PATH and the container image puts ``/opt/pm-src/bin`` (the bind-mounted
-# pm source) on PATH, so the same command resolves correctly in *both*
-# environments with no build-time path baking and no host->container rewrite.
+# exactly like the real ``claude`` binary.  The on-PATH ``fake-claude`` is a
+# tiny shim that resolves the actual binary via ``pm which`` at run time, so
+# the pm install *under test* is used (host or container).  ``install.sh``
+# writes the shim to ~/.local/bin on the host and
+# ``container._build_git_setup_script`` writes the same shim at container
+# startup, so the same command resolves correctly in *both* environments with
+# no build-time path baking and no host->container rewrite.
 _FAKE_CLAUDE_BIN = "fake-claude"
 
 
