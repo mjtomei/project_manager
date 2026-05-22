@@ -412,6 +412,19 @@ def _build_git_setup_script(
             f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
         )
 
+    # Symlink the bundled fake-claude integration-test stand-in onto PATH so it
+    # resolves by bare name inside the container, exactly as the launcher
+    # invokes it on the host.  The pm source is bind-mounted at
+    # _CONTAINER_PM_SRC and ~/.local/bin is first on PATH; doing it here (a
+    # runtime symlink, like the git wrapper below) avoids a Dockerfile/PATH
+    # change and the image rebuild that would require.  Harmless when the fake
+    # is unused — real claude is resolved separately.
+    lines.append(
+        f"mkdir -p {_CONTAINER_HOME}/.local/bin && "
+        f"ln -sf {_CONTAINER_PM_SRC}/bin/fake-claude "
+        f"{_CONTAINER_HOME}/.local/bin/fake-claude"
+    )
+
     # Install a git wrapper that intercepts remote-interacting commands
     # (push, fetch, pull, ls-remote) and forwards them to the host-side
     # proxy via the mounted Unix socket.  No credentials exist inside the

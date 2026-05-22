@@ -154,11 +154,16 @@ loop state machines, and verification transitions without real API calls.
      imports `pm_core` without an install. (`fake_claude.py` is stdlib-only, so
      the script runs under the system `python3` from its `#!/usr/bin/env
      python3` shebang — no venv/deps needed.)
-   - **Container:** the image puts `/opt/pm-src/bin` (the read-only pm-source
-     bind-mount) on `PATH` (Dockerfile `ENV PATH=…:/opt/pm-src/bin:…`). Bare
-     `fake-claude` resolves to `/opt/pm-src/bin/fake-claude`, which
+   - **Container:** `_build_git_setup_script` (run at every container start)
+     symlinks `~/.local/bin/fake-claude` → `/opt/pm-src/bin/fake-claude` (the
+     pm source is already bind-mounted at `/opt/pm-src`, and `~/.local/bin` is
+     first on the image's PATH — same dir the git-proxy wrapper uses). Bare
+     `fake-claude` then resolves to the symlink → `bin/fake-claude`, which
      `sys.path.insert`s `/opt/pm-src` (the repo root on the mount); the image
-     also sets `PYTHONPATH=/opt/pm-src`.
+     also sets `PYTHONPATH=/opt/pm-src`. Doing this as a **runtime symlink**
+     (not a Dockerfile PATH change) means no image rebuild is needed — the
+     symlink is created fresh each time a container is created, exactly like
+     the git wrapper.
    - This removes the earlier host-path-rewrite hack: `build_claude_shell_cmd`
      no longer bakes `<pm_src>/bin/fake-claude`, so `build_exec_cmd` no longer
      needs `_rewrite_pm_src_path` (deleted). The fake command now reaches the
