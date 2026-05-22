@@ -908,6 +908,35 @@ class TestBuildExecCmd:
         # Podman should NOT use -u pm (user is already mapped via --userns=keep-id)
         assert f"-u {_CONTAINER_USER}" not in cmd
 
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_rewrites_fake_claude_binary_to_container_path(self, mock_runtime):
+        # The fake-claude binary is resolved on the host to
+        # <pm_src>/bin/fake-claude; inside the container the pm source is
+        # mounted at _CONTAINER_PM_SRC, so the exec'd command must reference
+        # the container path or it dies with "No such file or directory".
+        from pm_core.paths import pm_core_path
+        from pm_core.container import _CONTAINER_PM_SRC
+        host_bin = str(pm_core_path().parent / "bin" / "fake-claude")
+        cmd = build_exec_cmd(
+            "my-container",
+            f"{host_bin} --verdict PASS --preamble 1",
+            cleanup=False,
+        )
+        assert f"{_CONTAINER_PM_SRC}/bin/fake-claude" in cmd
+        assert host_bin not in cmd
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_does_not_rewrite_project_workspace_paths(self, mock_runtime):
+        # A plain project cwd / prompt-file reference under the mounted
+        # /workspace clone must NOT be rewritten — only the pm-source bin dir.
+        from pm_core.container import _CONTAINER_WORKDIR
+        cmd = build_exec_cmd(
+            "my-container",
+            f"cat {_CONTAINER_WORKDIR}/pm/prompts/p.txt && claude",
+            cleanup=False,
+        )
+        assert f"{_CONTAINER_WORKDIR}/pm/prompts/p.txt" in cmd
+
 
 class TestWrapClaudeCmd:
     @patch("pm_core.container.is_container_mode_enabled", return_value=False)
