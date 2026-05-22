@@ -412,17 +412,26 @@ def _build_git_setup_script(
             f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
         )
 
-    # Symlink the bundled fake-claude integration-test stand-in onto PATH so it
+    # Install the fake-claude shim onto PATH so the integration-test stand-in
     # resolves by bare name inside the container, exactly as the launcher
-    # invokes it on the host.  The pm source is bind-mounted at
-    # _CONTAINER_PM_SRC and ~/.local/bin is first on PATH; doing it here (a
-    # runtime symlink, like the git wrapper below) avoids a Dockerfile/PATH
-    # change and the image rebuild that would require.  Harmless when the fake
-    # is unused — real claude is resolved separately.
+    # invokes it.  The shim resolves the actual binary via ``pm which`` *at run
+    # time inside the container*, so it picks up whichever pm_core the wrapper
+    # selects — e.g. the /workspace checkout under test for a pm-on-pm QA run,
+    # not just the mounted /opt/pm-src.  ~/.local/bin is first on PATH; doing
+    # it here (a runtime install, like the git wrapper below) avoids a
+    # Dockerfile/PATH change and the image rebuild that would require.
+    _fake_shim_path = f"{_CONTAINER_HOME}/.local/bin/fake-claude"
+    _fake_shim = (
+        "#!/bin/sh\n"
+        "# pm: resolve fake-claude from the active pm install (pm which) so the\n"
+        "# copy under test is used, even inside a container.\n"
+        'core="$(pm which 2>/dev/null | tail -n1)" || exit 127\n'
+        'exec "$(dirname "$core")/bin/fake-claude" "$@"\n'
+    )
     lines.append(
         f"mkdir -p {_CONTAINER_HOME}/.local/bin && "
-        f"ln -sf {_CONTAINER_PM_SRC}/bin/fake-claude "
-        f"{_CONTAINER_HOME}/.local/bin/fake-claude"
+        f"cat > {_fake_shim_path} << 'FAKEEOF'\n{_fake_shim}FAKEEOF\n"
+        f"chmod 755 {_fake_shim_path}"
     )
 
     # Install a git wrapper that intercepts remote-interacting commands

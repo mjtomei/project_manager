@@ -144,33 +144,40 @@ loop state machines, and verification transitions without real API calls.
      container with no host→container translation. There is no per-tag `binary`
      config override (removed — see "Scope extensions" / requirement 6b).
 
-6b. **Container-mode binary resolution — bare name, no rewrite.** Because the
-   fake is invoked by bare name, the only requirement is that `fake-claude` is
-   on PATH in both execution contexts:
-   - **Host:** `install.sh --local` symlinks `~/.local/bin/fake-claude` →
-     `<repo>/bin/fake-claude` (alongside the `pm` symlink). `bin/fake-claude`
-     does `sys.path.insert(0, Path(__file__).resolve().parent.parent)` — the
-     `.resolve()` makes the symlink point sys.path at the real repo root, so it
-     imports `pm_core` without an install. (`fake_claude.py` is stdlib-only, so
-     the script runs under the system `python3` from its `#!/usr/bin/env
-     python3` shebang — no venv/deps needed.)
+6b. **Binary resolution — a `pm which` shim on PATH (host & container).**
+   Because the fake is invoked by bare name, the only requirement is that a
+   `fake-claude` resolving to the right binary is on PATH in both contexts.
+   Rather than a fixed symlink, the on-PATH `fake-claude` is a tiny POSIX shim:
+
+       #!/bin/sh
+       core="$(pm which 2>/dev/null | tail -n1)" || exit 127
+       exec "$(dirname "$core")/bin/fake-claude" "$@"
+
+   `pm which` prints the active `pm_core` dir, and the wrapper resolves that the
+   same way it resolves the running `pm` (session override → session `pm_root` →
+   cwd-walk local `pm_core` → installed). So the shim runs the `bin/fake-claude`
+   of **whichever pm install `pm which` selects** — including a `/workspace`
+   checkout *under test* for a pm-on-pm QA run, not just the installed/mounted
+   copy. This is the same in-context resolution everywhere.
+   - **Host:** `install.sh --local` writes the shim to `~/.local/bin/fake-claude`
+     (alongside the `pm` symlink), removed on `--uninstall`.
    - **Container:** `_build_git_setup_script` (run at every container start)
-     symlinks `~/.local/bin/fake-claude` → `/opt/pm-src/bin/fake-claude` (the
-     pm source is already bind-mounted at `/opt/pm-src`, and `~/.local/bin` is
-     first on the image's PATH — same dir the git-proxy wrapper uses). Bare
-     `fake-claude` then resolves to the symlink → `bin/fake-claude`, which
-     `sys.path.insert`s `/opt/pm-src` (the repo root on the mount); the image
-     also sets `PYTHONPATH=/opt/pm-src`. Doing this as a **runtime symlink**
-     (not a Dockerfile PATH change) means no image rebuild is needed — the
-     symlink is created fresh each time a container is created, exactly like
-     the git wrapper.
+     writes the same shim to `~/.local/bin/fake-claude` (`~/.local/bin` is first
+     on the image PATH — same dir the git-proxy wrapper uses). Doing it as a
+     **runtime install** (not a Dockerfile PATH change) means no image rebuild
+     is needed. Inside the container `pm which` typically resolves to the
+     `/workspace` clone (pm-on-pm) or falls back to `/opt/pm-src`
+     (`PYTHONPATH=/opt/pm-src`); either way the shim execs that tree's
+     `bin/fake-claude`.
+   - The resolved `bin/fake-claude` does
+     `sys.path.insert(0, Path(__file__).resolve().parent.parent)` and is
+     stdlib-only, so it imports `pm_core` and runs under the system `python3`
+     (`#!/usr/bin/env python3`) with no install/venv/deps.
    - This removes the earlier host-path-rewrite hack: `build_claude_shell_cmd`
      no longer bakes `<pm_src>/bin/fake-claude`, so `build_exec_cmd` no longer
      needs `_rewrite_pm_src_path` (deleted). The fake command now reaches the
-     container verbatim, the same way bare `claude` does. The previous approach
-     baked a host path that didn't exist inside the container; resolving by
-     name at runtime is the principled fix and also removes the
-     custom-`binary`-override gap (the override no longer exists).
+     container verbatim, the same way bare `claude` does, and the
+     custom-`binary`-override gap is gone (the override was removed).
 
 7. **Companion fixtures — `tests/fixtures/fake_claude/*.txt`**
    - One file per verdict — `pass.txt`, `needs_work.txt`, `input_required.txt`,
@@ -261,11 +268,12 @@ loop state machines, and verification transitions without real API calls.
   optional with default `PASS` on the standalone `bin/fake-claude` so it can be
   invoked as a drop-in claude replacement with no arguments.
 - **Where does the binary path come from?** `_FAKE_CLAUDE_BIN` is the bare
-  name `"fake-claude"`, resolved from PATH at runtime in-context — exactly like
-  the real `claude` binary (requirements 6 and 6b). `install.sh` puts it on the
-  host PATH; the container image puts `/opt/pm-src/bin` on PATH. There is no
-  per-tag `binary` override (removed — bare-name resolution makes it
-  unnecessary and it could not be made container-correct).
+  name `"fake-claude"`, resolved from PATH at runtime — exactly like the real
+  `claude` binary. The on-PATH `fake-claude` is a shim that resolves the actual
+  binary via `pm which` (so the pm install under test is used, host or
+  container); `install.sh` writes it on the host and
+  `container._build_git_setup_script` writes it in the container (requirements
+  6 and 6b). There is no per-tag `binary` override (removed).
 
 ## Edge Cases / Interactions
 

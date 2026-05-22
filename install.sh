@@ -4,11 +4,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$HOME/.local/share/pm/venv"
 BIN_LINK="$HOME/.local/bin/pm"
-# fake-claude is a standalone integration-test stand-in for real Claude.  It is
+# fake-claude is a standalone integration-test stand-in for real Claude,
 # resolved by bare name from PATH (exactly like ``claude``) by the launcher, so
-# it must be on PATH.  Symlink the repo script directly — it self-resolves its
-# repo root via Path(__file__).resolve(), so a symlink works.
-FAKE_LINK="$HOME/.local/bin/fake-claude"
+# it must be on PATH.  We install a tiny shim (not a symlink) that resolves the
+# actual binary via ``pm which`` at run time — so the copy under test is used
+# (the same resolution works inside containers, where pm may resolve to a
+# /workspace checkout rather than the install dir).
+FAKE_SHIM="$HOME/.local/bin/fake-claude"
 
 FORCE=false
 MODE=""
@@ -33,9 +35,9 @@ done
 
 if [ "$MODE" = "uninstall" ]; then
     rm -f "$BIN_LINK"
-    rm -f "$FAKE_LINK"
+    rm -f "$FAKE_SHIM"
     rm -rf "$VENV_DIR"
-    echo "Removed $BIN_LINK, $FAKE_LINK and $VENV_DIR"
+    echo "Removed $BIN_LINK, $FAKE_SHIM and $VENV_DIR"
     exit 0
 fi
 
@@ -65,11 +67,18 @@ if [ "$MODE" = "local" ]; then
 
     mkdir -p "$HOME/.local/bin"
     ln -sf "$VENV_DIR/bin/pm" "$BIN_LINK"
-    ln -sf "$SCRIPT_DIR/bin/fake-claude" "$FAKE_LINK"
+    cat > "$FAKE_SHIM" << 'FAKEEOF'
+#!/bin/sh
+# pm: resolve fake-claude from the active pm install (pm which) so the copy
+# under test is used (works inside containers too).
+core="$(pm which 2>/dev/null | tail -n1)" || exit 127
+exec "$(dirname "$core")/bin/fake-claude" "$@"
+FAKEEOF
+    chmod 755 "$FAKE_SHIM"
 
     echo ""
     echo "Installed pm -> $BIN_LINK"
-    echo "Installed fake-claude -> $FAKE_LINK"
+    echo "Installed fake-claude shim -> $FAKE_SHIM"
     echo "Run 'pm help' to get started."
     exit 0
 fi

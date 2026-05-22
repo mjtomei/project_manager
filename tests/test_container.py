@@ -1076,15 +1076,18 @@ class TestBuildGitSetupScript:
         script = _build_git_setup_script()
         assert "safe.directory" in script
 
-    def test_symlinks_fake_claude_onto_path(self):
-        # The setup always symlinks the bundled fake-claude onto ~/.local/bin
-        # (first on PATH) so it resolves by bare name inside the container —
-        # no Dockerfile PATH change / image rebuild needed.
-        from pm_core.container import _CONTAINER_PM_SRC, _CONTAINER_HOME
+    def test_installs_fake_claude_shim_onto_path(self):
+        # The setup always installs a fake-claude shim onto ~/.local/bin (first
+        # on PATH) so it resolves by bare name inside the container — no
+        # Dockerfile PATH change / image rebuild needed.  The shim resolves the
+        # real binary via `pm which` at run time, so it picks up the pm_core the
+        # wrapper selects (e.g. the /workspace checkout under test).
+        from pm_core.container import _CONTAINER_HOME
         for proxy in (False, True):
             script = _build_git_setup_script(has_push_proxy=proxy)
-            assert (f"ln -sf {_CONTAINER_PM_SRC}/bin/fake-claude "
-                    f"{_CONTAINER_HOME}/.local/bin/fake-claude") in script
+            assert f"{_CONTAINER_HOME}/.local/bin/fake-claude" in script
+            assert "pm which" in script
+            assert '"$(dirname "$core")/bin/fake-claude" "$@"' in script
 
     def test_push_proxy_installs_wrapper(self):
         script = _build_git_setup_script(has_push_proxy=True)
