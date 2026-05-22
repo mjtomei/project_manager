@@ -232,6 +232,23 @@ async def test_identical_update_does_not_rebuild():
 
 
 @async_test
+async def test_auto_start_toggle_rebuilds_for_marker():
+    # Toggling auto-start changes no PR data, but the ◎ target marker lives on
+    # a (possibly pending) node not covered by refresh_active_nodes, so the
+    # layout signature must include auto-start state to trigger a rebuild.
+    app = _TreeApp([_pr("pr-a", status="pending")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        tree = app.query_one(TechTree)
+        before = [id(n) for n in app.query(PRNode)]
+        app._auto_start = True
+        app._auto_start_target = "pr-a"
+        tree.update_prs([_pr("pr-a", status="pending")])  # identical PR data
+        await pilot.pause()
+        after = [id(n) for n in app.query(PRNode)]
+        assert before != after  # rebuilt so the ◎ marker can render
+
+
+@async_test
 async def test_status_change_rebuilds():
     app = _TreeApp([_pr("pr-a", status="pending")])
     async with app.run_test(size=(120, 40)) as pilot:

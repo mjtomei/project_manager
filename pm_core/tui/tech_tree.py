@@ -793,6 +793,22 @@ class TechTree(Widget):
 
     # -- layout caching ------------------------------------------------------
 
+    def _auto_start_sig(self) -> tuple:
+        """Auto-start ``(enabled, target)`` — drives the ◎ marker on the target.
+
+        The target is often a *pending* node (so it isn't covered by
+        ``refresh_active_nodes``), and toggling auto-start changes no PR data,
+        so this must be part of the layout signature for the marker to appear
+        and clear when the user toggles auto-start or repoints the target.
+        """
+        try:
+            from pm_core.tui import auto_start as _auto_start
+            enabled = _auto_start.is_enabled(self.app)
+            target = _auto_start.get_target(self.app) if enabled else None
+            return (enabled, target)
+        except Exception:
+            return (False, None)
+
     def _signature(self) -> tuple:
         """A hashable signature of every input that affects layout or display.
 
@@ -822,6 +838,7 @@ class TechTree(Widget):
             self._hide_closed,
             self._sort_field,
             self._get_viewport_width(),
+            self._auto_start_sig(),
             pr_sig,
         )
 

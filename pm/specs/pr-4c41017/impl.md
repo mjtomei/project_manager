@@ -191,12 +191,21 @@ No **[UNRESOLVED]** ambiguities.
   use the existing hidden-label code paths.
 - **Selection out of range** after filter/hide shrinks the list — clamp in
   `_recompute` (current lines 223–224).
-- **Cross-plan dependency edges**: EdgeCanvas draws in global coords from
-  `node_positions`, independent of which PlanGroup a node widget lives in, so
-  cross-plan arrows still render.
+- **Cross-plan dependency edges**: per the resolved ambiguity **A5**, edges are
+  drawn by a per-band `EdgeCanvas` *inside* each `PlanGroup`, not a single
+  global canvas. A dependency whose endpoints land in different plan bands is
+  therefore **not** drawn (each band owns only its own edges) — an accepted
+  trade-off. Intra-plan edges (the overwhelming majority) render identically to
+  before. (Supersedes the earlier draft of this bullet, which assumed one
+  global EdgeCanvas in global coords.)
 - **Auto-start target `◎`** and **merge `⏸M`** markers: auto-start handled in
   `PRNode.render()`; merge-input marker is part of `_get_loop_marker` (moves to
-  `PRNode`), and such PRs must be included in `refresh_active_nodes()`.
+  `PRNode`), and such PRs must be included in `refresh_active_nodes()`. The
+  auto-start target is often a *pending* node (not "active"), and toggling
+  auto-start changes no PR data, so auto-start `(enabled, target)` is part of
+  the **layout signature** (`_auto_start_sig`) — toggling/repointing triggers a
+  rebuild that paints or clears the `◎`. (Without this the marker would only
+  appear on the next genuine PR-data change.)
 - **Resize**: `app._recompute_tree_layout` (app.py 490–496) calls
   `tree._recompute()` + `refresh(layout=True)`; viewport width is part of the
   layout signature so a width change invalidates the cache and rebuilds.
@@ -234,3 +243,19 @@ No **[UNRESOLVED]** ambiguities.
   labels, selection box, markers/spinners), arrow + hjkl + J/K nav works,
   hide/show (`x`), filter (`f`), sort (`F`), toggle-merged (`X`) work, and a
   running loop animates spinners without full-tree repaint (idle CPU drop).
+
+## QA focus — navigation lag
+Verify nav lag is reduced versus master. Measured per-keystroke render cost
+dropped from ~0.5–1.4 s (monolithic full-grid repaint) to ~0.26 s/key with the
+widget split (selection change repaints only the old+new node).
+
+**Important caveat — separate pre-existing bottleneck.** On large projects the
+dominant nav cost is NOT the repaint: `pr_view.handle_pr_selected` calls
+`store.locked_update` on *every* selection change, rewriting the entire
+`project.yaml` (here 1 MB / 359 PRs) to persist `active_pr`. With pure-Python
+YAML that dump alone is ~1.2 s, and the full lock+read+fsync round-trip
+measures ~2.7 s/key — so end-to-end nav is ~3 s/key regardless of the repaint
+fix. Measured: with the persistence write nav = ~3026 ms/key; with it mocked
+out = ~259 ms/key. If a debounce/async fix for that write is not on this
+branch, QA will still see laggy nav on big projects; test on a large
+project.yaml and attribute the lag correctly (persistence write vs repaint).
