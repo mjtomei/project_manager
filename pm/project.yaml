@@ -4541,7 +4541,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-05-23T06:03:12.893768+00:00'
+  updated_at: '2026-05-23T06:04:13.431032+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4648,6 +4648,24 @@ prs:
       to pm Guide view (not "No PRs defined"). No code changes needed.'
     created_at: '2026-05-23T06:03:12Z'
     last_edited: '2026-05-23T06:03:12Z'
+  - id: note-d9bbd2d
+    text: 'QA s23 (concurrent writers) NEEDS_WORK->fixed (1314537f). Found: SIGUSR1
+      TUI auto-reload was a silent no-op for the normal pm session case. pm attaches
+      users to the grouped ~N tmux session; _find_tui_pane returns the session name
+      WITH the ~N suffix, but the TUI keys its pidfile/cmd-queue by the suffix-stripped
+      canonical name (app.py:443 split("~")[0]). So trigger_tui_reload looked for
+      tui-<sess>~1.pid (nonexistent) and returned at the not-exists guard -> no signal.
+      External pm pr edit/add only surfaced on manual r or the 5-min bg sync. Fix:
+      _canonical_session() strips ~N in _tui_pidfile_for_session + _tui_command_queue_for_session
+      (helpers.py). Verified: coalesced per-burst write (mtime stable during nav,
+      single write ~1.5s after quiet, active_pr==boxed node); external edit now drives
+      action:reload and surfaces w/ cursor preserved (edit of pr-7b367f6 left cursor
+      on pr-5ddaafd); r on unchanged data = no rebuild/flicker; external add = one
+      reload, valid node, valid YAML, 0 tracebacks. Note: pm pr add sets the new PR
+      active, so after an external add the cursor follows to the added PR (valid,
+      not a clobber).'
+    created_at: '2026-05-23T06:04:13Z'
+    last_edited: '2026-05-23T06:04:13Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
