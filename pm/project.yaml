@@ -4541,7 +4541,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-05-23T07:10:36.844541+00:00'
+  updated_at: '2026-05-23T07:11:16.518337+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4699,6 +4699,38 @@ prs:
       check. Captures: /pm-captures/scenarios/26/.'
     created_at: '2026-05-23T07:10:36Z'
     last_edited: '2026-05-23T07:10:36Z'
+  - id: note-f01f550
+    text: 'Scenario 24 (render parity + full nav) is a superset of already-PASSed
+      scenarios 16 (render+gridnav) and 11 (J/K+hide+clamp). The new piece is the
+      master-parity comparison: master lives at /opt/pm-src (default PYTHONPATH) and
+      renders the same box style in a single canvas; this PR splits into per-band
+      EdgeCanvas widgets and intentionally drops cross-plan dependency arrows (accepted
+      A5). Parity check = capture both framebuffers on an identical fixture and confirm
+      node/label/intra-plan-arrow/selection-style equivalence, sole intended diff
+      being the cross-plan arrow master draws. Fixture: use `pm pr add --plan <name>`
+      (no `pm plan add`, that launches Claude). Clamp trigger: `f` cycle_filter to
+      a sparse status beats `x` hide_plan (hidden plans stay as navigable labels in
+      _ordered_ids).'
+    created_at: '2026-05-23T06:58:00Z'
+    last_edited: '2026-05-23T06:58:00Z'
+  - id: note-98377b2
+    text: 'Scenario 24 (render parity + full nav): PASS, all 6 triples on real tmux
+      surface (HEAD 60982b5e). KEY parity finding: PR vs master framebuffers are BYTE-IDENTICAL
+      on the same 6-PR fixture at 230x95 (diff = 0 bytes) — stronger than "matches
+      except cross-plan arrow". At the band-grouped layout NEITHER master (/opt/pm-src)
+      NOR the PR (/workspace) draws the db->auth cross-plan arrow, so there is no
+      observable diff at all (accepted A5 holds, just no master arrow to compare against).
+      Master-baseline gotcha: editable .pth makes /workspace win whenever cwd is /workspace;
+      run master from a non-/workspace cwd with PYTHONPATH=/opt/pm-src (cwd="" is
+      sys.path[0]). hjkl==arrows (4 dirs, single-step, one double-line cursor), 4-edge
+      no-wrap, J->first-PR-of-next-plan + label-to-top scroll, extra J on LAST plan
+      jumps to bottom-most row (needed a forked-root plan to test; a plain chain renders
+      single-row), K->top-of-plan-then-prev, Enter==e (launch pr-edit pane, no traceback,
+      focus returns/no command-bar leak), f->in_review clamps bottom selection to
+      the lone in_review PR with cursor visible + status bar updated. 🧪 box display-width
+      28 every line (aligned). No code changes needed.'
+    created_at: '2026-05-23T07:11:16Z'
+    last_edited: '2026-05-23T07:11:16Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
