@@ -980,6 +980,30 @@ class TestFakeClaudeLauncher:
         assert "PASS" in results
         assert "NEEDS_WORK" in results
 
+    def test_pick_fake_verdict_tolerates_hand_edited_bad_weights(self):
+        """A directly-edited config with non-numeric / negative weights must not
+        crash the launcher (float()/random.choices) — same invariant as
+        review-loop 878e i1.  Bad weights count as zero; a usable positive
+        weight still wins."""
+        from pm_core.claude_launcher import _pick_fake_verdict
+        # "PASS" has a real weight, the others are malformed → always PASS.
+        for _ in range(20):
+            assert _pick_fake_verdict(
+                {"PASS": 5, "NEEDS_WORK": "lots", "INPUT_REQUIRED": -3}
+            ) == "PASS"
+
+    def test_pick_fake_verdict_all_zero_or_invalid_falls_back_uniform(self):
+        """An all-zero / all-invalid weight map (which random.choices rejects)
+        falls back to a uniform pick rather than raising."""
+        from pm_core.claude_launcher import _pick_fake_verdict
+        # All weights unusable (zero / bool / non-numeric) → uniform over keys.
+        results = {
+            _pick_fake_verdict({"PASS": 0, "NEEDS_WORK": True, "INPUT_REQUIRED": "x"})
+            for _ in range(200)
+        }
+        assert results <= {"PASS", "NEEDS_WORK", "INPUT_REQUIRED"}
+        assert len(results) >= 2  # genuinely sampling, not stuck on one key
+
     def test_fake_claude_args_includes_verdict(self):
         from pm_core.claude_launcher import _fake_claude_args
         args = _fake_claude_args({"verdicts": {"PASS": 1}})

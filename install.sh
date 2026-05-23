@@ -71,7 +71,10 @@ if [ "$MODE" = "local" ]; then
 #!/bin/sh
 # pm: resolve fake-claude from the active pm install (pm which) so the copy
 # under test is used (works inside containers too).
-core="$(pm which 2>/dev/null | tail -n1)" || exit 127
+core="$(pm which 2>/dev/null | tail -n1)"
+# A pipeline's status is tail's (almost always 0), so guard the value itself:
+# an empty core makes dirname yield "." and exec a bogus relative path.
+[ -n "$core" ] || exit 127
 exec "$(dirname "$core")/bin/fake-claude" "$@"
 FAKEEOF
     chmod 755 "$FAKE_SHIM"

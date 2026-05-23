@@ -32,9 +32,30 @@ def _fake_claude_config_for_type(session_type: str | None) -> dict | None:
 
 
 def _pick_fake_verdict(verdicts: dict) -> str:
-    """Pick a verdict at random using the given weight map."""
+    """Pick a verdict at random using the given weight map.
+
+    Defensively tolerates a hand-edited weight map.  The supported
+    ``pm fake-claude config set`` path validates weights (numeric,
+    non-negative, not all-zero), but a directly-edited config must never
+    crash the launcher — same invariant as review-loop 878e i1, which
+    coerced malformed ``_all``/``_defaults``/per-type *shapes*; this covers
+    malformed weight *values* inside an otherwise well-shaped per-type entry.
+    Non-numeric / boolean / negative weights count as zero, and an all-zero
+    (or otherwise unusable) map falls back to a uniform pick instead of
+    crashing ``random.choices`` ("Total of weights must be greater than zero").
+    """
     names = list(verdicts.keys())
-    weights = [float(verdicts[n]) for n in names]
+    if not names:
+        return "NONE"
+    weights: list[float] = []
+    for n in names:
+        w = verdicts[n]
+        if isinstance(w, bool) or not isinstance(w, (int, float)) or w < 0:
+            weights.append(0.0)
+        else:
+            weights.append(float(w))
+    if sum(weights) <= 0:
+        return random.choice(names)
     return random.choices(names, weights=weights, k=1)[0]
 
 

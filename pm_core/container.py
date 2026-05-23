@@ -425,7 +425,10 @@ def _build_git_setup_script(
         "#!/bin/sh\n"
         "# pm: resolve fake-claude from the active pm install (pm which) so the\n"
         "# copy under test is used, even inside a container.\n"
-        'core="$(pm which 2>/dev/null | tail -n1)" || exit 127\n'
+        'core="$(pm which 2>/dev/null | tail -n1)"\n'
+        "# A pipeline's status is tail's (almost always 0), so guard the value\n"
+        "# itself: an empty core makes dirname yield '.' and exec a bogus path.\n"
+        '[ -n "$core" ] || exit 127\n'
         'exec "$(dirname "$core")/bin/fake-claude" "$@"\n'
     )
     lines.append(
