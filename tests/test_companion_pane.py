@@ -46,8 +46,6 @@ class TestAddCompanionPane:
              patch.object(pr_mod, "pane_layout") as mock_layout:
             mock_tmux.get_pane_indices.return_value = [("%1", 0)]
             mock_tmux.split_pane_at.return_value = "%2"
-            mock_reg.load_registry.return_value = {}
-            mock_reg.get_window_data.return_value = {"user_modified": True}
 
             pr_mod._add_companion_pane("sess", {"id": "@1", "index": "1"},
                                         "/work/dir", "impl")
@@ -55,15 +53,13 @@ class TestAddCompanionPane:
             mock_tmux.split_pane_at.assert_called_once_with(
                 "%1", "h", mock.ANY, background=True,
             )
-            # Both panes registered
-            assert mock_reg.register_pane.call_count == 2
-            roles = [c[0][3] for c in mock_reg.register_pane.call_args_list]
+            # Shared window size set and panes registered via register_and_rebalance
+            mock_tmux.set_shared_window_size.assert_called_once_with("sess", "@1")
+            mock_layout.register_and_rebalance.assert_called_once()
+            panes_arg = mock_layout.register_and_rebalance.call_args[0][2]
+            roles = [p[1] for p in panes_arg]
             assert "impl-claude" in roles
             assert "impl-companion" in roles
-
-            # user_modified reset and layout rebalanced
-            mock_reg.save_registry.assert_called_once()
-            mock_layout.rebalance.assert_called_once_with("sess", "@1")
 
 
 # ---------------------------------------------------------------------------

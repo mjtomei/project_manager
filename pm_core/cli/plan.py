@@ -9,10 +9,16 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
-from pm_core.plan_parser import parse_plan_prs
-from pm_core import review as review_mod
+from pm_core.plans.parser import parse_plan_prs
+from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_gen import tui_section
+
+# claude receives a session's prompt as a single argv entry.  Linux caps a
+# single argument at MAX_ARG_STRLEN (128 KiB / 131072 bytes, including the
+# terminating NUL); exceeding it makes execve fail with E2BIG.  Stay well
+# under that so prompts that inline per-PR detail degrade gracefully.
+_PROMPT_ARG_LIMIT = 120_000
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -23,7 +29,8 @@ from pm_core.cli.helpers import (
     _pr_display_id,
     _require_plan,
     _resolve_repo_dir,
-    save_and_push,
+    echo_record,
+    emit_paged,
     state_root,
     trigger_tui_refresh,
 )
@@ -63,17 +70,9 @@ def plan_add(name: str, description: str, fresh: bool):
     plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
-    entry = {
-        "id": plan_id,
-        "name": name,
-        "file": plan_file,
-        "status": "draft",
-    }
-    if data.get("plans") is None:
-        data["plans"] = []
-    data["plans"].append(entry)
+    entry = store.make_plan_entry(plan_id, name, plan_file)
 
-    # Create the plan file
+    # Create the plan file (idempotent, safe outside lock)
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
@@ -81,7 +80,12 @@ def plan_add(name: str, description: str, fresh: bool):
     # Ensure notes file exists
     notes.ensure_notes_file(root)
 
-    save_and_push(data, root, f"pm: add plan {plan_id}")
+    def apply(data):
+        if data.get("plans") is None:
+            data["plans"] = []
+        data["plans"].append(entry)
+
+    store.locked_update(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()
@@ -125,9 +129,11 @@ when there's a real ordering constraint.
 
 {_MANUAL_TESTING_GUIDANCE}
 
-After writing the PRs section, tell the user to run `pm plan review {plan_id}`
-(key: c in the plans pane) to check consistency and coverage before loading.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing the PRs section, tell the user to run `pm plan load {plan_id}`
+(key: l in the plans pane) to load the PRs into project.yaml. They can
+optionally run `pm plan review {plan_id}` (key: c) afterward to check
+consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -157,8 +163,7 @@ def plan_list():
     if not plans:
         click.echo("No plans.")
         return
-    for p in plans:
-        click.echo(f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]")
+    emit_paged([f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]" for p in plans])
 
 
 @plan.command("breakdown")
@@ -227,9 +232,10 @@ Guidelines:
 - Write the ## PRs section directly into the plan file at {plan_path}
 - {_MANUAL_TESTING_GUIDANCE}
 
-After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
-plans pane) to check consistency and coverage before loading PRs.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing, tell the user to run `pm plan load {plan_id}` (key: l in the
+plans pane) to load the PRs into project.yaml. They can optionally run
+`pm plan review {plan_id}` (key: c) afterward to check consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -289,6 +295,19 @@ def plan_review(plan_id: str | None, fresh: bool):
         workdir_str = f"\n    workdir: {workdir}" if workdir else ""
         return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{gh_str}{branch_str}{workdir_str}{desc_str}{tests_str}{files_str}"
 
+    def _format_pr_brief(pr):
+        """One-line PR summary — no description/tests/files inlined.
+
+        Used as a fallback when inlining full detail for every PR would push
+        the prompt past the argv size limit.
+        """
+        deps = pr.get("depends_on") or []
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        status = pr.get("status", "pending")
+        gh_num = pr.get("gh_pr_number")
+        gh_str = f" PR #{gh_num}" if gh_num else ""
+        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{gh_str}{dep_str}"
+
     pr_list = "\n".join(_format_pr(pr) for pr in plan_prs) if plan_prs else "(no PRs linked to this plan)"
 
     other_prs_context = ""
@@ -302,7 +321,8 @@ def plan_review(plan_id: str | None, fresh: bool):
 
     if plan_prs:
         # Post-load: PRs exist in project.yaml — review with progress awareness
-        prompt = f"""\
+        def _post_load_prompt(pr_list: str, pr_detail_note: str) -> str:
+            return f"""\
 Your goal: Review the plan's progress, iterate on both the plan and its PRs,
 and help the user understand where things stand.
 
@@ -313,7 +333,7 @@ Read the plan file at: {plan_path}
 
 PRs belonging to this plan:
 {pr_list}
-
+{pr_detail_note}
 {other_prs_context}\
 First, assess progress:
 - How many PRs are done (merged/in_review) vs remaining (pending/in_progress)?
@@ -343,8 +363,37 @@ For any issues found, you can propose a fix. Fixes can be applied as follows:
 - For plan updates: edit the plan file directly at {plan_path}
 - To add new PRs: use `pm pr add`
 
+IMPORTANT: keep the three sources of truth in sync. Whenever you change
+a PR's functionality, scope, or dependencies:
+1. Run `pm pr edit` (the canonical update — writes to project.yaml).
+2. Update the corresponding section in the plan file at {plan_path}
+   so the human-readable plan reflects the change.
+3. If the PR is already merged or in_review (i.e. its body cannot be
+   meaningfully rewritten anymore), add a `pm pr note add <id> "..."`
+   describing the change in context (e.g. "Phase N redesign: this PR's
+   <feature> is now consumed at <new surface> by <other PR>") instead
+   of editing the description.
+
+Apply the same rule when you reference a merged PR's behavior from a
+new pending PR — add a note on the merged PR pointing back, so future
+sessions reading either side find the connection.
+
 After fixing, summarize what was changed.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+
+        # Inline full per-PR detail by default, but if doing so pushes the
+        # prompt past the argv size limit (large plans), fall back to a brief
+        # one-line listing and let the session pull detail with `pm pr show`.
+        prompt = _post_load_prompt(pr_list, "")
+        if len(prompt.encode()) > _PROMPT_ARG_LIMIT:
+            brief = "\n".join(_format_pr_brief(pr) for pr in plan_prs)
+            note = (
+                "\n(This plan has too many PRs to inline each description here. "
+                "The list above is abbreviated — run `pm pr show <id>` to read "
+                "the full description, tests, and files of any PR before "
+                "reviewing it.)\n"
+            )
+            prompt = _post_load_prompt(brief, note)
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -562,7 +611,7 @@ def plan_load(plan_id: str | None):
             title_to_id[pr["title"]] = pr_id
             existing_ids.add(pr_id)
 
-    created = 0
+    new_entries = []
     for pr in prs:
         pr_id = title_to_id[pr["title"]]
 
@@ -589,15 +638,22 @@ def plan_load(plan_id: str | None):
         entry = _make_pr_entry(pr_id, pr["title"], branch,
                                plan=plan_id, depends_on=deps,
                                description=desc)
-        data["prs"].append(entry)
+        new_entries.append(entry)
         existing_titles[pr["title"]] = pr_id
-        created += 1
         click.echo(f"  Created {pr_id}: {pr['title']}")
 
-    if created:
-        save_and_push(data, root, f"pm: load plan {plan_id}")
+    if new_entries:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
         trigger_tui_refresh()
-    click.echo(f"\nLoaded {created} PRs from plan {plan_id}.")
+    click.echo(f"\nLoaded {len(new_entries)} PRs from plan {plan_id}.")
 
 
 @plan.command("fixes")
@@ -690,31 +746,36 @@ def _import_github_prs(root: Path, data: dict) -> None:
         click.echo("  No open PRs found.")
         return
 
-    if data.get("prs") is None:
-        data["prs"] = []
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    entries_to_import = []
 
-    imported = 0
     for gh_pr in gh_prs:
         branch = gh_pr.get("headRefName", "")
         number = gh_pr.get("number")
         title = gh_pr.get("title", "")
         status = _gh_state_to_status(gh_pr.get("state", "OPEN"), gh_pr.get("isDraft", False))
 
-        existing_ids = {p["id"] for p in data["prs"]}
         desc = gh_pr.get("body", "") or ""
         pr_id = store.generate_pr_id(title, desc, existing_ids)
 
         entry = _make_pr_entry(pr_id, title, branch, status=status,
                                description=desc, gh_pr=gh_pr.get("url", ""),
                                gh_pr_number=number)
-        data["prs"].append(entry)
+        entries_to_import.append(entry)
         existing_ids.add(pr_id)
-        imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
-    if imported:
-        store.save(data, root)
-        click.echo(f"  Imported {imported} PR(s) from GitHub.")
+    if entries_to_import:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in entries_to_import:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
+        click.echo(f"  Imported {len(entries_to_import)} PR(s) from GitHub.")
 
 
 def _run_plan_import(name: str):
@@ -725,17 +786,9 @@ def _run_plan_import(name: str):
     plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
-    entry = {
-        "id": plan_id,
-        "name": name,
-        "file": plan_file,
-        "status": "draft",
-    }
-    if data.get("plans") is None:
-        data["plans"] = []
-    data["plans"].append(entry)
+    entry = store.make_plan_entry(plan_id, name, plan_file)
 
-    # Create the plan file
+    # Create the plan file (idempotent, safe outside lock)
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(f"# {name}\n\n")
@@ -743,7 +796,12 @@ def _run_plan_import(name: str):
     # Ensure notes file exists
     notes.ensure_notes_file(root)
 
-    save_and_push(data, root, f"pm: add plan {plan_id}")
+    def apply(data):
+        if data.get("plans") is None:
+            data["plans"] = []
+        data["plans"].append(entry)
+
+    store.locked_update(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()

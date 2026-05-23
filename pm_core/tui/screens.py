@@ -242,12 +242,13 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]F[/]  Cycle sort field", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
-                yield Label("  [bold]d[/]  Review (zz d: loop, zzz d: strict)", classes="help-row")
+                yield Label("  [bold]d[/]  Review (zz d: loop)", classes="help-row")
                 yield Label("  [bold]g[/]  Merge PR", classes="help-row")
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
                 yield Label("  [bold]A[/]  Auto-start to selected PR / off", classes="help-row")
+                yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
                 yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             if not self._in_plans:
@@ -271,14 +272,16 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]ctrl+b d[/]  Detach from session", classes="help-row")
+            yield Label("Tmux Prefix Bindings", classes="help-section")
+            yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit)", classes="help-row")
+            yield Label("  [bold]prefix M[/]  pm command runner popup (Ctrl+C to quit)", classes="help-row")
+            yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
             yield Label("Review Loop", classes="help-section")
-            yield Label("  [bold]zz d[/]   Start loop", classes="help-row")
-            yield Label("  [bold]zzz d[/]  Start strict loop", classes="help-row")
-            yield Label("  [bold]z d[/]    Stop loop / fresh done", classes="help-row")
+            yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
+            yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
             yield Label("QA Loop", classes="help-section")
-            yield Label("  [bold]zz t[/]   Start QA loop (lenient)", classes="help-row")
-            yield Label("  [bold]zzz t[/]  Start strict QA loop", classes="help-row")
-            yield Label("  [bold]z t[/]    Fresh start QA", classes="help-row")
+            yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
+            yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
             yield Label("")
             yield Label("[dim]Press Esc/? to close  |  h to discuss pm[/]", classes="help-row")
 
@@ -331,10 +334,6 @@ class PlanPickerScreen(ModalScreen):
     .picker-row {
         height: 1;
     }
-    #picker-input {
-        display: none;
-        margin-top: 1;
-    }
     """
 
     def __init__(self, plans: list[dict], current_plan: str | None, pr_id: str):
@@ -343,25 +342,21 @@ class PlanPickerScreen(ModalScreen):
         self._current_plan = current_plan
         self._pr_id = pr_id
         self._selected = 0
-        # Options: each plan + "No plan (standalone)" + "New plan..."
+        # Options: each plan + "No plan (standalone)"
         self._options: list[tuple[str | None, str]] = []  # (plan_id_or_None, display_label)
         for p in plans:
             self._options.append((p["id"], f"{p['id']}: {p.get('name', '')}"))
         self._options.append(("_standalone", "No plan (standalone)"))
-        self._options.append(("_new", "New plan..."))
         # Pre-select current plan
         for i, (pid, _) in enumerate(self._options):
             if pid == current_plan:
                 self._selected = i
                 break
-        self._input_mode = False
 
     def compose(self) -> ComposeResult:
-        from textual.widgets import Input
         with VerticalScroll(id="picker-container"):
             yield Label(f"Move {self._pr_id} to plan:", id="picker-title")
             yield Label("", id="picker-options")
-            yield Input(placeholder="Plan name", id="picker-input")
             yield Label("[dim]↑↓ navigate  Enter select  Esc cancel[/]", classes="picker-row")
 
     def on_mount(self) -> None:
@@ -379,8 +374,6 @@ class PlanPickerScreen(ModalScreen):
         options_label.update("\n".join(lines))
 
     def on_key(self, event) -> None:
-        if self._input_mode:
-            return  # Let Input widget handle keys
         if event.key in ("up", "k"):
             self._selected = max(0, self._selected - 1)
             self._refresh_options()
@@ -393,27 +386,9 @@ class PlanPickerScreen(ModalScreen):
             event.stop()
         elif event.key == "enter":
             pid, label = self._options[self._selected]
-            if pid == "_new":
-                self._enter_input_mode()
-            else:
-                self.dismiss(pid)
+            self.dismiss(pid)
             event.prevent_default()
             event.stop()
-
-    def _enter_input_mode(self) -> None:
-        from textual.widgets import Input
-        self._input_mode = True
-        input_widget = self.query_one("#picker-input", Input)
-        input_widget.styles.display = "block"
-        input_widget.focus()
-
-    def on_input_submitted(self, event) -> None:
-        title = event.value.strip()
-        if title:
-            self.dismiss(("_new", title))
-        else:
-            self._input_mode = False
-            event.input.styles.display = "none"
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -477,3 +452,164 @@ class PlanAddScreen(ModalScreen):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class QACreatePickerScreen(ModalScreen):
+    """Modal for picking which kind of QA file to author.
+
+    Returns ``(category, mode, name)`` on confirm, where category is one
+    of ``"instructions" / "regression" / "artifacts"``, mode is always
+    ``"author"`` (guided Claude session — the TUI does not expose the
+    scaffold-stub flow; use ``pm qa add-*`` from the CLI for that), and
+    name is the file name the user typed. Returns ``None`` on cancel.
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    QACreatePickerScreen {
+        align: center middle;
+    }
+    #qa-create-container {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #qa-create-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .qa-create-label {
+        margin-top: 1;
+    }
+    #qa-create-container Input {
+        border: none;
+        height: 1;
+        padding: 0 1;
+        background: #333333;
+    }
+    #qa-create-container Input:focus {
+        background: #444444;
+    }
+    """
+
+    _OPTIONS = [
+        ("instructions", "author", "Instruction"),
+        ("regression",   "author", "Regression test"),
+        ("artifacts",    "author", "Artifact recipe"),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self._selected = 0
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Input
+        with Vertical(id="qa-create-container"):
+            yield Label("Create QA file", id="qa-create-title")
+            yield Label("Name", classes="qa-create-label")
+            yield Input(placeholder="e.g. login-flow-setup", id="qa-create-name")
+            yield Label("Kind", classes="qa-create-label")
+            yield Label("", id="qa-create-options")
+            yield Label(
+                "[dim]↑↓ change kind · Enter create · Esc cancel[/]",
+                classes="qa-create-label",
+            )
+
+    def on_mount(self) -> None:
+        from textual.widgets import Input
+        self._refresh_options()
+        self.query_one("#qa-create-name", Input).focus()
+
+    def _refresh_options(self) -> None:
+        lines = []
+        for i, (_cat, _mode, label) in enumerate(self._OPTIONS):
+            pointer = "▸ " if i == self._selected else "  "
+            lines.append(f"{pointer}{label}")
+        self.query_one("#qa-create-options", Label).update("\n".join(lines))
+
+    def on_key(self, event) -> None:
+        # Arrow keys move the radio selection even while the Input is focused.
+        if event.key in ("up",):
+            self._selected = max(0, self._selected - 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+        elif event.key in ("down",):
+            self._selected = min(len(self._OPTIONS) - 1, self._selected + 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+
+    def on_input_submitted(self, event) -> None:
+        from textual.widgets import Input
+        name = self.query_one("#qa-create-name", Input).value.strip()
+        if not name:
+            return
+        category, mode, _label = self._OPTIONS[self._selected]
+        self.dismiss((category, mode, name))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ConfirmCleanupScreen(ModalScreen):
+    """Confirm tearing down all live resources for a PR."""
+
+    BINDINGS = [
+        Binding("y", "confirm", "Yes", show=False),
+        Binding("n", "cancel", "No", show=False),
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    CSS = """
+    ConfirmCleanupScreen {
+        align: center middle;
+    }
+    #cleanup-container {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: solid $warning;
+        padding: 1 2;
+    }
+    #cleanup-title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    .cleanup-line {
+        margin-left: 2;
+    }
+    #cleanup-hint {
+        text-align: center;
+        margin-top: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, pr_display_id: str):
+        super().__init__()
+        self._pr_display_id = pr_display_id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="cleanup-container"):
+            yield Label(f"Clean up {self._pr_display_id}?", id="cleanup-title")
+            yield Label("This will remove:")
+            yield Label("• tmux windows (impl, review, merge, QA)", classes="cleanup-line")
+            yield Label("• docker containers (all QA scenarios)", classes="cleanup-line")
+            yield Label("• pane registry entries", classes="cleanup-line")
+            yield Label("• push-proxy sockets", classes="cleanup-line")
+            yield Label("[bold]y[/] confirm  [bold]n[/]/[bold]Esc[/] cancel", id="cleanup-hint")
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)

@@ -11,6 +11,7 @@ import click
 
 from pm_core import store, git_ops
 from pm_core import tmux as tmux_mod
+from pm_core.shell import shell_quote
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
 
 from pm_core.cli import cli
@@ -202,7 +203,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
 
     # Fallback: launch interactively
     click.echo("Launching Claude...")
-    result = subprocess.run(f"cd '{work_path}' && {cmd}", shell=True)
+    result = subprocess.run(f"cd {shell_quote(str(work_path))} && {cmd}", shell=True)
     # The clear_cmd in the shell command handles cleanup
     raise SystemExit(result.returncode)
 

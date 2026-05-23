@@ -3,6 +3,7 @@
 All pm-related directories now live under ~/.pm/:
 - ~/.pm/pane-registry/  - Pane tracking and logs
 - ~/.pm/workdirs/       - PR and meta workdirs
+- ~/.pm/sessions/{tag}/captures/{pr-id}/  - QA / bug-fix / regression captures
 - ~/.pm/sessions/       - Per-session config (overrides, debug, dangerously-skip-permissions)
 
 Session tags are derived from the git repo (GitHub repo name or directory name + hash).
@@ -28,6 +29,19 @@ def pm_home() -> Path:
     return d
 
 
+def pm_core_path() -> Path:
+    """Return the path to the currently-imported ``pm_core`` package dir.
+
+    This is the source the ``pm`` CLI is actually running from — for an
+    editable install (``install.sh --local``) that's the source checkout;
+    for a non-editable install it's a site-packages copy.  The repo root
+    (the dir containing ``install.sh`` / ``pyproject.toml``) is the
+    parent of this path when running from a source checkout.
+    """
+    import pm_core
+    return Path(pm_core.__path__[0])
+
+
 def pane_registry_dir() -> Path:
     """Return the pane registry directory (~/.pm/pane-registry/)."""
     d = pm_home() / "pane-registry"
@@ -50,6 +64,62 @@ def workdirs_base() -> Path:
     d = pm_home() / "workdirs"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def captures_dir(pr_id: str,
+                 session_tag: str | None = None,
+                 start_path: Path | None = None) -> Path | None:
+    """Return the captures directory for *pr_id*.
+
+    Single source of truth for captures-path resolution across every
+    surface (host orchestrator, scenario container, bug-fix flow
+    session, review pane, CLI). Resolution:
+
+    1. The host path ``~/.pm/sessions/<tag>/captures/<pr_id>/`` if it
+       already exists. ``tag`` is *session_tag* if supplied, else the
+       tmux-derived tag, else the cwd-derived tag.
+    2. Otherwise the container bind-mount at
+       :data:`CONTAINER_CAPTURES_MOUNT` if it exists (set up by
+       :func:`container.create_container`).
+    3. Otherwise create and return the host path.
+
+    The ``~/.pm`` path takes precedence so on the host we always land
+    in the canonical location; inside a container the host path
+    doesn't exist and we fall through to the bind-mount.
+
+    Returns None when no tag can be derived AND the bind-mount isn't
+    present.
+    """
+    if session_tag is None:
+        try:
+            from pm_core.cli.helpers import _get_pm_session
+            pm_sess = _get_pm_session()
+        except Exception:
+            pm_sess = None
+        if pm_sess:
+            session_tag = pm_sess.removeprefix("pm-")
+        else:
+            session_tag = get_session_tag(start_path=start_path)
+    host_path: Path | None = None
+    if session_tag:
+        host_path = sessions_dir() / session_tag / "captures" / pr_id
+        if host_path.is_dir():
+            return host_path
+    mount = Path(CONTAINER_CAPTURES_MOUNT)
+    if mount.is_dir():
+        return mount
+    if host_path is not None:
+        host_path.mkdir(parents=True, exist_ok=True)
+        return host_path
+    return None
+
+# Container-internal path where the host's captures_dir is bind-mounted
+# during container creation. Workers running in containers reference
+# this fixed path; the host filesystem path is invisible to them.
+# Namespaced (``/pm-captures`` rather than ``/captures``) to reduce the
+# chance of colliding with anything the host repo might already have at
+# a top-level ``/captures`` path.
+CONTAINER_CAPTURES_MOUNT = "/pm-captures"
 
 
 def sessions_dir() -> Path:
@@ -219,6 +289,39 @@ def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10
         logger.setLevel(logging.INFO)
 
     return logger
+
+
+def set_session_pm_root(session_tag: str, root: Path) -> None:
+    """Persist the project root for a session.
+
+    Stored at ~/.pm/sessions/{session-tag}/pm_root so popup commands can
+    resolve the root without depending on the launching pane's cwd.
+    """
+    sd = session_dir(session_tag)
+    if sd:
+        (sd / "pm_root").write_text(str(root) + "\n")
+
+
+def get_session_pm_root(session_tag: str | None = None) -> Path | None:
+    """Read the persisted project root for a session, if any.
+
+    Returns None if the file is missing, empty, or the path no longer
+    exists on disk (so callers fall back to cwd-based resolution).
+    """
+    sd = session_dir(session_tag)
+    if not sd:
+        return None
+    f = sd / "pm_root"
+    if not f.exists():
+        return None
+    try:
+        content = f.read_text().strip()
+    except (OSError, IOError):
+        return None
+    if not content:
+        return None
+    p = Path(content)
+    return p if p.exists() else None
 
 
 def get_override_path(session_tag: str | None = None) -> Path | None:
