@@ -164,6 +164,10 @@ runtime fields/verdicts/reasons/verified/finalize; `clear_resume_file`;
 non-qa PR, skip already-tracked / already-recovered, no-op without qa root; and
 `poll_qa_state` clearing the snapshot on in-memory completion. The orphaned
 `tests/test_qa_status.py` (old `VerdictPoller`) was removed in the merge.
+A second orphan, `tests/test_qa_loop_ui_recover.py` (intermediate
+`_recover_completed_qa_from_disk`, superseded by `_resume_incomplete_qa`),
+came in via the "superseded review-loop" merge and errored at collection;
+it was removed during review (its coverage lives in `test_qa_resume.py`).
 
 Full suite: 2369 passed (1 pre-existing, unrelated failure in
 `tests/test_hook_events.py::test_installer_writes_standalone_receiver`, which
