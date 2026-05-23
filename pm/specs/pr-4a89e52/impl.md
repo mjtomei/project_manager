@@ -192,6 +192,24 @@ re-process it. `app._resumed_qa_pr_ids` additionally dedupes within a session.
   never being cleared — narrow and self-limiting (at most one spurious
   recovery per session). Future hardening could record the active QA `loop_id`
   on the PR and validate it on resume.
+- **EC9 — Crash *during* finalize re-runs the lifecycle, not finalize**:
+  `overall` is written to `qa_status.json` (line ~3375) immediately *before*
+  the finalize pane runs, and the resume snapshot only carries
+  `finalize_verdict` once finalize completes (line ~3400). So a TUI death in
+  the narrow window *between* the overall write and finalize completion is
+  recovered via the **completed-during-downtime** path (`overall` is set),
+  which feeds `_on_qa_complete` directly and does **not** re-run the finalize
+  pane. The finalize side effects (verify scenario pushes reached
+  `origin/<branch>`, fast-forward the user's PR workdir) are therefore skipped
+  for that run. Accepted, and consistent with finalize being best-effort:
+  `_on_qa_complete` never gates the lifecycle transition on `finalize_verdict`
+  (even on the live path a `FINALIZE_BLOCKED` does not stop a PASS→merge), and
+  the merge itself pulls the PR branch from origin (where scenario containers
+  push directly) rather than from the locally-fast-forwarded workdir. The
+  practical loss is cosmetic (local workdir not fast-forwarded). Future
+  hardening: take the **incomplete** (resume-via-`resume_qa_sync`) path when
+  `overall` is set but the snapshot's `finalize_verdict` is still `None`, so
+  the interrupted finalize is re-run.
 
 ## Tests
 
