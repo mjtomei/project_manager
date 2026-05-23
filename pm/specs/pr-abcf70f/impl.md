@@ -89,10 +89,23 @@ loop state machines, and verification transitions without real API calls.
      session types.
    - **`_all` catch-all ("fake everything"):** when the config has an `_all`
      key, any session type without its own entry — and any call with
-     `session_type=None` — falls back to `_all`, always treated as a
-     **no-verdict** session (its `verdicts`, if any, are stripped/rejected).
-     Explicit per-type entries still win. Without `_all`, an absent type or
-     `None` session_type still returns `None` (real claude).
+     `session_type=None` — falls back to `_all` (its `verdicts`, if any, are
+     stripped/rejected). Explicit per-type entries still win. Without `_all`,
+     an absent type or `None` session_type still returns `None` (real claude).
+   - **`_all` and verdict-producing types (Fix 1, note-fa6fddd).** `_all` is a
+     no-verdict session **by default**, *except* for a verdict-producing
+     session type (a non-empty `SESSION_TYPE_VERDICTS` entry — `review`,
+     `qa_finalize`, …) routed through it: that would launch the no-verdict mock
+     and hang the verdict poller forever, so `fake_claude_config_for_type`
+     instead injects the type's **default (first/happy-path) verdict**
+     (`qa_finalize`→`FINALIZE_DONE`, `review`/`qa`→`PASS`,
+     `qa_concretize`→`REFINED_STEPS`, …). Untyped calls (`session_type=None`,
+     e.g. spec-gen) and genuine no-verdict types (`impl`/`merge`/non-loop) get
+     no verdict and stay no-verdict. To force a no-verdict session for a
+     verdict-producing type, give it an explicit per-type entry with empty
+     `verdicts`. (The complementary production-loop fix — `poll_for_verdict`
+     should not hang when an expected verdict never arrives — is split out to
+     pr-6566901.)
 
 6. **Launcher integration — `pm_core/claude_launcher.py`**
    - `_pick_fake_verdict(verdicts)` does weighted random selection from the

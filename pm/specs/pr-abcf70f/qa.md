@@ -78,8 +78,13 @@ flags unknown keys and bad effort levels.
 - GIVEN the user wants every Claude session in a project to be faked
 - WHEN they write a fake-claude config with only an `_all` entry (no per-type
   keys) and then trigger any pm command that would launch a Claude session
-- THEN every such session runs the fake as a no-verdict session and stays open
-  until the pane closes (no real Claude is invoked).
+- THEN every such session runs the fake instead of real Claude. A no-verdict
+  session type (impl/merge/non-loop) and any untyped (`session_type=None`)
+  launch stay open as a no-verdict mock; a **verdict-producing** session type
+  (review, qa_*, watcher) routed through `_all` emits its default happy-path
+  verdict instead (Fix 1 / note-fa6fddd) so the loop completes rather than
+  hanging the poller. (To force a no-verdict session for a verdict-producing
+  type, give it an explicit per-type entry with empty `verdicts`.)
 
 ### R9 — Per-type entry wins over `_all`
 - GIVEN both `_all` and an explicit `review` entry exist in the session config
