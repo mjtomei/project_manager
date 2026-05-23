@@ -146,7 +146,14 @@ re-process it. `app._resumed_qa_pr_ids` additionally dedupes within a session.
   persist), eventually `INPUT_REQUIRED` if exhausted — same as the live loop.
 - **EC3 — `verification_failures` not persisted**: resets to 0 on resume, so a
   scenario mid-verification may get a few extra verification attempts. Minor;
-  accepted (verdicts and `verified_scenarios` *are* persisted).
+  accepted (verdicts and `verified_scenarios` *are* persisted). The PASS branch
+  in `_poll_tmux_verdicts` honors the restored `verified_scenarios`: a PASS that
+  was already verified before the restart is *not* re-verified when the resumed
+  loop re-reads it (the scenario's `idle_prompt` event persists on disk under
+  `~/.pm/hooks/`, so every completed scenario re-enters `pending` on resume —
+  without this guard each restart would re-spawn a verifier Claude session for
+  every already-verified scenario). Covered by
+  `test_qa_resume.py::test_resumed_pass_skips_reverification`.
 - **EC4 — PASS without auto-start leaves status `qa`**: the snapshot is removed
   on processing, so it is not re-processed across restarts even though the
   status stays `qa`.

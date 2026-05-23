@@ -297,3 +297,49 @@ def test_poll_qa_state_clears_snapshot_on_completion(tmp_path):
 
     assert "pr-001" not in app._qa_loops
     assert not _resume_file_path(qa_dir).exists()
+
+
+# ---------------------------------------------------------------------------
+# Resumed runs trust prior verification (don't re-spawn verifier sessions)
+# ---------------------------------------------------------------------------
+
+def test_resumed_pass_skips_reverification(tmp_path):
+    """A PASS already in verified_scenarios (restored from the snapshot)
+    must not be re-verified when the resumed poll loop re-reads it — the
+    persisted verified set exists precisely to avoid that rework."""
+    from pm_core.qa_loop import _poll_tmux_verdicts
+
+    scenario = QAScenario(index=1, title="Test", focus="t",
+                          window_name="qa-test-s1", pane_id="%1",
+                          transcript_path="/tmp/t.jsonl",
+                          session_id="sid-verified-1")
+    state = QALoopState(pr_id="pr-001")
+    state.qa_workdir = None  # skip snapshot writes inside the loop
+    state.scenarios = [scenario]
+    state.scenario_verdicts = {1: VERDICT_PASS}
+    state.verified_scenarios = {1}  # restored from a prior run
+
+    fake_event = {"event_type": "idle_prompt",
+                  "timestamp": 1e12, "session_id": scenario.session_id}
+    status_path = tmp_path / "status.json"
+
+    with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+         patch("pm_core.qa_loop.time.sleep"), \
+         patch("pm_core.qa_loop.time.monotonic", side_effect=[0, 100]), \
+         patch("pm_core.hook_events.read_event", return_value=fake_event), \
+         patch("pm_core.qa_loop.extract_verdict_from_transcript",
+               return_value="PASS"), \
+         patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+         patch("pm_core.qa_loop._verify_single_scenario") as mock_verify:
+        _poll_tmux_verdicts(
+            state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+        )
+
+    mock_verify.assert_not_called()
+    # latest_output is set synchronously in the main loop: the "verifying"
+    # phrase only appears when a verifier thread is spawned, so this catches
+    # the regression deterministically (no dependency on thread timing).
+    assert "verifying" not in state.latest_output
+    assert state.scenario_verdicts[1] == VERDICT_PASS
+    assert 1 in state.verified_scenarios

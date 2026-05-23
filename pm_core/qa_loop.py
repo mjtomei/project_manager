@@ -2409,7 +2409,13 @@ def _poll_tmux_verdicts(
 
                 # Only PASS verdicts need verification — NEEDS_WORK and
                 # INPUT_REQUIRED already indicate problems were found.
-                if verdict == VERDICT_PASS and verify_enabled:
+                # Skip re-verification for a PASS that was already verified
+                # before a restart: ``verified_scenarios`` is persisted in
+                # the resume snapshot precisely so a resumed run trusts
+                # prior verification instead of re-spawning a verifier
+                # Claude session for every completed scenario each restart.
+                if (verdict == VERDICT_PASS and verify_enabled
+                        and scenario.index not in state.verified_scenarios):
                     state.latest_output = (
                         f"Scenario {scenario.index} ({scenario.title}): "
                         f"{verdict} — verifying..."
