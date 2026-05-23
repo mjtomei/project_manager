@@ -4541,7 +4541,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-05-22T22:08:14.655171+00:00'
+  updated_at: '2026-05-23T06:01:03.815117+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4590,6 +4590,36 @@ prs:
       not yet audited (_background_sync every 5min, 1s poll _poll_impl_idle).'
     created_at: '2026-05-22T22:08:14Z'
     last_edited: '2026-05-22T22:08:14Z'
+  - id: note-ba3fc74
+    text: 'QA scenario 22 (resize + identical-data refresh) concretized: drive resize
+      from your own shell with `tmux set-window-option -t pm-<tag>:main window-size
+      manual` then `tmux resize-window -t ... -x <cols> -y 24`. Keep height ~24 so
+      width stays > height*2 and orientation stays landscape (app.py:551 flips to
+      portrait when width < height*2) — isolates the tree width-reflow. Deep dependency-chain
+      node fixes its column by depth, so narrowing scrolls it off horizontally; re-scroll-into-view
+      is app.py:_recompute_tree_layout (a89ee334). Drive the identical-data refresh
+      with the `R` (Reload) key or `kill -USR1 $(cat ~/.pm/tui-pm-<tag>.pid)` — both
+      hit _load_state->update_prs->_recompute, where an unchanged _signature() is
+      a cache hit (no _rebuild, selection/scroll preserved). No file-watcher exists;
+      do NOT expect a bare project.yaml touch to reload. Verify no-flicker via byte-identical
+      framebuffer + no Traceback in ~/.pm/debug/<tag>.log.'
+    created_at: '2026-05-23T05:55:09Z'
+    last_edited: '2026-05-23T05:55:09Z'
+  - id: note-cbe9fea
+    text: 'QA scenario 22 (resize + identical-data refresh) PASS. Both triples verified
+      on the real tmux surface: (1) narrow 200->60->200 reflow keeps node/edge alignment,
+      pr-D stays selected and is re-scrolled into view at width 60 (would otherwise
+      fall off-screen right), wide-restore frame byte-identical to baseline, no Traceback
+      in debug log; (2) identical-data reload via R key AND kill -USR1 both produce
+      byte-identical framebuffers (cache hit, selection/scroll preserved, log shows
+      "action: reload (state only)"). ACCEPTED DEVIATION: the scenario expects a "--
+      Standalone --" band label to stay aligned, but with all PRs standalone there
+      is a single plan group and tree_layout.py _apply_plan_grouping (line ~583, "if
+      len(plan_groups) < 2: return") intentionally renders NO band label for one group.
+      So no Standalone label appears here — by design, not a bug. Future runs: dont
+      flag the missing single-group band label.'
+    created_at: '2026-05-23T06:01:03Z'
+    last_edited: '2026-05-23T06:01:03Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
