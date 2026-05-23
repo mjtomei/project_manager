@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 from typing import Callable, Optional
 
@@ -21,23 +22,48 @@ _log = configure_logger("pm.gh")
 GhRunner = Callable[[list[str], Optional[str]], subprocess.CompletedProcess]
 _GH_RUNNER: Optional[GhRunner] = None
 
+# Guards mutation of the global transport pointer so concurrent install/restore
+# cycles (e.g. several FakeGitHubBackend actors in a regression test) do not
+# corrupt it. ``_GH_RUNNER`` is a process-global by design — a runner installed
+# on one thread must be visible to ``run_gh`` calls on pm's worker threads — so
+# it cannot be made thread-local. The lock + depth counter instead guarantees
+# that once the last nested ``gh_runner`` context exits, the pointer returns to
+# the uninstalled baseline (None) rather than leaking some other thread's
+# stale runner via an interleaved save/restore.
+_GH_RUNNER_LOCK = threading.Lock()
+_GH_RUNNER_DEPTH = 0
+
 
 def set_gh_runner(runner: Optional[GhRunner]) -> Optional[GhRunner]:
     """Install a `gh` transport runner. Returns the previously installed one."""
     global _GH_RUNNER
-    prev = _GH_RUNNER
-    _GH_RUNNER = runner
+    with _GH_RUNNER_LOCK:
+        prev = _GH_RUNNER
+        _GH_RUNNER = runner
     return prev
 
 
 @contextmanager
 def gh_runner(runner: Optional[GhRunner]):
-    """Context manager: install ``runner`` as the gh transport, restore on exit."""
-    prev = set_gh_runner(runner)
+    """Context manager: install ``runner`` as the gh transport, restore on exit.
+
+    Restore is concurrency-safe: nested contexts on a single thread restore the
+    enclosing runner as before, but when the outermost context exits (depth back
+    to 0) the pointer is forced to the ``None`` baseline. This prevents the
+    save/restore-of-a-global race in which interleaved enter/exit across threads
+    would otherwise reinstate a stale runner and leak it past join.
+    """
+    global _GH_RUNNER, _GH_RUNNER_DEPTH
+    with _GH_RUNNER_LOCK:
+        prev = _GH_RUNNER
+        _GH_RUNNER = runner
+        _GH_RUNNER_DEPTH += 1
     try:
         yield runner
     finally:
-        set_gh_runner(prev)
+        with _GH_RUNNER_LOCK:
+            _GH_RUNNER_DEPTH -= 1
+            _GH_RUNNER = None if _GH_RUNNER_DEPTH == 0 else prev
 
 
 def _check_gh():
@@ -80,9 +106,12 @@ def run_gh(
     """
     cmd = ["gh", *args]
 
-    if _GH_RUNNER is not None:
+    # Snapshot the global once: a concurrent restore must not turn a non-None
+    # check into a None call (TypeError) between the test and the dispatch.
+    runner = _GH_RUNNER
+    if runner is not None:
         log_shell_command(cmd, prefix="gh")
-        result = _GH_RUNNER(list(args), cwd)
+        result = runner(list(args), cwd)
         if result.returncode != 0:
             log_shell_command(cmd, prefix="gh", returncode=result.returncode)
         if check and result.returncode != 0:

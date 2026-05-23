@@ -51,6 +51,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +114,11 @@ class FakeGitHubRepo:
     def __init__(self, path: Union[str, Path], default_branch: str = "master"):
         self.path = str(path)
         self.default_branch = default_branch
+        # The repo is a single non-bare worktree, so every branch/merge mutation
+        # touches the shared index. Serialize them: concurrent merges would
+        # otherwise collide on .git/index.lock and lose work. Re-entrant so a
+        # mutation built from sub-steps can hold it across them.
+        self._lock = threading.RLock()
         self._init()
 
     # -- low-level git -------------------------------------------------------
@@ -165,17 +171,18 @@ class FakeGitHubRepo:
         untouched.
         """
         base = base or self.default_branch
-        if name == base or self.branch_exists(name):
-            return
-        self._git("checkout", "-b", name, base)
-        payload = files or {f".pr-{name}": f"branch {name}\n"}
-        for rel, content in payload.items():
-            dest = Path(self.path, rel)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(content)
-            self._git("add", rel)
-        self._git("commit", "-m", f"work on {name}")
-        self._git("checkout", base)
+        with self._lock:
+            if name == base or self.branch_exists(name):
+                return
+            self._git("checkout", "-b", name, base)
+            payload = files or {f".pr-{name}": f"branch {name}\n"}
+            for rel, content in payload.items():
+                dest = Path(self.path, rel)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(content)
+                self._git("add", rel)
+            self._git("commit", "-m", f"work on {name}")
+            self._git("checkout", base)
 
     def merge_branch(self, head: str,
                      base: Optional[str] = None) -> tuple[bool, str]:
@@ -184,16 +191,45 @@ class FakeGitHubRepo:
         Returns ``(ok, detail)``. On a real git conflict ``ok`` is False and
         ``base`` is left unchanged — the caller surfaces a conflict-shaped
         `gh` failure.
+
+        Concurrency-safe: the whole merge sequence runs under ``self._lock`` so
+        parallel merges into the single backing worktree serialize instead of
+        colliding on ``.git/index.lock``. Every git step uses ``check=False`` and
+        the worktree is restored to a clean state on any failure, so a losing
+        merge never escapes as an unhandled ``RuntimeError`` nor leaves a
+        dangling ``MERGE_HEAD`` / stale ``index.lock`` behind.
         """
         base = base or self.default_branch
-        if not self.branch_exists(head):
-            return False, f"head branch {head!r} does not exist"
-        self._git("checkout", base)
-        merge = self._git("merge", "--no-ff", "--no-edit", head, check=False)
-        if merge.returncode != 0:
-            self._git("merge", "--abort", check=False)
-            return False, (merge.stdout + merge.stderr).strip()
-        return True, ""
+        with self._lock:
+            if not self.branch_exists(head):
+                return False, f"head branch {head!r} does not exist"
+            checkout = self._git("checkout", base, check=False)
+            if checkout.returncode != 0:
+                self._cleanup_worktree()
+                return False, (checkout.stdout + checkout.stderr).strip()
+            merge = self._git("merge", "--no-ff", "--no-edit", head, check=False)
+            if merge.returncode != 0:
+                detail = (merge.stdout + merge.stderr).strip()
+                self._git("merge", "--abort", check=False)
+                self._cleanup_worktree()
+                return False, detail
+            return True, ""
+
+    def _cleanup_worktree(self) -> None:
+        """Best-effort scrub of a half-finished merge's leftover state.
+
+        Removes a dangling ``.git/MERGE_HEAD`` (an aborted/failed merge) and a
+        stale ``.git/index.lock`` so the backing repo is left usable for the
+        next operation and for a consumer ``git fetch`` / ``merge --ff-only``.
+        """
+        git_dir = Path(self.path, ".git")
+        for leftover in ("MERGE_HEAD", "index.lock"):
+            try:
+                (git_dir / leftover).unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
 
     def clone(self, dest: Union[str, Path]) -> str:
         """Clone the remote to ``dest`` — a consumer workdir for tests."""
@@ -279,6 +315,9 @@ class FakeGitHubBackend:
         self.calls: list[list[str]] = []  # every gh argv, for assertions
         self._next_number = 1
         self._scripts: list[_Scripted] = []
+        # Guards scripted-response matching/consumption so a single queued
+        # response (times=1) is served to at most one of several racing calls.
+        self._scripts_lock = threading.Lock()
 
     @classmethod
     def with_git_repo(cls, base_path: Union[str, Path], *,
@@ -438,13 +477,15 @@ class FakeGitHubBackend:
         """Interpret a `gh` invocation (argv without the leading ``gh``)."""
         self.calls.append(list(argv))
 
-        for i, scr in enumerate(self._scripts):
-            if scr.matches(argv):
-                if scr.remaining > 0:
-                    scr.remaining -= 1
-                    if scr.remaining == 0:
-                        self._scripts.pop(i)
-                return _completed(argv, scr.returncode, scr.stdout, scr.stderr)
+        with self._scripts_lock:
+            for i, scr in enumerate(self._scripts):
+                if scr.matches(argv):
+                    if scr.remaining > 0:
+                        scr.remaining -= 1
+                        if scr.remaining == 0:
+                            self._scripts.pop(i)
+                    return _completed(argv, scr.returncode, scr.stdout,
+                                      scr.stderr)
 
         if not argv:
             return _completed(argv, 1, "", "fake-gh: empty command")
