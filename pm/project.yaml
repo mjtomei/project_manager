@@ -4541,7 +4541,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-05-23T06:04:13.431032+00:00'
+  updated_at: '2026-05-23T07:10:36.844541+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4666,6 +4666,39 @@ prs:
       not a clobber).'
     created_at: '2026-05-23T06:04:13Z'
     last_edited: '2026-05-23T06:04:13Z'
+  - id: note-c7b67c5
+    text: 'QA scenario 26 refine: no fuzzy jump-to-PR picker exists (PlanPickerScreen/QACreatePickerScreen
+      are move-to-plan / QA-create only). The programmatic-selection surface is CLI
+      `pm pr select <id>` → trigger_tui_refresh → SIGUSR1 → action_reload → _load_state
+      → _update_display → tree.select_pr(active_pr) (tech_tree.py:760), which does
+      hidden-plan auto-expand (_hidden_plans.discard + _recompute) and call_after_refresh(_scroll_selected_into_view).
+      Command-bar `edit <id>`/`review-loop <id>` also call select_pr but with side
+      effects (spawn pane / start loop). Note: active_pr is NOT part of _signature()
+      (tech_tree.py:861), so re-selecting the same active_pr is a guaranteed layout-cache
+      hit — the clean "identical data, no rebuild" driver. _load_state flush_sync-es
+      pending nav writes before re-reading, then re-applies select_pr(active_pr),
+      which is why selection survives a sync mid-navigation.'
+    created_at: '2026-05-23T07:01:19Z'
+    last_edited: '2026-05-23T07:01:19Z'
+  - id: note-3198409
+    text: 'QA scenario 26 (programmatic selection + hidden-plan auto-expand + bg-sync
+      during nav): PASS, all 4 triples on real tmux surface. (1) pm pr select of a
+      HIDDEN plan-beta PR auto-expands the plan (boxes return, bottom (hidden,3 PRs)
+      label gone), moves ║║ onto pr-92c7ddc, scrolls into view. (2) select of an off-screen
+      plan-gamma PR (pr-5d05762) scrolls it into the framebuffer with ║║ on it. (3)
+      re-issuing pm pr select of the SAME active_pr (and after a 1-step nav, the new
+      current PR) yields a byte-identical framebuffer (md5 match) + only action:reload
+      (state only) in debug log = layout cache hit, no flicker/rebuild, selection+scroll
+      preserved (active_pr not in _signature). (4) concurrent pm pr edit --title/--status
+      of a gamma PR surfaces the change (Changelog (EDITED), Docs pass in_review)
+      while ║║ stays on the users Login form node (pr-c61a47e) even with NO interleaved
+      nav (pm pr edit does not change active_pr); project.yaml stays valid (pm pr
+      list parses, YAML loads 9 PRs, both edits reflected, no corruption). No code
+      changes needed. NOTE: scenario text references pm pr show <id> which is not
+      a command in this version; used pm pr list + direct YAML parse for the integrity
+      check. Captures: /pm-captures/scenarios/26/.'
+    created_at: '2026-05-23T07:10:36Z'
+    last_edited: '2026-05-23T07:10:36Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
