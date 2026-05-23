@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-30888b1
+  active_pr: pr-1160366
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -4541,9 +4541,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-04-24T17:09:32.729022+00:00'
+  updated_at: '2026-05-22T22:42:50.685742+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
-  reviewed_at: '2026-03-09T17:23:26.156810+00:00'
+  reviewed_at: '2026-05-22T22:42:50.685742+00:00'
   merged_at: null
   notes:
   - id: note-e204001
@@ -4556,7 +4556,16 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:32Z'
     last_edited: '2026-04-24T17:09:32Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
+  - id: note-a93f1de
+    text: 'QA NEEDS_WORK: Tree render parity and grid navigation: NEEDS_WORK; Plan
+      operations — jump, hide/show, filter, sort, toggle-merged, empty states: NEEDS_WORK;
+      Live spinners/markers animate only active nodes (idle CPU): NEEDS_WORK; Large-project
+      navigation latency, viewport culling, and frame-capture bursts: PASS; Concurrent
+      mutation — CLI edits, background sync, reload, and resize while: NEEDS_WORK
+      (workdir: /home/matt/.pm/workdirs/qa/pr-4c41017-d7c67e1732e1011c)'
+    created_at: '2026-05-22T23:36:44Z'
+    last_edited: '2026-05-22T23:36:44Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-13a938ec
 - id: pr-e9d4b24
   plan: bugs
   title: 'Fix: keystrokes typed after / are discarded instead of appearing in command
@@ -7735,7 +7744,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-05-14T01:47:37.204184+00:00'
+  updated_at: '2026-05-23T03:45:16.575668+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7749,6 +7758,17 @@ prs:
       lines.'
     created_at: '2026-05-14T01:47:36Z'
     last_edited: '2026-05-14T01:47:36Z'
+  - id: note-9d48bd4
+    text: 'Cross-PR handoff from pr-cfb0b3a (prompt PR-notes guidance): pr-cfb0b3a
+      added a ''Your Verdict Is Final for This Run'' block to prompt_gen.generate_qa_child_prompt
+      telling QA scenario workers their verdict is terminal (no re-poll) and to hand
+      off to the next run via pm PR notes. When THIS pr lands and makes scenario INPUT_REQUIRED
+      re-pollable, soften that block: INPUT_REQUIRED will no longer be terminal, so
+      its ''use a note for next-run handoff'' framing must be updated (PASS/NEEDS_WORK
+      finality still holds). Also revisit the refiner ''This Decision Is Final'' block
+      in qa_loop._build_concretization_prompt.'
+    created_at: '2026-05-23T03:45:16Z'
+    last_edited: '2026-05-23T03:45:16Z'
 - id: pr-df1aa3f
   plan: null
   title: 'fix: rename tmux session after git init in guide to restore pm session access'
@@ -19043,7 +19063,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T21:02:19.201672+00:00'
-  updated_at: '2026-05-22T17:38:14.689335+00:00'
+  updated_at: '2026-05-23T03:45:18.213283+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -19067,6 +19087,16 @@ prs:
       Grep for "Changing or replacing a scenario that already ran" to find it.'
     created_at: '2026-05-22T17:38:13Z'
     last_edited: '2026-05-22T17:38:13Z'
+  - id: note-038b466
+    text: Related to pr-2c67d50 and pr-cfb0b3a. pr-cfb0b3a added prompt guidance that
+      QA scenario verdicts AND scenario-refiner REFINER_REJECT are terminal — 'Your
+      Verdict Is Final for This Run' in prompt_gen.generate_qa_child_prompt and 'This
+      Decision Is Final' in qa_loop._build_concretization_prompt. This PR re-runs
+      NEEDS_WORK/INPUT_REQUIRED scenarios and makes refiner-rejected scenarios re-pluggable
+      as replacements; when it lands, update those two blocks so they no longer state
+      those verdicts are permanently terminal.
+    created_at: '2026-05-23T03:45:18Z'
+    last_edited: '2026-05-23T03:45:18Z'
 - id: pr-2181ccd
   plan: plan-regression
   title: Move QA captures out of git into ~/.pm/captures/ alongside workdirs
@@ -21191,7 +21221,7 @@ prs:
   plan: plan-3119574
   title: 'QA artifact recipe: web UI recording (browser video + HTTP/SSE)'
   branch: pm/pr-ac58803-qa-artifact-recipe-web-ui-recording-http-sse
-  status: pending
+  status: merged
   depends_on:
   - pr-5db0e85
   - pr-37073ad
@@ -21232,14 +21262,23 @@ prs:
     endpoint, records both video and trace, and launches Chromium with container-safe
     flags.'
   agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/214
+  gh_pr_number: 214
   created_at: '2026-05-21T17:20:27.511304+00:00'
-  updated_at: '2026-05-22T17:27:23.922651+00:00'
+  updated_at: '2026-05-23T03:32:28.703302+00:00'
   started_at: null
   reviewed_at: null
-  merged_at: null
-  notes: []
+  merged_at: '2026-05-23T03:32:28.703302+00:00'
+  notes:
+  - id: note-1e9776d
+    text: 'QA INPUT_REQUIRED: Recipe is discoverable and printable across the pm QA-library
+      surfaces: PASS; Following the recipe end-to-end produces every promised artifact
+      against a live SSE web UI: PASS; The shared SSE event stream fans out to concurrent
+      subscribers: PASS; Recipe edge cases — non-SSE UI, load-bearing launch flags,
+      and a bounded SSE reader: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-ac58803-7749c5aac06f65b0)'
+    created_at: '2026-05-23T03:08:13Z'
+    last_edited: '2026-05-23T03:08:13Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac58803-qa-artifact-recipe-web-ui-recording--13a938ec
 - id: pr-37073ad
   plan: plan-3119574
   title: 'Container: pre-install Playwright + Chromium + ffmpeg for browser QA recordings'
@@ -21508,7 +21547,91 @@ prs:
   created_at: '2026-05-22T22:11:57.970441+00:00'
   updated_at: '2026-05-23T04:16:54.851976+00:00'
   started_at: '2026-05-22T22:17:38.855645+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-23T03:46:55.286293+00:00'
   merged_at: '2026-05-23T04:16:54.851976+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfb0b3a-improvement-prompt-sessions-to-use-p-9021c2a2
+- id: pr-9b96145
+  plan: bugs
+  title: 'Bug: PR actions picker reports "merged or closed" for an open PR when its
+    window display id desyncs; self-heal by re-linking gh_pr_number'
+  branch: pm/pr-9b96145-bug-pr-actions-picker-reports-merged-or-closed-for
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    Opening the PR actions picker (prefix+P) for an OPEN PR can report "No actions
+    available (PR is merged or closed)." even though the PR is neither merged nor
+    closed. Observed for GitHub #214 / pr-ac58803 (state OPEN on GitHub) whose tmux
+    windows are named `#214` / `review-#214`.
+
+
+    ## Root cause
+
+    The picker resolves the invoking window''s display id against `_pr_display_id(p)`
+    (`pm_core/cli/session.py:1080-1085`). `_pr_display_id` returns `#<gh_pr_number>`
+    when set, else the local pr-id (`pm_core/cli/helpers.py`). When a PR''s `gh_pr_number`
+    is later cleared/changed in project.yaml (e.g. lost during a state reconcile,
+    or never persisted), its display id flips from `#214` back to `pr-ac58803`, but
+    the already-open windows keep the name `#214`. The picker then finds no PR for
+    display id `#214`, `_build_picker_lines` returns `[]` at `session.py:1087-1088`,
+    and that empty result falls through to the message at `session.py:1730-1732`,
+    which wrongly assumes the only reason for no actions is a terminal status.
+
+
+    ## Primary fix — self-heal when the PR isn''t found
+
+    When the picker cannot resolve the invoking display id to a PR, do not assume
+    merged/closed. Instead attempt to programmatically restore/re-link the PR''s state
+    before giving up:
+
+    - Parse the window''s display id (`#N`) and/or its window name''s branch slug,
+    and match it against the project''s PRs by branch and against open GitHub PRs
+    by number/headRefName.
+
+    - On a match where the local entry is missing `gh_pr_number`, backfill `gh_pr_number`
+    (+ `gh_pr` URL, and status from the GitHub state) into project.yaml via `store.locked_update`,
+    then re-resolve and show the correct actions.
+
+    - This makes a desynced window self-heal on next use instead of presenting a dead,
+    misleading picker.
+
+
+    ## Secondary fixes
+
+    1. Accurate messaging: distinguish "no PR matches display id `<X>` (window may
+    be stale/desynced)" from "PR is merged or closed" at `session.py:1730-1732`. Only
+    say merged/closed when `_build_picker_lines` returned empty *because* the resolved
+    PR''s status is terminal.
+
+    2. Backfill gap: neither relink command can currently re-link a tracked PR that
+    lost its number. `pm pr sync-github` only updates PRs that already have a `gh_pr_number`
+    (`pm_core/cli/pr.py:2114`, `sync_from_github`), and `pm pr import-github` skips
+    entries already tracked by branch (`pm_core/cli/pr.py:2195-2197`). Add/extend
+    a path (reuse the self-heal matcher) that backfills a missing `gh_pr_number` on
+    an existing tracked PR by matching its branch to an open GitHub PR.
+
+
+    ## Acceptance criteria
+
+    - Opening the actions picker from a `#N` window whose PR currently lacks `gh_pr_number`
+    re-links the PR (backfills number/URL/status) and shows its real actions, rather
+    than "merged or closed".
+
+    - The "merged or closed" message appears only when the resolved PR''s status is
+    actually merged/closed; the not-found case gets a distinct, accurate message.
+
+    - `pm pr sync-github` (or an equivalent command) can backfill a missing `gh_pr_number`
+    on a tracked PR by branch match.
+
+    - Tests cover: not-found-with-backfill, not-found-no-match (accurate message),
+    and genuinely-terminal status (still reports merged/closed).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-22T22:52:39.457111+00:00'
+  updated_at: '2026-05-22T22:52:39.457111+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

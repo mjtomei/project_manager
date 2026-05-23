@@ -885,8 +885,10 @@ _CONCRETIZE_GRACE = 15
 
 def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
                                   base_branch: str,
-                                  instruction_content: str | None = None) -> str:
+                                  instruction_content: str | None = None,
+                                  pr_id: str | None = None) -> str:
     """Build a prompt that verifies and refines scenario steps against code."""
+    this_pr = pr_id or "<pr-id>"
     instruction_section = ""
     if instruction_content:
         instruction_section = f"""
@@ -974,7 +976,23 @@ REFINER_REJECT_END
 IMPORTANT: Your response must end with one of those END markers. Do not
 include any text after it. Pick exactly one — either refine or reject.
 Only include the REFINER_REJECT_START / REFINER_REJECT_END markers when
-actually rejecting; omit them entirely when refining."""
+actually rejecting; omit them entirely when refining.
+
+## This Decision Is Final — Hand Off via PR Notes
+
+This concretizer pane is one-shot: once you emit an END marker it is not
+re-polled, and a REFINER_REJECT defers the scenario so its worker never
+launches. You cannot follow a reject (or a refine) with a new decision in
+this run. If there is context the next QA or concretization run on this PR
+should have — why you rejected, a missing prerequisite, or a change that
+would unblock the scenario — record it with:
+  pm pr note add {this_pr} '<text>'
+The note persists on the PR and is injected into future sessions' prompts
+(the `## PR Notes` section). It is fine to add this from your workdir, even
+for another PR's id: the note is written to the git-tracked project.yaml,
+travels to master when this PR merges, and reaches the target PR's workers
+when they clone or pull master. Prefer pm PR notes over GitHub PR comments
+for this handoff."""
 
 
 def _build_concretize_cmd(
@@ -997,7 +1015,8 @@ def _build_concretize_cmd(
     pr_branch = pr_data.get("branch", "")
 
     prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
-                                          instruction_content=instruction_content)
+                                          instruction_content=instruction_content,
+                                          pr_id=pr_data.get("id"))
     claude_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
