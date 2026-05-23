@@ -694,7 +694,6 @@ class TechTree(Widget):
     """
 
     selected_index: reactive[int] = reactive(0)
-    prs: reactive[list] = reactive(list, init=False)
 
     def __init__(self, prs: list[dict] | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -728,7 +727,6 @@ class TechTree(Widget):
         self._perf_phases: dict = {}  # populated only when perf.ENABLED
 
     def on_mount(self) -> None:
-        self.prs = self._prs
         self._recompute()
         self._install_scroll_cull()
 
@@ -757,7 +755,6 @@ class TechTree(Widget):
 
     def update_prs(self, prs: list[dict]) -> None:
         self._prs = prs
-        self.prs = prs
         self._recompute()
 
     def select_pr(self, pr_id: str) -> None:
