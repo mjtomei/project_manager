@@ -902,6 +902,18 @@ class TestFakeClaudeConfig:
         assert result is not None
         assert "verdicts" not in result
 
+    def test_all_keeps_untyped_call_no_verdict(self, tmp_path, monkeypatch):
+        """An untyped (session_type=None) launch via _all stays no-verdict — the
+        default-verdict rule keys on the session type, and None has no entry in
+        SESSION_TYPE_VERDICTS. Critical so spec-gen (session_type=None) doesn't
+        emit a bogus verdict when an _all catch-all is present."""
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {"_all": {"delay": 0.1}})
+        result = fake_claude_config_for_type(None, tag)
+        assert result is not None
+        assert "verdicts" not in result
+
 
 # ---------------------------------------------------------------------------
 # Launcher fake-claude integration (_pick_fake_verdict, _fake_claude_args,
