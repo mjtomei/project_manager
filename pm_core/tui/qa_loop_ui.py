@@ -316,9 +316,109 @@ def poll_qa_state(app) -> None:
                 except Exception:
                     _log.debug("runtime_state qa verdict mirror failed",
                                exc_info=True)
+                # Completion processed — drop the resume snapshot so a
+                # later restart doesn't re-process this finished run.
+                if state.qa_workdir:
+                    from pm_core import qa_loop
+                    qa_loop.clear_resume_file(state.qa_workdir)
                 del app._qa_loops[pr_id]
             else:
                 state._ui_complete_notified = True
+
+    # --- Restart recovery: resume runs whose daemon thread died ---
+    _resume_incomplete_qa(app)
+
+
+def _resume_incomplete_qa(app) -> None:
+    """Resume or finish QA runs orphaned by a TUI restart.
+
+    The verdict-collection orchestration (run_qa_sync) runs in a daemon
+    thread inside the TUI process.  A TUI restart kills that thread and
+    empties ``app._qa_loops``; the scenario tmux windows keep running but
+    nobody collects verdicts, computes the overall result, or drives the
+    lifecycle transition.
+
+    Each in-progress run leaves a ``qa_resume.json`` snapshot in its QA
+    workdir.  This scans for snapshots not tracked in memory and either:
+
+    * re-spawns the orchestration loop (``resume_qa_background``) when the
+      run is still incomplete (no ``overall`` in qa_status.json), or
+    * feeds the completed-but-unprocessed result straight through
+      ``_on_qa_complete`` when the daemon finished writing the verdict but
+      the TUI died before processing it.
+
+    The snapshot is removed once the run has been handled, so it is not
+    re-processed on a subsequent restart.
+    """
+    import json
+    from pathlib import Path
+    from pm_core import qa_loop
+
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    if not qa_root.is_dir():
+        return
+
+    if not hasattr(app, "_resumed_qa_pr_ids"):
+        app._resumed_qa_pr_ids = set()
+
+    # Defer the (relatively expensive) project load until a candidate is
+    # actually found — this runs on the ~1s poll tick.
+    project_data = None
+
+    for resume_file in qa_root.glob("*/qa_resume.json"):
+        try:
+            rdata = json.loads(resume_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        pr_id = rdata.get("pr_id", "")
+        if not pr_id:
+            continue
+        if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
+            continue
+
+        # Only resume PRs still in QA — skip (and forget) ones that have
+        # already moved on.
+        if not app._root:
+            continue
+        if project_data is None:
+            project_data = store.load(app._root)
+        pr = store.get_pr(project_data, pr_id)
+        if not pr or pr.get("status") != "qa":
+            app._resumed_qa_pr_ids.add(pr_id)
+            continue
+
+        # Is the run already complete (daemon wrote overall, TUI died
+        # before processing)?  Read the display status file.
+        overall = ""
+        try:
+            sdata = json.loads((resume_file.parent / "qa_status.json").read_text())
+            overall = sdata.get("overall", "")
+        except (json.JSONDecodeError, OSError):
+            overall = ""
+
+        state = qa_loop.build_resume_state(rdata)
+        app._resumed_qa_pr_ids.add(pr_id)
+
+        if overall:
+            # Completed during downtime — process and clear the snapshot.
+            state.running = False
+            state.latest_verdict = overall
+            _log.info("Recovered completed QA from disk: %s → %s", pr_id, overall)
+            _on_qa_complete(app, state)
+            state._ui_complete_notified = True
+            if state.qa_workdir:
+                qa_loop.clear_resume_file(state.qa_workdir)
+            continue
+
+        # Still in progress — re-spawn the orchestration loop.
+        def _on_update(s, _app=app):
+            _app.call_from_thread(_on_qa_update, _app, s)
+
+        app._qa_loops[pr_id] = state
+        app.log_message(f"Resuming QA for {pr_id} after restart...")
+        _log.info("Resuming incomplete QA from disk: %s", pr_id)
+        qa_loop.resume_qa_background(state, app._root, pr, _on_update)
 
 
 # ---------------------------------------------------------------------------

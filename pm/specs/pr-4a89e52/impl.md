@@ -1,161 +1,171 @@
 # Spec: QA verdict collection survives TUI restart (pr-4a89e52)
 
+> **History note.** The branch's original fix (move pane-capture verdict
+> polling into `qa_status.py`) was implemented against a base that is now
+> 1152 commits behind master. Master re-architected QA verdict collection
+> into a rich in-process orchestration loop (transcript/JSONL-based
+> detection, PASS-verification panes, a concurrency-capped scenario launch
+> queue, hook-driven idle detection, verdict reasons, and a finalize
+> phase). The user chose to **re-implement on master**. This spec describes
+> the master-based design that landed. The old `qa_status.py` `VerdictPoller`
+> approach was discarded during the merge (it could not host master's
+> orchestration loop, which needs launch/container/hook context the
+> display-only status pane lacks).
+
 ## Problem
 
-QA scenario verdict polling ran in a **daemon thread inside the TUI process**:
-`start_qa_background` (in `pm_core/tui/qa_loop_ui.py`) spawns a daemon thread
-running `run_qa_sync` (`pm_core/qa_loop.py`), which previously called
-`_poll_tmux_verdicts`. That function captured each scenario's tmux pane,
-extracted verdicts, and wrote them to `qa_status.json`.
+QA orchestration (`run_qa_sync` in `pm_core/qa_loop.py`) runs in a **daemon
+thread inside the TUI process**, spawned by `start_qa_background` (called from
+`pm_core/tui/qa_loop_ui.py`). The thread plans scenarios, launches them in tmux
+windows, then runs `_poll_tmux_verdicts` — a long orchestration loop that
+collects verdicts (from per-scenario JSONL transcripts, gated on hook
+`idle_prompt` events), runs PASS-verification panes, launches queued
+scenarios, computes the overall verdict, and runs the finalize pane.
 
-Because the poller lived in the TUI process, a TUI restart killed the daemon
-threads and lost `app._qa_loops`. The scenario tmux panes kept running to
-completion, but **nobody collected their verdicts or updated
-`qa_status.json`**, so the TUI never observed completion and never triggered
-the QA lifecycle transitions (merge / back-to-review).
+When the TUI restarts, that daemon thread dies and `app._qa_loops` is emptied.
+The scenario tmux windows keep running (they live in the pm tmux session, which
+outlives the TUI client), but **nobody collects their verdicts, computes the
+overall result, or drives the lifecycle transition** (merge / back-to-review).
+`poll_qa_state` only ever inspected in-memory `app._qa_loops`, so a restarted
+TUI never observes the run again.
 
-## Requirements (grounded in code)
+## Approach: resume the orchestration loop on restart
 
-### R1 — Move verdict polling out of the TUI process into `qa_status.py`
-The verdict-collection logic must run inside the `qa_status.py` process that
-already executes in the QA **status pane** (launched at
-`pm_core/qa_loop.py:999-1005` via
-`python3 .../qa_status.py <status_path> <session>` split into the main QA
-window). That pane's lifetime is independent of the TUI, so verdict
-collection survives TUI restarts.
+Verdict collection on master is too tightly coupled to in-process, in-memory
+state to relocate into the status pane. Instead, the orchestration is made
+**resumable**: each in-progress run persists a snapshot of its reconstructable
+state, and the TUI re-spawns the loop (or processes a completion) for any
+orphaned run it finds on disk.
 
-Implemented as `VerdictPoller` in `pm_core/qa_status.py:157`, invoked once per
-refresh cycle from both `_run_interactive` (`:462`) and `_run_passive`
-(`:513`). Each `poll(status)` call:
-- Skips when `status is None` or an `overall` verdict already exists.
-- Iterates `status["scenarios"]`, skipping `interactive` (scenario 0),
-  already-completed, and window-less entries.
-- Resolves the scenario's tmux pane via `_find_claude_pane(session,
-  window_name)`; if the window is gone, records `INPUT_REQUIRED`.
-- Captures the pane (`_capture_pane`) and extracts a verdict
-  (`_extract_verdict` over the last `_VERDICT_TAIL_LINES=30` lines, matching a
-  bare `PASS` / `NEEDS_WORK` / `INPUT_REQUIRED` line via `_match_verdict`).
-- Requires `_STABILITY_POLLS=2` consecutive identical detections
-  (`_VerdictStabilityTracker`) before committing a verdict.
-- When all non-interactive scenarios have a verdict, computes `overall`
-  (NEEDS_WORK > INPUT_REQUIRED > PASS precedence) and writes it.
-- Writes updates back atomically (`_write_status` → tmp file + `rename`).
+### R1 — Persist a resume snapshot (`qa_resume.json`)
+`qa_status.json` is the display contract (read by `qa_status.py`) and only
+carries `index/title/verdict/verdict_reason/window_name`. The orchestration
+loop needs far more per-scenario runtime state to keep going:
+`session_id` (the hook turn-gate key), `transcript_path` (verdict source of
+truth), `pane_id` (reminders/follow-ups), and `worktree_path`/`container_name`
+/`verifier_*` (relaunch + verification).
 
-### R2 — `qa_status.json` is the cross-process contract
-The TUI seeds the file; `qa_status.py` takes over monitoring; the TUI reads it
-back to detect completion.
+New in `pm_core/qa_loop.py`:
+- `_RESUME_FILENAME = "qa_resume.json"`, `_resume_file_path(qa_workdir)`.
+- `_scenario_to_resume_dict` / `_scenario_from_resume_dict` — serialize the
+  resumable `QAScenario` fields.
+- `_write_resume_file(state, use_containers, concurrency_cap, queued_indices)`
+  — atomic tmp+rename; best-effort (logs, never raises). Persists run-level
+  fields (`pr_id`, `loop_id`, `qa_workdir`, `session_tag`, `use_containers`,
+  `concurrency_cap`, `finalize_verdict`, `scenario_verdicts`,
+  `scenario_verdict_reasons`, `verified_scenarios`, `queued_indices`),
+  every scenario, and `scenario_0`.
+- `_load_resume_file` / `clear_resume_file` / `build_resume_state`.
 
-- **Seeding**: `run_qa_sync` writes the initial `qa_status.json`
-  (`_write_status_file`, `pm_core/qa_loop.py:1031`) after launching scenarios
-  and the status pane. The file contains `pr_id`, the `scenarios` list (each
-  with `index`, `title`, `verdict`, `window_name`), and an empty `overall`.
-  Scenario 0 (interactive) is seeded with `verdict: "interactive"` and is
-  never polled.
-- **Schema** (`_write_status_file`, `:279`): `{ "pr_id", "scenarios": [{
-  "index", "title", "verdict", "window_name" }], "overall" }`. This schema is
-  the shared contract — `VerdictPoller` reads/writes the same shape.
+The snapshot is written:
+- once before the blocking poll (start of `_execute_and_finalize`),
+- every poll iteration inside `_poll_tmux_verdicts` (so queued-launch and
+  verdict mutations persist),
+- again after finalize (so the overall + finalize verdict are carried).
 
-### R3 — TUI no longer polls tmux panes itself
-`run_qa_sync` must stop calling `_poll_tmux_verdicts` and instead wait on the
-status file. Implemented as `_wait_for_verdicts_via_status_file`
-(`pm_core/qa_loop.py:686`), which polls `qa_status.json` every `_POLL_INTERVAL`
-seconds, mirrors per-scenario verdicts into `state.scenario_verdicts` (firing
-`_notify()` on change), and returns once `overall` is set (assigned to
-`state.latest_verdict`). The old `_poll_tmux_verdicts`,
-`_relaunch_scenario_window`, retry/backoff machinery, and the final
-aggregate-and-write block in `run_qa_sync` are removed (overall is now
-computed by `qa_status.py`).
+### R2 — Re-enter the execution phase without re-launching
+`run_qa_sync`'s tail (poll → aggregate → persist → finalize → summary) is
+extracted into `_execute_and_finalize(...)`, called by both `run_qa_sync`
+(after planning + launch) and the new `resume_qa_sync` (skipping planning +
+launch — the scenario windows already exist). Behavior of `run_qa_sync` is
+unchanged (verified by the existing `tests/test_qa_loop.py` /
+`test_qa_finalize_wiring.py` / `test_qa_self_driving.py` suites).
 
-### R4 — TUI detects completion and drives lifecycle, surviving restart
-`poll_qa_state` (`pm_core/tui/qa_loop_ui.py:254`) runs on the shared poll
-timer and must handle two cases:
-1. **Normal flow** — in-memory `app._qa_loops`: when a state is not running and
-   has a `latest_verdict`, call `_on_qa_complete` once
-   (guarded by `state._ui_complete_notified`).
-2. **Restart recovery** — `_recover_completed_qa_from_disk` (`:274`) scans
-   `~/.pm/workdirs/qa/*/qa_status.json` for files with an `overall` verdict
-   whose `pr_id` is **not** in `app._qa_loops`, builds a synthetic
-   `QALoopState` (scenarios + verdicts + `latest_verdict=overall`,
-   `running=False`), and feeds it through `_on_qa_complete`. A per-app
-   `_recovered_qa_pr_ids` set prevents re-processing.
+`resume_qa_sync(state, pm_root, pr_data, on_update)` rebuilds the execution
+context (session, workdir, status path, repo root, `use_containers`,
+`concurrency_cap`, queued scenarios from the snapshot) and calls
+`_execute_and_finalize`. `resume_qa_background` wraps it in a daemon thread,
+mirroring `start_qa_background`.
+
+### R3 — TUI detects and resumes orphaned runs
+`poll_qa_state` (`pm_core/tui/qa_loop_ui.py`) keeps its in-memory completion
+handling and now also calls `_resume_incomplete_qa(app)` each tick.
+`_resume_incomplete_qa` scans `~/.pm/workdirs/qa/*/qa_resume.json` (cheap glob;
+project data loaded lazily only when a candidate is found) and, for each run
+not in `app._qa_loops` and not in `app._resumed_qa_pr_ids`, whose PR is still
+`status == "qa"`:
+- **Completed during downtime** (`qa_status.json` has `overall`): build the
+  state, set `latest_verdict = overall`, run `_on_qa_complete`, and
+  `clear_resume_file`. (Daemon wrote the verdict but the TUI died before
+  processing it.)
+- **Still incomplete** (no `overall`): build the state, register it in
+  `app._qa_loops`, and `resume_qa_background(...)`. The resumed loop completes
+  through the normal in-memory `poll_qa_state` path.
+
+### R4 — Snapshot lifecycle keeps it from re-firing
+`qa_resume.json` exists ⇔ "this run still needs TUI attention." It is removed:
+- by `poll_qa_state` when an in-memory run finishes and is dropped
+  (`_ui_complete_notified` branch → `clear_resume_file(state.qa_workdir)`),
+- by `_resume_incomplete_qa` after processing a completed-during-downtime run.
+
+So a fully processed run leaves no snapshot, and a subsequent restart will not
+re-process it. `app._resumed_qa_pr_ids` additionally dedupes within a session.
 
 ## Implicit Requirements
 
-- **IR1 — `qa_status.py` runs standalone, no PYTHONPATH.** It is launched as a
-  bare script in a tmux pane, so verdict helpers (`_find_claude_pane`,
-  `_capture_pane`, `_extract_verdict`, `_VerdictStabilityTracker`) are
-  **inlined** rather than imported from `pm_core.loop_shared` (see module
-  docstring `:71-73`). Drift between the two copies is an accepted tradeoff;
-  they must stay verdict-compatible.
-- **IR2 — Atomic writes from two writers.** Both the TUI seed
-  (`_write_status_file`) and `qa_status.py` (`_write_status`) write via
-  tmp-file + `rename`, and readers tolerate `FileNotFoundError` /
-  `JSONDecodeError` (mid-rename). The status pane is the only writer after
-  seeding except the TUI's initial seed, so there is no last-writer-wins
-  conflict in the steady state.
-- **IR3 — Grace period.** `qa_status.py` applies `_VERDICT_GRACE_PERIOD=30s`
-  before accepting *content-based* verdicts (`in_grace` check at `:205`), so a
-  scenario that prints a verdict-looking line early isn't latched
-  prematurely. Window-gone → `INPUT_REQUIRED` is **not** gated by grace
-  (a missing window is unambiguous).
-- **IR4 — Recovery only fires for PRs still in QA.** `_recover...` loads
-  project data (lazily, only when a candidate is found) and skips PRs whose
-  status is no longer `qa` (already transitioned), recording them in
-  `_recovered_qa_pr_ids` so they aren't rechecked.
-- **IR5 — Idempotent completion.** `_on_qa_complete` must run exactly once per
-  completed run, whether via the in-memory path or the disk-recovery path
-  (both set `_ui_complete_notified = True`).
+- **IR1 — Scenario windows outlive the TUI.** They live in the pm tmux session
+  (separate from the TUI client), so a TUI restart leaves them running and
+  `get_pm_session()` still resolves on resume. (If the whole tmux server is
+  gone, `resume_qa_sync` returns `ERROR` early — nothing to resume.)
+- **IR2 — `session_id` drives the hook gate.** `_poll_tmux_verdicts` marks any
+  scenario without a `session_id` as `INPUT_REQUIRED`; persisting/restoring it
+  is what lets resumed scenarios be polled rather than abandoned. It is also
+  derivable from the transcript (`session_id_from_transcript`) as a fallback.
+- **IR3 — Atomic, tolerant IO.** Both `qa_status.json` and `qa_resume.json` use
+  tmp+rename; every reader (`_load_resume_file`, `_resume_incomplete_qa`)
+  swallows `FileNotFoundError` / `JSONDecodeError` / `OSError` and retries next
+  tick.
+- **IR4 — Resume runs on the TUI thread.** `_resume_incomplete_qa` is invoked
+  from the poll timer, so `_on_qa_complete` is called synchronously (same as
+  the in-memory path); the resumed daemon's `on_update` marshals back via
+  `call_from_thread`.
+- **IR5 — Idempotent completion.** A resumed run completes through the in-memory
+  path's `_on_qa_complete` (guarded by `_ui_complete_notified`); the
+  completed-during-downtime path guards via the snapshot removal +
+  `_resumed_qa_pr_ids`.
 
 ## Ambiguities (resolved)
 
-- **A1 — Who computes `overall`?** Resolved: `qa_status.py` computes and
-  persists `overall`; the TUI only reads it. Removing the duplicate
-  aggregation in `run_qa_sync` avoids two processes racing to set it.
-- **A2 — Scenario retry/relaunch on dead windows.** The old poller relaunched
-  dead scenario windows with exponential backoff. Resolved: dropped. A
-  status-pane poller cannot recreate worktree/container-backed windows
-  (it lacks the launch context), so a gone window now deterministically maps
-  to `INPUT_REQUIRED`. This is a behavior change but keeps the cross-process
-  contract simple; relaunch was best-effort and is out of scope for this fix.
-- **A3 — Grace timer across restart.** `VerdictPoller._start_time` resets each
-  time `qa_status.py` (re)starts. Resolved as acceptable: the status pane
-  normally outlives the TUI, and a re-launched status pane re-applying a 30s
-  grace only delays verdict acceptance slightly.
+- **A1 — Relocate vs resume.** Resolved in favor of resume-on-restart. The
+  status pane lacks the launch/container/hook context the orchestration loop
+  needs, so collection cannot move there on master.
+- **A2 — One snapshot file vs overloading `qa_status.json`.** Resolved: a
+  separate `qa_resume.json`. `qa_status.json` stays the lean display contract
+  that `qa_status.py` renders; the verbose runtime state lives in the sidecar.
+- **A3 — When to delete the snapshot.** Resolved: on TUI processing of the
+  completion (not at daemon exit), so a daemon that finishes just before the
+  TUI dies is still recoverable on the next restart.
 
 ## Edge Cases
 
-- **EC1 — TUI restarts mid-run, then again after completion.** First restart:
-  `qa_status.py` keeps collecting; `_recover_completed_qa_from_disk` picks up
-  the completed file on the next poll. Covered by `_recovered_qa_pr_ids`
-  dedup.
-- **EC2 — Window dies before any verdict.** `VerdictPoller` records
-  `INPUT_REQUIRED` immediately (not grace-gated), so the run still reaches an
-  `overall` rather than hanging.
-- **EC3 — Scenario 0 (interactive).** Seeded with `verdict:"interactive"`,
-  excluded from polling, from the `pending` set, and from
-  recovery-synthesized scenarios.
-- **EC4 — Status file missing/half-written.** All readers
-  (`_load_status`, `_wait_for_verdicts_via_status_file`,
-  `_recover_completed_qa_from_disk`) swallow `FileNotFoundError` /
-  `JSONDecodeError` / `OSError` and retry on the next tick.
-- **EC5 — Overlap with pr-b59f0c7 (reason strings).** Per PR notes,
-  pr-b59f0c7 adds reason strings into the verdict shape persisted here.
-  Coordination: the `scenarios[]` entry shape is the shared surface; a future
-  `reason` field is additive and both writers must preserve unknown keys.
-  (No code change required in this PR beyond not clobbering extra keys —
-  current writers rebuild the dict from known fields, so a follow-up will need
-  to thread `reason` through `_write_status_file` and `VerdictPoller`.)
+- **EC1 — Interrupted during planning/launch** (before the first snapshot):
+  not resumable; the half-planned run is abandoned (planning is cheap, restart
+  re-plans). Accepted limitation.
+- **EC2 — Scenario window died while the TUI was down**: handled by the
+  existing `_poll_tmux_verdicts` relaunch/backoff path (worktrees/containers
+  persist), eventually `INPUT_REQUIRED` if exhausted — same as the live loop.
+- **EC3 — `verification_failures` not persisted**: resets to 0 on resume, so a
+  scenario mid-verification may get a few extra verification attempts. Minor;
+  accepted (verdicts and `verified_scenarios` *are* persisted).
+- **EC4 — PASS without auto-start leaves status `qa`**: the snapshot is removed
+  on processing, so it is not re-processed across restarts even though the
+  status stays `qa`.
+- **EC5 — Grace period resets on resume**: the resumed loop re-applies the 30s
+  content-poll grace, delaying verdict acceptance briefly after restart.
+  Accepted.
+- **EC6 — pr-b59f0c7 overlap (verdict reasons)**: already landed on master;
+  `scenario_verdict_reasons` is persisted/restored in the snapshot.
 
-## Status
+## Tests
 
-Implementation already present on this branch (commit `1b4c8cea` + review-loop
-follow-ups). `tests/test_qa_status.py` (19 tests) covers `VerdictPoller`,
-verdict extraction, stability, and overall computation; all qa_loop /
-qa_self_driving / qa_pane / qa_status suites pass locally.
+`tests/test_qa_resume.py` (11 tests): snapshot round-trip incl. scenario
+runtime fields/verdicts/reasons/verified/finalize; `clear_resume_file`;
+`_resume_incomplete_qa` re-spawn (incomplete), process+clear (completed), skip
+non-qa PR, skip already-tracked / already-recovered, no-op without qa root; and
+`poll_qa_state` clearing the snapshot on in-memory completion. The orphaned
+`tests/test_qa_status.py` (old `VerdictPoller`) was removed in the merge.
 
-### Outstanding (non-implementation)
-The branch is **1152 commits behind master**. Per PR note (2026-04-24),
-master PR #166 removed `PASS_WITH_SUGGESTIONS`, the `zzz` prefix, and the QA
-strict/lenient distinction; `qa_loop_ui.py`'s docstring and some test
-references still mention `zzz`/strict. A master merge will conflict and is
-tracked as a follow-up decision, not part of the core verdict-collection fix.
+Full suite: 2369 passed (1 pre-existing, unrelated failure in
+`tests/test_hook_events.py::test_installer_writes_standalone_receiver`, which
+fails identically on the merge base — a hook-receiver install/env artifact,
+out of scope for this PR).

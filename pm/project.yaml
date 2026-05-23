@@ -5669,7 +5669,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-05-14T01:47:40.477024+00:00'
+  updated_at: '2026-05-23T05:38:48.389888+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
@@ -5690,6 +5690,23 @@ prs:
       the same verdict-storage surface; sequence them or coordinate the shape change.'
     created_at: '2026-05-14T01:47:40Z'
     last_edited: '2026-05-14T01:47:40Z'
+  - id: note-fefa01c
+    text: 'RE-IMPLEMENTED ON MASTER (2026-05-23): merged origin/master (1152 commits;
+      took master for the re-architected QA subsystem) and rebuilt restart-survival
+      to fit master. Approach = resume-on-restart, not relocate-to-status-pane. Each
+      in-progress QA run persists a sidecar qa_resume.json (session_id/transcript/pane_id/worktree/verifier
+      + verdicts/reasons/verified/finalize) written before+during the poll loop. New:
+      qa_loop._execute_and_finalize (extracted run_qa_sync tail, shared), resume_qa_sync/resume_qa_background,
+      build_resume_state, _write/_load/clear_resume_file. TUI: qa_loop_ui.poll_qa_state
+      now calls _resume_incomplete_qa which scans ~/.pm/workdirs/qa/*/qa_resume.json
+      and either re-spawns the loop (incomplete) or feeds _on_qa_complete (overall
+      already set, daemon died before TUI processed it); snapshot cleared on processing
+      so it never re-fires. Tests: tests/test_qa_resume.py (11). Removed orphaned
+      tests/test_qa_status.py (old VerdictPoller). Full suite 2369 pass; 1 pre-existing
+      unrelated failure test_hook_events::test_installer_writes_standalone_receiver
+      (fails on merge base too).'
+    created_at: '2026-05-23T05:38:48Z'
+    last_edited: '2026-05-23T05:38:48Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
