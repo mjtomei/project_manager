@@ -9,13 +9,14 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-37073ad
+  active_pr: pr-30888b1
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
   skip_qa: true
   nested_podman: true
+  libyaml: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -16106,11 +16107,18 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/207
   gh_pr_number: 207
   created_at: '2026-05-05T13:29:33.145323+00:00'
-  updated_at: '2026-05-22T19:22:00.365345+00:00'
+  updated_at: '2026-05-22T22:19:03.131617+00:00'
   started_at: '2026-05-05T17:44:35.482235+00:00'
   reviewed_at: '2026-05-05T17:54:24.906576+00:00'
-  merged_at: '2026-05-22T19:22:00.365345+00:00'
-  notes: []
+  merged_at: '2026-05-22T22:19:03.131617+00:00'
+  notes:
+  - id: note-5900335
+    text: 'review i6: made _render_content null-safe on a present-but-null project:
+      key in project.yaml (was data.get("project", {}).get(...) outside the load try/except,
+      raising AttributeError -> persistent "render error"). Switched to the `or {}`
+      idiom already used for prs; added test_render_content_null_project_key.'
+    created_at: '2026-05-21T16:31:34Z'
+    last_edited: '2026-05-21T16:31:34Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-28bda5d-improvement-home-window-redraws-only-a288d60a
 - id: pr-6f542a2
   plan: improvements
@@ -21321,6 +21329,43 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-9330dec
+  plan: bugs
+  title: 'Bug: home-window line truncation undercounts emoji width, can soft-wrap
+    on narrow panes'
+  branch: pm/pr-9330dec-bug-home-window-line-truncation-undercounts-emoji-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/home_window/pr_list.py:_truncate (and callers in
+    _render_content/_compose).
+
+
+    _truncate uses len() (code-point count) to fit lines to the pane width, but format_pr_line
+    (pm_core/cli/helpers.py:280) prepends a status emoji from PR_STATUS_ICONS (⏳🔨👀🧪✅🚫),
+    each rendered as 2 cells in most terminals. A line truncated to exactly `width`
+    code points therefore renders as width+1 cells (more if the title also contains
+    wide chars), overflowing the last column and soft-wrapping on a narrow pane.
+
+
+    Repro: shrink the pm-home pane to mobile-mode width with at least one long PR
+    title so lines truncate; the truncated line wraps, producing a stray trailing
+    character / extra row at the bottom — exactly the "no soft-wrap artifacts" case
+    the pr-28bda5d acceptance test calls out.
+
+
+    Fix needs display-width measurement (wcwidth dependency, or a unicodedata-based
+    helper with an emoji heuristic). Deferred from pr-28bda5d, whose spec explicitly
+    scoped wide-char awareness out (its premise that format_pr_line is plain ASCII
+    is incorrect — it carries emoji).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-21T15:56:55.362547+00:00'
+  updated_at: '2026-05-21T15:56:55.362547+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-6566901
   plan: null
   title: 'Verdict-loop robustness: surface/retry when an expected verdict is never
@@ -21362,3 +21407,97 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-cfb0b3a
+  plan: improvements
+  title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
+    and prefer them over GitHub notes'
+  branch: pm/pr-cfb0b3a-improvement-prompt-sessions-to-use-pm-pr-notes-for
+  status: in_progress
+  depends_on: []
+  description: '## Goal
+
+    Make Claude sessions aware that `pm pr note add <pr-id> ''<text>''` is the canonical
+    mechanism for handing off context to other sessions/PRs, and instruct them to
+    prefer pm PR notes over GitHub PR comments/review notes for that purpose.
+
+
+    pm PR notes serve two handoff directions, both via `pm pr note add <pr-id> ''<text>''`
+    (the target pr-id need not be the session''s own PR):
+
+    1. **Same-PR, next session** — immediate cross-session handoff: leave context
+    for whoever resumes this PR.
+
+    2. **Cross-PR** — whenever the session is leaving work or context for a *different*
+    PR to pick up, add the note to that target PR''s id.
+
+
+    ## Why
+
+    The user uses pm PR notes to hand off information between sessions and between
+    PRs. Two problems today:
+
+    - **Ambiguity**: when the user says "leave a note" / "add a note" / "notes", sessions
+    often assume GitHub PR comments unless carefully told otherwise. They should default
+    to pm PR notes.
+
+    - **Discoverability**: the handoff workflow is undocumented in the prompts, so
+    sessions — especially containerized ones — don''t know `pm pr note add` exists,
+    that it can target any PR, or that it''s the expected channel.
+
+
+    pm PR notes are already persistent (stored on the PR in project.yaml) and are
+    surfaced into future sessions'' prompts as the `## PR Notes` section (see `prompt_gen._format_pr_notes`),
+    so they are the correct handoff medium; GitHub comments are for external review
+    communication, not internal handoff.
+
+
+    ## Implementation
+
+    Add a short, ungated "PR Notes / handoff" guidance block to the session-prompt
+    generators in `pm_core/prompt_gen.py` (`generate_prompt`, `generate_review_prompt`)
+    and any other session prompts that should carry it (QA, bug-fix, watcher prompts).
+    The block should explain:
+
+    - PR notes persist on the PR and are injected into future sessions'' prompts for
+    that PR.
+
+    - Same-PR handoff: to leave context for the next session on this PR, run `pm pr
+    note add <this-pr-id> ''<text>''`.
+
+    - Cross-PR handoff: when leaving work/context for another PR, run `pm pr note
+    add <other-pr-id> ''<text>''` — the note attaches to that PR and surfaces in its
+    sessions.
+
+    - Prefer pm PR notes over GitHub PR comments/description edits for any handoff.
+    Treat unqualified "notes" from the user as pm PR notes, not GitHub.
+
+
+    Key constraint: the `tui_block` is gated on `session_name`, so this guidance must
+    live in an **ungated** block so it also reaches containerized sessions (which
+    may not receive the TUI section). Cross-reference, don''t duplicate, the existing
+    `_OUT_OF_SCOPE_BUGS_BLOCK`, which already mentions `pm pr note add` for recording
+    incidental fixes (and relate it to the cross-PR case: prefer a note on the relevant
+    existing PR over a brand-new PR when the work belongs to one that already exists).
+
+
+    ## Acceptance
+
+    - Generated impl, review, QA, and container prompts all contain the pm-notes handoff
+    guidance, both handoff directions (same-PR and cross-PR), and the "prefer pm notes
+    over GitHub" instruction.
+
+    - The guidance is present even when `session_name` is None (the container/non-TUI
+    path).
+
+    - Tests assert the block appears in `generate_prompt` / `generate_review_prompt`
+    output and is not gated on `session_name`.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/215
+  gh_pr_number: 215
+  created_at: '2026-05-22T22:11:57.970441+00:00'
+  updated_at: '2026-05-22T22:17:38.855645+00:00'
+  started_at: '2026-05-22T22:17:38.855645+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfb0b3a-improvement-prompt-sessions-to-use-p-9021c2a2
