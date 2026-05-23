@@ -146,7 +146,14 @@ def _resolve_fake_verdict(verdicts, session_type: str | None,
 
     sequence = _scripted_sequence(verdicts)
     if sequence is None:
-        # Existing weighted-random dict form.
+        # Existing weighted-random dict form.  A hand-edited config can put a
+        # scalar here (e.g. ``"verdicts": "PASS"``); that is neither a weight
+        # map nor a scripted sequence and would crash _pick_fake_verdict
+        # (``.keys()`` on a str/int).  Per the i1/i2 invariant — a directly
+        # edited config must never crash the launcher — treat any non-dict as
+        # no-verdict rather than blowing up.
+        if not isinstance(verdicts, dict):
+            return "NONE", {}
         return _pick_fake_verdict(verdicts), {}
 
     if not sequence:

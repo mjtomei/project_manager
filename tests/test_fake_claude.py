@@ -1010,6 +1010,17 @@ class TestFakeClaudeLauncher:
         assert "--verdict" in args
         assert "PASS" in args
 
+    def test_fake_claude_args_tolerates_scalar_verdicts(self):
+        """A hand-edited config whose ``verdicts`` is a bare scalar (string /
+        number) — neither a weight map nor a scripted sequence — must not crash
+        the launcher (``.keys()`` on a str/int in _pick_fake_verdict).  Same
+        invariant as review-loop 878e i1/i2; treated as a no-verdict session."""
+        from pm_core.claude_launcher import _fake_claude_args
+        for bad in ("PASS", 5, 1.5):
+            args = _fake_claude_args(
+                {"verdicts": bad}, session_type="review", session_tag=None)
+            assert args[:2] == ["--verdict", "NONE"]
+
     def test_fake_claude_args_passes_preamble(self):
         from pm_core.claude_launcher import _fake_claude_args
         args = _fake_claude_args({"verdicts": {"PASS": 1}, "preamble": 7})
