@@ -385,7 +385,12 @@ def _resume_incomplete_qa(app) -> None:
             project_data = store.load(app._root)
         pr = store.get_pr(project_data, pr_id)
         if not pr or pr.get("status") != "qa":
+            # The PR has left QA, so this snapshot can never be validly
+            # resumed (resume requires status == "qa").  Drop it so it
+            # doesn't linger on disk or get mistakenly picked up if the
+            # PR ever returns to QA under a different loop_id.
             app._resumed_qa_pr_ids.add(pr_id)
+            qa_loop.clear_resume_file(resume_file.parent)
             continue
 
         # Is the run already complete (daemon wrote overall, TUI died

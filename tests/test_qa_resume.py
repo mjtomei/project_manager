@@ -221,7 +221,7 @@ def test_resume_completed_processes_and_clears(tmp_path):
 
 def test_resume_skips_non_qa_pr(tmp_path):
     app = _make_app(tmp_path, pr_status="merged")
-    _seed_run(tmp_path, overall="")
+    qa_dir = _seed_run(tmp_path, overall="")
 
     with patch("pathlib.Path.home", return_value=tmp_path), \
          patch.object(qa_loop, "resume_qa_background") as resume_bg, \
@@ -232,6 +232,8 @@ def test_resume_skips_non_qa_pr(tmp_path):
     on_complete.assert_not_called()
     # Recorded so it isn't rechecked every tick.
     assert "pr-001" in app._resumed_qa_pr_ids
+    # The PR left QA, so its stale snapshot is dropped from disk.
+    assert not _resume_file_path(qa_dir).exists()
 
 
 def test_resume_skips_already_tracked(tmp_path):

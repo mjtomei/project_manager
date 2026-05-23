@@ -3325,7 +3325,7 @@ def resume_qa_sync(
     are still alive from before the restart.  We rebuild the execution
     context and re-enter the verdict-collection + finalize phase.
     """
-    from pm_core import tmux as tmux_mod, store
+    from pm_core import store
 
     state.running = True
     session = get_pm_session()
