@@ -7078,9 +7078,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-23T03:15:07.151295+00:00'
+  updated_at: '2026-05-23T03:52:56.539696+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
-  reviewed_at: '2026-05-22T22:48:58.471554+00:00'
+  reviewed_at: '2026-05-23T03:52:56.539696+00:00'
   merged_at: null
   notes:
   - id: note-abd8475
@@ -7352,6 +7352,17 @@ prs:
       is split out to pr-6566901 (surface-to-user + retry-N-times).'
     created_at: '2026-05-23T03:15:05Z'
     last_edited: '2026-05-23T03:15:05Z'
+  - id: note-99ca3e3
+    text: 'QA PASS: fake-claude emit CLI renders every verdict shape and honors timing/hold/stream/error
+      flags: PASS; fake-claude config CLI — set / show / clear, validation rejection,
+      and hand-edited raw-config tolerance: PASS; Host-side review loop driven end-to-end
+      by the fake via the pm which shim — single, scripted-sequence, _all default-verdict,
+      and concurrent cursor: PASS; Container-mode QA loop happy path — every phase
+      driven by the fake to FINALIZE_DONE, resolved via the shim in host AND container
+      panes, including Fix-1 _all finalize: PASS; Container-mode QA loop alternate
+      branches — deferred-on-reject and blocked finalize: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-4a0f132700d906a4)'
+    created_at: '2026-05-23T05:53:04Z'
+    last_edited: '2026-05-23T05:53:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
@@ -21412,7 +21423,7 @@ prs:
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
     and prefer them over GitHub notes'
   branch: pm/pr-cfb0b3a-improvement-prompt-sessions-to-use-pm-pr-notes-for
-  status: in_progress
+  status: merged
   depends_on: []
   description: '## Goal
 
@@ -21495,9 +21506,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/215
   gh_pr_number: 215
   created_at: '2026-05-22T22:11:57.970441+00:00'
-  updated_at: '2026-05-22T22:17:38.855645+00:00'
+  updated_at: '2026-05-23T04:16:54.851976+00:00'
   started_at: '2026-05-22T22:17:38.855645+00:00'
   reviewed_at: null
-  merged_at: null
+  merged_at: '2026-05-23T04:16:54.851976+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfb0b3a-improvement-prompt-sessions-to-use-p-9021c2a2

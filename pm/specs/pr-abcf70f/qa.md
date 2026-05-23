@@ -190,6 +190,40 @@ THEN it advances through the iterations driven entirely by the fake (no real
 Claude calls), state transitions match what real verdicts would have caused,
 and the loop terminates on the final `PASS`.
 
+### E8 — A hand-edited (raw-dropped) config never crashes the launcher
+GIVEN a user bypasses the validated `pm fake-claude config set` path and drops
+a malformed raw JSON file at `~/.pm/sessions/<tag>/fake-claude` — e.g. a
+non-dict `_all` or `_defaults`, a scalar `verdicts` value
+(`{"review": {"verdicts": "PASS"}}`), or a non-numeric / negative / all-zero
+weight map.
+WHEN a pm flow launches a Claude session for that tag.
+THEN the launcher tolerates the malformed shape (coercing it to a safe
+no-verdict or uniform pick) and the flow proceeds without an exception or a
+hung pane; the validated CLI path (`pm fake-claude config set`) still rejects
+the same shapes up front (non-dict `_all`/`_defaults`, all-zero weight map,
+bad pairings) with a non-zero exit and an error listing the offending entries.
+(Hardening commits 878e i1/i2/i3, 831c i2.)
+
+### E9 — Re-declaring a config restarts scripted sequences from the start
+GIVEN a scripted-sequence config has been set and partially consumed (the
+cursor sidecar `fake-claude.state` has advanced past slot 0).
+WHEN the user re-runs `pm fake-claude config set` (or `clear`) for that tag.
+THEN the scripted-sequence cursor is reset so the next launch starts at the
+first entry again, rather than resuming mid-sequence. (Commit 831c i1.)
+
+## Re-run mandate (note-fa6fddd / post-QA code change)
+The prior full QA PASS (2026-05-22 20:30 run) was invalidated by Fix 1
+(commit 91161255): a verdict-producing session type routed through the
+no-verdict `_all` catch-all now emits its default happy-path verdict instead
+of launching the no-verdict mock and hanging `poll_for_verdict` forever
+(see R8). Every phase must be re-driven on current HEAD; the container-mode
+QA-loop scenarios in particular must confirm that a config relying on `_all`
+for `qa_finalize` (or omitting `qa_finalize` entirely) now reaches
+`FINALIZE_DONE` rather than stalling. The residual production-loop hang
+(`poll_for_verdict` has no wall-clock deadline) is split out to pr-6566901 and
+is out of scope here — the in-scope assertion is that the fake's default-verdict
+behaviour keeps the loop moving.
+
 ## Pass/Fail Criteria
 A scenario passes when every THEN clause is directly observable in the
 captured artifact (CLI recording / tmux capture / file listing) without
