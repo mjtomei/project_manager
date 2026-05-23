@@ -5669,7 +5669,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-05-23T05:38:48.389888+00:00'
+  updated_at: '2026-05-23T06:46:05.519248+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
@@ -5707,6 +5707,18 @@ prs:
       (fails on merge base too).'
     created_at: '2026-05-23T05:38:48Z'
     last_edited: '2026-05-23T05:38:48Z'
+  - id: note-3c71860
+    text: 'review-loop a327 i1: merged origin/master (+57 fake-claude commits, clean
+      auto-merge; finalize call threads project_data). Reviewed resume-on-restart
+      design — solid, 165 QA tests pass. Documented two accepted limitations (no code-behavior
+      change): EC7 self-driving QA state (app._self_driving_qa) is in-memory only,
+      so a resumed run drives lifecycle via the legacy/auto-start path — verdict +
+      PASS/NEEDS_WORK transition survive, but consecutive-pass counting and direct
+      self-driving review restart do not. EC8 stale qa_resume.json snapshots are bounded
+      by _qa_loops/_resumed_qa_pr_ids guards + non-qa cleanup; future hardening: stamp
+      active loop_id on the PR and validate on resume.'
+    created_at: '2026-05-23T06:46:05Z'
+    last_edited: '2026-05-23T06:46:05Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
