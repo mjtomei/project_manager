@@ -19516,6 +19516,25 @@ prs:
       still pass; 32 fake_github tests + 193 gh/sync/merge tests green).'
     created_at: '2026-05-23T07:07:19Z'
     last_edited: '2026-05-23T07:07:19Z'
+  - id: note-93bc0af
+    text: 'QA scenario 3 (status sync via fake github backend) was REJECTED at concretization:
+      not drivable from the user-facing CLI/TUI surface. FakeGitHubBackend installs
+      its gh transport only IN-PROCESS via gh_ops.gh_runner/set_gh_runner (process-global
+      _GH_RUNNER) — there is no env var, config file, or CLI to install it into a
+      separate `pm pr sync-github` subprocess (which falls through to _check_gh +
+      the real GitHub API). The only way to combine the fake with sync is to call
+      pr_sync.sync_from_github() directly in-process with backend.installed(), which
+      is the pytest-harness path, not a real surface. Those exact behaviors are already
+      covered in tests/test_fake_github.py (test_sync_from_github_detects_merge, _draft_to_ready,
+      test_simulate_rate_limit, test_simulate_server_error_repeats). UNBLOCK: add
+      an out-of-process installation hook for the gh fake mirroring fake-claude (which
+      writes ~/.pm/sessions/<tag>/fake-claude and is read by subprocess panes) — e.g.
+      a PM_FAKE_GH env var / state file that run_gh consults — then `pm pr sync-github`
+      could be driven against the fake from a real pane. Also note: the bound instruction
+      file (TUI Manual Testing / fake-claude) does not cover the github mock; future
+      planning should bind a github-backend instruction or treat this PR as in-process-regression-test-only.'
+    created_at: '2026-05-23T06:59:28Z'
+    last_edited: '2026-05-23T06:59:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
