@@ -182,12 +182,12 @@ Per-line coverage data emitted from QA scenario runs and surfaced into the verdi
 PASS additionally requires that the lines added/modified by the PR were executed by at least one QA scenario. Closes the loophole where overall coverage passes while the fix code never runs. Surfaces a separate "fix-line coverage" percentage; uncovered changed lines must be explicitly justified in PR notes.
 
 ### PR: Extended coverage measures (path, user-story)
-`pr-8422dea` (pending)
+`pr-8422dea` (depends on: pr-8ed578d)
 
 Beyond line coverage: branch/path coverage on the diff and user-story coverage of QA scenarios. Strengthens the verdict signal once line and fix-line gates are in place.
 
 ### PR: QA refinement prompt asks for additional steps that improve coverage
-`pr-c2397e2` (pending)
+`pr-c2397e2` (depends on: pr-0b14f2c)
 
 When coverage gates fail, the refinement prompt asks the QA planner for additional scenarios specifically targeting the uncovered fix-line set. Closes the loop between gate failure and scenario growth.
 

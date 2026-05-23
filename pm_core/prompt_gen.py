@@ -30,6 +30,42 @@ If you don't, file a separate bug PR so it doesn't get lost:
 """
 
 
+def _pr_notes_handoff_block(pr_id: str | None = None) -> str:
+    """Ungated guidance: use pm PR notes for cross-session/cross-PR handoff.
+
+    Lives outside ``tui_section`` (which is gated on ``session_name``) so it
+    also reaches containerized / non-TUI sessions.
+    """
+    this_pr = pr_id or "<this-pr-id>"
+    return f"""
+## PR Notes — Handoff Channel
+
+`pm pr note add <pr-id> '<text>'` is the canonical way to hand off context
+between sessions. A note persists on the target PR (in project.yaml) and is
+injected into the prompt of every future session for that PR (the `## PR
+Notes` section). Prefer pm PR notes over GitHub PR comments or description
+edits for any handoff — GitHub comments are for external review
+communication, not internal handoff. When the user says "leave a note" /
+"add a note" / "notes" without qualification, they mean a pm PR note.
+
+- **Same-PR, next session** — to leave context for whoever resumes this PR,
+  run `pm pr note add {this_pr} '<text>'`.
+- **Cross-PR** — when leaving work or context for a *different* PR to pick
+  up, add the note to that PR's id: `pm pr note add <other-pr-id> '<text>'`.
+  It attaches to that PR and surfaces in its sessions. If incidental work
+  belongs to a PR that already exists, prefer a note on that PR over opening
+  a brand-new one (see the Incidental Bugs guidance for recording incidental
+  fixes).
+
+It is fine to run this from your own workdir, including a note targeting
+another PR. The note is written to the git-tracked `project.yaml`; it
+travels to master when your PR merges, and the target PR's sessions pick it
+up the next time they clone or pull master. So a cross-PR note may surface
+after your PR merges rather than instantly — that delay is expected, not a
+reason to use a GitHub comment instead.
+"""
+
+
 def tui_section(session_name: str) -> str:
     """Build a TUI interaction section for prompts running in a tmux session.
 
@@ -162,6 +198,8 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
 
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -172,7 +210,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}
+{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -308,6 +346,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
     if _is_bug_pr(pr):
         base += _bug_fix_review_block(pr)
     base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
+    base += "\n" + _pr_notes_handoff_block(pr_id)
     base += review_specific_block
     base += _beginner_addendum()
     if review_loop:
@@ -1355,6 +1394,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
     qa_spec_block = format_spec_for_prompt(pr, "qa")
@@ -1522,7 +1562,20 @@ QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
 
+## Changing or replacing a scenario that already ran
+
+Scenarios are locked once a QA run has started: they cannot be edited or
+replaced mid-run, and the support for changing/replacing scenarios within a
+plan is not yet implemented. If you find that an already-run scenario was
+wrong, undriveable, or contradicts the implementation (e.g. it assumed loop
+behavior the code does not actually have), do NOT silently rewrite or re-emit
+it here. Instead leave a note for the next QA run with
+`pm pr note add {pr_id} '<what was wrong + the corrected scenario>'`, and the
+next planning pass will pick it up. Only emit fresh scenarios (numbered from
+{scenario_start}) in this output.
+
 {_OUT_OF_SCOPE_BUGS_BLOCK}
+{pr_notes_handoff_block}
 {general_notes_block}{qa_specific_block}
 
 Don't forget that the goal of these scenarios should not be to exercise
@@ -1555,6 +1608,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
@@ -1632,7 +1686,7 @@ Help the user with whatever they need:
 
 You do NOT need to produce a verdict.  This session stays open until QA
 completes — take your time and be thorough.
-{tui_block}"""
+{tui_block}{pr_notes_handoff_block}"""
     return prompt.strip()
 
 
@@ -1733,6 +1787,7 @@ push captures — they're not part of the PR branch.
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Workdir description and execution instructions differ by mode
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -1849,6 +1904,20 @@ different methodology.
 
 {execution_block}
 {_OUT_OF_SCOPE_BUGS_BLOCK}
+## Your Verdict Is Final for This Run
+
+Once you output a verdict, the QA loop records it for this scenario and will
+not accept a later or replacement verdict from you — there is no re-poll.
+NEEDS_WORK and INPUT_REQUIRED are terminal. (The one exception is
+loop-initiated: if the loop's verification step flags your PASS, it messages
+this pane asking you to re-evaluate — answer that follow-up if it arrives.)
+
+So if you realize something after delivering your verdict, or you're leaving
+work or context for the **next QA run on this PR** to pick up — a fix you
+couldn't finish, a flaky prerequisite, something to check next time — you
+cannot amend your verdict to carry it forward. Hand it off as a PR note
+instead (see the PR Notes — Handoff Channel section below).
+{pr_notes_handoff_block}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
@@ -1906,6 +1975,7 @@ You are testing the current state of the codebase.
    - **NEEDS_WORK** — Issues found (describe them)
    - **INPUT_REQUIRED** — Need human input
 {_OUT_OF_SCOPE_BUGS_BLOCK}
+{_pr_notes_handoff_block()}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 

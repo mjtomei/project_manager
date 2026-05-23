@@ -21,7 +21,7 @@ from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
-from pm_core.plan_parser import extract_plan_intro
+from pm_core.plans.parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (
@@ -301,6 +301,10 @@ class ProjectManagerApp(App):
         super().__init__()
         self._data: dict = {}
         self._root: Path | None = None
+        # Coalescing write queue: decouples in-memory state from disk so
+        # per-keypress mutations (e.g. active_pr) don't block the event loop.
+        # Created on mount once the project root is known.
+        self._write_queue: store.WriteQueue | None = None
         self._sync_timer: Timer | None = None
         self._current_guide_step: str | None = None
         self._guide_auto_launched = False
@@ -443,6 +447,11 @@ class ProjectManagerApp(App):
         # sync) to after the first frame.
         self._load_state()
         self._update_orientation()
+        # Start the coalescing write queue now that the project root is known.
+        # TUI mutations enqueue here instead of writing to disk inline.
+        if self._root is not None:
+            self._write_queue = store.WriteQueue(self._root)
+            self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
@@ -1069,6 +1078,9 @@ class ProjectManagerApp(App):
     def on_unmount(self) -> None:
         """Clean up the reload pidfile and command queue on shutdown."""
         _log.info("TUI unmount: session=%s", self._session_name)
+        # Flush any pending writes before the process goes away.
+        if self._write_queue is not None:
+            self._write_queue.flush_sync()
         for path in (self._reload_pidfile(), self._command_queue_file()):
             if path is not None:
                 try:

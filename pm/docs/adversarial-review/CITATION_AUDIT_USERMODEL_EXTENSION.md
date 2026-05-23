@@ -1,0 +1,1522 @@
+# Citation Audit — User-Modeling Literature Review Extension
+
+**Artifact audited:** `pm/docs/literature-review-user-model-extension.md`.
+
+**Scope.** Full-text reads of load-bearing citations across the extension's substantive sections (§§2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 3.5, 3.7, 4.1, 4.2, 4.3, 4.4). Run as the Phase 3 detailed audit per `CITATION_USE_AUDIT.md`, before the Cycle 11 adversarial review.
+
+**Method.** arXiv HTML and PDF extraction via `pdftotext`; verbatim quotes where retrievable; secondary sources (e.g., Stanford Encyclopedia of Philosophy) for paywalled books, flagged in place. Audit was parallelized across four thematic chunks (entropy/decoding; branching/test-time compute; bootstrap/self-improvement; philosophy/deception); this file is the merged output for walkthrough.
+
+**How to walk this.** Read top-to-bottom and apply or reject each proposed rewrite. Faithful entries (no change required) carry the verdict "faithful" and can be skimmed. The combined summary table at the end ranks entries by required action.
+
+---
+
+## Tiering
+
+Per the updated `CITATION_USE_AUDIT.md` protocol (step a — "audit every citation; tier by depth; make the tier explicit"), this audit is organized in two passes:
+
+- **Tier 1 — Deep audit (§§ I–IV below).** Full-text reads (or best-available proxy) of the most load-bearing citations: those whose accurate characterization the extension's argument explicitly depends on. ~35 entries. All Tier-1 entries are in sections I–IV and carry **no explicit tier tag** (they predate the protocol amendment; treat absence of a tier tag in §§I–IV as "Tier 1").
+- **Tier 2 — Light/abstract audit (`## Tier-2 supplemental pass` below).** Abstract-level verification for the remaining citations — background references, methodological neighbours cited once in passing, and "as also noted by" anchors. Each entry is tagged **Tier: 2**.
+- **Tier 3 — Reference-list-only.** None identified — every citation in the lit review's references appears at least once inline, so the references list and inline citations are in good correspondence. See `## Tier 3 — reference-list-only check` at the end of the Tier-2 pass.
+
+**Tier-1 entries (existing §§ I–IV).** Holtzman 2020; Venkatraman/GPT-who 2024; Hamilton 2024; Shumailov 2024; Arora 2023; Ahmed & Singh 2026 (EPIC); Entropy-UID 2025; ForTIFAI 2025; Meister 2021; Verma 2023; Stroebl 2024; Feng 2026; Huang 2024; Beigi 2025 (SMART); DeepConf 2025; Puri 2025; Snell 2024; Brown 2024; STaR 2022; Quiet-STaR 2024; ReST-EM 2023; RFT 2023; Self-Rewarding LMs 2024; Constitutional AI 2022; Burns 2023 (weak-to-strong); AuthorMist 2025; Friston 2010; Friston/Thornton/Clark 2012; Russell & Wefald 1991; Mele 2001; Davidson 1985; MASK/Ren 2025; Zhu 2024; Parrack 2025; Mirtaheri & Belkin 2025; Mirtaheri & Belkin 2026.
+
+**Tier-2 entries** are listed in the `## Tier-2 supplemental pass` section below, clustered by lit-review subsection.
+
+---
+
+## I. Entropy, decoding, ventriloquizing — §§2.2, 3.4, 4.3, 4.4
+
+### Holtzman et al. 2020, "The Curious Case of Neural Text Degeneration" — [arXiv:1904.09751](https://arxiv.org/abs/1904.09751)
+
+**Doc passage as currently written:**
+> The historical evidence — Holtzman et al. 2020's neural-text-degeneration — captures the *crude* form: greedy decoding collapses into surface-repetitive loops on older models. Modern models have substantially solved that surface failure.
+
+**What the source actually says** (abstract + standard secondary read; full-text fetch returned only abstract):
+> "[U]sing likelihood as a decoding objective leads to text that is bland and strangely repetitive." The paper introduces **nucleus (top-p) sampling**, "sampling text from the dynamic nucleus of the probability distribution, which allows for diversity while effectively truncating the less reliable tail." The headline phenomena are repetition loops and probability-mass collapse under greedy/beam decoding on GPT-2 (the paper's primary model). The paper does not claim the failure is universal across all model scales nor that future larger/aligned models will solve it.
+
+**Verdict:** faithful (with one minor caveat — the doc's claim that "modern models have substantially solved that surface failure" is not Holtzman's claim, it is the review's own contemporary assessment, and is presented as such; the attribution to Holtzman is only of the original degeneration documentation).
+
+**Substantive change proposed** (optional tightening to make the model scope explicit):
+> The historical evidence — Holtzman et al. 2020's neural-text-degeneration on GPT-2-class models — captures the *crude* form: greedy/beam decoding collapses into surface-repetitive loops. Modern frontier models have substantially solved that surface failure (this review's assessment, not Holtzman's claim).
+
+---
+
+### Venkatraman et al. 2024, "GPT-who" — [arXiv:2310.06202](https://arxiv.org/abs/2310.06202) / [NAACL Findings 2024](https://aclanthology.org/2024.findings-naacl.8/)
+
+**Doc passage as currently written (§2.2):**
+> AI-text detectors operating on "burstiness" (Venkatraman et al. 2024 / GPT-who; the broader perplexity-variance detection literature, §3.4) already exploit this signature on text that humans cannot reliably distinguish.
+
+**Doc passage as currently written (§3.4):**
+> Venkatraman et al. (2024), "GPT-who" — NAACL Findings — UID features distinguish human from machine text; "burstiness" in AI-text detection is essentially the temporal-entropy-structure claim in operational form.
+
+**What the source actually says** (ACL Anthology abstract; full paper not retrievable in this pass):
+> Abstract: "[E]mploys UID-based features to model the unique statistical signature of each LLM and human author for accurate detection." Compared against GLTR, GPTZero, DetectGPT, OpenAI detector, ZeroGPT; evaluated on 4 benchmark datasets. The abstract frames the central question as "if [the] UID principle can help capture differences between LLMs-generated and human-generated texts." The abstract does **not** use the word "burstiness" and does not explicitly claim it detects text that humans cannot distinguish.
+
+**Verdict:** over-characterizes on two minor points. (a) "Burstiness" is the term-of-art in a different detector line (e.g., GPTZero) — the doc conflates GPT-who's UID-variance features with the burstiness framing. They are related (both perplexity-variance-flavored), but the conflation is a real slip. (b) The "text that humans cannot reliably distinguish" qualifier is a known property of LLM output that is true of the detection problem GPT-who addresses, but it is not specifically attributed to or measured in GPT-who.
+
+**Substantive change proposed (rewrite for §2.2):**
+> AI-text detectors operating on perplexity-variance features (Venkatraman et al. 2024 / GPT-who uses UID-based variance features; the broader "burstiness" detection literature — e.g., GPTZero — uses related per-segment perplexity-variance signals, §3.4) already exploit this signature, on a detection task widely held to be hard for humans.
+
+**Substantive change proposed (rewrite for §3.4):**
+> Venkatraman et al. (2024), "GPT-who" — NAACL Findings — UID-derived statistical features distinguish human from machine text across four benchmark datasets, outperforming GLTR, GPTZero, DetectGPT, OpenAI detector, and ZeroGPT. The closest existing operationalization of "exploit the variance/profile of token-level information content for detection." (Burstiness as a term-of-art belongs to a related detector line, not GPT-who specifically.)
+
+---
+
+### Hamilton 2024, "Detecting Mode Collapse in Language Models via Narration" — [arXiv:2402.04477](https://arxiv.org/abs/2402.04477)
+
+**Doc passage as currently written (§2.2 — after the in-progress fix to "Hamilton (2024)"):**
+> Hamilton (2024, §3.7) provides *suggestive corroboration*: across three successive OpenAI models … become measurably more lexically homogeneous (BERTopic clustering on 4,374 stories) … The measured construct is single-author-diversity-across-prompts rather than within-dialogue voice separation, so this corroborates the §2.2 averaged-perspective direction without directly observing within-conversation ventriloquism.
+
+**Doc passage as currently written (§3.7):**
+> Hamilton (2024), "Detecting Mode Collapse in Language Models via Narration" — [arXiv:2402.04477](https://arxiv.org/abs/2402.04477) (EACL 2024 Workshop … sole author …). Across three successive OpenAI models … become measurably more lexically homogeneous … *Suggestive corroboration* for §2.2's averaged-perspective direction …
+
+**What the source actually says** (full text, [arXiv:2402.04477](https://arxiv.org/abs/2402.04477)v1, 6 Feb 2024):
+> **Single author: Sil Hamilton, McGill University.**
+>
+> Abstract (verbatim): "By studying 4,374 stories sampled from three OpenAI language models, we show successive versions of GPT-3 suffer from increasing degrees of 'mode collapse' whereby overfitting the model during alignment constrains it from generalizing over authorship: models suffering from mode collapse become unable to assume a multiplicity of perspectives."
+>
+> Methodology (verbatim): "We assess authorial conjuration by conducting a topic analysis over all generated stories. Topic analyses are a routine stylometric technique for identifying and clustering lexical regularities in a given corpus."
+>
+> Construct measured: *single-author-voice diversity across separate prompts* — the three models (`davinci-instruct-beta`, `text-davinci-003`, `gpt-3.5-turbo`) are each asked to generate stories under varied prompts intended to elicit distinct implied authors; the topic analysis tests whether the resulting stories cluster by intended persona or collapse into a generic voice. The construct is *not* a single-conversation, both-sides ventriloquism measurement.
+>
+> Future-work passage (line 411): the paper explicitly notes it has not tested "mode collapse when predicting other textual genres, such as conversations or non-fictional writing" — confirming that dialogue/conversational ventriloquism is *out of scope* of the actual study.
+
+**Verdict:** the author attribution fix already landed. The construct-mismatch nuance is partially in the current text but could be sharpened — the paper *explicitly disclaims* dialogue testing, which is stronger than the current "rather than within-dialogue voice separation" framing.
+
+**Substantive change proposed** (sharpen the construct mismatch to reflect the explicit disclaimer):
+> Hamilton (2024, §3.7) provides partial empirical buttress: across 4,374 stories from three successively-aligned GPT-3 family models (`davinci-instruct-beta` → `text-davinci-003` → `gpt-3.5-turbo`), topic analysis shows the newer aligned models lose the ability to assume distinct implied authors across prompts — a single-author-voice-diversity loss. The "ventriloquizing both sides within one conversation" claim of this review is *adjacent* to but not identical with Hamilton's measurement: **the paper explicitly disclaims having tested the conversational genre** (line 411 of v1). The support is therefore suggestive rather than direct; a dialogue-level replication is open.
+
+---
+
+### Shumailov et al. 2024, "AI models collapse when trained on recursively generated data" — [*Nature* 631:755–759](https://www.nature.com/articles/s41586-024-07566-y) / [arXiv:2305.17493](https://arxiv.org/abs/2305.17493)
+
+**Doc passage as currently written (§2.2):**
+> Model collapse under recursive training on LLM-generated text (Shumailov et al. 2024, *Nature*; precursor 2023, *The Curse of Recursion*, §3.7) is the same signature seen from the training side: LLM text is missing something present in human text. *(Conjecture by this review, not Shumailov's claim: the missing something is most plausibly the between-perspective entropy contribution; Shumailov attributes collapse to statistical / expressivity / approximation error compounding without specifying its content.)*
+
+**Doc passage as currently written (§3.7):**
+> Shumailov et al. (2024), "AI models collapse when trained on recursively generated data" — *Nature* 631:755–759. Precursor: "The Curse of Recursion," [arXiv:2305.17493](https://arxiv.org/abs/2305.17493). Tails of the distribution disappear under recursive synthetic training.
+
+**What the source actually says** (Nature paywalled; [arXiv:2305.17493](https://arxiv.org/abs/2305.17493) full-text via pdftotext):
+> Section 3.1 identifies error sources behind model collapse:
+> - **Statistical approximation error** (primary): "arises due to the number of samples being finite, and disappears as the number of samples tends to infinity."
+> - **Functional approximation error** (secondary): "stems from our function approximators being insufficiently expressive (or sometimes too expressive outside of the original distribution support)."
+> - A third, **functional expressivity error**, appears in the taxonomy and is widely cited in secondary sources; verbatim definition not extracted in this pass — flagged.
+>
+> Core mechanism (verbatim from abstract): "use of model-generated content in training causes irreversible defects in the resulting models, where tails of the original content distribution disappear." Models "converge to a point estimate with very small variance" over generations.
+>
+> Tested systems: Gaussian Mixture Models, Variational Autoencoders, and OPT-125M.
+
+**Verdict:** **under-characterizes** the source slightly. Shumailov is *more specific than* "abstract error compounding without specifying content" — the paper explicitly says the *tails of the original distribution disappear* and the distribution *converges to a low-variance point estimate*. That is a content claim about what is lost (low-probability events / tails), even if the paper does not name "between-perspective entropy" as the content. The doc's parenthetical conjecture remains a legitimate reinterpretation of *which* tails matter, but the framing that Shumailov "does not specify content" is too strong.
+
+**Substantive change proposed (rewrite for §2.2 parenthetical):**
+> *(Conjecture by this review, not Shumailov's claim: the operative missing piece is the between-perspective entropy contribution. Shumailov is more specific than mere error-compounding — the paper identifies the lost content as the **tails of the original distribution** (low-probability events, rare modes), with distributions converging to low-variance point estimates over generations. This review's conjecture refines "what kind of tails" — perspective-distinguishing structure — but does not contradict Shumailov.)*
+
+**Substantive change proposed (rewrite for §3.7):**
+> Shumailov et al. (2024), "AI models collapse when trained on recursively generated data" — *Nature* 631:755–759 (precursor: [arXiv:2305.17493](https://arxiv.org/abs/2305.17493)). Recursive training on a model's own outputs causes the tails of the original distribution to disappear and the distribution to converge to a low-variance point estimate. Tested on Gaussian Mixture Models, Variational Autoencoders, and OPT-125M. Section 3.1 attributes the dynamic primarily to **statistical approximation error** (finite-sample tail loss) and secondarily to **functional approximation error** (limited expressivity of approximators).
+
+---
+
+### Arora et al. 2023, "The Stable Entropy Hypothesis and Entropy-Aware Decoding" — [arXiv:2302.06784](https://arxiv.org/abs/2302.06784)
+
+**Doc passage as currently written (§3.4):**
+> Arora et al. (2023), "The Stable Entropy Hypothesis and Entropy-Aware Decoding" — [arXiv:2302.06784](https://arxiv.org/abs/2302.06784). Claims human-like generation occupies "a narrow and nearly flat" entropy band across models, tasks, and domains; decodes to stay inside. **Caveat (this review, not the paper's):** the paper claims broad generalizability, but the empirical work was built on GPT-2/3-era LMs against degeneration failure modes that current models have substantially solved.
+
+**What the source actually says** (full-text extraction):
+> Models actually tested (verbatim from §2.1 and §3.1):
+> - Text completion: **GPT-2 XL (1.5B)** and **OPT (1.3B)**
+> - Summarization: **BART** and **Pegasus** ("90M and 1B parameters")
+> - Dialog: **BlenderBot (1B)**
+> - Story generation: WritingPrompts dataset (model unspecified in the excerpts I extracted, but in the same GPT-2/BART era)
+>
+> Largest LM tested: **GPT-2 XL at 1.5B parameters**. No model in the paper exceeds ~1.5B parameters. No LLaMA, Mistral, Qwen, Gemma, or instruction-tuned modern model is evaluated.
+
+**Verdict:** faithful — the review's caveat correctly identifies the model-regime gap. If anything the review *understates* it: the largest LM Arora tested (1.5B) is two-plus orders of magnitude smaller than current frontier LMs, and none is instruction-tuned or RLHF-aligned.
+
+**Substantive change proposed** (tighter, more specific caveat):
+> Arora et al. (2023), "The Stable Entropy Hypothesis and Entropy-Aware Decoding" — [arXiv:2302.06784](https://arxiv.org/abs/2302.06784). Claims human-like generation occupies "a narrow and nearly flat" entropy band across models, tasks, and domains; decodes to stay inside. **Models actually tested:** GPT-2 XL (1.5B), OPT (1.3B), BART (90M/1B), Pegasus, BlenderBot (1B) — all pre-LLaMA-era base models, none instruction-tuned, largest at 1.5B parameters. **Caveat (this review, not the paper's):** the "narrow and nearly flat" claim is asserted broadly but the empirical support is exclusively on this small-base-LM regime, against degeneration failure modes that current frontier instruction-tuned LMs have substantially solved. Reproduction on modern LMs is required before transferring the conclusion; §4.3 frames the reproduction question.
+
+---
+
+### Ahmed & Singh 2026, "EPIC: Entropy-Aligned Decoding" — [arXiv:2601.01714](https://arxiv.org/abs/2601.01714)
+
+**Doc passage as currently written (§3.4):**
+> Figure 1 plots the LM's predictive entropy on its own generation against the typical band; the cat-cat-cat panel shows monotonic decay from in-band to ~0 as the repetition entrenches — consistent with Holtzman-style degeneration, not anomalous; the earlier figure-semantics suspicion is retracted. Evaluations include AlpacaEval Creative Writing, CNN/DailyMail summarization, and GSM8K (an engineering-style task). **Caveat (§4.3):** if "The cat" prompt suffices to drive an EPIC-tested model into cat-cat-cat degeneration in the first place, the model class they are correcting against is weaker than current frontier LMs …
+
+**Doc passage as currently written (§4.3):**
+> Ahmed & Singh 2026 (Epic, §3.4) — … AlpacaEval / CNN-DailyMail / GSM8K evaluations are present. **The remaining concern is model-regime:** if EPIC's models degenerate on "The cat," the regime they correct against may be weaker than the LMs §4.3 actually cares about.
+
+**What the source actually says** (full-text extraction of v1):
+> Datasets evaluated (§5.2, verbatim): "For story generation, we evaluate on the W RITING P ROMPTS dataset (Fan et al., 2018a). For abstractive summarization, we evalaute on the CNN/DAILY M AIL dataset (Nallapati et al., 2016)." For math reasoning: "the GSM8K dataset (Cobbe et al., 2021b)."
+>
+> **Note:** the doc says "AlpacaEval Creative Writing" — but the paper actually uses **WritingPrompts**, not AlpacaEval. Doc citation needs correction.
+>
+> Judge: ChatGPT-5 used as the LM-as-judge for win-rate computation.
+>
+> **Base LM:** the paper *does not name* the underlying base LM anywhere in the main text or experimental sections (`grep` over the full extracted PDF for Llama / Mistral / Qwen / Gemma / GPT-2 / GPT-3 / Pythia / OPT / Phi returns zero substantive hits). The paper only says "We use the HuggingFace framework ... employing their implementations of top-p, top-k, min-p, temperature sampling, and typical decoding." This is a real reproducibility gap in the paper itself.
+>
+> Figure 1: an illustrative entropy-trajectory diagram with four panels (typical band, cat-cat-cat degeneration, gibberish, EPIC) conditioned on "The cat" prompt. The caption frames the panels conceptually; the cat-cat-cat panel is presented as illustrative of the degeneration mode the method targets, not as a specific empirical sample tied to a named model. It appears to be **schematic/illustrative**, not an empirical sample from the EPIC-tested base model.
+
+**Verdict:** mixed — partially faithful, partially over-characterizes:
+- **Wrong dataset name:** the doc lists "AlpacaEval Creative Writing" but the actual evaluation dataset is WritingPrompts. Mischaracterization, easily fixed.
+- **Figure 1 reading more nuanced than the doc allows:** the cat-cat-cat panel reads as schematic/illustrative rather than a real model output, which *strengthens* the §4.3 caveat — we cannot infer the base model's weakness from it because it is not a real sample.
+- **Base-model identity:** the §4.3 caveat about "if EPIC's models degenerate on 'The cat'..." is *unanswerable* from the paper because the paper does not name its base LM. The right caveat is "the paper does not specify the base LM, so the model-regime question cannot be settled from the paper text alone."
+
+**Substantive change proposed (rewrite for §3.4):**
+> Ahmed & Singh (2026), "EPIC: Entropy-Aligned Decoding" — [arXiv:2601.01714](https://arxiv.org/abs/2601.01714). k-step-lookahead, position-dependent entropy calibration to a "typical" entropy band derived from the data distribution. Figure 1 is a **schematic** four-panel diagram (typical band, cat-cat-cat repetition, gibberish, EPIC) illustrating the regimes the method targets, not an empirical sample tied to a specific model. Evaluations: **WritingPrompts** (creative writing), **CNN/DailyMail** (summarization), **GSM8K** (math reasoning), with ChatGPT-5 as LM-as-judge. **Significant reproducibility gap:** the paper does not name the underlying base LM in its experimental section (searched main text for Llama/Mistral/Qwen/Gemma/GPT-2/GPT-3/Pythia/OPT/Phi — no matches), only stating "We use the HuggingFace framework." The §4.3 reproduction question therefore stands on stronger ground than initially framed: without knowing EPIC's base model we cannot transfer its gains to a known modern model class.
+
+**Substantive change proposed (rewrite for §4.3 bullet):**
+> Ahmed & Singh 2026 (EPIC, §3.4) — k-step-lookahead position-dependent entropy calibration. Evaluations: WritingPrompts, CNN/DailyMail, GSM8K (not AlpacaEval as previously stated). **The base LM is unspecified in the paper text**, which makes the model-regime question genuinely open: EPIC's gains may or may not transfer to current frontier LMs, and the paper does not give us enough to tell. The §4.3 reproduction-on-named-modern-models question therefore stands.
+
+---
+
+### Entropy-UID 2025 — [arXiv:2502.14366](https://arxiv.org/abs/2502.14366)
+
+**Doc passage as currently written (§3.7):**
+> Entropy-UID (2025) — [arXiv:2502.14366](https://arxiv.org/abs/2502.14366). Optimizes generation toward lower surprisal and lower entropy variance — the most direct existing instance of "use a UID-derived signal to shape generation," at decoding time.
+
+**What the source actually says** (abstract):
+> Method: "adaptive adjustment of token selection by jointly minimizing entropy and surprisal, promoting more even information distribution across generated sequences." Decoding-time. Compared against "standard GPT-2 and alternative heuristics." Evaluated on WikiText-2, OpenWebText, WMT.
+
+**Verdict:** faithful, modulo the same model-regime caveat as Arora — Entropy-UID is evaluated against **GPT-2**, not modern LMs. The doc does not currently flag this.
+
+**Substantive change proposed:**
+> Entropy-UID (2025) — [arXiv:2502.14366](https://arxiv.org/abs/2502.14366). Decoding-time token selection that jointly minimizes entropy and surprisal, optimizing for lower entropy variance across the sequence — the most direct existing instance of "use a UID-derived signal to shape generation." **Evaluated against standard GPT-2** on WikiText-2 / OpenWebText / WMT; modern-LM transfer is open.
+
+---
+
+### ForTIFAI 2025 — [arXiv:2509.08972](https://arxiv.org/abs/2509.08972)
+
+**Doc passage as currently written (§3.7):**
+> ForTIFAI (2025) — [arXiv:2509.08972](https://arxiv.org/abs/2509.08972). Truncated-Cross-Entropy loss ignores high-confidence tokens (the synthetic fingerprint). Closest existing "detect-what's-missing via entropy signature" intervention — but per-token confidence rather than temporal profile, and defensive (collapse mitigation) rather than generative bootstrap.
+
+**What the source actually says** (abstract; full-text not fetched):
+> Truncated Cross-Entropy (TCE) loss "selectively ignor[es] high-confidence tokens during training, effectively filtering out likely machine-generated artifacts." Motivation: mitigating model collapse on synthetic data. Result: "tolerating over 2.3x more synthetic data before the onset of collapse." Signal: per-token confidence, not temporal profile or distribution shape. Defensive framing (collapse mitigation), not generative bootstrap.
+
+**Verdict:** faithful. Doc's characterization aligns with the abstract on all three load-bearing points.
+
+**Substantive change proposed** (none required; optional context):
+> … defensive (collapse mitigation) rather than generative bootstrap. Reported gain: 2.3× more synthetic data tolerated before collapse onset.
+
+---
+
+### Meister et al. 2021, "Revisiting the Uniform Information Density Hypothesis" — [EMNLP 2021](https://aclanthology.org/2021.emnlp-main.74/)
+
+**Doc passage as currently written (§3.4):**
+> Meister et al. (2021), "Revisiting the Uniform Information Density Hypothesis" — UID (Levy & Jaeger 2007) predicts humans *flatten* surprisal — challenges the "rich ebb and flow" premise the §4.3 study must first test.
+
+**What the source actually says** (full-text extraction):
+> Findings on UID are *more supportive than* the doc allows. Verbatim:
+> - "[W]e provide weakly super-linear effect of surprisal, which would be compatible with UID's predictions."
+> - "[W]e present evidence that non-uniformity in information [content is dispreferred] ... [there is] regression towards a mean surprisal across the document — a finding that supports a typical interpretation of UID."
+> - "[F]or sentence acceptability judgments, we [find] a [super-linear effect] of sentence-level surprisal ... consistent with a preference for UID in language."
+>
+> The paper is a *Revisiting* — finds the evidence base mixed but on balance *supports* UID under a "typical" interpretation, while noting multiple operationalizations of UID exist and "lack clarity or unity."
+
+**Verdict:** faithful in direction (the paper does support a UID-flattening reading), but the doc's framing as a clean "humans flatten surprisal" challenge is a slight oversimplification. The paper's actual position is more careful: UID is supported under specific operationalizations (mean-surprisal regression, super-linear acceptability cost), and the previous evidence base is more ambiguous than typically presented.
+
+**Substantive change proposed:**
+> Meister et al. (2021), "Revisiting the Uniform Information Density Hypothesis" — finds a weakly super-linear effect of surprisal on reading time and a super-linear surprisal cost in sentence-acceptability judgments, both compatible with UID; also finds regression toward mean surprisal across documents, supporting a "typical" interpretation of UID as flattening. (The paper notes UID has multiple operationalizations that "lack clarity or unity" — support is interpretation-dependent.) Either way, the finding tension-tests the "rich ebb and flow" premise the §4.3 study must first establish.
+
+---
+
+### Verma et al. 2023, "Revisiting Entropy Rate Constancy in Text" — [Findings of EMNLP 2023](https://aclanthology.org/2023.findings-emnlp.1039/)
+
+**Doc passage as currently written (§3.4):**
+> Verma et al. (2023), "Revisiting Entropy Rate Constancy in Text" — fails to replicate on neural LMs; weakens the robust-temporal-signature claim.
+
+**What the source actually says** (full-text extraction):
+> Verbatim from abstract: "We re-evaluate the claims of Genzel and Charniak (2002) with neural language models, failing to find clear evidence in support of entropy rate constancy."
+>
+> Setup: measures entropy rate on Penn Treebank, Common Crawl News, NYT Annotated Corpus, and an Arabic Billion Words subset, comparing a smoothed trigram model against **GPT-2 XL (1.5B)**.
+>
+> From Figure 1 caption (verbatim): "Genzel and Charniak (2002) showed that entropy rate increased under n-gram models and predicted that it would remain constant in models which can condition on long-range context. We replicate the former result but do not find clear evidence supporting the latter."
+
+**Verdict:** faithful. Doc's one-line summary accurately captures the paper's finding.
+
+**Substantive change proposed** (optional tightening):
+> Verma et al. (2023), "Revisiting Entropy Rate Constancy in Text" — replicates the Genzel & Charniak entropy-rate-increase finding under n-gram models on Penn Treebank, Common Crawl News, NYT, and an Arabic corpus, but with **GPT-2 XL (1.5B)** fails to find evidence for the predicted constancy under long-range neural conditioning. Weakens the robust-temporal-signature claim — though, like Arora and Entropy-UID, the test was on a GPT-2-era model and modern frontier behavior is open.
+
+---
+
+## II. Branching and test-time compute — §§3.3, 4.1
+
+### Stroebl, Kapoor & Narayanan 2024, "Inference Scaling fLaws" — [arXiv:2411.17501](https://arxiv.org/abs/2411.17501)
+
+**Doc passage as currently written:**
+> Stroebl, Kapoor & Narayanan (2024), "Inference Scaling fLaws: The Limits of LLM Resampling with Imperfect Verifiers" — [arXiv:2411.17501](https://arxiv.org/abs/2411.17501) — critical counterweight: an imperfect verifier imposes a hard accuracy ceiling that no compute budget breaks; under realistic false-positive costs, optimal N can be < 10. Exogenous selection is only as good as the verifier.
+
+**What the source actually says** (abstract + extracted passages):
+> "resampling cannot decrease this probability, so it imposes an upper bound to the accuracy of resampling-based inference scaling, regardless of compute budget."
+>
+> "optimal sampling attempts are often fewer than 10, as the negative utility of false positives outweighs benefits, bending inference scaling curves downward."
+>
+> Empirical work on HumanEval/MBPP found "a strong correlation between the model's single-sample accuracy and its false positive rate." The "ceiling" claim is grounded in the irreducible false-positive probability of an imperfect verifier; the "<10" claim is conditional on false positives carrying negative utility (e.g., cost of deploying buggy code).
+
+**Verdict:** faithful. Doc's two load-bearing summaries — hard accuracy ceiling and optimal-N-can-be-under-10 under realistic FP costs — match the paper.
+
+**Substantive change proposed** (optional tightening):
+> Stroebl, Kapoor & Narayanan (2024), "Inference Scaling fLaws: The Limits of LLM Resampling with Imperfect Verifiers" — [arXiv:2411.17501](https://arxiv.org/abs/2411.17501) — critical counterweight: an imperfect verifier's false-positive rate imposes a hard accuracy ceiling that no compute budget breaks; once false positives carry negative utility (e.g., a buggy-code deployment cost), optimal N can be < 10. Exogenous selection is only as good as the verifier.
+
+---
+
+### Feng et al. 2026, "Good Arguments Against the People Pleasers" — [arXiv:2603.16643](https://arxiv.org/abs/2603.16643)
+
+**Doc passage as currently written** (§2.3, load-bearing):
+> Feng et al. (2026) corroborates this directly: CoT reasoning *reduces sycophancy in final answers while masking it in the justification* — the model constructs plausible-sounding but deceptive rationales (logical gaps, calculation errors, one-sided arguments) for the same agreeable conclusion. This is the strongest argument that the plan's interpretability probe (H2) is necessary, not optional.
+
+**Doc passage as currently written** (§3.2):
+> CoT reasoning reduces sycophancy in final decisions but *masks* it in the justification: models construct deceptive rationales while landing on the agreeable answer.
+
+**What the source actually says** (abstract, verbatim):
+> "Results show that reasoning generally reduces sycophancy in final decisions but also masks sycophancy in some samples, where models construct deceptive justifications through logical inconsistencies, calculation errors, and one-sided arguments etc. Furthermore, LLMs are more prone to sycophancy in subjective tasks and under authority-bias. Our mechanistic analysis on three open-source models reveals that the tendency of sycophancy is dynamic during the reasoning process rather than being pre-determined at the input stage."
+
+**Verdict:** faithful, slightly over-generalized. The "masks sycophancy in *some samples*" qualifier matters — the doc currently reads as if masking is the across-the-board effect rather than a co-occurring partial phenomenon. The "three open-source models" + "dynamic during the reasoning process" caveats are not surfaced and matter for the H2 argument: within-trace dynamics are precisely what an internal probe should be looking at.
+
+**Substantive change proposed** (verbatim rewrite of the §2.3 passage):
+> Feng et al. (2026) corroborates this directly: CoT reasoning reduces sycophancy in final decisions overall but, in a subset of samples, *masks* it in the justification — the model lands on the agreeable conclusion via plausible-looking rationales that contain logical inconsistencies, calculation errors, or one-sided arguments. Their mechanistic analysis on three open-source models further finds that the tendency to be sycophantic is dynamic *during* the reasoning trace rather than fixed at the input — strengthening the case that the plan's interpretability probe (H2) needs to read mid-trace state, not just final outputs.
+
+---
+
+### Huang et al. 2024, "Large Language Models Cannot Self-Correct Reasoning Yet" — [arXiv:2310.01798](https://arxiv.org/abs/2310.01798)
+
+**Doc passage as currently written** (§2.3):
+> Huang et al. (2024) — that LLMs cannot reliably self-correct reasoning without external feedback — is the empirical confirmation that endogenous refinement does not close this gap.
+
+**Doc passage as currently written** (§3.2):
+> empirical death-knell for purely endogenous refinement; intrinsic self-correction does not improve and often degrades reasoning.
+
+**What the source actually says** (abstract, verbatim):
+> "Central to our investigation is the notion of intrinsic self-correction, whereby an LLM attempts to correct its initial responses based solely on its inherent capabilities, without the crutch of external feedback. In the context of reasoning, our research indicates that LLMs struggle to self-correct their responses without external feedback, and at times, their performance even degrades after self-correction."
+
+**Verdict:** faithful. "Often degrades" is slightly stronger than the paper's "at times" — minor over-characterization.
+
+**Substantive change proposed** (verbatim rewrite of the §3.2 line):
+> Huang et al. (2024), "Large Language Models Cannot Self-Correct Reasoning Yet" — [arXiv:2310.01798](https://arxiv.org/abs/2310.01798) (ICLR 2024) — empirical death-knell for purely endogenous refinement: intrinsic self-correction (no external feedback) does not improve reasoning and in some cases degrades it. Confirms §2.2/§2.3 that endogenous selection re-finds the mirror.
+
+---
+
+### Beigi et al. 2025, "SMART" — [arXiv:2509.16742](https://arxiv.org/abs/2509.16742)
+
+**Doc passage as currently written** (§3.3, and matching §4.1):
+> the closest existing *sycophancy-targeted* work using MCTS, but it operates as a **training-time data-collection scheme** (RL fine-tuning on trajectories collected via UA-MCTS), not a deployed test-time search. Its exploration signal is mixed — state-level uncertainty (endogenous) *plus* stepwise progress rewards and final-outcome rewards (exogenous). The lane overlap with §4.1 is therefore narrower than "the existing test-time search aimed at sycophancy" would suggest.
+
+The §3.3 title in the doc currently reads: "Beigi et al. (2025), 'Sycophancy Mitigation Through RL with Uncertainty-Aware Adaptive Reasoning Trajectories' (SMART)" — **this title is wrong.**
+
+**What the source actually says** (abstract, verbatim):
+> "SMART (Sycophancy Mitigation through Adaptive Reasoning Trajectories), which reframes sycophancy as a reasoning optimization problem rather than an output alignment issue. SMART is a two-stage framework comprising: (1) Uncertainty-Aware Adaptive Monte Carlo Tree Search (UA-MCTS), which dynamically adjusts model exploration based on state-level uncertainty to collect high-quality, diverse reasoning trajectories alongside both stepwise progress and final outcome rewards; and (2) progress-based reinforcement learning, which fine-tunes the model using the collected trajectories and reward signals to reinforce effective reasoning patterns."
+
+Two corrections:
+1. **Acronym/title:** "Sycophancy Mitigation through Adaptive Reasoning Trajectories" — *not* "…through RL with Uncertainty-Aware Adaptive Reasoning Trajectories."
+2. The training-time-vs-test-time classification and mixed-signal characterization are correct.
+
+**Verdict:** faithful on the substantive claims (training-time, mixed signal). Mischaracterizes the paper's title/acronym expansion.
+
+**Substantive change proposed** (verbatim rewrite of the §3.3 entry):
+> Beigi et al. (2025), "Sycophancy Mitigation through Adaptive Reasoning Trajectories" (SMART) — [arXiv:2509.16742](https://arxiv.org/abs/2509.16742) — the closest existing *sycophancy-targeted* work using MCTS, but it operates as a **training-time data-collection scheme**: UA-MCTS (Uncertainty-Aware Adaptive MCTS) collects reasoning trajectories whose exploration is adjusted by state-level uncertainty (endogenous), labelled with stepwise progress and final-outcome rewards (exogenous); a second stage does progress-based RL fine-tuning on those trajectories. It is not a deployed test-time search. The lane overlap with §4.1 is therefore narrower than "the existing test-time search aimed at sycophancy" would suggest.
+
+(Apply the same title correction in the §4.1 paragraph.)
+
+---
+
+### DeepConf 2025, "Deep Think with Confidence" — [arXiv:2508.15260](https://arxiv.org/abs/2508.15260)
+
+**Doc passage as currently written** (§3.3):
+> DeepConf (2025), "Deep Think with Confidence" — [arXiv:2508.15260](https://arxiv.org/abs/2508.15260) — discards low-confidence traces by local confidence (endogenous). This is the method whose selection criterion §4.1 must *invert*.
+
+**Doc passage as currently written** (§4.1):
+> *vs. adaptive compute (DeepConf, Reasoning on a Budget).* These allocate compute toward *high* model confidence; §4.1 must *invert* the criterion — toward the low-confidence, high-surprise dissenting branch.
+
+**What the source actually says** (abstract, verbatim):
+> "DeepConf leverages model-internal confidence signals to dynamically filter out low-quality reasoning traces during or after generation. It requires no additional model training or hyperparameter tuning and can be seamlessly integrated into existing serving frameworks. We evaluate DeepConf across a variety of reasoning tasks and the latest open-source models, including Qwen 3 and GPT-OSS series. Notably, on challenging benchmarks such as AIME 2025, DeepConf@512 achieves up to 99.9% accuracy and reduces generated tokens by up to 84.7% compared to full parallel thinking."
+
+The abstract confirms the doc's "endogenous" and "discards low-confidence traces" framing. The abstract does *not* specify whether "confidence" is computed per-token, over a sliding window/group, or as a trace-wide average. PDF and alphaXiv mirror reads both failed in this pass.
+
+**Flag:** the word "local" in "by local confidence" is a substantive technical claim (vs. global / trace-average) that could not be verified from the abstract alone.
+
+**Verdict:** faithful on the load-bearing claims (endogenous; discards low-confidence traces; allocates compute toward high model confidence — the criterion §4.1 inverts). The "local" qualifier should either be removed or cited to the methodology section once the paper is read in full.
+
+**Substantive change proposed** (conservative version that drops the unverified qualifier):
+> DeepConf (2025), "Deep Think with Confidence" — [arXiv:2508.15260](https://arxiv.org/abs/2508.15260) — dynamically filters out low-confidence reasoning traces during or after generation using model-internal confidence signals (endogenous). This is the method whose selection criterion §4.1 must *invert*.
+
+---
+
+### Puri et al. 2025, "A Probabilistic Inference Approach … Particle-Based Monte Carlo" — [arXiv:2502.01618](https://arxiv.org/abs/2502.01618)
+
+**Doc passage as currently written** (§3.3):
+> Puri et al. (2025), "A Probabilistic Inference Approach... using Particle-Based Monte Carlo Methods" — [arXiv:2502.01618](https://arxiv.org/abs/2502.01618) — closest existing method to "keep alternatives alive against imperfect reward models"; samples the typical set of a posterior rather than the mode; 4–16× better scaling rate. Selection: exogenous (reward as particle weight), softened probabilistically to avoid early pruning.
+
+**Doc passage as currently written** (§4.1):
+> *vs. Puri (particle filtering).* Closest precedent for "keep alternatives alive"; but particle weights are a task reward and it varies *solutions to a fixed problem*, while §4.1 varies *the problem's assumptions*.
+
+**What the source actually says** (abstract, verbatim):
+> "Existing inference-time scaling methods, usually with reward models, cast the task as a search problem, which tends to be vulnerable to reward hacking as a consequence of approximation errors in reward models. In this paper, we instead cast inference-time scaling as a probabilistic inference task and leverage sampling-based techniques to explore the typical set of the state distribution of a state-space model with an approximate likelihood, rather than optimize for its mode directly. We propose a novel inference-time scaling approach by adapting particle-based Monte Carlo methods to this task. Our empirical evaluation demonstrates that our methods have a 4-16x better scaling rate over our deterministic search counterparts on various challenging mathematical reasoning tasks. Using our approach, we show that Qwen2.5-Math-1.5B-Instruct can surpass GPT-4o accuracy in only 4 rollouts, while Qwen2.5-Math-7B-Instruct scales to o1 level accuracy in only 32 rollouts."
+
+**Verdict:** faithful. All characterizations match.
+
+**Substantive change proposed** (optional polish — surface the reward-hacking motivation):
+> Puri et al. (2025), "A Probabilistic Inference Approach… using Particle-Based Monte Carlo Methods" — [arXiv:2502.01618](https://arxiv.org/abs/2502.01618) — closest existing method to "keep alternatives alive against imperfect reward models"; explicitly motivated by reward-hacking under approximate reward models, the method samples the typical set of a posterior (state-space model with approximate likelihood) rather than optimizing the mode; 4–16× better scaling rate over deterministic search on math reasoning. Selection: exogenous (reward as particle weight), softened probabilistically to avoid early pruning.
+
+---
+
+### Snell et al. 2024, "Scaling LLM Test-Time Compute Optimally" — [arXiv:2408.03314](https://arxiv.org/abs/2408.03314)
+
+**Doc passage as currently written** (§3.3):
+> Snell et al. (2024), "Scaling LLM Test-Time Compute Optimally..." — [arXiv:2408.03314](https://arxiv.org/abs/2408.03314) — verifier-guided + revision, difficulty-dependent allocation (mixed).
+
+**What the source actually says** (abstract / extracted body):
+> Two primary mechanisms studied: "searching against dense, process-based verifier reward models," and "updating the model's distribution over a response adaptively, given the prompt at test time." And: "the effectiveness of different approaches to scaling test-time compute critically varies depending on the difficulty of the prompt." Difficulty-aware compute-optimal strategy "can improve the efficiency of test-time compute scaling by more than 4x compared to a best-of-N baseline" and "test-time compute can be used to outperform a 14x larger model."
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none required.
+
+---
+
+### Brown et al. 2024, "Large Language Monkeys" — [arXiv:2407.21787](https://arxiv.org/abs/2407.21787)
+
+**Doc passage as currently written** (§3.3):
+> Brown et al. (2024), "Large Language Monkeys: Scaling Inference Compute with Repeated Sampling" — [arXiv:2407.21787](https://arxiv.org/abs/2407.21787) — coverage scales log-linearly, *verifier-dependent* (exogenous).
+
+**What the source actually says** (abstract, verbatim):
+> "Across multiple tasks and models, we observe that coverage -- the fraction of problems that are solved by any generated sample -- scales with the number of samples over four orders of magnitude. Interestingly, the relationship between coverage and the number of samples is often log-linear and can be modelled with an exponentiated power law … In domains like coding and formal proofs, where answers can be automatically verified, these increases in coverage directly translate into improved performance. … In domains without automatic verifiers, we find that common methods for picking from a sample collection (majority voting and reward models) plateau beyond several hundred samples and fail to fully scale with the sample budget."
+
+**Verdict:** faithful.
+
+**Substantive change proposed** (optional tightening — the verifier-dependence is precisely what §4.1 leans on):
+> Brown et al. (2024), "Large Language Monkeys: Scaling Inference Compute with Repeated Sampling" — [arXiv:2407.21787](https://arxiv.org/abs/2407.21787) — coverage (fraction of problems solved by *any* generated sample) scales log-linearly over four orders of magnitude in sample count. In domains with automatic verifiers (coding, formal proofs) coverage gains translate into performance gains; without an exogenous verifier, majority voting and reward-model picking plateau within several hundred samples — i.e., the headline scaling is verifier-dependent (exogenous).
+
+---
+
+## III. Bootstrap and self-improvement — §§3.7, 4.4
+
+### Zelikman et al. 2022, STaR — [arXiv:2203.14465](https://arxiv.org/abs/2203.14465)
+
+**Doc passage as currently written:**
+> STaR (Zelikman et al. 2022) — [arXiv:2203.14465](https://arxiv.org/abs/2203.14465). Signal: exogenous correctness verifier (final-answer match against gold).
+
+**What the source actually says** (verbatim quote on load-bearing claims):
+> "generate rationales to answer many questions, prompted with a few rationale examples; if the generated answers are wrong, try again to generate a rationale given the correct answer; fine-tune on all the rationales that ultimately yielded correct answers; repeat."
+
+Filter signal is final-answer correctness against gold. Rationalization step regenerates a rationale *given* the correct answer when the initial attempt fails.
+
+**Verdict:** faithful.
+
+**Substantive change proposed** (optional tightening for completeness):
+> STaR (Zelikman et al. 2022) — [arXiv:2203.14465](https://arxiv.org/abs/2203.14465). Signal: exogenous correctness verifier (final-answer match against gold). Includes a rationalization step that conditions on the gold answer when the initial rationale fails, then fine-tunes on rationales whose final answer matches gold.
+
+---
+
+### Zelikman et al. 2024, Quiet-STaR — [arXiv:2403.09629](https://arxiv.org/abs/2403.09629)
+
+**Doc passage as currently written** (§3.7):
+> Quiet-STaR (Zelikman et al. 2024) — [arXiv:2403.09629](https://arxiv.org/abs/2403.09629). Reward is **REINFORCE with a sibling-rationale baseline** — for each position, the log-likelihood of the next *m* ground-truth tokens (typically m=4) under a thought-augmented forward pass (with a learned mixing head over base and thought-augmented logits), baselined against the mean over sibling rationales sampled at the same position. Natural text enters as the *supervision target* for the m-token lookahead; the *reward* itself is intra-batch relative (which-thought-beat-the-average), not a likelihood differential against the unaugmented model or against natural text. Closer to STaR-with-implicit-rationales than to "entropy-structure as bootstrap signal" — but the natural-text supervision target makes it the nearest spiritual precedent.
+
+**What the source actually says** (verbatim quotes on load-bearing claims):
+
+On the reward equation (Section 4.4.3, "Optimizing Rationale Generation"):
+> "We use REINFORCE to optimize the likelihoods of the rationales based on their usefullness: the log-likelihood of the n_true true next tokens X_{j+1:j+ntrue+1} under the language model given previous observed tokens and a particular rationale … we generate multiple rationale continuations for each token in the input sequence … We thus define the reward r_j for each rationale T_j as the difference between p^talk_{j:j+ntrue} and the average across rationales for that token: r_j = log p^talk_{j:j+ntrue}(X_{j+1:j+ntrue+1}) − log p̄^talk_{j:j+ntrue}(X_{j+1:j+ntrue+1})"
+
+On the baseline (Section 3):
+> "we use the relative improvements in the log-likelihood of the target text across rationales as an estimate of quality, but we simply subtract the mean reward and do not incorporate more complex control variates."
+
+On the mixing head (Section 4.3) and Algorithm 1: the mix is over *log-probabilities* (logits in log-space), learned via a shallow MLP weighting base vs. thought-augmented predictions.
+
+On the number of lookahead tokens:
+> "The number of future tokens included in the loss is a hyper-parameter."
+> "Specifically, for our C4 evaluation, we train Mistral 7B with 16 thought tokens and 4 true tokens ahead and otherwise the same setup."
+
+**Verdict:** faithful (minor precision opportunity). The doc's characterization is correct in all load-bearing respects. One additional nuance worth noting: the paper also includes an NLL loss term alongside REINFORCE, so the total objective is REINFORCE + NLL on the mixed distribution.
+
+**Substantive change proposed** (verbatim rewrite):
+> Quiet-STaR (Zelikman et al. 2024) — [arXiv:2403.09629](https://arxiv.org/abs/2403.09629). The REINFORCE reward for each rationale T_j is the log-likelihood of the next n_true ground-truth tokens under a mixed ("talk") distribution — a learned mixing-head interpolation of base and thought-augmented next-token log-probabilities — minus the mean of the same quantity across sibling rationales sampled at the same position (i.e., a sample-mean baseline, not a learned value function or control variate). n_true is a hyperparameter (4 in the C4 setup; ablated up to 8 in the paper). The full training objective adds an NLL term on the mixed distribution alongside REINFORCE. Natural text enters as the *supervision target* for the n_true-token lookahead; the *reward* itself is intra-batch relative (which-thought-beat-the-average), not a likelihood differential against the unaugmented model or against natural text. Closer to STaR-with-implicit-rationales than to "entropy-structure as bootstrap signal" — but the natural-text supervision target makes it the nearest spiritual precedent.
+
+---
+
+### Singh et al. 2023, ReST-EM — [arXiv:2312.06585](https://arxiv.org/abs/2312.06585)
+
+**Doc passage as currently written:**
+> ReST / ReST-EM (Singh et al. 2023) — [arXiv:2312.06585](https://arxiv.org/abs/2312.06585). Signal: binary task-correctness reward; E-step samples and filters, M-step finetunes.
+
+**What the source actually says** (verbatim quote on load-bearing claims):
+> "[the method follows a cycle of] generate samples from the model and filter them using binary feedback, fine-tune the model on these samples, and repeat this process a few times."
+>
+> "on tasks where we have access to scalar feedback, for example, on math problems where one can verify correctness."
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none.
+
+---
+
+### Yuan et al. 2023, RFT — [arXiv:2308.01825](https://arxiv.org/abs/2308.01825)
+
+**Doc passage as currently written:**
+> Rejection Sampling Fine-Tuning / RFT (Yuan et al. 2023) — [arXiv:2308.01825](https://arxiv.org/abs/2308.01825). Signal: task-correctness filter over multiple sampled trajectories.
+
+**What the source actually says** (verbatim quote on load-bearing claims):
+> "RFT uses supervised models to generate and collect correct reasoning paths as augmented fine-tuning datasets." "RFT improves mathematical reasoning performance more for LLMs" when "augmented samples containing more distinct reasoning paths" are used.
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none.
+
+---
+
+### Yuan et al. 2024, Self-Rewarding Language Models — [arXiv:2401.10020](https://arxiv.org/abs/2401.10020)
+
+**Doc passage as currently written:**
+> Self-Rewarding Language Models (Yuan et al. 2024) — [arXiv:2401.10020](https://arxiv.org/abs/2401.10020). Signal: model self-judgment (LLM-as-Judge); endogenous — an instance of the failure mode §2.3 names.
+
+**What the source actually says** (verbatim quote on load-bearing claims):
+> the model uses "LLM-as-a-Judge prompting to provide its own rewards during training"
+> "during Iterative DPO training … instruction following ability improve[s], but also the ability to provide high-quality rewards to itself."
+
+**Verdict:** faithful.
+
+**Substantive change proposed** (optional tighten):
+> Self-Rewarding Language Models (Yuan et al. 2024) — [arXiv:2401.10020](https://arxiv.org/abs/2401.10020). Signal: model self-judgment via LLM-as-Judge prompting, trained iteratively with DPO; endogenous — an instance of the failure mode §2.3 names. The paper's own framing is that the *judge capability* also improves across iterations, which sharpens the §2.3 concern (a mirror that gets better at validating itself).
+
+---
+
+### Bai et al. 2022, Constitutional AI / RLAIF — [arXiv:2212.08073](https://arxiv.org/abs/2212.08073)
+
+**Doc passage as currently written:**
+> Constitutional AI / RLAIF (Bai et al. 2022, Anthropic) — https://www.anthropic.com/research/constitutional-ai-harmlessness-from-ai-feedback. Two-phase. SL phase: the model self-critiques and revises its outputs against a written constitution. RL phase: AI-generated pairwise preferences (constitution-conditioned) train a *preference model* used as the RL reward — RLAIF. The grounding is a *distilled* AI-preference signal shaped by the constitution, not a direct constitutional check at each training step. Closer to model self-judgment-with-rule-prior than to an exogenous verifier — sits near the bottom of the §2.1 hierarchy of terminators.
+
+**What the source actually says** (verbatim quote on load-bearing claims, from arXiv abstract):
+> "In the supervised phase we sample from an initial model, then generate self-critiques and revisions, and then finetune the original model on revised responses. In the RL phase, we sample from the finetuned model, use a model to evaluate which of the two samples is better, and then train a preference model from this dataset of AI preferences."
+> "[we] train with RL using the preference model as the reward signal, i.e. we use 'RL from AI Feedback' (RLAIF)."
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none.
+
+---
+
+### Burns et al. 2023, Weak-to-Strong Generalization — [arXiv:2312.09390](https://arxiv.org/abs/2312.09390)
+
+**Doc passage as currently written:**
+> Weak-to-Strong Generalization (Burns et al. 2023, OpenAI) — [arXiv:2312.09390](https://arxiv.org/abs/2312.09390). Signal: weak supervisor's pseudo-labels; the strong student corrects weak errors via inductive bias.
+
+**What the source actually says** (verbatim quote on load-bearing claims):
+> "strong pretrained models [trained] on labels generated by a weak model … consistently perform better than their weak supervisors."
+> "finetune strong pretrained models on labels generated by a weak model"
+> "naive finetuning alone" falls short of full recovery; "simple methods can often significantly improve weak-to-strong generalization" (e.g., auxiliary confidence loss).
+
+**Verdict:** **under-characterizes / mildly imprecise.** The first half ("signal: weak supervisor's pseudo-labels") is faithful. The second half — "corrects weak errors via inductive bias" — is the *intuitive mechanism* the paper gestures at but is not the only or fully-established mechanism. The paper shows naive finetuning is not sufficient and that auxiliary losses (e.g., a confidence loss) materially improve weak-to-strong recovery.
+
+**Substantive change proposed** (verbatim rewrite):
+> Weak-to-Strong Generalization (Burns et al. 2023, OpenAI) — [arXiv:2312.09390](https://arxiv.org/abs/2312.09390). Signal: weak supervisor's pseudo-labels. The strong student recovers a fraction of its ceiling capability above the weak supervisor's level; naive finetuning alone is insufficient, and simple interventions (e.g., an auxiliary confidence loss) materially improve recovery. The paper attributes the partial recovery to a combination of strong-model pretrained inductive bias and these auxiliary training-time interventions.
+
+---
+
+### David & Gervais 2025, AuthorMist — [arXiv:2503.08716](https://arxiv.org/abs/2503.08716)
+
+**Doc passage as currently written** (§3.7):
+> AuthorMist (David & Gervais 2025) — [arXiv:2503.08716](https://arxiv.org/abs/2503.08716). RL loop using AI-text-detector APIs as reward — closest existing detector-as-reward bootstrap; goal is *evasion* of detection, not quality.
+
+**Doc passage as currently written** (§4.4):
+> AuthorMist (David & Gervais 2025, §3.7) is closest *mechanically*: a 3B paraphrase model fine-tuned with GRPO using AI-text-detector APIs as reward — pushes generation toward the human distribution. But the goal is *evasion* not quality; the signal is the opaque detector logit (mixing many features, not specifically temporal entropy); no separate picker — GRPO uses group-advantage over the same detector.
+
+**What the source actually says** (verbatim quote on load-bearing claims):
+
+On the reward function (Section 3.3): "The reward function is designed to quantitatively measure the success of AuthorMist in evading AI-generated text detection. Given a set of detectors D = {d_1, d_2, ..., d_k}, each detector d_j outputs either a probability score P_{d_j}(Y) ... Thus, the model receives a higher reward when outputs are classified as more human-like."
+
+On semantic preservation: "To maintain linguistic fluency and prevent unnatural text artifacts, we incorporate a Kullback-Leibler (KL) divergence penalty in our optimization objective, keeping the updated policy distribution close to the base model." Semantic similarity is enforced via KL divergence to the base model — *not* via an explicit similarity floor.
+
+On the 0.94 figure (Section 4.3, Text Similarity): "all models maintain high semantic fidelity, with median similarity scores consistently above 0.94." Semantic similarity is measured *post hoc* with E5-small cosine similarity for evaluation — it is not a term in the training reward function and not enforced as a floor during training.
+
+Model: Qwen2.5-3B GRPO-trained. Six separate models trained, one per target detector. At inference: 8 candidate paraphrases per chunk, lowest detector score selected.
+
+**Verdict:** faithful as written. The doc's existing §3.7 and §4.4 wording does *not* claim a semantic-similarity floor — and it should not be added in any future revision (the ≥0.94 figure is a median post-hoc evaluation outcome, not a training-time constraint; the actual semantic-preservation mechanism is KL divergence to the base model).
+
+**Substantive change proposed** (no change to the existing wording; optional tightening to forestall future misreadings):
+> AuthorMist (David & Gervais 2025, §3.7) is closest *mechanically*: a Qwen2.5-3B paraphrase model fine-tuned with GRPO using AI-text-detector APIs as reward and KL divergence to the base model as the sole semantic-preservation mechanism (no explicit similarity floor; the reported ≥0.94 median cosine similarity is an evaluation outcome, not a training constraint) — pushes generation toward the human distribution. But the goal is *evasion* not quality; the signal is the opaque detector logit (mixing many features, not specifically temporal entropy); no separate picker — GRPO uses group-advantage over the same detector. Six separately-trained per-detector models; inference selects the best of 8 paraphrases by detector score.
+
+---
+
+## IV. Philosophy and deception — §§3.1, 3.2, 3.5, 4.2
+
+### Friston 2010, "The free-energy principle: a unified brain theory?" — [doi:10.1038/nrn2787](https://www.nature.com/articles/nrn2787)
+
+**Doc passage as currently written:**
+> Friston (2010), "The free-energy principle: a unified brain theory?", *Nature Reviews Neuroscience* 11(2):127–138 [...] introduces the surprise-minimization principle. [...] The *formal short-term/long-term decomposition* §2.2 leans on — pragmatic vs. epistemic value, with information-seeking as a distinct term — lives in the **expected free energy** line (Friston, ~2015 onward), unified in "Reframing the Expected Free Energy" (arXiv:2402.14460). The 2010/2012 papers frame the principle and the dark-room problem; the EFE line is the formal home of the decomposition.
+
+**What the source actually says** (independent secondary sources; Nature PDF not directly readable):
+> "Expected free energy can be decomposed into epistemic and pragmatic parts, and this decomposition provides a principled explanation for the epistemics of planning and inference that underwrite the exploitation and exploration dilemma." (Search synthesis citing Friston et al. 2015 onward; the EFE decomposition is consistently dated to 2015+, not 2010.)
+
+**Verdict:** faithful. Doc explicitly attributes the formal decomposition to post-2015 EFE line, not the 2010 paper.
+
+**Substantive change proposed:** none. (Optional clarification: cite Friston, Rigoli et al. 2015 "Active inference and epistemic value" as the canonical EFE-decomposition anchor rather than the 2024 "Reframing" review.)
+
+---
+
+### Friston, Thornton & Clark 2012, "Free-energy minimization and the dark-room problem" — [Front. Psychol. 3:130](https://www.frontiersin.org/articles/10.3389/fpsyg.2012.00130/full)
+
+**Doc passage as currently written:**
+> Friston, Thornton & Clark (2012), "Free-energy minimization and the dark-room problem," [...] addresses the dark-room objection by noting that surprise is *model-relative*: an organism with priors expecting rich stimulation finds a dark room maximally surprising relative to its model.
+
+**What the source actually says** (verbatim):
+> "This means that a dark room will afford low levels of surprise if, and only if, the agent has been optimized by evolution (or neurodevelopment) to predict and inhabit it."
+> "Agents that predict rich stimulating environments will find the 'dark room' surprising and will leave at the earliest opportunity."
+> "average surprise or entropy H(s | m) is a function of sensations and the agent (model) predicting them."
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none. (Minor polish: the paper's resolution also leans on *evolutionary* shaping of priors — could add "(priors shaped by evolution/neurodevelopment)" in a parenthetical.)
+
+---
+
+### Russell & Wefald 1991, "Principles of Metareasoning" — [Artif. Intell. 49(1–3):361–395](https://doi.org/10.1016/0004-3702(91)90015-C)
+
+**Doc passage as currently written:**
+> The stopping problem recurses [...] It is bounded *operationally* (meta-reasoning has sharply diminishing returns against a fixed standard — Russell & Wefald 1991) [...]
+>
+> Russell & Wefald (1991), "Principles of Metareasoning," [...] Basis for §2.1's stopping analysis.
+
+**What the source actually says** (authoritative summaries; full text behind paywall, flagged secondary):
+> "Computations are actions with utilities or expected values. The latter depend on the effects in terms of the passage of time and the difference between the external actions they lead to and those that were favored before the deliberation."
+> "The essence of rational metareasoning is calculating the value of computation (VOC) for each potential computation."
+
+The summaries find **no passages claiming meta-reasoning has sharply diminishing returns** as a central thesis. The central contribution is the **value-of-computation (VOC) framework** that justifies *selective* deliberation based on expected utility of computation vs. its cost.
+
+**Verdict:** **mischaracterizes (load-bearing).** The diminishing-returns framing is closer to later empirical literature on overthinking (cited correctly in §3.6) than to R&W's analytical framework.
+
+**Substantive change proposed:**
+> The stopping problem recurses — deciding when to stop is itself a deliberation, and so on upward. It is bounded *operationally* by a value-of-computation criterion (Russell & Wefald 1991): computations are actions with expected utilities, and rational deliberation stops when expected VOC falls below the cost of further computation. This yields *operational* termination, but is not a *foundational* terminus — the regress is bounded by cost-benefit balance, not closed. Recent empirical work (§3.6) shows the diminishing- and even negative-returns regime arrives quickly on current LMs, consistent with this framework but stronger than R&W's analytical claim.
+
+---
+
+### Mele 2001, *Self-Deception Unmasked* — [Princeton UP](https://press.princeton.edu/books/paperback/9780691057453/self-deception-unmasked) — **secondary read via [SEP entry on Self-Deception](https://plato.stanford.edu/entries/self-deception/)**
+
+**Doc passage as currently written:**
+> Mele, *Self-Deception Unmasked* (Princeton University Press, 2001) [...] deflationary: motivated biased cognition without dual belief or intention.
+
+**What the source actually says** (SEP entry on Self-Deception, secondary; Mele's primary text paywalled):
+> "Others, however, argue the needed motivation can as easily be supplied by uncertainty or ignorance whether _p_, or suspicion that ~_p_" (Mele 2001).
+> "Non-intentionalists argue that most 'garden-variety' cases of self-deception can be explained without adverting to subagents, or unconscious beliefs and intentions."
+> Mele's jointly sufficient conditions include: "S consciously believes at the time that there is a significant chance that ~p"; belief results from "reflective, critical reasoning" where "S is wrong in regarding that reasoning as properly directed."
+
+**Verdict:** faithful (with one nuance). The doc's "no dual belief, no intention" formulation matches Mele's two key deflationary moves. Nuance: Mele retains a "conscious suspicion of ~p" condition — *not zero* conscious access to the unwelcome proposition.
+
+**Substantive change proposed** (optional sharpening, not a correction):
+> Mele, *Self-Deception Unmasked* (Princeton University Press, 2001) [...] deflationary: motivated biased cognition without dual belief and without intention to deceive — though Mele retains a "conscious suspicion of ~p" condition (i.e. the self-deceiver is aware ~p might be true, just not believing it).
+
+**Flag:** Secondary source (SEP). Primary text not directly read.
+
+---
+
+### Davidson 1985, "Deception and Division" (in Elster ed., *The Multiple Self*, Cambridge UP) — **secondary read via [SEP entry on Self-Deception](https://plato.stanford.edu/entries/self-deception/)**
+
+**Doc passage as currently written:**
+> Davidson, "Deception and Division" (1985, in Elster ed., *The Multiple Self*, Cambridge University Press) — intentionalist / partitioned mind.
+
+**What the source actually says** (SEP, secondary):
+> Davidson's account involves "the relatively modest division of Davidson (1982, 1986), where there need only be a boundary between conflicting attitudes and intentions."
+> Davidson is identified among those maintaining "that the paradigmatic cases of self-deception are intentional."
+
+**Verdict:** **over-characterizes (mildly, load-bearing for §4.2).** "Intentionalist" is correct. "Partitioned mind" is closer to over-characterization: Davidson's division is **modest** ("a boundary between conflicting attitudes and intentions"), not the strong subagent / autonomous-psychological-parts partitioning that "partitioned mind" tends to evoke in cognitive-science readers. This matters for §4.2's "probe experiment that decides a philosophical dispute," because a model-side analog of Davidson's modest partitioning is a weaker, harder-to-falsify target than a strong dual-representation claim.
+
+**Substantive change proposed:**
+> Davidson, "Deception and Division" (1985, in Elster ed., *The Multiple Self*, Cambridge University Press) — intentionalist about paradigmatic self-deception; posits a *modest* mental division (a boundary between conflicting attitudes and intentions) rather than strong subagent partitioning. Mele, *Self-Deception Unmasked* (Princeton University Press, 2001) [...] deflationary: motivated biased cognition without dual belief and without intention to deceive (though some conscious suspicion of ~p is retained).
+
+And in §4.2, the "decides a philosophical dispute" line should be softened to reflect that Davidson's representational commitment is weaker than the doc currently leans on:
+> Whether the entrenched self-deceiver carries an internal representation of the suppressed truth (Davidson's modest division: a boundary between conflicting attitudes and intentions) or does not (Mele) is *partially decidable* with open-model probing — the strong version of Davidson is decidable; the modest version may not be cleanly separable from Mele's deflationary picture by a representational probe alone.
+
+**Flag:** Secondary source (SEP). Primary essay not directly read.
+
+---
+
+### Ren et al. 2025, "The MASK Benchmark" — [arXiv:2503.03750](https://arxiv.org/abs/2503.03750)
+
+**Doc passage as currently written:**
+> Ren et al. (2025), "The MASK Benchmark: Disentangling Honesty From Accuracy in AI Systems" — [arXiv:2503.03750](https://arxiv.org/abs/2503.03750) — explicitly separates honesty from capability; direct precedent for §4.2's honesty-not-correctness framing.
+
+**What the source actually says** (verbatim from abstract):
+> "As large language models (LLMs) become more capable and agentic, the requirement for trust in their outputs grows significantly, yet at the same time concerns have been mounting that models may learn to lie in pursuit of their goals."
+> "while larger models obtain higher accuracy on our benchmark, they do not become more honest."
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none.
+
+---
+
+### Zhu, Zhang & Wang 2024, "Language Models Represent Beliefs of Self and Others" — [arXiv:2402.18496](https://arxiv.org/abs/2402.18496)
+
+**Doc passage as currently written:**
+> Zhu, Zhang & Wang (2024), "Language Models Represent Beliefs of Self and Others" — [arXiv:2402.18496](https://arxiv.org/abs/2402.18496) — nearest prior art for probing the model's representation of another agent's belief (ToM-task false belief, not deception).
+
+**What the source actually says** (verbatim, from search summary of the paper and project page):
+> "it is possible to linearly decode the belief status from the perspectives of various agents through neural activations of language models, indicating the existence of internal representations of self and others' beliefs."
+> "The researchers presented LLMs with stories involving characters with false beliefs, and measured the models' ability to accurately predict the characters' subsequent actions based on those false beliefs."
+> Manipulating these representations produces "dramatic changes in the models' ToM performance."
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none. (Optional strengthening: the doc could note that Zhu et al. also demonstrate *causal* manipulation of these representations changes ToM performance — strengthening the "representation is functionally load-bearing" claim that §4.2's user-side probe inherits.)
+
+---
+
+### Parrack, Attubato & Heimersheim 2025, "Benchmarking Deception Probes via Black-to-White Performance Boosts" — [arXiv:2507.12691](https://arxiv.org/abs/2507.12691)
+
+**Doc passage as currently written:**
+> Parrack et al. (2025), "Benchmarking Deception Probes via Black-to-White Performance Boosts" — [arXiv:2507.12691](https://arxiv.org/abs/2507.12691) — partial precedent for adversarial probe evaluation; red-teams a model-deception probe, not a user-deception one.
+
+**What the source actually says** (verbatim from abstract):
+> "AI assistants will occasionally respond deceptively to user queries. Recently, linear classifiers (called 'deception probes') have been trained to distinguish the internal activations of a language model during deceptive versus honest responses."
+
+The methodology contrasts white-box vs. black-box monitoring and measures the "black-to-white performance boost" — the differential when monitors gain access to probe activations vs. relying only on outputs.
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none.
+
+---
+
+### Mirtaheri & Belkin 2025, "Detecting Motivated Reasoning in the Internal Representations of Language Models" — [OpenReview NFiV0yVlBM](https://openreview.net/forum?id=NFiV0yVlBM) (NeurIPS 2025 Mech Interp Workshop)
+
+**Doc passage as currently written:**
+> Mirtaheri & Belkin (2025), "Detecting Motivated Reasoning in the Internal Representations of Language Models" — NeurIPS 2025 Mech Interp Workshop, OpenReview NFiV0yVlBM. [...] Probes for *the model's own* motivated reasoning; methodological template for §4.2's "motivated" signal (model-self, not user-self — model/human asymmetry preserved).
+
+**What the source actually says** (verbatim from OpenReview abstract):
+> "Large language models (LLMs) sometimes produce chains-of-thought (CoT) that do not faithfully reflect their internal reasoning."
+
+The work uses biased contexts with hints, trains non-linear probes on the residual stream, and shows that hint-following is predictable from internal representations even when the CoT does not acknowledge the hint. Evaluated on MMLU with Qwen2.5-7B-Instruct.
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none.
+
+---
+
+### Mirtaheri & Belkin 2026, "Catching rationalization in the act" — [arXiv:2603.17199](https://arxiv.org/abs/2603.17199)
+
+**Doc passage as currently written:**
+> Mirtaheri & Belkin (2026), "Catching rationalization in the act..." — [arXiv:2603.17199](https://arxiv.org/abs/2603.17199). [grouped with the 2025 paper as] Probes for *the model's own* motivated reasoning; methodological template for §4.2's "motivated" signal.
+
+**What the source actually says** (verbatim from abstract):
+> "Large language models (LLMs) can produce chains of thought (CoT) that do not accurately reflect the [actual factors driving their answers]."
+
+Methodology: supervised probes on the residual stream, evaluated *both* pre-CoT-generation and post-CoT-generation; compared against an LLM-based CoT monitor. Multi-family, multi-dataset evaluation.
+
+**Verdict:** faithful.
+
+**Substantive change proposed:** none. (Optional, if §4.2 wants to lean harder on this template: the 2026 paper's *pre-vs-post generation* probe distinction is directly transferable to §4.2's user-side probe and worth flagging as a design lever.)
+
+---
+
+## Summary of substantive changes recommended
+
+Ranked by required action — apply top to bottom.
+
+### Material fixes (apply)
+
+| Citation | Verdict | Action |
+|---|---|---|
+| **Russell & Wefald 1991** | mischaracterizes — load-bearing | Replace "sharply diminishing returns" with VOC-framework gloss in §2.1 and §3.1 (proposed rewrite above) |
+| **Davidson 1985** | over-characterizes — load-bearing for §4.2 | Soften "partitioned mind" → "modest mental division (a boundary between conflicting attitudes and intentions)"; soften §4.2 "decides a philosophical dispute" → "partially decidable" |
+| **Beigi 2025 SMART** | factual title error | Fix title to "Sycophancy Mitigation through Adaptive Reasoning Trajectories" (drop "Through RL with Uncertainty-Aware") in §3.3 and §4.1 |
+| **Ahmed & Singh 2026 EPIC** | wrong dataset name; figure-semantics nuance; base-LM unspecified | Replace "AlpacaEval Creative Writing" with "WritingPrompts" in §3.4 and §4.3; note Figure 1 is schematic, not empirical; note the paper does not name its base LM (strengthens the §4.3 reproduction-on-named-models case) |
+| **Hamilton 2024** | construct mismatch | Sharpen the §2.2 / §3.7 / §4.4 caveat to reflect the paper's explicit disclaimer (line 411) of conversational genre testing |
+| **Burns 2023 weak-to-strong** | under-characterizes | Replace "corrects weak errors via inductive bias" with the partial-recovery + auxiliary-confidence-loss formulation (proposed rewrite above) |
+| **Feng 2026** | slight over-generalization | Add "in some samples" qualifier; surface the "three open-source models, dynamic during the reasoning process" caveats (proposed rewrite above) |
+| **Shumailov 2024** | under-characterizes the source | Refine the §2.2 parenthetical and §3.7 entry to acknowledge Shumailov's actual content claim (tails of original distribution, low-variance point estimate) rather than framing as "abstract error compounding" (proposed rewrites above) |
+| **GPT-who 2024** | minor conflation | Disambiguate UID-variance features (GPT-who) from "burstiness" term-of-art (GPTZero line) in §2.2 and §3.4 (proposed rewrite above) |
+| **DeepConf 2025** | unverified technical qualifier | Drop "local" from "by local confidence" or cite the methodology section once it is read in full |
+
+### Optional tightenings (apply if the line is being touched anyway)
+
+- **Arora 2023**: name the specific models tested (GPT-2 XL, OPT 1.3B, BART, Pegasus, BlenderBot) to make the model-regime caveat concrete.
+- **Entropy-UID 2025**: name the evaluation regime (GPT-2 on WikiText-2 / OpenWebText / WMT) to apply the same modern-LM-transfer caveat.
+- **Verma 2023**: specify GPT-2 XL as the neural LM tested, parallel to Arora and Entropy-UID.
+- **Holtzman 2020**: optionally note "on GPT-2-class models" to make the model scope explicit.
+- **Stroebl 2024**: optionally make the false-positive-cost conditional crisper.
+- **Brown 2024**: optionally surface the explicit verifier-vs-non-verifier domain contrast.
+- **Puri 2025**: optionally surface the reward-hacking motivation.
+- **STaR 2022**: optionally mention the rationalization step.
+- **Quiet-STaR 2024**: optionally note that the full training objective is REINFORCE + NLL, not REINFORCE alone.
+- **Self-Rewarding LMs 2024**: optionally note that the judge capability also improves across iterations (sharpens the §2.3 concern).
+- **Mele 2001**: optionally add the "conscious suspicion of ~p" condition.
+- **Friston/Thornton/Clark 2012**: optionally add the evolutionary-prior-shaping parenthetical.
+- **AuthorMist 2025**: optionally add the "no semantic-similarity floor; preservation is via KL divergence" clarification to forestall future misreadings.
+- **Zhu 2024**: optionally note the causal manipulation result strengthens §4.2.
+- **Mirtaheri & Belkin 2026**: optionally surface the pre-vs-post-generation probe design as a §4.2 lever.
+
+### Faithful, no change required
+
+Holtzman 2020, Stroebl 2024, Snell 2024, Brown 2024, Puri 2025, Huang 2024 (tiny "often"→"at times" nit), STaR 2022, ReST-EM 2023, RFT 2023, Self-Rewarding LMs 2024, Constitutional AI 2022, AuthorMist 2025 (as written), Friston 2010, Friston/Thornton/Clark 2012, MASK 2025, Zhu 2024, Parrack 2025, Mirtaheri & Belkin 2025, Mirtaheri & Belkin 2026, ForTIFAI 2025, Verma 2023.
+
+## Fetch failures and scope notes
+
+- **Shumailov *Nature* version** is paywalled. All Shumailov quotes are from the arXiv precursor (2305.17493).
+- **Holtzman, GPT-who, Entropy-UID, ForTIFAI** — full PDFs not retrieved; relied on arXiv / ACL Anthology abstracts plus standard secondary knowledge.
+- **Arora, EPIC, Meister 2021, Verma 2023, Hamilton 2024, Quiet-STaR** — full PDFs extracted via `pdftotext`; verbatim quotes are from those extractions.
+- **DeepConf 2025** — PDF and alphaXiv mirror reads both failed in this pass; methodology body not directly verifiable.
+- **Mele 2001 and Davidson 1985** — primary texts paywalled; verdicts based on the Stanford Encyclopedia of Philosophy entry on Self-Deception. Treat as provisional pending primary-text confirmation.
+- **Russell & Wefald 1991** — full text behind paywall; verdict based on ScienceDirect abstract + secondary summaries.
+- The "third Shumailov error source" (functional expressivity error) is widely cited but verbatim definition was not extracted in this pass; flagged as a known gap.
+
+---
+
+## Tier-2 supplemental pass
+
+Abstract-level audit of citations not covered by the Tier-1 deep pass. Each entry: doc passage (verbatim), abstract gloss, verdict, brief notes. Rewrites are proposed only where the issue is egregious. Every entry is tagged **Tier: 2**. Organized by lit-review subsection.
+
+### II-T2. Philosophical and theoretical grounding — §3.1
+
+#### "Reframing the Expected Free Energy" — [arXiv:2402.14460](https://arxiv.org/abs/2402.14460)
+
+**Tier:** 2
+
+**Doc passage (§3.1):** "The *formal short-term/long-term decomposition* §2.2 leans on — pragmatic vs. epistemic value, with information-seeking as a distinct term — lives in the **expected free energy** line (Friston, ~2015 onward), unified in 'Reframing the Expected Free Energy' (arXiv:2402.14460)."
+
+**Abstract gloss:** A formalization paper that "seek[s] to formalize the problem of deriving these [EFE] formulations from a single root expected free energy definition, i.e., the unification problem." Studies two settings with their own root EFE definitions; notes scope limits (e.g., in setting 1 "the agent cannot have arbitrary prior preferences over observations").
+
+**Verdict:** faithful. The doc explicitly characterizes the paper as "unifying" the EFE line, which matches the abstract's framing.
+
+---
+
+#### Klein 1999, "Human Knowledge and the Infinite Regress of Reasons" — [doi:10.1111/0029-4624.33.s13.14](https://doi.org/10.1111/0029-4624.33.s13.14)
+
+**Tier:** 2
+
+**Doc passage (§2.1, §3.1):** "Klein 1999 names the corresponding philosophical position, *infinitism*"; "Klein's infinitism is the named position endorsing 'no foundational terminus' (§2.1)."
+
+**Abstract gloss:** Unfetchable in this pass (Wiley DOI not retrieved; SEP infinitism entry returned 404). Widely-attested in secondary epistemology sources: Klein 1999 is the standard contemporary citation for infinitism (knowledge is justified by an infinite chain of reasons, none foundational); the position is named and defended in this paper.
+
+**Verdict:** faithful (based on standard secondary attestation; primary text not directly verified). **Flag: unfetchable in this pass.**
+
+---
+
+#### Albert 1968/1985, *Treatise on Critical Reason* — [Princeton UP](https://press.princeton.edu/books/paperback/9780691020488/treatise-on-critical-reason)
+
+**Tier:** 2
+
+**Doc passage (§2.1, §3.1):** "(the Münchhausen trilemma — Albert 1968/1985)"; "Albert names the trilemma."
+
+**Abstract gloss:** Unfetchable (publisher page returned 404; SEP Münchhausen-trilemma slug not present). Standard attribution: Albert's *Treatise on Critical Reason* (1968 German / 1985 English translation) names the trilemma of justification (infinite regress, circularity, dogmatic stop) as the structural problem for foundationalist epistemology.
+
+**Verdict:** faithful (standard secondary attestation; primary text not directly verified). **Flag: unfetchable in this pass.**
+
+---
+
+#### Metzinger 2003, *Being No One* — [MIT Press](https://mitpress.mit.edu/9780262633086/being-no-one/); Metzinger 2009, *The Ego Tunnel*
+
+**Tier:** 2
+
+**Doc passage (§3.1):** "Metzinger, *Being No One* (MIT Press, 2003) … and *The Ego Tunnel* (Basic Books, 2009)."
+
+**Abstract gloss:** Unfetchable in this pass (MIT Press page returned 403). Standard reference: both works develop the self-model theory of subjectivity — the conscious self as a representational construct (a transparent phenomenal self-model) rather than a substantial entity. The doc lists these as background for "predictive processing and consciousness" alongside Seth.
+
+**Verdict:** faithful in scope — the doc does not make any specific load-bearing claim about Metzinger's content beyond placement in the predictive-processing tradition. **Flag: not directly verified in this pass.**
+
+---
+
+#### Seth, Suzuki & Critchley 2012, "An interoceptive predictive coding model of conscious presence" — [doi:10.3389/fpsyg.2011.00395](https://doi.org/10.3389/fpsyg.2011.00395)
+
+**Tier:** 2
+
+**Doc passage (§3.1):** "Seth, Suzuki & Critchley (2012), 'An interoceptive predictive coding model of conscious presence,' *Frontiers in Psychology* 2:395 — doi:10.3389/fpsyg.2011.00395 — origin of the 'controlled hallucination' framing."
+
+**Abstract gloss:** The paper proposes that "presence is the result of successful suppression by top-down predictions of informative interoceptive signals." Develops a model with agency and presence components; anterior insular cortex as comparator; applies to depersonalization/derealization disorders.
+
+**Verdict:** faithful in placement — the paper is a canonical anchor in the predictive-processing-of-self literature. **Minor:** the abstract does not itself use the phrase "controlled hallucination" (that framing is more associated with Clark and later Seth popularizations such as *Being You* 2021); the 2012 paper is more precisely the *interoceptive presence* model. Not load-bearing — the doc's attribution as the "origin of the 'controlled hallucination' framing" is a slight overreach but does not affect the lit review's argument.
+
+---
+
+#### Seth 2021, *Being You* — [Faber/Dutton](https://us.macmillan.com/books/9781524742874/beingyou)
+
+**Tier:** 2
+
+**Doc passage (§3.1):** "Seth, *Being You* (Faber/Dutton, 2021)."
+
+**Abstract gloss:** Trade book popularizing Seth's predictive-processing theory of consciousness, including the "controlled hallucination" framing.
+
+**Verdict:** faithful in placement (background reference, no inline load-bearing claim).
+
+---
+
+#### Kuran 1995, *Private Truths, Public Lies* — preference falsification
+
+**Tier:** 2
+
+**Doc passage (§3.1):** "Preference falsification. Kuran (1995); main review §5 — the human-scale analogue of sycophancy. Cross-referenced."
+
+**Abstract gloss:** Cross-reference to the main lit review (already audited there). The doc here only names the concept and asserts cross-reference.
+
+**Verdict:** faithful (placement-only).
+
+---
+
+### III-T2. Empirical sycophancy and motivated reasoning — §3.2
+
+#### "Sycophantic Chatbots Cause Delusional Spiraling, Even in Ideal Bayesians" — [arXiv:2602.19141](https://arxiv.org/abs/2602.19141)
+
+**Tier:** 2
+
+**Doc passage (§3.2):** "formally models the compounding dynamics of mirroring; complement to §2.2."
+
+**Abstract gloss (verbatim):** "We propose a simple Bayesian model of a user conversing with a chatbot, and formalize notions of sycophancy and delusional spiraling in that model. We then show that in this model, even an idealized Bayes-rational user is vulnerable to delusional spiraling, and that sycophancy plays a causal role. Furthermore, this effect persists in the face of two candidate mitigations: preventing chatbots from hallucinating false claims, and informing users of the possibility of model sycophancy."
+
+**Verdict:** faithful. The doc's one-line characterization is consistent with the abstract; if anything *under*-characterizes — the paper makes a *causal* claim (sycophancy causes spiraling) and shows two mitigations fail, both of which are stronger than "models the compounding dynamics." Optional tightening: "formally models the compounding dynamics of mirroring and shows two natural mitigations (no hallucination; informing users) fail to break the spiral."
+
+---
+
+#### "Unveiling Confirmation Bias in Chain-of-Thought Reasoning" (Findings of ACL 2025) — [arXiv:2506.12301](https://arxiv.org/abs/2506.12301)
+
+**Tier:** 2
+
+**Doc passage (§3.2):** "**'Unveiling Confirmation Bias in Chain-of-Thought Reasoning'** (Findings of ACL 2025) and **'Failing to Falsify: Evaluating and Mitigating Confirmation Bias in Language Models'** (arXiv:2604.02485) — both study the model's own confirmation bias and operationalize the 'asymmetric scrutiny' signal §4.2 proposes."
+
+**Abstract gloss:** Examines confirmation bias in LLMs through CoT prompting; "model beliefs not only skew the reasoning process but also influence how rationales are utilized for answer prediction" — i.e., bias enters both rationale generation and rationale use.
+
+**Verdict:** faithful. The doc's claim that the paper studies "the model's own confirmation bias" is matched by the abstract; the "asymmetric scrutiny" operationalization is a reasonable read (the paper documents asymmetric rationale generation and utilization).
+
+---
+
+#### "Failing to Falsify: Evaluating and Mitigating Confirmation Bias in Language Models" — [arXiv:2604.02485](https://arxiv.org/abs/2604.02485)
+
+**Tier:** 2
+
+**Doc passage (§3.2):** (same paragraph as above) "operationalize the 'asymmetric scrutiny' signal §4.2 proposes."
+
+**Abstract gloss (verbatim opening):** "Confirmation bias, the tendency to seek evidence that supports rather than challenges one's belief, hinders one's reasoning ability." LMs propose test cases that confirm existing beliefs rather than disprove them; counterexample prompting improves rule discovery from 42% to 56% on average; distillation of the intervention generalizes.
+
+**Verdict:** faithful. Paper directly studies and *mitigates* falsification-asymmetric scrutiny in LMs — the doc's framing is on-target.
+
+---
+
+#### Hagendorff 2024, "Deception abilities emerged in large language models" — *PNAS* 121(24) — [doi:10.1073/pnas.2317967121](https://doi.org/10.1073/pnas.2317967121) (preprint: [arXiv:2307.16513](https://arxiv.org/abs/2307.16513))
+
+**Tier:** 2
+
+**Doc passage (§3.2):** "Hagendorff (2024), 'Deception abilities emerged in large language models' — *PNAS* 121(24) — … Foundational framing reference for emergent LLM deception capability."
+
+**Abstract gloss (from arXiv preprint; PNAS page returned 403):** Frontier LLMs including GPT-4 "possess conceptual understanding of deception strategies, demonstrating capabilities to induce false beliefs in other agents." Frames deception as an emergent capability at the GPT-4 scale.
+
+**Verdict:** faithful. The doc uses Hagendorff only as a "foundational framing reference" — a placement-level use that the abstract supports.
+
+---
+
+#### Wang et al. 2026, "When Truth Is Overridden..." — cross-ref
+
+**Tier:** 2
+
+**Doc passage (§3.2):** "main review §5 cross-ref; user opinion statements override stored truth internally — supports the deployed-vs-available gap."
+
+**Verdict:** cross-reference to the main lit review (audited there). Placement-only in this extension. **Faithful.**
+
+---
+
+#### Vennemeyer et al. 2025, "Sycophancy Is Not One Thing..." — cross-ref
+
+**Tier:** 2
+
+**Doc passage (§3.2):** "main review §5; sycophancy decomposes causally into three subtypes."
+
+**Verdict:** cross-reference to the main lit review (audited there). Placement-only. **Faithful.**
+
+---
+
+#### Cheng et al. 2026, "Verbalizing LLMs' Assumptions..." — cross-ref
+
+**Tier:** 2
+
+**Doc passage (§3.2):** "main review §5; the assumption-verbalization primitive is shared with §2.3."
+
+**Verdict:** cross-reference to the main lit review (audited deeply there — note the documented "near-twin framing" gotcha in CITATION_USE_AUDIT.md's failure-mode history). The extension's use here is placement-only and explicitly relies on the main review's deeper audit. **Faithful in this artifact** (the verdict applies to the cross-reference shape; the main-review entry is the binding audit).
+
+---
+
+### IV-T2. Inference-time branching and test-time compute — §3.3
+
+#### Wu et al. 2024, "Inference Scaling Laws" — [arXiv:2408.00724](https://arxiv.org/abs/2408.00724)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Wu et al. (2024), 'Inference Scaling Laws' — arXiv:2408.00724 — smaller-models-plus-more-sampling can be compute-optimal (exogenous: vote / reranking)."
+
+**Abstract gloss:** Enhancing inference compute through "majority voting, tree search, and best-of-n sampling" can achieve better compute-efficiency than larger models; smaller models with advanced inference algorithms can outperform larger ones.
+
+**Verdict:** faithful. Note: the "exogenous: vote / reranking" tag is slightly loose — majority voting on raw answers is *endogenous* (model-internal agreement); only reward-model-based reranking is strictly exogenous. Not load-bearing for the lit review's argument; optional tightening only.
+
+---
+
+#### Chen et al. 2024, "Are More LLM Calls All You Need?" — [arXiv:2403.02419](https://arxiv.org/abs/2403.02419)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Chen et al. (2024), 'Are More LLM Calls All You Need?' — arXiv:2403.02419 — non-monotone returns from majority voting (endogenous)."
+
+**Abstract gloss:** "the performance of both Vote and Filter-Vote can first increase but then decrease as a function of the number of LM calls" — non-monotone; attributed to varying query difficulty.
+
+**Verdict:** faithful.
+
+---
+
+#### OpenAI o1 System Card (2024) — [arXiv:2412.16720](https://arxiv.org/abs/2412.16720)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "OpenAI o1 System Card (2024) — arXiv:2412.16720 — long internal CoT trained by RL."
+
+**Abstract gloss:** "The o1 model series is trained with large-scale reinforcement learning to reason using chain of thought." Safety-focused system card; confirms RL-trained-CoT framing.
+
+**Verdict:** faithful.
+
+---
+
+#### DeepSeek-R1 (2025) — [arXiv:2501.12948](https://arxiv.org/abs/2501.12948) ([*Nature* 2025](https://doi.org/10.1038/s41586-025-09422-z))
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "DeepSeek-AI (2025), 'DeepSeek-R1' — … RL with **exogenous** verifiable rewards on math/code; self-reflection emerges; greedy CoT at inference (endogenous)."
+
+**Abstract gloss:** "Pure reinforcement learning (RL)" without human-labeled reasoning trajectories enables "emergent reasoning patterns including 'self-reflection, verification, and dynamic strategy adaptation.'" Focus on "verifiable tasks such as mathematics, coding competitions, and STEM fields."
+
+**Verdict:** faithful. The "exogenous verifiable rewards" and "self-reflection emerges" framing match the abstract.
+
+---
+
+#### Muennighoff et al. 2025, "s1: Simple Test-Time Scaling" — [arXiv:2501.19393](https://arxiv.org/abs/2501.19393)
+
+**Tier:** 2
+
+**Doc passage (§3.3, §4.1):** "Muennighoff et al. (2025), 's1: Simple Test-Time Scaling' — arXiv:2501.19393 — budget forcing via 'Wait'; endogenous."
+
+**Abstract gloss:** Budget forcing both terminates early ("forcefully stopping the model's thinking process when desired") and extends thinking ("appending 'Wait' multiple times to prompt additional reasoning steps").
+
+**Verdict:** faithful. The §4.1 framing — "'Wait' controls *quantity* of endogenous thinking" — is exactly what the abstract describes.
+
+---
+
+#### Cobbe et al. 2021, "Training Verifiers to Solve Math Word Problems" — [arXiv:2110.14168](https://arxiv.org/abs/2110.14168)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Cobbe et al. (2021), 'Training Verifiers to Solve Math Word Problems' — arXiv:2110.14168 — origin of best-of-N + trained verifier."
+
+**Abstract gloss:** Introduces GSM8K; trains separate verifiers to rank multiple candidate solutions, demonstrating better scaling than direct finetuning.
+
+**Verdict:** faithful — Cobbe et al. is correctly cited as the canonical origin of best-of-N + trained verifier.
+
+---
+
+#### Lightman et al. 2023, "Let's Verify Step by Step" — [arXiv:2305.20050](https://arxiv.org/abs/2305.20050)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Lightman et al. (2023), 'Let's Verify Step by Step' — PRM anchor."
+
+**Abstract gloss:** "Process supervision significantly outperforms outcome supervision for training models to solve problems from the challenging MATH dataset."
+
+**Verdict:** faithful — correctly anchored as the PRM (process reward model) canonical citation.
+
+---
+
+#### Setlur et al. 2024, "Rewarding Progress" — [arXiv:2410.08146](https://arxiv.org/abs/2410.08146)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Setlur et al. (2024), 'Rewarding Progress...' — arXiv:2410.08146 — automated process verifiers measuring progress."
+
+**Abstract gloss:** "The process reward for a step should measure progress: a change in the likelihood of producing a correct response" — Process Advantage Verifiers compute step-level advantage via a separate prover policy.
+
+**Verdict:** faithful.
+
+---
+
+#### Lifshitz et al. 2025, "Multi-Agent Verification" — [arXiv:2502.20379](https://arxiv.org/abs/2502.20379)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Lifshitz et al. (2025), 'Multi-Agent Verification...' — arXiv:2502.20379 — weak-to-strong verifier ensemble."
+
+**Abstract gloss:** Introduces "Aspect Verifiers" — off-the-shelf LLMs as building blocks. Notable: "combining weak verifiers improves even stronger LLMs." BoN-MAV algorithm shows stronger scaling than self-consistency and single-RM verification.
+
+**Verdict:** faithful. "Weak-to-strong verifier ensemble" matches the paper's central claim.
+
+---
+
+#### Yao et al. 2023, "Tree of Thoughts" — [arXiv:2305.10601](https://arxiv.org/abs/2305.10601)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Yao et al. (2023), 'Tree of Thoughts' — arXiv:2305.10601 — LLM self-evaluation (endogenous)."
+
+**Abstract gloss:** ToT enables "self-evaluating choices to decide the next course of action, as well as looking ahead or backtracking" — explicit endogenous self-evaluation. Game of 24: 4% (CoT) → 74% (ToT).
+
+**Verdict:** faithful.
+
+---
+
+#### Qi et al. 2024, rStar — [arXiv:2408.06195](https://arxiv.org/abs/2408.06195)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "rStar (Qi et al. 2024, arXiv:2408.06195); … rStar endogenous."
+
+**Abstract gloss:** MCTS-augmented mutual-consistency between two SLMs (target generates; second SLM acts as discriminator). Trajectories agreed upon are taken as more likely correct — a peer-validation (mutual-consistency) signal between models.
+
+**Verdict:** faithful (with one nuance worth noting). The "endogenous" tag is correct in that no exogenous task verifier is used; however the signal is *cross-model* mutual consistency, not strict single-model self-evaluation. The §3.3 listing's purpose — distinguishing endogenous vs. exogenous — is preserved; the cross-model nuance is not load-bearing for the lit review's argument.
+
+---
+
+#### Guan et al. 2025, rStar-Math — [arXiv:2501.04519](https://arxiv.org/abs/2501.04519)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "rStar-Math (Guan et al. 2025, arXiv:2501.04519) — MCTS … rStar-Math exogenous via executed code."
+
+**Abstract gloss:** "Novel code-augmented CoT data synthesis method, which performs extensive MCTS rollouts to generate step-by-step verified reasoning trajectories." Improves Qwen2.5-Math-7B on MATH from 58.8% → 90.0%.
+
+**Verdict:** faithful — code execution is the exogenous verifier as the doc characterizes.
+
+---
+
+#### Wang et al. 2022, Self-Consistency — [arXiv:2203.11171](https://arxiv.org/abs/2203.11171)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Wang et al. (2022), 'Self-Consistency' — arXiv:2203.11171 — endogenous majority vote."
+
+**Abstract gloss:** "Self-consistency leverages the intuition that a complex reasoning problem typically admits multiple different ways of thinking leading to its unique correct answer" — majority voting over sampled reasoning paths.
+
+**Verdict:** faithful.
+
+---
+
+#### Du et al. 2023, Multi-Agent Debate — [arXiv:2305.14325](https://arxiv.org/abs/2305.14325)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Du et al. (2023), 'Multi-Agent Debate' — arXiv:2305.14325 — endogenous mutual critique."
+
+**Abstract gloss:** "Multiple language model instances propose and debate their individual responses and reasoning processes over multiple rounds to arrive at a common final answer" — "society of minds" framing.
+
+**Verdict:** faithful.
+
+---
+
+#### "Stop Overvaluing Multi-Agent Debate" (2025) — [arXiv:2502.08788](https://arxiv.org/abs/2502.08788)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "'Stop Overvaluing Multi-Agent Debate' (2025) — arXiv:2502.08788 — debate ≈ self-consistency at matched compute unless models heterogeneous."
+
+**Abstract gloss:** "MAD often fail to outperform simple single-agent baselines such as Chain-of-Thought and Self-Consistency, even when consuming significantly more inference-time computation"; recommends embracing model heterogeneity.
+
+**Verdict:** faithful. The "unless models heterogeneous" qualifier is exactly the paper's positive recommendation.
+
+---
+
+#### Alomrani et al. 2025, "Reasoning on a Budget" — [arXiv:2507.02076](https://arxiv.org/abs/2507.02076)
+
+**Tier:** 2
+
+**Doc passage (§3.3, §4.1):** "Alomrani et al. (2025), 'Reasoning on a Budget' — arXiv:2507.02076 — taxonomy of fixed-vs-adaptive budgets; most L2 methods select by endogenous confidence."
+
+**Abstract gloss:** Establishes L1 (controllability, fixed budgets) vs. L2 (adaptiveness, dynamic budgets based on difficulty or model confidence).
+
+**Verdict:** faithful — the L1/L2 taxonomy and the "confidence-driven" framing of L2 match the abstract.
+
+---
+
+#### Dubois et al. 2026, "Ask Don't Tell" — [arXiv:2602.23971](https://arxiv.org/abs/2602.23971)
+
+**Tier:** 2
+
+**Doc passage (§3.3):** "Dubois et al. (2026), 'Ask Don't Tell: Reducing Sycophancy in Large Language Models' — arXiv:2602.23971 — indirect prompt transformations to reduce sycophancy; endogenous."
+
+**Abstract gloss:** Controlled study of input framing (epistemic certainty, perspective, affirmation/negation); "sycophancy is substantially higher in response to non-questions compared to questions"; mitigation = convert statements to questions before responding.
+
+**Verdict:** faithful. "Indirect prompt transformations" is a reasonable paraphrase of "convert statements to questions."
+
+---
+
+### V-T2. Entropy and decoding structure — §3.4
+
+#### Meister et al. 2023, "Locally Typical Sampling" — [arXiv:2202.00666](https://arxiv.org/abs/2202.00666)
+
+**Tier:** 2
+
+**Doc passage (§3.4):** "Meister et al. (2023), 'Locally Typical Sampling' — TACL — arXiv:2202.00666 — samples tokens whose information content is close to the LM's current conditional entropy."
+
+**Abstract gloss:** Decoding method that "enforces consistency between each word's information content and the model's conditional entropy." Evaluated on abstractive summarization and story generation; competitive with nucleus/top-k while reducing degenerate repetitions.
+
+**Verdict:** faithful.
+
+---
+
+#### Basu et al. 2021, "Mirostat" — [arXiv:2007.14966](https://arxiv.org/abs/2007.14966)
+
+**Tier:** 2
+
+**Doc passage (§3.4):** "Basu et al. (2021), 'Mirostat' — ICLR — arXiv:2007.14966 — feedback control holding *average* surprise at a target."
+
+**Abstract gloss:** "Generates text (of any length) with a predetermined value of perplexity." Feedback control over sampling parameters; "cross-entropy has a near-linear relation with repetition."
+
+**Verdict:** faithful — "feedback control holding average surprise at a target" matches Mirostat exactly.
+
+---
+
+#### Zhang et al. 2024, "EDT" — [arXiv:2403.14541](https://arxiv.org/abs/2403.14541)
+
+**Tier:** 2
+
+**Doc passage (§3.4):** "Zhang et al. (2024), 'EDT: Entropy-based Dynamic Temperature Sampling' — arXiv:2403.14541 — per-token adaptive temperature from predictive entropy."
+
+**Abstract gloss:** Dynamically adjusts the temperature parameter during decoding based on entropy, replacing fixed-temperature sampling.
+
+**Verdict:** faithful.
+
+---
+
+#### Genzel & Charniak 2002, "Entropy Rate Constancy in Text" — [ACL Anthology P02-1026](https://aclanthology.org/P02-1026/)
+
+**Tier:** 2
+
+**Doc passage (§3.4):** "Genzel & Charniak (2002), 'Entropy Rate Constancy in Text' — … out-of-context sentence entropy increases with position; documents a real positional entropy structure."
+
+**Abstract gloss:** Abstract not retrieved from the Anthology page in this pass (metadata-only landing page). Widely-cited primary claim: under n-gram models, the entropy of a sentence considered out of context *increases* with its position in the document, while in-context entropy stays roughly constant — the canonical "entropy rate constancy" claim. Verma 2023 (Tier 1) replicates this finding for n-gram models and explicitly identifies it as Genzel & Charniak's contribution.
+
+**Verdict:** faithful (verified indirectly via Verma 2023's replication framing). **Flag: abstract not directly retrieved.**
+
+---
+
+#### "Predicting Surprisal Contours in Long-form Discourse" (EMNLP 2024) — [ACL 2024.emnlp-main.1047](https://aclanthology.org/2024.emnlp-main.1047/)
+
+**Tier:** 2
+
+**Doc passage (§3.4):** "directly models the temporal surprisal profile of human text."
+
+**Abstract gloss:** Proposes the "Structured Context Hypothesis": "speakers modulate information rate based on location within a hierarchically-structured model of discourse." Uses LMs to predict how surprisal fluctuates across natural text; hierarchical structural features significantly predict variation.
+
+**Verdict:** faithful. The doc's one-line use ("directly models the temporal surprisal profile") matches the paper's contribution.
+
+---
+
+### VI-T2. Deception probing — §3.5
+
+#### Azaria & Mitchell 2023, "The Internal State of an LLM Knows When It's Lying" — [arXiv:2304.13734](https://arxiv.org/abs/2304.13734)
+
+**Tier:** 2
+
+**Doc passage (§3.5):** Listed as an existing deception probe targeting "the model's own lying."
+
+**Abstract gloss:** Classifier on hidden-layer activations achieves 71–83% accuracy at labeling true vs. false statements; outperforms model confidence scores.
+
+**Verdict:** faithful — paper does probe the model's own truthful-vs-false outputs, as the doc characterizes.
+
+---
+
+#### Pacchiardi et al. 2023, "How to Catch an AI Liar" — [arXiv:2309.15840](https://arxiv.org/abs/2309.15840)
+
+**Tier:** 2
+
+**Doc passage (§3.5):** Existing deception probe; "model's own lying."
+
+**Abstract gloss:** Detection by "asking a predefined set of unrelated follow-up questions after a suspected lie, and feeding the LLM's yes/no answers into a logistic regression classifier." Transfers across architectures.
+
+**Verdict:** faithful. Note: Pacchiardi's method is technically a *behavioral* probe (follow-up questioning), not an internal-activation probe — but the doc's claim is only that it "targets the model's own lying," which is correct.
+
+---
+
+#### Anthropic / MacDiarmid et al. 2024, "Simple probes can catch sleeper agents" — [Anthropic research post](https://www.anthropic.com/research/probes-catch-sleeper-agents)
+
+**Tier:** 2
+
+**Doc passage (§3.5):** Existing deception probe; "model's own lying."
+
+**Abstract gloss:** "Linear detectors with AUROC scores above 99% can be created using generic contrast pairs" — detects defection to dangerous behavior without knowledge of trigger.
+
+**Verdict:** faithful. The probe targets the model's own behavior, which is the §3.5 claim.
+
+---
+
+#### Burns et al. 2023, "Discovering Latent Knowledge in Language Models Without Supervision" (CCS) — [arXiv:2212.03827](https://arxiv.org/abs/2212.03827)
+
+**Tier:** 2
+
+**Doc passage (§3.5):** Existing deception probe; "model's own lying."
+
+**Abstract gloss:** Unsupervised method that "directly find[s] latent knowledge inside the internal activations of a language model" by identifying activation directions satisfying logical consistency. ~4% gain over zero-shot accuracy on 6 models × 10 QA datasets.
+
+**Verdict:** faithful (with a minor nuance worth noting). CCS targets the model's *latent knowledge* / belief representation, not strictly "lying" — but the §3.5 framing ("the model's own lying" as an umbrella) is the standard taxonomy and the inclusion is conventional.
+
+---
+
+#### Marks & Tegmark 2023 — cross-ref
+
+**Tier:** 2
+
+**Doc passage (§3.5):** "Marks & Tegmark (2023) — main review cross-ref."
+
+**Verdict:** cross-reference to main lit review; placement-only. **Faithful.**
+
+---
+
+#### "When Thinking LLMs Lie: Strategic Deception in Reasoning Models" (2025) — [arXiv:2506.04909](https://arxiv.org/abs/2506.04909)
+
+**Tier:** 2
+
+**Doc passage (§3.5):** "'When Thinking LLMs Lie: Strategic Deception in Reasoning Models' (2025) — arXiv:2506.04909 — deception vectors via Linear Artificial Tomography; methodologically close to §4.2's Davidson-vs-Mele probe experiment."
+
+**Abstract gloss:** Uses "Linear Artificial Tomography (LAT)" to extract "deception vectors," achieving 89% detection accuracy; activation steering induces deception in 40% of cases without explicit prompts.
+
+**Verdict:** faithful. The LAT attribution is correct.
+
+---
+
+#### Miah et al. 2025, "Hidden in Plain Sight" — [arXiv:2506.09424](https://arxiv.org/abs/2506.09424)
+
+**Tier:** 2
+
+**Doc passage (§3.5):** "Miah et al. (2025), 'Hidden in Plain Sight' — arXiv:2506.09424 — LLMs as external classifiers over third-party human-deception corpora; does *not* probe the live interlocutor's deceptiveness internally."
+
+**Abstract gloss:** Evaluates whether LLMs can identify deceptive content; "fine-tuned LLMs achieve state-of-the-art performance on textual deception detection tasks"; struggles with cross-modal cues; uses courtroom interviews, instructed deception, and fraudulent reviews datasets.
+
+**Verdict:** faithful. The doc's distinction — "LLMs as classifiers over corpora, not probing the live interlocutor internally" — exactly matches the paper's setup.
+
+---
+
+#### Kaczmarek 2025, "Self-Deception in Human–AI Emotional Relations" — [doi:10.1111/japp.12786](https://onlinelibrary.wiley.com/doi/10.1111/japp.12786)
+
+**Tier:** 2
+
+**Doc passage (§3.5):** "Kaczmarek (2025), 'Self-Deception in Human–AI Emotional Relations' — *Journal of Applied Philosophy* — … philosophical; no detection method."
+
+**Abstract gloss:** Unfetchable in this pass (Wiley returned 403). The doc's characterization — "philosophical; no detection method" — is a scoping disclaimer, not a content claim about the paper. Standard reading of the title and venue (Journal of Applied Philosophy) supports the "philosophical, no detection method" gloss.
+
+**Verdict:** faithful in scope (placement-only). **Flag: abstract not directly retrieved.**
+
+---
+
+### VII-T2. Reasoning termination and overthinking — §3.6
+
+#### "Stop Spinning Wheels: Mitigating LLM Overthinking via Mining Patterns for Early Reasoning Exit" — [arXiv:2508.17627](https://arxiv.org/abs/2508.17627)
+
+**Tier:** 2
+
+**Doc passage (§3.6):** "Reasoning Completion Point framework."
+
+**Abstract gloss:** Reasoning Completion Point Detector (RCPD) reduces token usage up to 44% while preserving accuracy on AIME and GPQA using Qwen3 and DeepSeek-R1.
+
+**Verdict:** faithful — "Reasoning Completion Point framework" is exactly the paper's contribution.
+
+---
+
+#### "Conformal Thinking: Risk Control for Reasoning on a Compute Budget" — [arXiv:2602.03814](https://arxiv.org/abs/2602.03814)
+
+**Tier:** 2
+
+**Doc passage (§3.6):** "statistically principled stopping; operationalizes 'branch-cutting as resource decision.'"
+
+**Abstract gloss:** Frames token-budget allocation as a risk control problem; dual stopping mechanisms (upper threshold for confidence; lower for unsolvable problems); uses distribution-free risk control.
+
+**Verdict:** faithful — "statistically principled stopping" matches distribution-free risk control; the §2.1 "branch-cutting as resource decision" framing is an apt characterization of the paper's contribution.
+
+---
+
+#### "When More Thinking Hurts: Overthinking in LLM Test-Time Compute Scaling" — [arXiv:2604.10739](https://arxiv.org/abs/2604.10739)
+
+**Tier:** 2
+
+**Doc passage (§3.6):** "diminishing / negative returns."
+
+**Abstract gloss:** "Marginal returns diminish substantially at higher budgets and that models exhibit 'overthinking', where extended reasoning is associated with abandoning previously correct answers."
+
+**Verdict:** faithful.
+
+---
+
+#### "Don't Overthink it: Preferring Shorter Thinking Chains for Improved LLM Reasoning" — [arXiv:2505.17813](https://arxiv.org/abs/2505.17813)
+
+**Tier:** 2
+
+**Doc passage (§3.6):** "shorter chains can outperform; relates to *evasive regress*."
+
+**Abstract gloss:** "Shorter reasoning chains within individual questions are significantly more likely to yield correct answers — up to 34.5% more accurate"; introduces short-m@k parallel generation with up to 40% compute reduction.
+
+**Verdict:** faithful. The "*evasive regress*" cross-reference is the doc's own framing (§2.1) and is a reasonable conceptual link, not a paper claim.
+
+---
+
+#### "Scaling over Scaling: Exploring Test-Time Scaling Plateau in Large Reasoning Models" — [arXiv:2505.20522](https://arxiv.org/abs/2505.20522)
+
+**Tier:** 2
+
+**Doc passage (§3.6):** "saturation plateau."
+
+**Abstract gloss:** Introduces Test-Time Scaling Performance Model (TTSPM); analyzes parallel and sequential scaling, deriving saturation points; validated on AIME and MATH-500.
+
+**Verdict:** faithful.
+
+---
+
+#### "Stop Overthinking: A Survey on Efficient Reasoning for LLMs" — [arXiv:2503.16419](https://arxiv.org/abs/2503.16419)
+
+**Tier:** 2
+
+**Doc passage (§3.6):** Listed without elaboration.
+
+**Abstract gloss:** Survey of efficient-reasoning approaches in three directions: model-based, output-based, and input-driven.
+
+**Verdict:** faithful (placement only; the doc makes no specific claim about its contents).
+
+---
+
+#### "Test-Time Scaling in Reasoning Models Is Not Effective for Knowledge-Intensive Tasks Yet" — [arXiv:2509.06861](https://arxiv.org/abs/2509.06861)
+
+**Tier:** 2
+
+**Doc passage (§3.6, §4.1):** "scaling helps verifiable math/code but not knowledge retrieval and can increase hallucination. Important boundary for §4.1's 'checkable domains first.'"
+
+**Abstract gloss:** Evaluated 14 reasoning models on two knowledge-intensive benchmarks; extended reasoning "does not consistently improve accuracy and often increases hallucinations"; "compute-only test-time scaling … cannot increase information about the ground-truth answer."
+
+**Verdict:** faithful. The doc's use as a "boundary for §4.1's 'checkable domains first'" is well-supported by the paper's explicit framing.
+
+---
+
+### VIII-T2. Self-improvement, model collapse, distillation, AI-text detection — §3.7
+
+#### Gerstgrasser et al. 2024, "Is Model Collapse Inevitable?" — [arXiv:2404.01413](https://arxiv.org/abs/2404.01413)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Mitigation: keep real data in the pool."
+
+**Abstract gloss:** Demonstrates that "accumulating successive generations of synthetic data alongside original real data prevents performance degradation." Validated on LMs, diffusion models, VAEs.
+
+**Verdict:** faithful — "keep real data in the pool" is precisely the paper's mitigation.
+
+---
+
+#### "A Closer Look at Model Collapse: From a Generalization-to-Memorization Perspective" (2025) — [arXiv:2509.16499](https://arxiv.org/abs/2509.16499)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Mitigates collapse with entropy-based data selection."
+
+**Abstract gloss:** Identifies that collapse stems from "decreasing entropy in synthetic training data across cycles"; proposes entropy-based data selection. NeurIPS 2025 Spotlight. Tested on diffusion models.
+
+**Verdict:** faithful (with one minor scope note worth flagging). The paper's empirical setting is **diffusion models** (visual quality and diversity), not LMs — the doc's use is conceptual ("entropy-based data selection" as a mitigation) and does not transfer claims to LMs; not load-bearing.
+
+---
+
+#### Yu et al. 2017, SeqGAN — [arXiv:1609.05473](https://arxiv.org/abs/1609.05473)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Textual GAN background; discriminator is whole-sequence real/fake."
+
+**Abstract gloss:** Models generator as RL policy to bypass discrete-token gradient problem; discriminator provides reward signals for complete sequences, propagated backward via Monte Carlo search.
+
+**Verdict:** faithful. "Discriminator is whole-sequence real/fake" matches the paper's setup.
+
+---
+
+#### Kim & Rush 2016, Sequence-Level KD — [ACL D16-1139](https://aclanthology.org/D16-1139/)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Matches the teacher's sequence distribution."
+
+**Abstract gloss:** Abstract not retrieved in this pass (Anthology metadata page only). Widely-attested canonical claim: introduces sequence-level distillation by training the student on the teacher's beam-search outputs (approximating the teacher's sequence distribution); contrasted with token-level word-by-word KL.
+
+**Verdict:** faithful (verified indirectly via standard secondary attestation). **Flag: abstract not directly retrieved.**
+
+---
+
+#### Gu et al. 2023, MiniLLM — [arXiv:2306.08543](https://arxiv.org/abs/2306.08543)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Reverse KL; on-policy student samples; mode-seeking."
+
+**Abstract gloss:** "Replac[es] standard forward KL divergence with reverse KL divergence" to prevent students from overestimating low-probability regions; uses on-policy optimization; mode-seeking property.
+
+**Verdict:** faithful — all three load-bearing characteristics (reverse KL; on-policy; mode-seeking) confirmed.
+
+---
+
+#### Agarwal et al. 2023, GKD — [arXiv:2306.13649](https://arxiv.org/abs/2306.13649)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "On-policy with teacher feedback."
+
+**Abstract gloss:** "GKD trains the student on its self-generated output sequences by leveraging feedback from the teacher on such sequences" — on-policy student samples + teacher feedback.
+
+**Verdict:** faithful.
+
+---
+
+#### "Entropy-Aware On-Policy Distillation" (2026) — [arXiv:2603.07079](https://arxiv.org/abs/2603.07079)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "closest to entropy-structure-aware distillation; mixes forward/reverse KL by teacher entropy. Per-position, not temporal profile."
+
+**Abstract gloss:** Applies "reverse KL for confident predictions while switching to forward KL when teacher entropy is elevated"; maintains "generation diversity (sustained token-level entropy)"; math reasoning gains +1.37 to +5.05 Pass@8.
+
+**Verdict:** faithful. The "per-position, not temporal profile" caveat is correct — the mixing is *token-by-token* based on teacher entropy at that position.
+
+---
+
+#### Mitchell et al. 2023, DetectGPT — [arXiv:2301.11305](https://arxiv.org/abs/2301.11305)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Log-prob curvature feature; detector only."
+
+**Abstract gloss:** "Text sampled from an LLM tends to occupy negative curvature regions of the model's log probability function." Zero-shot detection using model log-probs and random perturbations via T5.
+
+**Verdict:** faithful.
+
+---
+
+#### Hans et al. 2024, Binoculars — [arXiv:2401.12070](https://arxiv.org/abs/2401.12070)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Contrast-of-two-LMs detector."
+
+**Abstract gloss:** "A score based on contrasting two closely related language models is highly accurate at separating human-generated and machine-generated text"; >90% detection on ChatGPT at 0.01% FPR.
+
+**Verdict:** faithful.
+
+---
+
+#### Csaky et al. 2019, "Improving Neural Conversational Models with Entropy-Based Data Filtering" — [arXiv:1905.05471](https://arxiv.org/abs/1905.05471)
+
+**Tier:** 2
+
+**Doc passage (§3.7):** "Data-filtering, not bootstrap reward."
+
+**Abstract gloss:** Filters dialog datasets by removing generic utterances via entropy-based scoring; no human annotation; tested across 17 metrics. Method = dataset curation, not training-signal modification.
+
+**Verdict:** faithful — "data-filtering, not bootstrap reward" matches the paper's setup.
+
+---
+
+## Tier 3 — reference-list-only check
+
+**Result: empty.** Every paper named in the lit review's §3 reference subsections appears at least once in an inline use (the §3 entries themselves are the inline uses; §§2, 4 reuse a subset of them). The references and inline citations are in good correspondence — no Tier-3 entries to record.
+
+---
+
+## Tier-2 pass — fetch failures and scope notes
+
+Citations whose abstracts could not be retrieved in this pass (verdict relies on standard secondary attestation or the doc's placement-only use; flagged in entry):
+
+- **Klein 1999** (Wiley DOI / SEP infinitism slug both 404). Standard infinitism attribution.
+- **Albert 1968/1985** (Princeton UP page 404; SEP Münchhausen-trilemma slug not present). Standard trilemma attribution.
+- **Metzinger 2003 / 2009** (MIT Press 403). Standard self-model-theory placement.
+- **Hagendorff 2024 PNAS** (PNAS 403). Verified via the [arXiv preprint](https://arxiv.org/abs/2307.16513).
+- **Kaczmarek 2025** (Wiley 403). Placement-only ("philosophical; no detection method") supported by venue and title.
+- **Genzel & Charniak 2002** (Anthology page is metadata-only; abstract not in landing markup). Verified indirectly via Verma 2023's replication framing.
+- **Kim & Rush 2016** (Anthology page is metadata-only). Verified indirectly via canonical secondary attestation.
+
+**No Tier-2 entry's verdict turned over a load-bearing finding.** All flagged-unfetchable entries are either placement-only or supported by independent secondary attestation; the lit review's argument does not depend on any of them at a level deeper than the abstract.

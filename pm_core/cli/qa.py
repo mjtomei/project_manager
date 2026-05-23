@@ -239,7 +239,7 @@ def _qa_author(name: str, category: str) -> None:
     root = state_root()
     prompt = qa_authoring.build_authoring_prompt(name, category, target)
     rc = launch_claude(prompt, session_key=f"qa-author:{category}:{name}",
-                       pm_root=root, resume=False)
+                       pm_root=root, resume=False, session_type="qa_author")
     raise SystemExit(rc)
 
 
@@ -344,7 +344,8 @@ def qa_regression(test_id: str, session: str | None, file_prs: bool):
     click.echo("-" * 60)
 
     rc = launch_claude(full_prompt, session_key=f"qa-regression:{test_id}",
-                       pm_root=root, cwd=None, resume=False)
+                       pm_root=root, cwd=None, resume=False,
+                       session_type="qa_regression")
     raise SystemExit(rc)
 
 
@@ -558,6 +559,7 @@ End with a summary of which steps work and which don't, then one of:
             prompt=prompt,
             cwd=container_mod._CONTAINER_WORKDIR,
             write_dir=str(clone_path),
+            session_type="qa_author",
         )
         shell_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True)
         run_cwd = str(qa_workdir)
@@ -565,6 +567,7 @@ End with a summary of which steps work and which don't, then one of:
         shell_cmd = build_claude_shell_cmd(
             prompt=prompt,
             cwd=str(clone_path),
+            session_type="qa_author",
         )
         run_cwd = str(clone_path)
 
@@ -655,7 +658,7 @@ To interact with this session, use commands like:
 {body}
 """
 
-    cmd = build_claude_shell_cmd(prompt=full_prompt)
+    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author")
     cwd = str(root.parent) if root.name == "pm" else str(root)
 
     if target_window:
@@ -711,7 +714,7 @@ def qa_standalone(instruction_id: str):
     click.echo(f"Running standalone QA: {item['title']}")
     click.echo(f"  Workdir: {workdir}")
 
-    cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir)
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir, session_type="qa_author")
     # Launch as tmux window if in a session, otherwise blocking
     session = tmux_mod.get_session_name() if tmux_mod.in_tmux() else None
     if session:
