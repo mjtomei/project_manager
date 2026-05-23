@@ -292,9 +292,17 @@ def fake_claude_config_for_type(
 
     The special ``_all`` key turns on "fake everything" mode: any session
     type without its own entry — and any call with no *session_type* at all —
-    falls back to ``_all``, which is always treated as a no-verdict session
-    (its ``verdicts``, if any, are ignored).  Explicit per-type entries still
-    win over ``_all``.
+    falls back to ``_all`` (its ``verdicts``, if any, are ignored).  Explicit
+    per-type entries still win over ``_all``.
+
+    ``_all`` is a no-verdict session by default, *except* for verdict-producing
+    session types (``review``, ``qa_finalize``, … — anything with a non-empty
+    entry in ``SESSION_TYPE_VERDICTS``).  Routing such a type through the
+    no-verdict catch-all would launch the no-verdict mock, which never emits a
+    verdict and hangs the verdict poller forever; so a catch-all'd
+    verdict-producing session is given its default (first/happy-path) verdict
+    instead.  To force a genuinely no-verdict session for such a type, give it
+    an explicit per-type entry with empty ``verdicts``.
 
     Returns None when:
 
@@ -309,8 +317,16 @@ def fake_claude_config_for_type(
         all_config = raw.get("_all")
         if all_config is None:
             return None
-        # Catch-all is always a no-verdict session — strip any stray verdicts.
+        # Catch-all is a no-verdict session by default — strip any stray
+        # verdicts.
         type_config = {k: v for k, v in all_config.items() if k != "verdicts"}
+        # ...but a verdict-producing session type routed through the catch-all
+        # with no verdict would launch the no-verdict mock and hang the verdict
+        # poller forever. Give it its default (happy-path) verdict instead.
+        from pm_core.fake_claude import SESSION_TYPE_VERDICTS
+        allowed = SESSION_TYPE_VERDICTS.get(session_type or "", ())
+        if allowed:
+            type_config["verdicts"] = {allowed[0]: 1}
     defaults = raw.get("_defaults", {})
     merged = {**defaults, **type_config}
     return merged

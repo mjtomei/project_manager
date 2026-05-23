@@ -875,6 +875,33 @@ class TestFakeClaudeConfig:
         with pytest.raises(ValueError, match="_all"):
             set_fake_claude_config(tag, {"_all": {"verdicts": {"PASS": 1}}})
 
+    def test_all_gives_verdict_producing_type_default_verdict(self, tmp_path, monkeypatch):
+        """A verdict-producing session routed through _all gets its default
+        (happy-path) verdict instead of falling to the no-verdict mock, which
+        would hang the verdict poller forever."""
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        # Reject-only config that omits qa_finalize, plus an _all catch-all.
+        set_fake_claude_config(tag, {
+            "_all": {"delay": 0.1},
+            "qa_concretize": {"verdicts": {"REFINER_REJECT": 1}},
+        })
+        result = fake_claude_config_for_type("qa_finalize", tag)
+        assert result is not None
+        # qa_finalize's default verdict is FINALIZE_DONE (first allowed).
+        assert result["verdicts"] == {"FINALIZE_DONE": 1}
+        assert result["delay"] == 0.1   # other _all keys still merge through
+
+    def test_all_keeps_no_verdict_type_no_verdict(self, tmp_path, monkeypatch):
+        """A genuinely no-verdict session type (impl) routed through _all stays
+        no-verdict — the default-verdict rule only applies to verdict types."""
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, {"_all": {"delay": 0.1}})
+        result = fake_claude_config_for_type("impl", tag)
+        assert result is not None
+        assert "verdicts" not in result
+
 
 # ---------------------------------------------------------------------------
 # Launcher fake-claude integration (_pick_fake_verdict, _fake_claude_args,

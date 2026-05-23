@@ -7077,7 +7077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-22T22:48:58.471554+00:00'
+  updated_at: '2026-05-23T03:15:07.151295+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-05-22T22:48:58.471554+00:00'
   merged_at: null
@@ -7337,6 +7337,20 @@ prs:
       finalize will run, or expect a hang.'
     created_at: '2026-05-22T23:44:49Z'
     last_edited: '2026-05-22T23:44:49Z'
+  - id: note-fa6fddd
+    text: 'POST-QA CODE CHANGE — re-run all phases (impl/review/QA) before merge.
+      Added Fix 1 for the scenario-28 drift (note-05a576a): fake_claude_config_for_type
+      now gives a verdict-producing session type (per SESSION_TYPE_VERDICTS) its default/happy-path
+      verdict when it falls through to the _all no-verdict catch-all, instead of launching
+      the no-verdict mock and hanging the verdict poller. qa_finalize -> FINALIZE_DONE,
+      review/qa -> PASS, etc. Explicit per-type {verdicts: []} still forces a no-verdict
+      session. Touches pm_core/paths.py + tests/test_fake_claude.py (2 new tests,
+      full suite green: 211 passed). This invalidates the prior QA PASS, so the implementation
+      session must re-drive all phases. The underlying production loop hang (poll_for_verdict
+      has no wall-clock deadline / no retry when a verdict is expected but never produced)
+      is split out to pr-6566901 (surface-to-user + retry-N-times).'
+    created_at: '2026-05-23T03:15:05Z'
+    last_edited: '2026-05-23T03:15:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
@@ -21303,6 +21317,47 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-18T21:03:10.950816+00:00'
   updated_at: '2026-05-18T21:03:10.950816+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6566901
+  plan: null
+  title: 'Verdict-loop robustness: surface/retry when an expected verdict is never
+    produced'
+  branch: pm/pr-6566901-verdict-loop-robustness-surface-retry-when-an-expe
+  status: pending
+  depends_on: []
+  description: "## Problem\n\n`loop_shared.poll_for_verdict()` (and the loops built\
+    \ on it — review_loop,\nwatcher_loop, the QA loop) has no wall-clock deadline\
+    \ and no handling for the\ncase where a verdict-producing session goes idle WITHOUT\
+    \ ever emitting one of\nits expected verdicts. The `while True:` loop only exits\
+    \ on `stop_check`, the\npane disappearing, or a matched verdict; otherwise it\
+    \ waits 15s for the next\nidle hook, finds no verdict, and loops forever.\n\n\
+    Discovered via QA of pr-abcf70f (FakeClaudeSession), scenario 28: a fake\nfinalize\
+    \ session that emits no verdict makes the QA loop hang in finalize until\nmanually\
+    \ killed. Real Claude can hit the same shape — it can go idle without the\nexpected\
+    \ marker (asks a clarifying question, errors out, hits a limit) — so this\nis\
+    \ a latent production robustness bug, independent of the fake.\n\n(pr-abcf70f\
+    \ carries the complementary test-harness fix: fake-claude now emits a\nverdict-producing\
+    \ session's default verdict instead of routing it to the\nno-verdict mock. That\
+    \ removes the QA-authoring footgun but NOT the underlying\nloop hang, which this\
+    \ PR addresses.)\n\n## Scope\n\nWhen a verdict is expected but not produced:\n\
+    \n1. Bound the wait — add an overall deadline / max idles-without-verdict to\n\
+    \   `poll_for_verdict` so it cannot spin forever.\n2. Retry the original prompt\
+    \ a configurable number of times (re-send the prompt\n   to the same session)\
+    \ before giving up.\n3. If still no verdict after the retries, get the user's\
+    \ attention (clear\n   surfaced error / notification) instead of hanging silently.\n\
+    4. Apply consistently across review_loop, watcher_loop, and the QA loop.\n\n##\
+    \ Acceptance\n\n- A session that idles without emitting a verdict no longer hangs\
+    \ the loop.\n- The original prompt is retried up to N times.\n- After exhausting\
+    \ retries, the loop surfaces a clear, attention-getting state\n  rather than blocking\
+    \ indefinitely."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-05-23T03:14:54.863296+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
