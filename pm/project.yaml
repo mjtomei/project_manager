@@ -19535,6 +19535,22 @@ prs:
       planning should bind a github-backend instruction or treat this PR as in-process-regression-test-only.'
     created_at: '2026-05-23T06:59:28Z'
     last_edited: '2026-05-23T06:59:28Z'
+  - id: note-0e6cf63
+    text: 'QA scenario-5 refiner: FakeGitHubBackend has NO CLI/subprocess installer
+      (in-process only, by design — qa.md ambiguity #1). Real surface = Python driver:
+      backend.installed()/gh_runner ctx mgr, backend.calls/backend.prs assertions,
+      and real pm fns it intercepts (gh_ops.create_pr, git_ops.push_pm_branch). R9
+      restore is observable behaviorally (post-exit op routes to outer fake / not
+      recorded) plus gh_ops._GH_RUNNER pointer. R8 chokepoint: drive git_ops.push_pm_branch(pm_root,
+      backend="github") end-to-end (not a hand-rolled run_gh) so calls log proves
+      the conversion; it issues `pr create --head <sync-branch>` with NO --base, fake
+      defaults base to default_branch. GOTCHA: push_pm_branch does a real `git push
+      -u origin` BEFORE gh create — if push fails it returns {"error":...} and never
+      reaches the chokepoint. Use a plain tmp repo with a local bare origin (NOT a
+      pm workdir, whose push-proxy git shim rejects local-origin pushes); if a proxy
+      shim is on PATH, put real git (pm_core.fake_github.REAL_GIT dir) first.'
+    created_at: '2026-05-23T06:59:05Z'
+    last_edited: '2026-05-23T06:59:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
