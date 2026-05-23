@@ -7057,7 +7057,7 @@ prs:
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
   branch: pm/pr-abcf70f-fakeclaudesession-scriptable-claude-replacement-fo
-  status: in_review
+  status: qa
   depends_on: []
   description: "Add a fake Claude executable that can be launched in place of real\
     \ Claude for integration tests. The fake session writes realistic-looking output\
@@ -7087,9 +7087,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-17T21:40:04.626162+00:00'
+  updated_at: '2026-05-23T03:52:56.539696+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
-  reviewed_at: '2026-03-19T16:25:44.605020+00:00'
+  reviewed_at: '2026-05-23T03:52:56.539696+00:00'
   merged_at: null
   notes:
   - id: note-abd8475
@@ -7142,6 +7142,236 @@ prs:
       PR before merging and link it as a prerequisite of pr-fbda1a8.'
     created_at: '2026-05-14T14:46:11Z'
     last_edited: '2026-05-14T14:46:11Z'
+  - id: note-567f97b
+    text: 'SCOPE EXTENSION (2026-05-18, review discussion): this PR grew beyond the
+      original FakeClaudeSession plan in four ways, all to keep the fake''s verdict
+      surface from drifting from production:
+
+
+      1. No-verdict mock mode + `_all` "fake everything" config key. impl/watcher/merge-style
+      sessions emit no verdict; the fake now writes output and stays open (blocks
+      on stdin until the pane closes, or `--hold N`). The `_all` top-level key in
+      the per-session fake-claude JSON fakes every session type, with untyped calls
+      falling back to a no-verdict mock.
+
+
+      2. Verdict-surface audit (addresses note-30c1a2e). Audited every verdict-extraction
+      site and closed three drift gaps: watcher (emits READY/INPUT_REQUIRED, was registered
+      no-verdict), qa concretize/refiner (emits REFINED_STEPS/REFINER_REJECT, was
+      mis-typed as qa_scenario), qa finalize (emits FINALIZE_DONE/FINALIZE_BLOCKED,
+      had no session type). New verdicts added to the fake catalogue. NOTE: this PR
+      did NOT do the proposed shared VerdictRegistry refactor — verdict definitions
+      still live in two places (detection path + fake_claude.py). If that registry
+      is still wanted before pr-fbda1a8, it should be a follow-up PR.
+
+
+      3. qa_concretize and qa_finalize promoted to first-class model_config.SESSION_TYPES
+      (fall back to "qa"). The refiner and finalize panes are now independently model-targetable
+      via project.yaml model_config and `pm model set`. cli/model.py now derives its
+      session-type list from model_config instead of hard-coding a duplicate.
+
+
+      4. validate_model_config() added — flags unknown session-type keys / invalid
+      effort levels in project.yaml model_config (resolution silently ignored them
+      before). Surfaced as warnings in `pm model show`.
+
+
+      Also: master was merged into the branch (was ~949 commits behind); PASS_WITH_SUGGESTIONS
+      dropped per #166; all six QA build_claude_shell_cmd calls now pass session_tag=state.session_tag
+      to avoid cwd-based tag drift. Full suite green (2408 passed). Spec updated with
+      a "Scope extensions beyond the original plan" section.'
+    created_at: '2026-05-18T20:40:53Z'
+    last_edited: '2026-05-18T20:40:53Z'
+  - id: note-af93128
+    text: Filed the deferred shared-VerdictRegistry refactor as follow-up pr-1d8b2b7
+      (plan-regression) and linked it as a prerequisite of pr-fbda1a8, per the forward-looking
+      refactor request in note-30c1a2e.
+    created_at: '2026-05-18T21:03:43Z'
+    last_edited: '2026-05-18T21:03:43Z'
+  - id: note-530ac2e
+    text: "FOLLOW-UP REQUEST (QA planning, 2026-05-19): the current fake-claude config\
+      \ only supports weighted random verdict selection (claude_launcher._pick_fake_verdict\
+      \ → random.choices on a {\"verdicts\": {\"PASS\": 70, ...}} map). That makes\
+      \ multi-iteration loop scenarios (e.g. \"NEEDS_WORK on iter 1, PASS on iter\
+      \ 2\") unexpressible — you can only bias weights and hope, which is flaky in\
+      \ CI and silently mis-models the very state-machine transitions FakeClaudeSession\
+      \ was built to exercise.\n\nPROPOSAL: add a scripted-sequence form to the per-type\
+      \ \"verdicts\" field, alongside the existing weighted map:\n\n  {\n    \"review\"\
+      : { \"verdicts\": [\"NEEDS_WORK\", \"PASS\"] },\n    \"qa_verification\": {\n\
+      \      \"verdicts\": [\n        {\"verdict\": \"FLAGGED\", \"body\": \"Step\
+      \ 3: FAILED\"},\n        {\"verdict\": \"VERIFIED\"}\n      ]\n    }\n  }\n\n\
+      Design points:\n- Polymorphic field: dict = weighted (existing); list = scripted.\
+      \ List entries may be bare strings or objects carrying per-iteration overrides\
+      \ (body / delay / preamble / etc.) layered over the type's _defaults.\n- Cursor\
+      \ lives in a sidecar (~/.pm/sessions/<tag>/fake-claude.state with {\"review\"\
+      : 1, ...}), not the config — config stays declarative. Advance under flock (or\
+      \ O_CREAT|O_EXCL + rename) so two panes of the same session-type launching concurrently\
+      \ do not both grab slot 0.\n- End-of-sequence: clamp-to-last by default (extra\
+      \ iterations keep emitting the terminal verdict, so the loop still completes).\
+      \ Opt-in wrap via {\"sequence\": [...], \"wrap\": true} for the rare cycling\
+      \ case. Clamp is safer — wrap can silently mask iteration-count bugs.\n- Validation:\
+      \ extend validate_session_verdicts to walk the list form and check each entry's\
+      \ verdict against SESSION_TYPE_VERDICTS — same error surface in set_fake_claude_config.\n\
+      - Optional debug aid: pm fake-claude peek <tag> printing the next verdict each\
+      \ session type would emit.\n\nWhy now: pr-fbda1a8 (the bridge PR) will start\
+      \ asserting on loop iteration counts and verdict ordering. Without scripted\
+      \ sequences those tests can only express \"eventually PASS\", which defeats\
+      \ the point of replacing real Claude with a fake. The QA plan for this PR has\
+      \ a multi-iteration scenario (NEEDS_WORK → PASS, FLAGGED → VERIFIED) that is\
+      \ currently unexpressible against the existing schema.\n\nScope: ~50 LOC in\
+      \ claude_launcher.py + paths.py + tests. Small enough to land in this PR, or\
+      \ split as a follow-up improvement PR linked as a prerequisite of pr-fbda1a8\
+      \ (same pattern used for the deferred VerdictRegistry refactor in pr-1d8b2b7)."
+    created_at: '2026-05-19T22:53:52Z'
+    last_edited: '2026-05-19T22:53:52Z'
+  - id: note-5711350
+    text: 'QA INPUT_REQUIRED: fake-claude CLI emits each verdict shape correctly:
+      PASS; fake-claude drives a real pm loop end-to-end via session config: INPUT_REQUIRED;
+      _all catch-all + per-type override + validation rejection: PASS; Concurrent
+      fake panes under one session tag (shared-resource sweep): PASS; Multi-iteration
+      loop scripted by the fake (NEEDS_WORK → PASS): INPUT_REQUIRED; model_config
+      gains qa_concretize/qa_finalize + validator warnings: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-529ffa683bdc994f)'
+    created_at: '2026-05-19T23:04:47Z'
+    last_edited: '2026-05-19T23:04:47Z'
+  - id: note-c3f8404
+    text: 'QA PASS: fake-claude CLI emits every verdict shape and honors timing/hold/error
+      flags: PASS; Redirecting a real pm review loop to the fake via a dropped session
+      config: PASS; Fake-claude config validation and the per-session-type verdict
+      catalogue: PASS; Multi-iteration scripted sequences and concurrent cursor advancement:
+      PASS; Concurrent fake panes of different session types share the config without
+      colliding: PASS; model_config gains qa_concretize/qa_finalize and surfaces validation
+      warnings: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-18bc503772a8f513)'
+    created_at: '2026-05-21T04:31:55Z'
+    last_edited: '2026-05-21T04:31:55Z'
+  - id: note-4d91f42
+    text: 'NEXT QA RUN should generate: a scenario driving a full container-mode QA
+      loop end-to-end with fake-claude, to cover the verdict surfaces only validated
+      at config level so far -- qa_planning (QA_PLAN), qa_concretize (REFINED_STEPS/REFINER_REJECT),
+      qa_scenario (PASS/NEEDS_WORK), qa_verification (VERIFIED/FLAGGED), qa_finalize
+      (FINALIZE_DONE/FINALIZE_BLOCKED). GIVEN: throwaway project + session, container
+      mode enabled (we run podman and support podman-in-podman), fake-claude config
+      scripting each phase verdict, no real claude. WHEN: start the QA loop. THEN:
+      each phase pane runs the fake in its container and the loop walks planning->concretize->scenario->verification->finalize
+      to FINALIZE_DONE; a second pass scripting REFINER_REJECT / FLAGGED / FINALIZE_BLOCKED
+      exercises the alternate branches (scenario rejected / verification routed back
+      / finalize halted). INSTRUCTION tui-manual-test.md, ARTIFACT tmux-screen-recording.md.
+      Could not be added to the current QA run -- scenarios had already started. (An
+      earlier version of this note wrongly cited docker-in-docker as a blocker; podman-in-podman
+      is supported, so this IS achievable here -- it just needs a fresh QA run.) Broad
+      re-validation of each Phase 1-5 feature own logic stays pr-fbda1a8 charter.'
+    created_at: '2026-05-21T04:41:55Z'
+    last_edited: '2026-05-21T04:53:49Z'
+  - id: note-b27fbc6
+    text: 'QA INPUT_REQUIRED: Full container-mode QA loop happy path, every phase
+      driven by the fake: INPUT_REQUIRED; Container-mode QA loop alternate-branch
+      routing (reject / re-verify / blocked finalize): INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-68332b60c76366c9)'
+    created_at: '2026-05-21T05:13:06Z'
+    last_edited: '2026-05-21T05:13:06Z'
+  - id: note-16be5fb
+    text: 'QA NEEDS_WORK: Container-mode QA loop happy path — every phase driven by
+      the fake to FINALIZE_DONE: NEEDS_WORK; Container-mode QA loop alternate-branch
+      routing — reject, re-verify, blocked finalize: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-6f15be0165c692cd)'
+    created_at: '2026-05-21T16:41:40Z'
+    last_edited: '2026-05-21T16:41:40Z'
+  - id: note-029f2a2
+    text: 'NEXT QA RUN — corrections for the container-mode alternate-branch scenario
+      (could not be applied to the 2026-05-21 run; scenarios are locked once started).
+      The alternate-branch QA-loop scenario as previously planned contradicts the
+      loop code in two places; both arcs assumed the loop retries a phase and that
+      the fake can supply a second verdict on demand, neither of which holds with
+      the one-shot fake.
+
+
+      (1) qa_concretize REFINER_REJECT does NOT retry/re-concretize — it DEFERS. qa_loop.py:1439-1450
+      marks the scenario INPUT_REQUIRED ("refiner rejected: ...") and returns, skipping
+      the worker launch entirely (refiner prompt itself: "A rejected scenario is deferred,
+      not silently converted", :949). So a scripted REFINER_REJECT->REFINED_STEPS
+      sequence for one scenario never consumes the second entry; do NOT plan a reject-then-recover
+      arc.
+
+
+      (2) qa_verification FLAGGED routes back to the SCENARIO WORKER pane, not a fresh
+      verifier process. qa_loop.py:2090-2133 sends a tmux follow-up to the worker
+      pane, clears the verdict to pending, and waits for a fresh idle_prompt; the
+      verifier pane is REUSED not relaunched (:142-144). The one-shot fake emits exactly
+      one verdict per process and ignores stdin/tmux input, so it never fires a fresh
+      idle_prompt -> the scenario STALLS in pending instead of recovering to VERIFIED.
+      A scripted FLAGGED->VERIFIED also never advances (no new qa_verification process
+      launches). The FLAGGED->re-evaluate->VERIFIED recovery path is therefore UNDRIVEABLE
+      by the current fake — known fake-vs-production drift (relevant to the pr-fbda1a8
+      bridge). Filed/track separately.
+
+
+      CORRECTED alternate-branch scenario (single forward verdicts only, all drivable):
+      plan two scenarios; scenario A qa_concretize->REFINER_REJECT (deferred, INPUT_REQUIRED,
+      no worker pane spawned); scenario B qa_concretize->REFINED_STEPS then qa_scenario->NEEDS_WORK
+      (fails outright); qa_finalize->FINALIZE_BLOCKED. Finalize runs unconditionally
+      after aggregation (qa_loop.py:3161; only an unverified PASS skips it, :408-415),
+      so FINALIZE_BLOCKED is reachable even when scenarios fail. Expect overall verdict
+      NEEDS_WORK with a blocked finalize (not a clean FINALIZE_DONE). GIVEN/INSTRUCTION/ARTIFACT
+      same as the happy-path scenario (tui-manual-test.md + tmux-screen-recording.md,
+      container mode + nested_podman:true).'
+    created_at: '2026-05-22T17:36:12Z'
+    last_edited: '2026-05-22T17:36:12Z'
+  - id: note-7bcb706
+    text: 'QA NEEDS_WORK: Container-mode QA loop happy path — every phase driven by
+      the fake to FINALIZE_DONE: NEEDS_WORK; Container-mode QA loop alternate branches
+      — deferred-on-reject and blocked finalize: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-0db9fa7703787d66)'
+    created_at: '2026-05-22T18:32:36Z'
+    last_edited: '2026-05-22T18:32:36Z'
+  - id: note-9206f91
+    text: 'QA PASS: Host-side fake resolves by bare name via the pm which shim and
+      drives a real review loop: PASS; Container-mode QA loop happy path — every phase
+      driven by the fake to FINALIZE_DONE, fake resolved via the shim in host AND
+      container panes: PASS; Container-mode QA loop alternate branches — deferred-on-reject
+      and blocked finalize: PASS; Host-side fake resolves by bare name via the pm
+      which shim and drives a real review loop: PASS; Container-mode QA loop happy
+      path — every phase driven by the fake to FINALIZE_DONE, fake resolved via the
+      shim in host AND container panes: PASS; Container-mode QA loop alternate branches
+      — deferred-on-reject and blocked finalize: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-13a01f62a4fa31a0)'
+    created_at: '2026-05-22T20:30:39Z'
+    last_edited: '2026-05-22T20:30:39Z'
+  - id: note-05a576a
+    text: 'QA scenario 28 (container-mode alt branches): the deferred-on-reject and
+      blocked-finalize branches both verified PASS in container mode driven entirely
+      by fake-claude. REFINER_REJECT defers scenario (INPUT_REQUIRED, "refiner rejected:"
+      reason, NO worker pane spawned — s-window has 1 pane vs 2 for the worker case,
+      no re-concretize). REFINED_STEPS->worker NEEDS_WORK->FINALIZE_BLOCKED terminates
+      cleanly with "QA complete: NEEDS_WORK [finalize: FINALIZE_BLOCKED]". DRIFT NOTE
+      for pr-fbda1a8: a reject-ONLY config that omits qa_finalize lets finalize fall
+      to the _all:{} no-verdict mock (fake-claude --verdict NONE), which holds its
+      pane open; poll_for_verdict (loop_shared.py) has no wall-clock timeout, so the
+      loop blocks in finalize until manually stopped (zz t). Production never hits
+      this (real Claude always emits a finalize verdict) and the combined-plan design
+      scripts qa_finalize — but bridge tests / future QA must script qa_finalize whenever
+      finalize will run, or expect a hang.'
+    created_at: '2026-05-22T23:44:49Z'
+    last_edited: '2026-05-22T23:44:49Z'
+  - id: note-fa6fddd
+    text: 'POST-QA CODE CHANGE — re-run all phases (impl/review/QA) before merge.
+      Added Fix 1 for the scenario-28 drift (note-05a576a): fake_claude_config_for_type
+      now gives a verdict-producing session type (per SESSION_TYPE_VERDICTS) its default/happy-path
+      verdict when it falls through to the _all no-verdict catch-all, instead of launching
+      the no-verdict mock and hanging the verdict poller. qa_finalize -> FINALIZE_DONE,
+      review/qa -> PASS, etc. Explicit per-type {verdicts: []} still forces a no-verdict
+      session. Touches pm_core/paths.py + tests/test_fake_claude.py (2 new tests,
+      full suite green: 211 passed). This invalidates the prior QA PASS, so the implementation
+      session must re-drive all phases. The underlying production loop hang (poll_for_verdict
+      has no wall-clock deadline / no retry when a verdict is expected but never produced)
+      is split out to pr-6566901 (surface-to-user + retry-N-times).'
+    created_at: '2026-05-23T03:15:05Z'
+    last_edited: '2026-05-23T03:15:05Z'
+  - id: note-99ca3e3
+    text: 'QA PASS: fake-claude emit CLI renders every verdict shape and honors timing/hold/stream/error
+      flags: PASS; fake-claude config CLI — set / show / clear, validation rejection,
+      and hand-edited raw-config tolerance: PASS; Host-side review loop driven end-to-end
+      by the fake via the pm which shim — single, scripted-sequence, _all default-verdict,
+      and concurrent cursor: PASS; Container-mode QA loop happy path — every phase
+      driven by the fake to FINALIZE_DONE, resolved via the shim in host AND container
+      panes, including Fix-1 _all finalize: PASS; Container-mode QA loop alternate
+      branches — deferred-on-reject and blocked finalize: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-4a0f132700d906a4)'
+    created_at: '2026-05-23T05:53:04Z'
+    last_edited: '2026-05-23T05:53:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
@@ -11437,6 +11667,7 @@ prs:
   - pr-06a96fa
   - pr-2680fbf
   - pr-51586d2
+  - pr-1d8b2b7
   description: "## Goal\n\nThis PR is the bridge between the old (Phases 1-5) and\
     \ new (Phase 10) QA flows. It fills the testing gaps identified after the regression-loop\
     \ landing AND re-validates every merged feature from Phases 1-5 under the new\
@@ -11520,7 +11751,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T20:49:18.500977+00:00'
-  updated_at: '2026-05-14T14:43:03.645253+00:00'
+  updated_at: '2026-05-18T21:03:35.305178+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -18845,6 +19076,17 @@ prs:
       and don''t affect the running batch.'
     created_at: '2026-05-13T21:04:40Z'
     last_edited: '2026-05-13T21:04:40Z'
+  - id: note-2312cc1
+    text: 'WHEN IMPLEMENTING: remove the stop-gap added in pr-abcf70f (#148). Until
+      scenarios can be changed/replaced mid-run, generate_qa_planner_prompt() in pm_core/prompt_gen.py
+      carries a "## Changing or replacing a scenario that already ran" block instructing
+      planners NOT to rewrite an already-run scenario and to instead leave a `pm pr
+      note add` for the next run. Once this PR lands (scenarios become editable/replaceable
+      within a plan), delete or rewrite that prompt block so planners actually use
+      the new in-plan change/replace flow instead of the note-for-next-run workaround.
+      Grep for "Changing or replacing a scenario that already ran" to find it.'
+    created_at: '2026-05-22T17:38:13Z'
+    last_edited: '2026-05-22T17:38:13Z'
   - id: note-038b466
     text: Related to pr-2c67d50 and pr-cfb0b3a. pr-cfb0b3a added prompt guidance that
       QA scenario verdicts AND scenario-refiner REFINER_REJECT are terminal — 'Your
@@ -21096,6 +21338,47 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-1d8b2b7
+  plan: plan-regression
+  title: 'Shared VerdictRegistry: unify verdict definitions across detection path
+    and fake_claude'
+  branch: pm/pr-1d8b2b7-shared-verdictregistry-unify-verdict-definitions-a
+  status: pending
+  depends_on: []
+  description: 'Follow-up to pr-abcf70f (FakeClaudeSession). That PR deferred the
+    shared verdict-registry refactor proposed in its forward-looking refactor request
+    (note-30c1a2e): verdict definitions currently live in two places — the detection
+    path (pm_core/qa_loop.py, pm_core/loop_shared.py, pm_core/verdict_transcript.py,
+    pm_core/prompt_gen.py) and pm_core/fake_claude.py (SINGLE_LINE_VERDICTS / BLOCK_VERDICTS
+    / SESSION_TYPE_VERDICTS).
+
+
+    Goal: introduce a shared VerdictRegistry/VerdictHandler that both the verdict-detection
+    path AND FakeClaudeSession import from. The registry declares the canonical set
+    of verdicts, their parsing rules (single-line vs START/END block), per-session-type
+    verdict sets, and per-verdict metadata. New verdicts are added in one place and
+    test infra picks them up automatically.
+
+
+    Why: pr-fbda1a8 (the bridge PR after pr-abcf70f) depends on FakeClaudeSession
+    not drifting from production. With definitions in two places, later PRs that add
+    verdicts/verdict-state (pr-eb450a0 evidence markers, pr-b42059d coverage data,
+    pr-8ed578d fix-line gate, pr-b59f0c7 reason strings, pr-2680fbf NEW_REGRESSION
+    sub-status, pr-98f670e shallow-PASS amendments) can silently diverge the fake
+    from the detector — tests pass while production regresses.
+
+
+    This is the follow-up the pr-abcf70f refactor request asked to be filed before
+    merge; should be linked as a prerequisite of pr-fbda1a8.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-18T21:03:10.950816+00:00'
+  updated_at: '2026-05-18T21:03:10.950816+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-9330dec
   plan: bugs
   title: 'Bug: home-window line truncation undercounts emoji width, can soft-wrap
@@ -21133,12 +21416,53 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-6566901
+  plan: null
+  title: 'Verdict-loop robustness: surface/retry when an expected verdict is never
+    produced'
+  branch: pm/pr-6566901-verdict-loop-robustness-surface-retry-when-an-expe
+  status: pending
+  depends_on: []
+  description: "## Problem\n\n`loop_shared.poll_for_verdict()` (and the loops built\
+    \ on it — review_loop,\nwatcher_loop, the QA loop) has no wall-clock deadline\
+    \ and no handling for the\ncase where a verdict-producing session goes idle WITHOUT\
+    \ ever emitting one of\nits expected verdicts. The `while True:` loop only exits\
+    \ on `stop_check`, the\npane disappearing, or a matched verdict; otherwise it\
+    \ waits 15s for the next\nidle hook, finds no verdict, and loops forever.\n\n\
+    Discovered via QA of pr-abcf70f (FakeClaudeSession), scenario 28: a fake\nfinalize\
+    \ session that emits no verdict makes the QA loop hang in finalize until\nmanually\
+    \ killed. Real Claude can hit the same shape — it can go idle without the\nexpected\
+    \ marker (asks a clarifying question, errors out, hits a limit) — so this\nis\
+    \ a latent production robustness bug, independent of the fake.\n\n(pr-abcf70f\
+    \ carries the complementary test-harness fix: fake-claude now emits a\nverdict-producing\
+    \ session's default verdict instead of routing it to the\nno-verdict mock. That\
+    \ removes the QA-authoring footgun but NOT the underlying\nloop hang, which this\
+    \ PR addresses.)\n\n## Scope\n\nWhen a verdict is expected but not produced:\n\
+    \n1. Bound the wait — add an overall deadline / max idles-without-verdict to\n\
+    \   `poll_for_verdict` so it cannot spin forever.\n2. Retry the original prompt\
+    \ a configurable number of times (re-send the prompt\n   to the same session)\
+    \ before giving up.\n3. If still no verdict after the retries, get the user's\
+    \ attention (clear\n   surfaced error / notification) instead of hanging silently.\n\
+    4. Apply consistently across review_loop, watcher_loop, and the QA loop.\n\n##\
+    \ Acceptance\n\n- A session that idles without emitting a verdict no longer hangs\
+    \ the loop.\n- The original prompt is retried up to N times.\n- After exhausting\
+    \ retries, the loop surfaces a clear, attention-getting state\n  rather than blocking\
+    \ indefinitely."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-05-23T03:14:54.863296+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
     and prefer them over GitHub notes'
   branch: pm/pr-cfb0b3a-improvement-prompt-sessions-to-use-pm-pr-notes-for
-  status: in_review
+  status: merged
   depends_on: []
   description: '## Goal
 
@@ -21221,10 +21545,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/215
   gh_pr_number: 215
   created_at: '2026-05-22T22:11:57.970441+00:00'
-  updated_at: '2026-05-23T03:46:55.286293+00:00'
+  updated_at: '2026-05-23T04:16:54.851976+00:00'
   started_at: '2026-05-22T22:17:38.855645+00:00'
   reviewed_at: '2026-05-23T03:46:55.286293+00:00'
-  merged_at: null
+  merged_at: '2026-05-23T04:16:54.851976+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfb0b3a-improvement-prompt-sessions-to-use-p-9021c2a2
 - id: pr-9b96145

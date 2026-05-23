@@ -93,15 +93,30 @@ class ContainerConfig:
     extra_mounts: list[str] = field(default_factory=list)
 
 
+def _detect_default_runtime() -> str:
+    """Auto-detect the best available container runtime.
+
+    Prefers podman (rootless, nested container support) over docker.
+    Falls back to ``DEFAULT_RUNTIME`` if neither is found (will fail later
+    with a clear error from ``_runtime_available``).
+    """
+    for candidate in ("podman", "docker"):
+        if shutil.which(candidate):
+            return candidate
+    return DEFAULT_RUNTIME
+
+
 def _get_runtime() -> str:
     """Return the configured container runtime binary name.
 
-    Returns the explicit ``container-runtime`` setting if set, otherwise
-    defaults to ``docker`` for backward compatibility.  Users opt into
-    Podman via ``pm container set runtime podman``.
+    If the user has explicitly set ``container-runtime``, use that.
+    Otherwise auto-detect: prefer podman if installed, fall back to docker.
     """
     from pm_core.paths import get_global_setting_value
-    return get_global_setting_value("container-runtime", DEFAULT_RUNTIME)
+    explicit = get_global_setting_value("container-runtime", "")
+    if explicit:
+        return explicit
+    return _detect_default_runtime()
 
 
 def _nested_podman_enabled() -> bool:
@@ -145,6 +160,35 @@ def _nested_podman_run_args() -> list[str]:
         "--device", "/dev/fuse",
         "--device", "/dev/net/tun",
         "--security-opt", "unmask=ALL",
+        # Share the host UTS namespace instead of creating a fresh one.
+        #
+        # Why it's needed: creating a new UTS namespace makes podman call
+        # ``sethostname(2)`` to give the container its own hostname. The
+        # kernel requires CAP_SYS_ADMIN *in the user namespace that owns the
+        # target UTS namespace* for that call. A container one level deep
+        # (the env an inner podman runs in) has no CAP_SYS_ADMIN in its
+        # bounding set and inherits the default seccomp filter, which gates
+        # ``sethostname`` on that very capability — so every *nested*
+        # ``podman run`` dies with "sethostname: Operation not permitted"
+        # before any workload starts. ``--uts=host`` skips the namespace,
+        # hence the syscall, so the inner launch succeeds. (The outer,
+        # bare-metal launch doesn't need this — it has the cap and no
+        # seccomp filter — but applying it unconditionally is harmless and
+        # saves us detecting whether we're already inside a container.)
+        #
+        # Why it's safe here: pm runs *rootless* podman. With ``--uts=host``
+        # the container shares the host UTS namespace, which is owned by the
+        # host's (init) user namespace — one a rootless container has no
+        # privileges over. So the container *cannot* rename the host: the
+        # same CAP_SYS_ADMIN rule that forces this workaround also prevents
+        # it from being abused (confirmed by the podman maintainers, gh
+        # discussion #25061). The CIS Docker 5.20 warning against
+        # ``--uts=host`` targets *rootful* containers, where the container
+        # really can change the host's hostname; it does not apply to
+        # rootless. The only real cost is functional: containers inherit the
+        # host hostname and can't set their own (and ``--uts=host`` is
+        # mutually exclusive with ``--hostname``, which pm never passes).
+        "--uts=host",
     ]
     if _apparmor_enforcing():
         args.extend(["--security-opt", "apparmor=unconfined"])
@@ -185,8 +229,21 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
 
     runtime = _get_runtime()
     git_name, git_email = _host_git_identity()
-    cmd = [
-        runtime, "build", "-t", tag,
+    cmd = [runtime, "build"]
+    # Nested rootless podman: build RUN steps otherwise create a fresh UTS
+    # namespace and call sethostname(2), which a nested env lacks
+    # CAP_SYS_ADMIN for — every RUN dies with "sethostname: Operation not
+    # permitted" before the image can be built (and create_container
+    # auto-builds pm-dev on first use, so this blocks the whole flow).
+    # Share the host UTS namespace (skipping the sethostname call), exactly
+    # mirroring the --uts=host accommodation _nested_podman_run_args()
+    # applies to the corresponding `podman run`.  (chroot isolation also
+    # skips the namespace but breaks node's libuv fd handling at build time,
+    # so --uts=host on the default OCI isolation is the right lever here.)
+    if "podman" in runtime and _nested_podman_enabled():
+        cmd.extend(["--uts", "host"])
+    cmd += [
+        "-t", tag,
         "--build-arg", f"GIT_USER_NAME={git_name}",
         "--build-arg", f"GIT_USER_EMAIL={git_email}",
         "-f", str(dockerfile), str(dockerfile.parent),
@@ -354,6 +411,31 @@ def _build_git_setup_script(
             f"su - {_CONTAINER_USER} -c "
             f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
         )
+
+    # Install the fake-claude shim onto PATH so the integration-test stand-in
+    # resolves by bare name inside the container, exactly as the launcher
+    # invokes it.  The shim resolves the actual binary via ``pm which`` *at run
+    # time inside the container*, so it picks up whichever pm_core the wrapper
+    # selects — e.g. the /workspace checkout under test for a pm-on-pm QA run,
+    # not just the mounted /opt/pm-src.  ~/.local/bin is first on PATH; doing
+    # it here (a runtime install, like the git wrapper below) avoids a
+    # Dockerfile/PATH change and the image rebuild that would require.
+    _fake_shim_path = f"{_CONTAINER_HOME}/.local/bin/fake-claude"
+    _fake_shim = (
+        "#!/bin/sh\n"
+        "# pm: resolve fake-claude from the active pm install (pm which) so the\n"
+        "# copy under test is used, even inside a container.\n"
+        'core="$(pm which 2>/dev/null | tail -n1)"\n'
+        "# A pipeline's status is tail's (almost always 0), so guard the value\n"
+        "# itself: an empty core makes dirname yield '.' and exec a bogus path.\n"
+        '[ -n "$core" ] || exit 127\n'
+        'exec "$(dirname "$core")/bin/fake-claude" "$@"\n'
+    )
+    lines.append(
+        f"mkdir -p {_CONTAINER_HOME}/.local/bin && "
+        f"cat > {_fake_shim_path} << 'FAKEEOF'\n{_fake_shim}FAKEEOF\n"
+        f"chmod 755 {_fake_shim_path}"
+    )
 
     # Install a git wrapper that intercepts remote-interacting commands
     # (push, fetch, pull, ls-remote) and forwards them to the host-side
@@ -577,8 +659,18 @@ def create_container(
     cmd = [
         "run", "-d",
         "--name", name,
-        "--memory", config.memory_limit,
-        "--cpus", config.cpu_limit,
+    ]
+    # Resource caps need delegated cgroup controllers.  Under nested
+    # rootless podman the controllers usually aren't delegated to the
+    # inner user's subtree (cgroupfs manager, empty cgroupControllers), so
+    # crun can't create the container cgroup and ``podman run`` dies with
+    # "could not find cgroup mount in /proc/self/cgroup" before the
+    # workload starts.  Skip the limits there — they're unenforceable in
+    # that environment anyway — matching the relaxed-sandbox intent of the
+    # nested_podman opt-in (see _nested_podman_run_args).
+    if not ("podman" in runtime and _nested_podman_enabled()):
+        cmd += ["--memory", config.memory_limit, "--cpus", config.cpu_limit]
+    cmd += [
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
         "-w", _CONTAINER_WORKDIR,
     ]

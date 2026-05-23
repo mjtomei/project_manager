@@ -1218,6 +1218,34 @@ class TestBuildVerificationPrompt:
         assert "FLAGGED_START" in prompt
         assert "FLAGGED_END" in prompt
 
+    def test_no_artifact_check_when_no_recipes(self):
+        # A scenario with no assigned artifact recipes must not get the
+        # artifact-completeness step; the judgment step stays at Step 3.
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="output")
+        assert "expected artifacts" not in prompt.lower()
+        assert "### Step 3: Make your judgment" in prompt
+
+    def test_artifact_check_present_when_recipes_assigned(self):
+        # When the scenario carries artifact recipes, the verifier is told to
+        # confirm the captures actually landed, the judgment step shifts to
+        # Step 4, and the recipe name + captures dir are named.
+        scenario = QAScenario(
+            index=2, title="Loop e2e", focus="loop", steps="steps",
+            artifact_paths=["/scratch/qa-artifacts/tmux-screen-recording.md"])
+        prompt = _build_verification_prompt(
+            scenario, "PASS", pane_output="output",
+            captures_scenario_dir="/caps/pr-x/scenarios/2")
+        assert "tmux-screen-recording.md" in prompt
+        assert "/caps/pr-x/scenarios/2" in prompt
+        # The judgment step is renumbered to Step 4 and the artifact rule
+        # is part of the FLAGGED criteria.
+        assert "### Step 4: Make your judgment" in prompt
+        assert ".cast" in prompt  # recording-vs-dump guidance present
+        # Missing/downgraded artifact without a valid reason -> FLAGGED.
+        assert "FLAGGED" in prompt
+
 
 class TestVerifySingleScenario:
     """Tests for _verify_single_scenario."""

@@ -328,7 +328,7 @@ they can use dedicated shortcuts rather than typing commands.
 
 The user will tell you what they need."""
 
-    cmd = build_claude_shell_cmd(prompt=prompt)
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss")
     launch_pane(app, cmd, "claude", fresh=fresh)
 
 
@@ -391,7 +391,7 @@ focused. Press Escape to return focus to the tree/plans view.
 
 Ask the user what they'd like to know about."""
 
-    cmd = build_claude_shell_cmd(prompt=prompt)
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss")
     launch_pane(app, cmd, "discuss", fresh=fresh)
 
 
@@ -443,7 +443,7 @@ def launch_watcher_review(app) -> None:
         transcript_dir=transcript_dir,
     )
 
-    cmd = build_claude_shell_cmd(prompt=prompt)
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="watcher_review")
     launch_pane(app, cmd, "watcher-review", fresh=fresh)
 
 
@@ -507,7 +507,7 @@ To interact with this session, use commands like:
 {body}
 """
 
-    cmd = build_claude_shell_cmd(prompt=full_prompt)
+    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author")
     launch_pane(app, cmd, "qa-item", target_window=target_window)
 
 

@@ -184,7 +184,8 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     click.echo(f"Set session override: ~/.pm/sessions/{session_tag}/override")
 
     # Build command with cleanup on exit
-    claude_cmd = build_claude_shell_cmd(prompt=prompt, session_tag=session_tag)
+    claude_cmd = build_claude_shell_cmd(prompt=prompt, session_tag=session_tag,
+                                        session_type="meta")
     clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
     cmd = f"{claude_cmd} ; {clear_cmd}"
 
