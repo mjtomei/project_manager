@@ -313,10 +313,19 @@ def fake_claude_config_for_type(
     if raw is None:
         return None
     type_config = raw.get(session_type) if session_type else None
+    if type_config is not None and not isinstance(type_config, dict):
+        # A hand-edited file may carry a malformed per-type entry; treat a
+        # non-dict as absent rather than crashing the launcher downstream.
+        type_config = None
     if type_config is None:
         all_config = raw.get("_all")
         if all_config is None:
             return None
+        # Tolerate a malformed (non-dict) ``_all`` from a hand-edited file —
+        # ``set_fake_claude_config`` rejects it, but a directly-written file
+        # should not crash the launcher on ``.items()``.
+        if not isinstance(all_config, dict):
+            all_config = {}
         # Catch-all is a no-verdict session by default — strip any stray
         # verdicts.
         type_config = {k: v for k, v in all_config.items() if k != "verdicts"}
@@ -328,6 +337,8 @@ def fake_claude_config_for_type(
         if allowed:
             type_config["verdicts"] = {allowed[0]: 1}
     defaults = raw.get("_defaults", {})
+    if not isinstance(defaults, dict):
+        defaults = {}
     merged = {**defaults, **type_config}
     return merged
 
@@ -347,13 +358,24 @@ def set_fake_claude_config(session_tag: str, config: dict) -> None:
         if key == "_all":
             # Catch-all "fake everything" entry — a no-verdict session, so it
             # must not carry verdicts (they would be silently ignored).
-            if isinstance(value, dict) and value.get("verdicts"):
+            if not isinstance(value, dict):
+                errors.append(
+                    f"'_all' must be a dict, got {type(value).__name__}."
+                )
+            elif value.get("verdicts"):
                 errors.append(
                     "'_all' is a no-verdict catch-all; remove its 'verdicts'."
                 )
             continue
         if key.startswith("_"):
-            continue  # _defaults — not a session-type entry
+            # _defaults — shared preamble/delay/body params, merged into every
+            # resolved config, so it too must be a dict (a non-dict would crash
+            # the {**defaults, ...} merge in fake_claude_config_for_type).
+            if not isinstance(value, dict):
+                errors.append(
+                    f"{key!r} must be a dict, got {type(value).__name__}."
+                )
+            continue  # not a session-type entry — no verdict validation
         if not isinstance(value, dict):
             errors.append(f"Config entry {key!r} must be a dict, got {type(value).__name__}")
             continue

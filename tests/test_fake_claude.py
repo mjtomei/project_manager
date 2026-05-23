@@ -914,6 +914,53 @@ class TestFakeClaudeConfig:
         assert result is not None
         assert "verdicts" not in result
 
+    def test_set_rejects_non_dict_all(self, tmp_path, monkeypatch):
+        """A non-dict ``_all`` is rejected on write — otherwise it slips through
+        validation and crashes ``fake_claude_config_for_type`` on ``.items()``."""
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        with pytest.raises(ValueError, match="_all.*must be a dict"):
+            set_fake_claude_config(tag, {"_all": "oops"})
+
+    def test_set_rejects_non_dict_defaults(self, tmp_path, monkeypatch):
+        """A non-dict ``_defaults`` is rejected on write — it would otherwise
+        crash the ``{**defaults, ...}`` merge at resolve time."""
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        with pytest.raises(ValueError, match="_defaults.*must be a dict"):
+            set_fake_claude_config(tag, {"_defaults": "oops"})
+
+    def test_for_type_tolerates_hand_edited_non_dict_all(self, tmp_path, monkeypatch):
+        """A directly-written (not via set_) malformed ``_all`` must not crash
+        the launcher — resolution treats it as an empty catch-all."""
+        import json
+        from pm_core.paths import fake_claude_config_for_type, session_dir
+        tag = self._setup(tmp_path, monkeypatch)
+        (session_dir(tag) / "fake-claude").write_text(json.dumps({"_all": "oops"}))
+        # review is verdict-producing → still gets its default verdict, no crash.
+        result = fake_claude_config_for_type("review", tag)
+        assert result == {"verdicts": {"PASS": 1}}
+
+    def test_for_type_tolerates_hand_edited_non_dict_defaults(self, tmp_path, monkeypatch):
+        """A directly-written non-dict ``_defaults`` must not crash the merge."""
+        import json
+        from pm_core.paths import fake_claude_config_for_type, session_dir
+        tag = self._setup(tmp_path, monkeypatch)
+        (session_dir(tag) / "fake-claude").write_text(
+            json.dumps({"_defaults": "oops", "review": {"verdicts": {"PASS": 1}}}))
+        result = fake_claude_config_for_type("review", tag)
+        assert result == {"verdicts": {"PASS": 1}}
+
+    def test_for_type_tolerates_hand_edited_non_dict_type_entry(self, tmp_path, monkeypatch):
+        """A non-dict per-type entry from a hand-edited file is treated as
+        absent (falls through to _all / None) instead of crashing."""
+        import json
+        from pm_core.paths import fake_claude_config_for_type, session_dir
+        tag = self._setup(tmp_path, monkeypatch)
+        (session_dir(tag) / "fake-claude").write_text(json.dumps({"review": "oops"}))
+        # No _all catch-all → malformed entry treated as absent → None.
+        assert fake_claude_config_for_type("review", tag) is None
+
 
 # ---------------------------------------------------------------------------
 # Launcher fake-claude integration (_pick_fake_verdict, _fake_claude_args,
