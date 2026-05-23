@@ -537,6 +537,11 @@ class ProjectManagerApp(App):
             if tree._prs:
                 tree._recompute()
                 tree.refresh(layout=True)
+                # A reflow at the new width can push the selected node off-screen
+                # (a dependency chain's depth fixes its column, so narrowing scrolls
+                # deep nodes out horizontally). Re-scroll the selection into view so
+                # it stays visible after the resize, matching the nav/selection paths.
+                tree.call_after_refresh(tree._scroll_selected_into_view)
         except Exception:
             pass
 
