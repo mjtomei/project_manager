@@ -299,6 +299,39 @@ def test_poll_qa_state_clears_snapshot_on_completion(tmp_path):
     assert not _resume_file_path(qa_dir).exists()
 
 
+def test_poll_qa_state_clears_snapshot_on_first_completion_tick(tmp_path):
+    """The snapshot is dropped as soon as the completion is first processed
+    (tick 1), not deferred to the tick-2 cleanup.
+
+    A PASS with auto-start off leaves the PR in ``qa`` and keeps the loop
+    in ``_qa_loops`` for one more cycle.  If the snapshot survived that
+    one-tick gap, a TUI restart could let ``_resume_incomplete_qa`` re-run
+    ``_on_qa_complete`` and record a duplicate QA note.  Clearing on the
+    first tick closes that window."""
+    app = _make_app(tmp_path)
+    app._pane_idle_tracker = MagicMock()
+
+    qa_dir = tmp_path / "qa-run"
+    qa_dir.mkdir()
+    state = _make_state(qa_dir)
+    state.running = False
+    state.latest_verdict = VERDICT_PASS
+    state._ui_complete_notified = False  # first cycle
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    app._qa_loops["pr-001"] = state
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop_ui, "_on_qa_complete"), \
+         patch.object(qa_loop_ui, "_resume_incomplete_qa"):
+        qa_loop_ui.poll_qa_state(app)
+
+    # Loop is kept for one more cycle, but the snapshot is already gone so
+    # a restart in this gap cannot re-process the run.
+    assert "pr-001" in app._qa_loops
+    assert state._ui_complete_notified is True
+    assert not _resume_file_path(qa_dir).exists()
+
+
 def test_poll_qa_state_throttles_resume_scan(tmp_path):
     """The orphan-recovery disk scan is throttled to ~every 5 poll ticks
     (it would otherwise stat every historical QA workdir each second)."""

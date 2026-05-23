@@ -160,7 +160,14 @@ re-process it. `app._resumed_qa_pr_ids` additionally dedupes within a session.
   `test_qa_resume.py::test_resumed_pass_skips_reverification`.
 - **EC4 — PASS without auto-start leaves status `qa`**: the snapshot is removed
   on processing, so it is not re-processed across restarts even though the
-  status stays `qa`.
+  status stays `qa`. The snapshot is cleared on the **first** completion poll
+  tick (right after `_on_qa_complete` first runs), not deferred to the tick-2
+  cleanup that drops the loop from `_qa_loops`. Otherwise a TUI restart in the
+  one-tick gap would let `_resume_incomplete_qa` see `status == "qa"` + an
+  `overall` verdict and re-run `_on_qa_complete`, recording a *duplicate* QA
+  note (`generate_note_id` extends the hash on collision, so identical note
+  text appends a second note rather than deduping). Covered by
+  `test_qa_resume.py::test_poll_qa_state_clears_snapshot_on_first_completion_tick`.
 - **EC5 — Grace period resets on resume**: the resumed loop re-applies the 30s
   content-poll grace, delaying verdict acceptance briefly after restart.
   Accepted.
@@ -188,11 +195,13 @@ re-process it. `app._resumed_qa_pr_ids` additionally dedupes within a session.
 
 ## Tests
 
-`tests/test_qa_resume.py` (12 tests): snapshot round-trip incl. scenario
+`tests/test_qa_resume.py` (14 tests): snapshot round-trip incl. scenario
 runtime fields/verdicts/reasons/verified/finalize; `clear_resume_file`;
 `_resume_incomplete_qa` re-spawn (incomplete), process+clear (completed), skip
 non-qa PR, skip already-tracked / already-recovered, no-op without qa root;
-`poll_qa_state` clearing the snapshot on in-memory completion; and a resumed
+`poll_qa_state` clearing the snapshot on in-memory completion (both on the
+first completion tick and the deferred tick-2 cleanup) and throttling the
+orphan-recovery disk scan to ~every 5 ticks; and a resumed
 PASS skipping re-verification (`test_resumed_pass_skips_reverification`). The orphaned
 `tests/test_qa_status.py` (old `VerdictPoller`) was removed in the merge.
 A second orphan, `tests/test_qa_loop_ui_recover.py` (intermediate

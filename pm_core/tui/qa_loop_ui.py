@@ -297,7 +297,19 @@ def poll_qa_state(app) -> None:
             tracker.poll(key)
 
         if not state.running and state.latest_verdict:
+            first_completion = not state._ui_complete_notified
             _on_qa_complete(app, state)
+            # The completion has now been processed (note recorded,
+            # lifecycle transition done).  Drop the resume snapshot
+            # immediately rather than waiting for the tick-2 cleanup
+            # below: a PASS that leaves the PR in "qa" (auto-start off)
+            # keeps both the snapshot and status=="qa" until tick 2, so a
+            # TUI restart in that one-tick gap would let
+            # _resume_incomplete_qa re-run _on_qa_complete and record a
+            # duplicate QA note.  Clearing here closes that window.
+            if first_completion and state.qa_workdir:
+                from pm_core import qa_loop
+                qa_loop.clear_resume_file(state.qa_workdir)
             # Remove completed loops (keep for one poll cycle)
             if state._ui_complete_notified:
                 # Drop tracker entries for this PR's QA panes so the
