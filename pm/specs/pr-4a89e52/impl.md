@@ -79,7 +79,11 @@ mirroring `start_qa_background`.
 
 ### R3 — TUI detects and resumes orphaned runs
 `poll_qa_state` (`pm_core/tui/qa_loop_ui.py`) keeps its in-memory completion
-handling and now also calls `_resume_incomplete_qa(app)` each tick.
+handling and now also calls `_resume_incomplete_qa(app)` — throttled to roughly
+every 5th poll tick via `app._qa_resume_poll_counter` (runs on the first tick so
+startup recovery isn't delayed). New orphans can only appear from a TUI restart
+and recovery is not latency-sensitive (QA runs take minutes), so the disk scan
+need not run every 1s; the throttle mirrors `_poll_impl_idle`'s `% 5` cadence.
 `_resume_incomplete_qa` scans `~/.pm/workdirs/qa/*/qa_resume.json` (cheap glob;
 project data loaded lazily only when a candidate is found) and, for each run
 not in `app._qa_loops` and not in `app._resumed_qa_pr_ids`, whose PR is still

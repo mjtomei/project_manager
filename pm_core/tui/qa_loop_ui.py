@@ -326,7 +326,15 @@ def poll_qa_state(app) -> None:
                 state._ui_complete_notified = True
 
     # --- Restart recovery: resume runs whose daemon thread died ---
-    _resume_incomplete_qa(app)
+    # New orphans can only appear from a TUI restart, and recovery is not
+    # latency-sensitive (QA runs take minutes), so throttle the disk scan to
+    # ~every 5s instead of every 1s poll tick — it would otherwise stat every
+    # historical QA workdir each second, forever, even when idle. Runs on the
+    # first tick (counter starts at 0) so startup recovery isn't delayed.
+    app._qa_resume_poll_counter = getattr(app, "_qa_resume_poll_counter", 0)
+    if app._qa_resume_poll_counter % 5 == 0:
+        _resume_incomplete_qa(app)
+    app._qa_resume_poll_counter += 1
 
 
 def _resume_incomplete_qa(app) -> None:

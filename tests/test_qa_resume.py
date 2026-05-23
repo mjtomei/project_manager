@@ -299,6 +299,25 @@ def test_poll_qa_state_clears_snapshot_on_completion(tmp_path):
     assert not _resume_file_path(qa_dir).exists()
 
 
+def test_poll_qa_state_throttles_resume_scan(tmp_path):
+    """The orphan-recovery disk scan is throttled to ~every 5 poll ticks
+    (it would otherwise stat every historical QA workdir each second)."""
+    app = _make_app(tmp_path)
+    app._pane_idle_tracker = MagicMock()
+    app._qa_loops = {}
+    # Start from a clean integer counter (MagicMock default would break the
+    # modulo), mirroring the real App where the attr is unset → getattr → 0.
+    app._qa_resume_poll_counter = 0
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop_ui, "_resume_incomplete_qa") as resume_scan:
+        for _ in range(10):
+            qa_loop_ui.poll_qa_state(app)
+
+    # Ticks 0 and 5 trigger the scan; the other 8 are skipped.
+    assert resume_scan.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # Resumed runs trust prior verification (don't re-spawn verifier sessions)
 # ---------------------------------------------------------------------------
