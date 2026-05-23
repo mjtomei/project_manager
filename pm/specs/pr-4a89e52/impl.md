@@ -162,14 +162,34 @@ re-process it. `app._resumed_qa_pr_ids` additionally dedupes within a session.
   Accepted.
 - **EC6 — pr-b59f0c7 overlap (verdict reasons)**: already landed on master;
   `scenario_verdict_reasons` is persisted/restored in the snapshot.
+- **EC7 — Self-driving state not persisted**: `app._self_driving_qa` lives only
+  in memory (TUI session-scoped). A resumed run therefore drives its lifecycle
+  transition through the legacy/auto-start path in `_on_qa_complete` — verdict
+  collection and the PASS→merge / NEEDS_WORK→in_review transition still happen,
+  but consecutive-pass counting and the direct self-driving review restart are
+  lost across the restart. Accepted: the PR's goal is verdict survival, and
+  auto-start (when enabled) still drives the loop forward. Documented in the
+  `_resume_incomplete_qa` docstring.
+- **EC8 — Stale snapshot for a re-run PR**: each QA run uses a fresh
+  `loop_id`/workdir, so old workdirs (and their `qa_resume.json`) are not
+  deleted at run start. A stale snapshot is bounded by: (a) normal completion
+  always clears its own snapshot; (b) `_resume_incomplete_qa` skips any pr_id
+  already in `app._qa_loops` (the live run) or `app._resumed_qa_pr_ids` (one
+  recovery attempt per session); and (c) snapshots for PRs no longer in `qa`
+  are cleared on sight. A truly stale snapshot surviving into a later run for
+  the same PR requires a hard TUI kill at a precise instant *and* the snapshot
+  never being cleared — narrow and self-limiting (at most one spurious
+  recovery per session). Future hardening could record the active QA `loop_id`
+  on the PR and validate it on resume.
 
 ## Tests
 
-`tests/test_qa_resume.py` (11 tests): snapshot round-trip incl. scenario
+`tests/test_qa_resume.py` (12 tests): snapshot round-trip incl. scenario
 runtime fields/verdicts/reasons/verified/finalize; `clear_resume_file`;
 `_resume_incomplete_qa` re-spawn (incomplete), process+clear (completed), skip
-non-qa PR, skip already-tracked / already-recovered, no-op without qa root; and
-`poll_qa_state` clearing the snapshot on in-memory completion. The orphaned
+non-qa PR, skip already-tracked / already-recovered, no-op without qa root;
+`poll_qa_state` clearing the snapshot on in-memory completion; and a resumed
+PASS skipping re-verification (`test_resumed_pass_skips_reverification`). The orphaned
 `tests/test_qa_status.py` (old `VerdictPoller`) was removed in the merge.
 A second orphan, `tests/test_qa_loop_ui_recover.py` (intermediate
 `_recover_completed_qa_from_disk`, superseded by `_resume_incomplete_qa`),

@@ -349,6 +349,15 @@ def _resume_incomplete_qa(app) -> None:
 
     The snapshot is removed once the run has been handled, so it is not
     re-processed on a subsequent restart.
+
+    Limitation: self-driving QA state (``app._self_driving_qa``) lives only
+    in memory and is *not* persisted, so a resumed run drives its lifecycle
+    transition through the legacy/auto-start path in ``_on_qa_complete``
+    (verdict collection and the PASS→merge / NEEDS_WORK→in_review transition
+    still happen — only consecutive-pass counting and the direct
+    self-driving review restart are lost across the restart). Accepted: the
+    core goal is verdict survival, and auto-start (if enabled) still drives
+    the loop forward.
     """
     import json
     from pathlib import Path
