@@ -7047,7 +7047,7 @@ prs:
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
   branch: pm/pr-abcf70f-fakeclaudesession-scriptable-claude-replacement-fo
-  status: in_review
+  status: qa
   depends_on: []
   description: "Add a fake Claude executable that can be launched in place of real\
     \ Claude for integration tests. The fake session writes realistic-looking output\
@@ -7077,9 +7077,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-22T17:36:13.202398+00:00'
+  updated_at: '2026-05-22T22:48:58.471554+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
-  reviewed_at: '2026-05-21T05:42:54.769787+00:00'
+  reviewed_at: '2026-05-22T22:48:58.471554+00:00'
   merged_at: null
   notes:
   - id: note-abd8475
@@ -7309,6 +7309,34 @@ prs:
       — deferred-on-reject and blocked finalize: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-0db9fa7703787d66)'
     created_at: '2026-05-22T18:32:36Z'
     last_edited: '2026-05-22T18:32:36Z'
+  - id: note-9206f91
+    text: 'QA PASS: Host-side fake resolves by bare name via the pm which shim and
+      drives a real review loop: PASS; Container-mode QA loop happy path — every phase
+      driven by the fake to FINALIZE_DONE, fake resolved via the shim in host AND
+      container panes: PASS; Container-mode QA loop alternate branches — deferred-on-reject
+      and blocked finalize: PASS; Host-side fake resolves by bare name via the pm
+      which shim and drives a real review loop: PASS; Container-mode QA loop happy
+      path — every phase driven by the fake to FINALIZE_DONE, fake resolved via the
+      shim in host AND container panes: PASS; Container-mode QA loop alternate branches
+      — deferred-on-reject and blocked finalize: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-abcf70f-13a01f62a4fa31a0)'
+    created_at: '2026-05-22T20:30:39Z'
+    last_edited: '2026-05-22T20:30:39Z'
+  - id: note-05a576a
+    text: 'QA scenario 28 (container-mode alt branches): the deferred-on-reject and
+      blocked-finalize branches both verified PASS in container mode driven entirely
+      by fake-claude. REFINER_REJECT defers scenario (INPUT_REQUIRED, "refiner rejected:"
+      reason, NO worker pane spawned — s-window has 1 pane vs 2 for the worker case,
+      no re-concretize). REFINED_STEPS->worker NEEDS_WORK->FINALIZE_BLOCKED terminates
+      cleanly with "QA complete: NEEDS_WORK [finalize: FINALIZE_BLOCKED]". DRIFT NOTE
+      for pr-fbda1a8: a reject-ONLY config that omits qa_finalize lets finalize fall
+      to the _all:{} no-verdict mock (fake-claude --verdict NONE), which holds its
+      pane open; poll_for_verdict (loop_shared.py) has no wall-clock timeout, so the
+      loop blocks in finalize until manually stopped (zz t). Production never hits
+      this (real Claude always emits a finalize verdict) and the combined-plan design
+      scripts qa_finalize — but bridge tests / future QA must script qa_finalize whenever
+      finalize will run, or expect a hang.'
+    created_at: '2026-05-22T23:44:49Z'
+    last_edited: '2026-05-22T23:44:49Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
@@ -15900,7 +15928,7 @@ prs:
   title: 'Improvement: home window redraws only on actual content change, not on a
     5s timer'
   branch: pm/pr-28bda5d-improvement-home-window-redraws-only-on-actual-con
-  status: in_review
+  status: merged
   depends_on: []
   description: '## Goal
 
@@ -16064,10 +16092,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/207
   gh_pr_number: 207
   created_at: '2026-05-05T13:29:33.145323+00:00'
-  updated_at: '2026-05-21T15:48:35.324999+00:00'
+  updated_at: '2026-05-22T19:22:00.365345+00:00'
   started_at: '2026-05-05T17:44:35.482235+00:00'
   reviewed_at: '2026-05-05T17:54:24.906576+00:00'
-  merged_at: null
+  merged_at: '2026-05-22T19:22:00.365345+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-28bda5d-improvement-home-window-redraws-only-a288d60a
 - id: pr-6f542a2
