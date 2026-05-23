@@ -916,7 +916,13 @@ class TechTree(Widget):
                           if not k.startswith("_hidden:")}
         if not real_positions:
             width = 40
-            height = (len(self._hidden_label_ids) + 4
+            msg = self._empty_message()
+            if msg:
+                # Don't let the narrow default clip the all-hidden banner.
+                # Allow for the banner's x=2 offset plus the widget's left/right
+                # padding (2 each) so the full message fits.
+                width = max(width, len(msg) + 8)
+            height = (len(self._hidden_label_ids) + 6
                       if self._hidden_label_ids else 10)
             return width, height
         max_x = max(x for x, r in real_positions.values())
@@ -939,11 +945,15 @@ class TechTree(Widget):
         """Return an empty-state message, or None if there is content to draw."""
         if not self._prs:
             return "No PRs defined. Use 'pr add' to create PRs."
-        if not self._ordered_ids and self._status_filter:
-            return f"No {self._status_filter} PRs. Press F to cycle filter."
-        if not self._ordered_ids and self._hidden_plans:
+        # Hidden-plan labels still populate ``_ordered_ids`` (they are
+        # navigable), so "is the grid empty?" must look only at *visible* PR
+        # nodes — otherwise the all-hidden banner below is unreachable.
+        visible = [p for p in self._ordered_ids if not p.startswith("_hidden:")]
+        if not visible and self._hidden_plans:
             hidden_count = len(self._hidden_plans)
             return f"All PRs hidden ({hidden_count} plan(s)). Press x to show all."
+        if not visible and self._status_filter:
+            return f"No {self._status_filter} PRs. Press F to cycle filter."
         return None
 
     def _rebuild(self) -> None:
@@ -958,11 +968,13 @@ class TechTree(Widget):
         self._neighbors = {}
 
         msg = self._empty_message()
-        if msg is not None:
-            # Fill the scroll viewport rather than sizing to content: a plain
-            # Widget does not auto-size to its children, so "auto" here collapses
-            # the tree to 0x0 and the message never renders (blank grid).  A
-            # percentage size gives the mounted Static a real region to draw in.
+        if msg is not None and not self._hidden_label_ids:
+            # Truly empty (no PRs, or a filter hid everything and nothing is
+            # navigable).  Fill the scroll viewport rather than sizing to
+            # content: a plain Widget does not auto-size to its children, so
+            # "auto" here collapses the tree to 0x0 and the message never
+            # renders (blank grid).  A percentage size gives the mounted Static
+            # a real region to draw in.
             self.styles.width = "100%"
             self.styles.height = "100%"
             from textual.widgets import Static
@@ -1062,6 +1074,18 @@ class TechTree(Widget):
                 base_y = max_row * (NODE_H + V_GAP) + 4 + 1
             else:
                 base_y = 1
+            # When every plan is hidden there are no visible PR nodes, so show
+            # the all-hidden banner above the navigable labels (the labels still
+            # let the user unhide individual plans).
+            if msg is not None:
+                from textual.widgets import Static
+                banner = Static(Text(msg, style="dim"))
+                banner.styles.position = "absolute"
+                banner.styles.offset = (2, base_y)
+                banner.styles.width = max(width, len(msg) + 2)
+                banner.styles.height = 1
+                new_widgets.append(banner)
+                base_y += 2  # banner row + a blank spacer before the labels
             for i, virtual_id in enumerate(self._hidden_label_ids):
                 plan_id = virtual_id[len("_hidden:"):]
                 pr_count = sum(1 for pr in self._prs
@@ -1212,6 +1236,16 @@ class TechTree(Widget):
         nb = self._neighbors.get(current_id, {})
 
         new_index = None
+
+        # Keys we handle ourselves.  Stop the event so the parent
+        # ScrollableContainer's built-in arrow bindings (up/down/left/right ->
+        # scroll_* by one line) don't also fire — that 1-line scroll races with
+        # and overrides our scroll-into-view, leaving the selected node off
+        # screen during arrow-key navigation.
+        if event.key in ("up", "k", "down", "j", "left", "h", "right", "l",
+                         "J", "K", "enter"):
+            event.stop()
+            event.prevent_default()
 
         if event.key in ("up", "k"):
             target = nb.get("up")
