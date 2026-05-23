@@ -655,6 +655,13 @@ def handle_command_submitted(app, cmd: str) -> None:
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(edit_pr_id)
         pane_ops.edit_plan(app)
+        # Return focus to the tree (or plans pane) so subsequent nav keys
+        # don't leak into the command bar's Input, mirroring the other
+        # command branches.
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
         return
 
     # Handle auto-start commands
