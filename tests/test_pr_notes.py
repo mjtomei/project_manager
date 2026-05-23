@@ -741,3 +741,63 @@ class TestPrNotesHandoffGuidance:
         self._assert_handoff(review)
 
 
+class TestQAVerdictFinalityGuidance:
+    """A QA scenario worker cannot deliver a replacement verdict once one is
+    recorded (qa_loop pending-set guard), and a scenario refiner's decision is
+    one-shot — so cross-run handoff must go through a pm PR note. Review loops
+    re-run per iteration, so they get no such "verdict is final" guidance.
+    """
+
+    def _data(self):
+        pr = {
+            "id": "pr-fin",
+            "plan": None,
+            "title": "Finality PR",
+            "branch": "pm/pr-fin",
+            "status": "qa",
+            "depends_on": [],
+            "description": "Do the thing",
+            "agent_machine": None,
+            "gh_pr": None,
+            "gh_pr_number": None,
+        }
+        return {
+            "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "master", "backend": "local"},
+            "plans": [],
+            "prs": [pr],
+        }
+
+    def test_qa_child_states_verdict_is_final(self):
+        from pm_core.qa_loop import QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        with patch("pm_core.prompt_gen.store.find_project_root"):
+            prompt = generate_qa_child_prompt(self._data(), "pr-fin", scenario, "/tmp/workdir")
+        assert "Your Verdict Is Final for This Run" in prompt
+        assert "there is no re-poll" in prompt
+        assert "next QA run on this PR" in prompt
+        # Points to the handoff channel with the concrete PR id.
+        assert "pm pr note add pr-fin '<text>'" in prompt
+
+    def test_review_prompt_has_no_verdict_finality_block(self):
+        """Review loops accept successive verdicts, so they must NOT carry the
+        QA 'verdict is final' guidance."""
+        prompt = generate_review_prompt(self._data(), "pr-fin")
+        assert "Your Verdict Is Final for This Run" not in prompt
+
+    def test_refiner_prompt_one_shot_handoff(self):
+        from pm_core.qa_loop import _build_concretization_prompt, QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = _build_concretization_prompt(
+            scenario, "pm/pr-fin", "master", pr_id="pr-fin")
+        assert "This Decision Is Final" in prompt
+        assert "REFINER_REJECT defers the scenario" in prompt
+        assert "pm pr note add pr-fin '<text>'" in prompt
+        assert "Prefer pm PR notes over GitHub" in prompt
+
+    def test_refiner_prompt_placeholder_without_pr_id(self):
+        from pm_core.qa_loop import _build_concretization_prompt, QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = _build_concretization_prompt(scenario, "pm/pr-fin", "master")
+        assert "pm pr note add <pr-id> '<text>'" in prompt
+
+

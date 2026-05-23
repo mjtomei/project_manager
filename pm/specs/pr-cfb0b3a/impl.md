@@ -112,6 +112,37 @@ Insert the block (ungated) into each target generator:
    Notes` heading. To avoid two identical headings, the handoff block uses
    `## PR Notes — Handoff Channel`.
 
+## Follow-up: QA-run-to-QA-run handoff & verdict finality
+
+A second handoff direction surfaced in review: handing context from one QA
+run to the next on the same PR. This is forced by how verdicts are accepted:
+
+- **QA scenario workers** (`qa_loop.py`): when a verdict is extracted it is
+  recorded and the scenario is `pending.discard()`'d (`qa_loop.py:2222-2224`);
+  the poll loop then skips anything not in `pending` (`2131-2133`). The only
+  re-entry to `pending` is loop-initiated — a PASS that the verification step
+  flags gets a follow-up message (`2070-2112`). So a worker cannot volunteer a
+  replacement verdict; **all three verdicts are terminal** from the worker's
+  side (qa_loop has no per-scenario INPUT_REQUIRED follow-up poll).
+- **Scenario refiners** (the concretizer, `qa_loop._build_concretization_prompt`):
+  one-shot. A `REFINER_REJECT` marks the scenario INPUT_REQUIRED and returns
+  before the worker launches (`1415-1432`, `1660-1666`) — terminal, including
+  INPUT_REQUIRED.
+- **Review loops** (`review_loop.py:268+`): each iteration relaunches a fresh
+  pane and accepts a new verdict (INPUT_REQUIRED even gets an in-pane follow-up
+  poll). Successive verdicts ARE accepted, so review loops get **no** "verdict
+  is final" guidance.
+
+Implementation of the follow-up:
+- `generate_qa_child_prompt`: add a "Your Verdict Is Final for This Run" block
+  (states terminality + the one loop-initiated PASS-reverify exception) that
+  routes post-verdict / next-run context to a PR note, pointing at the existing
+  handoff section with the concrete `pr_id`.
+- `qa_loop._build_concretization_prompt`: add a "This Decision Is Final — Hand
+  Off via PR Notes" block; thread `pr_id` (from `pr_data["id"]` in
+  `_build_concretize_cmd`) so the example is concrete, falling back to `<pr-id>`.
+- Review and impl prompts intentionally left without the finality block.
+
 ## Edge Cases
 
 - `generate_prompt` lacks `_OUT_OF_SCOPE_BUGS_BLOCK`; the soft cross-reference

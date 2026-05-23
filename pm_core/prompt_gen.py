@@ -1885,6 +1885,19 @@ different methodology.
 
 {execution_block}
 {_OUT_OF_SCOPE_BUGS_BLOCK}
+## Your Verdict Is Final for This Run
+
+Once you output a verdict, the QA loop records it for this scenario and will
+not accept a later or replacement verdict from you — there is no re-poll.
+NEEDS_WORK and INPUT_REQUIRED are terminal. (The one exception is
+loop-initiated: if the loop's verification step flags your PASS, it messages
+this pane asking you to re-evaluate — answer that follow-up if it arrives.)
+
+So if you realize something after delivering your verdict, or you're leaving
+work or context for the **next QA run on this PR** to pick up — a fix you
+couldn't finish, a flaky prerequisite, something to check next time — you
+cannot amend your verdict to carry it forward. Hand it off as a PR note
+instead (see the PR Notes — Handoff Channel section below).
 {pr_notes_handoff_block}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
