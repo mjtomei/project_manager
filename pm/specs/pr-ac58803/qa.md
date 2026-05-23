@@ -166,13 +166,20 @@ the TUI sub-story additionally needs a running `pm session`.
   documented flush ordering actually yields a video (a common Playwright
   foot-gun the recipe calls out).
 
-### E4 — Container-safe flags are load-bearing
+### E4 — Container-safe flags are defensive defaults
 - **Given** the same container environment.
-- **When** Chromium is launched **without** `--no-sandbox` /
-  `--disable-dev-shm-usage`.
-- **Then** launch/navigation fails (or crashes), demonstrating the documented
-  flags are required — and that the recipe's launch line is the one that
-  works.
+- **When** Chromium is launched **with** the documented `--no-sandbox` /
+  `--disable-dev-shm-usage`, and again **without** them.
+- **Then** the flagged launch reliably starts, navigates, and finishes the run
+  to artifacts — that is the recipe's load-bearing guarantee. The unflagged
+  launch is **environment-dependent**: where it fails/crashes (root without
+  user namespaces, or a page that exhausts a small `/dev/shm`) it demonstrates
+  the flags are required; where it still succeeds (verified directly: root +
+  user-namespaces-available + 63M `/dev/shm` + the recipe's lightweight UI,
+  flags omitted, full video driver → valid `recording.webm`) the flags are
+  acting as defensive defaults, **not** a regression. So E4 confirms the
+  flagged line always works and treats an unflagged success as acceptable, not
+  a failure — only a *flagged* launch failure is a fail.
 
 ### E5 — SSE reader bounded and non-hanging
 - **Given** the Layer-2 `curl -sS -N --max-time <n>` reader.
@@ -211,8 +218,9 @@ the TUI sub-story additionally needs a running `pm session`.
   and driver blocks parse cleanly.
 - Edge cases behave as described: SSE layer is cleanly optional (E1), the
   shared event stream fans out to concurrent subscribers (E2), the webm is
-  produced thanks to correct flush ordering (E3), the flags are shown to be
-  required (E4), the SSE reader is bounded (E5), parallel scenarios are
+  produced thanks to correct flush ordering (E3), the flagged Chromium launch
+  reliably works and an unflagged launch is environment-dependent rather than a
+  regression (E4), the SSE reader is bounded (E5), parallel scenarios are
   isolated (E6).
 
 **Fail (examples):**
