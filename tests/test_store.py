@@ -272,6 +272,16 @@ class TestYamlBackend:
         store.save(data, tmp_pm_root)
         assert self._body(tmp_pm_root) == self._expected_pure_python(data)
 
+    def test_default_matches_pure_python_bytes(self, tmp_pm_root):
+        # With the flag absent, the dumper must default to byte-stable
+        # pure-Python output — not the C dumper. This guards the regression
+        # where a dropped project.libyaml flag silently re-enabled the C
+        # dumper and reformatted the whole file on the next save.
+        data = self._representative()  # no libyaml key at all
+        assert "libyaml" not in data["project"]
+        store.save(data, tmp_pm_root)
+        assert self._body(tmp_pm_root) == self._expected_pure_python(data)
+
     def test_reserialization_fixed_point(self, tmp_pm_root):
         # Within a mode, dump -> load -> dump must not drift.
         for flag in (True, False):
