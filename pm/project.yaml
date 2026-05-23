@@ -4541,7 +4541,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-05-23T06:01:03.815117+00:00'
+  updated_at: '2026-05-23T06:03:12.893768+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4620,6 +4620,34 @@ prs:
       flag the missing single-group band label.'
     created_at: '2026-05-23T06:01:03Z'
     last_edited: '2026-05-23T06:01:03Z'
+  - id: note-9cdd3ec
+    text: 'Scenario 18 refine: the tech-tree "No PRs defined. Use ''pr add'' to create
+      PRs." empty-state string (tech_tree.py:947) is UNREACHABLE from the TUI — app._show_view
+      (app.py:600-602) routes an empty prs list to the guide view instead of the tree.
+      So the empty-project sub-claim must observe the guide/setup screen, not that
+      string. The all-hidden banner ("All PRs hidden (N plan(s)). Press x to show
+      all.") IS reachable. Filter cycle = [all, pending, in_progress, in_review, qa,
+      merged, closed] (7 f-presses to return to all); fixture intentionally has no
+      closed PRs so the "closed" step is the zero-match case ("No closed PRs. Press
+      F to cycle filter."). Keys: x=hide/show-plan, X=toggle-merged, f=filter, F=sort.'
+    created_at: '2026-05-23T05:55:23Z'
+    last_edited: '2026-05-23T05:55:23Z'
+  - id: note-787b408
+    text: 'Scenario 18 result (2026-05-23): PASS, all 7 sub-claims driven on real
+      tmux surface. IMPORTANT premise correction for future runs: _hide_closed defaults
+      True (tech_tree.py:712), so the status bar shows "filter: hide closed" by DEFAULT
+      — there is no "no filter segment" baseline. Consequences (all intended, NOT
+      bugs): (1) cycling status filter back to "all" reverts to "filter: hide closed",
+      it does not blank; (2) X (hide merged) shows "filter: hide merged+closed" (toggles
+      combine via "+"), not bare "hide merged". Confirmed working: hide/show plan
+      + navigable bottom label (selected=bold-white, posts no Selected: log), filter
+      cycle incl. "No closed PRs. Press F to cycle filter." zero-match, sort F preserves
+      cursor (pr id re-selected), X persists hide_merged:false to project.yaml, selection
+      clamp on over-filter, all-hidden banner "All PRs hidden (N plan(s))" + per-plan
+      "(hidden, 1 PR)" singular labels individually unhideable, empty project routes
+      to pm Guide view (not "No PRs defined"). No code changes needed.'
+    created_at: '2026-05-23T06:03:12Z'
+    last_edited: '2026-05-23T06:03:12Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
