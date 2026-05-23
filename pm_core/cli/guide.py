@@ -82,10 +82,10 @@ def _run_guide(fresh=False):
             return
 
         if _in_pm_tmux_session():
-            cmd = build_claude_shell_cmd(prompt=prompt)
+            cmd = build_claude_shell_cmd(prompt=prompt, session_type="guide")
             os.execvp("bash", ["bash", "-c", cmd])
         else:
-            launch_claude(prompt)
+            launch_claude(prompt, session_type="guide")
     else:
         # Setup mode — no PRs yet
         prompt = guide_mod.build_setup_prompt(state, ctx, root, session_name=pm_session)
@@ -117,7 +117,8 @@ def _run_guide(fresh=False):
                 session_id = str(uuid_mod.uuid4())
                 save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
 
-            claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id, resume=is_resuming)
+            claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id,
+                                                resume=is_resuming, session_type="guide")
 
             # On failure (non-zero exit), clear the session so next launch starts fresh
             clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
@@ -125,7 +126,8 @@ def _run_guide(fresh=False):
 
             os.execvp("bash", ["bash", "-c", cmd])
         else:
-            launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+            launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
+                          session_type="guide")
 
 
 @cli.command("notes")

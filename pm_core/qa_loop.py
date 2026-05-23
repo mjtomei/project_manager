@@ -384,6 +384,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
                           session: str, window_name: str,
                           workdir_path: str | None,
                           stop_check: Callable[[], bool] | None = None,
+                          project_data: dict | None = None,
                           ) -> str | None:
     """Run the post-QA finalize pane synchronously.
 
@@ -442,9 +443,16 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
 
     import uuid as _uuid
     finalize_session_id = str(_uuid.uuid4())
+    _finalize_resolution = _resolve_qa_model(pr_data, project_data,
+                                             session_type="qa_finalize")
     finalize_cmd = build_claude_shell_cmd(
         prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
         session_id=finalize_session_id,
+        model=_finalize_resolution.model,
+        provider=_finalize_resolution.provider,
+        effort=_finalize_resolution.effort,
+        session_type="qa_finalize",
+        session_tag=state.session_tag,
     )
 
     try:
@@ -1008,9 +1016,10 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
                       session_type: str = "qa"):
     """Resolve model/provider for a QA session type.
 
-    session_type should be "qa_planning" for the planner, "qa_scenario"
-    for scenario workers, or "qa_verification" for the verification step.
-    Falls back to "qa" config if the specific type is not configured.
+    session_type is one of "qa_planning" (planner), "qa_scenario" (scenario
+    workers), "qa_concretize" (step refiner), "qa_verification" (verification
+    step), or "qa_finalize" (post-QA finalize pane). Each falls back to "qa"
+    config when the specific type is not configured.
     """
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     return resolve_model_and_provider(
@@ -1151,12 +1160,13 @@ def _build_concretize_cmd(
     instruction_content: str | None = None,
     write_dir: str | None = None,
     session_id: str | None = None,
+    session_tag: str | None = None,
 ) -> str:
     """Build the shell command for the concretization step."""
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
-                                   session_type="qa_scenario")
+                                   session_type="qa_concretize")
     base_branch = project_data.get("project", {}).get("base_branch", "master")
     pr_branch = pr_data.get("branch", "")
 
@@ -1168,6 +1178,11 @@ def _build_concretize_cmd(
         model=resolution.model, provider=resolution.provider,
         effort=resolution.effort, cwd=cwd, write_dir=write_dir,
         session_id=session_id,
+        # The refiner emits REFINED_STEPS / REFINER_REJECT, not the worker's
+        # PASS/NEEDS_WORK — so it is its own fake-claude session type even
+        # though it shares model resolution with qa_scenario.
+        session_type="qa_concretize",
+        session_tag=session_tag,
     )
 
     if container_name:
@@ -1300,7 +1315,9 @@ def _launch_scenario_0(
     final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
         model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
-        cwd=scenario_cwd)
+        cwd=scenario_cwd,
+        session_type="qa_scenario",
+        session_tag=state.session_tag)
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
@@ -1534,7 +1551,8 @@ def _launch_scenarios_in_tmux(
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
             instruction_content=instruction_content,
-            session_id=scenario.concretize_session_id)
+            session_id=scenario.concretize_session_id,
+            session_tag=state.session_tag)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1774,7 +1792,8 @@ def _launch_scenarios_in_containers(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
             write_dir=str(clone_path),
-            session_id=scenario.concretize_session_id)
+            session_id=scenario.concretize_session_id,
+            session_tag=state.session_tag)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1964,6 +1983,8 @@ def _build_scenario_run_cmd(
         model=qa_resolution.model, provider=qa_resolution.provider,
         effort=qa_resolution.effort,
         transcript=transcript, cwd=wd_in, write_dir=host_clone,
+        session_type="qa_scenario",
+        session_tag=state.session_tag,
     )
 
     if use_containers:
@@ -2135,6 +2156,7 @@ def _poll_tmux_verdicts(
                 scenario, verdict, content, pr_data, data,
                 session=session, stop_check=_stop,
                 qa_workdir=state.qa_workdir,
+                session_tag=state.session_tag,
                 pr_workdir=workdir_path,
             )
         except Exception:
@@ -2472,7 +2494,8 @@ _VERIFICATION_MAX_PANE_LINES = 500
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
                                 pane_output: str | None = None,
-                                pane_output_path: str | None = None) -> str:
+                                pane_output_path: str | None = None,
+                                captures_scenario_dir: str | None = None) -> str:
     """Build a prompt for Claude to verify a single scenario's verdict.
 
     The prompt asks Claude to determine whether the scenario genuinely
@@ -2481,6 +2504,12 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
     If *pane_output_path* is provided the prompt tells the verifier to
     read the file (keeps the prompt small).  Otherwise *pane_output* is
     inlined (truncated to ``_VERIFICATION_MAX_PANE_LINES``).
+
+    If the scenario was assigned artifact recipes (``scenario.artifact_paths``)
+    the prompt also tells the verifier to confirm the expected captures
+    actually landed in *captures_scenario_dir* — a recording recipe that
+    only produced a static text dump, or no capture at all, is flagged
+    unless the transcript states a valid reason it could not be produced.
     """
     if pane_output_path:
         is_jsonl = pane_output_path.endswith(".jsonl")
@@ -2514,6 +2543,55 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
             f"Here is the full output from the scenario session:\n\n"
             f"<scenario_output>\n{text}\n</scenario_output>"
         )
+
+    # Artifact-completeness check — only when the scenario was assigned one
+    # or more capture recipes. A recipe declares the artifacts it must
+    # produce; the verifier confirms they actually landed in the captures
+    # dir (and are the real thing, not a downgraded substitute) before it
+    # can VERIFIED. This catches scenarios that drove the surface correctly
+    # but silently skipped or weakened the prescribed capture.
+    artifact_names = [Path(p).name for p in (scenario.artifact_paths or [])]
+    artifact_check_block = ""
+    artifact_judgment_bullet = ""
+    if artifact_names:
+        recipe_bullets = "\n".join(f"- {n}" for n in artifact_names)
+        where = captures_scenario_dir or (
+            "the per-scenario captures directory the scenario worker was given")
+        artifact_check_block = f"""
+### Step 3: Confirm the expected artifacts were produced
+
+This scenario was assigned the following capture recipe(s):
+
+{recipe_bullets}
+
+Each recipe documents, under its "What this recipe produces" section, the
+artifact(s) the scenario was supposed to save. They should have landed in:
+
+  {where}
+
+List that directory and confirm, for every assigned recipe, that the
+artifact(s) it requires are actually present **and are the real thing the
+recipe calls for** — not a weaker substitute. In particular, a recipe that
+calls for a replayable recording (e.g. an asciinema `.cast`) is **not**
+satisfied by a plain-text scrollback dump alone; a static `.log` or
+`.txt` capture does not stand in for the required recording.
+
+A missing or downgraded artifact is acceptable **only** if the transcript
+states a specific, valid reason it could not be produced — for example the
+required tool (asciinema, a display, etc.) was genuinely unavailable in the
+environment, or the exercised surface produced nothing observable to
+capture. "I used `capture-pane` instead", "I forgot", or simple absence of
+the artifact with no explanation are **not** valid reasons.
+
+"""
+        artifact_judgment_bullet = (
+            "\n- If any required artifact (Step 3) is missing or downgraded to a "
+            "weaker substitute without a stated, valid reason in the transcript, "
+            "the verdict is **FLAGGED**.")
+
+    # When an artifact-check step is present it takes the "Step 3" slot, so
+    # the judgment step shifts to Step 4.
+    judgment_step_no = 4 if artifact_names else 3
 
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 
@@ -2555,12 +2633,12 @@ Mark each part as:
 - **SKIPPED** — no evidence it was attempted
 - **SUBSTITUTED** — the scenario verified it a different way (unit test, code reading, string-grep against generated output instead of running it)
 - **FAILED** — it was attempted but produced errors or wrong results
-
-### Step 3: Make your judgment
+{artifact_check_block}
+### Step {judgment_step_no}: Make your judgment
 
 - If any Given, When, or Then in any triple is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that worked around missing tools by substituting methodology (unit tests, code review, harnessed source dumps) has not exercised the behavior — it should have reported INPUT_REQUIRED instead of PASS.
-- If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.
-- Only if every part of every triple is DONE and matched is the verdict **VERIFIED**.
+- If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.{artifact_judgment_bullet}
+- Only if every part of every triple is DONE and matched (and every required artifact is present or validly excused) is the verdict **VERIFIED**.
 
 ### Common false-pass patterns to watch for
 
@@ -2612,6 +2690,7 @@ def _verify_single_scenario(
     session: str | None = None,
     stop_check: Callable[[], bool] | None = None,
     qa_workdir: str | None = None,
+    session_tag: str | None = None,
     pr_workdir: str | None = None,
 ) -> tuple[bool, str, str | None]:
     """Verify a single scenario's verdict in its dedicated verifier pane.
@@ -2660,10 +2739,27 @@ def _verify_single_scenario(
                          "falling back to pane output",
                          scenario.index, scenario.transcript_path)
 
+    # Resolve the host captures dir for this scenario so the verifier can
+    # confirm the scenario's assigned artifact recipes actually produced
+    # their captures there.
+    captures_scenario_dir: str | None = None
+    if scenario.artifact_paths:
+        try:
+            from pm_core.paths import captures_dir
+            _pr_id = pr_data.get("id") if pr_data else None
+            base = captures_dir(_pr_id, session_tag=session_tag) if _pr_id else None
+            if base:
+                captures_scenario_dir = str(
+                    Path(base) / "scenarios" / str(scenario.index))
+        except Exception:
+            _log.debug("Verification: could not resolve captures dir for "
+                       "scenario %d", scenario.index, exc_info=True)
+
     prompt = _build_verification_prompt(
         scenario, verdict,
         pane_output_path=transcript_path,
         pane_output=pane_output if not transcript_path else None,
+        captures_scenario_dir=captures_scenario_dir,
     )
 
     pane_alive = bool(scenario.verifier_pane_id) and tmux_mod.pane_exists(
@@ -2700,6 +2796,8 @@ def _verify_single_scenario(
             model=resolution.model, provider=resolution.provider,
             effort=resolution.effort,
             cwd=verify_cwd, session_id=verify_session_id,
+            session_type="qa_verification",
+            session_tag=session_tag,
         )
         try:
             verify_pane = tmux_mod.split_pane_at(
@@ -2919,7 +3017,9 @@ def run_qa_sync(
             prompt=planner_prompt,
             model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
             cwd=workdir_path,
-            session_id=planner_session_id)
+            session_id=planner_session_id,
+            session_type="qa_planning",
+            session_tag=state.session_tag)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -3290,6 +3390,7 @@ def _execute_and_finalize(
         state.finalize_verdict = _run_qa_finalize_pane(
             state, pr_data, session, window_name, workdir_path,
             stop_check=lambda: state.stop_requested,
+            project_data=data,
         )
     except Exception:
         _log.exception("Failed to run QA finalize pane")

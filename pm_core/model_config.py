@@ -47,7 +47,9 @@ _HAIKU_PATTERNS = ("haiku",)
 
 # ── Session types ────────────────────────────────────────────────────
 
-SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario", "qa_verification", "watcher", "merge")
+SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario",
+                 "qa_concretize", "qa_verification", "qa_finalize",
+                 "watcher", "merge")
 
 DEFAULT_SESSION_MODELS: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
@@ -61,7 +63,9 @@ _PROVIDER_PREFIX = "provider:"
 _FALLBACK_TYPES: dict[str, str] = {
     "qa_planning": "qa",
     "qa_scenario": "qa",
+    "qa_concretize": "qa",
     "qa_verification": "qa",
+    "qa_finalize": "qa",
 }
 
 # Valid effort levels for the Claude CLI --effort flag.
@@ -225,6 +229,49 @@ def get_model_config_summary(project_data: dict | None = None) -> dict[str, str]
         else:
             result[st] = "(default)"
     return result
+
+
+def validate_model_config(project_data: dict | None) -> list[str]:
+    """Return a list of problems with project.yaml's ``model_config`` block.
+
+    An empty list means valid. Checks that:
+
+    - ``session_models`` / ``session_effort`` keys are known session types
+      (``SESSION_TYPES``);
+    - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``).
+
+    Unknown keys are silently ignored by ``resolve_model_and_provider`` — a
+    typo'd session type would otherwise just never take effect — so this is
+    surfaced as a warning (e.g. by ``pm model show``) rather than raised.
+    """
+    if not project_data:
+        return []
+    mc = project_data.get("project", {}).get("model_config", {})
+    if not isinstance(mc, dict):
+        return ["model_config must be a mapping"]
+
+    errors: list[str] = []
+    known = sorted(SESSION_TYPES)
+    for block in ("session_models", "session_effort"):
+        entries = mc.get(block, {})
+        if not isinstance(entries, dict):
+            errors.append(f"model_config.{block} must be a mapping")
+            continue
+        for st in entries:
+            if st not in SESSION_TYPES:
+                errors.append(
+                    f"model_config.{block}: unknown session type {st!r}. "
+                    f"Valid types: {known}"
+                )
+    effort_entries = mc.get("session_effort", {})
+    if isinstance(effort_entries, dict):
+        for st, level in effort_entries.items():
+            if level not in EFFORT_LEVELS:
+                errors.append(
+                    f"model_config.session_effort[{st!r}]: invalid effort "
+                    f"{level!r}. Valid levels: {list(EFFORT_LEVELS)}"
+                )
+    return errors
 
 
 def get_pr_model_override(pr_entry: dict) -> str | None:

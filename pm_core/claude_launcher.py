@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import random
 import shlex
 import shutil
 import subprocess
@@ -12,6 +13,265 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger, log_shell_command
 _log = configure_logger("pm.claude_launcher")
+
+# The fake-claude executable is invoked by bare name and resolved from PATH —
+# exactly like the real ``claude`` binary.  The on-PATH ``fake-claude`` is a
+# tiny shim that resolves the actual binary via ``pm which`` at run time, so
+# the pm install *under test* is used (host or container).  ``install.sh``
+# writes the shim to ~/.local/bin on the host and
+# ``container._build_git_setup_script`` writes the same shim at container
+# startup, so the same command resolves correctly in *both* environments with
+# no build-time path baking and no host->container rewrite.
+_FAKE_CLAUDE_BIN = "fake-claude"
+
+
+def _fake_claude_config_for_type(session_type: str | None) -> dict | None:
+    """Return the merged fake-claude config for *session_type*, or None."""
+    from pm_core.paths import fake_claude_config_for_type
+    return fake_claude_config_for_type(session_type)
+
+
+def _pick_fake_verdict(verdicts: dict) -> str:
+    """Pick a verdict at random using the given weight map.
+
+    Defensively tolerates a hand-edited weight map.  The supported
+    ``pm fake-claude config set`` path validates weights (numeric,
+    non-negative, not all-zero), but a directly-edited config must never
+    crash the launcher — same invariant as review-loop 878e i1, which
+    coerced malformed ``_all``/``_defaults``/per-type *shapes*; this covers
+    malformed weight *values* inside an otherwise well-shaped per-type entry.
+    Non-numeric / boolean / negative weights count as zero, and an all-zero
+    (or otherwise unusable) map falls back to a uniform pick instead of
+    crashing ``random.choices`` ("Total of weights must be greater than zero").
+    """
+    names = list(verdicts.keys())
+    if not names:
+        return "NONE"
+    weights: list[float] = []
+    for n in names:
+        w = verdicts[n]
+        if isinstance(w, bool) or not isinstance(w, (int, float)) or w < 0:
+            weights.append(0.0)
+        else:
+            weights.append(float(w))
+    if sum(weights) <= 0:
+        return random.choice(names)
+    return random.choices(names, weights=weights, k=1)[0]
+
+
+def _clamp_cursor(raw, length: int, wrap: bool) -> int:
+    """Normalise a stored cursor value into a valid index for a sequence.
+
+    Coerces non-int / negative values to 0, then handles an out-of-range
+    cursor (e.g. the config was edited to a shorter sequence): wrap → 0,
+    clamp → the terminal slot.
+    """
+    cur = raw if isinstance(raw, int) and raw >= 0 else 0
+    if cur >= length:
+        cur = 0 if wrap else length - 1
+    return cur
+
+
+def _advance_scripted_cursor(session_tag: str | None, session_type: str,
+                             sequence_len: int, wrap: bool) -> int:
+    """Atomically advance the scripted-verdict cursor for *session_type*.
+
+    The cursor lives in ``<session_dir>/fake-claude.state`` as JSON
+    ``{"<session_type>": <next_index>}``.  Returns the index to use *this*
+    invocation (then bumps it for the next).  Concurrent panes of the same
+    session type advancing simultaneously are serialised via ``fcntl.flock``
+    so neither grabs the same slot.
+
+    ``wrap=False`` clamps the cursor at ``sequence_len - 1`` (the terminal
+    entry keeps emitting once the script runs out).  ``wrap=True`` cycles
+    back to 0.
+    """
+    import fcntl
+    from pm_core.paths import session_dir
+
+    if sequence_len <= 0:
+        return 0
+    sd = session_dir(session_tag)
+    if sd is None:
+        # No session dir → no place to persist the cursor.  Fall back to
+        # always emitting the first entry (deterministic, drift-free).
+        return 0
+    state_path = sd / "fake-claude.state"
+    fd = os.open(str(state_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            raw = os.read(fd, 1 << 20).decode("utf-8") or "{}"
+            state = json.loads(raw) if raw.strip() else {}
+            if not isinstance(state, dict):
+                state = {}
+        except (ValueError, OSError):
+            state = {}
+        cur = _clamp_cursor(state.get(session_type, 0), sequence_len, wrap)
+        if wrap:
+            nxt = (cur + 1) % sequence_len
+        else:
+            # Clamp toward the terminal slot; a one-entry sequence keeps
+            # resolving to 0 (cur is already clamped above, so cur + 1 caps
+            # at sequence_len - 1 == 0).
+            nxt = min(cur + 1, sequence_len - 1)
+        state[session_type] = nxt
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.ftruncate(fd, 0)
+        os.write(fd, (json.dumps(state) + "\n").encode("utf-8"))
+        return cur
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _resolve_fake_verdict(verdicts, session_type: str | None,
+                          session_tag: str | None) -> tuple[str, dict]:
+    """Pick the next verdict and any per-iteration overrides.
+
+    Returns ``(verdict_name, overrides_dict)``.  For weighted-random configs
+    (a plain verdict→weight dict) the overrides dict is empty.  For
+    scripted-sequence configs the overrides come from the per-entry dict (if
+    any), layered later on top of the base config.
+
+    ``"NONE"`` is returned when verdicts is empty/absent.
+    """
+    from pm_core.fake_claude import (_scripted_sequence, _scripted_entry_verdict,
+                                      _scripted_wrap)
+
+    if not verdicts:
+        return "NONE", {}
+
+    sequence = _scripted_sequence(verdicts)
+    if sequence is None:
+        # Existing weighted-random dict form.  A hand-edited config can put a
+        # scalar here (e.g. ``"verdicts": "PASS"``); that is neither a weight
+        # map nor a scripted sequence and would crash _pick_fake_verdict
+        # (``.keys()`` on a str/int).  Per the i1/i2 invariant — a directly
+        # edited config must never crash the launcher — treat any non-dict as
+        # no-verdict rather than blowing up.
+        if not isinstance(verdicts, dict):
+            return "NONE", {}
+        return _pick_fake_verdict(verdicts), {}
+
+    if not sequence:
+        return "NONE", {}
+
+    # No persistent cursor without a session_type to key it under: emit slot 0.
+    if not session_type:
+        idx = 0
+    else:
+        idx = _advance_scripted_cursor(session_tag, session_type, len(sequence),
+                                       _scripted_wrap(verdicts))
+    entry = sequence[idx]
+    name = _scripted_entry_verdict(entry) or "NONE"
+    overrides: dict = {}
+    if isinstance(entry, dict):
+        overrides = {k: v for k, v in entry.items() if k != "verdict"}
+    return name, overrides
+
+
+def _fake_claude_args(config: dict, session_id: str | None = None,
+                     session_type: str | None = None,
+                     session_tag: str | None = None) -> list[str]:
+    """Build the fake-claude argv (excluding the binary) from a config dict.
+
+    Resolves the next verdict from the ``verdicts`` field, which may be:
+
+    * a verdict→weight ``dict`` — random pick weighted by the values
+    * a ``list`` of entries — scripted sequence (clamp-to-last by default)
+    * a ``dict`` with ``"sequence"`` list and optional ``"wrap": true`` —
+      scripted with wrap-around
+
+    An empty / absent verdicts field means a no-verdict session
+    (impl/watcher/merge, or a session type matched only by the ``_all``
+    catch-all): the fake emits ``--verdict NONE`` and stays open like a real
+    interactive session.
+
+    Scripted entries may carry per-iteration overrides (``body``, ``delay``,
+    ``preamble``, …) which are layered on top of the base config keys for
+    just that invocation.
+
+    When *session_id* is given it is passed through as ``--session-id`` so
+    the fake writes a JSONL transcript and emits the ``idle_prompt`` hook
+    event — the inputs the hook-driven verdict poller actually reads.
+    """
+    verdicts = config.get("verdicts") or {}
+    verdict, overrides = _resolve_fake_verdict(verdicts, session_type, session_tag)
+
+    # Layer per-entry overrides on top of the base config.  Caller's config
+    # values lose to script-entry overrides for this single invocation.
+    effective = {k: v for k, v in config.items() if k != "verdicts"}
+    effective.update(overrides)
+
+    args = ["--verdict", verdict]
+    if session_id:
+        args.extend(["--session-id", session_id])
+    if "body" in effective:
+        args.extend(["--body", str(effective["body"])])
+    for cfg_key, flag in (
+        ("preamble", "--preamble"),
+        ("preamble_delay", "--preamble-delay"),
+        ("delay", "--delay"),
+        ("body_lines", "--body-lines"),
+        ("body_batch", "--body-batch"),
+        ("body_delay", "--body-delay"),
+        ("hold", "--hold"),
+    ):
+        if cfg_key in effective:
+            args.extend([flag, str(effective[cfg_key])])
+    return args
+
+
+def peek_fake_verdicts(session_tag: str | None = None) -> dict:
+    """Return ``{session_type: next_verdict}`` without advancing any cursors.
+
+    Useful as a debug aid for scripted-sequence configs: shows which slot
+    each session type would emit on its next launch.  Weighted-random
+    configs report ``"<random>"`` since the pick is non-deterministic.
+    Session types whose verdicts are empty/absent report ``"NONE"``.
+    """
+    from pm_core.fake_claude import (_scripted_sequence, _scripted_entry_verdict,
+                                      _scripted_wrap)
+    from pm_core.paths import fake_claude_config, session_dir
+
+    raw = fake_claude_config(session_tag)
+    if not raw:
+        return {}
+    sd = session_dir(session_tag)
+    state: dict = {}
+    if sd is not None:
+        state_path = sd / "fake-claude.state"
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text()) or {}
+                if not isinstance(state, dict):
+                    state = {}
+            except (OSError, json.JSONDecodeError):
+                state = {}
+
+    out: dict = {}
+    for key, value in raw.items():
+        # Skip non-session-type keys: _defaults, _all (mirrors the
+        # filtering in set_fake_claude_config).
+        if key.startswith("_") or not isinstance(value, dict):
+            continue
+        verdicts = value.get("verdicts") or {}
+        if not verdicts:
+            out[key] = "NONE"
+            continue
+        seq = _scripted_sequence(verdicts)
+        if seq is None:
+            out[key] = "<random>"
+            continue
+        if not seq:
+            out[key] = "NONE"
+            continue
+        cur = _clamp_cursor(state.get(key, 0), len(seq), _scripted_wrap(verdicts))
+        out[key] = _scripted_entry_verdict(seq[cur]) or "NONE"
+    return out
 
 
 def _resolve_provider(provider: str | None = None):
@@ -99,7 +359,11 @@ def _parse_session_id(stderr_text: str) -> str | None:
 
 
 def find_claude() -> str | None:
-    """Return path to claude CLI, or None if not found."""
+    """Return path to the claude CLI, or None if not found.
+
+    Does not apply the fake-claude override — session-type is required for
+    that.  Launch functions call ``_fake_claude_config_for_type`` directly.
+    """
     return shutil.which("claude")
 
 
@@ -128,7 +392,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
                   cwd: str | None = None, resume: bool = True,
                   provider: str | None = None,
                   model: str | None = None,
-                  effort: str | None = None) -> int:
+                  effort: str | None = None,
+                  session_type: str | None = None) -> int:
     """Run claude interactively with a prompt. Returns exit code.
 
     Attempts to resume a previous session if one exists for session_key.
@@ -142,8 +407,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     """
     import uuid
 
+    # Check fake-claude config before requiring real claude on PATH.
+    fc_config = _fake_claude_config_for_type(session_type)
+
     claude = find_claude()
-    if not claude:
+    if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider for env vars and model flag
@@ -166,19 +434,23 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         save_session(pm_root, session_key, session_id)
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
-    cmd = [claude]
-    if _skip_permissions():
-        cmd.append("--dangerously-skip-permissions")
-    if model_flag:
-        cmd.extend(["--model", model_flag])
-    if effort:
-        cmd.extend(["--effort", effort])
-    if is_resuming:
-        cmd.extend(["--resume", session_id])
-        # Don't pass prompt when resuming - Claude already has the conversation
+    if fc_config is not None:
+        cmd = [_FAKE_CLAUDE_BIN]
+        cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
-        cmd.extend(["--session-id", session_id])
-        cmd.append(prompt)
+        cmd = [claude]
+        if _skip_permissions():
+            cmd.append("--dangerously-skip-permissions")
+        if model_flag:
+            cmd.extend(["--model", model_flag])
+        if effort:
+            cmd.extend(["--effort", effort])
+        if is_resuming:
+            cmd.extend(["--resume", session_id])
+            # Don't pass prompt when resuming - Claude already has the conversation
+        else:
+            cmd.extend(["--session-id", session_id])
+            cmd.append(prompt)
 
     _log.info("launch_claude: cmd=%s (cwd=%s, session_key=%s, session_id=%s)",
               cmd[:6], cwd, session_key, session_id[:8] + "...")
@@ -191,8 +463,9 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     if returncode != 0:
         log_shell_command(cmd, prefix="claude", returncode=returncode)
 
-    # If session failed (possibly invalid/corrupted), try with fresh session
-    if returncode != 0 and resume:
+    # If session failed (possibly invalid/corrupted), try with a fresh session.
+    # Skip the retry when using fake-claude — it always exits 0.
+    if returncode != 0 and resume and fc_config is None:
         _log.warning("Session failed (rc=%d), retrying with fresh session", returncode)
         session_id = str(uuid.uuid4())
         save_session(pm_root, session_key, session_id)
@@ -219,7 +492,8 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
                         provider: str | None = None,
                         model: str | None = None,
                         effort: str | None = None,
-                        allowed_tools: list[str] | None = None) -> str:
+                        allowed_tools: list[str] | None = None,
+                        session_type: str | None = None) -> str:
     """Run claude -p (non-interactive print mode). Returns stdout.
 
     Shows a spinner on stderr while waiting for Claude to finish.
@@ -237,26 +511,32 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     import time
     import itertools
 
+    # Check fake-claude config before requiring real claude on PATH.
+    fc_config = _fake_claude_config_for_type(session_type)
+
     claude = find_claude()
-    if not claude:
+    if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider
     _, model_flag, run_env = _resolve_provider(provider)
-
-    cmd = [claude]
-    if _skip_permissions():
-        cmd.append("--dangerously-skip-permissions")
-    # Explicit model takes precedence over provider model_flag
-    effective_model = model or model_flag
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-    if effort:
-        cmd.extend(["--effort", effort])
-    if allowed_tools:
-        for tool in allowed_tools:
-            cmd.extend(["--allowedTools", tool])
-    cmd.extend(["-p", prompt])
+    if fc_config is not None:
+        cmd = [_FAKE_CLAUDE_BIN]
+        cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
+    else:
+        cmd = [claude]
+        if _skip_permissions():
+            cmd.append("--dangerously-skip-permissions")
+        # Explicit model takes precedence over provider model_flag
+        effective_model = model or model_flag
+        if effective_model:
+            cmd.extend(["--model", effective_model])
+        if effort:
+            cmd.extend(["--effort", effort])
+        if allowed_tools:
+            for tool in allowed_tools:
+                cmd.extend(["--allowedTools", tool])
+        cmd.extend(["-p", prompt])
 
     done = threading.Event()
 
@@ -275,12 +555,17 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
 
     try:
         log_shell_command(cmd, prefix="claude-print")
+        # Print mode is one-shot; close stdin so a no-verdict fake-claude
+        # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
+        # forever on inherited stdin.  Real `claude -p` gets its prompt via
+        # argument, so it never needs stdin either.
         result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
             env=run_env,
+            stdin=subprocess.DEVNULL,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
@@ -312,6 +597,7 @@ def build_claude_shell_cmd(
     provider: str | None = None,
     effort: str | None = None,
     write_dir: str | None = None,
+    session_type: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -370,9 +656,22 @@ def build_claude_shell_cmd(
         parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
         env_prefix = " ".join(parts) + " "
 
-    from pm_core.paths import skip_permissions_enabled
-    skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-    cmd = f"{env_prefix}claude{skip}"
+    from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
+    fc_config = fake_claude_config_for_type(session_type, session_tag)
+    if fc_config is not None:
+        # Thread the session_id (generated above for transcript=, or passed
+        # by the caller) so the fake writes the JSONL transcript + hook event
+        # the verdict poller reads.  None for interactive panes that aren't
+        # polled — the fake then just writes to stdout.
+        fake_args = _fake_claude_args(fc_config, session_id=session_id,
+                                      session_type=session_type,
+                                      session_tag=session_tag)
+        cmd = env_prefix + shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
+        log_shell_command(cmd, prefix="claude")
+        return cmd
+    else:
+        skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
+        cmd = f"{env_prefix}claude{skip}"
 
     # Explicit model param overrides provider's model_flag
     effective_model = model or model_flag
@@ -477,10 +776,15 @@ def finalize_transcript(transcript_path: Path) -> None:
         _log.debug("transcript: target %s does not exist, skipping finalize", target)
 
 
-def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None) -> None:
-    """Send a claude command to a tmux pane."""
+def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,
+                          session_type: str | None = None) -> None:
+    """Send a claude command to a tmux pane.
+
+    Pass *session_type* to let the fake-claude override apply (see
+    ``build_claude_shell_cmd``).
+    """
     from pm_core.tmux import send_keys
-    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd)
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd, session_type=session_type)
     send_keys(pane_target, cmd)
 
 
@@ -501,36 +805,48 @@ def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> st
 
 def launch_claude_print_background(prompt: str, cwd: str | None = None,
                                     callback=None,
-                                    provider: str | None = None) -> None:
+                                    provider: str | None = None,
+                                    session_type: str | None = None) -> None:
     """Run claude -p in a background thread. Calls callback(stdout, stderr, returncode) when done.
 
     Args:
         provider: Name of the LLM provider to use. See providers.py.
+        session_type: Session type for fake-claude override selection.
     """
     import threading
 
-    # Resolve provider outside the thread so config is read on the caller's thread
+    # Resolve provider and fake config outside the thread (caller's thread context)
     _, model_flag, run_env = _resolve_provider(provider)
+    fc_config = _fake_claude_config_for_type(session_type)
 
     def _run():
-        claude = find_claude()
-        if not claude:
-            if callback:
-                callback("", "claude CLI not found", 1)
-            return
-        cmd = [claude]
-        if _skip_permissions():
-            cmd.append("--dangerously-skip-permissions")
-        if model_flag:
-            cmd.extend(["--model", model_flag])
-        cmd.extend(["-p", prompt])
+        if fc_config is not None:
+            cmd = [_FAKE_CLAUDE_BIN]
+            cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
+        else:
+            claude = find_claude()
+            if not claude:
+                if callback:
+                    callback("", "claude CLI not found", 1)
+                return
+            cmd = [claude]
+            if _skip_permissions():
+                cmd.append("--dangerously-skip-permissions")
+            if model_flag:
+                cmd.extend(["--model", model_flag])
+            cmd.extend(["-p", prompt])
         log_shell_command(cmd, prefix="claude-print")
+        # Print mode is one-shot; close stdin so a no-verdict fake-claude
+        # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
+        # forever on inherited stdin.  Real `claude -p` gets its prompt via
+        # argument, so it never needs stdin either.
         result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
             env=run_env,
+            stdin=subprocess.DEVNULL,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)

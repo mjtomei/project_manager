@@ -3,8 +3,10 @@
 import click
 
 from pm_core.cli.helpers import state_root
+from pm_core.model_config import SESSION_TYPES
 
-_SESSION_TYPES = ["impl", "review", "qa", "qa_planning", "qa_scenario", "qa_verification", "watcher", "merge"]
+# Single source of truth — kept in sync with model_config.SESSION_TYPES.
+_SESSION_TYPES = list(SESSION_TYPES)
 
 
 @click.group("model")
@@ -52,6 +54,17 @@ def model_show():
             click.echo(f"  {st:14s} effort -> {val}")
     else:
         click.echo("No project-level model_config in project.yaml (using defaults).")
+
+    # Surface invalid model_config entries — unknown session types are
+    # silently ignored at resolution time, so a typo would otherwise just
+    # never take effect.
+    from pm_core.model_config import validate_model_config
+    problems = validate_model_config(data)
+    if problems:
+        click.echo()
+        click.echo("⚠ Problems in project.yaml model_config:")
+        for p in problems:
+            click.echo(f"  • {p}")
 
 
 @model.command("set")

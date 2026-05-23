@@ -11,3 +11,4 @@ Dockerfile.pm-project
 pm_prompt_*.txt
 pm/prompts/
 pm/transcripts/
+.claude/
