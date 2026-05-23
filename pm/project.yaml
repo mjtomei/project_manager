@@ -4541,7 +4541,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-05-23T07:11:16.518337+00:00'
+  updated_at: '2026-05-23T07:20:05.796686+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4731,6 +4731,43 @@ prs:
       28 every line (aligned). No code changes needed.'
     created_at: '2026-05-23T07:11:16Z'
     last_edited: '2026-05-23T07:11:16Z'
+  - id: note-f8c7dcc
+    text: 'QA scenario 25 (live spinners/markers on active nodes): the bound instruction
+      file references `pm fake-claude config set`, but that CLI does NOT exist on
+      this branch (pr-4c41017 only adds the tech-tree split). Confirmed via `pm --help`
+      and pm_core/cli/* (no fake module). On this branch the loop launches a literal
+      `claude` (claude_launcher.build_claude_shell_cmd) and detects verdicts via JSONL
+      transcript + ~/.pm/hooks/<sid>.json idle_prompt event (verdict_transcript.py
+      + loop_shared.poll_for_verdict, 20s grace). To drive a review loop without real
+      Claude here you must drop a fake `claude` on PATH: a blocking script (sleep)
+      is enough to make state.running=True and animate the ⟳N spinner indefinitely;
+      to also show a verdict marker the fake must additionally write a UUID-named
+      assistant JSONL under ~/.claude/projects/<any>/<sid>.jsonl (verdict keyword
+      alone on a line, e.g. \\nPASS\\n) and ~/.pm/hooks/<sid>.json {"event_type":"idle_prompt","timestamp":<now>}.
+      The selective-repaint focus (spinner animates only on active nodes, rest byte-stable;
+      auto-start ◎; nav crispness) is fully testable with just the blocking fake.'
+    created_at: '2026-05-23T07:02:03Z'
+    last_edited: '2026-05-23T07:02:03Z'
+  - id: note-d0508a2
+    text: 'QA scenario 25 (live spinners/markers on active nodes) PASS — 2026-05-23,
+      real tmux surface. Triple1: review loop on started PR-A shows ⟳1 + spinner cycling
+      ◐◓◑◒ one glyph/1s tick (bold cyan, ANSI 1m+96m); after 20s grace verdict marker
+      flips — scripted NEEDS_WORK accepted (log: iteration 1 verdict=NEEDS_WORK) →
+      relaunch ⟳2 → PASS → ⟳N✓ green (ANSI 92m). Selective repaint confirmed: consecutive
+      idle-tick framebuffer diffs change ONLY PR-A status-line spinner cell; pending
+      PR-B/C, merged PR-D, band labels, dep arrows byte-identical. Triple2: A on pending
+      PR-B appends bold-magenta ◎ (ANSI 1m+35m) to its id LINE + status-bar AUTO while
+      it stays ○ pending; A again clears both; diff = only PR-B id-cell + AUTO segment
+      (+ bottom log line). Triple3: nav burst (arrows/hjkl/J/K) during live spinner
+      = crisp 1 node/key, hjkl==arrows, 4-edge clamp no wrap, rapid no-delay bursts
+      land deterministically (no lost keys); ⟳1 spinner keeps cycling on PR-A even
+      when unselected; 0 Tracebacks. GOTCHAS for next run: zz t = start QA (not stop)
+      — to stop a loop use z d or kill the review window; pr start refuses unless
+      pm/project.yaml is committed on master (git add+commit in the test repo first);
+      make test project under /scratch NOT under /workspace (nested pm root resolves
+      up to /workspace). Captures in /pm-captures/scenarios/25/{triple1,triple2,triple3}.'
+    created_at: '2026-05-23T07:20:05Z'
+    last_edited: '2026-05-23T07:20:05Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
