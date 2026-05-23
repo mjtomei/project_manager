@@ -56,6 +56,13 @@ communication, not internal handoff. When the user says "leave a note" /
   belongs to a PR that already exists, prefer a note on that PR over opening
   a brand-new one (see the Incidental Bugs guidance for recording incidental
   fixes).
+
+It is fine to run this from your own workdir, including a note targeting
+another PR. The note is written to the git-tracked `project.yaml`; it
+travels to master when your PR merges, and the target PR's sessions pick it
+up the next time they clone or pull master. So a cross-PR note may surface
+after your PR merges rather than instantly — that delay is expected, not a
+reason to use a GitHub comment instead.
 """
 
 

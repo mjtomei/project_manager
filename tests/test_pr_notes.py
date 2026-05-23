@@ -707,6 +707,8 @@ class TestPrNotesHandoffGuidance:
         assert "pm pr note add <other-pr-id> '<text>'" in prompt  # cross-PR
         # Prefer pm notes over GitHub
         assert "Prefer pm PR notes over GitHub" in prompt
+        # Workdir -> master -> target-PR propagation is spelled out
+        assert "travels to master when your PR merges" in prompt
 
     @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
@@ -793,6 +795,7 @@ class TestQAVerdictFinalityGuidance:
         assert "REFINER_REJECT defers the scenario" in prompt
         assert "pm pr note add pr-fin '<text>'" in prompt
         assert "Prefer pm PR notes over GitHub" in prompt
+        assert "travels to master when this PR merges" in prompt
 
     def test_refiner_prompt_placeholder_without_pr_id(self):
         from pm_core.qa_loop import _build_concretization_prompt, QAScenario

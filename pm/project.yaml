@@ -7505,7 +7505,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-05-14T01:47:37.204184+00:00'
+  updated_at: '2026-05-23T03:45:16.575668+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7519,6 +7519,17 @@ prs:
       lines.'
     created_at: '2026-05-14T01:47:36Z'
     last_edited: '2026-05-14T01:47:36Z'
+  - id: note-9d48bd4
+    text: 'Cross-PR handoff from pr-cfb0b3a (prompt PR-notes guidance): pr-cfb0b3a
+      added a ''Your Verdict Is Final for This Run'' block to prompt_gen.generate_qa_child_prompt
+      telling QA scenario workers their verdict is terminal (no re-poll) and to hand
+      off to the next run via pm PR notes. When THIS pr lands and makes scenario INPUT_REQUIRED
+      re-pollable, soften that block: INPUT_REQUIRED will no longer be terminal, so
+      its ''use a note for next-run handoff'' framing must be updated (PASS/NEEDS_WORK
+      finality still holds). Also revisit the refiner ''This Decision Is Final'' block
+      in qa_loop._build_concretization_prompt.'
+    created_at: '2026-05-23T03:45:16Z'
+    last_edited: '2026-05-23T03:45:16Z'
 - id: pr-df1aa3f
   plan: null
   title: 'fix: rename tmux session after git init in guide to restore pm session access'
@@ -18812,7 +18823,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T21:02:19.201672+00:00'
-  updated_at: '2026-05-14T02:06:09.002431+00:00'
+  updated_at: '2026-05-23T03:45:18.213283+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -18825,6 +18836,16 @@ prs:
       and don''t affect the running batch.'
     created_at: '2026-05-13T21:04:40Z'
     last_edited: '2026-05-13T21:04:40Z'
+  - id: note-038b466
+    text: Related to pr-2c67d50 and pr-cfb0b3a. pr-cfb0b3a added prompt guidance that
+      QA scenario verdicts AND scenario-refiner REFINER_REJECT are terminal — 'Your
+      Verdict Is Final for This Run' in prompt_gen.generate_qa_child_prompt and 'This
+      Decision Is Final' in qa_loop._build_concretization_prompt. This PR re-runs
+      NEEDS_WORK/INPUT_REQUIRED scenarios and makes refiner-rejected scenarios re-pluggable
+      as replacements; when it lands, update those two blocks so they no longer state
+      those verdicts are permanently terminal.
+    created_at: '2026-05-23T03:45:18Z'
+    last_edited: '2026-05-23T03:45:18Z'
 - id: pr-2181ccd
   plan: plan-regression
   title: Move QA captures out of git into ~/.pm/captures/ alongside workdirs

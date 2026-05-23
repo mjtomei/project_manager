@@ -143,6 +143,24 @@ Implementation of the follow-up:
   `_build_concretize_cmd`) so the example is concrete, falling back to `<pr-id>`.
 - Review and impl prompts intentionally left without the finality block.
 
+## Follow-up: cross-PR notes propagate via the git-tracked project.yaml
+
+`pm pr note add` writes to the `project.yaml` resolved from `state_root()`
+(`cli/helpers.py:236` → `find_project_root`), which in a workdir clone is the
+clone's own (git-tracked) `project.yaml`. A cross-PR note added from a workdir
+therefore rides that file: it merges to master when the authoring PR lands and
+reaches the target PR's sessions the next time they clone or pull master. The
+handoff blocks (`_pr_notes_handoff_block` and the refiner block in
+`qa_loop._build_concretization_prompt`) now state this explicitly so sessions
+know the workdir path is valid and that a cross-PR note may surface after merge
+rather than instantly.
+
+Note: a stale dumper could reserialize the whole `project.yaml` on note add
+(massive spurious diff). That was a transient store-serialization bug fixed on
+master; with the fix, `pm pr note add` produces a minimal diff (the appended
+note + the PR's `updated_at`). Always eyeball `git diff pm/project.yaml` after a
+note add and discard if it reflows unrelated entries.
+
 ## Edge Cases
 
 - `generate_prompt` lacks `_OUT_OF_SCOPE_BUGS_BLOCK`; the soft cross-reference

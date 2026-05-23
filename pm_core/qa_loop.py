@@ -979,8 +979,11 @@ should have — why you rejected, a missing prerequisite, or a change that
 would unblock the scenario — record it with:
   pm pr note add {this_pr} '<text>'
 The note persists on the PR and is injected into future sessions' prompts
-(the `## PR Notes` section). Prefer pm PR notes over GitHub PR comments for
-this handoff."""
+(the `## PR Notes` section). It is fine to add this from your workdir, even
+for another PR's id: the note is written to the git-tracked project.yaml,
+travels to master when this PR merges, and reaches the target PR's workers
+when they clone or pull master. Prefer pm PR notes over GitHub PR comments
+for this handoff."""
 
 
 def _build_concretize_cmd(
