@@ -150,6 +150,68 @@ class TestReclaimTerminalPrWindows:
 
         mock_cleanup.assert_not_called()
 
+    def test_active_loop_for_terminal_pr_is_stopped_and_cleaned(self):
+        """A terminal PR with a still-running QA loop must have the loop
+        stopped (so it stops relaunching windows / rewriting runtime_state)
+        and its resources reclaimed."""
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = self._make_app([pr])
+        app._qa_loops = {"pr-abc": object()}
+        app._review_loops = {}
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows", return_value=[]), \
+             patch("pm_core.tui.qa_loop_ui.stop_qa") as mock_stop_qa, \
+             patch("pm_core.tui.review_loop_ui.stop_loop_for_pr"), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value={"windows": [], "containers": [],
+                                 "registry_windows": [], "sockets": [],
+                                 "runtime_state": True}) as mock_cleanup:
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_stop_qa.assert_called_once_with(app, "pr-abc")
+        mock_cleanup.assert_called_once_with("pm-test", pr)
+
+    def test_stale_runtime_state_triggers_cleanup_without_windows(self):
+        """Even with no live windows and no active loop, a lingering
+        runtime-state file (recreated by a loop's final iteration) must be
+        reclaimed — otherwise the window-only check would leak the file."""
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = self._make_app([pr])
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows", return_value=[]), \
+             patch("pm_core.runtime_state.runtime_path") as mock_rt, \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value={"windows": [], "containers": [],
+                                 "registry_windows": [], "sockets": [],
+                                 "runtime_state": True}) as mock_cleanup:
+            mock_rt.return_value.exists.return_value = True
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_cleanup.assert_called_once_with("pm-test", pr)
+
+    def test_terminal_pr_no_windows_no_loop_no_state_is_skipped(self):
+        """The cheap path stays a no-op: terminal PR with nothing left to
+        clean is skipped (no cleanup call)."""
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = self._make_app([pr])
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows", return_value=[]), \
+             patch("pm_core.runtime_state.runtime_path") as mock_rt, \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources") as mock_cleanup:
+            mock_rt.return_value.exists.return_value = False
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_cleanup.assert_not_called()
+
     def test_merged_pr_mid_propagation_is_not_reclaimed(self):
         """A PR flipped to merged on GitHub while pm's two-step merge
         propagation is still resolving conflicts in its live `merge-` window

@@ -68,11 +68,23 @@ def _reclaim_terminal_pr_windows(app) -> None:
     self-heal on the next refresh. It is idempotent: terminal PRs whose
     windows are already gone are skipped by a cheap name check before any
     cleanup work runs.
+
+    A terminal PR may also still have a *running* QA / review loop driving
+    it (an external ``pm pr edit --status merged`` mid-loop). Reclaiming the
+    windows without stopping the loop just starts a tug-of-war: the loop
+    relaunches its next scenario window and rewrites ``runtime_state`` while
+    the sweep keeps killing them. So we request a graceful stop of any active
+    loop for the terminal PR, and broaden the cleanup trigger to also fire
+    when a loop is active or a stale runtime-state file lingers (the loop's
+    last iteration recreates it after the windows are gone) — otherwise the
+    cheap window-only check would skip the final cleanup and leak the file.
     """
     from pm_core import pr_cleanup
+    from pm_core import runtime_state
     from pm_core import tmux as tmux_mod
     from pm_core.cli.helpers import pr_window_names
     from pm_core.cli.session import _TERMINAL_STATUSES
+    from pm_core.tui import qa_loop_ui, review_loop_ui
 
     if not app._session_name:
         return
@@ -97,17 +109,34 @@ def _reclaim_terminal_pr_windows(app) -> None:
     for pr in app._data.get("prs") or []:
         if pr.get("status") not in _TERMINAL_STATUSES:
             continue
-        if pr["id"] in propagating:
+        pr_id = pr["id"]
+        if pr_id in propagating:
             continue
+
+        # Request a graceful stop of any loop still driving this terminal PR
+        # so it stops relaunching windows / rewriting runtime_state under us.
+        has_loop = False
+        if pr_id in getattr(app, "_qa_loops", {}):
+            has_loop = True
+            qa_loop_ui.stop_qa(app, pr_id)
+        if pr_id in getattr(app, "_review_loops", {}):
+            has_loop = True
+            review_loop_ui.stop_loop_for_pr(app, pr_id)
+
         exact_names, qa_prefix = pr_window_names(pr)
         has_live = bool(set(exact_names) & live_names) or any(
             n.startswith(qa_prefix) for n in live_names)
-        if not has_live:
+        # Clean up when windows exist, when a loop is still being torn down,
+        # or when only a stale runtime-state file is left (the loop's final
+        # iteration recreates it after its windows are already gone). The
+        # runtime-state stat is only reached when nothing cheaper triggered.
+        if not (has_live or has_loop
+                or runtime_state.runtime_path(pr_id).exists()):
             continue
         summary = pr_cleanup.cleanup_pr_resources(session, pr)
         for win_name in summary.get("windows", []):
             _log.info("Reclaimed window '%s' for terminal %s (%s)",
-                      win_name, pr["id"], pr.get("status"))
+                      win_name, pr_id, pr.get("status"))
 
 
 async def background_sync(app) -> None:
