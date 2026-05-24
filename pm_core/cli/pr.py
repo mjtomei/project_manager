@@ -1853,7 +1853,6 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                     click.echo(f"GitHub PR #{gh_pr_number} merged.")
                 else:
                     # Check if PR was already merged (e.g. re-attempt after conflict resolution)
-                    from pm_core import gh_ops
                     if gh_ops.is_pr_merged(workdir, branch):
                         click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
                         gh_merged = True
