@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3d1fa55
+  active_pr: pr-d82e0f1
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22066,3 +22066,56 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d1fa55-bug-terminal-status-prs-keep-their-t-c52f26ee
+- id: pr-d82e0f1
+  plan: null
+  title: 'Bug: PR workdir clones leave origin fetch URL local, so ''git push origin''
+    is rejected by the push-proxy'
+  branch: pm/pr-d82e0f1-bug-pr-workdir-clones-leave-origin-fetch-url-local
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\nIn a regular (host) PR workdir created by `pm pr start`,\
+    \ running `git push origin <branch>` is rejected by the push-proxy:\n\n    push-proxy:\
+    \ rejected — caller's 'origin' resolves to a local path (...).\n    Scenario clones\
+    \ must have `origin` set to the real upstream URL before pushing...\n\nThe user\
+    \ has to work around it by pushing to the explicit GitHub URL:\n`git push https://github.com/<org>/<repo>.git\
+    \ <branch>`.\n\n## Root cause\n\nTwo clone paths set origin up differently:\n\n\
+    - **QA scenario clones** (`qa_loop.py:create_scenario_workdir`, ~L283-295)\n \
+    \ rewrite origin to the real upstream after the local clone via\n  `resolve_real_origin()`\
+    \ + `git remote set-url origin <real-url>`. Pushes work.\n\n- **Regular PR workdir\
+    \ clones** (`cli/pr.py`, ~L886-895) clone locally and then\n  only configure *push*\
+    \ URLs (local + GitHub), leaving the **fetch** URL local:\n  - fetch URL = local\
+    \ path\n  - push URLs = [local path, GitHub]\n\nThe push-proxy decides local-vs-remote\
+    \ by inspecting `git remote get-url origin`\n= the **fetch** URL (`push_proxy.py:_execute_push`,\
+    \ ~L313 via\n`_resolve_local_remote_url`). It sees the local path and rejects,\
+    \ ignoring the\nconfigured GitHub push URL. The rejection text assumes every clone\
+    \ is a scenario\nclone with a rewritten origin — which regular PR workdirs never\
+    \ do.\n\n## Fix\n\nMirror the scenario-clone setup for regular PR workdirs: after\
+    \ the local clone,\nrewrite the **fetch** URL of origin to the real upstream (via\n\
+    `resolve_real_origin()`), so the clone is correct with plain git — not only when\n\
+    the proxy shim is on PATH. This unifies the two clone paths instead of\nspecial-casing\
+    \ the proxy.\n\nNotes / constraints:\n- It must be the **fetch** URL. The proxy\
+    \ keys off `get-url origin` (fetch);\n  adding push URLs alone (today's behavior)\
+    \ does not satisfy it.\n- The only real cost is that ongoing `git fetch origin`/`git\
+    \ pull` (e.g.\n  cli/pr.py:1916, git_ops.py:136) become network ops instead of\
+    \ local. The\n  initial clone still clones locally (fast). If keeping the local\
+    \ mirror current\n  matters, retain `local_source` as an *additional* push URL\
+    \ — orthogonal to the\n  fetch-URL fix.\n- The local-backend merge does NOT depend\
+    \ on this: `_pull_from_workdir`\n  (cli/pr.py:1646, 1670) fetches the base branch\
+    \ directly from the workdir path,\n  not via a local-mirror push-back.\n- Containers\
+    \ are unaffected/still safe: they have no real git and always go\n  through the\
+    \ shim -> proxy, which keeps enforcing the branch restriction.\n- Keep the proxy's\
+    \ local-origin rejection as a safety guard (it becomes\n  effectively unreachable\
+    \ once all clones have a real origin, but makes future\n  regressions loud instead\
+    \ of silent).\n\n## Scope\n\n- `pm_core/cli/pr.py` clone setup (rewrite origin\
+    \ fetch URL after clone).\n- Leave `pm_core/push_proxy.py` rejection in place\
+    \ as a guard.\n- Test: a PR workdir clone ends up with origin fetch URL = real\
+    \ upstream; a\n  push through the proxy from such a clone is accepted."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-24T23:10:12.099283+00:00'
+  updated_at: '2026-05-24T23:10:12.099283+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
