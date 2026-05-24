@@ -49,6 +49,28 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
     summary = {"windows": [], "containers": [], "registry_windows": [],
                "sockets": [], "runtime_state": False}
 
+    # The pane registry is keyed by tmux *window @id* (see register_pane
+    # callers, which all pass a window id), but the windows are gone from tmux
+    # by the time we unregister them below. Snapshot the live name -> @id map
+    # and the candidate window names *before* killing so we can prune the
+    # registry by @id afterwards. Without this the unregister pass matched the
+    # registry by window *name* and removed nothing — orphaned registry
+    # entries leaked on every terminal-status reclaim (pr-3d1fa55).
+    window_names: list[str] = []
+    name_to_id: dict[str, str] = {}
+    if session:
+        try:
+            for w in tmux_mod.list_windows(session):
+                wid = w.get("id")
+                if wid:
+                    name_to_id[w.get("name", "")] = wid
+        except Exception as e:  # pragma: no cover
+            _log.warning("list_windows snapshot failed: %s", e)
+        try:
+            window_names = _candidate_window_names(pr, session)
+        except Exception as e:  # pragma: no cover
+            _log.warning("candidate window names failed: %s", e)
+
     if session:
         try:
             summary["windows"] = kill_pr_windows(session, pr)
@@ -74,9 +96,14 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
 
     if session:
         try:
-            window_names = _candidate_window_names(pr, session)
+            # Unregister by both the window names (legacy / name-keyed
+            # registries) and the @ids captured before the kill (production,
+            # which keys the registry by tmux @id) so the prune works
+            # regardless of how the entry was keyed.
+            win_ids = [name_to_id[n] for n in window_names if n in name_to_id]
+            targets = list(window_names) + win_ids
             summary["registry_windows"] = pane_registry.unregister_windows(
-                session, window_names)
+                session, targets)
         except Exception as e:  # pragma: no cover
             _log.warning("unregister_windows failed: %s", e)
 
