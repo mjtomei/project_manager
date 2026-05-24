@@ -5669,7 +5669,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-05-24T02:25:25.615893+00:00'
+  updated_at: '2026-05-24T02:27:03.837374+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
@@ -5749,6 +5749,79 @@ prs:
       by loop-dir suffix, not total.'
     created_at: '2026-05-24T02:25:25Z'
     last_edited: '2026-05-24T02:25:25Z'
+  - id: note-e9177ee
+    text: 'QA scenario refiner (R3 NEEDS_WORK resume): two non-obvious prereqs not
+      in qa.md Setup. (1) Spec gate at qa_loop.py:3187 — the fake qa_planning only
+      emits QA_PLAN, it does NOT generate a spec, so the first QA run halts at INPUT_REQUIRED
+      before launching scenarios (no resume snapshot ever written). Pre-seed the spec
+      in GIVEN via `pm pr spec <id> qa`; under fake `_all:{}` this routes to the no-verdict
+      mock (launch_claude_print closes stdin so it does not hang) and writes a 3-line
+      filler spec that satisfies the gate. (2) Workdir is auto-created by run_qa_sync
+      via _ensure_workdir (clones repo, checkout_branch create=True), so no `pm pr
+      start` needed — but the throwaway repo MUST have an initial commit on the base
+      branch or the clone fails. Keep run in-progress at restart with a `delay` on
+      qa_scenario (e.g. NEEDS_WORK delay 25); resume_qa_sync skips planning and re-enters
+      _execute_and_finalize. Resume is driven from the TUI poll loop (poll_qa_state),
+      so QA must be started via the TUI (t / command-bar /pr qa), not the CLI.'
+    created_at: '2026-05-24T02:06:14Z'
+    last_edited: '2026-05-24T02:06:14Z'
+  - id: note-22a9531
+    text: 'QA-refiner (scenario 3, two-concurrent-runs-survive-restart): per-PR verdict
+      differentiation CANNOT come from qa_scenario verdicts. fake-claude config is
+      session-tag-scoped (both PRs share one tmux session => one tag => one config)
+      and the scripted cursor is keyed by session_type only and advances at command-BUILD
+      time in the orchestrator (claude_launcher.build_claude_shell_cmd). Scenario
+      0 (qa_loop.py:1262 _launch_scenario_0) is built with session_type="qa_scenario",
+      so it consumes a qa_scenario cursor slot per PR; with 2 PRs that is 4 qa_scenario
+      builds against any scripted [PASS,NEEDS_WORK] => split is unreliable. ROBUST
+      approach: make ALL qa_scenario emit PASS (single-entry scripted list, clamp-to-last)
+      and split via qa_verification ["VERIFIED","FLAGGED"] (only the 2 real polled
+      scenarios are verified; scenario 0 is never verified). Set qa-verify-retries=0
+      (pm set) so the single FLAGGED becomes NEEDS_WORK immediately instead of re-prompting
+      the pane 3x. WHICH PR gets PASS vs NEEDS_WORK is racy (build order) - verify
+      post-hoc, do not assert a fixed assignment. Spec gate (qa_loop.py:3187): pm
+      pr spec needs real claude (launch_claude_print, no session_type => fake not
+      used), so pre-seed pm/specs/<id>/qa.md directly (bootstrap; content arbitrary,
+      fake QA_PLAN is hardcoded to 1 scenario). PR must be in_review before TUI start_qa
+      (start_qa only transitions in_review->qa; resume requires status==qa). Put delay
+      (~45s) on qa_scenario so panes sleep through the restart window.'
+    created_at: '2026-05-24T02:11:23Z'
+    last_edited: '2026-05-24T02:11:23Z'
+  - id: note-92d09f9
+    text: 'QA scenario 4 (stale/historical snapshot no-op) concretizer handoff: A
+      qa_resume.json is ONLY ever written by a real run reaching _execute_and_finalize
+      (qa_loop.py:3353) AFTER the spec gate passes (get_spec must find a qa spec,
+      else the loop returns INPUT_REQUIRED before any snapshot). So to create a lingering
+      snapshot you must drive a real fake-claude run to scenario-launch: pre-seed
+      spec (pm pr spec <pr> qa), config qa_planning=QA_PLAN + qa_concretize=REFINED_STEPS
+      + qa_scenario={} (no verdict) so it launches scenarios, writes the snapshot,
+      then hangs in poll_for_verdict (no timeout). Then move the PR out of qa via
+      pm pr edit <pr> --status in_review and restart the TUI (ctrl+r = os.execvp re-exec,
+      kills the daemon thread). KEY: resume reuses the existing scenario panes (resume_qa_sync
+      re-enters polling) rather than launching NEW windows, so "no new windows" is
+      NOT the discriminating signal. The discriminating observable for the cleanup
+      branch (qa_loop_ui.py:~416) is that qa_resume.json is DELETED from disk (a real
+      resume would keep rewriting it), plus no "Resuming QA for <pr> after restart..."
+      log, no new QA note (pm pr note list), and status unchanged. The orphan scan
+      runs on poll tick 0 and every 5th tick (~5s throttle, qa_loop_ui.py:346).'
+    created_at: '2026-05-24T02:10:14Z'
+    last_edited: '2026-05-24T02:10:14Z'
+  - id: note-d2e1f33
+    text: 'QA scenario 4 PASS (2026-05-24, real surface). Setup refinement to note-92d09f9:
+      to get a GENUINELY HUNG run (lingering qa_resume.json), the test repo needs
+      an initial commit AND the PR must be started (pm push + merge sync branch +
+      pm pr start) so the branch/workdir exist. Without that, the QA scenario worktree
+      clone fails (Failed to create workdir -> Scenario has no window -> INPUT_REQUIRED),
+      the run COMPLETES and clears its own snapshot, so there is nothing lingering
+      to test. Also: the pre-restart TUI guards the active in-memory loop so the snapshot
+      survives `pm pr edit <pr> --status in_review` until ctrl+r; the FRESH post-restart
+      process then runs qa_loop_ui._resume_incomplete_qa, sees pr.status!=qa, calls
+      clear_resume_file + continue (no resume_qa_background, no _on_qa_complete) ->
+      qa_resume.json deleted, no Resuming-QA log, status/notes unchanged. Leftover
+      historical QA (qa_status.json only, no qa_resume.json) is a clean no-op (glob
+      misses it). pm pr show does not exist in this build; use pm pr list.'
+    created_at: '2026-05-24T02:27:03Z'
+    last_edited: '2026-05-24T02:27:03Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
