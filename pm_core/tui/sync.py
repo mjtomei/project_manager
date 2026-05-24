@@ -214,7 +214,10 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         if mode_owns_status:
             app._update_status_bar()
         else:
-            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
+            # Route through _update_status_bar so the filter/sort/assist/watcher
+            # indicators survive the sync; the bare update_status() call dropped
+            # them, blanking "filter: hide closed" etc. after every refresh.
+            app._update_status_bar(sync_state=sync_status)
 
         # Clear log message after 1 second for manual refresh
         if is_manual:

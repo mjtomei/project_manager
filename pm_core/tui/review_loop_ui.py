@@ -462,12 +462,16 @@ def _poll_loop_state_inner(app) -> None:
 
 
 def _refresh_tech_tree(app) -> None:
-    """Refresh the tech tree so ⟳N markers and spinners update on PR nodes."""
+    """Refresh the tech tree so ⟳N markers and spinners update on PR nodes.
+
+    Only the active node widgets are repainted (not the whole tree), so the
+    1 s poll tick no longer pays for a full ~120-node grid render.
+    """
     try:
         from pm_core.tui.tech_tree import TechTree
         tree = app.query_one("#tech-tree", TechTree)
         tree.advance_animation()
-        tree.refresh()
+        tree.refresh_active_nodes()
     except Exception:
         pass
 
