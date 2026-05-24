@@ -455,10 +455,25 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["merged_at"] = now
 
 
+def _canonical_session(session: str) -> str:
+    """Strip the tmux session-group suffix (``~N``) from ``session``.
+
+    The TUI keys its pidfile and command-queue by its own session name
+    with the group suffix removed (see TechTreeApp: ``split("~")[0]``).
+    A user started via ``pm session`` is attached to the *grouped*
+    session (e.g. ``pm-foo~1``), so callers that resolve the current
+    session name (``_find_tui_pane`` -> ``get_session_name``) see the
+    ``~N`` form.  Normalizing here keeps every consumer pointed at the
+    same canonical file the TUI actually wrote, so external mutations
+    (``pm pr edit`` -> SIGUSR1 reload) reach the TUI.
+    """
+    return session.split("~")[0]
+
+
 def _tui_pidfile_for_session(session: str) -> Path:
     """Path to the pidfile a TUI in ``session`` writes at startup."""
     from pm_core.paths import pm_home
-    return pm_home() / f"tui-{session}.pid"
+    return pm_home() / f"tui-{_canonical_session(session)}.pid"
 
 
 def trigger_tui_reload(session: str | None = None) -> None:
@@ -517,7 +532,7 @@ trigger_tui_refresh = trigger_tui_reload
 def _tui_command_queue_for_session(session: str) -> Path:
     """Path to the per-session TUI command queue file."""
     from pm_core.paths import pm_home
-    return pm_home() / f"tui-{session}.cmd-queue"
+    return pm_home() / f"tui-{_canonical_session(session)}.cmd-queue"
 
 
 def trigger_tui_command(session: str, cmd: str) -> bool:

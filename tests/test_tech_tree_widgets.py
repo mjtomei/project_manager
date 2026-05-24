@@ -1,0 +1,499 @@
+"""Tests for the compositional TechTree widget architecture.
+
+Covers the refactor that split the monolithic grid renderer into per-PR
+``PRNode`` widgets, ``PlanGroup`` containers, an ``EdgeCanvas`` layer, layout
+caching, and neighbor-based navigation.
+
+The repo has no pytest-asyncio plugin, so each async body is driven through
+``asyncio.run`` by a sync ``test_*`` wrapper.
+"""
+
+import asyncio
+import functools
+
+from textual.app import App, ComposeResult
+from textual.containers import ScrollableContainer
+from textual.widgets import Static
+
+from pm_core.pane_idle import PaneIdleTracker
+from pm_core.tui.tech_tree import (
+    TechTree, PRNode, PlanGroup, EdgeCanvas,
+    compute_neighbors, _node_y, NODE_H, SORT_FIELD_KEYS,
+)
+
+
+def async_test(coro):
+    @functools.wraps(coro)
+    def wrapper(*args, **kwargs):
+        asyncio.run(coro(*args, **kwargs))
+    return wrapper
+
+
+class _TreeApp(App):
+    """Minimal host app exposing the attributes PRNode.render reads."""
+
+    def __init__(self, prs, plans=None):
+        super().__init__()
+        self._prs = prs
+        self._plans = plans or []
+        self._review_loops = {}
+        self._merge_input_required_prs = set()
+        self._pane_idle_tracker = PaneIdleTracker()
+        self._auto_start = False
+        self._auto_start_target = None
+
+    def compose(self) -> ComposeResult:
+        with ScrollableContainer(id="sc"):
+            yield TechTree(id="tech-tree")
+
+    def on_mount(self) -> None:
+        tree = self.query_one("#tech-tree", TechTree)
+        tree.update_plans(self._plans)
+        tree.update_prs(self._prs)
+
+    # Stubs for hooks pr_view.* helpers call on the host app.
+    def log_message(self, *args, **kwargs) -> None:
+        pass
+
+    def _update_filter_status(self) -> None:
+        pass
+
+
+def _pr(pid, title="t", status="pending", plan=None, depends_on=None, **extra):
+    d = {"id": pid, "title": title, "status": status, "plan": plan,
+         "depends_on": depends_on or []}
+    d.update(extra)
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Widget construction
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_one_prnode_per_visible_pr_with_offset():
+    prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()  # let absolute-positioned children lay out
+        tree = app.query_one(TechTree)
+        nodes = {n.pr_id: n for n in app.query(PRNode)}
+        assert set(nodes) == {"pr-a", "pr-b"}
+        for pid, node in nodes.items():
+            col, row = tree._node_positions[pid]
+            assert node.region.x == col
+            assert node.region.y == _node_y(row)
+
+
+@async_test
+async def test_single_edge_canvas_mounted():
+    prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(120, 40)):
+        assert len(app.query(EdgeCanvas)) == 1
+
+
+@async_test
+async def test_one_plangroup_per_plan():
+    prs = [
+        _pr("pr-a", plan="plan-001"),
+        _pr("pr-b", plan="plan-001", depends_on=["pr-a"]),
+        _pr("pr-c", plan="plan-002"),
+        _pr("pr-d"),  # standalone
+    ]
+    app = _TreeApp(prs, plans=[{"id": "plan-001", "name": "One"},
+                               {"id": "plan-002", "name": "Two"}])
+    async with app.run_test(size=(160, 60)):
+        groups = {g.plan_id for g in app.query(PlanGroup)}
+        assert groups == {"plan-001", "plan-002", "_standalone"}
+
+
+@async_test
+async def test_empty_state_shows_message():
+    app = _TreeApp([])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert len(app.query(PRNode)) == 0
+        assert len(app.query(EdgeCanvas)) == 0
+        # The message Static must actually render: a plain Widget does not
+        # auto-size to its children, so the empty-state container must take a
+        # real (non-zero) region or the message stays invisible (blank grid).
+        tree = app.query_one("#tech-tree", TechTree)
+        statics = list(tree.query(Static))
+        assert statics, "empty state should mount a message Static"
+        msg = statics[0]
+        assert "No PRs defined" in msg.render().plain
+        assert msg.region.width > 0 and msg.region.height > 0, (
+            f"empty-state message collapsed to {tuple(msg.region)}")
+
+
+@async_test
+async def test_filter_empty_state_renders():
+    # Filtering to a status no PR has empties the grid; the message must still
+    # render with a real region (regression: it collapsed to 0x0 under "auto").
+    app = _TreeApp([_pr("pr-a", status="merged")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one("#tech-tree", TechTree)
+        tree._status_filter = "qa"
+        tree._recompute()
+        tree.refresh(layout=True)
+        await pilot.pause()
+        await pilot.pause()
+        statics = list(tree.query(Static))
+        assert statics, "filter empty state should mount a message Static"
+        msg = statics[0]
+        assert "No qa PRs" in msg.render().plain
+        assert msg.region.width > 0 and msg.region.height > 0, (
+            f"filter empty-state message collapsed to {tuple(msg.region)}")
+
+
+@async_test
+async def test_one_edge_canvas_per_band():
+    prs = [
+        _pr("pr-a", plan="plan-001"),
+        _pr("pr-b", plan="plan-001", depends_on=["pr-a"]),
+        _pr("pr-c", plan="plan-002"),
+    ]
+    app = _TreeApp(prs, plans=[{"id": "plan-001", "name": "One"},
+                               {"id": "plan-002", "name": "Two"}])
+    async with app.run_test(size=(160, 60)) as pilot:
+        await pilot.pause()
+        groups = app.query(PlanGroup)
+        canvases = app.query(EdgeCanvas)
+        assert len(canvases) == len(groups) == 2
+        # The plan-001 band's canvas must have drawn an arrow head.
+        texts = [c.render().plain for c in canvases]
+        assert any("▶" in t for t in texts)
+
+
+@async_test
+async def test_cross_plan_dependency_nodes_render_in_separate_bands():
+    # pr-b is plan-002 but depends on pr-a (plan-001).  The layout remaps rows
+    # by each PR's own plan, so the two nodes land in separate plan bands.
+    # Both still render; the cross-band dependency arrow is not drawn (each
+    # band owns its edges) — a documented trade-off of per-band edge layers.
+    prs = [
+        _pr("pr-a", plan="plan-001"),
+        _pr("pr-b", plan="plan-002", depends_on=["pr-a"]),
+    ]
+    app = _TreeApp(prs, plans=[{"id": "plan-001", "name": "One"},
+                               {"id": "plan-002", "name": "Two"}])
+    async with app.run_test(size=(160, 60)) as pilot:
+        await pilot.pause()
+        nodes = {n.pr_id: n for n in app.query(PRNode)}
+        assert nodes["pr-a"].region.height == NODE_H
+        assert nodes["pr-b"].region.height == NODE_H
+        assert nodes["pr-a"].region.y != nodes["pr-b"].region.y  # different bands
+        assert len(app.query(PlanGroup)) == 2
+
+
+@async_test
+async def test_hidden_plan_shows_navigable_label():
+    prs = [
+        _pr("pr-a", plan="plan-001"),
+        _pr("pr-b", plan="plan-002"),
+    ]
+    app = _TreeApp(prs, plans=[{"id": "plan-001", "name": "One"},
+                               {"id": "plan-002", "name": "Two"}])
+    async with app.run_test(size=(160, 60)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        tree._hidden_plans.add("plan-002")
+        tree._recompute()
+        await pilot.pause()
+        assert "_hidden:plan-002" in tree._ordered_ids
+        assert "_hidden:plan-002" in tree._label_widgets
+        assert "pr-b" not in tree._node_widgets
+
+
+# ---------------------------------------------------------------------------
+# Spinner tick refreshes only active nodes (no recompute)
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_spinner_tick_refreshes_only_active_nodes():
+    prs = [
+        _pr("pr-a", status="in_progress", workdir="/tmp/a"),
+        _pr("pr-b", status="pending"),
+        _pr("pr-c", status="merged"),
+    ]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(120, 40)):
+        tree = app.query_one(TechTree)
+        nodes = {n.pr_id: n for n in app.query(PRNode)}
+        refreshed = []
+
+        def make_spy(pid, orig):
+            def spy(*a, **k):
+                refreshed.append(pid)
+                return orig(*a, **k)
+            return spy
+
+        for pid, n in nodes.items():
+            n.refresh = make_spy(pid, n.refresh)
+
+        sig_before = tree._layout_sig
+        tree.advance_animation()
+        tree.refresh_active_nodes()
+
+        assert refreshed == ["pr-a"]           # only the active node repainted
+        assert tree._layout_sig is sig_before  # no recompute happened
+
+
+@async_test
+async def test_advance_animation_cycles_frame():
+    app = _TreeApp([_pr("pr-a")])
+    async with app.run_test(size=(80, 24)):
+        tree = app.query_one(TechTree)
+        start = tree._anim_frame
+        tree.advance_animation()
+        assert tree._anim_frame == (start + 1) % 4
+
+
+# ---------------------------------------------------------------------------
+# Layout caching
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_identical_update_does_not_rebuild():
+    prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(120, 40)):
+        tree = app.query_one(TechTree)
+        before = {n.pr_id: id(n) for n in app.query(PRNode)}
+        # Re-feed identical data — signature unchanged → no widget rebuild.
+        tree.update_prs([_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])])
+        after = {n.pr_id: id(n) for n in app.query(PRNode)}
+        assert before == after  # same widget instances reused
+
+
+@async_test
+async def test_auto_start_toggle_rebuilds_for_marker():
+    # Toggling auto-start changes no PR data, but the ◎ target marker lives on
+    # a (possibly pending) node not covered by refresh_active_nodes, so the
+    # layout signature must include auto-start state to trigger a rebuild.
+    app = _TreeApp([_pr("pr-a", status="pending")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        tree = app.query_one(TechTree)
+        before = [id(n) for n in app.query(PRNode)]
+        app._auto_start = True
+        app._auto_start_target = "pr-a"
+        tree.update_prs([_pr("pr-a", status="pending")])  # identical PR data
+        await pilot.pause()
+        after = [id(n) for n in app.query(PRNode)]
+        assert before != after  # rebuilt so the ◎ marker can render
+
+
+def test_recompute_before_mount_does_not_mark_built():
+    # _recompute on an unmounted tree must NOT set _built — otherwise the
+    # post-mount build (with identical data, so layout_changed is False) would
+    # be skipped and the tree would render blank.
+    tree = TechTree([_pr("pr-a")])
+    assert not tree.is_mounted
+    tree._recompute()
+    assert tree._built is False
+
+
+@async_test
+async def test_status_change_rebuilds():
+    app = _TreeApp([_pr("pr-a", status="pending")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        tree = app.query_one(TechTree)
+        before = [id(n) for n in app.query(PRNode)]
+        tree.update_prs([_pr("pr-a", status="in_progress")])
+        await pilot.pause()
+        after = [id(n) for n in app.query(PRNode)]
+        assert before != after  # widget rebuilt on a real change
+
+
+# ---------------------------------------------------------------------------
+# Neighbor computation (replaces the on_key candidate loops)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_neighbors_linear_chain():
+    # a -> b -> c laid out left to right on the same row
+    ordered = ["a", "b", "c"]
+    positions = {"a": (0, 0), "b": (30, 0), "c": (60, 0)}
+    nb = compute_neighbors(ordered, positions)
+    assert nb["a"]["right"] == "b"
+    assert nb["b"]["right"] == "c"
+    assert nb["c"]["left"] == "b"
+    assert nb["b"]["left"] == "a"
+    assert nb["a"]["left"] is None
+    assert nb["c"]["right"] is None
+
+
+def test_compute_neighbors_vertical_prefers_same_column():
+    positions = {
+        "a": (0, 0), "c": (0, 3),     # left column, rows 0 and 3
+        "b": (30, 0), "d": (30, 3),   # right column, rows 0 and 3
+    }
+    ordered = ["a", "b", "c", "d"]
+    nb = compute_neighbors(ordered, positions)
+    assert nb["a"]["down"] == "c"   # same column down
+    assert nb["c"]["up"] == "a"
+    assert nb["b"]["down"] == "d"
+    assert nb["a"]["right"] == "b"
+
+
+# ---------------------------------------------------------------------------
+# Navigation through mounted widgets
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_arrow_nav_moves_selection():
+    prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(120, 40)) as pilot:
+        tree = app.query_one(TechTree)
+        tree.focus()
+        await pilot.pause()
+        tree.selected_index = tree._ordered_ids.index("pr-a")
+        await pilot.press("right")
+        await pilot.pause()
+        assert tree.selected_pr_id == "pr-b"
+        await pilot.press("left")
+        await pilot.pause()
+        assert tree.selected_pr_id == "pr-a"
+
+
+@async_test
+async def test_prnode_carries_neighbor_ids():
+    prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(120, 40)):
+        nodes = {n.pr_id: n for n in app.query(PRNode)}
+        assert nodes["pr-a"].neighbor_right == "pr-b"
+        assert nodes["pr-b"].neighbor_left == "pr-a"
+
+
+# ---------------------------------------------------------------------------
+# Viewport band culling
+# ---------------------------------------------------------------------------
+
+
+def _many_plans(n_plans=6, per_plan=2):
+    prs, plans = [], []
+    for p in range(n_plans):
+        pid = f"plan-{p:03d}"
+        plans.append({"id": pid, "name": f"P{p}"})
+        prs.append(_pr(f"pr-{p}a", plan=pid))
+        prs.append(_pr(f"pr-{p}b", plan=pid, depends_on=[f"pr-{p}a"]))
+    return prs, plans
+
+
+@async_test
+async def test_offscreen_bands_are_culled():
+    prs, plans = _many_plans(6)
+    app = _TreeApp(prs, plans=plans)
+    async with app.run_test(size=(120, 16)) as pilot:  # viewport << full content
+        await pilot.pause(); await pilot.pause()
+        tree = app.query_one(TechTree)
+        groups = tree._plan_groups
+        assert len(groups) == 6
+        displayed = [g for g in groups if g.display]
+        assert 0 < len(displayed) < len(groups)
+
+
+@async_test
+async def test_selected_band_visible_after_plan_jump():
+    prs, plans = _many_plans(6)
+    app = _TreeApp(prs, plans=plans)
+    async with app.run_test(size=(120, 16)) as pilot:
+        await pilot.pause(); await pilot.pause()
+        tree = app.query_one(TechTree); tree.focus()
+        await pilot.press("J"); await pilot.pause()
+        await pilot.press("J"); await pilot.pause()
+        sid = tree.selected_pr_id
+        node = tree._node_widgets[sid]
+        owner = next(g for g in tree._plan_groups if node in g.children)
+        assert owner.display  # the band holding the selection is never culled
+
+
+@async_test
+async def test_all_bands_visible_when_content_fits():
+    prs, plans = _many_plans(2)
+    app = _TreeApp(prs, plans=plans)
+    async with app.run_test(size=(160, 80)) as pilot:  # everything fits
+        await pilot.pause(); await pilot.pause()
+        tree = app.query_one(TechTree)
+        assert all(g.display for g in tree._plan_groups)
+
+
+# ---------------------------------------------------------------------------
+# J/K plan jump — bottom is the visual bottom, not a mid-plan root
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_all_plans_hidden_keeps_navigable_labels():
+    # When every plan is hidden the layout must still emit navigable hidden
+    # labels so the user can select one and unhide it.
+    prs = [
+        _pr("pr-a", plan="plan-001"),
+        _pr("pr-b", plan="plan-002"),
+    ]
+    app = _TreeApp(prs, plans=[{"id": "plan-001", "name": "One"},
+                               {"id": "plan-002", "name": "Two"}])
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        tree._hidden_plans.update({"plan-001", "plan-002"})
+        tree._recompute()
+        await pilot.pause()
+        assert tree._ordered_ids == ["_hidden:plan-001", "_hidden:plan-002"]
+        assert "_hidden:plan-001" in tree._label_widgets
+        assert tree.selected_is_hidden_label
+
+
+@async_test
+async def test_cycle_sort_preserves_selected_pr():
+    from pm_core.tui import pr_view
+    # Two PRs whose order flips between created_at and updated_at sorts.
+    prs = [
+        _pr("pr-old", created_at="2020-01-01T00:00:00",
+            updated_at="2024-01-01T00:00:00"),
+        _pr("pr-new", created_at="2024-01-01T00:00:00",
+            updated_at="2020-01-01T00:00:00"),
+    ]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 60)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        tree.select_pr("pr-new")
+        await pilot.pause()
+        assert tree.selected_pr_id == "pr-new"
+        # Cycle the sort field a few times; selection must stay on pr-new even
+        # as its index in _ordered_ids changes.
+        for _ in range(len(SORT_FIELD_KEYS)):
+            pr_view.cycle_sort(app)
+            await pilot.pause()
+            assert tree.selected_pr_id == "pr-new"
+
+
+@async_test
+async def test_jump_plan_bottom_selects_visual_bottom():
+    # Single (standalone) plan with a fan-out: the bottom-most row is a child,
+    # not the root.  J on the last/only plan must land on the visual bottom.
+    prs = [
+        _pr("root"),
+        _pr("c1", depends_on=["root"]),
+        _pr("c2", depends_on=["root"]),
+        _pr("c3", depends_on=["root"]),
+    ]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(200, 80)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree); tree.focus()
+        tree.selected_index = tree._ordered_ids.index("root")
+        await pilot.press("J"); await pilot.pause()
+        sid = tree.selected_pr_id
+        assert sid != "root"  # not stuck on the root
+        max_row = max(r for _, (c, r) in tree._node_positions.items())
+        assert tree._node_positions[sid][1] == max_row
