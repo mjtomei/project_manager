@@ -19806,7 +19806,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-24T23:16:28.929600+00:00'
+  updated_at: '2026-05-24T23:25:47.533065+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
@@ -19967,6 +19967,17 @@ prs:
       167 gh/sync/merge/fake tests green. Committed 195cb606.'
     created_at: '2026-05-24T23:16:28Z'
     last_edited: '2026-05-24T23:16:28Z'
+  - id: note-7f0eaaa
+    text: 'review-loop i3 (9eb3): added committed concurrency regression tests in
+      tests/test_fake_github.py for the QA-scenario-6 fixes that previously had no
+      committed guard — test_concurrent_merges_all_land_no_dangling_state (per-repo
+      RLock + _cleanup_worktree; verified it fails without the lock: lost merges),
+      test_concurrent_conflicting_merges_yield_one_winner, and test_concurrent_installs_restore_to_none_baseline
+      (deterministic enter/enter/exit/exit interleaving; verified it fails with a
+      naive save/restore: leaked runner). No source changes. Full suite 2687 passed
+      (1 pre-existing unrelated hook_events env failure deselected). Committed 9f9161d8.'
+    created_at: '2026-05-24T23:25:47Z'
+    last_edited: '2026-05-24T23:25:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
