@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-1160366
+  active_pr: pr-9b96145
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -4508,7 +4508,7 @@ prs:
   plan: tui-ux
   title: 'Refactor TechTree: split PR nodes into individual Textual widgets'
   branch: pm/pr-4c41017-refactor-techtree-split-pr-nodes-into-individual-t
-  status: qa
+  status: merged
   depends_on: []
   description: 'Refactor the TechTree from a monolithic single-widget renderer into
     a compositional Textual architecture:
@@ -4541,10 +4541,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-05-23T07:20:05.796686+00:00'
+  updated_at: '2026-05-24T02:09:19.000320+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
-  reviewed_at: '2026-05-22T22:42:50.685742+00:00'
-  merged_at: null
+  reviewed_at: '2026-05-23T05:20:37.515080+00:00'
+  merged_at: '2026-05-24T02:09:19.000320+00:00'
   notes:
   - id: note-e204001
     text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
@@ -5860,7 +5860,7 @@ prs:
   plan: plan-qa
   title: QA verdict collection survives TUI restart
   branch: pm/pr-4a89e52-qa-verdict-collection-survives-tui-restart
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Bug: QA scenario verdict polling runs in a daemon thread inside the
     TUI process (via start_qa_background → run_qa_sync → _poll_tmux_verdicts). When
@@ -5877,14 +5877,14 @@ prs:
     (merge, back-to-review, etc.). The initial scenario list and window names are
     seeded into qa_status.json by the TUI at launch time, and qa_status.py takes over
     monitoring from there.'
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-05-24T02:27:03.837374+00:00'
+  updated_at: '2026-05-24T21:29:13.466842+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
-  merged_at: null
+  merged_at: '2026-05-24T21:29:13.466842+00:00'
   notes:
   - id: note-b58bd04
     text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
@@ -6034,7 +6034,15 @@ prs:
       misses it). pm pr show does not exist in this build; use pm pr list.'
     created_at: '2026-05-24T02:27:03Z'
     last_edited: '2026-05-24T02:27:03Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
+  - id: note-b41633b
+    text: 'QA PASS: Mid-run TUI restart resumes verdict collection and drives a PASS
+      lifecycle: PASS; Resumed run that finds problems returns the PR to review (NEEDS_WORK):
+      PASS; Two concurrent QA runs both survive a single TUI restart: PASS; Restart
+      with no in-flight QA, and stale/historical snapshots, never resurrect a run:
+      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4a89e52-dd64a390aaaf1290)'
+    created_at: '2026-05-24T02:42:34Z'
+    last_edited: '2026-05-24T02:42:34Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-da382194
 - id: pr-9bf8b0b
   plan: improvements
   title: Unified log file with source prefixes and pm log CLI
@@ -7401,7 +7409,7 @@ prs:
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
   branch: pm/pr-abcf70f-fakeclaudesession-scriptable-claude-replacement-fo
-  status: qa
+  status: merged
   depends_on: []
   description: "Add a fake Claude executable that can be launched in place of real\
     \ Claude for integration tests. The fake session writes realistic-looking output\
@@ -7431,10 +7439,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-05-23T03:52:56.539696+00:00'
+  updated_at: '2026-05-24T02:09:19.000433+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-05-23T03:52:56.539696+00:00'
-  merged_at: null
+  merged_at: '2026-05-24T02:09:19.000433+00:00'
   notes:
   - id: note-abd8475
     text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
@@ -20176,7 +20184,7 @@ prs:
   title: 'Bug: decouple TUI in-memory state from project.yaml via a coalescing write
     queue'
   branch: pm/pr-b4b68f3-bug-decouple-tui-in-memory-state-from-project-yaml
-  status: in_review
+  status: merged
   depends_on: []
   description: "## Symptom\n\nTUI key handling exhibits a \"first press lags, next\
     \ few queue, results appear all at once\" pattern when navigating PR selection\
@@ -20236,10 +20244,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/212
   gh_pr_number: 212
   created_at: '2026-05-14T14:37:18.381479+00:00'
-  updated_at: '2026-05-21T16:17:51.414473+00:00'
+  updated_at: '2026-05-24T21:47:30.303639+00:00'
   started_at: '2026-05-21T15:47:09.402440+00:00'
   reviewed_at: '2026-05-21T16:17:51.414473+00:00'
-  merged_at: null
+  merged_at: '2026-05-24T21:47:30.303610+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b4b68f3-bug-decouple-tui-in-memory-state-fro-d07aaad6
 - id: pr-70d02ed
@@ -21404,7 +21412,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-21T04:28:23.226210+00:00'
+  updated_at: '2026-05-24T21:48:25.739643+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21451,6 +21459,17 @@ prs:
       serializing pr-start, and create-after-reserve ordering.'
     created_at: '2026-05-21T04:28:22Z'
     last_edited: '2026-05-21T04:28:22Z'
+  - id: note-ec8b4da
+    text: 'Third symptom, same root (_unstash_after_merge, pm_core/cli/pr.py:2304-2314):
+      on a conflicted `git stash pop` it only echoes "Warning: stash pop had conflicts.
+      Resolve manually." and returns False — it does NOT launch a merge/conflict-resolution
+      session the way the git-merge-conflict paths do (_launch_merge_window). So a
+      picker-driven merge action that hits a stash-pop conflict leaves the user with
+      conflicts and no automated resolution session. Fix should launch a resolution
+      window on stash-pop conflict (in addition to the corruption + stash-leak fixes),
+      so picker merges self-heal like real merge conflicts do.'
+    created_at: '2026-05-24T21:48:25Z'
+    last_edited: '2026-05-24T21:48:25Z'
 - id: pr-c41f029
   plan: bugs
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
@@ -21893,14 +21912,23 @@ prs:
   started_at: '2026-05-22T22:17:38.855645+00:00'
   reviewed_at: '2026-05-23T03:46:55.286293+00:00'
   merged_at: '2026-05-23T04:16:54.851976+00:00'
-  notes: []
+  notes:
+  - id: note-9f3c00f
+    text: 'QA PASS: Same-PR handoff round-trips and the impl prompt carries handoff
+      guidance on the container path: PASS; Cross-PR handoff targets any PR id, stays
+      isolated, and survives hostile input and bad ids: PASS; Review session prompt
+      carries handoff guidance but omits the QA verdict-finality block: PASS; project.yaml
+      stays byte-stable and lossless under note writes, including concurrent writers:
+      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-cfb0b3a-f2fe2c665bbbef5d)'
+    created_at: '2026-05-23T04:15:10Z'
+    last_edited: '2026-05-23T04:15:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfb0b3a-improvement-prompt-sessions-to-use-p-9021c2a2
 - id: pr-9b96145
   plan: bugs
   title: 'Bug: PR actions picker reports "merged or closed" for an open PR when its
     window display id desyncs; self-heal by re-linking gh_pr_number'
   branch: pm/pr-9b96145-bug-pr-actions-picker-reports-merged-or-closed-for
-  status: pending
+  status: in_progress
   depends_on: []
   description: '## Symptom
 
@@ -21970,11 +21998,69 @@ prs:
 
     - Tests cover: not-found-with-backfill, not-found-no-match (accurate message),
     and genuinely-terminal status (still reports merged/closed).'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/216
+  gh_pr_number: 216
+  created_at: '2026-05-22T22:52:39.457111+00:00'
+  updated_at: '2026-05-24T21:56:02.396650+00:00'
+  started_at: '2026-05-24T21:56:02.396650+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9b96145-bug-pr-actions-picker-reports-merged-904ede96
+- id: pr-3d1fa55
+  plan: bugs
+  title: 'Bug: terminal-status PRs keep their tmux windows when finalized outside
+    pm merge flow'
+  branch: pm/pr-3d1fa55-bug-terminal-status-prs-keep-their-tmux-windows-wh
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    A PR marked terminal (merged/closed) *outside* pm''s own merge flow keeps all
+    of its tmux windows open — impl, merge-, review-, and every qa-<id>-sN scenario
+    window. Observed with pr-b4b68f3 (GitHub #212): its code shipped to master via
+    a content-merge with diverged SHAs (so neither GitHub nor pm auto-detected the
+    merge), it was then marked merged via `pm pr edit --status merged`, and a TUI
+    reload did not reclaim any of its ~10 windows.
+
+
+    ## Root cause
+
+    Window teardown for a finished PR only runs as part of pm''s interactive merge
+    flow (`pm pr merge` / picker merge action). A status transition to a terminal
+    state by any other path — `pm pr edit --status merged|closed`, a PR merged by
+    content with diverged SHAs (see pr-ca6981c / GitHub SHA-based merge detection),
+    or an externally-merged PR picked up by sync — does not trigger window cleanup.
+    So the windows orphan.
+
+
+    ## Expected
+
+    Reaching a terminal status (`merged`/`closed`) should reclaim the PR''s windows
+    regardless of how it got there. The cleanest fix is to make window teardown a
+    function of the PR reaching terminal status (detected on TUI reload / sync), not
+    a side effect of the merge command. Reuse the existing teardown (cf. `_cleanup_stale_scenario_windows`,
+    qa_loop.py) and extend it to impl/merge/review/qa windows for any PR whose status
+    is in `_TERMINAL_STATUSES` (session.py:953) but whose windows still exist.
+
+
+    ## Acceptance
+
+    - Marking a PR merged/closed by any path (edit, sync-detected, content-merge)
+    causes its impl/merge/review/qa windows to be closed on the next TUI reload/sync.
+
+    - No orphaned windows remain for terminal-status PRs.
+
+    - Active/non-terminal PRs are unaffected.
+
+    - Test: simulate a PR with open windows transitioning to merged via `pm pr edit`;
+    assert windows are reclaimed.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-22T22:52:39.457111+00:00'
-  updated_at: '2026-05-22T22:52:39.457111+00:00'
+  created_at: '2026-05-24T21:50:28.501175+00:00'
+  updated_at: '2026-05-24T21:50:28.501175+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
