@@ -19806,7 +19806,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-24T22:58:07.001779+00:00'
+  updated_at: '2026-05-24T23:11:25.995546+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
@@ -19941,6 +19941,23 @@ prs:
       config set/show/clear --help`. Verify state with `pm fake-github config show`.'
     created_at: '2026-05-24T22:58:06Z'
     last_edited: '2026-05-24T22:58:06Z'
+  - id: note-9f322a1
+    text: 'Review-loop i1 (9eb3): fixed a regression introduced by routing gh through
+      gh_ops.run_gh. _check_gh() raises SystemExit (BaseException) on missing/unauthed
+      gh; pr_close caught only Exception so SystemExit aborted BEFORE local cleanup
+      (workdir + PR-entry removal), and git_ops.push_pm_branch aborted BEFORE _checkout_and_restore_pm
+      (stranding the repo on the pm/sync-* branch). Both previously degraded gracefully
+      via raw subprocess.run. Now both catch SystemExit (pr_close warns+continues;
+      push_pm_branch records pr_error+restores). Added regression tests: tests/test_pr_enhancements.py::TestGitHubCloseResilience
+      and tests/test_git_ops.py::TestPushPmBranch::test_github_gh_unavailable_still_restores
+      (both verified to fail without the fix). NOTE: pr_merge was intentionally left
+      as-is — its github branch is guarded by shutil.which("gh") (missing gh is skipped),
+      and a hard exit with "gh auth login" guidance on unauthed merge is acceptable;
+      the author already accommodated the new auth preflight in test_pr_enhancements.
+      Full suite 2683 passed (1 pre-existing unrelated hook_events env failure deselected).
+      Committed a57a8ac.'
+    created_at: '2026-05-24T23:11:25Z'
+    last_edited: '2026-05-24T23:11:25Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
