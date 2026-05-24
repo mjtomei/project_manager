@@ -12428,11 +12428,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T00:16:07.755219+00:00'
-  updated_at: '2026-05-03T00:16:07.755219+00:00'
+  updated_at: '2026-05-24T22:28:49.514826+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c6539ec
+    text: 'pr-3d1fa55 added _reclaim_terminal_pr_windows (tui/sync.py): a status-based
+      sweep that tears down impl/review/merge/qa windows for ANY PR whose status is
+      in _TERMINAL_STATUSES, on every do_normal_sync + startup_github_sync. It now
+      guards against your scenario by skipping PRs in app._merge_propagation_phase
+      (so an active two-step merge-resolve window is not killed when GitHub flips
+      status to merged mid-flow). When you fix pr-6bf587b, note there are now TWO
+      kill paths to keep consistent: the transition-based _kill_merged_pr_windows
+      (still one-shot, NOT guarded) and the new _reclaim_terminal_pr_windows (guarded
+      by _merge_propagation_phase). The phase set is in-memory only, so a TUI restart
+      mid-propagation clears it and the sweep would then reclaim the window.'
+    created_at: '2026-05-24T22:28:49Z'
+    last_edited: '2026-05-24T22:28:49Z'
 - id: pr-b77702b
   plan: plan-regression
   title: Per-plan auto-merge=false mode with dep-merge in start prompt

@@ -49,8 +49,10 @@ that detection is fragile:
   windows on the next TUI reload/sync. *Implemented:* new
   `_reclaim_terminal_pr_windows(app)` in `sync.py` sweeps all PRs whose
   status ∈ `_TERMINAL_STATUSES` and calls `cleanup_pr_resources` for any with
-  live windows. Called at the end of `do_normal_sync` and after the GitHub
-  startup sync's display update.
+  live windows. Called at the end of `do_normal_sync` and unconditionally at
+  the end of `startup_github_sync` (i.e. even when GitHub reports no updates —
+  the headline content-merge case is invisible to GitHub, so `updated_count`
+  is 0 and the merge-detection branch never runs).
 - **R2** — No orphaned windows remain for terminal-status PRs. The sweep is
   self-healing: it runs every sync, so a PR whose teardown was missed once is
   reclaimed on the following refresh.
@@ -76,6 +78,12 @@ that detection is fragile:
   out-of-merge-flow path reclaims everything the merge flow would.
 - **Guards.** Respect the existing pattern: no-op when `app._session_name` is
   unset or the tmux session does not exist.
+- **Don't abort an in-progress merge propagation.** A PR can be flipped to
+  `merged` on GitHub while pm's two-step merge propagation is still resolving
+  conflicts in its live `merge-` window (cf. pr-6bf587b). The sweep skips any
+  PR in `app._merge_propagation_phase` so it doesn't tear that window down on
+  every sync; the window is reclaimed normally once propagation completes (the
+  phase set is cleared) or on the next TUI restart (the set is in-memory).
 
 ## Ambiguities (resolved)
 
@@ -85,9 +93,9 @@ that detection is fragile:
   safety net; overlap is harmless because the sweep's name check makes
   already-cleaned PRs a no-op.
 - **Where to run the sweep?** In `do_normal_sync` (the periodic + manual `r`
-  reload path that `background_sync` drives) and after `startup_github_sync`'s
-  display update. These are the "TUI reload/sync" chokepoints named in the
-  task.
+  reload path that `background_sync` drives) and unconditionally at the end of
+  `startup_github_sync` (regardless of `updated_count`). These are the "TUI
+  reload/sync" chokepoints named in the task.
 - **Reuse `_cleanup_stale_scenario_windows` (qa_loop) per the task hint?**
   That helper only covers `qa-` windows. `cleanup_pr_resources` is the
   superset (impl/review/merge/qa + containers + registry + runtime-state) and
@@ -103,3 +111,5 @@ that detection is fragile:
 - No tmux session / no `_session_name` → guarded no-op.
 - `tmux.list_windows` failure → logged, sweep returns without raising (won't
   crash the sync loop).
+- PR marked `merged` on GitHub mid-propagation (in `_merge_propagation_phase`)
+  → skipped so the active `merge-` resolve window survives (pr-6bf587b).

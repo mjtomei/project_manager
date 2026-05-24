@@ -86,8 +86,18 @@ def _reclaim_terminal_pr_windows(app) -> None:
         _log.warning("list_windows failed during terminal sweep: %s", e)
         return
 
+    # A PR can be marked merged on GitHub mid-flow while pm's two-step merge
+    # propagation is still resolving conflicts in its live `merge-` window
+    # (see pr-6bf587b). Tearing that window down on every sync would abort an
+    # in-progress propagation, so skip PRs the TUI knows are still propagating;
+    # they're reclaimed normally once propagation completes (the phase set is
+    # cleared) or on the next TUI restart (the set is in-memory only).
+    propagating = getattr(app, "_merge_propagation_phase", None) or set()
+
     for pr in app._data.get("prs") or []:
         if pr.get("status") not in _TERMINAL_STATUSES:
+            continue
+        if pr["id"] in propagating:
             continue
         display_id = _pr_display_id(pr)
         qa_prefix = f"qa-{display_id}-s"
@@ -334,7 +344,6 @@ async def startup_github_sync(app) -> None:
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
-            _reclaim_terminal_pr_windows(app)
             app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
             # Auto-start ready PRs if enabled
             if newly_merged:
@@ -344,6 +353,14 @@ async def startup_github_sync(app) -> None:
             _log.warning("GitHub sync error: %s", result.error)
         else:
             app.log_message("GitHub sync: up to date")
+
+        # Self-healing sweep: reclaim windows for any terminal-status PR even
+        # when GitHub reports no new updates. The headline case (a content-merge
+        # with diverged SHAs marked merged via `pm pr edit`) is invisible to
+        # GitHub, so `updated_count` is 0 and the merge-detection branch above
+        # never runs — but the orphaned windows must still be reclaimed on this
+        # reload, not deferred to the next background sync.
+        _reclaim_terminal_pr_windows(app)
 
         app.set_timer(2.0, app._clear_log_message)
     except Exception as e:
