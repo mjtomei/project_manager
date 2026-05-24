@@ -2627,6 +2627,12 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
                 click.echo(f"GitHub PR #{gh_pr_number} closed.")
             else:
                 click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
+        except SystemExit:
+            # gh_ops.run_gh -> _check_gh() raises SystemExit when gh is missing
+            # or unauthenticated. Don't let that abort the local close/cleanup
+            # (workdir + PR-entry removal below) — warn and continue, preserving
+            # the pre-chokepoint behavior where a raw `gh` failure was tolerated.
+            click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
 

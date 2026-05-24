@@ -291,6 +291,33 @@ class TestPushPmBranch:
         assert "error" in result
         assert "Failed to detect" in result["error"]
 
+    @patch("pm_core.gh_ops.run_gh", side_effect=SystemExit(1))
+    @patch("pm_core.git_ops.pull_rebase")
+    @patch("pm_core.git_ops.run_git")
+    @patch("pm_core.git_ops.is_git_repo", return_value=True)
+    @patch("pm_core.store.is_internal_pm_dir", return_value=False)
+    def test_github_gh_unavailable_still_restores(
+        self, mock_ipd, mock_igr, mock_rg, mock_pr, mock_gh, tmp_path,
+    ):
+        """gh missing/unauthed (SystemExit from _check_gh via run_gh) must not
+        abort the sync: record pr_error and still restore the original branch."""
+        mock_rg.side_effect = [
+            MagicMock(returncode=0, stdout="main\n"),  # rev-parse HEAD
+            MagicMock(returncode=0),  # git add .
+            MagicMock(returncode=1),  # diff --cached (1 = has changes)
+            MagicMock(returncode=0),  # checkout -b
+            MagicMock(returncode=0),  # commit
+            MagicMock(returncode=0),  # push -u origin
+            MagicMock(returncode=0),  # checkout original (restore)
+            MagicMock(returncode=0),  # checkout -- . (restore)
+        ]
+        result = push_pm_branch(tmp_path, backend="github")
+        assert "pr_error" in result
+        assert "branch" in result  # did not abort
+        # The original branch was restored despite the gh failure.
+        restore_calls = [c[0] for c in mock_rg.call_args_list]
+        assert ("checkout", "main") in restore_calls
+
 
 # ---------------------------------------------------------------------------
 # _checkout_and_restore_pm
