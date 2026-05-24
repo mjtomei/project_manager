@@ -5669,7 +5669,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-05-23T06:46:05.519248+00:00'
+  updated_at: '2026-05-24T02:25:25.615893+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
@@ -5719,6 +5719,36 @@ prs:
       active loop_id on the PR and validate on resume.'
     created_at: '2026-05-23T06:46:05Z'
     last_edited: '2026-05-23T06:46:05Z'
+  - id: note-d49f9cd
+    text: 'QA scenario-1 refiner notes: (1) QA status is a PANE (qa-status) split
+      into the main qa-<id> window, not its own window; scenario workers are separate
+      windows qa-<id>-s<N>. (2) resume scan is throttled to ~every 5s (runs on first
+      tick), so "Resuming QA for <pr> after restart..." appears within ~5s of relaunch.
+      (3) keep a run in-flight via per-scenario delay on qa_scenario; cursor advances
+      per launch in index order, so a scripted list [{PASS,delay:5},{PASS,delay:30}]
+      staggers s1 fast / s2 slow for the EC1 already-verified-skip case. (4) one-shot
+      QA = plain t (legacy path, no self-driving); auto-start off => PASS leaves PR
+      in qa with exactly one note. (5) qa workdir = ~/.pm/workdirs/qa/<pr>-<loop>/
+      with qa_status.json (overall) + qa_resume.json (snapshot, cleared on first completion
+      processing). EC1 timing is the fragile part.'
+    created_at: '2026-05-24T02:04:46Z'
+    last_edited: '2026-05-24T02:04:46Z'
+  - id: note-e90cdf4
+    text: 'QA scenario-1 setup gotchas (2026-05-24, PASS all 3 triples on real tmux
+      surface): (A) SPEC-GATE PREREQ omitted from GIVEN — after the fake planner parses
+      scenarios the loop halts INPUT_REQUIRED ("QA spec missing ... planner did not
+      generate spec in Step 0", qa_loop.py:3187); real claude writes the spec in Step
+      0, fake does not. Pre-seed `pm pr spec <pr> qa` then `z t` to fresh-start. (B)
+      CURSOR STAGGER CORRECTION to note-d49f9cd: a 2-entry qa_scenario list does NOT
+      stagger the two real scenarios — the interactive Scenario 0 consumes verdict
+      entry #0 first, so both real scenarios fall through to the clamped last entry
+      (identical delay). For EC1 already-verified-skip you need a 3-entry list e.g.
+      [{delay:2},{delay:5},{delay:90}]: entry0→Scenario0, entry1→first real (fast),
+      entry2→second real (slow). (C) fresh `z t` runs renumber scenarios (3/4, then
+      5/6, ...) and each run legitimately appends its own QA PASS note — count notes
+      by loop-dir suffix, not total.'
+    created_at: '2026-05-24T02:25:25Z'
+    last_edited: '2026-05-24T02:25:25Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
