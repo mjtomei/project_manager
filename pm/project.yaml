@@ -22114,8 +22114,14 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-24T23:10:12.099283+00:00'
-  updated_at: '2026-05-24T23:10:12.099283+00:00'
+  updated_at: '2026-05-24T23:10:47.944544+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-2044913
+    text: 'When this fix lands, the workaround memory is obsolete: delete the [[project_workdir_push_proxy]]
+      memory ("git push origin rejected → push to explicit GitHub URL") and its line
+      in MEMORY.md, since git push origin will work directly from PR workdirs.'
+    created_at: '2026-05-24T23:10:47Z'
+    last_edited: '2026-05-24T23:10:47Z'
