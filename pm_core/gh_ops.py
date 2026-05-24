@@ -66,6 +66,43 @@ def gh_runner(runner: Optional[GhRunner]):
             _GH_RUNNER = None if _GH_RUNNER_DEPTH == 0 else prev
 
 
+def _finish_runner_result(
+    cmd: list[str],
+    result: subprocess.CompletedProcess,
+    check: bool,
+) -> subprocess.CompletedProcess:
+    """Log a non-zero result and raise on ``check``, shared by the fake paths."""
+    if result.returncode != 0:
+        log_shell_command(cmd, prefix="gh", returncode=result.returncode)
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, result.stdout, result.stderr
+        )
+    return result
+
+
+def _maybe_dispatch_session_fake(
+    args: tuple[str, ...],
+    cwd: Optional[str],
+) -> Optional[subprocess.CompletedProcess]:
+    """Dispatch to a session-installed out-of-process fake-github, or None.
+
+    Returns None (→ real `gh`) when no fake is installed for the session. When
+    one *is* installed, the dispatch result is returned; any error during
+    dispatch propagates rather than silently falling through to the real GitHub
+    API (a loud failure is safer than an unintended live call).
+    """
+    from pm_core import paths
+    try:
+        active = paths.fake_github_active()
+    except Exception:
+        return None
+    if not active:
+        return None
+    from pm_core import fake_github
+    return fake_github.dispatch_session(list(args), cwd)
+
+
 def _check_gh():
     """Check that gh CLI is installed and authenticated. Exit with guidance if not."""
     if not shutil.which("gh"):
@@ -111,14 +148,16 @@ def run_gh(
     runner = _GH_RUNNER
     if runner is not None:
         log_shell_command(cmd, prefix="gh")
-        result = runner(list(args), cwd)
-        if result.returncode != 0:
-            log_shell_command(cmd, prefix="gh", returncode=result.returncode)
-        if check and result.returncode != 0:
-            raise subprocess.CalledProcessError(
-                result.returncode, cmd, result.stdout, result.stderr
-            )
-        return result
+        return _finish_runner_result(cmd, runner(list(args), cwd), check)
+
+    # Out-of-process fake gate: a freshly-spawned `pm pr ...` subprocess has no
+    # in-process runner, so consult the per-session fake-github state (mirrors
+    # fake-claude's config gate). When installed, the command is served by the
+    # fake instead of the real `gh` CLI / GitHub API.
+    session_result = _maybe_dispatch_session_fake(args, cwd)
+    if session_result is not None:
+        log_shell_command(cmd, prefix="gh")
+        return _finish_runner_result(cmd, session_result, check)
 
     _check_gh()
     log_shell_command(cmd, prefix="gh")

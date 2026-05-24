@@ -27,6 +27,23 @@ deferred. Only the git-affecting operations need a working repo.
 
 This is captured as **R8** below.
 
+## Out-of-process correction (2026-05-24)
+
+QA found (notes note-93bc0af, note-0e6cf63) that the fake installed *only
+in-process* via `gh_ops.set_gh_runner` / `installed()`. A separately-spawned
+`pm pr sync-github` / `pm pr merge` subprocess starts with `_GH_RUNNER is
+None` and falls through to real `gh` / the live GitHub API — so the github
+side could not be driven from a real CLI/TUI pane, only from the pytest
+in-process path. This breaks parity with `fake-claude` (which redirects
+subprocess panes via a per-session config gate) and undercuts the PR's goal
+of driving **both** Claude and GitHub deterministically in the same
+regression run (the regression runner drives real pm flows in subprocess
+panes).
+
+Resolution (chosen approach: run_gh config-gate): add a per-session,
+on-disk fake plus a CLI to install it, gated inside `run_gh`. Captured as
+**R9** below.
+
 ## Design probe
 
 The "github backend" is not a single class. The surface that regression tests
@@ -99,6 +116,22 @@ This is also a small code-quality consolidation.
   The fixture must provide both the backing repo and a clone/workdir so
   scenario tests can run the full merge-with-pull path without hand-mocking
   `git_ops`.
+- **R9 Out-of-process / CLI installer** (post-QA scope addition — see
+  *Out-of-process correction* below): the fake must be installable for a pm
+  *session* so a freshly-spawned `pm pr ...` subprocess (or TUI pane) is
+  served by it, mirroring how `fake-claude` works. Concretely:
+  - State persists at `~/.pm/sessions/<tag>/fake-github/` (`state.json`
+    registry + `remote.git/` backing repo), reusing the per-session gate
+    pattern of `fake-claude`.
+  - `gh_ops.run_gh`, when no in-process runner is installed, consults
+    `paths.fake_github_active()` and dispatches to the on-disk fake
+    (`fake_github.dispatch_session`: load → run one command → persist).
+  - A `pm fake-github config set/show/clear` CLI seeds/inspects/removes it
+    (`fake_github.install_session` from a JSON spec of PRs + scripts),
+    paralleling `pm fake-claude config`.
+  - The in-process path (`installed()` / fixtures) stays the route for
+    multi-threaded tests; the out-of-process path assumes a session's `gh`
+    calls are serial (true for pm flows).
 
 ## 2. Implicit requirements
 
@@ -153,7 +186,26 @@ No **[UNRESOLVED]** ambiguities.
   clone (`FakeGitHubRepo.clone`) can `git fetch` + `git merge --ff-only` to
   complete the pull half. Real merge conflicts surface as conflict-shaped
   `gh` failures.
+- **R9** — out-of-process / CLI installer: implemented.
+  `paths.fake_github_dir/active/clear_fake_github` provide the per-session
+  gate; `fake_github.install_session/save_session/load_session/
+  dispatch_session` persist and serve the on-disk fake; `gh_ops.run_gh`
+  consults the gate when no in-process runner is set; `pm fake-github config
+  set/show/clear` is the CLI. `FakeGitHubRepo._init` is idempotent so it
+  re-attaches to the session's existing `remote.git/`. Predicate (callable)
+  scripts are in-process only — they are dropped from the on-disk state
+  (only string-prefix matches persist to subprocesses).
 - Comment/admin operations remain metadata-only by design.
+
+### Note: the regression-runner consequence is now resolved
+
+R9 closes the gap flagged in the push-proxy note below for the *GitHub-API*
+half: a regression scenario can `pm fake-github config set …` in a pane and
+then run real `pm pr sync-github` / `pm pr merge` against the fake. The
+git-plumbing half (`_pull_after_merge`'s `git fetch`) still depends on the
+consumer repo's `origin` pointing at the fake's `remote.git/` and on real git
+(see the push-proxy note) — that wiring remains the regression runner's
+responsibility (pr-7d5d036).
 
 ### Note: the pm git push-proxy wrapper
 

@@ -53,7 +53,7 @@ import shutil
 import subprocess
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Union
 
@@ -135,8 +135,14 @@ class FakeGitHubRepo:
         return result
 
     def _init(self) -> None:
-        """Create the remote repo with an initial commit on the base branch."""
+        """Create the remote repo with an initial commit on the base branch.
+
+        Idempotent: if the repo already exists on disk (re-attaching to an
+        out-of-process session's ``remote.git/``), leave it untouched.
+        """
         Path(self.path).mkdir(parents=True, exist_ok=True)
+        if (Path(self.path) / ".git").exists():
+            return
         self._git("init", "-b", self.default_branch)
         self._git("config", "user.email", "fake-gh@example.com")
         self._git("config", "user.name", "Fake GitHub")
@@ -329,6 +335,50 @@ class FakeGitHubBackend:
         )
         return cls(owner=owner, repo=repo, default_branch=default_branch,
                    git_repo=git_repo)
+
+    # --- serialization (out-of-process session state) -----------------------
+
+    def to_state(self) -> dict:
+        """Serialize registry + scripts for the on-disk session fake.
+
+        Predicate (callable) scripts are in-process only and are dropped — a
+        subprocess can only carry string-prefix matches.
+        """
+        return {
+            "owner": self.owner,
+            "repo": self.repo,
+            "default_branch": self.default_branch,
+            "git_backed": self.git_repo is not None,
+            "next_number": self._next_number,
+            "prs": [asdict(pr) for pr in self.prs.values()],
+            "scripts": [
+                {"match": s.match, "returncode": s.returncode,
+                 "stdout": s.stdout, "stderr": s.stderr,
+                 "remaining": s.remaining}
+                for s in self._scripts if isinstance(s.match, str)
+            ],
+        }
+
+    @classmethod
+    def from_state(cls, state: dict,
+                   git_repo: Optional[FakeGitHubRepo] = None) -> "FakeGitHubBackend":
+        """Rebuild a backend from :meth:`to_state` output (does not re-seed git)."""
+        b = cls(
+            owner=state.get("owner", "owner"),
+            repo=state.get("repo", "repo"),
+            default_branch=state.get("default_branch", "master"),
+            git_repo=git_repo,
+        )
+        b._next_number = state.get("next_number", 1)
+        for prd in state.get("prs", []):
+            pr = FakePR(**prd)
+            b.prs[pr.number] = pr
+        for sd in state.get("scripts", []):
+            b._scripts.append(_Scripted(
+                match=sd["match"], returncode=sd.get("returncode", 0),
+                stdout=sd.get("stdout", ""), stderr=sd.get("stderr", ""),
+                remaining=sd.get("remaining", 1)))
+        return b
 
     # --- state seeding ------------------------------------------------------
 
@@ -677,3 +727,113 @@ def sync_mid_flow(backend: FakeGitHubBackend, ref: PRRef,
     else:
         raise ValueError(f"unknown state {state!r}")
     return pr
+
+
+# --- out-of-process session installer ---------------------------------------
+#
+# Mirrors fake-claude's per-session config gate. `install_session` seeds the
+# fake into ~/.pm/sessions/<tag>/fake-github/ (state.json + remote.git/);
+# thereafter any `gh` command pm runs in that session — even from a freshly
+# spawned `pm pr ...` subprocess — is served by the fake, because
+# `gh_ops.run_gh` consults `paths.fake_github_active()` and calls
+# `dispatch_session`. State is reloaded and persisted around each command so it
+# survives across subprocess boundaries.
+#
+# Concurrency note: dispatch assumes a session's `gh` calls are serial (true
+# for pm flows — a single pane runs them one at a time). The in-process path
+# (FakeGitHubBackend.installed) remains the route for multi-threaded tests.
+
+def install_session(config: dict, session_tag: Optional[str] = None) -> FakeGitHubBackend:
+    """Seed an out-of-process fake-github for a pm session.
+
+    ``config`` is a plain dict (JSON-friendly)::
+
+        {
+          "git_backed": true,              # default true
+          "default_branch": "master",
+          "owner": "owner", "repo": "repo",
+          "prs": [
+            {"head": "feat-x", "title": "...", "draft": true,
+             "base": "master", "state": "OPEN", "files": {"a.txt": "..."}}
+          ],
+          "scripts": [
+            {"match": "pr merge", "returncode": 1, "stderr": "...", "times": 1}
+          ]
+        }
+
+    Returns the seeded backend (already persisted to disk).
+    """
+    from pm_core import paths
+    d = paths.fake_github_dir(session_tag)
+    if d is None:
+        raise RuntimeError("no pm session tag: cannot install fake-github")
+    d.mkdir(parents=True, exist_ok=True)
+
+    git_backed = config.get("git_backed", True)
+    default_branch = config.get("default_branch", "master")
+    git_repo = (FakeGitHubRepo(d / "remote.git", default_branch)
+                if git_backed else None)
+    backend = FakeGitHubBackend(
+        owner=config.get("owner", "owner"),
+        repo=config.get("repo", "repo"),
+        default_branch=default_branch,
+        git_repo=git_repo,
+    )
+    for prd in config.get("prs", []):
+        backend.add_pr(
+            title=prd.get("title", "Test PR"),
+            head=prd["head"],
+            base=prd.get("base"),
+            body=prd.get("body", ""),
+            is_draft=prd.get("draft", prd.get("is_draft", False)),
+            state=prd.get("state", "OPEN"),
+            files=prd.get("files"),
+        )
+    for sd in config.get("scripts", []):
+        backend.queue_response(
+            sd["match"], returncode=sd.get("returncode", 0),
+            stdout=sd.get("stdout", ""), stderr=sd.get("stderr", ""),
+            times=sd.get("times", 1))
+    save_session(backend, session_tag)
+    return backend
+
+
+def save_session(backend: FakeGitHubBackend,
+                 session_tag: Optional[str] = None) -> None:
+    """Persist a backend's registry/scripts to the session's state.json."""
+    from pm_core import paths
+    d = paths.fake_github_dir(session_tag)
+    if d is None:
+        raise RuntimeError("no pm session tag: cannot save fake-github state")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "state.json").write_text(json.dumps(backend.to_state(), indent=2) + "\n")
+
+
+def load_session(session_tag: Optional[str] = None) -> Optional[FakeGitHubBackend]:
+    """Load the session's on-disk fake-github backend, or None if absent."""
+    from pm_core import paths
+    d = paths.fake_github_dir(session_tag)
+    if d is None:
+        return None
+    state_file = d / "state.json"
+    if not state_file.exists():
+        return None
+    state = json.loads(state_file.read_text())
+    git_repo = (FakeGitHubRepo(d / "remote.git", state.get("default_branch", "master"))
+                if state.get("git_backed") else None)
+    return FakeGitHubBackend.from_state(state, git_repo)
+
+
+def dispatch_session(args: list[str], cwd: Optional[str] = None,
+                     session_tag: Optional[str] = None) -> subprocess.CompletedProcess:
+    """Load → run one `gh` command → persist, for the session fake.
+
+    Called by ``gh_ops.run_gh`` when ``paths.fake_github_active()``.
+    """
+    backend = load_session(session_tag)
+    if backend is None:
+        return _completed(list(args), 1, "",
+                          "fake-gh: no session fake-github installed")
+    result = backend.run(list(args), cwd)
+    save_session(backend, session_tag)
+    return result

@@ -312,3 +312,140 @@ def test_git_backed_seed_merged_state(fake_github_repo):
     pr = fake_github_repo.add_pr(head="feature-x", state="MERGED")
     assert pr.state == "MERGED"
     assert fake_github_repo.git_repo.is_merged("feature-x") is True
+
+
+# --- out-of-process session fake (CLI-installable, run_gh config gate) ------
+
+@pytest.fixture
+def session_fake(monkeypatch, tmp_path):
+    """Point the session-dir machinery at tmp_path with a fixed tag.
+
+    Yields the tag. With this active, paths.fake_github_active()/dir() resolve
+    under tmp_path, so install_session + the gh_ops.run_gh gate can be driven
+    without a real pm session — and crucially WITHOUT installing an in-process
+    runner, so the out-of-process path is what's exercised.
+    """
+    tag = "proj-deadbeef"
+    monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+    monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+    # Ensure no in-process runner leaks in from elsewhere.
+    assert gh_ops._GH_RUNNER is None
+    yield tag
+
+
+def test_session_install_active_clear(session_fake):
+    from pm_core import fake_github, paths
+
+    assert paths.fake_github_active() is False
+    fake_github.install_session({"prs": [{"head": "feat-x", "draft": True}]})
+    assert paths.fake_github_active() is True
+
+    paths.clear_fake_github()
+    assert paths.fake_github_active() is False
+
+
+def test_session_run_gh_dispatches_to_fake(session_fake):
+    """A run_gh call with no in-process runner is served by the session fake."""
+    from pm_core import fake_github
+
+    fake_github.install_session({
+        "git_backed": False,
+        "prs": [{"head": "feat-x", "title": "Feature X", "draft": True}],
+    })
+
+    info = gh_ops.get_pr_status("/tmp/repo", "feat-x")
+    assert info is not None and info["state"] == "OPEN" and info["number"] == 1
+
+
+def test_session_state_persists_across_run_gh_calls(session_fake):
+    """State mutates on disk: a PR created by one call is seen by the next."""
+    from pm_core import fake_github
+
+    fake_github.install_session({"git_backed": False})
+
+    created = gh_ops.create_draft_pr("/tmp/repo", "My PR", "master", "body")
+    assert created["number"] == 1
+    # A separate run_gh call (fresh load from disk) sees the new PR.
+    info = gh_ops.get_pr_state(created["number"])
+    assert info == {"state": "OPEN", "isDraft": True, "mergedAt": None}
+
+
+def test_session_scripted_failure(session_fake):
+    from pm_core import fake_github
+
+    fake_github.install_session({
+        "git_backed": False,
+        "prs": [{"head": "feat-x"}],
+        "scripts": [{"match": "pr view", "returncode": 1,
+                     "stderr": "gh: rate limit (HTTP 403)"}],
+    })
+    assert gh_ops.get_pr_status("/tmp/repo", "feat-x") is None  # scripted 403
+    assert gh_ops.get_pr_status("/tmp/repo", "feat-x") is not None  # consumed
+
+
+def test_session_git_backed_merge_persists(session_fake):
+    """gh pr merge through the session path advances the on-disk backing repo."""
+    from pm_core import fake_github
+
+    fake_github.install_session({"prs": [{"head": "feat-x", "draft": True}]})
+
+    result = gh_ops.merge_pr("/tmp/repo", 1)
+    assert result.returncode == 0
+
+    reloaded = fake_github.load_session()
+    assert reloaded.prs[1].state == "MERGED"
+    assert reloaded.git_repo.is_merged("feat-x") is True
+
+
+def test_session_inactive_returns_none(session_fake):
+    """The gate returns None (→ real gh) when no fake is installed."""
+    assert gh_ops._maybe_dispatch_session_fake(("pr", "list"), None) is None
+
+
+def test_in_process_runner_takes_precedence_over_session(session_fake, tmp_path):
+    """An installed in-process runner wins over the session fake."""
+    from pm_core import fake_github
+
+    fake_github.install_session({"git_backed": False,
+                                 "prs": [{"head": "disk-pr"}]})
+    inproc = FakeGitHubBackend()  # empty, in-process
+    inproc.add_pr(head="mem-pr")
+    with inproc.installed():
+        prs = gh_ops.list_prs("/tmp/repo")
+    assert [p["headRefName"] for p in prs] == ["mem-pr"]  # not disk-pr
+
+
+# --- pm fake-github CLI -----------------------------------------------------
+
+def test_cli_config_set_show_clear(session_fake):
+    import json as _json
+    from click.testing import CliRunner
+    from pm_core.cli.fake_github import (
+        config_clear_cmd, config_set_cmd, config_show_cmd,
+    )
+    from pm_core import paths
+
+    runner = CliRunner()
+    cfg = _json.dumps({"git_backed": False,
+                       "prs": [{"head": "feat-x", "draft": True}]})
+
+    r = runner.invoke(config_set_cmd, [cfg])
+    assert r.exit_code == 0, r.output
+    assert "Installed fake-github" in r.output
+    assert paths.fake_github_active() is True
+
+    r = runner.invoke(config_show_cmd, [])
+    assert r.exit_code == 0 and "feat-x" in r.output
+
+    r = runner.invoke(config_clear_cmd, [])
+    assert r.exit_code == 0
+    assert paths.fake_github_active() is False
+
+
+def test_cli_config_set_rejects_bad_json(session_fake):
+    from click.testing import CliRunner
+    from pm_core.cli.fake_github import config_set_cmd
+
+    r = CliRunner().invoke(config_set_cmd, ["{not json"])
+    assert r.exit_code != 0
+    assert "Invalid JSON" in r.output
