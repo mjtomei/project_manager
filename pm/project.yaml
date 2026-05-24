@@ -19806,7 +19806,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-24T23:11:25.995546+00:00'
+  updated_at: '2026-05-24T23:16:28.929600+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
@@ -19958,6 +19958,15 @@ prs:
       Committed a57a8ac.'
     created_at: '2026-05-24T23:11:25Z'
     last_edited: '2026-05-24T23:11:25Z'
+  - id: note-85548d2
+    text: 'review-loop i2 (9eb3): fixed R9 parity gap in pr_merge — the github merge
+      block was gated on shutil.which("gh") so with no gh binary it skipped to the
+      manual-merge SystemExit fallback, unlike sync-github/close which already serve
+      the out-of-process fake via run_gh session gate. Now gh_usable = which(gh) or
+      paths.fake_github_active(); real no-fake behavior unchanged. Added TestGitHubMergePull::test_github_merge_uses_fake_when_gh_binary_absent.
+      167 gh/sync/merge/fake tests green. Committed 195cb606.'
+    created_at: '2026-05-24T23:16:28Z'
+    last_edited: '2026-05-24T23:16:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression

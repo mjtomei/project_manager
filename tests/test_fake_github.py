@@ -449,3 +449,133 @@ def test_cli_config_set_rejects_bad_json(session_fake):
     r = CliRunner().invoke(config_set_cmd, ["{not json"])
     assert r.exit_code != 0
     assert "Invalid JSON" in r.output
+
+
+# --- concurrency: regression coverage for the QA-scenario-6 fixes -----------
+#
+# These guard the concurrency-safety code added to fix QA scenario 6: the
+# per-repo RLock + _cleanup_worktree in FakeGitHubRepo (merges into the single
+# backing worktree were colliding on .git/index.lock, losing non-conflicting
+# merges and leaking dangling MERGE_HEAD/index.lock), and the gh_ops depth
+# counter that forces _GH_RUNNER back to the None baseline after interleaved
+# install/restore cycles (the transport-pointer leak). Previously these were
+# only exercised by throwaway QA capture drivers, not committed tests.
+
+import threading  # noqa: E402
+
+
+def _no_dangling_merge_state(repo) -> None:
+    git_dir = Path(repo.path, ".git")
+    assert not (git_dir / "MERGE_HEAD").exists(), "dangling MERGE_HEAD left behind"
+    assert not (git_dir / "index.lock").exists(), "stale index.lock left behind"
+
+
+def test_concurrent_merges_all_land_no_dangling_state(tmp_path):
+    """Concurrent non-conflicting merges serialize: every one lands and the
+    backing repo is left clean (per-repo RLock + _cleanup_worktree)."""
+    backend = FakeGitHubBackend.with_git_repo(tmp_path / "gh")
+    n = 6
+    prs = [backend.add_pr(head=f"feat-{i}", files={f"f{i}.txt": f"{i}\n"})
+           for i in range(n)]
+
+    barrier = threading.Barrier(n)
+    results: dict[int, int] = {}
+    results_lock = threading.Lock()
+
+    def worker(pr):
+        barrier.wait()  # maximize the collision window
+        res = gh_ops.merge_pr("/tmp/repo", pr.number)
+        with results_lock:
+            results[pr.number] = res.returncode
+
+    with backend.installed():
+        threads = [threading.Thread(target=worker, args=(pr,)) for pr in prs]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert all(rc == 0 for rc in results.values()), results
+    for pr in prs:
+        assert backend.git_repo.is_merged(pr.head) is True
+    _no_dangling_merge_state(backend.git_repo)
+
+
+def test_concurrent_conflicting_merges_yield_one_winner(tmp_path):
+    """Two PRs touching the same file merged concurrently → exactly one winner
+    plus one conflict-shaped rc=1, base reflects only the winner, no dangling
+    merge state."""
+    backend = FakeGitHubBackend.with_git_repo(tmp_path / "gh")
+    a = backend.add_pr(head="feat-a", files={"shared.txt": "from A\n"})
+    b = backend.add_pr(head="feat-b", files={"shared.txt": "from B\n"})
+
+    barrier = threading.Barrier(2)
+    results: dict[int, subprocess.CompletedProcess] = {}
+    results_lock = threading.Lock()
+
+    def worker(pr):
+        barrier.wait()
+        res = gh_ops.merge_pr("/tmp/repo", pr.number)
+        with results_lock:
+            results[pr.number] = res
+
+    with backend.installed():
+        threads = [threading.Thread(target=worker, args=(p,)) for p in (a, b)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    codes = sorted(r.returncode for r in results.values())
+    assert codes == [0, 1], {n: r.returncode for n, r in results.items()}
+    loser = next(r for r in results.values() if r.returncode == 1)
+    assert "conflict" in loser.stderr.lower()
+    # exactly one of the two is merged into base; the other stays OPEN
+    merged = [pr for pr in (a, b) if backend.git_repo.is_merged(pr.head)]
+    assert len(merged) == 1
+    _no_dangling_merge_state(backend.git_repo)
+
+
+def test_concurrent_installs_restore_to_none_baseline():
+    """An interleaved enter(T1)/enter(T2)/exit(T1)/exit(T2) across threads must
+    leave the global transport at the None baseline.
+
+    This is the exact save/restore race the depth counter fixes: with a naive
+    ``finally: _GH_RUNNER = prev`` the last exit (T2) would reinstate T1's
+    already-departed runner and leak it past join. The events below pin the
+    interleaving so the regression is caught deterministically, not by luck.
+    """
+    assert gh_ops._GH_RUNNER is None
+    r1 = lambda argv, cwd: _completed_stub()
+    r2 = lambda argv, cwd: _completed_stub()
+    t1_entered = threading.Event()
+    t2_entered = threading.Event()
+    t1_may_exit = threading.Event()
+    t1_exited = threading.Event()
+
+    def t1():
+        with gh_ops.gh_runner(r1):
+            t1_entered.set()
+            t2_entered.wait()      # T2 enters while T1 still holds (nested)
+            t1_may_exit.wait()
+        t1_exited.set()            # T1 has restored
+
+    def t2():
+        t1_entered.wait()          # enter strictly after T1
+        with gh_ops.gh_runner(r2):
+            t2_entered.set()
+            t1_may_exit.set()      # let T1 exit first (the interleave)
+            t1_exited.wait()       # T2 exits only after T1 has
+
+    th1, th2 = threading.Thread(target=t1), threading.Thread(target=t2)
+    th1.start()
+    th2.start()
+    th1.join()
+    th2.join()
+
+    assert gh_ops._GH_RUNNER is None
+    assert gh_ops._GH_RUNNER_DEPTH == 0
+
+
+def _completed_stub():
+    return subprocess.CompletedProcess(["gh"], 0, "", "")
