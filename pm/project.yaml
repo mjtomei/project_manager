@@ -19454,7 +19454,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-23T07:07:19.130628+00:00'
+  updated_at: '2026-05-24T02:09:39.278528+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
@@ -19551,6 +19551,22 @@ prs:
       shim is on PATH, put real git (pm_core.fake_github.REAL_GIT dir) first.'
     created_at: '2026-05-23T06:59:05Z'
     last_edited: '2026-05-23T06:59:05Z'
+  - id: note-f5cb66e
+    text: 'R9 (out-of-process / CLI installer) implemented — addresses the UNBLOCK
+      in note-93bc0af / note-0e6cf63. The github fake is now installable per-session
+      like fake-claude: state at ~/.pm/sessions/<tag>/fake-github/ (state.json + remote.git),
+      gh_ops.run_gh consults paths.fake_github_active() when no in-process runner
+      is set and dispatches via fake_github.dispatch_session (load->run->persist),
+      and ''pm fake-github config set/show/clear'' seeds it. So scenario 3 (status
+      sync) and merge flows are now drivable from a real pane: ''pm fake-github config
+      set ...'' then real ''pm pr sync-github''/''pm pr merge''. In-process installed()/fixtures
+      unchanged (still the multi-threaded-test route); out-of-process dispatch assumes
+      serial gh calls per session. Predicate (callable) scripts are in-process only.
+      NOTE for regression runner (pr-7d5d036): the git-plumbing half of merge-with-pull
+      still needs the consumer repo origin pointed at the fake''s remote.git + real
+      git (push-proxy note in impl.md). Full suite 2643 passed.'
+    created_at: '2026-05-24T02:09:39Z'
+    last_edited: '2026-05-24T02:09:39Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
