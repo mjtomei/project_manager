@@ -80,6 +80,39 @@ class TestUnregisterWindows:
 
 
 class TestCleanupPrResources:
+    def test_prunes_id_keyed_registry_entries(self, tmp_path, monkeypatch):
+        # Reproducer for pr-3d1fa55: in production register_pane is called with
+        # the tmux window @id, so the registry is *@id-keyed*. The old cleanup
+        # unregistered by window *name* and removed nothing, leaking the entry.
+        # cleanup_pr_resources must snapshot name->@id before the kill and
+        # prune the registry by @id.
+        monkeypatch.setattr(pane_registry, "registry_dir", lambda: tmp_path)
+        monkeypatch.setattr(runtime_state, "_runtime_dir", lambda: tmp_path)
+        # Production-style: window key is the tmux @id, not the name.
+        pane_registry.register_pane("pm-s", "@4", "%4", "review-diff",
+                                    "diff-shell")
+        pane_registry.register_pane("pm-s", "@0", "%0", "tui", "pm _tui")
+
+        # tmux still lists the review window (name -> @id) at snapshot time.
+        live_windows = [
+            {"id": "@0", "index": "0", "name": "main"},
+            {"id": "@4", "index": "1", "name": "review-pr-001"},
+        ]
+        with patch("pm_core.pr_cleanup.kill_pr_windows",
+                   return_value=["review-pr-001"]), \
+             patch("pm_core.pr_cleanup.container_mod") as mc, \
+             patch("pm_core.pr_cleanup.tmux_mod") as mt:
+            mc.cleanup_pr_containers.return_value = []
+            mt.list_windows.return_value = live_windows
+            summary = pr_cleanup.cleanup_pr_resources(
+                "pm-s", {"id": "pr-001"})
+
+        # The @id entry for the review window must be gone; the unrelated TUI
+        # window (@0) must survive.
+        assert "@4" in summary["registry_windows"]
+        data = pane_registry.load_registry("pm-s")
+        assert list(data.get("windows", {}).keys()) == ["@0"]
+
     @patch("pm_core.pr_cleanup.tmux_mod")
     @patch("pm_core.pr_cleanup.pane_registry")
     @patch("pm_core.pr_cleanup.container_mod")

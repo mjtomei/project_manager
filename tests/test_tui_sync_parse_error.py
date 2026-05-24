@@ -77,6 +77,198 @@ class TestKillMergedPrWindows:
         mock_cleanup.assert_called_once_with("pm-test", pr)
 
 
+class TestReclaimTerminalPrWindows:
+    """Terminal-status PRs must have their windows reclaimed on every sync,
+    regardless of how they reached terminal status."""
+
+    def _make_app(self, prs):
+        return types.SimpleNamespace(
+            _session_name="pm-test",
+            _data={"prs": prs},
+        )
+
+    def test_merged_pr_with_live_windows_is_reclaimed(self):
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = self._make_app([pr])
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "pr-abc"},
+                                 {"name": "qa-pr-abc-s1"}]), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value={"windows": ["pr-abc"], "containers": [],
+                                 "registry_windows": [], "sockets": [],
+                                 "runtime_state": True}) as mock_cleanup:
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_cleanup.assert_called_once_with("pm-test", pr)
+
+    def test_closed_pr_with_live_windows_is_reclaimed(self):
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "closed", "branch": "feat/x"}
+        app = self._make_app([pr])
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "review-pr-abc"}]), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value={"windows": ["review-pr-abc"], "containers": [],
+                                 "registry_windows": [], "sockets": [],
+                                 "runtime_state": True}) as mock_cleanup:
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_cleanup.assert_called_once_with("pm-test", pr)
+
+    def test_terminal_pr_without_live_windows_is_skipped(self):
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = self._make_app([pr])
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "pr-other"}]), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources") as mock_cleanup:
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_cleanup.assert_not_called()
+
+    def test_active_pr_with_live_windows_is_untouched(self):
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "in_progress", "branch": "feat/x"}
+        app = self._make_app([pr])
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "pr-abc"}]), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources") as mock_cleanup:
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_cleanup.assert_not_called()
+
+    def test_merged_pr_mid_propagation_is_not_reclaimed(self):
+        """A PR flipped to merged on GitHub while pm's two-step merge
+        propagation is still resolving conflicts in its live `merge-` window
+        (pr-6bf587b) must NOT have that window torn down by the sweep."""
+        from pm_core.tui import sync as sync_mod
+
+        pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = self._make_app([pr])
+        app._merge_propagation_phase = {"pr-abc"}
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "merge-pr-abc"}]), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources") as mock_cleanup:
+            sync_mod._reclaim_terminal_pr_windows(app)
+
+        mock_cleanup.assert_not_called()
+
+
+class TestDoNormalSyncReclaimsTerminalWindows:
+    """Regression: a PR marked merged via `pm pr edit` (so app._data already
+    holds the merged status before the sync snapshot, masking any transition)
+    must still have its windows reclaimed on the next sync."""
+
+    def test_masked_merge_transition_still_reclaims_windows(self):
+        from pm_core.tui import sync as sync_mod
+        from pm_core import pr_sync
+
+        # The PR is ALREADY merged in app._data (loaded from disk by a prior
+        # background_sync reload) — no merged->X transition for this sync to
+        # observe. Pre-fix this masks cleanup; the windows orphan.
+        merged_pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = types.SimpleNamespace(
+            _root="/root",
+            _data={"project": {"name": "p", "repo": "r"},
+                   "prs": [merged_pr]},
+            _session_name="pm-test",
+            _qa_visible=False,
+            _plans_visible=False,
+            query_one=MagicMock(return_value=MagicMock()),
+            _update_display=MagicMock(),
+            _update_status_bar=MagicMock(),
+            log_message=MagicMock(),
+            set_timer=MagicMock(),
+        )
+
+        sync_result = pr_sync.SyncResult(synced=True, updated_count=0,
+                                         merged_prs=[])
+
+        async def fake_executor(_none, fn):
+            return fn()
+
+        loop = MagicMock()
+        loop.run_in_executor = fake_executor
+
+        with patch.object(pr_sync, "sync_prs", return_value=sync_result), \
+             patch.object(store, "load", return_value=app._data), \
+             patch("asyncio.get_event_loop", return_value=loop), \
+             patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "pr-abc"},
+                                 {"name": "qa-pr-abc-s1"}]), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value={"windows": ["pr-abc", "qa-pr-abc-s1"],
+                                 "containers": [], "registry_windows": [],
+                                 "sockets": [], "runtime_state": True}
+                   ) as mock_cleanup:
+            asyncio.run(sync_mod.do_normal_sync(app))
+
+        mock_cleanup.assert_called_once_with("pm-test", merged_pr)
+
+
+class TestStartupGithubSyncReclaimsTerminalWindows:
+    """Regression: the headline case is a content-merge with diverged SHAs
+    marked merged via `pm pr edit` — invisible to GitHub, so the startup
+    sync reports no updates. The orphaned windows must still be reclaimed on
+    that reload, not deferred to the next background sync."""
+
+    def test_reclaims_windows_when_github_reports_no_updates(self):
+        from pm_core.tui import sync as sync_mod
+        from pm_core import pr_sync
+
+        merged_pr = {"id": "pr-abc", "status": "merged", "branch": "feat/x"}
+        app = types.SimpleNamespace(
+            _root="/root",
+            _data={"project": {"name": "p", "repo": "r", "backend": "github"},
+                   "prs": [merged_pr]},
+            _session_name="pm-test",
+            _update_display=MagicMock(),
+            log_message=MagicMock(),
+            set_timer=MagicMock(),
+            _clear_log_message=MagicMock(),
+        )
+
+        # GitHub reports nothing new (updated_count == 0): the merge-detection
+        # branch never runs, so reclaim relies on the unconditional sweep.
+        sync_result = pr_sync.SyncResult(synced=True, updated_count=0,
+                                         merged_prs=[])
+
+        async def fake_executor(_none, fn):
+            return fn()
+
+        loop = MagicMock()
+        loop.run_in_executor = fake_executor
+
+        with patch.object(pr_sync, "sync_from_github", return_value=sync_result), \
+             patch("asyncio.get_event_loop", return_value=loop), \
+             patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "pr-abc"}]), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value={"windows": ["pr-abc"], "containers": [],
+                                 "registry_windows": [], "sockets": [],
+                                 "runtime_state": True}) as mock_cleanup:
+            asyncio.run(sync_mod.startup_github_sync(app))
+
+        mock_cleanup.assert_called_once_with("pm-test", merged_pr)
+
+
 class TestLoadStateParseError:
     """app._load_state catches ProjectYamlParseError and keeps previous state."""
 

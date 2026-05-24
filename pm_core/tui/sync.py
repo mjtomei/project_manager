@@ -49,6 +49,67 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
                       len(summary["containers"]), pr_id)
 
 
+def _reclaim_terminal_pr_windows(app) -> None:
+    """Reclaim live windows for any PR that has reached terminal status.
+
+    Window teardown must be a function of the PR's *status*, not a side
+    effect of the merge command. A PR can reach ``merged``/``closed`` by
+    many paths — ``pm pr edit --status``, a content-merge with diverged
+    SHAs, or an externally-merged/closed PR picked up by sync — none of
+    which run the interactive merge flow's cleanup. The transition-based
+    ``_kill_merged_pr_windows`` only fires on the single sync that *observes*
+    the change, and it misses the transition entirely when the new status
+    was already loaded into ``app._data`` before the snapshot (e.g. an
+    external ``pm pr edit`` between two background syncs) and never handled
+    ``closed`` at all.
+
+    This sweep runs on every reload/sync and tears down windows for any
+    terminal-status PR whose windows still exist, so orphaned windows
+    self-heal on the next refresh. It is idempotent: terminal PRs whose
+    windows are already gone are skipped by a cheap name check before any
+    cleanup work runs.
+    """
+    from pm_core import pr_cleanup
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import pr_window_names
+    from pm_core.cli.session import _TERMINAL_STATUSES
+
+    if not app._session_name:
+        return
+    session = app._session_name
+    if not tmux_mod.session_exists(session):
+        return
+
+    try:
+        live_names = {w.get("name", "") for w in tmux_mod.list_windows(session)}
+    except Exception as e:  # pragma: no cover
+        _log.warning("list_windows failed during terminal sweep: %s", e)
+        return
+
+    # A PR can be marked merged on GitHub mid-flow while pm's two-step merge
+    # propagation is still resolving conflicts in its live `merge-` window
+    # (see pr-6bf587b). Tearing that window down on every sync would abort an
+    # in-progress propagation, so skip PRs the TUI knows are still propagating;
+    # they're reclaimed normally once propagation completes (the phase set is
+    # cleared) or on the next TUI restart (the set is in-memory only).
+    propagating = getattr(app, "_merge_propagation_phase", None) or set()
+
+    for pr in app._data.get("prs") or []:
+        if pr.get("status") not in _TERMINAL_STATUSES:
+            continue
+        if pr["id"] in propagating:
+            continue
+        exact_names, qa_prefix = pr_window_names(pr)
+        has_live = bool(set(exact_names) & live_names) or any(
+            n.startswith(qa_prefix) for n in live_names)
+        if not has_live:
+            continue
+        summary = pr_cleanup.cleanup_pr_resources(session, pr)
+        for win_name in summary.get("windows", []):
+            _log.info("Reclaimed window '%s' for terminal %s (%s)",
+                      win_name, pr["id"], pr.get("status"))
+
+
 async def background_sync(app) -> None:
     """Pull latest state from git or check guide progress."""
     from pm_core.tui.frame_capture import load_capture_config
@@ -181,6 +242,12 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         if newly_merged - set(result.merged_prs):
             _kill_merged_pr_windows(app, newly_merged - set(result.merged_prs))
 
+        # Self-healing sweep: reclaim windows for *any* terminal-status PR
+        # whose windows still exist, regardless of whether this sync observed
+        # the transition. Covers `pm pr edit --status`, content-merges with
+        # diverged SHAs, and closed PRs the transition path never handled.
+        _reclaim_terminal_pr_windows(app)
+
         # Auto-start ready PRs if enabled (after merged PR detection)
         if newly_merged:
             from pm_core.tui.auto_start import check_and_start
@@ -283,6 +350,14 @@ async def startup_github_sync(app) -> None:
             _log.warning("GitHub sync error: %s", result.error)
         else:
             app.log_message("GitHub sync: up to date")
+
+        # Self-healing sweep: reclaim windows for any terminal-status PR even
+        # when GitHub reports no new updates. The headline case (a content-merge
+        # with diverged SHAs marked merged via `pm pr edit`) is invisible to
+        # GitHub, so `updated_count` is 0 and the merge-detection branch above
+        # never runs — but the orphaned windows must still be reclaimed on this
+        # reload, not deferred to the next background sync.
+        _reclaim_terminal_pr_windows(app)
 
         app.set_timer(2.0, app._clear_log_message)
     except Exception as e:
