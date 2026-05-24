@@ -298,6 +298,22 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     )
 
 
+def pr_window_names(pr: dict) -> tuple[tuple[str, ...], str]:
+    """Return the tmux window names for a PR's resources.
+
+    Returns ``(exact_names, scenario_prefix)`` where ``exact_names`` is the
+    ordered tuple of the impl, ``review-``, ``merge-``, and ``qa-`` window
+    names, and ``scenario_prefix`` matches every ``qa-<id>-sN`` scenario
+    window. Both the teardown (``kill_pr_windows``) and the terminal-status
+    sweep (``tui/sync._reclaim_terminal_pr_windows``) derive window names from
+    here so the two can't drift if a new window type is added.
+    """
+    display_id = _pr_display_id(pr)
+    exact = (display_id, f"review-{display_id}", f"merge-{display_id}",
+             f"qa-{display_id}")
+    return exact, f"qa-{display_id}-s"
+
+
 def kill_pr_windows(session: str, pr: dict) -> list[str]:
     """Kill tmux work, review, merge, and QA windows for a PR.
 
@@ -308,15 +324,14 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
 
     killed = []
     display_id = _pr_display_id(pr)
-    qa_prefix = f"qa-{display_id}-s"
+    exact_names, qa_prefix = pr_window_names(pr)
     _log.info("kill_pr_windows: pr=%s session=%s", display_id, session)
 
     # Park *every* grouped session whose active window is one of the
     # windows we're about to kill — covers cross-session kills where the
     # caller isn't on the doomed window but another grouped session is.
     # No recreate follows here, so parked clients stay on home.
-    for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}",
-                     f"qa-{display_id}"):
+    for win_name in exact_names:
         win = tmux_mod.find_window_by_name(session, win_name)
         if win:
             home_window.park_if_on(session, win["id"])

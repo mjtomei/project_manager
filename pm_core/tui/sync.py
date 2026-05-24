@@ -71,7 +71,7 @@ def _reclaim_terminal_pr_windows(app) -> None:
     """
     from pm_core import pr_cleanup
     from pm_core import tmux as tmux_mod
-    from pm_core.cli.helpers import _pr_display_id
+    from pm_core.cli.helpers import pr_window_names
     from pm_core.cli.session import _TERMINAL_STATUSES
 
     if not app._session_name:
@@ -99,11 +99,8 @@ def _reclaim_terminal_pr_windows(app) -> None:
             continue
         if pr["id"] in propagating:
             continue
-        display_id = _pr_display_id(pr)
-        qa_prefix = f"qa-{display_id}-s"
-        candidates = {display_id, f"review-{display_id}",
-                      f"merge-{display_id}", f"qa-{display_id}"}
-        has_live = bool(candidates & live_names) or any(
+        exact_names, qa_prefix = pr_window_names(pr)
+        has_live = bool(set(exact_names) & live_names) or any(
             n.startswith(qa_prefix) for n in live_names)
         if not has_live:
             continue
