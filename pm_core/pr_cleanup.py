@@ -4,16 +4,18 @@ from pm_core import container as container_mod
 from pm_core import pane_registry, push_proxy
 from pm_core import runtime_state
 from pm_core import tmux as tmux_mod
-from pm_core.cli.helpers import _pr_display_id, kill_pr_windows
+from pm_core.cli.helpers import kill_pr_windows, pr_window_names
 from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.pr_cleanup")
 
 
-def _candidate_window_names(display_id: str, session: str) -> list[str]:
-    base = [display_id, f"review-{display_id}", f"merge-{display_id}",
-            f"qa-{display_id}"]
-    qa_prefix = f"qa-{display_id}-s"
+def _candidate_window_names(pr: dict, session: str) -> list[str]:
+    # Derive the exact window names + scenario prefix from the shared helper
+    # so this registry-unregister path can't drift from kill_pr_windows / the
+    # terminal-status sweep when a new window type is added.
+    exact_names, qa_prefix = pr_window_names(pr)
+    base = list(exact_names)
     try:
         for w in tmux_mod.list_windows(session):
             name = w.get("name", "")
@@ -44,7 +46,6 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
          "sockets": [...]}
     """
     pr_id = pr["id"]
-    display_id = _pr_display_id(pr)
     summary = {"windows": [], "containers": [], "registry_windows": [],
                "sockets": [], "runtime_state": False}
 
@@ -73,7 +74,7 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
 
     if session:
         try:
-            window_names = _candidate_window_names(display_id, session)
+            window_names = _candidate_window_names(pr, session)
             summary["registry_windows"] = pane_registry.unregister_windows(
                 session, window_names)
         except Exception as e:  # pragma: no cover
