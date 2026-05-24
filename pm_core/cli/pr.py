@@ -1830,7 +1830,14 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         workdir = pr_entry.get("workdir")
         if workdir and not Path(workdir).exists():
             workdir = _ensure_workdir(data, pr_entry, root)
-        if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
+        # An out-of-process fake-github (R9, regression runner) serves `gh` via
+        # run_gh's session gate even when the real `gh` binary is absent — treat
+        # it as usable so `pm pr merge` is drivable against the fake, matching
+        # `pm pr sync-github` / `pm pr close` (neither of which has a which(gh)
+        # guard). Real (no-fake) behavior is unchanged.
+        from pm_core.paths import fake_github_active
+        gh_usable = bool(shutil.which("gh")) or fake_github_active()
+        if gh_pr_number and workdir and Path(workdir).exists() and gh_usable:
             gh_merged = False
 
             if propagation_only:

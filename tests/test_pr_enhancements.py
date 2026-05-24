@@ -767,6 +767,35 @@ class TestGitHubMergePull:
             assert cwd == repo_dir, f"git op cwd={cwd} should be repo dir, not workdir"
             assert cwd != workdir
 
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch.object(pr_mod, "_pull_after_merge", return_value=True)
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("pm_core.gh_ops.merge_pr")
+    @mock.patch("pm_core.paths.fake_github_active", return_value=True)
+    @mock.patch("shutil.which", return_value=None)
+    def test_github_merge_uses_fake_when_gh_binary_absent(
+        self, _mock_which, _mock_active, mock_merge_pr, mock_git_ops,
+        mock_pull, mock_finalize, tmp_github_merge_project,
+    ):
+        """R9 parity: with the real gh binary absent but a session fake active,
+        `pm pr merge` still runs the merge against the fake (via run_gh's
+        session gate) instead of falling through to the manual-merge fallback."""
+        mock_merge_pr.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.return_value = MagicMock(
+            returncode=0, stdout="", stderr="")
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0, result.output
+        # The github merge block was entered and used the fake-backed gh_ops,
+        # not the "Merge via GitHub" manual fallback.
+        mock_merge_pr.assert_called_once()
+        mock_finalize.assert_called_once()
+        assert "Merge via GitHub" not in result.output
+
     @mock.patch.object(pr_mod, "trigger_tui_restart")
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
