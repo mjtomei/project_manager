@@ -20043,6 +20043,24 @@ prs:
       PYTHONPATH=/workspace, confirm with `pm which`.'
     created_at: '2026-05-25T01:55:59Z'
     last_edited: '2026-05-25T01:55:59Z'
+  - id: note-8b2f973
+    text: 'QA s9 refiner (verified on real surface, all 3 triples PASS-able): (1)
+      MUST run with PYTHONPATH=/workspace (master at /opt/pm-src lacks i1/i2 fixes;
+      gh_usable count 0 there, 2 in /workspace) — confirm via `pm which`. (2) MUST
+      prepend /usr/bin to PATH so pm uses real git, not the host push-proxy wrapper
+      at ~/.local/bin/git (it hijacks ALL push/fetch/pull to the outer PR workdir
+      and rejects the throwaway sync branch) — needed for triple1 sync-branch push
+      to the local bare origin and triple3 post-merge pull. (3) Throwaway needs a
+      local bare repo as `origin` (git init --bare) with master pushed, github backend
+      (`pm init --backend github --no-import`; the github PR-import still runs but
+      degrades gracefully w/o gh). (4) No real gh in env (good). (5) fake-github session
+      tag is derived from git ROOT path (get_session_tag), NOT tmux — `pm fake-github
+      config set` + `pm pr merge` just need same cwd; no tmux session required. (6)
+      Triple2/3 need a PR with gh_pr_number+workdir; w/o gh you cannot get a real
+      gh_pr_number, so bootstrap those fields as fixture (sanctioned). Exact outputs
+      captured in refined steps.'
+    created_at: '2026-05-25T01:56:13Z'
+    last_edited: '2026-05-25T01:56:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
