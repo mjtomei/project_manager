@@ -27,8 +27,8 @@ def _data_with(pr: dict) -> dict:
 def _locked_update_runs(data: dict):
     """side_effect for store.locked_update that runs the apply fn on *data*.
 
-    ``signoff.act_on_signoff_verdict`` performs its status transition inside
-    ``store.locked_update`` and only returns a routing hop when the apply
+    ``signoff.apply_signoff_hop`` performs its status transition inside
+    ``store.locked_update`` and only returns the bounce hop when the apply
     callback actually flips the status, so tests must execute the callback.
     """
     def _side(root, fn):

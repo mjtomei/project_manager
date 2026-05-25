@@ -6,8 +6,8 @@ from unittest.mock import patch
 from pm_core import signoff
 from pm_core.signoff import (
     SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
-    SIGNOFF_VERDICTS, act_on_signoff_verdict, is_signoff_autonomous,
-    signoff_window_name,
+    SIGNOFF_VERDICTS, decide_signoff_hop, apply_signoff_hop,
+    is_signoff_autonomous, signoff_window_name,
 )
 
 
@@ -36,6 +36,23 @@ class TestConfigFlag:
         assert is_signoff_autonomous(
             {"project": {"sign_off_autonomous": True}}) is True
 
+    def test_per_plan_override_wins(self):
+        # Forward seam for pr-ff9b728: per-plan map overrides project default.
+        data = {"project": {
+            "sign_off_autonomous": False,
+            "plan_sign_off_autonomous": {"bugs": True, "ux": False},
+        }}
+        assert is_signoff_autonomous(data, {"plan": "bugs"}) is True
+        assert is_signoff_autonomous(data, {"plan": "ux"}) is False
+        # plan not in the map -> project-level default
+        assert is_signoff_autonomous(data, {"plan": "other"}) is False
+        # no pr -> project-level default
+        assert is_signoff_autonomous(data) is False
+
+    def test_per_plan_falls_back_to_project(self):
+        data = {"project": {"sign_off_autonomous": True}}
+        assert is_signoff_autonomous(data, {"plan": "bugs"}) is True
+
     def test_autonomous_false(self):
         assert is_signoff_autonomous(
             {"project": {"sign_off_autonomous": False}}) is False
@@ -58,80 +75,86 @@ class TestVerdictVocab:
             assert v in SIGNOFF_VERDICTS
 
 
-class TestActOnVerdict:
+class TestDecideHop:
+    """The DECISION half is pure — never touches the store (no patch needed)."""
+
     def test_merge_autonomous(self):
-        assert act_on_signoff_verdict(
-            Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=True) == "merge"
+        assert decide_signoff_hop(SIGNOFF_MERGE, autonomous=True) == "merge"
 
     def test_merge_gated(self):
-        assert act_on_signoff_verdict(
-            Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=False) == "held"
+        assert decide_signoff_hop(SIGNOFF_MERGE, autonomous=False) == "held"
 
     def test_blocked(self):
-        assert act_on_signoff_verdict(
-            Path("/x"), "pr-001", SIGNOFF_BLOCKED, autonomous=True) == "blocked"
+        assert decide_signoff_hop(SIGNOFF_BLOCKED, autonomous=True) == "blocked"
+
+    def test_bounce_hops(self):
+        assert decide_signoff_hop(SIGNOFF_REQA, autonomous=False) == "qa"
+        assert decide_signoff_hop(SIGNOFF_REVIEW, autonomous=False) == "review"
+        assert decide_signoff_hop(SIGNOFF_IMPL, autonomous=False) == "impl"
 
     def test_unknown_verdict(self):
-        assert act_on_signoff_verdict(
-            Path("/x"), "pr-001", None, autonomous=True) == "unknown"
-        assert act_on_signoff_verdict(
-            Path("/x"), "pr-001", "GARBAGE", autonomous=True) == "unknown"
+        assert decide_signoff_hop(None, autonomous=True) == "unknown"
+        assert decide_signoff_hop("GARBAGE", autonomous=True) == "unknown"
 
-    def test_reqa_transitions_to_qa(self):
+    def test_decision_is_side_effect_free(self):
+        """decide must not call into the store at all."""
+        with patch("pm_core.signoff.store.locked_update") as lu:
+            decide_signoff_hop(SIGNOFF_REQA, autonomous=False)
+            decide_signoff_hop(SIGNOFF_MERGE, autonomous=True)
+        lu.assert_not_called()
+
+
+class TestApplyHop:
+    """The SIDE-EFFECT half — transitions only bounce hops, guarded on sign_off."""
+
+    def test_qa_transition(self):
         data = _data("sign_off")
         with _patch_locked_update(data):
-            hop = act_on_signoff_verdict(
-                Path("/x"), "pr-001", SIGNOFF_REQA, autonomous=False)
-        assert hop == "qa"
+            assert apply_signoff_hop(Path("/x"), "pr-001", "qa") == "qa"
         assert data["prs"][0]["status"] == "qa"
 
-    def test_review_transitions_to_in_review(self):
+    def test_review_transition(self):
         data = _data("sign_off")
         with _patch_locked_update(data):
-            hop = act_on_signoff_verdict(
-                Path("/x"), "pr-001", SIGNOFF_REVIEW, autonomous=False)
-        assert hop == "review"
+            assert apply_signoff_hop(Path("/x"), "pr-001", "review") == "review"
         assert data["prs"][0]["status"] == "in_review"
 
-    def test_impl_transitions_to_in_progress(self):
+    def test_impl_transition(self):
         data = _data("sign_off")
         with _patch_locked_update(data):
-            hop = act_on_signoff_verdict(
-                Path("/x"), "pr-001", SIGNOFF_IMPL, autonomous=False)
-        assert hop == "impl"
+            assert apply_signoff_hop(Path("/x"), "pr-001", "impl") == "impl"
         assert data["prs"][0]["status"] == "in_progress"
+
+    def test_merge_held_blocked_no_state_change(self):
+        """Non-bounce hops never touch the store."""
+        with patch("pm_core.signoff.store.locked_update") as lu:
+            for hop in ("merge", "held", "blocked", "unknown"):
+                assert apply_signoff_hop(Path("/x"), "pr-001", hop) == hop
+        lu.assert_not_called()
 
     def test_guard_pr_not_in_sign_off(self):
         """If the PR already left sign_off (e.g. concurrent sync), no clobber."""
         data = _data("merged")
         with _patch_locked_update(data):
-            hop = act_on_signoff_verdict(
-                Path("/x"), "pr-001", SIGNOFF_REQA, autonomous=False)
+            hop = apply_signoff_hop(Path("/x"), "pr-001", "qa")
         assert hop == "unknown"
         assert data["prs"][0]["status"] == "merged"
 
 
 class TestBugCaptureGate:
     def test_missing_captures_override_merge_to_impl(self):
-        data = _data("sign_off")
-        with _patch_locked_update(data):
-            hop = act_on_signoff_verdict(
-                Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=True,
-                bug_captures_ok=False)
-        assert hop == "impl"
-        assert data["prs"][0]["status"] == "in_progress"
+        # The gate lives in the pure decision: a missing-capture bug PR's MERGE
+        # is downgraded to an impl bounce before any side-effect.
+        assert decide_signoff_hop(
+            SIGNOFF_MERGE, autonomous=True, bug_captures_ok=False) == "impl"
 
     def test_present_captures_allow_merge(self):
-        hop = act_on_signoff_verdict(
-            Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=True,
-            bug_captures_ok=True)
-        assert hop == "merge"
+        assert decide_signoff_hop(
+            SIGNOFF_MERGE, autonomous=True, bug_captures_ok=True) == "merge"
 
     def test_non_bug_pr_not_gated(self):
-        hop = act_on_signoff_verdict(
-            Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=True,
-            bug_captures_ok=None)
-        assert hop == "merge"
+        assert decide_signoff_hop(
+            SIGNOFF_MERGE, autonomous=True, bug_captures_ok=None) == "merge"
 
     def test_capture_status_reads_impl_dirs(self, tmp_path):
         cap = tmp_path / "captures" / "pr-001"

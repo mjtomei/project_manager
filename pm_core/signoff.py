@@ -53,14 +53,28 @@ SIGNOFF_VERDICTS = (
 )
 
 
-def is_signoff_autonomous(data: dict) -> bool:
-    """Whether sign-off auto-merges on a verified PASS.
+def is_signoff_autonomous(data: dict, pr: dict | None = None) -> bool:
+    """Whether sign-off auto-merges on a PASS (vs. holding for a human).
 
-    Reads ``project.sign_off_autonomous`` (default ``False`` — gated, i.e. a
-    verified PASS is held for a human rather than merged).  Mirrors the
-    ``project.skip_qa`` config pattern.
+    Default ``False`` (gated — a PASS is held, not merged).  Resolution order:
+
+    1. **Per-plan override** (the forward seam for the plan watcher,
+       pr-ff9b728): ``project.plan_sign_off_autonomous[<plan>]`` — lets e.g.
+       the ``bugs`` plan run autonomous while ``ux`` stays gated.  Requires
+       *pr* (to know its plan); empty/unset today.
+    2. **Project-level default**: ``project.sign_off_autonomous`` (mirrors the
+       ``project.skip_qa`` config pattern).
+
+    Pass *pr* at every call site so per-plan resolution works the moment
+    pr-ff9b728 populates ``plan_sign_off_autonomous``; until then both PR-aware
+    and PR-less calls fall through to the project-level flag.
     """
     project = (data or {}).get("project") or {}
+    if pr is not None:
+        plan = pr.get("plan")
+        per_plan = project.get("plan_sign_off_autonomous") or {}
+        if plan in per_plan:
+            return bool(per_plan[plan])
     return bool(project.get("sign_off_autonomous"))
 
 
@@ -301,37 +315,38 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         print(f"Sign-off window error: {e}")
 
 
-def act_on_signoff_verdict(root: Path, pr_id: str, verdict: str | None, *,
-                           autonomous: bool,
-                           bug_captures_ok: bool | None = None) -> str:
-    """Execute the routed hop for a sign-off *verdict*.
+# Hops that carry a state side-effect (a sign_off -> X status transition).
+# merge / held / blocked / unknown carry NO state change.
+_BOUNCE_HOP_STATUS = {"qa": "qa", "review": "in_review", "impl": "in_progress"}
 
-    Performs the status transition (guarded on the PR still being in
-    ``sign_off`` so a concurrent sync that already moved it isn't clobbered)
-    and returns a short hop token describing what pm should do next:
 
-    * ``"merge"``   — autonomous + verified PASS; caller performs the merge.
-                      (The router never merges; pm executes it.)
-    * ``"held"``    — gated + verified PASS; PR stays in ``sign_off`` awaiting
-                      a human.
-    * ``"qa"``      — transitioned ``sign_off -> qa``; caller relaunches QA.
-    * ``"review"``  — transitioned ``sign_off -> in_review``; caller relaunches
-                      a review-loop iteration.
-    * ``"impl"``    — transitioned ``sign_off -> in_progress``; caller
-                      relaunches implementation.
-    * ``"blocked"`` — escalate; PR stays in ``sign_off``.
+def decide_signoff_hop(verdict: str | None, *, autonomous: bool,
+                       bug_captures_ok: bool | None = None) -> str:
+    """Pure DECISION half of sign-off routing — maps a verdict to a hop token.
+
+    This function has **no side effects**: it never touches project state. It is
+    safe to call from any context (including a manual / recommendation-only
+    ``pm pr signoff``).  The state mutation lives in :func:`apply_signoff_hop`,
+    which is invoked ONLY from the auto-sequence driver — so a sign-off verdict
+    can cause an actual transition (for ANY hop, not just merge) only under
+    auto-sequence.
+
+    Returns one of:
+
+    * ``"merge"``   — autonomous PASS; the caller performs the merge.
+    * ``"held"``    — gated PASS; the PR stays in ``sign_off`` awaiting a human.
+    * ``"qa"`` / ``"review"`` / ``"impl"`` — a bounce (apply_signoff_hop will
+      transition sign_off -> qa / in_review / in_progress).
+    * ``"blocked"`` — escalate; the PR stays in ``sign_off``.
     * ``"unknown"`` — no recognized verdict (still running / no decision yet).
 
-    Note: ``"merge"`` and ``"held"`` do NOT themselves change status — merge
-    sets ``merged`` via the existing merge path; a held PASS legitimately
-    stays in ``sign_off``.
-
-    ``bug_captures_ok`` is the bug-PR capture gate (``None`` when not a bug
-    PR / not applicable).  When ``False`` (a bug PR is missing its pre-fix or
+    ``bug_captures_ok`` is the bug-PR capture gate (``None`` when not a bug PR /
+    not applicable).  When ``False`` (a bug PR is missing its pre-fix or
     post-fix capture) the fix has not been demonstrated, so a ``SIGNOFF_MERGE``
-    is **overridden** to an impl bounce regardless of what the router emitted —
-    a missing-capture bug PR can never reach merge.  This is the deterministic
-    safety net behind the prompt's instruction to route ``SIGNOFF_IMPL``.
+    is **overridden** to an impl bounce — a missing-capture bug PR can never
+    reach merge.  NOTE: this gate is *presence-only* (it checks the captures
+    exist, not that they were taken against the right code) — a deterministic
+    floor, not a provenance check; never describe it as "verified".
     """
     # Hard gate: a bug PR with a missing pre/post-fix capture must never merge.
     if bug_captures_ok is False and verdict == SIGNOFF_MERGE:
@@ -341,16 +356,33 @@ def act_on_signoff_verdict(root: Path, pr_id: str, verdict: str | None, *,
         return "merge" if autonomous else "held"
     if verdict == SIGNOFF_BLOCKED:
         return "blocked"
+    return {
+        SIGNOFF_REQA: "qa",
+        SIGNOFF_REVIEW: "review",
+        SIGNOFF_IMPL: "impl",
+    }.get(verdict or "", "unknown")
 
-    hop_status = {
-        SIGNOFF_REQA: ("qa", "qa"),
-        SIGNOFF_REVIEW: ("review", "in_review"),
-        SIGNOFF_IMPL: ("impl", "in_progress"),
-    }.get(verdict or "")
-    if hop_status is None:
-        return "unknown"
 
-    hop, to_status = hop_status
+def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
+    """SIDE-EFFECT half of sign-off routing — perform a bounce hop's transition.
+
+    **Auto-sequence only.**  Keeping the mutation here (separate from the pure
+    :func:`decide_signoff_hop`) enforces the invariant that a sign-off verdict
+    only ever changes state under the auto-sequence driver; manual
+    ``pm pr signoff`` decides/recommends but never mutates.
+
+    For a bounce hop (``qa`` / ``review`` / ``impl``) this transitions
+    ``sign_off -> qa / in_review / in_progress`` (guarded on the PR still being
+    in ``sign_off`` so a concurrent sync isn't clobbered), returning the hop, or
+    ``"unknown"`` if the PR already left ``sign_off``.  ``merge`` / ``held`` /
+    ``blocked`` / ``unknown`` carry no state change and are returned unchanged
+    (merge sets ``merged`` via the existing merge path; a held/blocked PR
+    legitimately stays in ``sign_off``).
+    """
+    to_status = _BOUNCE_HOP_STATUS.get(hop)
+    if to_status is None:
+        return hop  # merge / held / blocked / unknown: no state change
+
     transitioned = {"ok": False}
 
     def _apply(data):
@@ -361,7 +393,4 @@ def act_on_signoff_verdict(root: Path, pr_id: str, verdict: str | None, *,
             transitioned["ok"] = True
 
     store.locked_update(root, _apply)
-    if not transitioned["ok"]:
-        # PR was no longer in sign_off (e.g. moved by a concurrent sync).
-        return "unknown"
-    return hop
+    return hop if transitioned["ok"] else "unknown"

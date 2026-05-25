@@ -155,6 +155,30 @@ PRs, not by re-opening merged ones. `pm pr signoff` therefore rejects `merged`
 PRs (entry from `qa`/`sign_off` only). The pre/post-fix capture gate (R8,
 note-0357619) still applies.
 
+### R10 — Routing refinements (orchestrator note-1a982f3)
+1. **Capture gate is presence-only, NOT verification [HOLD].** `bug_fix_capture_status`
+   only checks that `impl/pre-fix/` and `impl/post-fix/` each hold ≥1 file — it does
+   NOT prove provenance (that the pre-fix capture was taken against pre-fix code; same
+   limitation as the closed pr-eb450a0). It is a deterministic *floor* (no captureless
+   bug auto-merges); genuineness is judged by the LLM router and, eventually, the
+   harness-run regression-as-repro (Phase 10, provenance-bound). It must never be
+   labelled "verified" — say "captures present". **The user may DROP this gate
+   entirely; per the orchestrator we HOLD on hardening it.** No code change made for
+   this item beyond ensuring the docstring/prompt do not claim "verified".
+2. **Per-plan autonomy seam.** `is_signoff_autonomous(data, pr=None)` now resolves a
+   per-plan override first — `project.plan_sign_off_autonomous[<plan>]` — then falls
+   back to the project-level `project.sign_off_autonomous`. The per-plan map is unset
+   today; **pr-ff9b728 (plan watcher) will populate it** so e.g. `bugs` runs autonomous
+   while `ux` stays gated. All call sites pass `pr_entry` so per-plan resolution works
+   the moment the map is populated.
+3. **Invariant: verdict → action ONLY under auto-sequence, for ALL hops.** The routing
+   is split into a pure DECISION (`decide_signoff_hop`, no state change, safe anywhere)
+   and a SIDE-EFFECT (`apply_signoff_hop`, the sign_off → qa/in_review/in_progress
+   transition). Only the auto-sequence sign_off branch calls `apply_signoff_hop`;
+   manual `pm pr signoff` decides/recommends but never mutates. This structurally
+   enforces that a sign-off verdict can change state (any hop, not just merge) only
+   under the auto-sequence driver.
+
 ### R6 — Transition wiring (qa-finalize → sign_off; sign_off → next hop)
 Primary autonomous driver = the auto-sequence state machine (`pr_auto_sequence`,
 `pm_core/cli/pr.py:2761`):
