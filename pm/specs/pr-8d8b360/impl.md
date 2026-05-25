@@ -41,9 +41,13 @@ The bug is specific to the **github** backend reusing the vanilla framing.
    - Merge `base_branch` (master) **INTO** the PR branch in the workdir, resolving conflicts there.
    - Push the **PR branch** to origin.
    - Re-run the GitHub merge: `gh pr merge <#> --merge`.
-   - It must NOT instruct merging into master locally or `git push origin master`.
-   - It must NOT instruct the agent to pull `base_branch` into the local repo — pm does
-     that automatically (see Finalize below). The agent works only in the PR-branch workdir.
+   - Fast-forward the **main repo checkout's** `base_branch` to origin (`--ff-only`), in a
+     directory distinct from the PR-branch workdir (see Finalize below for why the agent
+     does this itself rather than leaving it to pm).
+   - It must NOT instruct merging into master locally or `git push origin master` in either
+     directory; the main-repo change is a fast-forward only (no merge commit, no push).
+   - The two directories (PR-branch workdir = agent cwd; main repo checkout = resolved via
+     `_resolve_repo_dir`) must be spelled out explicitly so the agent can't confuse them.
 2. **R2** — Update the github MERGED verdict description and the failure-framing line
    ("The merge of `branch` into `master` failed") to match the new direction (the failure
    is the GitHub merge; success = branch pushed + GitHub merge completed).
@@ -70,11 +74,21 @@ The bug is specific to the **github** backend reusing the vanilla framing.
   - Step 5 (agent runs `gh pr merge`) is **load-bearing**, not idempotent decoration:
     pm will not run the GitHub merge itself on the propagation re-attempt, so if the agent
     skips it the PR stays OPEN on GitHub while pm marks it merged.
-  - The local-repo pull is **pm's job, not the agent's**. The prompt must NOT tell the
-    agent to pull master into the local repo — the agent's cwd is the PR-branch workdir
-    and "the local repo" would misdirect it onto the workdir. The github prompt instead
-    states pm pulls the merged base into the main checkout automatically.
-  - No code change to the re-attempt path is required.
+  - **The propagation re-attempt is fragile.** A concurrent sync that detects the PR merged
+    on GitHub mid-flow (`tui/sync.py` → `_kill_merged_pr_windows`) kills the merge window
+    before the MERGED verdict is scanned, so the propagation re-attempt — the only thing that
+    pulls master into the main repo — never runs and master silently falls behind origin.
+    This is tracked separately as **pr-6bf587b** (pending), which protects the propagation
+    window from sync kills (`_merge_propagation_phase`).
+  - To make the github conflict-resolution flow robust **independent of pr-6bf587b**, the
+    prompt has the agent fast-forward the main repo checkout itself (step 6), inside the
+    resolution window. If the propagation re-attempt does also run, its `--ff-only` is a
+    no-op (idempotent). The two fixes are complementary: pr-8d8b360 makes this flow
+    self-contained; pr-6bf587b protects the other propagation variants/backends.
+  - The agent must distinguish two directories: its cwd (PR-branch workdir) vs. the main
+    repo checkout (`_resolve_repo_dir(find_project_root(), data)`, lazy-imported from
+    `cli.helpers` to avoid a module-level cycle). Only a fast-forward touches the main repo.
+  - No code change to the re-attempt or sync path is required in this PR.
 
 ## Ambiguities
 

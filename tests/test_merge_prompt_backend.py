@@ -37,14 +37,29 @@ def test_github_merge_prompt_merges_master_into_branch_and_reruns_gh():
     assert "gh pr merge 212 --merge" in p
 
 
-def test_github_merge_prompt_leaves_local_repo_pull_to_pm():
-    # pm pulls master into the main repo via --propagation-only; the agent
-    # (in the PR-branch workdir) must not touch the main checkout itself.
+def test_github_merge_prompt_fast_forwards_main_repo_itself():
+    # pm's post-MERGED propagation re-attempt can be killed by a concurrent
+    # sync (pr-6bf587b), so the agent fast-forwards the main repo itself.
     p = prompt_gen.generate_merge_prompt(_data("github"), "pr-test", "not mergeable")
-    assert "Do NOT touch the main repo" in p
-    assert "pm pulls the merged `master` into it automatically" in p
-    # No step instructing the agent to pull master into the local repo.
-    assert "Pull `master` into the local repo" not in p
+    # The two directories are spelled out distinctly.
+    assert "PR-branch workdir" in p
+    assert "Main repo checkout" in p
+    # Fast-forward only — never a local merge commit on master, never a push.
+    assert "merge --ff-only origin/master" in p
+    assert "fetch origin" in p
+    # The fast-forward targets the main repo checkout, not the workdir.
+    assert "main repo checkout" in p.lower()
+
+
+def test_github_merge_prompt_two_directories_are_different(monkeypatch):
+    # The workdir (agent cwd) and the resolved main repo dir must be distinct,
+    # so the agent can't confuse them.
+    from pm_core.cli import helpers
+    monkeypatch.setattr(helpers, "_resolve_repo_dir", lambda root, data: __import__("pathlib").Path("/main/repo"))
+    p = prompt_gen.generate_merge_prompt(_data("github"), "pr-test", "not mergeable")
+    assert "/tmp/wd" in p          # the PR-branch workdir
+    assert "/main/repo" in p       # the main repo checkout
+    assert "git -C /main/repo merge --ff-only origin/master" in p
 
 
 def test_github_merge_prompt_does_not_push_master():
