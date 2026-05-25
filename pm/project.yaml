@@ -3457,11 +3457,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-03T04:13:33.757811+00:00'
-  updated_at: '2026-03-03T04:13:33.757811+00:00'
+  updated_at: '2026-05-25T03:39:35.224282+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-57d8fe2
+    text: 'pr-0b4e1a9 (focus-hijack) landed a focus-safe switch resolver in pm_core/tmux.py:
+      new caller_switch_target(base) returns ONLY the caller''s own grouped session
+      (via $TMUX/$TMUX_PANE) or None. new_window/new_window_get_pane(switch=True)
+      and select_window now route through it instead of current_or_base_session()
+      — when the caller has no identifiable client they skip the switch (leave window
+      detached) rather than grabbing an arbitrary attached grouped session. current_or_base_session
+      is now query-only (docstring warns against focus use). Coordinate: if your fix
+      also touches select-window targeting, build on caller_switch_target rather than
+      re-adding a current_or_base_session switch path.'
+    created_at: '2026-05-25T03:39:35Z'
+    last_edited: '2026-05-25T03:39:35Z'
 - id: pr-4fd59d4
   plan: tui-ux
   title: Separate fresh and looping review onto different prefix keys
