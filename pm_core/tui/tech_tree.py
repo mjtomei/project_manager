@@ -29,6 +29,7 @@ STATUS_ICONS = {
     "in_progress": "◎",
     "in_review": "◉",
     "qa": "●",
+    "sign_off": "◆",
     "merged": "✓",
     "closed": "✗",
     "blocked": "✗",
@@ -51,6 +52,12 @@ VERDICT_STYLES = {
     "ERROR": "bold red",
     "INPUT_REQUIRED": "bold red",
 }
+
+# Sign-off verdict markers/styles live in pm_core.signoff (single source of
+# truth shared with `pm pr list`); re-exported here for the node renderer.
+from pm_core.signoff import (  # noqa: E402
+    SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES, latest_signoff_verdict,
+)
 
 SPINNER_FRAMES = "◐◓◑◒"
 
@@ -81,6 +88,7 @@ STATUS_STYLES = {
     "in_progress": "bold yellow",
     "in_review": "bold cyan",
     "qa": "bold magenta",
+    "sign_off": "bold blue",
     "merged": "bold green",
     "closed": "dim red",
     "blocked": "bold red",
@@ -92,13 +100,14 @@ STATUS_BG = {
     "in_progress": "on #333300",  # subtle yellow
     "in_review": "on #003333",    # subtle cyan
     "qa": "on #330033",           # subtle magenta
+    "sign_off": "on #000033",     # subtle blue
     "merged": "on #003300",       # subtle green
     "closed": "on #220000",       # dim red
     "blocked": "on #330000",      # subtle red
 }
 
 # Status filter cycle order (None = show all)
-STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "merged", "closed"]
+STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"]
 
 # Node dimensions
 NODE_W = 24
@@ -582,6 +591,19 @@ class PRNode(Widget):
                     loop_style = "bold yellow"
                     status_text += " ⏸"
                 elif qa_state == "active":
+                    spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
+                    marker_offset = 2 + len(status_text) + 1
+                    loop_style = "bold cyan"
+                    status_text += f" {spinner}"
+            elif status == "sign_off":
+                # Sign-off is running until the router records a verdict: show
+                # the latest verdict icon if recorded, else animate the spinner.
+                verdict = latest_signoff_verdict(pr)
+                if verdict in SIGNOFF_VERDICT_ICONS:
+                    marker_offset = 2 + len(status_text) + 1
+                    loop_style = SIGNOFF_VERDICT_STYLES.get(verdict, "bold blue")
+                    status_text += f" {SIGNOFF_VERDICT_ICONS[verdict]}"
+                elif pr.get("workdir"):
                     spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold cyan"
@@ -1153,7 +1175,7 @@ class TechTree(Widget):
     def _is_active_pr(self, pr: dict) -> bool:
         """True if *pr*'s node may be animating (spinner / loop / merge marker)."""
         pr_id = pr.get("id")
-        if pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir"):
+        if pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir"):
             return True
         try:
             if self.app._review_loops.get(pr_id):

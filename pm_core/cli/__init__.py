@@ -406,9 +406,9 @@ def status_cmd():
     click.echo(f"\nPRs: {len(prs)} total")
     status_icons = {
         "pending": "⏳", "in_progress": "🔨", "in_review": "👀",
-        "qa": "🧪", "merged": "✅", "closed": "🚫",
+        "qa": "🧪", "sign_off": "✔️", "merged": "✅", "closed": "🚫",
     }
-    for s in ("pending", "in_progress", "in_review", "qa", "merged", "closed"):
+    for s in ("pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"):
         if s in counts:
             click.echo(f"  {status_icons.get(s, '?')} {s}: {counts[s]}")
 

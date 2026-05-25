@@ -22595,11 +22595,43 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T18:50:45.591385+00:00'
+  updated_at: '2026-05-25T19:08:56.981533+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
   notes:
+  - id: note-49ace04
+    text: 'Sign-off impl landed (1b9c11ef). Design decisions for QA/review: (1) sign_off
+      is the universal post-QA router but only entered after a QA PASS+finalize (qa-finalize->sign_off);
+      QA NEEDS_WORK/INPUT_REQUIRED still bounce at the QA level as before. The router
+      can DOWNGRADE a QA PASS via its own verdict (e.g. a scenario silently committed
+      a fix -> SIGNOFF_REVIEW). (2) The Claude pane emits ONE routing verdict (SIGNOFF_MERGE/REQA/REVIEW/IMPL/BLOCKED)
+      + records pm pr notes; pm polls the transcript (like qa-finalize) and executes
+      the hop via signoff.act_on_signoff_verdict. Router never edits/merges. (3) Gated
+      vs autonomous = project.sign_off_autonomous, DEFAULT gated (conservative) ->
+      a verified PASS is HELD, not merged, until a human merges. NOTE: this means
+      autonomous bug-fix loops stop auto-merging unless sign_off_autonomous=true is
+      set. (4) DEFERRED by design: the TUI auto-merge path in qa_loop_ui._on_qa_complete
+      is UNCHANGED (pr-ff9b728 owns redirect/cleanup of old gates); the rich report/dashboard
+      pane is pr-8e693f6 (here the left pane is a plain evidence-summary shell). Primary
+      transition wiring is the auto-sequence CLI path + pm pr signoff command. (5)
+      fake-claude session type "signoff" added so QA/regression can drive it (default
+      verdict SIGNOFF_MERGE).'
+    created_at: '2026-05-25T16:53:58Z'
+    last_edited: '2026-05-25T16:53:58Z'
+  - id: note-4567d12
+    text: 'Follow-ups landed (cd323a8f): (R7) per-step acceptance criteria — prompt
+      now states purpose+criteria for impl/review/qa and routes on the first step
+      that falls short. (R8) bug-PR capture gate — signoff.bug_fix_capture_status
+      reads $CAP/impl/{pre-fix,post-fix}; prompt injects present/MISSING + mandatory
+      route-to-IMPL; act_on_signoff_verdict has a DETERMINISTIC safety net: a bug
+      PR missing either capture has SIGNOFF_MERGE overridden to an impl bounce (can
+      never merge). CORRECTION: re-runnable-on-merged / re-open-merged (earlier note-6f7abcd)
+      was WITHDRAWN by orchestrator and deferred to pr-8015c1d; pm pr signoff still
+      rejects merged PRs (qa/sign_off entry only). HTML-report surfacing of captures
+      = pr-8e693f6 (cross-PR note added there).'
+    created_at: '2026-05-25T17:13:41Z'
+    last_edited: '2026-05-25T17:13:41Z'
   - id: note-0357619
     text: 'ACCEPTANCE / shepherding requirement (was not in the description): the
       sign-off step must be aware of the PURPOSE and ACCEPTANCE MEASURES of EVERY
@@ -22671,6 +22703,21 @@ prs:
       any non-auto-sequence path.'
     created_at: '2026-05-25T17:56:51Z'
     last_edited: '2026-05-25T17:56:51Z'
+  - id: note-d197540
+    text: 'Routing refinements landed (80a23e6b, from note-1a982f3): (2) PER-PLAN
+      AUTONOMY SEAM — is_signoff_autonomous(data, pr=None) now checks project.plan_sign_off_autonomous[<plan>]
+      first, falls back to project.sign_off_autonomous. Map is empty today; pr-ff9b728
+      populates it (bugs autonomous / ux gated). All call sites pass pr_entry. (3)
+      DECISION/SIDE-EFFECT DECOUPLE — act_on_signoff_verdict REMOVED; split into decide_signoff_hop()
+      (pure, no state change, safe anywhere) + apply_signoff_hop() (the sign_off->qa/in_review/in_progress
+      transition, called ONLY from the auto-sequence sign_off branch). Manual pm pr
+      signoff decides/recommends but never mutates → invariant: a verdict mutates
+      state (ALL hops, not just merge) only under auto-sequence. (1) CAPTURE GATE
+      = presence-only floor, NOT verification/provenance; on HOLD per orchestrator
+      (user may drop it) — no hardening done; gate language says "captures present"/"MISSING",
+      never "verified". Merged origin/master (unioned orchestrator notes).'
+    created_at: '2026-05-25T18:03:49Z'
+    last_edited: '2026-05-25T18:03:49Z'
   - id: note-942fa37
     text: 'DECISION (supersedes parts of note-1a982f3):
 
@@ -22735,6 +22782,38 @@ prs:
       All four are part of this PR.'
     created_at: '2026-05-25T18:34:36Z'
     last_edited: '2026-05-25T18:34:36Z'
+  - id: note-8ff101d
+    text: 'Round landed (2cd5f4da) — note-942fa37 removals + note-511d725 additions:
+      (A) AUTONOMY REMOVED: sign-off always gates; decide_signoff_hop(verdict) ->
+      {ready_to_merge,qa,review,impl,blocked,unknown}; SIGNOFF_MERGE always = ready_to_merge
+      recommendation (PR stays sign_off). Deleted is_signoff_autonomous + project.sign_off_autonomous
+      + per-plan seam. Merge decision -> pr-ff9b728. (B) CAPTURE GATE REMOVED: deleted
+      bug_fix_capture_status/_dir_has_content/override/prompt injection; router still
+      reviews repro/verify evidence generally; #226 still renders captures. (C) KEPT
+      decide/apply decouple. (1) ADOPTION: pr["signoff"]={verdict,sha,ts,origin};
+      hidden `pm pr signoff record <id> <V> --origin <o>` (agent self-records, origin
+      threaded); auto-sequence adopts fresh record (sha==HEAD) else records transcript
+      verdict (origin auto-sequence) then acts; only auto-sequence acts (invariant).
+      (2/3/4) DISPLAY: tech-tree sign_off node spins while running / shows verdict
+      icon once recorded; SIGNOFF_VERDICT_ICONS/STYLES single source in signoff.py
+      (re-exported by tech_tree; colors also in qa_status._VERDICT_COLORS); pm pr
+      list shows [sign_off <icon>]. Full suite 2755 pass (1 pre-existing unrelated
+      hook failure).'
+    created_at: '2026-05-25T18:49:10Z'
+    last_edited: '2026-05-25T18:49:10Z'
+  - id: note-450e68e
+    text: 'review-loop i2: fixed sign_off running spinner never animating — three
+      "active PR" gates (tech_tree._is_active_pr, review_loop_ui.ensure_animation_timer
+      + poll-timer stop check) excluded sign_off, so refresh_active_nodes never repainted
+      the node and the poll timer wouldn''t start/stay alive for a sign_off-only active
+      PR (defeated R12 §2). Added sign_off to all three. Also added the sign_off status
+      icon to two display-only status maps that had been missed (graph.render_static_graph,
+      cli __init__ status summary). Reconciled the impl spec: R4 executor section
+      still described the removed act_on_signoff_verdict(autonomous,...) and R6 still
+      echoed sign_off_autonomous/held — updated to the implemented decide_signoff_hop/apply_signoff_hop
+      split + always-gates; fixed signoff-record command name (hyphen).'
+    created_at: '2026-05-25T19:08:56Z'
+    last_edited: '2026-05-25T19:08:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
@@ -22801,6 +22880,17 @@ prs:
       so regenerate = copy the command).'
     created_at: '2026-05-25T16:40:45Z'
     last_edited: '2026-05-25T16:40:45Z'
+  - id: note-22f1fb3
+    text: 'From sign-off (pr-2d5f712, note-0357619 requirement): the HTML report/dashboard
+      (#226) must SURFACE the bug-PR pre-fix AND post-fix captures. Sign-off provides
+      the discovery seam: signoff.bug_fix_capture_status(pr_id) -> (has_pre, has_post),
+      reading $(pm qa captures-path <id>)/impl/pre-fix/ and /impl/post-fix/ (each
+      present = dir holds >=1 file). Sign-off hard-fails/bounces a bug PR to impl
+      when either is missing, so by the time a bug PR is signed off both should exist.
+      The report should render both captures (and flag any missing) alongside the
+      per-scenario captures under scenarios/<n>/.'
+    created_at: '2026-05-25T17:13:39Z'
+    last_edited: '2026-05-25T17:13:39Z'
   - id: note-e1ff391
     text: 'Report requirement (was not in the description): for bug PRs the per-PR
       HTML report must surface the PRE-FIX capture (bug reproduced) and the POST-FIX
@@ -22944,11 +23034,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T18:06:08.382333+00:00'
+  updated_at: '2026-05-25T18:59:05.780861+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-bebf7cb
+    text: 'pr-2d5f712 inserted a sign_off step into `pm pr auto-sequence`. New output
+      strings the bug-fix/improvement watcher prompts (prompt_gen.generate_bug_fix_impl_prompt
+      ~L1323) do NOT yet document: `advanced: sign_off`, `advanced: sign_off_relaunched`,
+      `running: sign_off`, `sign_off: re-qa`, `sign_off: returning to review`, `sign_off:
+      returning to impl`, `paused: sign_off_blocked`. They degrade gracefully today
+      (advanced:/running: read as progress; ready_to_merge still emitted on SIGNOFF_MERGE
+      so auto-merge still fires) but should be documented when the watcher cleanup
+      lands here.'
+    created_at: '2026-05-25T18:59:05Z'
+    last_edited: '2026-05-25T18:59:05Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)

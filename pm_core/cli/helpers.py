@@ -264,6 +264,7 @@ PR_STATUS_ICONS = {
     "in_progress": "🔨",
     "in_review": "👀",
     "qa": "🧪",
+    "sign_off": "✔️",
     "merged": "✅",
     "closed": "🚫",
     "blocked": "🚫",
@@ -278,6 +279,13 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     provider so both render PRs identically.
     """
     icon = PR_STATUS_ICONS.get(p.get("status", "pending"), "?")
+    # For a sign_off PR, append the latest recorded router verdict icon.
+    verdict_str = ""
+    if p.get("status") == "sign_off":
+        from pm_core.signoff import signoff_verdict_icon, latest_signoff_verdict
+        v_icon = signoff_verdict_icon(latest_signoff_verdict(p))
+        if v_icon:
+            verdict_str = f" {v_icon}"
     deps = p.get("depends_on") or []
     dep_str = f" <- [{', '.join(deps)}]" if deps else ""
     machine = p.get("agent_machine")
@@ -294,7 +302,7 @@ def format_pr_line(p: dict, active_pr: str | None = None,
                 ts_str = f" [{ts}]"
     return (
         f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
-        f"[{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}"
+        f"[{p.get('status', '?')}{verdict_str}]{dep_str}{machine_str}{active_str}{ts_str}"
     )
 
 
@@ -443,6 +451,7 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
 
     * ``started_at`` — set once on the first transition to ``in_progress``.
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
+    * ``signed_off_at`` — updated each time the PR enters ``sign_off``.
     * ``merged_at`` — set when the PR is ``merged``.
     """
     now = datetime.now(timezone.utc).isoformat()
@@ -451,6 +460,8 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["started_at"] = now
     elif status == "in_review":
         pr_entry["reviewed_at"] = now
+    elif status == "sign_off":
+        pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
 
