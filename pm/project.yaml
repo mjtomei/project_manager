@@ -22073,7 +22073,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-25T03:30:30.612503+00:00'
+  updated_at: '2026-05-25T03:36:54.209699+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22142,6 +22142,20 @@ prs:
       trigger, bcd9bc11) reviewed and sound.'
     created_at: '2026-05-25T03:30:30Z'
     last_edited: '2026-05-25T03:30:30Z'
+  - id: note-5062585
+    text: 'review-loop 6ccc i2: the remote branch tip (40baa4a3 on origin) was MISSING
+      the Bug1 (registry @id prune, 6fe2a720) and Bug2 (stop_qa/stop_loop_for_pr +
+      broadened has_loop/runtime trigger, bcd9bc11) CODE fixes + their tests — they
+      were committed locally during QA but never pushed; origin only had the resume-fix
+      cherry-pick. Merged + pushed the complete branch (c36450f6) to GitHub so the
+      PR now actually contains the fixes. Reviewed all changes: sweep correctness,
+      shared pr_window_names helper (DRY across kill_pr_windows/sync/pr_cleanup),
+      @id registry prune, merge-propagation guard, loop-stop coordination, resume-fix
+      bottom-of-iteration write. All verified: 187 tests pass; resume test + registry
+      @id test both confirmed failing pre-fix / passing post-fix; pre/post-fix captures
+      show 6 orphaned windows -> 0. PASS.'
+    created_at: '2026-05-25T03:36:54Z'
+    last_edited: '2026-05-25T03:36:54Z'
 - id: pr-f480c1e
   plan: bugs
   title: 'Bug: QA last-scenario verdict lost on TUI restart — resume snapshot not
