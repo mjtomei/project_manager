@@ -22720,3 +22720,30 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8d8b360-bug-merge-conflict-resolution-pushes-37062cb3
+- id: pr-60aa9e3
+  plan: bugs
+  title: 'Bug: pm init gitignore template omits project.yaml.lock, so the transient
+    lock file gets committed'
+  branch: pm/pr-60aa9e3-bug-pm-init-gitignore-template-omits-project-yaml-
+  status: pending
+  depends_on: []
+  description: 'Repro: pm init --backend local --no-import in a fresh git repo, then
+    pm pr add (triggers store.locked_update which creates pm/project.yaml.lock), then
+    pm push && git merge --ff-only pm/sync-* — the commit includes "create mode 100644
+    pm/project.yaml.lock". git ls-files pm/ then shows pm/project.yaml.lock tracked.
+    Root: pm_core/cli/__init__.py:154 seeds pm/.gitignore with only ("notes.txt",
+    ".pm-sessions.json"); project.yaml.lock (the transient flock target written by
+    store.locked_update) is not ignored, so pm push stages and commits it. Fix direction:
+    add "project.yaml.lock" (and likely "*.lock") to the init gitignore template,
+    and have pm push/sync staging exclude it; consider untracking already-committed
+    lock files. Low severity (0-byte lock target) but causes spurious tracked file
+    in every pm-managed repo. Found during QA of pr-ca6981c scenario 4.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T04:08:22.178796+00:00'
+  updated_at: '2026-05-25T04:08:22.178796+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
