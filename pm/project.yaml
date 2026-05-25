@@ -22073,7 +22073,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-25T03:36:54.209699+00:00'
+  updated_at: '2026-05-25T04:12:16.131387+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22156,6 +22156,54 @@ prs:
       show 6 orphaned windows -> 0. PASS.'
     created_at: '2026-05-25T03:36:54Z'
     last_edited: '2026-05-25T03:36:54Z'
+  - id: note-c846870
+    text: 'QA scenario 6 (last-verdict-survives-restart) concretization: the fix (commit
+      8dd2b2f6, 8-line verdict-change _write_resume_file at qa_loop.py:2490) is ONLY
+      user-discriminating via the recorded PR NOTE on completion-recovery. Mechanic:
+      run_qa_sync writes qa_status.json with overall AT loop-exit (line 3382, BEFORE
+      finalize), then runs the finalize pane (_run_qa_finalize_pane, line 3398), then
+      refreshes the snapshot (line 3408) and sets running=False (3410). So the ONLY
+      deterministic window where the snapshot is the sole source AND (pre-fix) stale
+      is DURING the finalize phase. Drive it by configuring fake with _all:{} and
+      OMITTING qa_finalize so finalize is a no-verdict mock that hangs (poll_for_verdict
+      has no timeout). While finalize hangs: state.running stays True so the live
+      poll_qa_state never processes completion (cond is `not running and latest_verdict`),
+      and qa_status.json overall IS set + PR still status==qa. pm tui restart kills
+      the hung daemon; on restart _resume_incomplete_qa (qa_loop_ui.py:352) finds
+      qa_resume.json, PR==qa, qa_status.json overall set -> COMPLETED branch (line
+      437) -> _on_qa_complete -> _record_qa_note (qa_loop_ui.py:632) builds note text
+      from state.scenario_verdicts of build_resume_state(snapshot). Pre-fix the snapshot
+      lacks the LAST scenario verdict -> note shows "<title>: ?"; post-fix it shows
+      the real verdict. qa_status.json itself always carries verdicts (written by
+      the loop) so it does NOT discriminate the fix - the NOTE is the discriminator.
+      Completed branch does NOT re-run scenarios/finalize -> no relaunch, exactly
+      one note, no "Resuming QA after restart" log (that line only fires for the INCOMPLETE
+      re-spawn branch). The pure incomplete re-spawn path cannot test the LAST verdict
+      (needs overall=="" which only holds in the sub-tick gap between loop-exit and
+      line 3382). Host/venv mode is sufficient; container mode/nested_podman is NOT
+      required (resume logic is mode-independent).'
+    created_at: '2026-05-25T03:57:46Z'
+    last_edited: '2026-05-25T03:57:46Z'
+  - id: note-41cb1b5
+    text: 'QA scenario 6 (last-verdict-survives-restart) PASS on real surface (host/venv,
+      test PR pr-5cd8c7f in /scratch). Fix verified: parked resume snapshot scenario_verdicts={1:NEEDS_WORK,2:NEEDS_WORK};
+      restart completed-recovery note = "QA NEEDS_WORK: First check: NEEDS_WORK; Second
+      check: NEEDS_WORK". Airtight pre/post discriminator on the SAME surface: with
+      qa_loop.py:2490 bottom-of-iteration _write_resume_file disabled, parked snapshot
+      = {} and the note renders "First check: ?; Second check: ?" (note text comes
+      ONLY from snapshot-derived state.scenario_verdicts.get(idx,"?") at qa_loop_ui.py:639,
+      NOT qa_status.json which always carries verdicts). Exactly 1 note, qa->in_review
+      once, no new windows, "returning to review" (not "Resuming QA"), 2nd restart
+      no-op. IMPORTANT scenario-instruction staleness (NOT a PR defect): the prompts
+      premise that "_all:{} makes qa_finalize a hanging no-verdict mock" is FALSE
+      against current master — paths.py:298-335 (commit 91161255, pre-existing on
+      master) gives an _all-routed verdict-producing session its default happy-path
+      verdict, so qa_finalize emits FINALIZE_DONE and the run completes live with
+      NO restart window. To force the hang use the documented explicit empty-verdicts
+      entry "qa_finalize":{"verdicts":[]}. Also: zt only moves PR to qa when it is
+      in_review first (qa_loop_ui.py:130); resume requires status==qa (:416).'
+    created_at: '2026-05-25T04:12:16Z'
+    last_edited: '2026-05-25T04:12:16Z'
 - id: pr-f480c1e
   plan: bugs
   title: 'Bug: QA last-scenario verdict lost on TUI restart — resume snapshot not
