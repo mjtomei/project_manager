@@ -884,15 +884,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             local_source = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
             click.echo(f"Cloning locally from {local_source}...")
             git_ops.clone(local_source, tmp_path, branch=base_branch)
-            # Configure push URLs: push to both the local repo (keeps
-            # it up to date, like the container push proxy does) and
-            # the remote (GitHub).  Fetch stays local for speed.
-            # PR branches aren't checked out in the main repo, so
-            # pushing to the local path succeeds without issues.
-            git_ops.run_git("remote", "set-url", "--push",
-                            "origin", local_source, cwd=tmp_path)
-            git_ops.run_git("remote", "set-url", "--add", "--push",
-                            "origin", repo_url, cwd=tmp_path)
+            # fetch from upstream, push to both local + upstream.  Critically
+            # the fetch URL must be upstream, not the local clone source, or
+            # the container push proxy rejects pushes from inside the session.
+            git_ops.configure_dual_remote(tmp_path, local_source, repo_url)
 
             # Cache repo_id now that we have a clone
             _resolve_repo_id(data, tmp_path, root)

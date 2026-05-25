@@ -11,6 +11,7 @@ from pm_core.git_ops import (
     run_git,
     is_git_repo,
     clone,
+    configure_dual_remote,
     checkout_branch,
     pull_rebase,
     commit_and_push,
@@ -108,6 +109,39 @@ class TestClone:
         # Second call should not have --branch
         second_args = mock_rg.call_args_list[1][0]
         assert "--branch" not in second_args
+
+
+# ---------------------------------------------------------------------------
+# configure_dual_remote
+# ---------------------------------------------------------------------------
+
+class TestConfigureDualRemote:
+    @patch("pm_core.git_ops.run_git")
+    def test_sets_fetch_upstream_then_dual_push(self, mock_rg):
+        mock_rg.return_value = MagicMock(returncode=0)
+        configure_dual_remote("/wd", "/local/repo", "https://gh/org/repo.git")
+
+        calls = [c[0] for c in mock_rg.call_args_list]
+        # 1) fetch URL -> upstream (no --push).  A plain `set-url` only touches
+        #    remote.origin.url, not the separate remote.origin.pushurl entries,
+        #    so it's emitted first purely to mirror the helper's documented
+        #    order (base URL, then push fan-out).
+        assert calls[0] == (
+            "remote", "set-url", "origin", "https://gh/org/repo.git")
+        assert "--push" not in calls[0]
+        # 2) push -> local source (replaces), then 3) --add upstream
+        assert calls[1] == (
+            "remote", "set-url", "--push", "origin", "/local/repo")
+        assert calls[2] == (
+            "remote", "set-url", "--add", "--push", "origin",
+            "https://gh/org/repo.git")
+
+    @patch("pm_core.git_ops.run_git")
+    def test_passes_cwd_to_every_call(self, mock_rg):
+        mock_rg.return_value = MagicMock(returncode=0)
+        configure_dual_remote("/wd", "/local/repo", "https://gh/org/repo.git")
+        assert all(c.kwargs.get("cwd") == "/wd"
+                   for c in mock_rg.call_args_list)
 
 
 # ---------------------------------------------------------------------------

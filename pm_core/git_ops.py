@@ -118,6 +118,33 @@ def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
         run_git("clone", repo_url, str(dest))
 
 
+def configure_dual_remote(workdir: str | Path, local_source: str,
+                          upstream_url: str) -> None:
+    """Point a local clone's ``origin`` at the real upstream for fetch and
+    at both the local source and the upstream for push.
+
+    A ``git clone --local`` leaves ``origin`` resolving to the local source
+    directory for *both* fetch and push.  That breaks containerised sessions:
+    the host-side push proxy inspects ``origin``'s fetch URL and rejects
+    local-path origins outright (it dropped the old fetch-into-target
+    fallback because it silently desynced the target's worktree).  Pointing
+    fetch at *upstream_url* also lets pm find PR branches pushed from other
+    machines.
+
+    Push fans out to both ``local_source`` (keeps the base repo's branch ref
+    current — PR branches aren't checked out there, so the push succeeds) and
+    *upstream_url* (GitHub).  Mirrors the setup in
+    :func:`pm_core.qa_loop.create_scenario_workdir` (which uses upstream only)
+    and the inline config that ``pr start`` / ``ensure_workdir`` previously
+    duplicated.
+    """
+    run_git("remote", "set-url", "origin", upstream_url, cwd=workdir)
+    run_git("remote", "set-url", "--push", "origin", local_source,
+            cwd=workdir)
+    run_git("remote", "set-url", "--add", "--push", "origin", upstream_url,
+            cwd=workdir)
+
+
 def checkout_branch(workdir: Path, branch: str, create: bool = False) -> None:
     """Checkout or create a branch.
 
