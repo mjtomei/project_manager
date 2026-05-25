@@ -22753,3 +22753,25 @@ prs:
       not a 30s exit.'
     created_at: '2026-05-25T03:50:54Z'
     last_edited: '2026-05-25T03:50:54Z'
+  - id: note-daa6260
+    text: 'QA scenario 2 (nominal-cwd regression guard) refiner notes: (1) fzf is
+      REQUIRED for the zz/zz-d chord — the no-fzf fallback picker only offers single
+      shortcut keys (s/e/d/t/g) and numbered rows, NO z/zz chords, so review-loop
+      is unreachable without it. fzf is NOT in apt here; download the linux_arm64
+      (aarch64) binary from github releases (junegunn/fzf v0.73.0) to ~/.local/bin.
+      (2) Drive the REAL picker, not _run_picker_command: run the exact bind-key command
+      `pm _popup-picker pm-<tag> <window_name>` in a tmux pane and send-keys z, z,
+      d (each z relaunches fzf with the next chord header). (3) NOMINAL vs FOREIGN
+      cwd: the contrast with scenario 1 is the picker process cwd. For nominal, run
+      the picker from a pane whose cwd IS the project (TEST_DIR or the PR workdir
+      clone — both contain pr_id in pm/project.yaml), so BOTH _resolve_root_from_session(session)
+      and the state_root() fallback resolve the owning project. (4) current_pr is
+      derived from the window_name ARG (regex in _current_window_pr_id: ^(review-|merge-|qa-)?(#N|pr-xxxx)(-sN)?$),
+      NOT cwd — pass window_name=<display_id> (local backend display_id = pr-id, so
+      review window = review-pr-xxxx) so the picker targets the PR even before its
+      review window exists. (5) Observe the switch on the base session (no client
+      attached): tmux display-message -p -t pm-<tag> "#{window_name}"; corroborate
+      with ~/.pm/debug/<tag>.log (PM_SPINNER_TRACE=1) lines: spinner select_window
+      ok=True / spinner exit reason=window_open.'
+    created_at: '2026-05-25T03:50:59Z'
+    last_edited: '2026-05-25T03:50:59Z'
