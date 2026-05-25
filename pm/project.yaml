@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-48cb564
+  active_pr: pr-8d8b360
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13402,7 +13402,7 @@ prs:
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
   branch: pm/pr-48cb564-picker-popup-indicate-per-session-window-selected-
-  status: qa
+  status: merged
   depends_on: []
   description: 'The prefix+P PR action picker (pm _popup-picker, pm_core/cli/session.py:1448)
     lists active PR windows with their status and phase, but does not show which windows
@@ -13459,10 +13459,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/218
   gh_pr_number: 218
   created_at: '2026-05-04T12:02:52.811047+00:00'
-  updated_at: '2026-05-24T23:11:57.220681+00:00'
+  updated_at: '2026-05-25T01:51:34.678184+00:00'
   started_at: '2026-05-24T22:07:05.116285+00:00'
   reviewed_at: '2026-05-24T23:11:57.220681+00:00'
-  merged_at: null
+  merged_at: '2026-05-25T01:51:34.678184+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-48cb564-picker-popup-indicate-per-session-wi-e2348b0f
 - id: pr-c3bf868
@@ -19770,7 +19770,7 @@ prs:
   plan: plan-regression
   title: GitHub backend mock for regression tests
   branch: pm/pr-9603d04-github-backend-mock-for-regression-tests
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Provide a mock/fake GitHub backend so regression tests can exercise
     the github-backend code paths (PR create, status sync, comments, merges, post-merge
@@ -20199,7 +20199,7 @@ prs:
   title: 'Bug: decouple TUI in-memory state from project.yaml via a coalescing write
     queue'
   branch: pm/pr-b4b68f3-bug-decouple-tui-in-memory-state-from-project-yaml
-  status: merged
+  status: in_review
   depends_on: []
   description: "## Symptom\n\nTUI key handling exhibits a \"first press lags, next\
     \ few queue, results appear all at once\" pattern when navigating PR selection\
@@ -20259,9 +20259,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/212
   gh_pr_number: 212
   created_at: '2026-05-14T14:37:18.381479+00:00'
-  updated_at: '2026-05-24T21:47:30.303639+00:00'
+  updated_at: '2026-05-25T02:06:00.226269+00:00'
   started_at: '2026-05-21T15:47:09.402440+00:00'
-  reviewed_at: '2026-05-21T16:17:51.414473+00:00'
+  reviewed_at: '2026-05-25T00:54:49.998234+00:00'
   merged_at: '2026-05-24T21:47:30.303610+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b4b68f3-bug-decouple-tui-in-memory-state-fro-d07aaad6
@@ -21661,7 +21661,7 @@ prs:
   plan: plan-3119574
   title: 'Container: pre-install Playwright + Chromium + ffmpeg for browser QA recordings'
   branch: pm/pr-37073ad-container-pre-install-headless-chrome-ffmpeg-puppe
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Add browser video-recording tooling to the QA container image so the
     walker UI PRs can be recorded under Claude-driven QA. Today the base `pm-dev`
@@ -21711,10 +21711,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/213
   gh_pr_number: 213
   created_at: '2026-05-21T17:46:24.839379+00:00'
-  updated_at: '2026-05-24T22:03:24.149264+00:00'
+  updated_at: '2026-05-25T00:52:45.144464+00:00'
   started_at: null
   reviewed_at: '2026-05-24T22:03:24.149232+00:00'
-  merged_at: null
+  merged_at: '2026-05-25T00:52:45.144464+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-37073ad-container-pre-install-headless-chrom-e2348b0f
 - id: pr-1d8b2b7
@@ -22149,3 +22149,91 @@ prs:
       in MEMORY.md, since git push origin will work directly from PR workdirs.'
     created_at: '2026-05-24T23:10:47Z'
     last_edited: '2026-05-24T23:10:47Z'
+- id: pr-8d8b360
+  plan: bugs
+  title: 'Bug: merge-conflict resolution pushes a local master merge on GitHub backend
+    instead of re-running the GitHub merge'
+  branch: pm/pr-8d8b360-bug-merge-conflict-resolution-pushes-a-local-maste
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    On a merge conflict with the **GitHub backend**, pm''s merge-resolution session
+    pushes a *local* merge of the PR branch into `master` straight to origin, bypassing
+    GitHub. GitHub never records the merge (PR stays OPEN), and master gets a merge
+    commit authored/committed by the local user instead of GitHub. Observed with #212
+    (pr-b4b68f3): merge commit 6003301e, committer "Matthew Tomei", subject "Merge
+    pull request: ..." — vs a correct gh merge like #213''s 52551e37 (committer "GitHub").
+
+
+    ## Root cause
+
+    `prompt_gen.generate_merge_prompt` (pm_core/prompt_gen.py:558-623), standard merge-conflict
+    variant. The GitHub/vanilla path (`backend != "local"`) instructs, while cwd is
+    the **PR branch workdir**:
+
+    - Goal: "Resolve the merge conflict so that `master` contains the merged result
+    of both branches."
+
+    - Step 2: "ensure `master` includes changes from `branch`"
+
+    - Step 4: "Push the merged `master` to origin"
+
+
+    Run in the branch workdir, that drives the agent to check out master, merge the
+    branch into it, and `git push origin master` — a local master merge that skips
+    `gh pr merge` entirely. The `local` backend path is correct (commit the merge
+    on master in the workdir, NO push, since origin is a local non-bare repo); the
+    bug is the GitHub/vanilla path reusing that "master includes branch" framing and
+    adding "push master to origin".
+
+
+    ## Expected (GitHub backend)
+
+    The resolution should keep GitHub as the merger:
+
+    1. Merge `base_branch` (master) **into the PR branch** in the workdir, resolving
+    conflicts there.
+
+    2. Push the **PR branch** to origin.
+
+    3. Re-run the GitHub merge (`gh pr merge <#> --merge`) so GitHub performs the
+    master merge and records the PR as merged.
+
+    4. Pull `base_branch` into the local repo.
+
+    Never `git push origin master` directly on the GitHub backend.
+
+
+    ## Scope
+
+    - Fix the GitHub/vanilla branch of `generate_merge_prompt` (direction + steps
+    + MERGED verdict text + the "merge of branch into master failed" framing).
+
+    - Leave the `local` backend path as-is (it is correct).
+
+    - Consider having the post-resolution finalize re-invoke `gh pr merge` rather
+    than relying on the agent to push.
+
+
+    ## Acceptance
+
+    - GitHub-backend merge-resolution prompt instructs merge master→branch, push branch,
+    re-run `gh pr merge`, pull master; it does NOT instruct pushing master to origin.
+
+    - After an auto-resolved conflict on the GitHub backend, GitHub shows the PR as
+    Merged (merge commit committer = GitHub), with no local-committer master merge.
+
+    - Local backend behavior unchanged.
+
+    - Tests assert the github-backend prompt mentions pushing the branch + gh pr merge
+    (not pushing master); local-backend prompt unchanged.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T02:12:54.366523+00:00'
+  updated_at: '2026-05-25T02:12:54.366523+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
