@@ -1252,6 +1252,14 @@ def _origin_action_for_cmd(cmd: str) -> tuple[str | None, str | None]:
     and the direct ``pr start|review|merge`` subprocess route, so the
     invoking session can be captured under the same ``(pr_id, action)`` key
     the action implementation later consumes.
+
+    Today only the ``tui:`` actions ``qa`` and ``review-loop`` actually
+    consume the captured session (``qa_loop`` / ``cli.pr._launch_review_window``
+    — the window-following call sites).  The direct-route ``start`` / ``review``
+    / ``merge`` keys have no consumer yet: capturing them is harmless
+    (the field is overwritten on the next invocation and never read, and
+    ``_format_action_status`` ignores a state-less entry) and keeps the seam
+    in place for when those actions grow window-following too.
     """
     if not cmd:
         return None, None
