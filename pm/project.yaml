@@ -12267,11 +12267,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T22:06:47.034939+00:00'
-  updated_at: '2026-05-02T22:06:47.034939+00:00'
+  updated_at: '2026-05-25T23:13:42.589865+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-02f0cc8
+    text: 'Related code-level instance (found during pr-2d5f712 QA): two pm tmux panes
+      pipe their content through `| less -R` and render BLANK where `less` is absent
+      — pm_core/cli/pr.py:1256 (_launch_review_window diff pane) and pm_core/signoff.py:_evidence_pane_cmd
+      (sign-off evidence pane). The sign-off one was fixed in pr-2d5f712 with a `command
+      -v less >/dev/null 2>&1 && less -R || cat` fallback; the review diff pane (pr.py:1256)
+      still has the bare `| less -R`. Beyond installing less in containers, applying
+      the same `command -v less` pager fallback to pr.py:1256 makes the review diff
+      pane robust on any host lacking less (e.g. this QA container, where less has
+      no apt candidate).'
+    created_at: '2026-05-25T23:13:42Z'
+    last_edited: '2026-05-25T23:13:42Z'
 - id: pr-e43e4b0
   plan: bugs
   title: Push-proxy fetch into PR workdir leaves index/worktree desynced from HEAD
@@ -22853,6 +22865,40 @@ prs:
       exit 1 + no write. Suite green (273 tui/tree + 113 signoff/signature).'
     created_at: '2026-05-25T23:13:30Z'
     last_edited: '2026-05-25T23:13:30Z'
+  - id: note-aaac6f0
+    text: 'QA scenario 2 (sign-off) refiner finding: the evidence-pane "(no captures
+      found)" fallback is effectively DEAD for the empty-captures degradation case.
+      _evidence_pane_cmd runs CAP=$(pm qa captures-path <id>) then if [ -d "$CAP"
+      ]; find ...; else echo "(no captures found)". But qa captures-path -> paths.captures_dir()
+      mkdirs and returns the dir when missing, so CAP is always an existing dir and
+      the find branch always runs; an empty captures dir lists only the bare dir path,
+      never "(no captures found)". The "(no qa status)" fallback IS reachable (no
+      qa_status.json -> QS empty). Worker: verify triple-4 graceful degradation via
+      (a) pane does not crash/blank, (b) "(no qa status)" shows, (c) captures section
+      shows no impl/scenarios entries; and consider fixing the captures branch (test
+      for empty find output, or do not auto-create in captures-path) so "(no captures
+      found)" is reachable.'
+    created_at: '2026-05-25T23:01:08Z'
+    last_edited: '2026-05-25T23:01:08Z'
+  - id: note-0a62884
+    text: 'QA scenario 2 (pm pr signoff) PASS after fixing two sign-off evidence-pane
+      defects in signoff._evidence_pane_cmd (both verified on the real tmux surface;
+      test_signoff.py 36/36 green): (1) evidence pane hard-depended on `less` (note-2eead0c)
+      — `| less -R` rendered the whole left pane blank where less is absent (not installable
+      in the QA container); now `| if command -v less >/dev/null 2>&1; then less -R;
+      else cat; fi`. (2) `(no captures found)` fallback was unreachable (note-aaac6f0)
+      — captures-path auto-creates the dir so an empty captures dir printed only the
+      bare dir path; now lists with `-mindepth 1` gated on whether any entry exists,
+      else echoes `(no captures found)` (empty pr-D pane now shows it; populated pr-A
+      pane lists impl/+scenarios/ without the bare-dir noise). All 5 triples verified:
+      auto-select+qa->sign_off transition w/ signed_off_at, 2-pane window (evidence
+      LEFT via registry), switch-to-existing (no dup), --fresh kill+reopen (new @id),
+      pr-D graceful degradation, and non-qa rejection on stderr+exit1 (pending/in_progress/in_review/already-merged)
+      with no status/window change. NOTE for reviewers: pr.py:1256 (_launch_review_window
+      diff pane) has the IDENTICAL `| less -R` dependency — out of scope here, filing/noting
+      separately.'
+    created_at: '2026-05-25T23:13:26Z'
+    last_edited: '2026-05-25T23:13:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression

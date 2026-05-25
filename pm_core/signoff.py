@@ -168,8 +168,9 @@ def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
         f" && echo ''"
         f" && echo '--- Cross-stage evidence (captures) ---'"
         f" && CAP=\"$(pm qa captures-path {shell_quote(pr_id)} 2>/dev/null)\""
-        f" && if [ -n \"$CAP\" ] && [ -d \"$CAP\" ]; then"
-        f"      find \"$CAP\" -maxdepth 3 -print | sort;"
+        f" && if [ -n \"$CAP\" ] && [ -d \"$CAP\" ] &&"
+        f"        [ -n \"$(find \"$CAP\" -mindepth 1 -maxdepth 3 -print -quit)\" ]; then"
+        f"      find \"$CAP\" -mindepth 1 -maxdepth 3 -print | sort;"
         f"    else echo '(no captures found)'; fi"
         f" && echo ''"
         f" && echo '--- QA status (latest qa_status.json) ---'"
@@ -182,7 +183,7 @@ def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
         f" && echo ''"
         f" && echo '--- Full diff ---'"
         f" && git --no-pager diff {diff_ref}...HEAD"
-        f"; }} | less -R"
+        f"; }} | if command -v less >/dev/null 2>&1; then less -R; else cat; fi"
         f"; exec {shell}"
     )
 
