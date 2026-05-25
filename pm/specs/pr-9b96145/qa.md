@@ -33,12 +33,25 @@ project.yaml via `store.locked_update`.
 ## Test harness notes (how to drive without real GitHub)
 
 - The behavior only triggers on a **github**-backend project, and the
-  backfill reads GitHub via `gh pr list`. To exercise this end-to-end
-  without a live GitHub repo, stand in a **fake `gh` binary** on `PATH`
-  that answers `gh auth status` (exit 0) and `gh pr list --json …`
-  (canned JSON: `number, headRefName, state, url, isDraft, title, body`).
-  This is the realistic way a user's environment behaves and keeps the
-  scenarios end-to-end rather than mocking Python internals.
+  backfill reads GitHub via `gh pr list`. As of the merge of pr-9603d04
+  (#208) into master/this branch, the repo now ships an **in-process
+  fake-github facility**: `gh_ops.run_gh` consults
+  `paths.fake_github_active()` and dispatches to a per-session fake
+  *before* `_check_gh()`, so a freshly-spawned `pm` subprocess (picker or
+  CLI) is served scripted `gh pr list` / `gh pr view` results with no real
+  `gh` binary, auth, or network. Seed it from the user surface with
+  `pm fake-github config set '{"git_backed":true,"prs":[{"head":"<branch>",
+  "title":"…","state":"OPEN"}]}'` (per-session; `pm fake-github config
+  show` reveals the auto-assigned PR numbers, which start at 1 in seed
+  order — do NOT hardcode them). This facility replaces the previously
+  documented hand-rolled `gh` shim and is the preferred driver for all
+  scenarios.
+- (Legacy fallback, only if the fake-github facility is unavailable in a
+  given clone) stand in a **fake `gh` binary** first on `PATH` that
+  answers `gh auth status` (exit 0) and `gh pr list --json …` (canned
+  JSON: `number, headRefName, state, url, isDraft, title, body`), plus
+  `gh pr view <n> --json state,isDraft,mergedAt` for the sync path.
+  `fzf` is also absent, so the picker uses its numbered-list fallback.
 - A throwaway project is set up per `tui-manual-test.md`. The project's
   `backend` must be `github`; setting that (and clearing/seeding a PR's
   `gh_pr_number` for the desync fixture) in `project.yaml` is acceptable
@@ -165,10 +178,12 @@ remains valid and parseable; neither actor crashes.
 
 ## Ambiguities (resolved)
 
-- **Driving the GitHub backend in QA** — resolved by using a fake `gh`
-  binary on PATH (end-to-end, environment-realistic) rather than mocking
-  Python internals, since `backfill_gh_numbers_by_branch` shells out via
-  `gh_ops.list_prs`.
+- **Driving the GitHub backend in QA** — resolved by the in-process
+  fake-github facility (`pm fake-github config set`, merged from
+  pr-9603d04), which serves scripted `gh pr list` / `gh pr view` from the
+  user surface with no real `gh`/auth/network. This supersedes the earlier
+  hand-rolled `gh` shim and unblocks the `pm pr sync-github` CLI scenario
+  (formerly INPUT_REQUIRED/deferred). See the updated Test harness notes.
 - **Invoking the picker** — the picker is reached via `prefix+P` in the
   TUI (the user surface). The hidden `_popup-picker` command is the
   underlying entry point; QA drives the user-facing keybinding where
