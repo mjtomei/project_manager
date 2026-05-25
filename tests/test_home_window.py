@@ -200,6 +200,32 @@ class TestRenderHelpers:
         # returned unchanged.
         assert _truncate("⏳ ok", 5) == "⏳ ok"
 
+    def test_truncate_fits_every_status_emoji_from_format_pr_line(self):
+        # Regression for pr-9330dec: the home window truncates lines that
+        # come from format_pr_line, which prepends a 2-cell status glyph
+        # from PR_STATUS_ICONS. Drive the *real* formatter for *every*
+        # status (not just a hardcoded ⏳) and assert the truncated line
+        # never exceeds the pane width at boundary widths. Counting code
+        # points instead of cells would make every one of these overflow
+        # by at least one cell and soft-wrap on a narrow pane. This also
+        # guards against a future status emoji that east_asian_width
+        # classifies as narrow, which the single-literal test above misses.
+        from pm_core.cli.helpers import PR_STATUS_ICONS
+        from pm_core.home_window.pr_list import _display_width
+
+        long_title = "an extremely long pull-request title that overflows"
+        for status, icon in PR_STATUS_ICONS.items():
+            assert _display_width(icon) == 2, (status, icon)
+            line = format_pr_line(
+                {"id": "pr-1234567", "title": long_title, "status": status},
+                with_timestamp=True,
+            )
+            # Widths around the leading "  <icon> " prefix boundary, where
+            # an off-by-one cell miscount would surface as a soft-wrap.
+            for width in (3, 4, 5, 6, 7, 10, 20, 40):
+                out = _truncate(line, width)
+                assert _display_width(out) <= width, (status, width, out)
+
     def test_render_content_overflow_emits_more_footer(self):
         prs = [
             {"id": f"pr-{i}", "title": f"T{i}", "status": "in_progress",
