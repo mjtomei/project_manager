@@ -133,6 +133,21 @@ class TestThreeWayMerge:
         assert pr["status"] == "merged"  # only ours changed it
         assert pr["note"] == "b"         # only theirs changed it
 
+    def test_concurrent_notes_unioned(self):
+        # notes is a nested id-keyed list: a note added on each side must be
+        # unioned, not have one side clobber the whole list.
+        base = {"prs": [{"id": "pr-001",
+                         "notes": [{"id": "n1", "text": "a"}]}]}
+        ours = {"prs": [{"id": "pr-001",
+                         "notes": [{"id": "n1", "text": "a"},
+                                   {"id": "n2", "text": "from disk"}]}]}
+        theirs = {"prs": [{"id": "pr-001",
+                           "notes": [{"id": "n1", "text": "a"},
+                                     {"id": "n3", "text": "from overlay"}]}]}
+        merged = store.three_way_merge(base, ours, theirs)
+        note_ids = {n["id"] for n in merged["prs"][0]["notes"]}
+        assert note_ids == {"n1", "n2", "n3"}
+
 
 # ---------------------------------------------------------------------------
 # _dirty_file_paths regression (fix the off-by-one path mangling)

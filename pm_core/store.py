@@ -358,12 +358,15 @@ def locked_update(
 
 _MISSING = object()
 
-# Lists in project.yaml that are collections of dicts keyed by ``id`` and so
-# should be merged element-wise (by id) rather than as opaque scalars.
-_ID_KEYED_LISTS = ("prs", "plans")
-
 
 def _is_id_list(value) -> bool:
+    """A non-empty list whose every element is a dict carrying an ``id``.
+
+    Detected structurally (rather than by key name) so it covers ``prs`` and
+    ``plans`` as well as nested id-keyed lists such as a PR's ``notes`` — all
+    are merged element-wise by id rather than as opaque scalars, so notes added
+    concurrently on both sides are unioned instead of one side winning whole.
+    """
     return (
         isinstance(value, list)
         and value
