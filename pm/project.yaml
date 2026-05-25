@@ -22567,7 +22567,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T17:09:04.420787+00:00'
+  updated_at: '2026-05-25T17:56:51.246098+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
@@ -22614,6 +22614,35 @@ prs:
       (note-0357619) still stands for bug PRs going through sign-off.'
     created_at: '2026-05-25T17:09:04Z'
     last_edited: '2026-05-25T17:09:04Z'
+  - id: note-1a982f3
+    text: 'Routing refinements from review (please incorporate):
+
+      1) CAPTURE GATE is presence-only, NOT verification. bug_fix_capture_status just
+      checks impl/pre-fix and impl/post-fix each hold >=1 file. File presence does
+      not prove the pre-fix capture was taken against pre-fix code (provenance) —
+      same limitation as the closed pr-eb450a0. It is a deterministic FLOOR (no captureless
+      bug auto-merges), and genuineness is judged by the LLM router + eventually the
+      harness-run regression-as-repro (Phase 10, provenance-bound). Do NOT label it
+      ''verified'' anywhere in the prompt/report — say ''captures present''. [The
+      user may decide to DROP this deterministic gate entirely; hold for that decision
+      before hardening it.]
+
+      2) AUTONOMY is project-level today (is_signoff_autonomous reads project.sign_off_autonomous).
+      The plan watcher (pr-ff9b728) needs PER-PLAN gated/autonomous (e.g. bugs autonomous,
+      ux gated). Either thread the plan through is_signoff_autonomous now or leave
+      a clean seam to generalize it to per-plan when ff9b728 lands; note the gap in
+      the spec.
+
+      3) INVARIANT — verdict -> action ONLY under auto-sequence, for ALL hops (transitions
+      + bounces, not just merge). This holds today (act_on_signoff_verdict is called
+      only from the auto-sequence sign_off branch; manual pm pr signoff never acts).
+      Harden it structurally: DECOUPLE the decision (compute the hop / record the
+      verdict as a recommendation, e.g. a note) from the SIDE-EFFECT (status transition
+      + relaunch). Outside auto-sequence, sign-off must be recommendation-only with
+      NO state change. act_on_signoff_verdict should not be able to mutate state from
+      any non-auto-sequence path.'
+    created_at: '2026-05-25T17:56:51Z'
+    last_edited: '2026-05-25T17:56:51Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
