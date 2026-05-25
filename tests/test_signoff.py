@@ -111,6 +111,48 @@ class TestActOnVerdict:
         assert data["prs"][0]["status"] == "merged"
 
 
+class TestBugCaptureGate:
+    def test_missing_captures_override_merge_to_impl(self):
+        data = _data("sign_off")
+        with _patch_locked_update(data):
+            hop = act_on_signoff_verdict(
+                Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=True,
+                bug_captures_ok=False)
+        assert hop == "impl"
+        assert data["prs"][0]["status"] == "in_progress"
+
+    def test_present_captures_allow_merge(self):
+        hop = act_on_signoff_verdict(
+            Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=True,
+            bug_captures_ok=True)
+        assert hop == "merge"
+
+    def test_non_bug_pr_not_gated(self):
+        hop = act_on_signoff_verdict(
+            Path("/x"), "pr-001", SIGNOFF_MERGE, autonomous=True,
+            bug_captures_ok=None)
+        assert hop == "merge"
+
+    def test_capture_status_reads_impl_dirs(self, tmp_path):
+        cap = tmp_path / "captures" / "pr-001"
+        (cap / "impl" / "pre-fix").mkdir(parents=True)
+        (cap / "impl" / "pre-fix" / "repro.cast").write_text("x")
+        # post-fix dir exists but is empty -> counts as missing
+        (cap / "impl" / "post-fix").mkdir(parents=True)
+        with patch("pm_core.paths.captures_dir", return_value=cap):
+            has_pre, has_post = signoff.bug_fix_capture_status("pr-001")
+        assert has_pre is True
+        assert has_post is False
+
+    def test_capture_status_both_present(self, tmp_path):
+        cap = tmp_path / "captures" / "pr-001"
+        for sub in ("pre-fix", "post-fix"):
+            (cap / "impl" / sub).mkdir(parents=True)
+            (cap / "impl" / sub / "cap.txt").write_text("x")
+        with patch("pm_core.paths.captures_dir", return_value=cap):
+            assert signoff.bug_fix_capture_status("pr-001") == (True, True)
+
+
 class TestSignoffCommand:
     def _invoke(self, tmp_path, pr):
         from click.testing import CliRunner
@@ -150,6 +192,14 @@ class TestSignoffCommand:
         assert data["prs"][0]["status"] == "sign_off"
         mock_launch.assert_called_once()
 
+    def test_merged_rejected(self, tmp_path):
+        pr = {"id": "pr-001", "title": "T", "status": "merged",
+              "branch": "pm/pr-001"}
+        result, mock_launch, data = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert "already merged" in result.output
+        mock_launch.assert_not_called()
+
 
 def _patch_locked_update_fn(data: dict):
     def _side(root, fn):
@@ -175,3 +225,28 @@ class TestPrompt:
         assert "scenarios/" in p
         # audit-trail note instruction
         assert "pm pr note add pr-001" in p
+        # per-step acceptance criteria (R7): each lifecycle step named
+        assert "Per-step acceptance criteria" in p
+        for token in ("Implementation (impl)", "Review", "QA"):
+            assert token in p
+
+    def test_bug_pr_capture_gate_shown_when_missing(self, tmp_path):
+        from pm_core import prompt_gen
+        data = _data("sign_off")
+        data["prs"][0]["plan"] = "bugs"  # mark as bug PR
+        with patch("pm_core.signoff.bug_fix_capture_status",
+                   return_value=(False, False)):
+            p = prompt_gen.generate_signoff_prompt(data, "pr-001")
+        assert "Bug-fix capture gate" in p
+        assert "CAPTURE GATE FAILED" in p
+        assert "**MISSING**" in p
+
+    def test_bug_pr_capture_gate_passes_when_present(self):
+        from pm_core import prompt_gen
+        data = _data("sign_off")
+        data["prs"][0]["plan"] = "bugs"
+        with patch("pm_core.signoff.bug_fix_capture_status",
+                   return_value=(True, True)):
+            p = prompt_gen.generate_signoff_prompt(data, "pr-001")
+        assert "Bug-fix capture gate" in p
+        assert "CAPTURE GATE FAILED" not in p

@@ -118,6 +118,43 @@ existing `project.skip_qa` pattern (read from `data["project"]`). Default **Fals
 — the conservative bias. Reader `signoff.is_signoff_autonomous(data) -> bool`. Used by the
 executor for `SIGNOFF_MERGE`.
 
+### R7 — Per-step acceptance criteria (orchestrator note-0357619)
+Sign-off must know the *purpose + acceptance criteria of EACH lifecycle step*
+(impl / review / qa) and check each individually — not just generic checks. The
+`generate_signoff_prompt` includes a "Per-step acceptance criteria" section that,
+for each step, states its purpose, its acceptance criteria, and the routing
+verdict a shortfall maps to (impl gap → `SIGNOFF_IMPL`; un-re-reviewed code →
+`SIGNOFF_REVIEW`; thin/misframed/unverified QA → `SIGNOFF_REQA`). The reviewer
+reports a per-step verdict and routes on the first step that fell short.
+
+### R8 — Bug-PR capture gate (orchestrator note-0357619)
+For a bug PR (`_is_bug_pr`: `plan == "bugs"` or `type == "bug"`) sign-off must
+verify BOTH a pre-fix capture (`$CAP/impl/pre-fix/`) and a post-fix capture
+(`$CAP/impl/post-fix/`) exist, and fail/bounce if either is missing.
+- `signoff.bug_fix_capture_status(pr_id) -> (has_pre, has_post)` reads the
+  captures dir; a capture counts only when its directory holds ≥1 file.
+- The prompt injects the computed PRE-FIX/POST-FIX present/MISSING status with a
+  mandatory rule: if either is missing → route `SIGNOFF_IMPL`.
+- **Deterministic safety net**: `act_on_signoff_verdict(..., bug_captures_ok)` —
+  when `bug_captures_ok is False`, a `SIGNOFF_MERGE` is overridden to an impl
+  bounce, so a missing-capture bug PR can NEVER reach merge regardless of the
+  router's emitted verdict. The auto-sequence sign_off branch computes
+  `bug_captures_ok` and passes it.
+- **HTML report surfacing (#226 / pr-8e693f6)**: the report/dashboard surface is
+  built in pr-8e693f6; this PR provides the discovery seam
+  (`bug_fix_capture_status` + the standard `impl/pre-fix` `impl/post-fix` layout)
+  and a cross-PR note on pr-8e693f6 requiring it to surface both captures.
+
+### R9 — Re-runnable on merged: DEFERRED (orchestrator note, corrected)
+An earlier orchestrator note (note-6f7abcd) asked for sign-off to be re-runnable
+on already-merged PRs (re-open merged work to roll out process updates). This was
+**corrected/withdrawn** — that capability is deferred to **pr-8015c1d**. For this
+PR, sign-off only covers the normal forward lifecycle (qa → sign_off → merge, or
+a bounce within a not-yet-merged PR). Process updates are handled by creating NEW
+PRs, not by re-opening merged ones. `pm pr signoff` therefore rejects `merged`
+PRs (entry from `qa`/`sign_off` only). The pre/post-fix capture gate (R8,
+note-0357619) still applies.
+
 ### R6 — Transition wiring (qa-finalize → sign_off; sign_off → next hop)
 Primary autonomous driver = the auto-sequence state machine (`pr_auto_sequence`,
 `pm_core/cli/pr.py:2761`):

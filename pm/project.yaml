@@ -22567,11 +22567,30 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T15:23:36.138064+00:00'
+  updated_at: '2026-05-25T16:53:59.055075+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-49ace04
+    text: 'Sign-off impl landed (1b9c11ef). Design decisions for QA/review: (1) sign_off
+      is the universal post-QA router but only entered after a QA PASS+finalize (qa-finalize->sign_off);
+      QA NEEDS_WORK/INPUT_REQUIRED still bounce at the QA level as before. The router
+      can DOWNGRADE a QA PASS via its own verdict (e.g. a scenario silently committed
+      a fix -> SIGNOFF_REVIEW). (2) The Claude pane emits ONE routing verdict (SIGNOFF_MERGE/REQA/REVIEW/IMPL/BLOCKED)
+      + records pm pr notes; pm polls the transcript (like qa-finalize) and executes
+      the hop via signoff.act_on_signoff_verdict. Router never edits/merges. (3) Gated
+      vs autonomous = project.sign_off_autonomous, DEFAULT gated (conservative) ->
+      a verified PASS is HELD, not merged, until a human merges. NOTE: this means
+      autonomous bug-fix loops stop auto-merging unless sign_off_autonomous=true is
+      set. (4) DEFERRED by design: the TUI auto-merge path in qa_loop_ui._on_qa_complete
+      is UNCHANGED (pr-ff9b728 owns redirect/cleanup of old gates); the rich report/dashboard
+      pane is pr-8e693f6 (here the left pane is a plain evidence-summary shell). Primary
+      transition wiring is the auto-sequence CLI path + pm pr signoff command. (5)
+      fake-claude session type "signoff" added so QA/regression can drive it (default
+      verdict SIGNOFF_MERGE).'
+    created_at: '2026-05-25T16:53:58Z'
+    last_edited: '2026-05-25T16:53:58Z'
 - id: pr-8e693f6
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'

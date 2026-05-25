@@ -3041,8 +3041,16 @@ def pr_auto_sequence(pr_id: str):
             return
 
         autonomous = signoff_mod.is_signoff_autonomous(data)
+        # Bug-PR capture gate: a bug fix missing its pre/post-fix capture has
+        # not been demonstrated and must never reach merge.
+        from pm_core.bug_fix_prompts import _is_bug_pr
+        bug_captures_ok = None
+        if _is_bug_pr(pr_entry):
+            has_pre, has_post = signoff_mod.bug_fix_capture_status(pr_id)
+            bug_captures_ok = has_pre and has_post
         hop = signoff_mod.act_on_signoff_verdict(
-            root, pr_id, verdict, autonomous=autonomous)
+            root, pr_id, verdict, autonomous=autonomous,
+            bug_captures_ok=bug_captures_ok)
         if hop == "merge":
             # Autonomous + verified PASS.  Auto-sequence reports
             # ready_to_merge (its documented contract stops before merge);

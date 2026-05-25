@@ -69,6 +69,35 @@ def signoff_window_name(pr_entry: dict) -> str:
     return f"signoff-{_pr_display_id(pr_entry)}"
 
 
+def _dir_has_content(path: Path) -> bool:
+    """True when *path* is a directory containing at least one file (recursive)."""
+    if not path.is_dir():
+        return False
+    return any(p.is_file() for p in path.rglob("*"))
+
+
+def bug_fix_capture_status(pr_id: str,
+                           session_tag: str | None = None) -> tuple[bool, bool]:
+    """Return ``(has_pre_fix, has_post_fix)`` for a bug PR's impl captures.
+
+    Bug-fix implementations write their *primary* evidence to
+    ``$CAP/impl/pre-fix/`` (the reproduction on pre-fix code) and
+    ``$CAP/impl/post-fix/`` (the post-fix verification) — see
+    ``bug_fix_prompts``.  Sign-off requires BOTH to exist for a bug PR; a fix
+    with either missing has not actually been demonstrated.
+
+    Each is considered present only when its directory holds at least one file.
+    """
+    from pm_core.paths import captures_dir
+
+    base = captures_dir(pr_id, session_tag=session_tag)
+    if base is None:
+        return (False, False)
+    impl = base / "impl"
+    return (_dir_has_content(impl / "pre-fix"),
+            _dir_has_content(impl / "post-fix"))
+
+
 def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
                        workdir: str, diff_ref: str) -> str:
     """Build the left ("evidence") pane shell command.
@@ -273,7 +302,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
 
 def act_on_signoff_verdict(root: Path, pr_id: str, verdict: str | None, *,
-                           autonomous: bool) -> str:
+                           autonomous: bool,
+                           bug_captures_ok: bool | None = None) -> str:
     """Execute the routed hop for a sign-off *verdict*.
 
     Performs the status transition (guarded on the PR still being in
@@ -295,7 +325,18 @@ def act_on_signoff_verdict(root: Path, pr_id: str, verdict: str | None, *,
     Note: ``"merge"`` and ``"held"`` do NOT themselves change status — merge
     sets ``merged`` via the existing merge path; a held PASS legitimately
     stays in ``sign_off``.
+
+    ``bug_captures_ok`` is the bug-PR capture gate (``None`` when not a bug
+    PR / not applicable).  When ``False`` (a bug PR is missing its pre-fix or
+    post-fix capture) the fix has not been demonstrated, so a ``SIGNOFF_MERGE``
+    is **overridden** to an impl bounce regardless of what the router emitted —
+    a missing-capture bug PR can never reach merge.  This is the deterministic
+    safety net behind the prompt's instruction to route ``SIGNOFF_IMPL``.
     """
+    # Hard gate: a bug PR with a missing pre/post-fix capture must never merge.
+    if bug_captures_ok is False and verdict == SIGNOFF_MERGE:
+        verdict = SIGNOFF_IMPL
+
     if verdict == SIGNOFF_MERGE:
         return "merge" if autonomous else "held"
     if verdict == SIGNOFF_BLOCKED:

@@ -407,6 +407,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     """
     from pm_core.signoff import (
         SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
+        bug_fix_capture_status,
     )
 
     pr = store.get_pr(data, pr_id)
@@ -445,12 +446,28 @@ def generate_signoff_prompt(data: dict, pr_id: str,
 
     bug_note = ""
     if _is_bug_pr(pr):
+        has_pre, has_post = bug_fix_capture_status(pr_id)
+        pre_state = "present" if has_pre else "**MISSING**"
+        post_state = "present" if has_post else "**MISSING**"
+        gate = ""
+        if not (has_pre and has_post):
+            gate = (
+                "\n> **CAPTURE GATE FAILED** — a bug fix is not demonstrated "
+                "without BOTH captures. You MUST route **" + SIGNOFF_IMPL +
+                "** (note which is missing); pm will reject a merge here "
+                "regardless of any other verdict.\n")
         bug_note = (
-            "\nThis is a **bug-fix PR**: the implementation followed "
-            "reproduce → fix → verify and wrote its *primary* evidence "
-            "(the failing repro and the post-fix verification) to "
-            "`$CAPTURES/impl/`. A fix that lacks a real pre-fix repro and a "
-            "post-fix verification has not actually been demonstrated.\n")
+            "\n## Bug-fix capture gate (REQUIRED)\n"
+            "This is a **bug-fix PR**: the implementation must follow "
+            "reproduce → fix → verify and write its *primary* evidence to "
+            "`$CAP/impl/pre-fix/` (the failing repro on pre-fix code) and "
+            "`$CAP/impl/post-fix/` (the post-fix verification). BOTH must "
+            "exist or the fix has not been demonstrated.\n"
+            f"- Pre-fix capture (`$CAP/impl/pre-fix/`): {pre_state}\n"
+            f"- Post-fix capture (`$CAP/impl/post-fix/`): {post_state}\n"
+            "Inspect the captures yourself to confirm they actually show the "
+            "bug and its absence — do not trust the directory listing alone.\n"
+            + gate)
 
     prompt = f"""You are the **sign-off reviewer** for PR {pr_id}: "{title}"
 
@@ -464,6 +481,29 @@ implementation or QA so it re-passes review and QA.
 {pr_notes_block}{impl_spec_block}{plan_context}{tui_block}
 ## QA scenarios (from the QA run)
 {qa_block}{bug_note}
+## Per-step acceptance criteria — check EACH lifecycle step individually
+
+Do not run only generic checks. The PR passed through impl → review → qa; each
+step has a distinct *purpose* and *acceptance criteria*. Verify each one met its
+criteria, report a per-step verdict, and route on the FIRST step that fell short.
+
+- **Implementation (impl)** — purpose: deliver the PR's required behavior and an
+  implementation spec. Criteria: the diff implements every requirement in the
+  spec/description; an impl spec exists and the code matches it; for a bug PR,
+  the pre-fix + post-fix captures exist and demonstrate the bug and its fix.
+  Shortfall → **{SIGNOFF_IMPL}** (missing/incomplete behavior or missing
+  captures).
+- **Review** — purpose: confirm code quality, correctness, and architectural
+  fit. Criteria: the change was actually reviewed (a review verdict exists), and
+  no unaddressed quality/architecture/correctness issue remains. If code was
+  changed after the last review (e.g. during QA), it has NOT been re-reviewed.
+  Shortfall → **{SIGNOFF_REVIEW}** (must re-pass review AND qa).
+- **QA** — purpose: prove the behavior works against the *real* code path.
+  Criteria: every scenario has an accounted-for verdict; each exercised the real
+  path (not a mock) with captured evidence; obvious edge cases are covered; no
+  PASS is unverified (e.g. verifier-cwd). Shortfall → **{SIGNOFF_REQA}** (harness
+  / misframed / thin-evidence problems are a QA problem, not a code problem).
+
 ## What to do
 
 1. **Read the whole evidence record — every stage, every scenario, every step.**

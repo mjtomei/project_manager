@@ -384,3 +384,25 @@ class TestSignOff:
         assert result.exit_code == 0, result.output
         assert "sign_off: returning to impl" in result.output
         assert pr["status"] == "in_progress"
+
+    def test_bug_pr_missing_captures_blocks_merge(self, runner, tmp_path):
+        """A bug PR missing captures: MERGE verdict is overridden to an impl bounce."""
+        pr = _pr("sign_off", plan="bugs")
+        data = _data_with(pr)
+        data["project"]["sign_off_autonomous"] = True
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_signoff_verdict",
+                   return_value="SIGNOFF_MERGE"), \
+             patch("pm_core.signoff.bug_fix_capture_status",
+                   return_value=(False, True)), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr.pr_start") as mock_start:
+            mock_start.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "sign_off: returning to impl" in result.output
+        assert "ready_to_merge" not in result.output
+        assert pr["status"] == "in_progress"
