@@ -665,6 +665,52 @@ def sessions_on_window(base: str, window_id: str) -> list[str]:
     return result
 
 
+def followers_for_window(base: str, window_id: str,
+                         captured: str | list[str] | None = None) -> list[str]:
+    """Return the sessions to switch onto a freshly (re)created window.
+
+    Prefer the explicitly-*captured* originating session(s) — resolved at
+    PR-actions-pane / picker open time and threaded through the action
+    context — and skip live detection entirely.  Only when no session was
+    captured (CLI invocations, the project-level watcher, multi-client
+    ambiguity) do we fall back to :func:`sessions_on_window`, which queries
+    each grouped session's current window and is subject to the
+    open-vs-execution race this helper exists to avoid.
+    """
+    if captured:
+        items = captured if isinstance(captured, list) else [captured]
+        followers = [s for s in items if s]
+        if followers:
+            _log.info("followers_for_window: using captured=%s "
+                      "(skipping sessions_on_window)", followers)
+            return followers
+    return sessions_on_window(base, window_id)
+
+
+def active_client_session(base: str) -> str | None:
+    """Return the lone attached client's session in the group, else None.
+
+    Used to capture the originating session for in-TUI dispatch (command
+    bar / keybindings).  When zero or multiple clients are attached the
+    originating client is ambiguous from inside the TUI, so we return
+    ``None`` and let callers fall back to live detection.
+    """
+    grouped = {base} | set(list_grouped_sessions(base))
+    r = _run(
+        _tmux_cmd("list-clients", "-F", "#{session_name}"),
+        text=True,
+    )
+    if r.returncode != 0:
+        return None
+    sessions = [line.strip() for line in r.stdout.splitlines()
+                if line.strip() in grouped]
+    if len(sessions) == 1:
+        return sessions[0]
+    _log.info("active_client_session: ambiguous (%d attached) → None",
+              len(sessions))
+    return None
+
+
 def switch_sessions_to_window(sessions: list[str], session: str, window_name: str) -> None:
     """Switch the given sessions to the named window.
 

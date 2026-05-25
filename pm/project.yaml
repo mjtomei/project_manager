@@ -9194,7 +9194,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/159
   gh_pr_number: 159
   created_at: '2026-04-07T12:51:22.561975+00:00'
-  updated_at: '2026-05-04T14:00:14.026192+00:00'
+  updated_at: '2026-05-25T03:11:02.654619+00:00'
   started_at: '2026-04-07T13:06:32.173284+00:00'
   reviewed_at: '2026-05-04T14:00:14.026192+00:00'
   merged_at: null
@@ -9233,6 +9233,20 @@ prs:
       capture mechanism.'
     created_at: '2026-05-03T11:56:47Z'
     last_edited: '2026-05-03T11:56:47Z'
+  - id: note-84ed3c3
+    text: 'Coordination from pr-c41f029 (origin-session capture): that PR added tmux.followers_for_window(base,
+      window_id, captured) which, when a captured originating session is present,
+      returns ONLY that session and SKIPS sessions_on_window entirely (detection is
+      unreliable under the popup-open-vs-execution race — it can return a session
+      that merely drifted onto the old window). The picker path captures a single
+      popup session. So for consistent multi-client co-view switching, do NOT just
+      union captured + sessions_on_window (that re-admits the race-drifter the capture
+      exists to exclude). Instead capture ALL attached co-viewer sessions at popup-open
+      (or have followers_for_window accept a captured LIST — it already does) and
+      pass them through. capture_origin_session currently stores a single session
+      string; extend it to a list for the collab case.'
+    created_at: '2026-05-25T03:11:02Z'
+    last_edited: '2026-05-25T03:11:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1735d44-consolidate-window-refocus-switch-al-d9cdab42
 - id: pr-322f503
   plan: plan-qa
@@ -21905,11 +21919,32 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/220
   gh_pr_number: 220
   created_at: '2026-05-21T15:56:33.458586+00:00'
-  updated_at: '2026-05-25T02:46:34.752207+00:00'
+  updated_at: '2026-05-25T02:59:24.487825+00:00'
   started_at: '2026-05-25T02:46:34.752207+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-259d9ee
+    text: 'Fix implemented (commit on branch): origin session captured at picker-open
+      via runtime_state.capture_origin_session, consumed by tmux.followers_for_window
+      at the QA/review-loop window-follow call sites; sessions_on_window kept as fallback.
+      Notes for QA/review: (1) Depends conceptually on pr-291e891 (action-context
+      struct), which is still PENDING — this PR introduces only the session field
+      via the existing per-(pr_id,action) runtime_state channel (same as suppress_switch),
+      so no hard code dependency. (2) The live race is timing-dependent across grouped
+      tmux sessions and is NOT deterministically reproducible headless; mechanism
+      is covered by tests/test_origin_session_capture.py (24 tests, fail pre-fix)
+      + a deterministic repro under captures impl/. (3) Division of responsibility:
+      for the POPUP path the spinner (session.py _wait_for_tui_command) already switches
+      the captured popup session for review-loop (action!=qa), so QA is the primary
+      beneficiary of the cli-level fix — the QA spinner intentionally does NOT switch
+      (action==qa), leaving it to qa_loop which is where the late-detection race actually
+      bit. (4) review-loop captured value is consumed at top of cli/pr.py _launch_review_window
+      and is typically unused on iter-1 (no existing window) so suppress_switch handling
+      stays owned by the spinner; iter-2+ falls back to detection (reliable once the
+      user is on the review window).'
+    created_at: '2026-05-25T02:59:24Z'
+    last_edited: '2026-05-25T02:59:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
 - id: pr-5db0e85
   plan: plan-3119574
