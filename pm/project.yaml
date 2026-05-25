@@ -22775,3 +22775,20 @@ prs:
       ok=True / spinner exit reason=window_open.'
     created_at: '2026-05-25T03:50:59Z'
     last_edited: '2026-05-25T03:50:59Z'
+  - id: note-f0292f1
+    text: 'Scenario 3 (q/Esc suppress-switch) nuance: for review-loop the popup spinner
+      is the ONLY switcher — review_loop_ui/pr_view deliberately do NOT switch (pr_view.py:629-633
+      comment; pr.py:1222 switch=not review_loop), and consume_suppress_switch has
+      NO review-loop call site (only qa: qa_loop.py:3074, qa_loop_ui.py:89; the spinner
+      consumes at session.py:1521 only when it reaches window_open). So on q/Esc dismiss
+      the spinner exits at session.py:1560-1575 (request_suppress_switch + SystemExit)
+      and the no-switch is STRUCTURAL (switcher is gone), not enforced by a later
+      consume. request_suppress_switch is belt-and-suspenders/dead for review-loop
+      first-start. Therefore drive+observe the user surface (active window via tmux
+      display-message), do NOT assert a consume path. Faithful driver = _run_picker_command("tui:review-loop
+      start <pr>", base) run inside a tmux pane (needs a tty for cbreak q/Esc) with
+      foreign cwd /workspace; send q/Esc via tmux send-keys; spinner log ~/.pm/debug/<tag>.log
+      shows reason=keypress vs reason=window_open. Positive control: a non-dismissed
+      run switches active to review-<display_id>, proving no-switch is meaningful.'
+    created_at: '2026-05-25T03:51:07Z'
+    last_edited: '2026-05-25T03:51:07Z'
