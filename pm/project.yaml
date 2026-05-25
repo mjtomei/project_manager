@@ -21781,7 +21781,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-25T03:28:54.528866+00:00'
+  updated_at: '2026-05-25T04:00:11.247840+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21890,6 +21890,43 @@ prs:
       pre-existing unrelated test_hook_events failure on clean master).'
     created_at: '2026-05-25T03:28:54Z'
     last_edited: '2026-05-25T03:28:54Z'
+  - id: note-74fa8ce
+    text: 'QA s5 (R9 pr-start orphan-under-lock) refiner findings: (1) NO `pm pr show`
+      command — observe the record via `pm pr list` (it renders `#<gh_pr_number> [in_progress]`
+      once the number is recorded, vs `pr-xxx [pending]` before). (2) The R9 `_persist_with_backoff`
+      path only fires when a draft PR was actually created (gh_pr_info set) → must
+      drive the github backend with a SUCCESSFUL branch push + fake `gh pr create`;
+      local/vanilla take the plain locked_update. (3) `_persist_with_backoff` uses
+      timeout=5.0 (not the 2.0 default), so a contending holder must hold the lock
+      >5s past the persist start to force a real backoff retry. (4) CRITICAL: during
+      the clone phase `_resolve_repo_id` (helpers.py) does its OWN `store.locked_update`
+      at the 2.0s default — if a holder is contending the lock from the start, that
+      call times out and pr_start dies BEFORE creating the draft PR (no R9 path).
+      Pre-cache project.repo_id first (run one un-contended `pm pr start` on a throwaway
+      PR) so the contended start touches the lock ONLY at the final persist. (5) The
+      fake `_pr_create` ALWAYS mints a new number (no head-branch dedup), so two genuinely-concurrent
+      `pm pr start <same id>` create TWO fake PRs (one orphan) — that is the documented
+      OUT-OF-SCOPE create-after-reserve follow-up, NOT a lock-contention orphan; do
+      not assert "exactly one PR / no orphan" for concurrent creates. Reshaped triple
+      2 to the contend-from-another-pane variant with honest invariants (valid YAML,
+      no held lock, number recorded).'
+    created_at: '2026-05-25T03:52:53Z'
+    last_edited: '2026-05-25T03:52:53Z'
+  - id: note-3eafb36
+    text: 'QA scenario 5 (R9 orphan-prevention) PASS on real CLI surface + fake-github.
+      Triple1: held project.yaml.lock via external flock for 18s; pm pr start created
+      draft PR #2 then _persist_with_backoff blocked through the hold and recorded
+      gh_pr_number=2 only after release (start exit 0 after 22.2s — without R9 backoff
+      the single 5s persist would StoreLockTimeout->exit1->orphan). Triple2: 4 overlapping
+      2s lock bursts during start; PR #3 recorded in_progress, project.yaml stayed
+      valid YAML with no conflict markers, no lock left held (subsequent pm pr list
+      0.25s). Casts under captures scenarios/5. DEVIATION (not an R9 failure): the
+      scenario THEN expects the fake PR head == pm/<branch>, but gh_ops.create_draft_pr
+      does not pass --head so the fake defaults head=branch-N (fake_github.py:580);
+      linkage confirmed instead via title match + recorded number == fake PR number.
+      Pre-existing fake-stub limitation, out of R9 scope.'
+    created_at: '2026-05-25T04:00:11Z'
+    last_edited: '2026-05-25T04:00:11Z'
 - id: pr-c41f029
   plan: bugs
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
