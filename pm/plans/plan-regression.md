@@ -360,10 +360,12 @@ Let the planner add scenarios beyond the initial plan and let users re-run NEEDS
 
 Manual testing: drive the keypress flow against a real run with at least one NEEDS_WORK and one INPUT_REQUIRED scenario; also exercise an add-scenario that triggers NEW_REGRESSION and verify the regression file lands on the branch before the scenario runs; INPUT_REQUIRED is appropriate for the human-judged "load this plan block" moments.
 
-### PR: Port the existing regression-test corpus to the new QA structure
-`pr-c77561b` (depends on: pr-06a96fa, pr-2680fbf, pr-51586d2)
+### PR: Port the regression-test corpus to the instruction + artifact recipe format under pm/qa
+`pr-c77561b` (no hard deps — the instruction/artifact recipe format already exists)
 
-The existing `pm/qa/regression/*.md` were authored under the pre-Phase-10 model. After the chain lands (binding `pr-06a96fa`, new-regression authoring `pr-2680fbf`, mocks-at-authoring `pr-51586d2`), the regression-test format + conventions are the new canonical structure. This PR migrates the existing corpus to it — frontmatter/setup/drive/capture/assertion shape the binding+concretizer expect, mocks attached with declared `target_surface` — and verifies each still binds/runs and is scheduled by the discovery supervisor (`pr-271cb3a`). It establishes the canonical new-structure template that newly-authored regression tests are written against and **depend on** (e.g. `pr-3ca6b36`, `pr-2c060b2`, `pr-70d02ed`, `pr-a1f267a`), so the corpus stays consistent.
+Today each regression test in `pm/qa/regression/*.md` is **monolithic** — it inlines its own background, "Available Tools", setup, and capture/steps (e.g. `command-dedup.md`). The reusable building blocks already exist but the corpus doesn't use them: `pm/qa/instructions/` (setup recipes, e.g. `tui-manual-test.md`) and `pm/qa/artifacts/` (capture recipes — `cli-recording.md`, `tmux-screen-recording.md`, `web-ui-recording.md`). This PR ports the corpus to that structured format: decompose each test to **reference** shared instruction (setup) + artifact (capture) files, factoring recurring blocks into new `instructions/`/`artifacts/` entries where missing. It establishes the canonical instruction+artifact regression-test template that newly-authored regression tests are written against and **depend on** (`pr-3ca6b36`, `pr-2c060b2`, `pr-70d02ed`, `pr-a1f267a`).
+
+This is a corpus refactor, not a new mechanism (the recipe format shipped earlier), so it has no hard dependency on the Phase 10 binding chain. **Reconciliation with Phase 10:** instruction+artifact recipes are the regression test's *internal* structure; Phase 10's "scenarios bind to a regression test (scenario-level INSTRUCTION+ARTIFACT is the fallback)" is the *scenario layer* above it — they compose (scenarios bind to regression tests; regression tests are built from instruction+artifact recipes).
 
 ### PR: QA library auditor — propose regression-test fills (with attached mocks)
 `pr-f4dc8a2` (pending)
