@@ -395,3 +395,57 @@ def test_resumed_pass_skips_reverification(tmp_path):
     assert "verifying" not in state.latest_output
     assert state.scenario_verdicts[1] == VERDICT_PASS
     assert 1 in state.verified_scenarios
+
+
+# ---------------------------------------------------------------------------
+# Last scenario's verdict survives a restart (pr-3d1fa55 QA follow-up)
+# ---------------------------------------------------------------------------
+
+def test_last_verdict_is_persisted_before_loop_exits(tmp_path):
+    """The resume snapshot must include the *last* scenario's verdict.
+
+    The snapshot was previously written only at the top of each poll
+    iteration, so the verdict recorded in the final iteration — which
+    empties pending/verifying and exits the loop before the next
+    top-of-loop write — never made it to qa_resume.json.  A TUI restart
+    at that moment rebuilt state from the stale snapshot and the verdict
+    was lost (observed as a scenario losing its NEEDS_WORK after a
+    restart).  The loop must persist the snapshot on every verdict change.
+    """
+    from pm_core.qa_loop import _poll_tmux_verdicts
+
+    scenario = QAScenario(index=1, title="Concurrent finalize", focus="t",
+                          window_name="qa-test-s1", pane_id="%1",
+                          transcript_path="/tmp/t.jsonl",
+                          session_id="sid-needs-work-1")
+    state = QALoopState(pr_id="pr-001")
+    state.qa_workdir = str(tmp_path)  # snapshot writes land here
+    state.scenarios = [scenario]
+
+    fake_event = {"event_type": "idle_prompt",
+                  "timestamp": 1e12, "session_id": scenario.session_id}
+    status_path = tmp_path / "status.json"
+
+    with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+         patch("pm_core.qa_loop.time.sleep"), \
+         patch("pm_core.qa_loop.time.monotonic", side_effect=[0] + [1000] * 20), \
+         patch("pm_core.hook_events.read_event", return_value=fake_event), \
+         patch("pm_core.qa_loop.extract_verdict_from_transcript",
+               return_value="NEEDS_WORK"), \
+         patch("pm_core.tmux.pane_exists", return_value=True):
+        _poll_tmux_verdicts(
+            state, {}, {}, "sess", str(tmp_path), status_path, lambda *a: None,
+        )
+
+    assert state.scenario_verdicts[1] == VERDICT_NEEDS_WORK
+
+    # The on-disk snapshot — the only thing a restart sees — must already
+    # carry the final verdict.
+    resume = _load_resume_file(tmp_path)
+    assert resume is not None
+    assert resume["scenario_verdicts"].get("1") == VERDICT_NEEDS_WORK
+
+    # And a state rebuilt from that snapshot (as the TUI does on restart)
+    # preserves the verdict.
+    rebuilt = build_resume_state(resume)
+    assert rebuilt.scenario_verdicts.get(1) == VERDICT_NEEDS_WORK
