@@ -41,6 +41,34 @@ def container_status():
             err=True,
         )
 
+    # Keyring headroom — leaked rootless-podman containers exhaust the
+    # namespaced-root keyring quota, silently breaking container QA.
+    from pm_core.container import (
+        running_container_count, keyring_usage, keyring_pressure,
+    )
+    if enabled and runtime_ok:
+        click.echo(f"Running pm containers: {running_container_count()}")
+        rows = keyring_usage()
+        if rows:
+            worst = max(
+                (r for r in rows.values() if r["max_keys"] > 0),
+                key=lambda r: r["keys"] / r["max_keys"], default=None,
+            )
+            if worst:
+                click.echo(
+                    f"Keyring keys:    {worst['keys']}/{worst['max_keys']} "
+                    f"(bytes {worst['bytes']}/{worst['max_bytes']})"
+                )
+        pressure = keyring_pressure()
+        if pressure:
+            click.echo(
+                f"\nWarning: kernel keyring for uid {pressure['uid']} is "
+                f"{pressure['ratio']*100:.0f}% full "
+                f"({pressure['keys']}/{pressure['max_keys']} keys). "
+                f"Reap leaked containers with 'pm container reap'.",
+                err=True,
+            )
+
 
 @container_group.command("enable")
 def container_enable():
@@ -298,3 +326,28 @@ def container_cleanup(pr_id: str | None):
         removed += 1
 
     click.echo(f"Removed {removed} container(s).")
+
+
+@container_group.command("reap")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Show what would be reaped without removing anything.")
+def container_reap(dry_run: bool):
+    """Reap orphaned pm containers (running AND stopped).
+
+    Removes containers whose PR is merged/closed or whose tmux session is
+    gone, across all PRs.  Unlike 'pm container cleanup' (which removes every
+    pm container), this is orphan-aware and leaves active sessions running.
+    The keys held by leaked *running* containers are what exhaust the
+    rootless-podman keyring and break container QA — pruning only stopped
+    containers does not free them.
+    """
+    from pm_core.container import reap_orphaned_containers
+
+    reaped = reap_orphaned_containers(dry_run=dry_run)
+    if not reaped:
+        click.echo("No orphaned pm containers found.")
+        return
+    verb = "Would reap" if dry_run else "Reaped"
+    for name, reason in reaped:
+        click.echo(f"  {name}  ({reason})")
+    click.echo(f"{verb} {len(reaped)} orphaned container(s).")

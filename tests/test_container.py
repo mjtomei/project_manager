@@ -1252,3 +1252,245 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+
+# ---------------------------------------------------------------------------
+# Orphan reaping + keyring-quota awareness (pr-4265093)
+# ---------------------------------------------------------------------------
+
+from pm_core.container import (  # noqa: E402
+    _parse_container_name,
+    _is_keyring_exhaustion,
+    keyring_usage,
+    keyring_pressure,
+    running_container_count,
+    reap_orphaned_containers,
+)
+
+
+class TestParseContainerName:
+    KNOWN = {"pr-4265093", "pr-1", "pr-abc123"}
+
+    def test_qa_session_tagged(self):
+        p = _parse_container_name("pm-repo-abc-qa-pr-1-loop9-s2", self.KNOWN)
+        assert p is not None
+        assert p.kind == "qa"
+        assert p.pr_id == "pr-1"
+        assert p.session_tag == "repo-abc"
+
+    def test_impl_session_tagged(self):
+        p = _parse_container_name("pm-repo-abc-impl-pr-4265093", self.KNOWN)
+        assert p.kind == "impl"
+        assert p.pr_id == "pr-4265093"
+        assert p.session_tag == "repo-abc"
+
+    def test_review_legacy_no_tag(self):
+        p = _parse_container_name("pm-review-pr-1", self.KNOWN)
+        assert p.kind == "review"
+        assert p.pr_id == "pr-1"
+        assert p.session_tag is None
+
+    def test_unknown_pr_id_yields_none_pr(self):
+        p = _parse_container_name("pm-repo-abc-qa-pr-999-loop1-s0", self.KNOWN)
+        assert p.kind == "qa"
+        assert p.pr_id is None  # not among known ids
+        assert p.session_tag == "repo-abc"
+
+    def test_non_pm_or_unknown_kind(self):
+        assert _parse_container_name("pm-something-else", self.KNOWN) is None
+        assert _parse_container_name("other-impl-pr-1", self.KNOWN) is None
+
+
+class TestKeyringDetection:
+    def test_matches_keyring_signature(self):
+        msg = ("runc: exec failed: unable to start container process: unable "
+               "to join session keyring: unable to create session key: disk "
+               "quota exceeded")
+        assert _is_keyring_exhaustion(msg) is True
+
+    def test_plain_disk_quota_not_keyring(self):
+        assert _is_keyring_exhaustion("write failed: disk quota exceeded") is False
+
+    def test_empty_or_none(self):
+        assert _is_keyring_exhaustion("") is False
+        assert _is_keyring_exhaustion(None) is False
+
+    def test_create_container_raises_keyring_error_on_run(self):
+        """A keyring-exhaustion stderr from podman run surfaces clearly."""
+        from pm_core import container as cmod
+        with patch.object(cmod, "_get_runtime", return_value="podman"), \
+             patch.object(cmod, "container_is_running", return_value=False), \
+             patch.object(cmod, "remove_container"), \
+             patch.object(cmod, "image_exists", return_value=True), \
+             patch.object(cmod, "_resolve_claude_binary", return_value=None), \
+             patch.object(cmod, "_run_runtime") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=125, stdout="",
+                stderr="unable to join session keyring: disk quota exceeded",
+            )
+            with pytest.raises(ContainerError) as ei:
+                cmod.create_container("pm-x", ContainerConfig(runtime="podman"),
+                                      Path("/tmp"))
+            assert "keyring" in str(ei.value).lower()
+            assert "pm container reap" in str(ei.value)
+
+
+class TestKeyringUsage:
+    def test_parses_proc_key_users(self, tmp_path, monkeypatch):
+        # Kernel format: uid: usage nkeys/nikeys qnkeys/maxkeys qnbytes/maxbytes
+        sample = (
+            "    0:    21 19/19 19/1000000 1234/25000000\n"
+            "100000:   200 200/200 200/200 14000/20000\n"
+        )
+        f = tmp_path / "key-users"
+        f.write_text(sample)
+        monkeypatch.setattr("pm_core.container.Path",
+                            lambda p: f if p == "/proc/key-users" else Path(p))
+        rows = keyring_usage()
+        assert rows[100000]["keys"] == 200
+        assert rows[100000]["max_keys"] == 200
+        assert rows[100000]["bytes"] == 14000
+        assert rows[100000]["max_bytes"] == 20000
+
+    def test_unreadable_returns_none(self, monkeypatch):
+        class _P:
+            def read_text(self):
+                raise OSError("nope")
+        monkeypatch.setattr("pm_core.container.Path",
+                            lambda p: _P() if p == "/proc/key-users" else Path(p))
+        assert keyring_usage() is None
+
+    def test_pressure_flags_full_keyring(self, monkeypatch):
+        monkeypatch.setattr(
+            "pm_core.container.keyring_usage",
+            lambda uid=None: {100000: {"keys": 200, "max_keys": 200,
+                                       "bytes": 14000, "max_bytes": 20000}},
+        )
+        p = keyring_pressure(threshold=0.9)
+        assert p is not None and p["uid"] == 100000 and p["ratio"] == 1.0
+
+    def test_pressure_none_when_below(self, monkeypatch):
+        monkeypatch.setattr(
+            "pm_core.container.keyring_usage",
+            lambda uid=None: {100000: {"keys": 10, "max_keys": 200,
+                                       "bytes": 1, "max_bytes": 20000}},
+        )
+        assert keyring_pressure(threshold=0.9) is None
+
+
+class TestRunningContainerCount:
+    @patch("pm_core.container._run_runtime")
+    def test_counts_running(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="a\nb\nc\n")
+        assert running_container_count() == 3
+        # uses `ps` without -a (running only)
+        assert "-a" not in mock_run.call_args[0]
+
+    @patch("pm_core.container._run_runtime")
+    def test_zero_on_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert running_container_count() == 0
+
+
+class TestReapOrphanedContainers:
+    def _setup(self, names, prs, live_sessions):
+        """Return patch context for a reap call."""
+        from pm_core import container as cmod
+
+        def fake_run(*args, **kwargs):
+            return MagicMock(
+                returncode=0,
+                stdout="\n".join(names) + ("\n" if names else ""),
+            )
+
+        data = {"prs": [{"id": pid, "status": st} for pid, st in prs.items()]}
+        patches = [
+            patch.object(cmod, "_run_runtime", side_effect=fake_run),
+            patch.object(cmod, "remove_container"),
+            patch("pm_core.store.find_project_root", return_value=Path("/proj")),
+            patch("pm_core.store.load", return_value=data),
+            patch("pm_core.tmux.session_exists",
+                  side_effect=lambda s: s in live_sessions),
+        ]
+        return patches
+
+    def test_reaps_merged_pr(self):
+        from pm_core import container as cmod
+        patches = self._setup(
+            names=["pm-repo-abc-qa-pr-1-l1-s0"],
+            prs={"pr-1": "merged"},
+            live_sessions={"pm-repo-abc"},
+        )
+        for p in patches:
+            p.start()
+        try:
+            reaped = reap_orphaned_containers()
+        finally:
+            for p in patches:
+                p.stop()
+        assert [n for n, _ in reaped] == ["pm-repo-abc-qa-pr-1-l1-s0"]
+        assert "merged" in reaped[0][1]
+
+    def test_keeps_active_pr_with_live_session(self):
+        patches = self._setup(
+            names=["pm-repo-abc-qa-pr-1-l1-s0"],
+            prs={"pr-1": "qa"},
+            live_sessions={"pm-repo-abc"},
+        )
+        for p in patches:
+            p.start()
+        try:
+            reaped = reap_orphaned_containers()
+        finally:
+            for p in patches:
+                p.stop()
+        assert reaped == []
+
+    def test_reaps_active_pr_when_session_gone(self):
+        patches = self._setup(
+            names=["pm-repo-abc-impl-pr-1"],
+            prs={"pr-1": "in_progress"},
+            live_sessions=set(),  # session gone
+        )
+        for p in patches:
+            p.start()
+        try:
+            reaped = reap_orphaned_containers()
+        finally:
+            for p in patches:
+                p.stop()
+        assert [n for n, _ in reaped] == ["pm-repo-abc-impl-pr-1"]
+        assert "session" in reaped[0][1]
+
+    def test_dry_run_does_not_remove(self):
+        from pm_core import container as cmod
+        patches = self._setup(
+            names=["pm-repo-abc-qa-pr-1-l1-s0"],
+            prs={"pr-1": "closed"},
+            live_sessions=set(),
+        )
+        started = [p.start() for p in patches]
+        try:
+            reaped = reap_orphaned_containers(dry_run=True)
+            # remove_container is the 2nd patch
+            cmod.remove_container.assert_not_called()
+        finally:
+            for p in patches:
+                p.stop()
+        assert len(reaped) == 1
+
+    def test_unknown_pr_with_live_session_kept(self):
+        # pr not in project yaml, session still alive -> conservative keep
+        patches = self._setup(
+            names=["pm-repo-abc-qa-pr-999-l1-s0"],
+            prs={"pr-1": "qa"},
+            live_sessions={"pm-repo-abc"},
+        )
+        for p in patches:
+            p.start()
+        try:
+            reaped = reap_orphaned_containers()
+        finally:
+            for p in patches:
+                p.stop()
+        assert reaped == []

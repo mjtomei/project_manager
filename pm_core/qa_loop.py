@@ -66,6 +66,22 @@ def _get_max_scenarios() -> int:
         return _DEFAULT_MAX_SCENARIOS
 
 
+def _get_max_containers() -> int:
+    """Read qa-max-containers from global settings (0 = unlimited).
+
+    Caps the number of *running* pm containers a QA launch batch will push the
+    host to.  Default 0 keeps today's behaviour (unbounded fan-out, fine on
+    docker); operators on rootless podman can set a positive ceiling to stay
+    clear of the keyring-key quota that leaked containers exhaust.
+    """
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-max-containers", "")
+    try:
+        return max(0, int(val))
+    except ValueError:
+        return 0
+
+
 def _get_verification_max_retries() -> int:
     """Read qa-verify-retries from global settings (default: 3)."""
     from pm_core.paths import get_global_setting_value
@@ -3033,11 +3049,19 @@ def run_qa_sync(
             _cleanup_stale_scenario_windows(session, pr_data)
 
         # Clean up orphaned containers from previous runs whose tmux
-        # windows no longer exist.
+        # windows no longer exist.  cleanup_orphaned_qa_containers handles
+        # this PR's stale scenario windows; reap_orphaned_containers also
+        # frees containers leaked by *other* finished PRs (merged/closed or
+        # whose tmux session is gone) — the keyring keys they hold while
+        # running are what break container QA host-wide.
         if use_containers:
             from pm_core import container as container_mod
             container_mod.cleanup_orphaned_qa_containers(
                 session, state.pr_id, session_tag=state.session_tag)
+            try:
+                container_mod.reap_orphaned_containers()
+            except Exception:
+                _log.debug("reap_orphaned_containers failed", exc_info=True)
 
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.
@@ -3229,6 +3253,32 @@ def run_qa_sync(
     # --- Phase 2: Execution ---
     # Determine concurrency cap (0 = launch all at once)
     concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
+
+    # Global container ceiling: bound how many *running* pm containers a
+    # launch batch pushes the host to, so leaked/concurrent containers can't
+    # exhaust the rootless-podman keyring quota.  Reap first (frees headroom),
+    # then clamp the batch to whatever headroom remains; the rest queue and
+    # launch as running scenarios finish.
+    if use_containers:
+        max_containers = _get_max_containers()
+        if max_containers > 0:
+            from pm_core import container as container_mod
+            try:
+                container_mod.reap_orphaned_containers()
+            except Exception:
+                _log.debug("reap before bound failed", exc_info=True)
+            running = container_mod.running_container_count()
+            headroom = max(0, max_containers - running)
+            if headroom <= 0:
+                _log.warning(
+                    "QA for %s: %d running pm container(s) already at the "
+                    "qa-max-containers ceiling (%d) — launching 1 and queuing "
+                    "the rest to avoid keyring exhaustion",
+                    state.pr_id, running, max_containers)
+                headroom = 1  # always make forward progress on at least one
+            if concurrency_cap <= 0 or headroom < concurrency_cap:
+                concurrency_cap = headroom
+
     if concurrency_cap > 0:
         launch_scenarios = state.scenarios[:concurrency_cap]
         queued_scenarios = state.scenarios[concurrency_cap:]

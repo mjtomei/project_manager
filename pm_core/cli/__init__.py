@@ -259,7 +259,7 @@ def which_cmd():
 _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
-                 "qa-max-scenarios", "qa-verify-retries",
+                 "qa-max-scenarios", "qa-max-containers", "qa-verify-retries",
                  "qa-verdict-reminder-timeout"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
@@ -272,6 +272,7 @@ _SETTING_DEFAULTS = {
     "min-pane-width": "100",
     "mobile-width-threshold": "110",
     "qa-max-scenarios": "(unset)",
+    "qa-max-containers": "(unset)",
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
     "spec-mode": "prompt",
@@ -321,6 +322,10 @@ def set_cmd(setting, value):
                               terminal split, narrow if it should be more eager)
 
       qa-max-scenarios     Max QA scenarios to run (0 = unlimited, default 0)
+
+      qa-max-containers    Max running pm containers a QA launch will reach
+                           (0 = unlimited, default 0; bounds keyring use on
+                           rootless podman)
 
       qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
 
@@ -625,6 +630,7 @@ COMMANDS
   pm container set <key> <val>   Configure container image, memory, cpu
   pm container build             Launch Claude to build project-specific image
   pm container cleanup           Remove stale pm containers
+  pm container reap              Reap orphaned containers (merged/closed PRs, dead sessions)
 
   pm bench models               List models on local inference backend
   pm bench exercises            List available benchmark exercises

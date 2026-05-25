@@ -601,13 +601,22 @@ def session_kill(start_dir):
     # Clean up containers and push proxies belonging to this session
     session_tag = session_name.removeprefix("pm-")
     if session_tag:
-        from pm_core.container import cleanup_session_containers
+        from pm_core.container import (
+            cleanup_session_containers, reap_orphaned_containers,
+        )
         from pm_core.push_proxy import stop_session_proxies
         n_containers = cleanup_session_containers(session_tag)
         n_proxies = stop_session_proxies(session_tag)
-        if n_containers or n_proxies:
-            _log.info("Session kill cleanup: %d container(s), %d proxy(ies)",
-                      n_containers, n_proxies)
+        # Also reap cross-session orphans (other sessions now gone, or PRs
+        # merged/closed) so a kill doesn't leave the keyring filled by other
+        # leaks.  Best-effort — this session's tmux is already torn down.
+        try:
+            n_orphans = len(reap_orphaned_containers())
+        except Exception:
+            n_orphans = 0
+        if n_containers or n_proxies or n_orphans:
+            _log.info("Session kill cleanup: %d container(s), %d proxy(ies), "
+                      "%d orphan(s)", n_containers, n_proxies, n_orphans)
 
     # Clean up shared socket file
     if socket_path:

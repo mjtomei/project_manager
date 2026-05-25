@@ -882,7 +882,13 @@ def create_container(
     setup = "; ".join(setup_parts)
     cmd.extend([config.image, "bash", "-c", setup])
 
-    result = _run_runtime(*cmd, timeout=60)
+    result = _run_runtime(*cmd, timeout=60, check=False)
+    if result.returncode != 0:
+        if _is_keyring_exhaustion(result.stderr):
+            raise _keyring_exhausted_error(name)
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd,
+            output=result.stdout, stderr=result.stderr)
     container_id = result.stdout.strip()
 
     # Wait for the setup script to finish (sentinel file appears).
@@ -893,6 +899,7 @@ def create_container(
     _SETUP_TIMEOUT = 30  # seconds — needs headroom under memory pressure
     _POLL_INTERVAL = 0.2
     _setup_ready = False
+    _last_probe_stderr = ""
     _deadline = time.monotonic() + _SETUP_TIMEOUT
     while time.monotonic() < _deadline:
         check = _run_runtime(
@@ -902,15 +909,23 @@ def create_container(
         if check.returncode == 0:
             _setup_ready = True
             break
+        _last_probe_stderr = check.stderr or ""
+        # A full kernel keyring makes ``podman exec`` fail outright (it can't
+        # join a session keyring) — surface that immediately rather than
+        # waiting out the whole timeout and blaming memory pressure.
+        if _is_keyring_exhaustion(_last_probe_stderr):
+            raise _keyring_exhausted_error(name)
         time.sleep(_POLL_INTERVAL)
     if not _setup_ready:
+        if _is_keyring_exhaustion(_last_probe_stderr):
+            raise _keyring_exhausted_error(name)
         _log.error("Container %s setup did not complete within %ds — "
                    "git push proxy wrapper may not be installed",
                    name, _SETUP_TIMEOUT)
         raise ContainerError(
             f"Container '{name}' setup timed out after {_SETUP_TIMEOUT}s. "
-            f"The system may be under memory pressure (try stopping unused "
-            f"containers with 'pm session cleanup')."
+            f"The system may be under memory pressure (try reaping unused "
+            f"containers with 'pm container reap')."
         )
 
     # Repair ownership of ~/.pm inside the container.  When we bind-mount
@@ -1290,6 +1305,295 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
         _log.info("Cleaned up %d orphaned QA container(s) for %s",
                   count, pr_id)
     return count
+
+
+# ---------------------------------------------------------------------------
+# Orphan reaping (cross-PR, cross-session) + keyring-quota awareness
+# ---------------------------------------------------------------------------
+#
+# Each *running* rootless-podman container holds session keys in the
+# namespaced-root keyring, which has a hard quota (e.g. 200 keys).  Leaked
+# containers from finished PRs keep their keys, and once the quota is hit
+# every new ``podman run``/``podman exec`` fails with "unable to join session
+# keyring: ... disk quota exceeded" — silently breaking ALL container QA.
+# Reaping running-AND-stopped orphans (PR merged/closed or tmux session gone)
+# is the real fix; pruning only stopped containers does not free the keyring.
+
+_TERMINAL_PR_STATES = ("merged", "closed")
+_CONTAINER_KINDS = ("impl", "review", "qa")
+
+
+class _ParsedContainer:
+    """Decomposed pm container name."""
+    __slots__ = ("name", "kind", "pr_id", "session_tag")
+
+    def __init__(self, name: str, kind: str, pr_id: str | None,
+                 session_tag: str | None):
+        self.name = name
+        self.kind = kind
+        self.pr_id = pr_id
+        self.session_tag = session_tag
+
+
+def _parse_container_name(name: str,
+                          known_pr_ids: set[str]) -> _ParsedContainer | None:
+    """Decompose a ``pm-*`` container name into (kind, pr_id, session_tag).
+
+    Names take the shapes (legacy = no session tag):
+        pm[-{tag}]-impl-{pr_id}
+        pm[-{tag}]-review-{pr_id}
+        pm[-{tag}]-qa-{pr_id}-{loop_id}-s{N}
+
+    Both ``pr_id`` (``pr-<hex>``) and ``session_tag`` may contain hyphens, so
+    the ``pr_id`` is recovered by matching the segment after the kind marker
+    against *known_pr_ids* rather than by positional splitting.  Returns None
+    for names that don't match any known kind.  ``pr_id`` is None when the
+    embedded id is not among *known_pr_ids* (unknown / foreign / removed PR).
+    """
+    if not name.startswith(CONTAINER_PREFIX):
+        return None
+    body = name[len(CONTAINER_PREFIX):]
+    for kind in _CONTAINER_KINDS:
+        if body.startswith(f"{kind}-"):
+            tag = ""
+            rest = body[len(kind) + 1:]
+        else:
+            marker = f"-{kind}-"
+            i = body.find(marker)
+            if i == -1:
+                continue
+            tag = body[:i]
+            rest = body[i + len(marker):]
+        pr_id = None
+        for pid in known_pr_ids:
+            if rest == pid or rest.startswith(pid + "-"):
+                pr_id = pid
+                break
+        return _ParsedContainer(name, kind, pr_id, tag or None)
+    return None
+
+
+def _tmux_session_name(session_tag: str) -> str:
+    """tmux session name for a session tag (pm uses the ``pm-`` prefix)."""
+    return f"{CONTAINER_PREFIX.rstrip('-')}-{session_tag}"
+
+
+def reap_orphaned_containers(
+    project_root: "Path | None" = None,
+    *,
+    dry_run: bool = False,
+) -> list[tuple[str, str]]:
+    """Remove leaked pm containers (running AND stopped) across all PRs.
+
+    A container is an orphan when:
+      - its PR is merged or closed, or
+      - its owning tmux session no longer exists.
+
+    Conservative by design (see IR1): a container for an *active* PR whose
+    tmux session is still alive is kept, and when neither signal can be
+    determined the container is left alone.  Best-effort — any runtime or
+    project-load failure yields an empty result rather than raising, so this
+    is safe to call on hot QA paths.
+
+    Returns a list of ``(container_name, reason)`` for every reaped (or, with
+    *dry_run*, reapable) container.
+    """
+    result = _run_runtime(
+        "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0:
+        return []
+    names = [ln.strip() for ln in result.stdout.strip().splitlines() if ln.strip()]
+    if not names:
+        return []
+
+    pr_status: dict[str, str] = {}
+    known_pr_ids: set[str] = set()
+    try:
+        from pm_core.store import find_project_root, load
+        root = project_root or find_project_root()
+        data = load(root, validate=False)
+        for pr in data.get("prs") or []:
+            pid = pr.get("id")
+            if pid:
+                known_pr_ids.add(pid)
+                pr_status[pid] = pr.get("status")
+    except Exception:
+        pass  # no project context — fall back to tmux-liveness only
+
+    from pm_core import tmux as tmux_mod
+    session_alive: dict[str, bool] = {}
+
+    def _session_is_alive(tag: str) -> bool:
+        sess = _tmux_session_name(tag)
+        if sess not in session_alive:
+            try:
+                session_alive[sess] = tmux_mod.session_exists(sess)
+            except Exception:
+                session_alive[sess] = True  # indeterminate → assume alive
+        return session_alive[sess]
+
+    reaped: list[tuple[str, str]] = []
+    for name in names:
+        parsed = _parse_container_name(name, known_pr_ids)
+        if parsed is None:
+            continue
+        reason = None
+        pid = parsed.pr_id
+        active_pr = False
+        if pid is not None and pid in pr_status:
+            status = pr_status[pid]
+            if status in _TERMINAL_PR_STATES:
+                reason = f"PR {pid} is {status}"
+            else:
+                active_pr = True
+        if reason is None:
+            # Not terminal — fall back to tmux session liveness.  Only reap on
+            # a positive "session gone" signal; never on an active PR with a
+            # live session, and never when liveness is indeterminate.
+            if parsed.session_tag and not _session_is_alive(parsed.session_tag):
+                reason = (f"tmux session "
+                          f"{_tmux_session_name(parsed.session_tag)} gone")
+        if reason is None:
+            continue
+        if not dry_run:
+            try:
+                remove_container(name)
+            except Exception as e:  # pragma: no cover - best effort
+                _log.warning("reap remove_container(%s) failed: %s", name, e)
+                continue
+        reaped.append((name, reason))
+
+    if reaped:
+        _log.info("Reaped %d orphaned container(s)%s: %s",
+                  len(reaped), " (dry-run)" if dry_run else "",
+                  ", ".join(f"{n} [{r}]" for n, r in reaped))
+    return reaped
+
+
+def running_container_count() -> int:
+    """Number of *running* pm containers (the keyring-key holders)."""
+    result = _run_runtime(
+        "ps", "--filter", f"name={CONTAINER_PREFIX}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0:
+        return 0
+    return len([ln for ln in result.stdout.strip().splitlines() if ln.strip()])
+
+
+# Substrings that identify a kernel keyring-quota exhaustion in runtime stderr.
+_KEYRING_SIGNATURES = (
+    "session keyring",
+    "create session key",
+    "join session keyring",
+)
+
+
+def _is_keyring_exhaustion(text: str | None) -> bool:
+    """True when *text* looks like a kernel keyring-quota exhaustion.
+
+    Matches the rootless-podman failure ``unable to join session keyring:
+    unable to create session key: disk quota exceeded``.  A bare "disk quota
+    exceeded" (real filesystem quota) is only treated as keyring-related when
+    it co-occurs with keyring wording, so we don't misreport disk-full.
+    """
+    if not text:
+        return False
+    low = text.lower()
+    if any(sig in low for sig in _KEYRING_SIGNATURES):
+        return True
+    return "disk quota exceeded" in low and "key" in low
+
+
+def _keyring_exhausted_error(name: str) -> ContainerError:
+    """Build a clear, actionable error for a full kernel keyring.
+
+    Includes current usage when readable so the operator can see how far over
+    the line they are, and points at the real remedies: reap leaked
+    containers (frees keys held by running containers) and, as a safety
+    margin, raise the keyring quota for the podman subuid.
+    """
+    pressure = keyring_pressure(threshold=0.0)
+    usage = ""
+    if pressure:
+        usage = (f" Keyring for uid {pressure['uid']} is at "
+                 f"{pressure['keys']}/{pressure['max_keys']} keys "
+                 f"({pressure['bytes']}/{pressure['max_bytes']} bytes).")
+    return ContainerError(
+        f"Container '{name}' could not start: the kernel keyring quota is "
+        f"exhausted.{usage} Leaked containers from finished PRs hold these "
+        f"keys while running — reap them with 'pm container reap' (pruning "
+        f"only stopped containers does NOT free the keyring). As a safety "
+        f"margin you can also raise the quota for the podman subuid via "
+        f"'sysctl kernel.keys.maxkeys' / 'kernel.keys.maxbytes'."
+    )
+
+
+def keyring_usage(uid: int | None = None):
+    """Read kernel keyring usage from ``/proc/key-users``.
+
+    Each line is ``<uid>: usage nkeys/nikeys qnkeys/maxkeys qnbytes/maxbytes``.
+    Returns a ``{uid: {keys, max_keys, bytes, max_bytes}}`` mapping, or just
+    that dict for *uid* when given.  Returns None if the file is unreadable
+    (non-Linux, restricted) — callers treat that as "unknown, don't warn".
+    """
+    try:
+        text = Path("/proc/key-users").read_text()
+    except OSError:
+        return None
+    rows: dict[int, dict[str, int]] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if ":" not in line:
+            continue
+        head, rest = line.split(":", 1)
+        try:
+            uid_i = int(head.strip())
+        except ValueError:
+            continue
+        parts = rest.split()
+        if len(parts) < 4:
+            continue
+        try:
+            nkeys, maxkeys = parts[2].split("/")
+            nbytes, maxbytes = parts[3].split("/")
+            rows[uid_i] = {
+                "keys": int(nkeys), "max_keys": int(maxkeys),
+                "bytes": int(nbytes), "max_bytes": int(maxbytes),
+            }
+        except (IndexError, ValueError):
+            continue
+    if uid is not None:
+        return rows.get(uid)
+    return rows
+
+
+def keyring_pressure(threshold: float = 0.9) -> dict[str, int] | None:
+    """Return the most-utilised keyring row if any is at/above *threshold*.
+
+    Used to warn before launching a container into a near-full keyring.  The
+    returned dict carries the row fields plus ``uid`` and ``ratio``.  Returns
+    None when usage is unknown or below the threshold.
+    """
+    rows = keyring_usage()
+    if not rows:
+        return None
+    worst = None
+    worst_ratio = 0.0
+    for uid_i, row in rows.items():
+        if row["max_keys"] <= 0:
+            continue
+        ratio = row["keys"] / row["max_keys"]
+        if ratio > worst_ratio:
+            worst_ratio = ratio
+            worst = {**row, "uid": uid_i, "ratio": ratio}
+    if worst is not None and worst_ratio >= threshold:
+        return worst
+    return None
 
 
 def cleanup_session_containers(session_tag: str) -> int:
