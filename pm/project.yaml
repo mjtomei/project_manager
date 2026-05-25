@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-ff9b728
+  active_pr: pr-8e693f6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22486,7 +22486,7 @@ prs:
   title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
     router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
     stage between qa and merge with its own window, not logic embedded in the QA loop.
@@ -22563,20 +22563,50 @@ prs:
     verdict+capture model; soft-aligns with pr-b59f0c7 (reason strings) and pr-06a96fa
     (evidence model) when they land. Loop-guard + auto-run + the plan auto-start watcher
     are pr-ff9b728; the report/dashboard surface is pr-8e693f6.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/225
+  gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T15:23:36.138064+00:00'
-  started_at: null
+  updated_at: '2026-05-25T17:01:35.814384+00:00'
+  started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0357619
+    text: 'ACCEPTANCE / shepherding requirement (was not in the description): the
+      sign-off step must be aware of the PURPOSE and ACCEPTANCE MEASURES of EVERY
+      step in a PR''s lifecycle (impl, review, qa) and check each one INDIVIDUALLY
+      — confirm that step''s own success conditions were actually met — in addition
+      to the generic ''does the captured behavior prove the claim / no shortcuts''
+      checks. SPECIFICALLY for bug PRs: confirm BOTH a pre-fix capture (bug reproduced
+      on pre-fix code) AND a post-fix capture (bug gone on the fixed code) exist;
+      absence of either is a fail/bounce (the reproduce->fix->verify step''s acceptance
+      was not met). Those captures live under $(pm qa captures-path <pr-id>)/impl/
+      (pre-fix/ + post-fix). They must also be surfaced in the HTML report (pr-8e693f6
+      / #226).'
+    created_at: '2026-05-25T16:59:06Z'
+    last_edited: '2026-05-25T16:59:06Z'
+  - id: note-6f7abcd
+    text: 'Design principle — sign-off is the rollout mechanism for PROCESS / ACCEPTANCE-CRITERIA
+      updates. It checks each step against the CURRENT standard, so it must be RE-RUNNABLE
+      on existing and already-MERGED PRs. When a standard changes (e.g. the new pre/post-fix-capture
+      requirement), re-running sign-off on an old PR should detect the gap, add a
+      note, and bounce it through the relevant steps under updated prompting to bring
+      it into compliance — never manual backfill. Implications for the lifecycle/transitions
+      you are building: sign_off must be enterable FROM a merged PR, and a bounce
+      must be able to re-open already-merged work (to regenerate now-missing evidence
+      by re-running repro/verify against the merged fix). Trigger is single-PR mode
+      (pr-ff9b728: pm pr signoff <id>); the plan watcher can batch it across a plan.
+      Net: updating a step/sign-off PROMPT is how the acceptance bar is raised, and
+      re-running sign-off propagates it.'
+    created_at: '2026-05-25T17:01:35Z'
+    last_edited: '2026-05-25T17:01:35Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: pending
+  status: in_progress
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -22613,15 +22643,26 @@ prs:
     Static export (open a file, no server) is the v1 lean; co-located with the captures.
     Depends on pr-2d5f712 (the sign-off window/step) and the pr-06a96fa evidence model
     (forward-compatible).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/226
+  gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T14:39:06.066606+00:00'
-  started_at: null
+  updated_at: '2026-05-25T16:59:08.396212+00:00'
+  started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e1ff391
+    text: 'Report requirement (was not in the description): for bug PRs the per-PR
+      HTML report must surface the PRE-FIX capture (bug reproduced) and the POST-FIX
+      capture (bug gone) so the before/after is visible. More generally, present each
+      PR step''s evidence against THAT step''s acceptance criteria (impl/review/qa),
+      not only the final-QA scenarios. Coordinate with pr-2d5f712 (#225, sign-off
+      step), which checks each step''s acceptance individually and requires the pre/post-fix
+      captures for bugs.'
+    created_at: '2026-05-25T16:59:08Z'
+    last_edited: '2026-05-25T16:59:08Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
   title: Plan auto-start watcher — generalize impl watchers + become the auto-start
