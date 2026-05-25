@@ -812,16 +812,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     impl_workdir = pr_entry.get("workdir") or workdir
                     if impl_workdir:
                         _add_companion_pane(pm_session, existing, impl_workdir, "impl")
-                    tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    if tmux_mod.select_window(pm_session, existing["id"]):
+                        click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    else:
+                        click.echo(f"Existing window '{window_name}' is open (session: {pm_session}; no terminal to switch)")
                     return
                 elif background:
                     # Window already exists, nothing to do in background mode
                     click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
                     return
                 else:
-                    tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    if tmux_mod.select_window(pm_session, existing["id"]):
+                        click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    else:
+                        click.echo(f"Existing window '{window_name}' is open (session: {pm_session}; no terminal to switch)")
                     return
 
     repo_url = data["project"]["repo"]
@@ -1148,8 +1152,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
-            tmux_mod.select_window(pm_session, existing["id"])
-            click.echo(f"Switched to existing review window '{window_name}'")
+            if tmux_mod.select_window(pm_session, existing["id"]):
+                click.echo(f"Switched to existing review window '{window_name}'")
+            else:
+                click.echo(f"Existing review window '{window_name}' is open (no terminal to switch)")
             return
 
     title = pr_entry.get("title", "")
@@ -1520,8 +1526,10 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         if background:
             click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
             return
-        tmux_mod.select_window(pm_session, existing["id"])
-        click.echo(f"Switched to existing merge window '{window_name}'")
+        if tmux_mod.select_window(pm_session, existing["id"]):
+            click.echo(f"Switched to existing merge window '{window_name}'")
+        else:
+            click.echo(f"Existing merge window '{window_name}' is open (no terminal to switch)")
         return
 
     try:
