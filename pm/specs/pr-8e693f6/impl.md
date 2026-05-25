@@ -109,6 +109,34 @@ Add `captures_root(session_tag=None) -> Path | None` to `paths.py` (the
 `captures/` dir that holds every per-PR dir + `index.html`), mirroring
 `captures_dir`'s tag resolution.
 
+### R7 — Step-evidence against acceptance criteria; bug before/after (note-e1ff391)
+Added mid-implementation by the orchestrator (not in the original description):
+the report must present **each step's evidence against that step's acceptance
+criteria**, not just final-QA scenarios — and **bug PRs** must surface the
+**pre-fix capture (bug reproduced)** and **post-fix capture (bug gone)** so the
+before/after is visible. Coordinated with the sign-off step (#225 / pr-2d5f712).
+
+- **Bug detection** reuses the single source of truth
+  `bug_fix_prompts._is_bug_pr(pr)` (`plan == "bugs"` or `type == "bug"`).
+- **Implementation step** renders as a first-class step. For bug PRs (or whenever
+  `impl/pre-fix/` or `impl/post-fix/` captures exist) it shows a two-column
+  **before/after**: *Before — pre-fix* (acceptance: "the bug reproduces") and
+  *After — post-fix* (acceptance: "the symptom no longer reproduces"), each paired
+  with its captures. A missing phase is flagged ("No pre/post-fix capture
+  recorded — the before/after is incomplete") instead of silently dropped. Phase
+  is detected from a `pre-fix`/`post-fix` directory component (the layout
+  `bug_fix_prompts.py` writes under `$CAP/impl/`), tolerating `pre_fix` spelling
+  and ignoring filenames. Non-bug PRs keep a flat implementation-evidence block.
+- **QA behaviors** now render explicit **Acceptance criteria** (the THEN clauses,
+  incl. trailing AND/BUT and sub-bullets, parsed from the scenario steps) above
+  the evidence, making the criteria→evidence pairing explicit. A bug-fix scenario
+  that captured `pre-fix`/`post-fix` evidence is also shown before/after.
+- **Coordination with #225**: pr-2d5f712's sign-off window deliberately keeps its
+  second pane a plain evidence-summary shell and links to *this* report as the
+  rich surface; its router reads the same `impl/` (bug "primary evidence") +
+  `scenarios/<n>/` captures. Our report organizes exactly those into the
+  step→acceptance→evidence shape the router/human reviews against.
+
 ### R6 — Safety / robustness
 - All user/derived text (titles, descriptions, notes, reasons, steps, file
   names) is `html.escape`d. No untrusted HTML injected.

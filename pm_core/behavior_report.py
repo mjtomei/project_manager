@@ -87,6 +87,7 @@ class Behavior:
     verdict: str      # normalized: PASS | NEEDS_WORK | INPUT_REQUIRED | ""
     reason: str
     evidence: list[Evidence] = field(default_factory=list)
+    acceptance: list[str] = field(default_factory=list)  # THEN clauses
 
 
 @dataclass
@@ -101,6 +102,7 @@ class ReportData:
     plan_id: Optional[str]
     plan_name: Optional[str]
     plan_notes: list[str]
+    is_bug: bool
     behaviors: list[Behavior]
     impl_evidence: list[Evidence]
     recommendation: str
@@ -143,6 +145,72 @@ def _norm_verdict(v: str) -> str:
         if cand in v:
             return cand
     return ""
+
+
+def _extract_acceptance(steps: str) -> list[str]:
+    """Pull the acceptance criteria (THEN clauses) out of free-form steps.
+
+    The THEN of a Given/When/Then triple is the observable outcome the
+    evidence must demonstrate — i.e. the step's acceptance criterion. We
+    also collect AND/BUT lines and sub-bullets that follow a THEN (the
+    concretizer emits "THEN ... / AND ..." and sub-bullets for multiple
+    outcomes). Returns [] when steps aren't structured.
+    """
+    crit: list[str] = []
+    capturing = False
+    for line in steps.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        upper = s.upper()
+        if upper.startswith("THEN:") or upper.startswith("THEN "):
+            capturing = True
+            rest = s[4:].lstrip(": ").strip()
+            if rest:
+                crit.append(rest)
+        elif upper.startswith("GIVEN:") or upper.startswith("GIVEN ") or \
+                upper.startswith("WHEN:") or upper.startswith("WHEN "):
+            capturing = False
+        elif capturing and (upper.startswith("AND") or upper.startswith("BUT")):
+            kw = "AND" if upper.startswith("AND") else "BUT"
+            rest = s[len(kw):].lstrip(": ").strip()
+            if rest:
+                crit.append(rest)
+        elif capturing and s[:1] in "-*•":
+            rest = s.lstrip("-*• ").strip()
+            if rest:
+                crit.append(rest)
+    return crit
+
+
+def _phase_of(rel: str) -> str:
+    """Classify an evidence path as a bug-fix phase: pre / post / "".
+
+    Matches a ``pre-fix`` / ``post-fix`` *directory* component (the layout
+    bug_fix_prompts writes: ``impl/pre-fix/...`` and ``impl/post-fix/...``,
+    and the same under ``scenarios/<n>/``). Tolerates ``pre_fix`` spelling;
+    ignores the filename so an unrelated file like ``prefix.txt`` isn't
+    misread.
+    """
+    parts = rel.split("/")[:-1]  # directory components only
+    for seg in parts:
+        norm = seg.lower().replace("_", "-")
+        if norm == "pre-fix":
+            return "pre"
+        if norm == "post-fix":
+            return "post"
+    return ""
+
+
+def _partition_phase(
+        evidence: list[Evidence]) -> tuple[list[Evidence], list[Evidence],
+                                           list[Evidence]]:
+    """Split evidence into (pre-fix, post-fix, other) by path."""
+    pre, post, other = [], [], []
+    for e in evidence:
+        ph = _phase_of(e.rel)
+        (pre if ph == "pre" else post if ph == "post" else other).append(e)
+    return pre, post, other
 
 
 def _classify(path: Path) -> str:
@@ -278,6 +346,7 @@ def _load_behavior(scenario_dir: Path, report_dir: Path,
         verdict=_norm_verdict(verdict),
         reason=reason,
         evidence=_iter_evidence(scenario_dir, report_dir, captures_dir),
+        acceptance=_extract_acceptance(steps),
     )
 
 
@@ -339,6 +408,7 @@ def gather_pr_report_data(data: dict, pr_id: str,
     relative-link base).
     """
     from pm_core import store
+    from pm_core.bug_fix_prompts import _is_bug_pr
 
     pr = store.get_pr(data, pr_id) or {}
     gh = pr.get("gh_pr_number")
@@ -378,6 +448,7 @@ def gather_pr_report_data(data: dict, pr_id: str,
         plan_id=plan_id,
         plan_name=plan_name,
         plan_notes=plan_notes,
+        is_bug=_is_bug_pr(pr),
         behaviors=behaviors,
         impl_evidence=impl_evidence,
         recommendation=recommendation,
@@ -479,6 +550,13 @@ button.copy { font-size: .78rem; padding: .15rem .5rem; cursor: pointer;
   border: 1px solid rgba(127,127,127,.5); border-radius: 5px;
   background: transparent; color: inherit; }
 .notes li { margin: .25rem 0; }
+.acceptance { margin: .3rem 0; padding-left: 1.2rem; }
+.acceptance li { margin: .2rem 0; }
+.beforeafter { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 720px) { .beforeafter { grid-template-columns: 1fr; } }
+.phase { margin: 0; }
+.phase-pre { border-left: 4px solid #cf222e; }
+.phase-post { border-left: 4px solid #1a7f37; }
 """
 
 
@@ -568,6 +646,67 @@ def _notes_html(notes: list[str], empty: str) -> str:
     return f'<ul class="notes">{items}</ul>'
 
 
+def _acceptance_html(criteria: list[str], fallback: str = "") -> str:
+    """Render a step's acceptance criteria as a checklist."""
+    if not criteria:
+        return (f'<p class="muted">{_e(fallback)}</p>' if fallback else "")
+    items = "".join(f'<li>{_e(c)}</li>' for c in criteria)
+    return f'<ul class="acceptance">{items}</ul>'
+
+
+def _render_impl_step(rd: ReportData) -> str:
+    """Render the implementation step: for bug fixes the before/after
+    (pre-fix = bug reproduced; post-fix = symptom gone), each paired with
+    its acceptance criterion; otherwise a flat implementation-evidence
+    block. Returns "" when there is nothing to show.
+    """
+    pre, post, other = _partition_phase(rd.impl_evidence)
+    show_beforeafter = rd.is_bug or bool(pre) or bool(post)
+    if not (rd.impl_evidence or show_beforeafter):
+        return ""
+
+    out: list[str] = ['<h2>Implementation</h2>']
+    if show_beforeafter:
+        out.append('<p class="muted">Bug fix — the before/after record: the '
+                   'bug reproduced on pre-fix code, then gone on post-fix '
+                   'code.</p>')
+        out.append('<div class="beforeafter">')
+        # Before (pre-fix)
+        out.append('<section class="card phase phase-pre">')
+        out.append('<h3>Before — pre-fix (bug reproduced)</h3>')
+        out.append('<h4 style="margin:.4rem 0 .1rem">Acceptance</h4>')
+        out.append('<ul class="acceptance"><li>The bug reproduces on '
+                   'pre-fix code (symptom present).</li></ul>')
+        out.append('<h4 style="margin:.4rem 0 .1rem">Evidence</h4>')
+        out.append(_render_evidence_html(pre) if pre else
+                   '<p class="missing">No pre-fix capture recorded — the '
+                   'reproduction before/after is incomplete.</p>')
+        out.append('</section>')
+        # After (post-fix)
+        out.append('<section class="card phase phase-post">')
+        out.append('<h3>After — post-fix (symptom gone)</h3>')
+        out.append('<h4 style="margin:.4rem 0 .1rem">Acceptance</h4>')
+        out.append('<ul class="acceptance"><li>The symptom no longer '
+                   'reproduces on post-fix code (fix verified).</li></ul>')
+        out.append('<h4 style="margin:.4rem 0 .1rem">Evidence</h4>')
+        out.append(_render_evidence_html(post) if post else
+                   '<p class="missing">No post-fix capture recorded — the '
+                   'reproduction before/after is incomplete.</p>')
+        out.append('</section>')
+        out.append('</div>')
+        if other:
+            out.append('<section class="card">')
+            out.append('<h3>Other implementation evidence</h3>')
+            out.append(_render_evidence_html(other))
+            out.append('</section>')
+    else:
+        out.append('<p class="muted">Captured during implementation.</p>')
+        out.append('<section class="card">')
+        out.append(_render_evidence_html(rd.impl_evidence))
+        out.append('</section>')
+    return "".join(out)
+
+
 # ---------------------------------------------------------------------------
 # Rendering — per-PR report
 # ---------------------------------------------------------------------------
@@ -614,8 +753,14 @@ def render_pr_report_html(rd: ReportData) -> str:
         parts.append(f'<p>{_e(rd.summary)}</p>')
     parts.append('</header>')
 
-    # Behaviors
-    parts.append('<h2>Behaviors</h2>')
+    parts.append('<p class="muted">Each step below pairs its acceptance '
+                 'criteria with the evidence that demonstrates them.</p>')
+
+    # Implementation step (bug-fix before/after, or other impl evidence).
+    parts.append(_render_impl_step(rd))
+
+    # QA step — one behavior per scenario, evidence against its criteria.
+    parts.append('<h2>QA behaviors</h2>')
     if not rd.behaviors:
         parts.append('<p class="muted">No recorded behaviors yet. Run QA for '
                      'this PR, then regenerate this report.</p>')
@@ -630,19 +775,25 @@ def render_pr_report_html(rd: ReportData) -> str:
             parts.append(f'<p class="muted">Focus: {_e(b.focus)}</p>')
         parts.append('<h4 style="margin:.6rem 0 .1rem">Flow</h4>')
         parts.append(_render_steps_html(b.steps))
+        parts.append('<h4 style="margin:.6rem 0 .1rem">Acceptance criteria'
+                     '</h4>')
+        parts.append(_acceptance_html(
+            b.acceptance,
+            "Not separable from the steps above (no explicit THEN)."))
         if b.reason:
             parts.append(f'<p><b>Reason:</b> {_e(b.reason)}</p>')
         parts.append('<h4 style="margin:.6rem 0 .1rem">Evidence</h4>')
-        parts.append(_render_evidence_html(b.evidence))
-        parts.append('</section>')
-
-    # Implementation evidence (bug-fix repro/verify, etc.)
-    if rd.impl_evidence:
-        parts.append('<h2>Implementation evidence</h2>')
-        parts.append('<p class="muted">Captured during implementation '
-                     '(e.g. bug-fix reproduce / verify).</p>')
-        parts.append('<section class="card">')
-        parts.append(_render_evidence_html(rd.impl_evidence))
+        # If a bug-fix scenario captured pre/post, show the before/after.
+        bpre, bpost, bother = _partition_phase(b.evidence)
+        if bpre or bpost:
+            parts.append('<p class="muted">Before — pre-fix:</p>')
+            parts.append(_render_evidence_html(bpre))
+            parts.append('<p class="muted">After — post-fix:</p>')
+            parts.append(_render_evidence_html(bpost))
+            if bother:
+                parts.append(_render_evidence_html(bother))
+        else:
+            parts.append(_render_evidence_html(b.evidence))
         parts.append('</section>')
 
     # Reachable context

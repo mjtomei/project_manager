@@ -138,16 +138,85 @@ def test_signoff_json_overrides_derived(tmp_path):
     assert "derived from verdicts" not in h
 
 
-def test_impl_evidence_section(tmp_path):
+def test_impl_evidence_section_non_bug(tmp_path):
+    """Non-bug PR with flat impl evidence → plain Implementation block."""
     cap = _seed_captures(tmp_path)
     impl = cap / "impl"
     impl.mkdir()
-    (impl / "prefix.txt").write_text("repro before fix")
+    (impl / "build.txt").write_text("compiled cleanly")
     rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    assert any("prefix.txt" in e.name for e in rd.impl_evidence)
+    assert rd.is_bug is False
+    assert any("build.txt" in e.name for e in rd.impl_evidence)
     h = br.render_pr_report_html(rd)
-    assert "Implementation evidence" in h
-    assert "repro before fix" in h
+    assert "<h2>Implementation</h2>" in h
+    assert "compiled cleanly" in h
+    # No before/after framing for a non-bug PR without pre/post captures.
+    assert "Before — pre-fix" not in h
+
+
+def test_bug_pr_before_after(tmp_path):
+    """Bug PR surfaces pre-fix (reproduced) and post-fix (gone) captures."""
+    data = _data()
+    data["prs"][0]["plan"] = "bugs"  # canonical bug signal
+    cap = tmp_path / "pr-aaa"
+    pre = cap / "impl" / "pre-fix"
+    post = cap / "impl" / "post-fix"
+    pre.mkdir(parents=True)
+    post.mkdir(parents=True)
+    (pre / "repro.webm").write_bytes(b"\x00" * 1000)
+    (pre / "trace.txt").write_text("TypeError: cannot read x")
+    (post / "fixed.webm").write_bytes(b"\x00" * 1000)
+
+    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
+    assert rd.is_bug is True
+    pre_ev, post_ev, _ = br._partition_phase(rd.impl_evidence)
+    assert any("repro.webm" in e.name for e in pre_ev)
+    assert any("fixed.webm" in e.name for e in post_ev)
+
+    h = br.render_pr_report_html(rd)
+    # Before/after blocks present with acceptance criteria
+    assert "Before — pre-fix (bug reproduced)" in h
+    assert "After — post-fix (symptom gone)" in h
+    assert "bug reproduces on" in h.lower()
+    assert "no longer" in h.lower()
+    # The actual captures are surfaced in the right phase
+    assert 'src="impl/pre-fix/repro.webm"' in h
+    assert 'src="impl/post-fix/fixed.webm"' in h
+    assert "TypeError: cannot read x" in h
+
+
+def test_bug_pr_missing_post_fix_flagged(tmp_path):
+    """A bug PR with only a pre-fix capture flags the incomplete before/after."""
+    data = _data()
+    data["prs"][0]["type"] = "bug"  # forward-looking bug signal
+    cap = tmp_path / "pr-aaa"
+    pre = cap / "impl" / "pre-fix"
+    pre.mkdir(parents=True)
+    (pre / "repro.txt").write_text("boom")
+    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
+    assert rd.is_bug is True
+    h = br.render_pr_report_html(rd)
+    assert "Before — pre-fix (bug reproduced)" in h
+    assert "After — post-fix (symptom gone)" in h
+    assert "No post-fix capture recorded" in h
+
+
+def test_acceptance_criteria_from_then(tmp_path):
+    """QA behavior surfaces acceptance criteria (THEN clauses) by themselves."""
+    cap = _seed_captures(tmp_path)
+    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
+    b = rd.behaviors[0]
+    assert b.acceptance == ["dashboard shows"]
+    h = br.render_pr_report_html(rd)
+    assert "Acceptance criteria" in h
+    assert '<ul class="acceptance">' in h
+
+
+def test_acceptance_extraction_multiline():
+    steps = ("GIVEN: x\nWHEN: y\nTHEN: first outcome\n  AND: second outcome\n"
+             "  - third bullet outcome")
+    assert br._extract_acceptance(steps) == [
+        "first outcome", "second outcome", "third bullet outcome"]
 
 
 # ---------------------------------------------------------------------------

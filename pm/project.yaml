@@ -22617,7 +22617,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T16:40:45.813169+00:00'
+  updated_at: '2026-05-25T17:03:16.631841+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22637,6 +22637,20 @@ prs:
       so regenerate = copy the command).'
     created_at: '2026-05-25T16:40:45Z'
     last_edited: '2026-05-25T16:40:45Z'
+  - id: note-b5f42a9
+    text: 'Incorporated note-e1ff391 (orchestrator add-on): report is now step-oriented,
+      evidence paired with acceptance criteria. (1) Implementation step renders bug
+      before/after — impl/pre-fix (acceptance: bug reproduces) + impl/post-fix (acceptance:
+      symptom gone), missing phase flagged not dropped; bug detection via bug_fix_prompts._is_bug_pr
+      (plan==bugs or type==bug); phase via pre-fix/post-fix DIR component. (2) QA
+      behaviors show explicit Acceptance criteria parsed from THEN/AND/sub-bullets.
+      Coordinated w/ #225 (pr-2d5f712): its sign-off window keeps a plain evidence
+      shell pane and links to THIS report as the rich surface; router reads same impl/+scenarios/<n>/
+      captures. NOTE: pr-2d5f712 does NOT write signoff.json (it records via pm pr
+      notes + emits SIGNOFF_* verdict polled by auto-sequence), so my signoff.json
+      seam stays optional/forward-only; recommendation stays derived for now.'
+    created_at: '2026-05-25T17:03:16Z'
+    last_edited: '2026-05-25T17:03:16Z'
 - id: pr-ff9b728
   plan: plan-regression
   title: Plan auto-start watcher — generalize impl watchers + become the auto-start
