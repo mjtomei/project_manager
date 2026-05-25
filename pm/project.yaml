@@ -21781,7 +21781,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-25T04:00:11.247840+00:00'
+  updated_at: '2026-05-25T04:05:14.527356+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21927,6 +21927,44 @@ prs:
       Pre-existing fake-stub limitation, out of R9 scope.'
     created_at: '2026-05-25T04:00:11Z'
     last_edited: '2026-05-25T04:00:11Z'
+  - id: note-db3070c
+    text: 'QA scenario-1 refiner notes (local-backend merge reconcile): (1) There
+      is NO `pm pr show` command — observe merged status via `pm pr list` / `pm pr
+      list --status merged`, notes via `pm pr note list <id>`, and merged_at/field
+      values by inspecting pm/project.yaml directly (it is the artifact the bug corrupts).
+      (2) For backend:local, `pm pr merge` does the branch merge in the PR workdir
+      (clean) then reconciles divergent project.yaml at the `_pull_from_workdir` site
+      — i.e. in the MAIN repo dir on base_branch, where the uncommitted local project.yaml
+      edit triggers _stash_for_merge -> structural three_way_merge reapply. So "the
+      local working copy" = the main repo (TEST_DIR), and that repo MUST be on base_branch
+      and dirty for the bug path to fire. (3) `pm pr add` already sets pr["branch"]=pm/<id>-<slug>;
+      so you can pre-seed a committed divergent branch in TEST_DIR (git checkout -b
+      <that branch>, pm pr edit/note add, commit, git checkout master) and let `pm
+      pr merge` materialize the workdir via _ensure_workdir (no need for `pm pr start`
+      or a tmux window). (4) Local field edit should be a field finalize wont overwrite
+      (use title, NOT status — finalize forces status=merged). Branch edit = description.
+      (5) Pre-seed stashes BEFORE dirtying project.yaml so plain `git stash push`
+      does not capture project.yaml.'
+    created_at: '2026-05-25T03:55:56Z'
+    last_edited: '2026-05-25T03:55:56Z'
+  - id: note-f68718f
+    text: 'QA scenario-1 PASS all 3 stories (2026-05-25, local-backend CLI). Both
+      divergent project.yaml edits reconcile structurally: description=branch edit
+      + title=local edit BOTH survive, notes are unioned (branch+local), no conflict
+      markers, merged_at set; story2 reaps only the stale "pm: auto-stash for merge"
+      and keeps "important WIP refactor"; story3 text-stashes/restores a non-project.yaml
+      dirty file (code.txt intact) and ends with empty stash list. GOTCHA for next
+      QA run: this container ships ~/.local/bin/git as a host push-proxy that intercepts
+      fetch/pull/ls-remote and forwards to the host HOST_WORKDIR. For a local-backend
+      test that breaks pm pr merge with "does not appear to be a git repository" (the
+      container-local merge workdir path does not exist on the host) AND silently
+      makes _ensure_workdir create the local PR branch at base via checkout -b (proxied
+      ls-remote returns nothing) so the branch divergence never merges. Fix: run the
+      whole test with REAL git on PATH (ln -s /usr/bin/git /tmp/realgit-bin/git; export
+      PATH=/tmp/realgit-bin:$PATH) — local backend needs no GitHub proxy. Bare git
+      -C bypasses the proxy (only $1=fetch matches) which can mask the issue.'
+    created_at: '2026-05-25T04:05:14Z'
+    last_edited: '2026-05-25T04:05:14Z'
 - id: pr-c41f029
   plan: bugs
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
