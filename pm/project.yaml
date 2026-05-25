@@ -22595,7 +22595,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T22:31:10.736635+00:00'
+  updated_at: '2026-05-25T23:13:30.991683+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22824,6 +22824,35 @@ prs:
       is low-priority/environmental.'
     created_at: '2026-05-25T22:31:10Z'
     last_edited: '2026-05-25T22:31:10Z'
+  - id: note-c4871af
+    text: 'QA s1 refiner: tech-tree "active sorting" of sign_off is only at COMPONENT
+      granularity. tree_layout._component_sort_key (line ~95) lists sign_off in has_active
+      so the sign_off PR''s component/plan sorts to the front; but the within-layer
+      node sort _activity_sort_key (line ~343) does NOT list sign_off (falls to default
+      priority 5, sorting AFTER pending=2). So a sign_off PR sharing a layer with
+      a pending PR would NOT sort among active nodes. The reliable observable "active"
+      signal for the spinner test is the animated ◐◓◑◒ spinner via _is_active_pr (tech_tree.py:1178,
+      sign_off+workdir), not within-layer node order. Consider adding sign_off to
+      _activity_sort_key.status_priority if true node-level active sorting is intended.'
+    created_at: '2026-05-25T22:59:28Z'
+    last_edited: '2026-05-25T22:59:28Z'
+  - id: note-03fd184
+    text: 'QA s1 (NEEDS_WORK, fixed db7e8e8d): tech-tree sign_off node did NOT reflect
+      a recorded verdict on LIVE reload. pm pr signoff-record fires trigger_tui_refresh
+      (TUI logs action: reload), but TechTree._signature() omitted the signoff verdict;
+      recording leaves status=sign_off and does NOT bump updated_at, so the signature
+      was unchanged -> _recompute skipped _rebuild -> PRNodes kept a stale self._pr
+      without the signoff record -> node kept spinning, never showed the verdict icon.
+      pm pr list (separate path) was correct, masking it. Fix: add (pr.get("signoff")
+      or {}).get("verdict") to _signature() pr_sig, beside the other display-only
+      markers spec_pending/agent_machine. Verified live on real surface: edit->sign_off
+      spins (workdir,no verdict); signoff-record -> node transitions LIVE to the static
+      verdict icon and stops spinning; distinct icons render together (⊘ BLOCKED /
+      ↻ REQA / ⇤ IMPL). Also confirmed: ◆ glyph bold-blue(themed) on #000033 bg; ⇤
+      bold-yellow; persistence across fresh processes; invalid verdict -> stderr +
+      exit 1 + no write. Suite green (273 tui/tree + 113 signoff/signature).'
+    created_at: '2026-05-25T23:13:30Z'
+    last_edited: '2026-05-25T23:13:30Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
