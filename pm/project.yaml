@@ -22809,54 +22809,82 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b4e1a9-bug-pr-start-window-switch-hijacks-a-bb78bd4e
 - id: pr-2d5f712
   plan: plan-regression
-  title: 'Sign-off / acceptance gate: QA verdict router (auto-run capstone)'
+  title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
+    router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
   status: pending
   depends_on: []
-  description: "The capstone of the autonomous loop: an acceptance/sign-off stage\
-    \ that auto-runs after QA finalization and acts as the **verdict router** — mapping\
-    \ every terminal QA outcome to a next hop so a PR can advance from QA to merge\
-    \ (or back) without a human. This is the missing piece that closes auto-run end\
-    \ to end.\n\nROUTER-ONLY: the checkoff never edits code. It judges, annotates\
-    \ (pm pr notes), files follow-up PRs, and sets the next hop. All code edits happen\
-    \ in impl/qa so they always pass back through review+qa.\n\nInputs: every scenario's\
-    \ verdict (PASS/NEEDS_WORK/INPUT_REQUIRED) + reason string (pr-b59f0c7), the captures/evidence,\
-    \ the diff vs master, and the PR's scope (plan/description + bound regression\
-    \ tests post-Phase-10).\n\nTwo evaluations:\n1. Evidence supports the claim (BDD:\
-    \ does the captured behavior prove what the diff claims?).\n2. Meta-QA / anti-shortcut:\
-    \ was the QA itself rigorous? Thin evidence, a scenario that drove a mock instead\
-    \ of the real path, or an obvious uncovered edge case is caught HERE.\n\nVerdict\
-    \ -> next-hop matrix:\n- PASS (verified): evidence + anti-shortcut review -> merge\
-    \ (or human gate).\n- PASS (unverified, e.g. verifier-cwd): harness problem ->\
-    \ re-qa, do NOT bounce to impl.\n- NEEDS_WORK (scenario fixed it itself): a code\
-    \ change happened -> back through review AND qa (no shortcut to merge); validate\
-    \ the fix is real + shortcut-free.\n- INPUT_REQUIRED: classify the cause and route:\n\
-    \  * misframed/mistaken scenario (\"only run tests\", scenario pane just wrong)\
-    \ -> note for next qa run -> re-qa (no PR change). qa-gen reads notes today, so\
-    \ this closes.\n  * real gap (PR should cover it but doesn't) -> note on PR ->\
-    \ back to impl.\n  * assumed-missing feature (PR depends on something that mistakenly\
-    \ doesn't exist yet) -> agent decides: file a new PR + depends_on (block), or\
-    \ expand scope.\n  * nice-to-have the generator imagined -> agent decides: defer\
-    \ to a NEW PR, or include if trivially in scope.\n  * impossible/out-of-scope\
-    \ -> note recording the limitation -> accept or bounce with the constraint.\n\n\
-    CONSERVATIVE BIAS: the cost of misclassifying a real gap as \"scenario error ->\
-    \ re-qa\" is merging incomplete work (the pitch's predicted failure mode); the\
-    \ reverse only wastes an impl cycle. So when a bucket is genuinely ambiguous,\
-    \ the checkoff RAISES INPUT_REQUIRED itself and escalates to a human rather than\
-    \ merging.\n\nAUDIT TRAIL: every classification + chosen hop is recorded as a\
-    \ pm pr note (prefer-pm-pr-notes pattern) so an autonomous merge is inspectable\
-    \ after the fact — essential for defending autonomous mode in the pitch.\n\nGated\
-    \ vs autonomous is a config flag on the same path: gated presents the behavior\
-    \ report + recommendation and waits; autonomous executes the hop. Flipping to\
-    \ autonomous and watching the bug count is the pitch experiment.\n\nDepends on:\
-    \ pr-b59f0c7 (verdict reason strings), the auto-sequence chain (merged), and ideally\
-    \ the Phase 10 regressions-as-scenarios evidence model (pr-06a96fa). Loop-guard\
-    \ + re-loop wiring is a sibling PR; per-PR HTML report + dashboard are siblings."
+  description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
+    stage between qa and merge with its own window, not logic embedded in the QA loop.
+    It reviews ALL scenarios and ALL steps comprehensively and aggregates evidence
+    across every stage, then routes the PR''s next hop.
+
+
+    NEW LIFECYCLE STATUS: add `sign_off` to the status model. Today the enum is {pending,
+    in_progress, in_review, qa, merged, closed} (pm_core/cli/pr.py:169 valid_statuses,
+    :314 --status Choice). Extend it across: store validation, the --status choices,
+    qa_status color map, the tech tree rendering, and the transition points (qa-finalize
+    -> sign_off; sign_off -> merged, or sign_off -> back to in_progress/in_review/qa
+    on a bounce).
+
+
+    DEDICATED WINDOW: launch a sign-off window like the review/qa windows (pane registry,
+    role-based dedup, window-switch via the now-fixed switch path). A Claude pane
+    drives the comprehensive review; the human-facing behavior report / captures (pr-8e693f6)
+    is the surface shown/linked from this window. Approve/reject + discussion happen
+    here.
+
+
+    COMPREHENSIVE REVIEW: walk EVERY scenario and EVERY step from the QA run — not
+    a spot check. This is why it is a separate step with its own window rather than
+    a quick gate.
+
+
+    CROSS-STAGE EVIDENCE AGGREGATION: read the WHOLE per-PR captures dir, not just
+    final-QA captures. Implementation also generates captures — bug-fix PRs follow
+    reproduce->fix->verify and write repro/verify evidence to `$(pm qa captures-path
+    <pr-id>)/impl/` (the "primary evidence" per bug_fix_prompts.py), and QA scenarios
+    write under scenarios/<n>/. Sign-off includes impl + qa (+ review) captures so
+    a bug-fix''s repro and post-fix verification are part of the sign-off record,
+    not just the QA scenarios.
+
+
+    VERDICT ROUTER (the decision logic): runs over every scenario''s verdict + reason,
+    the aggregated captures/evidence, the diff vs master, and the PR''s scope. Two
+    evaluations: (1) does the captured behavior support the diff''s claims (BDD);
+    (2) meta-QA / anti-shortcut — was the QA itself rigorous (thin evidence, a scenario
+    that drove a mock instead of the real path, an obvious uncovered edge case). Then
+    route:
+
+    - PASS (verified) -> merge (or human gate).
+
+    - PASS (unverified, e.g. verifier-cwd) -> harness problem -> re-qa; do NOT bounce
+    to impl.
+
+    - NEEDS_WORK (scenario fixed it itself) -> a code change happened -> back through
+    review AND qa; validate the fix is real and shortcut-free.
+
+    - INPUT_REQUIRED -> classify: misframed scenario -> note -> re-qa; real gap ->
+    note -> impl; assumed-missing feature -> file new PR + depends_on (block) or expand
+    scope (agent decides); nice-to-have -> defer to new PR or include if trivial;
+    impossible/out-of-scope -> note the limitation.
+
+
+    ROUTER-ONLY: never edits code (all edits happen in impl/qa so they re-pass review+qa).
+    CONSERVATIVE BIAS: on genuine ambiguity, raise INPUT_REQUIRED and escalate rather
+    than merge. AUDIT TRAIL: record every classification + chosen hop as a pm pr note
+    so an autonomous merge is inspectable.
+
+
+    Gated vs autonomous is a config flag on this step. Buildable now against the current
+    verdict+capture model; soft-aligns with pr-b59f0c7 (reason strings) and pr-06a96fa
+    (evidence model) when they land. Loop-guard + auto-run transitions are pr-ff9b728;
+    the report/dashboard surface is pr-8e693f6.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T13:58:59.541347+00:00'
+  updated_at: '2026-05-25T14:11:03.923179+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22866,7 +22894,8 @@ prs:
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-2d5f712
   description: 'The human-facing surface for sign-off (sibling of the verdict router)
     — both the per-PR behavior report and the all-PR dashboard that indexes them,
     combined into one PR since they share a generator and storage layout.
@@ -22900,7 +22929,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T14:01:35.060872+00:00'
+  updated_at: '2026-05-25T14:11:05.397637+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

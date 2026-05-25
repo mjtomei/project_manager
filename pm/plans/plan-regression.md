@@ -357,19 +357,23 @@ Proposals go to a report (no auto-apply) for human or scenario-author follow-up.
 
 ## Phase 11: Sign-off / acceptance gate — the verdict router that closes auto-run
 
-Everything before this phase produces verdicts; nothing decides what to *do* with them without a human. Phase 11 is the capstone: an acceptance/sign-off stage that auto-runs after QA finalization and maps every terminal QA outcome to a next hop, so a PR can advance from QA all the way to merge — or back to the right earlier step — unattended. This is the literal mechanism behind the plan's thesis and the pitch's decisive open question (*can pm drive its own defect count down without a human reviewing every change?*): gated and autonomous are the same code path behind a flag, and flipping to autonomous and watching the bug count is the experiment.
+Everything before this phase produces verdicts; nothing decides what to *do* with them without a human. Phase 11 is the capstone: a first-class **sign-off step** — its own lifecycle status (`sign_off`) and its own window — that runs after QA finalization, reviews every scenario and step, and maps every terminal QA outcome to a next hop, so a PR can advance from QA all the way to merge — or back to the right earlier step — unattended. This is the literal mechanism behind the plan's thesis and the pitch's decisive open question (*can pm drive its own defect count down without a human reviewing every change?*): gated and autonomous are the same code path behind a flag, and flipping to autonomous and watching the bug count is the experiment.
 
-It is distinct from the review loop. Review asks *is the code correct/clean*; sign-off asks *does the captured evidence prove the behavior, with no shortcuts, and is it mergeable*. It reviews PRs **by behavior** (BDD), which is why its human-facing surface is an HTML behavior report rather than a diff.
+It is distinct from the review loop. Review asks *is the code correct/clean*; sign-off asks *does the captured evidence prove the behavior, with no shortcuts, and is it mergeable*. It reviews PRs **by behavior** (BDD), which is why its human-facing surface is an HTML behavior report rather than a diff. Because it walks *all* scenarios and steps and aggregates evidence across every stage — including implementation captures, not just final QA (bug-fix PRs write repro/verify evidence to `$(pm qa captures-path <pr-id>)/impl/`) — it is a real step with its own window, not a quick inline gate.
 
 **Two invariants that make autonomy trustworthy:**
 
 - **Router-only.** The checkoff never edits code. It judges, annotates (`pm pr note`), files follow-up PRs, and sets the next hop. Every code edit happens in impl/qa, so it always passes back through review+qa — including edits the checkoff prompted. A judge that never writes the code it approves is what makes an autonomous merge defensible.
 - **Conservative toward not-merging.** Misclassifying a real gap as "scenario error → re-qa" merges incomplete work (the predicted failure mode); the reverse only wastes an impl cycle. So on genuine ambiguity the checkoff *raises INPUT_REQUIRED itself* and escalates rather than merging.
 
-### PR: Sign-off / acceptance gate — QA verdict router (auto-run capstone)
+### PR: Sign-off step — dedicated window + lifecycle status + comprehensive verdict router
 `pr-2d5f712` (buildable now — no hard deps; *soft*: aligns with `pr-b59f0c7` reason strings and the `pr-06a96fa` evidence model when they land, but reads the current verdict+capture surface and degrades gracefully)
 
-Auto-runs after QA finalization. Reads every scenario's verdict + reason (`pr-b59f0c7`), the captures/evidence, the diff vs master, and the PR's scope (description/plan + bound regression tests). Performs two evaluations — (1) does the captured behavior support the diff's claims; (2) meta-QA / anti-shortcut: was the QA itself rigorous (thin evidence, a scenario that drove a mock instead of the real path, an obvious uncovered edge case) — then routes:
+A distinct flow step, not embedded logic. **New `sign_off` lifecycle status** — extend the enum `{pending, in_progress, in_review, qa, merged, closed}` (`pm_core/cli/pr.py:169`, `:314`) across store validation, `--status` choices, the `qa_status` color map, the tech tree, and the transition points (qa-finalize → `sign_off`; `sign_off` → merged or back to in_progress/in_review/qa on a bounce). **Dedicated window** like review/qa (pane registry, role-based dedup, the now-fixed window-switch path): a Claude pane drives the review and the behavior report (`pr-8e693f6`) is the surface shown there; approve/reject + discussion happen in this window.
+
+**Comprehensive + cross-stage evidence.** Walk *every* scenario and *every* step, and read the *whole* per-PR captures dir — not just final-QA captures. Implementation generates evidence too: bug-fix PRs follow reproduce→fix→verify and write to `$(pm qa captures-path <pr-id>)/impl/` (the "primary evidence" per `bug_fix_prompts.py`), QA scenarios under `scenarios/<n>/`. Sign-off includes impl + qa (+ review) so a bug-fix's repro and post-fix verification are part of the record.
+
+Then the verdict router runs after QA finalization over every scenario's verdict + reason (`pr-b59f0c7`), the aggregated captures/evidence, the diff vs master, and the PR's scope. Two evaluations — (1) does the captured behavior support the diff's claims; (2) meta-QA / anti-shortcut: was the QA itself rigorous (thin evidence, a scenario that drove a mock instead of the real path, an obvious uncovered edge case) — then routes:
 
 - **PASS** (verified) → evidence + anti-shortcut review → merge (or human gate).
 - **PASS** (unverified, e.g. the verifier-cwd case) → harness problem → re-qa; do *not* bounce to impl.
@@ -379,7 +383,7 @@ Auto-runs after QA finalization. Reads every scenario's verdict + reason (`pr-b5
 Every classification + chosen hop is recorded as a `pm pr note` (audit trail, prefer-pm-pr-notes), so an autonomous merge is inspectable after the fact. Gated vs autonomous is a config flag on this path. Loop-guard + re-loop wiring is `pr-ff9b728`; the per-PR behavior report + dashboard are `pr-8e693f6`.
 
 ### PR: Sign-off UI — per-PR BDD report + all-PR behavior dashboard (HTML)
-`pr-8e693f6` (buildable now in parallel with the router — no hard deps; *soft*: renders the router's recommendation block once `pr-2d5f712` lands, forward-compatible with the `pr-06a96fa` evidence model)
+`pr-8e693f6` (depends on: `pr-2d5f712` — the report is the surface shown in the sign-off window; forward-compatible with the `pr-06a96fa` evidence model)
 
 The human-facing surface for sign-off — the per-PR report plus the dashboard that indexes them, combined since they share a generator and storage layout.
 
@@ -394,7 +398,7 @@ Wires the router into both single-PR runs and the dependency-aware auto-start, w
 
 **Single-PR mode.** A CLI/TUI entry to run the full sign-off + auto-run loop on one PR (e.g. `pm pr signoff <id>` / `pm pr auto <id>`), independent of a full auto-start sweep — reuses the router, loop guard, and re-loop invariant.
 
-**Auto-start integration.** Insert sign-off as a stage in the dependency-aware orchestrator (`pm_core/tui/auto_start.py` `check_and_start`: review → qa → **sign-off** → merge), scoped to the target's dependency tree (`_transitive_deps`) like the existing loops.
+**Auto-start integration.** Insert the sign-off step into the dependency-aware orchestrator (`pm_core/tui/auto_start.py` `check_and_start`: review → qa → **sign_off** → merge), driving the `sign_off` status transitions (added in `pr-2d5f712`) and scoped to the target's dependency tree (`_transitive_deps`) like the existing loops. Single-PR mode and auto-start drive the same sign-off window/step.
 
 **Re-loop invariant.** Any code/content change (impl, or a NEEDS_WORK fix a scenario worker made) routes back through review **and** qa before merge — no shortcut; note-only actions don't re-trigger review (recording a limitation then merging; note→re-qa; and notes on *other* PRs in `project.yaml` never require review).
 
@@ -434,6 +438,7 @@ Wires the router into both single-PR runs and the dependency-aware auto-start, w
 - All Phase 1-5 features re-validated under the new flow via the bridge PR (`pr-fbda1a8`) before the regression loop is declared unsupervised-ready
 
 **Sign-off / acceptance gate (Phase 11, pending — closes auto-run):**
+- Sign-off is a first-class step with its own `sign_off` status and window (`pr-2d5f712`); it reviews every scenario and step and aggregates evidence across all stages, including implementation captures (`impl/`), not just final QA
 - Every PR that finalizes QA gets an auto-generated BDD behavior report, and the dashboard (both `pr-8e693f6`) reviews all PRs by behavior + status with merged/unmerged filtering and regenerates missing reports
 - The verdict router (`pr-2d5f712`) maps every terminal verdict to a next hop, edits no code, and escalates to INPUT_REQUIRED on genuine ambiguity rather than merging incomplete work
 - The gate runs both on a single PR on demand and as a stage inside dependency-aware auto-start (`pr-ff9b728`); auto-run re-loops through review+qa on any code change, never on note-only actions; the loop guard (default 10) + repeated-root-cause escalation prevent infinite bounce loops
