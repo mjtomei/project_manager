@@ -64,7 +64,7 @@ This is the load-bearing change: the regression library starts to *compound* —
 
 **Pending (28)** — Phases 6-11:
 - Phase 6 — test backfill (1): pr-fbda1a8
-- Phase 7 — evidence-gated bug fix loop (5): pr-eb450a0, pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
+- Phase 7 — evidence-gated bug fix loop (4): pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
 - Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
 - Phase 9 — headless / unsupervised hardening + single-prompt capstone (7): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf (realistic capstone), pr-0cf3626 (exact-ProgramBench offshoot)
 - Phase 10 — QA loop surface improvements (8): pr-9603d04, pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2
@@ -170,12 +170,9 @@ Goal: tighten the bug-fix flow until the loop can run unsupervised. The earlier 
 ### PR: Bug-fix flow surface TUI QA repro instructions in session prompt ✅ MERGED (#190)
 `pr-6be8ee6` (plan=improvements)
 
-Adds a "did you reproduce on pre-fix code?" gate to `_BUG_FIX_FLOW_BLOCK` and references `pm/qa/instructions/tui-manual-test.md` for TUI bugs. Tracked under improvements but is the prompt-side prerequisite for the evidence-artifact PR below — listed here for plan visibility.
+Adds a "did you reproduce on pre-fix code?" gate to `_BUG_FIX_FLOW_BLOCK` and references `pm/qa/instructions/tui-manual-test.md` for TUI bugs. Tracked under improvements; the bug-fix repro/verify captures land in `$(pm qa captures-path)/impl/` (per `bug_fix_prompts.py`).
 
-### PR: Persist pre-fix repro and post-fix verification evidence as artifacts
-`pr-eb450a0` (depends on: pr-6be8ee6)
-
-Make the prompt-level repro/verify gates machine-checkable. Sessions write `pm/evidence/<pr_id>/pre-fix.md` (sha + commands + captured output showing the bug, before any source modification) and `pm/evidence/<pr_id>/post-fix.md` (sha on fix branch + commands + captured output showing the bug is gone, referencing pre-fix.md). Bug-fix implementation watcher refuses to advance to review without `pre-fix.md`; review/QA verdict gate refuses PASS without `post-fix.md`.
+> **Closed — `pr-eb450a0` (persist pre-fix/post-fix evidence as `pm/evidence/*.md`):** its premise — a deterministic gate over session-written repro artifacts — is unsound, because nothing binds a session-written capture to the code state that produced it (the sha in the file is self-reported, not proof). The *verifiable* machine-checkable repro is the **harness-run regression test** (Phase 10: fails at the pre-fix parent sha, passes at the fix sha, both run by the runner), and the qualitative "is this real evidence / no shortcuts" judgment is the **sign-off step** (Phase 11). Repro/verify captures already persist to `/impl/`; no separate `pm/evidence/` store.
 
 ### PR: QA code coverage of exercised lines factors into PASS verdict
 `pr-b42059d` (pending)
@@ -391,7 +388,7 @@ Sign-off concretizes the taste-check / merge-gating the impl watchers improvise 
 Three earlier mechanisms are *absorbed*, not duplicated:
 - **Meta-QA builds on the scenario quality supervisor (`pr-98f670e`).** `98f670e` catches false-PASS per scenario, inline; sign-off's anti-shortcut pass is the PR-level review over scenarios it already vetted (cross-scenario gaps + mergeability), trusting per-scenario depth to `98f670e`.
 - **The loop guard reuses the no-progress primitive (`pr-ed10ac4`).** `ed10ac4` is within-loop; the loop guard is its across-bounce counterpart and reuses the hashing rather than a parallel mechanism.
-- **Evidence comes from both stores** — `pr-eb450a0`'s `pm/evidence/<pr_id>/{pre,post}-fix.md` and the raw `impl/` captures.
+- **Evidence is the captures + the harness-run regression results** — `/impl/` and `/scenarios/` captures plus the Phase 10 regression test's pre-fix-fails / post-fix-passes result; sign-off judges them. Provenance comes from the harness running the regression at a known sha, not from a session-written file (which is why the `pm/evidence` gate idea was dropped — see Phase 7).
 
 ### PR: Sign-off step — dedicated window + lifecycle status + comprehensive verdict router
 `pr-2d5f712` (buildable now — no hard deps; *soft*: aligns with `pr-b59f0c7` reason strings and the `pr-06a96fa` evidence model when they land, but reads the current verdict+capture surface and degrades gracefully)

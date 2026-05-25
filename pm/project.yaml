@@ -14357,98 +14357,6 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfe24ea-picker-action-open-shell-pane-in-cur-563aedc0
-- id: pr-eb450a0
-  plan: plan-regression
-  title: 'Bug-fix flow: persist pre-fix repro and post-fix verification evidence as
-    artifacts'
-  branch: pm/pr-eb450a0-bug-fix-flow-persist-pre-fix-repro-and-post-fix-ve
-  status: pending
-  depends_on:
-  - pr-6be8ee6
-  description: 'Make the bug-fix loop''s reproduce / fix / verify steps produce machine-checkable
-    artifacts on disk, so the watcher and merge gate can confirm each step actually
-    happened (not just that the prompt asked for it).
-
-
-    ## Motivation
-
-
-    #190 / pr-6be8ee6 adds a ''did you reproduce on pre-fix code?'' gate to the bug-fix
-    prompt, but the gate is purely advisory — nothing attests that the session actually
-    performed the repro. For unsupervised runs we need evidence on disk so the watcher
-    / verdict can hard-gate on it.
-
-
-    ## Proposed convention
-
-
-    Persist evidence under `pm/evidence/<pr_id>/`:
-
-
-    - `pre-fix.md` — written before the fix is applied. Must include: the sha that
-    was checked out for repro (parent / pre-fix), the exact commands or test invocation
-    used, and the captured output / log / screenshot path showing the bug occurring.
-    The session must produce this file *before* modifying any source.
-
-    - `post-fix.md` — written after the fix is applied on the fix branch. Same structure:
-    sha (HEAD of fix branch), commands, captured output showing the bug no longer
-    reproduces. Must reference `pre-fix.md` so the diff of behavior is auditable.
-
-
-    For TUI bugs the captured output is a `pm tui view` snapshot; for CLI bugs it
-    is the relevant stdout/stderr; for unit-testable bugs it can be a pytest output.
-
-
-    ## Watcher / gate behavior
-
-
-    - Bug-fix implementation watcher (#177) refuses to mark the PR ready-for-review
-    unless `pre-fix.md` exists and references a sha != HEAD of the fix branch.
-
-    - Review/QA verdict gate refuses PASS unless `post-fix.md` exists and references
-    HEAD of the fix branch (or a descendant sha).
-
-    - If the fix is fundamentally not reproducible (rare), the session writes `pre-fix.md`
-    with an explicit ''NOT_REPRODUCIBLE'' marker and a justification; this routes
-    to INPUT_REQUIRED instead of silently proceeding.
-
-
-    ## Code paths
-
-    - pm_core/prompt_gen.py: extend _BUG_FIX_FLOW_BLOCK to instruct writing the artifacts
-    and reference the path convention.
-
-    - pm_core/watchers/<bug-fix-impl>: check `pre-fix.md` exists and sha-references
-    parent before allowing review handoff.
-
-    - pm_core/qa or review verdict path: check `post-fix.md` references fix-branch
-    sha before PASS.
-
-    - pm/evidence/ added to .gitignore? — open question. Probably git-track it so
-    reviewers can read the evidence and so it survives workdir cleanup. Decide during
-    impl.
-
-
-    ## Out of scope
-
-    - Auto-generating the artifacts from session output (would be nice, but for now
-    the session writes them explicitly).
-
-    - Evidence formats for non-bug PR types.
-
-
-    ## Depends on
-
-    - #190 / pr-6be8ee6 (introduces the pre-fix repro gate this PR makes machine-checkable)'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-04T14:32:28.076697+00:00'
-  updated_at: '2026-05-17T20:19:52.362922+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-8ed578d
   plan: plan-regression
   title: 'QA: fix-line coverage gate ties coverage to the diff so PASS requires the
@@ -22814,9 +22722,11 @@ prs:
     final-QA captures. Implementation also generates captures — bug-fix PRs follow
     reproduce->fix->verify and write repro/verify evidence to $(pm qa captures-path
     <pr-id>)/impl/ (the "primary evidence" per bug_fix_prompts.py), and QA scenarios
-    write under scenarios/<n>/. Also read pr-eb450a0''s machine-checkable pm/evidence/<pr_id>/{pre,post}-fix.md.
-    Sign-off includes impl + qa (+ review) so a bug-fix''s repro and post-fix verification
-    are part of the record.
+    write under scenarios/<n>/. Also factor in the harness-run regression result (Phase
+    10: fails at the pre-fix parent sha, passes at the fix sha) — provenance comes
+    from the harness running the regression at a known sha, not from any session-written
+    file. Sign-off includes impl + qa (+ review) so a bug-fix''s repro and post-fix
+    verification are part of the record.
 
 
     VERDICT ROUTER (the decision logic): runs over every scenario''s verdict + reason,
@@ -22861,7 +22771,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T14:39:21.518478+00:00'
+  updated_at: '2026-05-25T15:23:36.138064+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
