@@ -22990,11 +22990,52 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T21:41:45.984364+00:00'
-  updated_at: '2026-05-25T21:41:45.984364+00:00'
+  updated_at: '2026-05-25T21:53:32.971362+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0dd3c7a
+    text: 'Fix landed (commit 7b6dc7b9). Root cause: leaked RUNNING containers from
+      finished PRs hold session keys in the rootless-podman ns-root keyring; at quota
+      (200 keys) every podman run/exec fails -> container QA silently degrades host-wide.
+      Pruning STOPPED containers does not free the keys.
+
+
+      Fix surface:
+
+      - container.reap_orphaned_containers(): removes running+stopped pm containers
+      whose PR is merged/closed or whose tmux session is gone (cross-PR, cross-session).
+      Conservative: keeps active PRs with live sessions; skips when indeterminate
+      (no false reaps of live workers).
+
+      - create_container now detects the keyring signature on podman run/exec stderr
+      and raises a clear actionable ContainerError (reap; raise keys.maxkeys/maxbytes)
+      instead of the old generic "memory pressure" timeout. Also fixed dangling "pm
+      session cleanup" reference (no such cmd).
+
+      - qa_loop: reap at QA-start (covers OTHER finished PRs, not just this PR windows)
+      + configurable qa-max-containers ceiling on the launch batch (reap, then clamp;
+      rest queue).
+
+      - CLI: pm container reap [--dry-run]; keyring headroom in pm container status;
+      reap cross-session orphans on pm session kill.
+
+
+      Repro note: the literal 200/200 keyring-exhaustion symptom needs ~200 real running
+      containers and is NOT reproducible as a unit test or in the sandbox. Codified
+      instead with unit tests (tests/test_container.py: parsing, keyring detect/parse,
+      reaper orphan logic, running count) + a real-podman capture under captures/pr-4265093/impl/{pre-fix,post-fix}:
+      3 leaked containers (merged PR / live-session active PR / dead-session PR),
+      reaper removes exactly the 2 orphans and frees their keyring keys, keeps the
+      live one.
+
+
+      Did NOT change: kernel keyring sysctl is left to operator (needs root; documented
+      in the error). Sibling bug pr (QA masks failed-launch as INPUT_REQUIRED) is
+      separate.'
+    created_at: '2026-05-25T21:53:32Z'
+    last_edited: '2026-05-25T21:53:32Z'
 - id: pr-7ab0a99
   plan: bugs
   title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
