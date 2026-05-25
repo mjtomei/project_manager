@@ -53,6 +53,12 @@ VERDICT_STYLES = {
     "INPUT_REQUIRED": "bold red",
 }
 
+# Sign-off verdict markers/styles live in pm_core.signoff (single source of
+# truth shared with `pm pr list`); re-exported here for the node renderer.
+from pm_core.signoff import (  # noqa: E402
+    SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES,
+)
+
 SPINNER_FRAMES = "◐◓◑◒"
 
 
@@ -585,6 +591,19 @@ class PRNode(Widget):
                     loop_style = "bold yellow"
                     status_text += " ⏸"
                 elif qa_state == "active":
+                    spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
+                    marker_offset = 2 + len(status_text) + 1
+                    loop_style = "bold cyan"
+                    status_text += f" {spinner}"
+            elif status == "sign_off":
+                # Sign-off is running until the router records a verdict: show
+                # the latest verdict icon if recorded, else animate the spinner.
+                verdict = (pr.get("signoff") or {}).get("verdict")
+                if verdict in SIGNOFF_VERDICT_ICONS:
+                    marker_offset = 2 + len(status_text) + 1
+                    loop_style = SIGNOFF_VERDICT_STYLES.get(verdict, "bold blue")
+                    status_text += f" {SIGNOFF_VERDICT_ICONS[verdict]}"
+                elif pr.get("workdir"):
                     spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold cyan"

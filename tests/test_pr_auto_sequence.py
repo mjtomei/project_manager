@@ -297,40 +297,75 @@ class TestSignOff:
         assert result.exit_code == 0, result.output
         assert "advanced: sign_off_relaunched" in result.output
 
-    def test_merge_autonomous_reports_ready(self, runner, tmp_path):
+    def test_merge_always_reports_ready(self, runner, tmp_path):
+        """Sign-off always gates: SIGNOFF_MERGE -> ready_to_merge recommendation."""
         pr = _pr("sign_off")
         data = _data_with(pr)
-        data["project"]["sign_off_autonomous"] = True
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
              patch("pm_core.cli.pr.store.load", return_value=data), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.cli.pr._check_signoff_verdict",
-                   return_value="SIGNOFF_MERGE"):
+                   return_value="SIGNOFF_MERGE"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)):
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
         assert "ready_to_merge" in result.output
-
-    def test_merge_gated_holds(self, runner, tmp_path):
-        pr = _pr("sign_off")  # default gated (no sign_off_autonomous)
-        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
-             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
-             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
-             patch("pm_core.cli.pr._check_signoff_verdict",
-                   return_value="SIGNOFF_MERGE"):
-            result = runner.invoke(pr_auto_sequence, ["pr-001"])
-        assert result.exit_code == 0, result.output
-        assert "held: sign_off_gated" in result.output
+        # PR stays in sign_off (sign-off never merges)
+        assert pr["status"] == "sign_off"
 
     def test_blocked_pauses(self, runner, tmp_path):
         pr = _pr("sign_off")
+        data = _data_with(pr)
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
-             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.cli.pr._check_signoff_verdict",
-                   return_value="SIGNOFF_BLOCKED"):
+                   return_value="SIGNOFF_BLOCKED"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)):
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
         assert "paused: sign_off_blocked" in result.output
+
+    def test_adopts_fresh_recorded_verdict(self, runner, tmp_path):
+        """A fresh record (sha == HEAD) is adopted without relaunch or transcript."""
+        pr = _pr("sign_off")
+        pr["signoff"] = {"verdict": "SIGNOFF_REQA", "sha": "abc", "origin": "manual"}
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.signoff.head_sha", return_value="abc"), \
+             patch("pm_core.cli.pr._check_signoff_verdict") as mock_tx, \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "sign_off: re-qa" in result.output
+        assert pr["status"] == "qa"
+        mock_tx.assert_not_called()        # adopted record, didn't read transcript
+        mock_qa.assert_called_once()
+
+    def test_records_transcript_verdict_when_no_fresh_record(self, runner, tmp_path):
+        pr = _pr("sign_off")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.signoff.head_sha", return_value="abc"), \
+             patch("pm_core.cli.pr._check_signoff_verdict",
+                   return_value="SIGNOFF_BLOCKED"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)):
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "paused: sign_off_blocked" in result.output
+        # the transcript verdict was recorded (origin auto-sequence) for adoption
+        assert pr["signoff"]["verdict"] == "SIGNOFF_BLOCKED"
+        assert pr["signoff"]["origin"] == "auto-sequence"
+        assert pr["signoff"]["sha"] == "abc"
 
     def test_reqa_relaunches_qa(self, runner, tmp_path):
         pr = _pr("sign_off")
@@ -383,26 +418,4 @@ class TestSignOff:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
         assert "sign_off: returning to impl" in result.output
-        assert pr["status"] == "in_progress"
-
-    def test_bug_pr_missing_captures_blocks_merge(self, runner, tmp_path):
-        """A bug PR missing captures: MERGE verdict is overridden to an impl bounce."""
-        pr = _pr("sign_off", plan="bugs")
-        data = _data_with(pr)
-        data["project"]["sign_off_autonomous"] = True
-        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
-             patch("pm_core.cli.pr.store.load", return_value=data), \
-             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
-             patch("pm_core.cli.pr._check_signoff_verdict",
-                   return_value="SIGNOFF_MERGE"), \
-             patch("pm_core.signoff.bug_fix_capture_status",
-                   return_value=(False, True)), \
-             patch("pm_core.cli.pr.store.locked_update",
-                   side_effect=_locked_update_runs(data)), \
-             patch("pm_core.cli.pr.pr_start") as mock_start:
-            mock_start.callback = MagicMock()
-            result = runner.invoke(pr_auto_sequence, ["pr-001"])
-        assert result.exit_code == 0, result.output
-        assert "sign_off: returning to impl" in result.output
-        assert "ready_to_merge" not in result.output
         assert pr["status"] == "in_progress"

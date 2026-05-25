@@ -393,7 +393,8 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
 
 
 def generate_signoff_prompt(data: dict, pr_id: str,
-                            session_name: str | None = None) -> str:
+                            session_name: str | None = None,
+                            origin: str = "manual") -> str:
     """Generate a Claude Code prompt for the sign-off step of a PR.
 
     Sign-off is the PR-level comprehensive review that runs *after* QA passes
@@ -407,7 +408,6 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     """
     from pm_core.signoff import (
         SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
-        bug_fix_capture_status,
     )
 
     pr = store.get_pr(data, pr_id)
@@ -446,28 +446,15 @@ def generate_signoff_prompt(data: dict, pr_id: str,
 
     bug_note = ""
     if _is_bug_pr(pr):
-        has_pre, has_post = bug_fix_capture_status(pr_id)
-        pre_state = "present" if has_pre else "**MISSING**"
-        post_state = "present" if has_post else "**MISSING**"
-        gate = ""
-        if not (has_pre and has_post):
-            gate = (
-                "\n> **CAPTURE GATE FAILED** — a bug fix is not demonstrated "
-                "without BOTH captures. You MUST route **" + SIGNOFF_IMPL +
-                "** (note which is missing); pm will reject a merge here "
-                "regardless of any other verdict.\n")
         bug_note = (
-            "\n## Bug-fix capture gate (REQUIRED)\n"
-            "This is a **bug-fix PR**: the implementation must follow "
-            "reproduce → fix → verify and write its *primary* evidence to "
-            "`$CAP/impl/pre-fix/` (the failing repro on pre-fix code) and "
-            "`$CAP/impl/post-fix/` (the post-fix verification). BOTH must "
-            "exist or the fix has not been demonstrated.\n"
-            f"- Pre-fix capture (`$CAP/impl/pre-fix/`): {pre_state}\n"
-            f"- Post-fix capture (`$CAP/impl/post-fix/`): {post_state}\n"
-            "Inspect the captures yourself to confirm they actually show the "
-            "bug and its absence — do not trust the directory listing alone.\n"
-            + gate)
+            "\n## Bug-fix evidence\n"
+            "This is a **bug-fix PR** (reproduce → fix → verify). Its primary "
+            "evidence lives under `$CAP/impl/pre-fix/` (the failing repro on "
+            "pre-fix code) and `$CAP/impl/post-fix/` (the post-fix "
+            "verification). Read both and judge, as part of your per-step "
+            "review, whether they genuinely demonstrate the bug and its "
+            "absence — a fix with thin or missing repro/verify evidence has "
+            "not really been shown to work (route " + SIGNOFF_IMPL + ").\n")
 
     prompt = f"""You are the **sign-off reviewer** for PR {pr_id}: "{title}"
 
@@ -531,12 +518,21 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
 
 4. **Record an audit trail.** For every classification and the hop you choose,
    add a `pm pr note add {pr_id} '...'` entry stating what you found and why you
-   routed where you did, so an autonomous merge is fully inspectable.
+   routed where you did, so the recommendation is fully inspectable.
 
-5. **Route** by ending with exactly ONE verdict keyword on its own line:
+5. **Record your verdict** durably so it can be adopted without a re-run:
+   ```
+   pm pr signoff record {pr_id} <VERDICT> --origin {origin}
+   ```
+   (replace `<VERDICT>` with the keyword you chose below). This only RECORDS a
+   recommendation — it does not act. Sign-off never merges; the actual next hop
+   is executed later, only under the auto-sequence driver.
 
-   - **{SIGNOFF_MERGE}** — verified PASS: the evidence supports the diff and the
-     QA was rigorous. Ready to merge (or to hold for a human gate).
+6. **Route** by ending with exactly ONE verdict keyword on its own line:
+
+   - **{SIGNOFF_MERGE}** — PASS: the evidence supports the diff and the QA was
+     rigorous. This is a RECOMMENDATION to merge — sign-off never merges itself;
+     the PR is reported ready_to_merge and the merge decision is made later.
    - **{SIGNOFF_REQA}** — PASS but *unverified* (e.g. a verifier-cwd / harness
      problem made the PASS untrustworthy) OR a scenario was *misframed*. This is
      a harness/QA problem, not a code problem → re-run QA. Do NOT bounce to impl.

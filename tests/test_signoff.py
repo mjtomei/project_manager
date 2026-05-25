@@ -7,7 +7,8 @@ from pm_core import signoff
 from pm_core.signoff import (
     SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
     SIGNOFF_VERDICTS, decide_signoff_hop, apply_signoff_hop,
-    is_signoff_autonomous, signoff_window_name,
+    record_signoff_verdict, fresh_recorded_verdict, latest_signoff_verdict,
+    signoff_window_name,
 )
 
 
@@ -25,37 +26,6 @@ def _patch_locked_update(data: dict):
         fn(data)
         return data
     return patch("pm_core.signoff.store.locked_update", side_effect=_side)
-
-
-class TestConfigFlag:
-    def test_default_gated(self):
-        assert is_signoff_autonomous({}) is False
-        assert is_signoff_autonomous({"project": {}}) is False
-
-    def test_autonomous_true(self):
-        assert is_signoff_autonomous(
-            {"project": {"sign_off_autonomous": True}}) is True
-
-    def test_per_plan_override_wins(self):
-        # Forward seam for pr-ff9b728: per-plan map overrides project default.
-        data = {"project": {
-            "sign_off_autonomous": False,
-            "plan_sign_off_autonomous": {"bugs": True, "ux": False},
-        }}
-        assert is_signoff_autonomous(data, {"plan": "bugs"}) is True
-        assert is_signoff_autonomous(data, {"plan": "ux"}) is False
-        # plan not in the map -> project-level default
-        assert is_signoff_autonomous(data, {"plan": "other"}) is False
-        # no pr -> project-level default
-        assert is_signoff_autonomous(data) is False
-
-    def test_per_plan_falls_back_to_project(self):
-        data = {"project": {"sign_off_autonomous": True}}
-        assert is_signoff_autonomous(data, {"plan": "bugs"}) is True
-
-    def test_autonomous_false(self):
-        assert is_signoff_autonomous(
-            {"project": {"sign_off_autonomous": False}}) is False
 
 
 class TestWindowName:
@@ -78,29 +48,27 @@ class TestVerdictVocab:
 class TestDecideHop:
     """The DECISION half is pure — never touches the store (no patch needed)."""
 
-    def test_merge_autonomous(self):
-        assert decide_signoff_hop(SIGNOFF_MERGE, autonomous=True) == "merge"
-
-    def test_merge_gated(self):
-        assert decide_signoff_hop(SIGNOFF_MERGE, autonomous=False) == "held"
+    def test_merge_always_recommendation(self):
+        # Sign-off always gates at merge: SIGNOFF_MERGE -> recommendation only.
+        assert decide_signoff_hop(SIGNOFF_MERGE) == "ready_to_merge"
 
     def test_blocked(self):
-        assert decide_signoff_hop(SIGNOFF_BLOCKED, autonomous=True) == "blocked"
+        assert decide_signoff_hop(SIGNOFF_BLOCKED) == "blocked"
 
     def test_bounce_hops(self):
-        assert decide_signoff_hop(SIGNOFF_REQA, autonomous=False) == "qa"
-        assert decide_signoff_hop(SIGNOFF_REVIEW, autonomous=False) == "review"
-        assert decide_signoff_hop(SIGNOFF_IMPL, autonomous=False) == "impl"
+        assert decide_signoff_hop(SIGNOFF_REQA) == "qa"
+        assert decide_signoff_hop(SIGNOFF_REVIEW) == "review"
+        assert decide_signoff_hop(SIGNOFF_IMPL) == "impl"
 
     def test_unknown_verdict(self):
-        assert decide_signoff_hop(None, autonomous=True) == "unknown"
-        assert decide_signoff_hop("GARBAGE", autonomous=True) == "unknown"
+        assert decide_signoff_hop(None) == "unknown"
+        assert decide_signoff_hop("GARBAGE") == "unknown"
 
     def test_decision_is_side_effect_free(self):
         """decide must not call into the store at all."""
         with patch("pm_core.signoff.store.locked_update") as lu:
-            decide_signoff_hop(SIGNOFF_REQA, autonomous=False)
-            decide_signoff_hop(SIGNOFF_MERGE, autonomous=True)
+            decide_signoff_hop(SIGNOFF_REQA)
+            decide_signoff_hop(SIGNOFF_MERGE)
         lu.assert_not_called()
 
 
@@ -125,10 +93,10 @@ class TestApplyHop:
             assert apply_signoff_hop(Path("/x"), "pr-001", "impl") == "impl"
         assert data["prs"][0]["status"] == "in_progress"
 
-    def test_merge_held_blocked_no_state_change(self):
-        """Non-bounce hops never touch the store."""
+    def test_ready_to_merge_blocked_no_state_change(self):
+        """Non-bounce hops never touch the store (sign-off owns no merge)."""
         with patch("pm_core.signoff.store.locked_update") as lu:
-            for hop in ("merge", "held", "blocked", "unknown"):
+            for hop in ("ready_to_merge", "blocked", "unknown"):
                 assert apply_signoff_hop(Path("/x"), "pr-001", hop) == hop
         lu.assert_not_called()
 
@@ -141,39 +109,75 @@ class TestApplyHop:
         assert data["prs"][0]["status"] == "merged"
 
 
-class TestBugCaptureGate:
-    def test_missing_captures_override_merge_to_impl(self):
-        # The gate lives in the pure decision: a missing-capture bug PR's MERGE
-        # is downgraded to an impl bounce before any side-effect.
-        assert decide_signoff_hop(
-            SIGNOFF_MERGE, autonomous=True, bug_captures_ok=False) == "impl"
+class TestVerdictRecordAdoption:
+    def test_record_writes_signoff_dict(self):
+        data = _data("sign_off")
+        with _patch_locked_update(data):
+            record_signoff_verdict(
+                Path("/x"), "pr-001", SIGNOFF_MERGE, "abc123", "manual")
+        rec = data["prs"][0]["signoff"]
+        assert rec["verdict"] == SIGNOFF_MERGE
+        assert rec["sha"] == "abc123"
+        assert rec["origin"] == "manual"
+        assert rec["ts"]
 
-    def test_present_captures_allow_merge(self):
-        assert decide_signoff_hop(
-            SIGNOFF_MERGE, autonomous=True, bug_captures_ok=True) == "merge"
+    def test_fresh_when_sha_matches(self):
+        pr = {"signoff": {"verdict": SIGNOFF_REQA, "sha": "abc"}}
+        assert fresh_recorded_verdict(pr, "abc") == SIGNOFF_REQA
 
-    def test_non_bug_pr_not_gated(self):
-        assert decide_signoff_hop(
-            SIGNOFF_MERGE, autonomous=True, bug_captures_ok=None) == "merge"
+    def test_stale_when_sha_differs(self):
+        pr = {"signoff": {"verdict": SIGNOFF_REQA, "sha": "abc"}}
+        assert fresh_recorded_verdict(pr, "def") is None
 
-    def test_capture_status_reads_impl_dirs(self, tmp_path):
-        cap = tmp_path / "captures" / "pr-001"
-        (cap / "impl" / "pre-fix").mkdir(parents=True)
-        (cap / "impl" / "pre-fix" / "repro.cast").write_text("x")
-        # post-fix dir exists but is empty -> counts as missing
-        (cap / "impl" / "post-fix").mkdir(parents=True)
-        with patch("pm_core.paths.captures_dir", return_value=cap):
-            has_pre, has_post = signoff.bug_fix_capture_status("pr-001")
-        assert has_pre is True
-        assert has_post is False
+    def test_absent_record_or_unknown_sha(self):
+        assert fresh_recorded_verdict({}, "abc") is None
+        # current sha unknown -> can't establish freshness
+        assert fresh_recorded_verdict(
+            {"signoff": {"verdict": SIGNOFF_REQA, "sha": "abc"}}, None) is None
 
-    def test_capture_status_both_present(self, tmp_path):
-        cap = tmp_path / "captures" / "pr-001"
-        for sub in ("pre-fix", "post-fix"):
-            (cap / "impl" / sub).mkdir(parents=True)
-            (cap / "impl" / sub / "cap.txt").write_text("x")
-        with patch("pm_core.paths.captures_dir", return_value=cap):
-            assert signoff.bug_fix_capture_status("pr-001") == (True, True)
+    def test_latest_verdict_ignores_staleness(self):
+        pr = {"signoff": {"verdict": SIGNOFF_IMPL, "sha": "old"}}
+        assert latest_signoff_verdict(pr) == SIGNOFF_IMPL
+        assert latest_signoff_verdict({}) is None
+
+
+class TestVerdictIcons:
+    def test_each_verdict_has_distinct_icon(self):
+        from pm_core.signoff import SIGNOFF_VERDICT_ICONS
+        icons = [SIGNOFF_VERDICT_ICONS[v] for v in SIGNOFF_VERDICTS]
+        assert len(set(icons)) == len(SIGNOFF_VERDICTS)  # all distinct
+        for v in SIGNOFF_VERDICTS:
+            assert v in SIGNOFF_VERDICT_ICONS
+
+    def test_signoff_verdict_icon_helper(self):
+        assert signoff.signoff_verdict_icon(SIGNOFF_MERGE) == \
+            signoff.SIGNOFF_VERDICT_ICONS[SIGNOFF_MERGE]
+        assert signoff.signoff_verdict_icon(None) == ""
+        assert signoff.signoff_verdict_icon("GARBAGE") == ""
+
+    def test_tech_tree_reexports_same_maps(self):
+        from pm_core.tui import tech_tree
+        assert tech_tree.SIGNOFF_VERDICT_ICONS is signoff.SIGNOFF_VERDICT_ICONS
+        assert tech_tree.SIGNOFF_VERDICT_STYLES is signoff.SIGNOFF_VERDICT_STYLES
+
+
+class TestPrListLine:
+    def test_sign_off_without_verdict(self):
+        from pm_core.cli.helpers import format_pr_line
+        line = format_pr_line({"id": "pr-001", "title": "T", "status": "sign_off"})
+        assert "[sign_off]" in line
+
+    def test_sign_off_with_verdict_icon(self):
+        from pm_core.cli.helpers import format_pr_line
+        line = format_pr_line({"id": "pr-001", "title": "T", "status": "sign_off",
+                               "signoff": {"verdict": SIGNOFF_IMPL}})
+        assert signoff.signoff_verdict_icon(SIGNOFF_IMPL) in line
+        assert "[sign_off " in line  # icon appended inside the status bracket
+
+    def test_non_sign_off_unaffected(self):
+        from pm_core.cli.helpers import format_pr_line
+        line = format_pr_line({"id": "pr-001", "title": "T", "status": "qa"})
+        assert "[qa]" in line
 
 
 class TestSignoffCommand:
@@ -252,24 +256,25 @@ class TestPrompt:
         assert "Per-step acceptance criteria" in p
         for token in ("Implementation (impl)", "Review", "QA"):
             assert token in p
+        # verdict self-record instruction (adoption seam)
+        assert "pm pr signoff record pr-001" in p
+        # merge is always a recommendation now (no autonomy/hardcoded gate)
+        assert "never merges" in p.lower()
 
-    def test_bug_pr_capture_gate_shown_when_missing(self, tmp_path):
+    def test_record_instruction_carries_origin(self):
         from pm_core import prompt_gen
         data = _data("sign_off")
-        data["prs"][0]["plan"] = "bugs"  # mark as bug PR
-        with patch("pm_core.signoff.bug_fix_capture_status",
-                   return_value=(False, False)):
-            p = prompt_gen.generate_signoff_prompt(data, "pr-001")
-        assert "Bug-fix capture gate" in p
-        assert "CAPTURE GATE FAILED" in p
-        assert "**MISSING**" in p
+        p = prompt_gen.generate_signoff_prompt(
+            data, "pr-001", origin="auto-sequence")
+        assert "--origin auto-sequence" in p
 
-    def test_bug_pr_capture_gate_passes_when_present(self):
+    def test_no_capture_gate_language(self):
+        """The deterministic capture gate was removed (display moved to #226)."""
         from pm_core import prompt_gen
         data = _data("sign_off")
         data["prs"][0]["plan"] = "bugs"
-        with patch("pm_core.signoff.bug_fix_capture_status",
-                   return_value=(True, True)):
-            p = prompt_gen.generate_signoff_prompt(data, "pr-001")
-        assert "Bug-fix capture gate" in p
+        p = prompt_gen.generate_signoff_prompt(data, "pr-001")
         assert "CAPTURE GATE FAILED" not in p
+        assert "capture gate" not in p.lower()
+        # but bug repro/verify evidence is still part of the review
+        assert "pre-fix" in p and "post-fix" in p

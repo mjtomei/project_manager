@@ -52,30 +52,29 @@ SIGNOFF_VERDICTS = (
     SIGNOFF_BLOCKED,
 )
 
+# Distinct display markers per sign-off verdict (single source of truth for
+# both the TUI tech tree and `pm pr list`).  Kept here (core, no TUI deps) so
+# CLI and TUI render the recorded verdict identically.
+SIGNOFF_VERDICT_ICONS = {
+    SIGNOFF_MERGE: "▲",    # recommend merge (forward)
+    SIGNOFF_REQA: "↻",     # re-qa
+    SIGNOFF_REVIEW: "↩",   # back to review
+    SIGNOFF_IMPL: "⇤",     # back to implementation
+    SIGNOFF_BLOCKED: "⊘",  # escalate / hold
+}
 
-def is_signoff_autonomous(data: dict, pr: dict | None = None) -> bool:
-    """Whether sign-off auto-merges on a PASS (vs. holding for a human).
+SIGNOFF_VERDICT_STYLES = {
+    SIGNOFF_MERGE: "bold green",
+    SIGNOFF_REQA: "bold magenta",
+    SIGNOFF_REVIEW: "bold cyan",
+    SIGNOFF_IMPL: "bold yellow",
+    SIGNOFF_BLOCKED: "bold red",
+}
 
-    Default ``False`` (gated — a PASS is held, not merged).  Resolution order:
 
-    1. **Per-plan override** (the forward seam for the plan watcher,
-       pr-ff9b728): ``project.plan_sign_off_autonomous[<plan>]`` — lets e.g.
-       the ``bugs`` plan run autonomous while ``ux`` stays gated.  Requires
-       *pr* (to know its plan); empty/unset today.
-    2. **Project-level default**: ``project.sign_off_autonomous`` (mirrors the
-       ``project.skip_qa`` config pattern).
-
-    Pass *pr* at every call site so per-plan resolution works the moment
-    pr-ff9b728 populates ``plan_sign_off_autonomous``; until then both PR-aware
-    and PR-less calls fall through to the project-level flag.
-    """
-    project = (data or {}).get("project") or {}
-    if pr is not None:
-        plan = pr.get("plan")
-        per_plan = project.get("plan_sign_off_autonomous") or {}
-        if plan in per_plan:
-            return bool(per_plan[plan])
-    return bool(project.get("sign_off_autonomous"))
+def signoff_verdict_icon(verdict: str | None) -> str:
+    """Return the display icon for a sign-off *verdict* (empty if unknown)."""
+    return SIGNOFF_VERDICT_ICONS.get(verdict or "", "")
 
 
 def signoff_window_name(pr_entry: dict) -> str:
@@ -83,33 +82,67 @@ def signoff_window_name(pr_entry: dict) -> str:
     return f"signoff-{_pr_display_id(pr_entry)}"
 
 
-def _dir_has_content(path: Path) -> bool:
-    """True when *path* is a directory containing at least one file (recursive)."""
-    if not path.is_dir():
-        return False
-    return any(p.is_file() for p in path.rglob("*"))
+# --- Verdict record + adoption --------------------------------------------
+# A sign-off run records its routing verdict durably on the PR so a later
+# auto-sequence tick can ADOPT it (no wasted re-run) instead of relaunching.
+# The record is ``pr["signoff"] = {verdict, sha, ts, origin}`` where *sha* is
+# the branch HEAD the verdict was computed against; a record is "fresh" when
+# its sha matches the current HEAD (no code change since).
+
+def head_sha(workdir: str | None) -> str | None:
+    """Return the git HEAD sha of *workdir*, or None if unavailable."""
+    if not workdir or not Path(workdir).exists():
+        return None
+    from pm_core import git_ops
+    r = git_ops.run_git("rev-parse", "HEAD", cwd=workdir, check=False)
+    sha = (r.stdout or "").strip()
+    return sha or None
 
 
-def bug_fix_capture_status(pr_id: str,
-                           session_tag: str | None = None) -> tuple[bool, bool]:
-    """Return ``(has_pre_fix, has_post_fix)`` for a bug PR's impl captures.
+def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
+                           sha: str | None, origin: str) -> None:
+    """Durably record a sign-off *verdict* on the PR (``pr['signoff']``).
 
-    Bug-fix implementations write their *primary* evidence to
-    ``$CAP/impl/pre-fix/`` (the reproduction on pre-fix code) and
-    ``$CAP/impl/post-fix/`` (the post-fix verification) — see
-    ``bug_fix_prompts``.  Sign-off requires BOTH to exist for a bug PR; a fix
-    with either missing has not actually been demonstrated.
-
-    Each is considered present only when its directory holds at least one file.
+    *origin* is ``"manual"`` (a hand-triggered ``pm pr signoff`` whose router
+    self-recorded) or ``"auto-sequence"`` (the driver recorded a transcript
+    verdict).  Recording is NOT acting — it never changes status; only
+    :func:`apply_signoff_hop` (auto-sequence only) mutates state.
     """
-    from pm_core.paths import captures_dir
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).isoformat()
 
-    base = captures_dir(pr_id, session_tag=session_tag)
-    if base is None:
-        return (False, False)
-    impl = base / "impl"
-    return (_dir_has_content(impl / "pre-fix"),
-            _dir_has_content(impl / "post-fix"))
+    def _apply(data):
+        pr = store.get_pr(data, pr_id)
+        if pr is not None:
+            pr["signoff"] = {
+                "verdict": verdict, "sha": sha, "ts": ts, "origin": origin,
+            }
+
+    store.locked_update(root, _apply)
+
+
+def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
+    """Return the recorded verdict if it is fresh (record sha == *current_sha*).
+
+    Fresh means the verdict was computed against the current branch HEAD (no
+    code change since), so auto-sequence can adopt it instead of relaunching.
+    Returns None when there is no record, it carries no verdict, the sha is
+    unknown, or the record is stale.
+    """
+    record = (pr or {}).get("signoff") or {}
+    verdict = record.get("verdict")
+    sha = record.get("sha")
+    if verdict and sha and current_sha and sha == current_sha:
+        return verdict
+    return None
+
+
+def latest_signoff_verdict(pr: dict) -> str | None:
+    """Return the most recently recorded sign-off verdict, fresh or not.
+
+    Used for display (icons / ``pm pr list``); does not consider staleness.
+    """
+    return ((pr or {}).get("signoff") or {}).get("verdict") or None
 
 
 def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
@@ -156,7 +189,8 @@ def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                           background: bool = False,
                           transcript: str | None = None,
-                          session_name: str | None = None) -> None:
+                          session_name: str | None = None,
+                          origin: str = "manual") -> None:
     """Launch a tmux sign-off window: evidence pane + Claude review pane.
 
     Mirrors ``pm_core.cli.pr._launch_review_window``: existing-window fast
@@ -219,7 +253,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     )
 
     signoff_prompt = prompt_gen.generate_signoff_prompt(
-        data, pr_id, session_name=pm_session)
+        data, pr_id, session_name=pm_session, origin=origin)
 
     # Container cwd quirk mirrors review: Claude's cwd is /workspace inside a
     # container, so the transcript symlink + prompt file must target the
@@ -316,12 +350,11 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
 
 # Hops that carry a state side-effect (a sign_off -> X status transition).
-# merge / held / blocked / unknown carry NO state change.
+# ready_to_merge / blocked / unknown carry NO state change.
 _BOUNCE_HOP_STATUS = {"qa": "qa", "review": "in_review", "impl": "in_progress"}
 
 
-def decide_signoff_hop(verdict: str | None, *, autonomous: bool,
-                       bug_captures_ok: bool | None = None) -> str:
+def decide_signoff_hop(verdict: str | None) -> str:
     """Pure DECISION half of sign-off routing — maps a verdict to a hop token.
 
     This function has **no side effects**: it never touches project state. It is
@@ -331,29 +364,22 @@ def decide_signoff_hop(verdict: str | None, *, autonomous: bool,
     can cause an actual transition (for ANY hop, not just merge) only under
     auto-sequence.
 
+    Sign-off **always gates at merge**: ``SIGNOFF_MERGE`` is always a
+    *recommendation* (``"ready_to_merge"``) — sign-off never merges. The actual
+    auto-merge-vs-hold decision belongs to the plan auto-start watcher
+    (pr-ff9b728) per its per-plan config.
+
     Returns one of:
 
-    * ``"merge"``   — autonomous PASS; the caller performs the merge.
-    * ``"held"``    — gated PASS; the PR stays in ``sign_off`` awaiting a human.
+    * ``"ready_to_merge"`` — the router recommends merge; the PR stays in
+      ``sign_off`` (pm/the watcher decides the merge).
     * ``"qa"`` / ``"review"`` / ``"impl"`` — a bounce (apply_signoff_hop will
       transition sign_off -> qa / in_review / in_progress).
     * ``"blocked"`` — escalate; the PR stays in ``sign_off``.
     * ``"unknown"`` — no recognized verdict (still running / no decision yet).
-
-    ``bug_captures_ok`` is the bug-PR capture gate (``None`` when not a bug PR /
-    not applicable).  When ``False`` (a bug PR is missing its pre-fix or
-    post-fix capture) the fix has not been demonstrated, so a ``SIGNOFF_MERGE``
-    is **overridden** to an impl bounce — a missing-capture bug PR can never
-    reach merge.  NOTE: this gate is *presence-only* (it checks the captures
-    exist, not that they were taken against the right code) — a deterministic
-    floor, not a provenance check; never describe it as "verified".
     """
-    # Hard gate: a bug PR with a missing pre/post-fix capture must never merge.
-    if bug_captures_ok is False and verdict == SIGNOFF_MERGE:
-        verdict = SIGNOFF_IMPL
-
     if verdict == SIGNOFF_MERGE:
-        return "merge" if autonomous else "held"
+        return "ready_to_merge"
     if verdict == SIGNOFF_BLOCKED:
         return "blocked"
     return {
@@ -374,14 +400,13 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
     For a bounce hop (``qa`` / ``review`` / ``impl``) this transitions
     ``sign_off -> qa / in_review / in_progress`` (guarded on the PR still being
     in ``sign_off`` so a concurrent sync isn't clobbered), returning the hop, or
-    ``"unknown"`` if the PR already left ``sign_off``.  ``merge`` / ``held`` /
+    ``"unknown"`` if the PR already left ``sign_off``.  ``ready_to_merge`` /
     ``blocked`` / ``unknown`` carry no state change and are returned unchanged
-    (merge sets ``merged`` via the existing merge path; a held/blocked PR
-    legitimately stays in ``sign_off``).
+    (the PR legitimately stays in ``sign_off`` — pm/the watcher owns the merge).
     """
     to_status = _BOUNCE_HOP_STATUS.get(hop)
     if to_status is None:
-        return hop  # merge / held / blocked / unknown: no state change
+        return hop  # ready_to_merge / blocked / unknown: no state change
 
     transitioned = {"ok": False}
 

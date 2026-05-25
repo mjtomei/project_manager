@@ -279,6 +279,13 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     provider so both render PRs identically.
     """
     icon = PR_STATUS_ICONS.get(p.get("status", "pending"), "?")
+    # For a sign_off PR, append the latest recorded router verdict icon.
+    verdict_str = ""
+    if p.get("status") == "sign_off":
+        from pm_core.signoff import signoff_verdict_icon
+        v_icon = signoff_verdict_icon((p.get("signoff") or {}).get("verdict"))
+        if v_icon:
+            verdict_str = f" {v_icon}"
     deps = p.get("depends_on") or []
     dep_str = f" <- [{', '.join(deps)}]" if deps else ""
     machine = p.get("agent_machine")
@@ -295,7 +302,7 @@ def format_pr_line(p: dict, active_pr: str | None = None,
                 ts_str = f" [{ts}]"
     return (
         f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
-        f"[{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}"
+        f"[{p.get('status', '?')}{verdict_str}]{dep_str}{machine_str}{active_str}{ts_str}"
     )
 
 

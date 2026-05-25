@@ -112,11 +112,14 @@ Executor `signoff.act_on_signoff_verdict(root, pr_id, verdict, *, autonomous, la
 Status writes use `store.locked_update` + `_record_status_timestamp`, guarded on the
 current status being `sign_off` (mirrors existing transition helpers).
 
-### R5 — Config flag: gated vs autonomous
-Project-level flag `project.sign_off_autonomous` (bool) in `project.yaml`, matching the
-existing `project.skip_qa` pattern (read from `data["project"]`). Default **False (gated)**
-— the conservative bias. Reader `signoff.is_signoff_autonomous(data) -> bool`. Used by the
-executor for `SIGNOFF_MERGE`.
+### R5 — Autonomy: REMOVED (orchestrator note-942fa37)
+Autonomy was removed from this PR. Sign-off **always gates at merge**:
+`SIGNOFF_MERGE` is always a recommendation (`decide_signoff_hop` returns
+`"ready_to_merge"`; the PR stays in `sign_off`; sign-off never merges). The
+`is_signoff_autonomous` reader, the `project.sign_off_autonomous` flag, the
+per-plan seam, and the `autonomous`/`held` branching are all deleted. The
+actual auto-merge-vs-hold decision belongs to the plan auto-start watcher
+(pr-ff9b728) per its per-plan config.
 
 ### R7 — Per-step acceptance criteria (orchestrator note-0357619)
 Sign-off must know the *purpose + acceptance criteria of EACH lifecycle step*
@@ -127,23 +130,15 @@ verdict a shortfall maps to (impl gap → `SIGNOFF_IMPL`; un-re-reviewed code �
 `SIGNOFF_REVIEW`; thin/misframed/unverified QA → `SIGNOFF_REQA`). The reviewer
 reports a per-step verdict and routes on the first step that fell short.
 
-### R8 — Bug-PR capture gate (orchestrator note-0357619)
-For a bug PR (`_is_bug_pr`: `plan == "bugs"` or `type == "bug"`) sign-off must
-verify BOTH a pre-fix capture (`$CAP/impl/pre-fix/`) and a post-fix capture
-(`$CAP/impl/post-fix/`) exist, and fail/bounce if either is missing.
-- `signoff.bug_fix_capture_status(pr_id) -> (has_pre, has_post)` reads the
-  captures dir; a capture counts only when its directory holds ≥1 file.
-- The prompt injects the computed PRE-FIX/POST-FIX present/MISSING status with a
-  mandatory rule: if either is missing → route `SIGNOFF_IMPL`.
-- **Deterministic safety net**: `act_on_signoff_verdict(..., bug_captures_ok)` —
-  when `bug_captures_ok is False`, a `SIGNOFF_MERGE` is overridden to an impl
-  bounce, so a missing-capture bug PR can NEVER reach merge regardless of the
-  router's emitted verdict. The auto-sequence sign_off branch computes
-  `bug_captures_ok` and passes it.
-- **HTML report surfacing (#226 / pr-8e693f6)**: the report/dashboard surface is
-  built in pr-8e693f6; this PR provides the discovery seam
-  (`bug_fix_capture_status` + the standard `impl/pre-fix` `impl/post-fix` layout)
-  and a cross-PR note on pr-8e693f6 requiring it to surface both captures.
+### R8 — Bug-PR capture gate: REMOVED (orchestrator note-942fa37)
+The deterministic capture gate was removed to reduce complexity.
+`bug_fix_capture_status`, `_dir_has_content`, the `bug_captures_ok` param, the
+`SIGNOFF_MERGE → IMPL` override, and the prompt's PRE-FIX/POST-FIX
+present/MISSING injection + mandatory-route rule are all deleted. The router's
+general per-step review still reads `$CAP/impl/pre-fix/` and `$CAP/impl/post-fix/`
+and judges whether the repro/verify evidence genuinely demonstrates the fix (no
+hardcoded gate). The HTML report (#226 / pr-8e693f6) still RENDERS the pre/post-fix
+captures (display only); the cross-PR note on pr-8e693f6 covers that.
 
 ### R9 — Re-runnable on merged: DEFERRED (orchestrator note, corrected)
 An earlier orchestrator note (note-6f7abcd) asked for sign-off to be re-runnable
@@ -155,29 +150,47 @@ PRs, not by re-opening merged ones. `pm pr signoff` therefore rejects `merged`
 PRs (entry from `qa`/`sign_off` only). The pre/post-fix capture gate (R8,
 note-0357619) still applies.
 
-### R10 — Routing refinements (orchestrator note-1a982f3)
-1. **Capture gate is presence-only, NOT verification [HOLD].** `bug_fix_capture_status`
-   only checks that `impl/pre-fix/` and `impl/post-fix/` each hold ≥1 file — it does
-   NOT prove provenance (that the pre-fix capture was taken against pre-fix code; same
-   limitation as the closed pr-eb450a0). It is a deterministic *floor* (no captureless
-   bug auto-merges); genuineness is judged by the LLM router and, eventually, the
-   harness-run regression-as-repro (Phase 10, provenance-bound). It must never be
-   labelled "verified" — say "captures present". **The user may DROP this gate
-   entirely; per the orchestrator we HOLD on hardening it.** No code change made for
-   this item beyond ensuring the docstring/prompt do not claim "verified".
-2. **Per-plan autonomy seam.** `is_signoff_autonomous(data, pr=None)` now resolves a
-   per-plan override first — `project.plan_sign_off_autonomous[<plan>]` — then falls
-   back to the project-level `project.sign_off_autonomous`. The per-plan map is unset
-   today; **pr-ff9b728 (plan watcher) will populate it** so e.g. `bugs` runs autonomous
-   while `ux` stays gated. All call sites pass `pr_entry` so per-plan resolution works
-   the moment the map is populated.
-3. **Invariant: verdict → action ONLY under auto-sequence, for ALL hops.** The routing
-   is split into a pure DECISION (`decide_signoff_hop`, no state change, safe anywhere)
-   and a SIDE-EFFECT (`apply_signoff_hop`, the sign_off → qa/in_review/in_progress
-   transition). Only the auto-sequence sign_off branch calls `apply_signoff_hop`;
-   manual `pm pr signoff` decides/recommends but never mutates. This structurally
-   enforces that a sign-off verdict can change state (any hop, not just merge) only
-   under the auto-sequence driver.
+### R10 — Routing refinements (orchestrator note-1a982f3, then note-942fa37)
+1. **Capture gate** was first clarified as presence-only and then **removed
+   entirely** (see R8) per note-942fa37.
+2. **Per-plan autonomy seam** — **removed** along with all autonomy (see R5).
+3. **Invariant: verdict → action ONLY under auto-sequence, for ALL hops** — KEPT.
+   The routing is split into a pure DECISION (`decide_signoff_hop`, no state
+   change, safe anywhere) and a SIDE-EFFECT (`apply_signoff_hop`, the
+   sign_off → qa/in_review/in_progress transition). Only the auto-sequence
+   sign_off branch calls `apply_signoff_hop`; manual `pm pr signoff`
+   decides/recommends but never mutates.
+
+### R11 — Verdict record + adoption (orchestrator note-511d725 §1)
+The router records its verdict durably on the PR as
+`pr["signoff"] = {verdict, sha, ts, origin}` (`sha` = the workdir HEAD it was
+computed against; `origin` ∈ {`manual`, `auto-sequence`}).
+- `signoff.record_signoff_verdict(root, pr_id, verdict, sha, origin)` writes it;
+  `fresh_recorded_verdict(pr, current_sha)` returns the verdict iff the record's
+  sha == current HEAD (fresh); `head_sha(workdir)` reads HEAD.
+- The router self-records via hidden `pm pr signoff record <id> <VERDICT>
+  --origin <origin>` (the prompt instructs it; `origin` is threaded
+  manual/auto-sequence through `pr_signoff` → `launch_signoff_window` →
+  `generate_signoff_prompt`). Recording NEVER acts.
+- **Auto-sequence ADOPTS** a fresh recorded verdict (sha == HEAD) instead of
+  relaunching — picking up a hand-triggered run's verdict with no wasted re-run.
+  If no fresh record, it reads the running window's transcript; on a verdict it
+  records it (origin `auto-sequence`) then acts. Stale/absent → relaunch/running.
+- Invariant preserved: only the auto-sequence branch calls `apply_signoff_hop`,
+  so a manual run records but never acts; its verdict is adopted later.
+
+### R12 — Sign-off display (orchestrator note-511d725 §2–4)
+- **Running animation (§2):** a `sign_off` node with a workdir and no recorded
+  verdict shows the spinner (`SPINNER_FRAMES` / `_anim_frame`, the same mechanism
+  as review/qa), via a `sign_off` branch in `TechTreeNode.render`. Once a verdict
+  is recorded the spinner is replaced by the verdict icon.
+- **Verdict icons (§3):** `signoff.SIGNOFF_VERDICT_ICONS` / `SIGNOFF_VERDICT_STYLES`
+  (single source of truth, re-exported by `tech_tree`) give each verdict a distinct
+  marker; the `sign_off` status icon is `◆` (`STATUS_ICONS`). `qa_status._VERDICT_COLORS`
+  also carries the sign-off verdicts.
+- **`pm pr list` (§4):** `format_pr_line` appends the latest recorded verdict icon
+  inside the status bracket for a `sign_off` PR (`[sign_off ⇤]`), consistent with
+  the TUI.
 
 ### R6 — Transition wiring (qa-finalize → sign_off; sign_off → next hop)
 Primary autonomous driver = the auto-sequence state machine (`pr_auto_sequence`,

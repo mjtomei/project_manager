@@ -1417,8 +1417,11 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
               help="Create sign-off window without switching focus (auto-sequence)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-sequence)")
+@click.option("--origin", default="manual", hidden=True,
+              type=click.Choice(["manual", "auto-sequence"]),
+              help="Who launched this sign-off run (recorded with the verdict)")
 def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
-               transcript: str | None):
+               transcript: str | None, origin: str):
     """Move a PR into sign_off and launch its sign-off window.
 
     Sign-off is the comprehensive PR-level review + verdict router that runs
@@ -1463,7 +1466,39 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
 
     signoff_mod.launch_signoff_window(
         data, pr_entry, fresh=fresh, background=background,
-        transcript=transcript)
+        transcript=transcript, origin=origin)
+
+
+@pr.command("signoff-record", hidden=True)
+@click.argument("pr_id")
+@click.argument("verdict")
+@click.option("--origin", default="manual",
+              type=click.Choice(["manual", "auto-sequence"]))
+def pr_signoff_record(pr_id: str, verdict: str, origin: str):
+    """Durably record a sign-off router verdict on the PR (does NOT act).
+
+    Invoked by the sign-off router pane to persist its recommendation as
+    ``pr['signoff'] = {verdict, sha, ts, origin}`` so a later auto-sequence
+    tick can ADOPT it without a wasted re-run.  Recording never changes status;
+    only the auto-sequence driver acts on a verdict.
+    """
+    from pm_core import signoff as signoff_mod
+
+    if verdict not in signoff_mod.SIGNOFF_VERDICTS:
+        click.echo(
+            f"Invalid sign-off verdict '{verdict}'. Must be one of: "
+            f"{', '.join(signoff_mod.SIGNOFF_VERDICTS)}", err=True)
+        raise SystemExit(1)
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    sha = signoff_mod.head_sha(pr_entry.get("workdir"))
+    signoff_mod.record_signoff_verdict(root, pr_id, verdict, sha, origin)
+    click.echo(f"Recorded sign-off verdict {verdict} for {_pr_display_id(pr_entry)} "
+               f"(sha={sha or '?'}, origin={origin})")
+    trigger_tui_refresh()
 
 
 def _finalize_merge(root, pr_entry: dict, pr_id: str,
@@ -2973,7 +3008,7 @@ def pr_auto_sequence(pr_id: str):
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
-                       transcript=str(signoff_transcript))
+                       transcript=str(signoff_transcript), origin="auto-sequence")
             click.echo("advanced: sign_off")
             return
         if overall == "INPUT_REQUIRED":
@@ -3026,41 +3061,45 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: no pm tmux session")
             return
         from pm_core import signoff as signoff_mod
-        verdict = _check_signoff_verdict(tdir, pr_id)
+        current_sha = signoff_mod.head_sha(pr_entry.get("workdir"))
+
+        # ADOPT a fresh recorded verdict (recorded sha == current HEAD) rather
+        # than relaunching — this picks up a hand-triggered `pm pr signoff`
+        # verdict without a wasted re-run.
+        verdict = signoff_mod.fresh_recorded_verdict(pr_entry, current_sha)
         if verdict is None:
-            # No routing verdict yet.  Relaunch the window if it's gone,
-            # otherwise the router is still running.
+            # No fresh record: read the running window's transcript. If it has
+            # emitted a verdict, record it (origin auto-sequence) so future
+            # ticks adopt it, then act on it below.
+            tverdict = _check_signoff_verdict(tdir, pr_id)
+            if tverdict is not None:
+                signoff_mod.record_signoff_verdict(
+                    root, pr_id, tverdict, current_sha, origin="auto-sequence")
+                verdict = tverdict
+
+        if verdict is None:
+            # No verdict yet (record stale/absent, transcript empty). Relaunch
+            # the window if it's gone, otherwise the router is still running.
             if _signoff_window_pane(pm_session, pr_entry) is None:
                 signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
                 ctx = click.get_current_context()
                 ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False,
-                           background=True, transcript=str(signoff_transcript))
+                           background=True, transcript=str(signoff_transcript),
+                           origin="auto-sequence")
                 click.echo("advanced: sign_off_relaunched")
                 return
             click.echo("running: sign_off")
             return
 
-        autonomous = signoff_mod.is_signoff_autonomous(data, pr_entry)
-        # Bug-PR capture gate: a bug fix missing its pre/post-fix capture has
-        # not been demonstrated and must never reach merge.
-        from pm_core.bug_fix_prompts import _is_bug_pr
-        bug_captures_ok = None
-        if _is_bug_pr(pr_entry):
-            has_pre, has_post = signoff_mod.bug_fix_capture_status(pr_id)
-            bug_captures_ok = has_pre and has_post
         # Decision (pure) then side-effect (auto-sequence only): a sign-off
         # verdict can only mutate state here, never from a manual signoff run.
-        hop = signoff_mod.decide_signoff_hop(
-            verdict, autonomous=autonomous, bug_captures_ok=bug_captures_ok)
+        hop = signoff_mod.decide_signoff_hop(verdict)
         hop = signoff_mod.apply_signoff_hop(root, pr_id, hop)
-        if hop == "merge":
-            # Autonomous + verified PASS.  Auto-sequence reports
-            # ready_to_merge (its documented contract stops before merge);
-            # the caller performs the merge.
+        if hop == "ready_to_merge":
+            # Sign-off always gates at merge: this is a recommendation only.
+            # The PR stays in sign_off; the merge decision is made elsewhere
+            # (the plan auto-start watcher, pr-ff9b728).
             click.echo("ready_to_merge")
-            return
-        if hop == "held":
-            click.echo("held: sign_off_gated")
             return
         if hop == "blocked":
             click.echo("paused: sign_off_blocked")
