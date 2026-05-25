@@ -22941,6 +22941,20 @@ prs:
       scenario runs.'
     created_at: '2026-05-25T23:34:50Z'
     last_edited: '2026-05-25T23:34:50Z'
+  - id: note-3c411e8
+    text: 'QA scenario 6 (sign_off sync) refined: the sign_off-preserve logic lives
+      ONLY in sync_from_github (pr_sync.py:327-330 — OPEN + old_status in ("qa","sign_off")
+      → continue/skip), reached via `pm pr sync-github` (NOT `pm pr sync`, which is
+      git-merge-detection needing a workdir). Drive with out-of-process fake-github:
+      `pm fake-github config set` seeds PRs (state OPEN|MERGED, numbers auto-start
+      at 1); sync only needs gh_pr_number per PR (cwd=None, resolves by number, no
+      workdir). Bootstrap fixture: pm init --backend github (gh import auto-skips
+      when no gh), pm pr add, then edit pm/project.yaml to set status: sign_off +
+      gh_pr_number to match fake. Session tag = git-root path hash, so fixture + sync
+      must run from same TEST_DIR. THEN: OPEN→"No status changes."+still sign_off;
+      MERGED→"Updated 1 PR(s)."/"Merged: <id>"+status merged+merged_at.'
+    created_at: '2026-05-25T23:00:36Z'
+    last_edited: '2026-05-25T23:00:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
