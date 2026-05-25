@@ -2481,6 +2481,14 @@ def _poll_tmux_verdicts(
                                queued_scenarios=_queued_indices,
                                verification_failures=verification_failures,
                                verdict_reasons=state.scenario_verdict_reasons)
+            # Persist the resume snapshot immediately on any verdict change.
+            # The top-of-loop write lags by one iteration, so the *last*
+            # scenario's verdict — recorded in the final iteration, which
+            # empties pending/verifying/_launch_queue and exits the loop
+            # before the next top-of-loop write — would otherwise never be
+            # snapshotted and would be lost on a TUI restart.
+            _write_resume_file(state, use_containers, concurrency_cap,
+                               _queued_indices)
 
 
 # ---------------------------------------------------------------------------

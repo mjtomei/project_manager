@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-9b96145
+  active_pr: pr-f480c1e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22073,7 +22073,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-24T23:25:49.792257+00:00'
+  updated_at: '2026-05-25T03:20:18.655662+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22115,3 +22115,74 @@ prs:
       keep worker container live during the merge race.'
     created_at: '2026-05-24T23:25:49Z'
     last_edited: '2026-05-24T23:25:49Z'
+  - id: note-cc23280
+    text: 'ALSO FIXED ON THIS BRANCH (incidental, found during this PRs QA): QA last-scenario
+      verdict was lost on TUI restart. Root cause in pm_core/qa_loop.py:_poll_tmux_verdicts
+      — qa_resume.json was snapshotted only at the TOP of each poll iteration, so
+      the final verdict (the one that empties pending/verifying and exits the loop)
+      was never persisted before the loop ended; a TUI restart then rebuilt from the
+      stale snapshot and dropped it. This is a gap in #145 (pr-4a89e52), present in
+      master — NOT a regression from this PR. Fix: also call _write_resume_file in
+      the bottom-of-iteration "verdicts_changed or completed_verifications" block.
+      QA/REVIEW verify: tests/test_qa_resume.py::test_last_verdict_is_persisted_before_loop_exits
+      (fails pre-fix with empty scenario_verdicts {}, passes post-fix); full tests/test_qa_resume.py
+      + tests/test_qa_loop.py = 124 passed. The standalone bug PR pr-f480c1e was filed
+      then CLOSED in favor of folding the fix here.'
+    created_at: '2026-05-25T01:51:24Z'
+    last_edited: '2026-05-25T03:20:18Z'
+- id: pr-f480c1e
+  plan: bugs
+  title: 'Bug: QA last-scenario verdict lost on TUI restart — resume snapshot not
+    written before the poll loop exits'
+  branch: pm/pr-f480c1e-bug-qa-last-scenario-verdict-lost-on-tui-restart-r
+  status: closed
+  depends_on: []
+  description: "Symptom\nA scenario whose verdict COMPLETES a QA run (the last one\
+    \ to empty pending/verifying) is lost if the TUI restarts right after the run\
+    \ finishes. Observed: a scenario returned NEEDS_WORK, the TUI restarted, and the\
+    \ verdict was gone — the resumed run rebuilt state from a stale qa_resume.json\
+    \ that did not contain it.\n\nScope\nThis is a gap in the resume mechanism added\
+    \ by #145 (pr-4a89e52, \"QA verdict collection survives TUI restart\"); it is\
+    \ NOT a regression from pr-3d1fa55. It lives in master today.\n\nRoot cause\n\
+    pm_core/qa_loop.py:_poll_tmux_verdicts snapshots qa_resume.json only at the TOP\
+    \ of each poll iteration (the \"Refresh the resume snapshot each iteration\" _write_resume_file\
+    \ call), BEFORE verdicts are processed. Any verdict followed by at least one more\
+    \ iteration is captured by the next top-of-loop write. But the LAST verdict —\
+    \ the one that empties pending/verifying/_launch_queue — is recorded after that\
+    \ iteration top-of-loop write, then the `while (pending or verifying or _launch_queue)`\
+    \ condition goes false and the loop exits BEFORE the next top-of-loop write runs.\
+    \ So the final verdict never reaches the snapshot. A TUI restart in that window\
+    \ rebuilds from the stale snapshot via build_resume_state and the verdict is lost.\
+    \ #145 also never added a write after recording a verdict or after the loop exits.\n\
+    \nRepro\nDrive _poll_tmux_verdicts with a single scenario that emits a verdict\
+    \ (e.g. NEEDS_WORK), with state.qa_workdir set, then load qa_resume.json: scenario_verdicts\
+    \ is {} (empty) instead of containing the verdict. See the regression test below.\n\
+    \nFix (verified)\nIn the bottom-of-iteration block `if verdicts_changed or completed_verifications:`\
+    \ (right after the existing _write_status_file call), also call:\n    _write_resume_file(state,\
+    \ use_containers, concurrency_cap, _queued_indices)\nso every verdict change —\
+    \ including the last one before the loop exits — is durably snapshotted. All vars\
+    \ are already in scope there.\n\nRegression test (verified fails pre-fix / passes\
+    \ post-fix)\ntests/test_qa_resume.py::test_last_verdict_is_persisted_before_loop_exits\
+    \ — runs the real poll loop for one NEEDS_WORK scenario with qa_workdir set, then\
+    \ asserts the on-disk qa_resume.json (and build_resume_state from it) carries\
+    \ the verdict. Confirmed: pre-fix the snapshot is {} (fails); post-fix it contains\
+    \ NEEDS_WORK (passes). Full test_qa_resume.py + test_qa_loop.py: 124 passed.\n\
+    \nNote\nA patch + test are already written and verified locally (originally on\
+    \ the pr-3d1fa55 workdir as an incidental fix); they will be reverted from that\
+    \ branch and should be reapplied here. Diagnosis is exact, so this is implement-ready."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T02:21:23.853951+00:00'
+  updated_at: '2026-05-25T03:20:09.685661+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-9021675
+    text: 'Closed: not pursued as a standalone PR. The fix + regression test are folded
+      into pr-3d1fa55 (terminal-status window reclamation) since the bug was found
+      during that PRs QA. See pr-3d1fa55 for the implemented change (pm_core/qa_loop.py
+      bottom-of-iteration _write_resume_file) and tests/test_qa_resume.py::test_last_verdict_is_persisted_before_loop_exits.'
+    created_at: '2026-05-25T03:20:09Z'
+    last_edited: '2026-05-25T03:20:09Z'
