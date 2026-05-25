@@ -22073,7 +22073,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-25T03:20:18.655662+00:00'
+  updated_at: '2026-05-25T03:30:30.612503+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22130,6 +22130,18 @@ prs:
       then CLOSED in favor of folding the fix here.'
     created_at: '2026-05-25T01:51:24Z'
     last_edited: '2026-05-25T03:20:18Z'
+  - id: note-d21b646
+    text: 'review-loop 6ccc i1: the qa_loop resume fix (bottom-of-iteration _write_resume_file
+      + tests/test_qa_resume.py::test_last_verdict_is_persisted_before_loop_exits)
+      was MISSING from the branch tip (b6344ed1) despite the PR notes/description
+      claiming it is fixed here and pr-f480c1e being closed in favor of folding it
+      in — it had apparently been reverted and not reapplied. Re-applied it via cherry-pick
+      of 8dd2b2f6 onto the QA tip (commit 09ebe88c). Verified the test fails pre-fix
+      (empty scenario_verdicts {}) and passes post-fix; full related suite 206 passed.
+      Bug1 (registry @id prune, 6fe2a720) and Bug2 (stop_qa/stop_loop_for_pr + broadened
+      trigger, bcd9bc11) reviewed and sound.'
+    created_at: '2026-05-25T03:30:30Z'
+    last_edited: '2026-05-25T03:30:30Z'
 - id: pr-f480c1e
   plan: bugs
   title: 'Bug: QA last-scenario verdict lost on TUI restart — resume snapshot not
