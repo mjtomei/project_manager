@@ -48,8 +48,17 @@ popup spinner at session.py:1509-1522 whose `display-popup -E` runs in-tmux
 with `$TMUX_PANE` set to the origin session).
 
 R4. `current_or_base_session` keeps its existing query-only behavior for
-genuine read-only callers (e.g. `pane_layout.py:92`, `qa_status.py` mirror,
-`get_window_id`). Only focus changes stop routing through it.
+genuine read-only callers (e.g. `pane_layout.py:92`, `get_window_id`). Only
+focus changes stop routing through it.
+
+R5 (review-loop i1). The QA status mirror (`pm_core/qa_status.py`) is NOT a
+query-only caller as originally listed — its `_switch_to_window` performs a
+focus-mutating `select-window` and held a *private duplicate* of the
+arbitrary-attached-grouped-session fallback (`_find_attached_session`). It
+runs by path and deliberately avoids importing `pm_core.tmux`, so it now has
+a standalone `_caller_switch_target` mirror (no arbitrary-attached fallback)
+and skips the switch when the caller can't be identified. Covered by
+`tests/test_qa_status.py`.
 
 ## Implementation
 
