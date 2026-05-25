@@ -321,9 +321,17 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         signoff_win_id = wid_result.stdout.strip()
         if signoff_win_id:
             tmux_mod.set_shared_window_size(pm_session, signoff_win_id)
-            panes = [(claude_pane, "signoff-claude", claude_cmd)]
+            # Register the evidence pane FIRST so it keeps order 0: the
+            # pane registry's order drives pane_layout.rebalance, which
+            # reorders the tmux panes left-to-right by registry order.
+            # Registering claude first would put it at order 0 and rebalance
+            # would swap it to the LEFT, inverting the intended layout
+            # (evidence LEFT, Claude router RIGHT — see impl spec + the
+            # split_pane_at(evidence_pane, "h", ...) above).
+            panes = []
             if evidence_pane:
                 panes.append((evidence_pane, "signoff-evidence", "evidence-shell"))
+            panes.append((claude_pane, "signoff-claude", claude_cmd))
             for pane_id, role, cmd in panes:
                 pane_registry.register_pane(
                     pm_session, signoff_win_id, pane_id, role, cmd)
