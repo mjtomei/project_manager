@@ -22665,8 +22665,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-05-25T03:25:04.533357+00:00'
+  updated_at: '2026-05-25T03:38:26.926812+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f4cf6f8
+    text: 'FIXED (commit 2b2953b9). Root cause: _wait_for_tui_command (pm_core/cli/session.py)
+      resolved the PR display_id via state_root() (cwd/_project_override-based). When
+      the popup runs from a window whose cwd is NOT the PR project (e.g. another window/foreign
+      cwd), state_root() loads the wrong project.yaml, pr_id not found, display_id=None
+      -> target_window=None -> _find_target_window_ids() returns [] on every poll
+      -> window_open never True -> spinner spins forever, never switches. This breaks
+      ALL THREE cases (no window / running loop / terminal loop) identically because
+      the cause is upstream of any window/state logic. NOTE: task premise "the spinner
+      is watching the right window / NOT the cwd-yaml case" is inaccurate per repro
+      — it is a cwd-root-resolution gap, just in a DIFFERENT code path than #206 (which
+      only fixed the picker LISTING via _resolve_root_from_session + PM_PROJECT env
+      for subprocesses; the spinner runs in-process and re-resolved via state_root()).
+      Fix: resolve root via _resolve_root_from_session(session) first, fall back to
+      state_root(). Verified on real tmux surface (all 3 cases switch, exit 0) + 2
+      unit tests in tests/test_spinner_review_loop_switch.py (fail pre-fix, pass post-fix).'
+    created_at: '2026-05-25T03:38:26Z'
+    last_edited: '2026-05-25T03:38:26Z'
