@@ -606,7 +606,14 @@ Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
         # the two directories).  Falls back to plain `git` if the path didn't
         # resolve, in which case the agent must cd into the main checkout.
         gc = f"git -C {repo_dir}" if repo_dir else "git"
-        ff_procedure = f"""   - `{gc} fetch origin`
+        # When repo_dir didn't resolve, the commands have no `-C <dir>`, so the
+        # agent (whose cwd is the PR-branch workdir) must first cd into the main
+        # checkout — otherwise the fast-forward would run against the workdir.
+        cd_hint = (
+            "" if repo_dir else
+            f"   - First `cd` into the main repo checkout (a *different* directory from your current workdir, normally checked out on `{base_branch}`); run the remaining commands there.\n"
+        )
+        ff_procedure = f"""{cd_hint}   - `{gc} fetch origin`
    - The main checkout usually has small uncommitted edits (most often `project.yaml`, which pm writes live).  These do NOT block the update, but stash them first so the fast-forward is clean: `{gc} stash push --include-untracked -m "pm: auto-stash for merge"` (skip if `{gc} status --porcelain` is empty).
    - Fast-forward the base branch: `{gc} merge --ff-only origin/{base_branch}`.
    - If you stashed, restore the edits: `{gc} stash pop`.  If the pop conflicts (e.g. on `project.yaml`), resolve it — keep the incoming merged content AND re-apply the local uncommitted edits — then `{gc} add` the resolved files.  Do NOT commit; these stay as uncommitted working-tree changes.

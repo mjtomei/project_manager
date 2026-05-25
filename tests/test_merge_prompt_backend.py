@@ -108,3 +108,32 @@ def test_vanilla_merge_prompt_still_pushes_master():
     # Vanilla legitimately pushes the merged master to origin.
     assert "push the merged `master` to origin" in p.lower()
     assert "gh pr merge" not in p
+
+
+def test_github_merge_prompt_placeholder_when_gh_pr_number_missing():
+    # The merge window is only launched when gh_pr_number is truthy, but the
+    # prompt must stay coherent (placeholder, never a literal None) if it is
+    # missing — see the spec's edge case.
+    data = _data("github")
+    data["prs"][0].pop("gh_pr_number")
+    p = prompt_gen.generate_merge_prompt(data, "pr-test", "not mergeable")
+    assert "gh pr merge <PR#> --merge" in p
+    assert "gh pr merge None" not in p
+
+
+def test_github_merge_prompt_falls_back_when_repo_dir_unresolved(monkeypatch):
+    # If _resolve_repo_dir raises, the prompt must still render: plain `git`
+    # (no -C) plus a human-readable main-checkout description, not a crash.
+    from pm_core.cli import helpers
+
+    def _boom(root, data):
+        raise RuntimeError("no project root")
+
+    monkeypatch.setattr(helpers, "_resolve_repo_dir", _boom)
+    p = prompt_gen.generate_merge_prompt(_data("github"), "pr-test", "not mergeable")
+    assert "the main repo checkout (the directory pm runs from)" in p
+    # Falls back to bare `git` (no `-C <dir>`) for the fast-forward.
+    assert "git merge --ff-only origin/master" in p
+    assert "git -C " not in p
+    # Without `-C`, the agent must be told to cd into the main checkout first.
+    assert "First `cd` into the main repo checkout" in p
