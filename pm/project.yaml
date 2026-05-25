@@ -22607,7 +22607,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T23:13:30.991683+00:00'
+  updated_at: '2026-05-25T23:24:43.872492+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22899,6 +22899,33 @@ prs:
       separately.'
     created_at: '2026-05-25T23:13:26Z'
     last_edited: '2026-05-25T23:13:26Z'
+  - id: note-e928d8e
+    text: 'QA s5 (concurrent sign-off state) NEEDS_WORK→fixed (commit on branch).
+      Triple 1 (two simultaneous `pm pr signoff` same PR) exposed TWO real races,
+      both fixed: (1) _ensure_workdir (helpers.py) cloned into a FIXED .tmp-{pr_id}
+      path with NO lock — two callers that both find the workdir missing collide,
+      the winner shutil.move()s the dir out from under the loser → loser dies with
+      an unhandled traceback (git checkout --orphan / git remote set-url exit 128,
+      failing cmd varies by interleaving). Fixed: per-PR exclusive flock .workdir-{pr_id}.lock
+      + double-checked adoption of the winners persisted workdir; clone work extracted
+      to _clone_workdir. (2) Fixing #1 UNMASKED the dup-window race the scenario flags:
+      launch_signoff_window had no lock around find_window_by_name→new_window_get_pane,
+      so once both survive provisioning both create a window → TWO signoff-<id> windows
+      (reliably reproduced). Fixed: per-PR launch flock .signoff-launch-{session}-{pr_id}.lock
+      so the loser takes the existing-window fast path and switches. Post-fix: 1 window,
+      loser prints "Switched to existing", 0 tracebacks, yaml valid (8 workdir-present
+      + 3 absent-workdir trials). NOTE: _launch_review_window (pr.py:1139) has the
+      SAME unlocked find/create pattern (memory said pr-8409c64 added _review_window_launch_lock
+      but it is NOT on this branch) — review window dup race likely still latent,
+      out of scope here. Triple 2 (concurrent signoff-record diff verdicts) PASS:
+      store.locked_update serializes → single well-formed {verdict,sha,ts,origin},
+      one verdict wins, single icon. Triple 3 (bounce guard) PASS: merge-first→auto-sequence
+      prints "merged", SIGNOFF_IMPL never acted on; simultaneous/staggered (8 trials)
+      always end single clean status=merged, never clobbered to bounce target, yaml
+      always valid. Full suite 2764 pass (1 pre-existing unrelated hook-installer
+      failure).'
+    created_at: '2026-05-25T23:24:43Z'
+    last_edited: '2026-05-25T23:24:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
