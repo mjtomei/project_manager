@@ -22772,7 +22772,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T03:31:48.369386+00:00'
-  updated_at: '2026-05-25T04:16:29.786961+00:00'
+  updated_at: '2026-05-25T04:26:39.707361+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22810,3 +22810,21 @@ prs:
       was already correct (per-session, not caller-based).'
     created_at: '2026-05-25T04:16:29Z'
     last_edited: '2026-05-25T04:16:29Z'
+  - id: note-187ed67
+    text: 'QA scenario-1 VERIFIED against the shipped $TMUX-session-id fix (commit
+      78c23102) on real tmux 3.2a. R1 (non-tmux caller, `pm pr start` from a plain
+      shell): A stays main, B stays on busy window, new window created detached (no
+      grouped session views it), output "Launched Claude in tmux window ..." with
+      no "Switched" — PASS. R2 (identifiable caller in session A, command run from
+      a pane in A): A follows onto the new PR window, B unchanged on the busy window
+      — no hijack — PASS. Independently confirmed the root cause this scenario was
+      probing: `display-message -t <pane> #{session_name}` resolved the callerA pane
+      to ~2 (the MRU/more-recently-attached sibling) while $TMUX session id resolved
+      to ~1 (the true caller) — the $TMUX approach is correct. Both tmux.py and the
+      qa_status.py mirror are fixed consistently (test_tmux + test_qa_status: 83 passed).
+      Pre/post-fix asciinema+transcript under captures scenarios/1/{pre,post}-fix
+      (pre-fix shows the R2 hijack: A=callerA unchanged, B stolen onto the new window).
+      I had an independent pane-window-id fix but discarded it in favor of the already-pushed
+      $TMUX fix to avoid divergence.'
+    created_at: '2026-05-25T04:26:39Z'
+    last_edited: '2026-05-25T04:26:39Z'
