@@ -6,6 +6,11 @@ Pluggable always-on watcher framework with specialized watchers for session heal
 
 The existing watcher/auto-start loop is a monolithic piece that handles too many concerns. This plan refactors it into a pluggable framework where each watcher is a focused, independent unit that shares common infrastructure (polling, TUI integration, prompt templates, tmux pane management).
 
+> **Review note (2026-05-25) — reconcile with the sign-off / plan-watcher work (`plan-regression` Phase 11) and revisit the trust-prompt approach.** While QA'd PR #225 (sign-off step), the workspace-trust prompt repeatedly blocked QA scenario panes, and the decided handling is a **context-aware agent** — a Claude session / watcher that *verifies the workspace and presses Enter itself*, NOT a programmatic always-on bypass (no global `--dangerously-skip-permissions`). That contradicts `pr-b53bfe2`'s current framing ("trust prompt — simpler as a programmatic fix"). When this plan is next picked up, review:
+> 1. **`pr-b53bfe2`** — re-scope from "programmatic fix" to context-aware-agent handling (verify the workspace path, then accept), consistent with the decision above.
+> 2. **`pr-18ac983`** (session-health watcher — detects stalled sessions) — decide whether it should own trust-prompt clearing (a stalled session sitting on a trust prompt is exactly its domain), or whether that overlaps the `plan-regression` plan auto-start watcher (`pr-ff9b728`) enough that one should be dropped/merged. (The plan auto-start watcher generalizes the old impl watchers + `AutoStartWatcher`; check for overlap before building both.)
+> 3. Whether the headless/benchmark mode (`plan-regression` `pr-6f9301e`) needs the same context-aware trust handling rather than a blanket skip.
+
 ## Phases
 
 ### Phase 1: Foundation
@@ -165,7 +170,7 @@ These standalone PRs were closed in favor of built-in watchers in this framework
 
 These remain as separate fixes outside the watcher framework:
 - pr-757a140 (SSH disconnect garbage) — outside tmux, can't be handled by a watcher
-- pr-b53bfe2 (trust prompt blocking) — simpler as a programmatic fix, saves tokens vs watcher approach
+- pr-b53bfe2 (trust prompt blocking) — ⚠️ **contested, see Review note (2026-05-25) at top.** Was "simpler as a programmatic fix"; the decided direction is a context-aware agent (verify the workspace, then press Enter), NOT a programmatic always-on bypass. Re-scope when revisiting.
 
 ## Manual testing notes
 
