@@ -12015,95 +12015,64 @@ prs:
   branch: pm/pr-fbda1a8-claude-based-tests-for-watcher-classes-and-prompt-
   status: pending
   depends_on:
-  - pr-d60d185
   - pr-06a96fa
   - pr-2680fbf
   - pr-51586d2
   - pr-1d8b2b7
-  description: "## Goal\n\nThis PR is the bridge between the old (Phases 1-5) and\
-    \ new (Phase 10) QA flows. It fills the testing gaps identified after the regression-loop\
-    \ landing AND re-validates every merged feature from Phases 1-5 under the new\
-    \ regressions-as-scenarios flow.\n\nThe three concrete watcher classes and their\
-    \ prompt builders shipped without direct unit tests — covered only by framework-level\
-    \ tests and a live operator markdown. Worse, they shipped *and* were QA'd under\
-    \ the old INSTRUCTION+ARTIFACT scenario model that Phase 10 replaces. When Phase\
-    \ 10's chain (pr-06a96fa → pr-2680fbf → pr-51586d2) lands, the QA loop's verdicts\
-    \ mean something different — the merged features need re-validation against the\
-    \ new model.\n\nThis PR adds Claude-based integration tests using FakeClaudeSession\
-    \ (pr-abcf70f) and FakeGitHubBackend (pr-9603d04, Phase 10) so the watchers can\
-    \ be exercised deterministically, with scenarios bound to (or authoring) real\
-    \ regression tests rather than the deprecated INSTRUCTION+ARTIFACT scaffolding.\n\
-    \n## Targets\n\n1. **Watcher class tests under the new flow** — new tests/test_discovery_supervisor.py,\
-    \ tests/test_bug_fix_impl_watcher.py, tests/test_improvement_fix_impl_watcher.py.\
-    \ Each script a sequence of FakeClaudeSession responses for a few ticks, verifying:\n\
-    \   - The watcher reads its work log and project state correctly\n   - It writes\
-    \ expected entries on each tick\n   - It emits READY / INPUT_REQUIRED at the right\
-    \ times\n   - For the discovery supervisor: it launches regression tests via the\
-    \ existing launch_qa_item path (mocked to record the call) and reconciles filed\
-    \ PRs post-hoc\n   - For the impl watchers: they pick the right PR from their\
-    \ plan, invoke pm pr auto-sequence on it, and (for bug-fix) auto-merge on PASS\n\
-    \   - **Critically**: the scenarios the watchers consume bind to regression tests\
-    \ (via pr-06a96fa) or trigger new-regression authoring (via pr-2680fbf), not INSTRUCTION+ARTIFACT.\n\
-    \n2. **Watcher prompt generation tests** — extend tests/test_bug_fix_flow_prompts.py\
-    \ patterns to the four new prompt builders in prompt_gen.py (discovery_supervisor,\
-    \ bug_fix_impl, improvement_fix_impl, watcher_review_session). Direct prompt-string\
-    \ assertions: notes injection works, work-log path is referenced, plan source\
-    \ is correct, merge mode (auto vs gated) is encoded, mocks awareness is wired\
-    \ at the new-regression authoring surface (pr-51586d2) and NOT at scenario planning.\n\
-    \n3. **Auto-sequence integration backstop** — tests/test_pr_auto_sequence_integration.py\
-    \ that exercises the three integration paths flagged during pr-e58459b's review\
-    \ (O keypress + _stop_before_merge, _check_impl_idle against a real PaneIdleTracker,\
-    \ _launch_qa_detached running run_qa_sync from a detached process). FakeClaudeSession\
-    \ + the existing TUI test framework (pr-ac3625d) substrate.\n\n4. **Pane_ops behavioral\
-    \ tests** — add tests for launch_qa_item's new target_window parameter (pr-97ddabf)\
-    \ and the regression filing addendum (pr-47940bc): assert the addendum text appears\
-    \ in the wrapped session prompt and that target_window correctly routes to the\
-    \ watcher's pane.\n\n5. **End-to-end re-validation of Phases 1-5 under Phase 10's\
-    \ flow** (NEW SCOPE):\n   - Discovery supervisor launch + reconcile cycle, exercised\
-    \ against regression tests bound via pr-06a96fa\n   - Bug-fix watcher pick-and-advance\
-    \ loop, verified that scenarios bind to regression tests (existing or freshly-authored\
-    \ via pr-2680fbf)\n   - Improvement-fix watcher gated-merge behavior, verified\
-    \ the regression library grows when new-regressions are authored\n   - Auto-sequence\
-    \ chain's halt-at-pause-condition handling, verified pauses still fire correctly\
-    \ when the scenario stage runs under the new flow\n   - Watcher review session's\
-    \ summary-then-chat opening, verified it reads the work logs correctly given the\
-    \ new scenario shape\n   - Regression-filing addendum from pr-47940bc, verified\
-    \ that regression tests filing bugs still file them with the correct plan routing\
-    \ under the new flow\n   - For each of the above, prefer existing regression tests\
-    \ (REGRESSION: <id>); use NEW_REGRESSION: <slug> via pr-2680fbf where none exist,\
-    \ contributing to the library rather than expanding test scaffolding.\n\n## Why\
-    \ this bridges old and new\n\nThe old Phases 1-5 PRs were implemented, reviewed,\
-    \ and QA'd against the pre-Phase-10 flow — INSTRUCTION+ARTIFACT scenarios, pre-strip\
-    \ mocks injection, no regression-test binding. They merged. Phase 10's chain changes\
-    \ the underlying model. Without this PR, there is no checkpoint that confirms\
-    \ the merged features still behave correctly under the new model — they could\
-    \ regress silently as soon as the new flow becomes the default.\n\nThis PR makes\
-    \ that checkpoint explicit: it depends on Phase 10's chain (pr-06a96fa, pr-2680fbf,\
-    \ pr-51586d2) so it runs only after those land, and it exercises every Phase 1-5\
-    \ feature against the new flow before declaring the regression loop ready for\
-    \ unsupervised operation.\n\n## Manual testing during review\n\nRun `pytest tests/test_discovery_supervisor.py\
-    \ tests/test_bug_fix_impl_watcher.py tests/test_improvement_fix_impl_watcher.py\
-    \ tests/test_pr_auto_sequence_integration.py -v` and confirm all pass. New tests\
-    \ should be deterministic — no real Claude calls, no real tmux operations beyond\
-    \ what the existing test substrate supports. Additionally, manually verify a single\
-    \ end-to-end run of the full watcher chain under the new flow: discovery supervisor\
-    \ launches a regression test, test files a bug, bug-fix watcher picks it up, auto-sequence\
-    \ runs scenarios that bind to regression tests, verdict propagates, merge happens.\
-    \ INPUT_REQUIRED appropriate for the visual / end-to-end validation portions.\n\
-    \n## Depends on\n\n- pr-d60d185 — the merged auto-start command this PR's end-to-end\
-    \ probe drives.\n- pr-06a96fa — the regressions-as-scenarios binding model; tests\
-    \ must exercise it.\n- pr-2680fbf — the new-regression authoring step; tests must\
-    \ cover both \"binds to existing\" and \"authors new\" paths.\n- pr-51586d2 —\
-    \ the mocks-at-authoring surface; tests must verify mocks awareness is at the\
-    \ right surface.\n\n## Out of scope\n\n- Coverage gates (Phase 7's pr-b42059d,\
-    \ pr-8ed578d) — separate PR chain.\n- Watcher self-recovery audit (Phase 9 pr-ca6859f)\
-    \ — separate scope.\n- Adding new regression tests outside the scope of validating\
-    \ Phases 1-5 features."
+  - pr-ff9b728
+  description: 'The integration checkpoint for the autonomous loop: re-validate the
+    merged Phase 1-5 features under BOTH the Phase 10 QA model (regressions-as-scenarios)
+    AND the Phase 11 architecture (the generalized plan auto-start watcher + the sign-off
+    step), using deterministic fakes, before declaring the loop unsupervised-ready.
+
+
+    REFRAMED FOR PHASE 11: the two impl watchers (pr-e3a711c, pr-d39a7fb) and the
+    programmatic auto_start.py are replaced by ONE plan auto-start watcher (pr-ff9b728);
+    per-PR merge/route decisions move to the sign-off step (pr-2d5f712). So this PR
+    validates the GENERALIZED watcher + sign-off, not the old per-plan watchers or
+    auto-merge/gated-merge behaviors.
+
+
+    Targets:
+
+    1. Plan auto-start watcher tests (tests/test_plan_watcher.py) via FakeClaudeSession
+    (pr-abcf70f) + FakeGitHubBackend (pr-9603d04): per-plan config (gated vs autonomous,
+    mandated taste check), max-in-flight concurrency, picks ready PRs respecting deps,
+    runs the per-PR auto-sequence chain (qa -> sign_off -> merge), defers per-PR decisions
+    to sign-off. Scenarios bind to regression tests (pr-06a96fa) or author new ones
+    (pr-2680fbf), NOT INSTRUCTION+ARTIFACT.
+
+    2. Discovery supervisor (pr-271cb3a, unchanged) launch + reconcile cycle.
+
+    3. Sign-off step (pr-2d5f712) integration: qa-finalize -> sign_off -> merge (autonomous)
+    / hold (gated); verdict-router next-hops; re-loop on code change.
+
+    4. Auto-sequence chain integration backstop (the three paths from pr-e58459b''s
+    review) now including the sign_off stage.
+
+    5. launch_qa_item target_window (pr-97ddabf) + regression-filing addendum (pr-47940bc)
+    under the new flow.
+
+    6. Behavior interface / review session (pr-e84b43c) reads plan notes (recast from
+    work logs by pr-ff9b728), PR descriptions, PR notes.
+
+
+    Uses the VerdictRegistry (pr-1d8b2b7) so the fakes don''t drift from production
+    verdicts (incl. the new sign_off verdicts).
+
+
+    Depends on: pr-06a96fa, pr-2680fbf, pr-51586d2 (Phase 10 chain), pr-1d8b2b7 (verdict
+    registry), pr-ff9b728 (the generalized plan watcher + sign-off it validates; replaces
+    the old auto-start command pr-d60d185 this probe used to drive).
+
+
+    Out of scope: coverage gates (Phase 7); adding regression tests beyond validating
+    the loop.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T20:49:18.500977+00:00'
-  updated_at: '2026-05-18T21:03:35.305178+00:00'
+  updated_at: '2026-05-25T15:41:39.187127+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16692,34 +16661,40 @@ prs:
   title: Watcher self-recovery audit
   branch: pm/pr-ca6859f-watcher-self-recovery-audit
   status: pending
-  depends_on: []
-  description: 'Audit every escalation path in the watcher prompts and surrounding
-    code (generate_bug_fix_impl_prompt, generate_improvement_fix_impl_prompt, generate_discovery_supervisor_prompt,
-    the review and QA prompts) and add explicit recovery playbooks instead of INPUT_REQUIRED
-    for technical issues that have a clear correct response.
+  depends_on:
+  - pr-ff9b728
+  description: 'Audit every escalation path in the loop''s prompts and add explicit
+    recovery playbooks instead of INPUT_REQUIRED for technical issues with a clear
+    correct response. REFRAMED for Phase 11: the watcher prompts are now the single
+    generalized plan-watcher prompt (pr-ff9b728); also audit the review, QA, and sign-off
+    (pr-2d5f712) escalation paths.
 
 
-    Examples: container creation failure → retry with backoff, missing dep → install,
-    stuck loop → cap iterations + mark failed + move on, spec ambiguity → record assumption
-    and proceed, push failure → retry then re-fetch and rebase. INPUT_REQUIRED stays
-    available for genuinely human-judgment-required cases (e.g. the watcher review
-    session adding notes); but the bar to escalate moves from "anything unexpected"
-    to "no plausible automatic recovery."
+    Examples: container creation failure -> retry with backoff; missing dep -> install;
+    stuck loop -> cap + mark failed + move on; spec ambiguity -> record assumption
+    and proceed; push failure -> retry then re-fetch/rebase. INPUT_REQUIRED stays
+    for genuinely human-judgment cases (incl. sign-off raising INPUT_REQUIRED on ambiguity);
+    the bar moves from "anything unexpected" to "no plausible automatic recovery."
 
 
-    Land first in Phase 9 — gates the headless/benchmark mode PR (which removes INPUT_REQUIRED
-    from prompts entirely) since stripping interactive language is only safe once
-    recovery playbooks exist.
+    Gates the headless/benchmark mode (pr-6f9301e), which strips INPUT_REQUIRED from
+    prompts — only safe once recovery playbooks exist.
 
 
-    Manual testing: synthesize each failure mode in a controlled run and confirm the
-    playbook fires. INPUT_REQUIRED rate on a representative bug-fix corpus should
-    drop measurably.'
+    SEQUENCING: because it audits the generalized watcher prompt, this lands after
+    pr-ff9b728 (Phase 11) — so Phase 9 hardening + the capstone now follow Phase 11.
+
+
+    Depends on: pr-ff9b728 (the generalized watcher + sign-off prompts it audits).
+
+
+    Manual testing: synthesize each failure mode; confirm the playbook fires; INPUT_REQUIRED
+    rate on a representative corpus drops measurably.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-06T03:28:42.921822+00:00'
-  updated_at: '2026-05-06T03:28:42.921822+00:00'
+  updated_at: '2026-05-25T15:41:43.825858+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -20502,163 +20477,44 @@ prs:
   title: 'Regression coverage: watcher behavior and review session'
   branch: pm/pr-70d02ed-regression-coverage-watcher-behavior-and-review-se
   status: pending
-  depends_on: []
-  description: '## Goal
+  depends_on:
+  - pr-ff9b728
+  description: 'Claude-driven regression-test markdowns covering the watcher / observation
+    surfaces, REFRAMED for Phase 11: the surfaces are now the single PLAN AUTO-START
+    WATCHER (pr-ff9b728) + the sign-off step (pr-2d5f712), not the two old impl watchers.
 
 
-    Add Claude-driven regression-test markdowns covering the four watcher / observation
-    surfaces from Phases 2-4: the discovery supervisor, the bug-fix implementation
-    watcher, the improvement-fix implementation watcher, and the watcher review session.
-    Today these are covered only by BaseWatcher framework tests (pr-3032fb6) and live
-    operator markdown. They merged under the old QA flow and need durable, discovery-supervisor-runnable
-    coverage going forward.
+    Files in pm/qa/regression/:
 
+    1. discovery-supervisor-tick.md — discovery supervisor (pr-271cb3a, unchanged):
+    reads its log, launches a regression test in the watcher window (pr-97ddabf),
+    reconciles a filed bug via dedup, emits READY/INPUT_REQUIRED. Variants: cold start,
+    rolling context, in-flight continuation.
 
-    ## Scenarios
+    2. plan-watcher-pick-and-advance.md — the generalized plan watcher against a plan:
+    picks ready PRs respecting deps, honors max-in-flight, runs the per-PR auto-sequence
+    chain (qa -> sign_off -> merge), defers the merge/route decision to sign-off.
+    Variants: at concurrency cap (no-op); autonomous plan (sign-off merges); gated
+    plan (sign-off holds for human); stuck PR (loop guard -> INPUT_REQUIRED).
 
+    3. sign-off-step.md — qa-finalize -> sign_off: comprehensive review, verdict-router
+    next-hops (merge / re-qa / back-to-impl / escalate), audit notes.
 
-    Four new files in pm/qa/regression/:
+    4. watcher-review-session.md — the behavior interface / review session reads PLAN
+    NOTES (recast from work logs by pr-ff9b728), PR descriptions, PR notes; remediation
+    via a plan/Watcher note confirmed before applying; next tick picks it up.
 
 
-    ### 1. discovery-supervisor-tick.md
+    Opportunistic audit folded in (flag other uncovered surfaces -> improvement PRs
+    via pr-47940bc), complementing pr-f4dc8a2.
 
-    Start the discovery supervisor against a fixture project state (some pending PRs,
-    some in flight, some recently merged). Let it tick. Verify it:
 
-    - Reads the work log (pm/watchers/discovery.log) for context
-
-    - Launches the expected regression test in the watcher''s window (per pr-97ddabf)
-
-    - Reconciles a synthetically-filed bug PR via dedup against existing entries (pm
-    pr list --plan bugs)
-
-    - Appends a one-line summary
-
-    - Emits READY (or INPUT_REQUIRED if a deliberate ambiguity is seeded)
-
-
-    Variants:
-
-    - Empty work log (cold start)
-
-    - Full work log (rolling context — verify trimming/summarization works)
-
-    - In-flight test from previous tick (continuation, not re-launch)
-
-
-    ### 2. bug-fix-watcher-pick-and-advance.md
-
-    Bug-fix watcher (pr-e3a711c) against plan=bugs with multiple pending PRs. Verify
-    it:
-
-    - Picks the right candidate per the prompt''s prioritization signals (severity
-    + recurrence + age + Watcher notes)
-
-    - Invokes pm pr auto-sequence on the picked PR
-
-    - Advances impl -> review -> QA -> auto-merge on PASS
-
-    - Honors concurrency cap (does nothing when at cap)
-
-
-    Variants:
-
-    - At concurrency cap (no-op)
-
-    - Stuck PR with repeated NEEDS_WORK (escalates via INPUT_REQUIRED)
-
-    - Reproduce-step failure from pr-30588a7 (escalates)
-
-
-    ### 3. improvement-fix-watcher-gated-merge.md
-
-    Improvement-fix watcher (pr-d39a7fb) against plan=ux. Same shape as bug-fix-watcher
-    but with gated-merge: PRs that PASS QA are marked ready-for-merge and NOT merged.
-    Verify:
-
-    - Stops at qa-pass; no merge happens
-
-    - Next tick continues without re-attempting the merged-pending PR
-
-
-    Variants:
-
-    - Human merges some PRs between ticks; next tick picks up the next candidate
-
-    - Backlog with multiple ready-for-merge PRs
-
-
-    ### 4. watcher-review-session-summary.md
-
-    Launch the watcher review session (pr-e84b43c) from the TUI. Verify:
-
-    - Opening summary covers all three watchers'' recent activity (discovery, bug-fix,
-    improvement-fix)
-
-    - A follow-up question (e.g. "why was bug X deduped against bug Y?") gets a reasoned
-    answer using the work logs
-
-    - A remediation flow (add a Watcher-section note to notes.txt) confirms before
-    applying
-
-    - The added note shows up in the next watcher tick
-
-
-    ## Family 3: opportunistic audit (folded in here)
-
-
-    As these scenarios run, Claude is asked to flag *other* uncovered surfaces it
-    notices in the project that should have regression tests but do not. Findings
-    file as improvement PRs proposing new regression-test additions, via the existing
-    addendum from pr-47940bc. This is a one-time forcing function for broader audit,
-    complementing pr-f4dc8a2 (the static QA library auditor that does this systematically).
-
-
-    ## Sequencing
-
-
-    Independent of Phase 10 code-wise. Lands more usefully after pr-06a96fa (QA scenarios
-    bind to regression tests) since downstream QA scenarios exercising these surfaces
-    can then bind to these regression tests via REGRESSION: <id> rather than INSTRUCTION+ARTIFACT.
-
-
-    ## Manual testing
-
-
-    Walk through each variant per scenario and confirm the verdict matches what a
-    human reviewing the same trace would conclude. INPUT_REQUIRED is appropriate for
-    the multi-tick judgment portions and the watcher-review-session follow-up phase.
-
-
-    ## Out of scope
-
-
-    - The auto-sequence chain itself (separate PR — filed in the same wave).
-
-    - CLI rendering scenarios (pr-2c060b2).
-
-    - Modifying the watcher classes themselves to be more testable — the regression
-    scenarios drive them as they are.
-
-
-    ## Related
-
-
-    - pr-2c060b2 (filed alongside): CLI rendering at varied widths. Same pattern,
-    different surface.
-
-    - pr-a1f267a (filed alongside): auto-sequence chain regression coverage.
-
-    - pr-fbda1a8 (Phase 6 bridge PR): exercises watchers deterministically with FakeClaudeSession;
-    this PR exercises them via the discovery-supervisor-launched runtime path. Complementary.
-
-    - pr-f4dc8a2 (QA library auditor): static counterpart that proposes missing regression
-    tests systematically.'
+    Depends on: pr-ff9b728 (the generalized watcher + sign-off the scenarios exercise).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:12.969486+00:00'
-  updated_at: '2026-05-14T14:49:49.637943+00:00'
+  updated_at: '2026-05-25T15:41:40.689954+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -20668,108 +20524,42 @@ prs:
   title: 'Regression coverage: auto-sequence chain pause conditions'
   branch: pm/pr-a1f267a-regression-coverage-auto-sequence-chain-pause-cond
   status: pending
-  depends_on: []
-  description: '## Goal
+  depends_on:
+  - pr-ff9b728
+  description: 'Claude-driven regression-test markdown covering the auto-sequence
+    chain (pr-e58459b) — now start -> review -> QA -> SIGN_OFF -> merge after Phase
+    11. Exercises every pause/transition on both entry points (TUI O keypress + pm
+    pr auto-sequence <id>).
 
 
-    Add a Claude-driven regression-test markdown covering the auto-sequence chain
-    (pr-e58459b) — the start -> review -> QA pipeline used by both TUI keypress and
-    the programmatic pm pr auto-sequence CLI consumed by the impl watchers. Today
-    its halt-at-pause-condition behavior is covered only by ad-hoc manual testing.
+    pm/qa/regression/auto-sequence-halt-conditions.md, conditions:
+
+    1. impl idle-no-spec.
+
+    2. review INPUT_REQUIRED.
+
+    3. QA INPUT_REQUIRED (or refiner rejection; reason per pr-b59f0c7).
+
+    4. sign_off stage (NEW): qa-finalize enters sign_off; verify the chain advances
+    to sign_off, the verdict router runs, and on a bounce it routes back through review+qa.
+
+    5. gated sign-off hold (REPLACES auto_merge=false): a gated plan''s PR reaches
+    sign_off and HOLDS for the human instead of merging (the plan watcher''s per-plan
+    gated config + sign-off gated mode, pr-2d5f712 / pr-ff9b728).
+
+    6. review NEEDS_WORK loop; 7. QA NEEDS_WORK loop; 8. max-iterations / no-progress
+    stop (pr-ed10ac4).
 
 
-    ## Scenarios
+    For each: entry point, condition fired, emitted state, correct resume.
 
 
-    New file pm/qa/regression/auto-sequence-halt-conditions.md exercising every documented
-    pause condition on both entry points:
-
-
-    ### Entry points
-
-    - TUI keypress (O key on a selected PR)
-
-    - pm pr auto-sequence <id> CLI (programmatic; what watchers use)
-
-
-    ### Pause conditions to verify
-
-    1. **impl idle-no-spec**: PR enters impl, the spec_impl is missing or pending
-    review (spec_pending=True), session goes idle. Chain pauses; impl window left
-    in place for human inspection.
-
-
-    2. **review INPUT_REQUIRED**: review session emits INPUT_REQUIRED. Chain pauses
-    at review; does not advance to QA.
-
-
-    3. **QA INPUT_REQUIRED**: QA scenario emits INPUT_REQUIRED (or refiner rejection
-    per pr-b59f0c7 reason machinery). Chain pauses at QA; does not advance to merge.
-
-
-    4. **stop-before-merge**: chain reaches QA PASS but the configured behavior is
-    stop-before-merge (auto-merge=false per pr-b77702b, or improvement-fix gated).
-    Chain stops; PR sits in qa-pass / ready-for-merge state.
-
-
-    5. **review NEEDS_WORK loop**: review emits NEEDS_WORK -> impl rerun -> review
-    again. Verify the chain loops correctly (does not double-advance to QA) and respects
-    max-iterations.
-
-
-    6. **QA NEEDS_WORK loop**: same shape on the QA side — NEEDS_WORK loops back to
-    a fix iteration before re-running QA scenarios.
-
-
-    7. **terminal pause (max-iterations hit)**: chain hits max-iterations on a sub-loop.
-    Pauses with structured reason (per pr-b59f0c7) the watcher can route.
-
-
-    For each pause, the regression captures: (a) which entry point triggered the chain,
-    (b) which pause condition fired, (c) the chain''s emitted state, (d) whether the
-    next manual / watcher action correctly resumes from the paused state.
-
-
-    ## Sequencing
-
-
-    Independent of Phase 10 code-wise. Lands more usefully after pr-06a96fa.
-
-
-    ## Manual testing
-
-
-    Drive each pause condition from both entry points and confirm the chain halts
-    and resumes correctly. INPUT_REQUIRED appropriate for the visual / state-inspection
-    portion.
-
-
-    ## Out of scope
-
-
-    - Watcher behavior itself (pr-70d02ed handles that).
-
-    - CLI rendering (pr-2c060b2).
-
-    - Modifying the auto-sequence chain — the regression drives it as-is.
-
-
-    ## Related
-
-
-    - pr-2c060b2 and pr-70d02ed (filed alongside): the other two pieces of the regression-corpus
-    expansion wave.
-
-    - pr-e58459b (merged): the auto-sequence chain this PR covers.
-
-    - pr-fbda1a8 (Phase 6 bridge PR): exercises the chain deterministically via FakeClaudeSession''s
-    three integration backstops; this PR exercises it via the discovery-supervisor-launched
-    runtime path. Complementary.'
+    Depends on: pr-ff9b728 (the chain''s sign_off stage + gated hold this PR exercises).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:39.950664+00:00'
-  updated_at: '2026-05-14T14:49:39.950664+00:00'
+  updated_at: '2026-05-25T15:41:42.173225+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21967,36 +21757,33 @@ prs:
   branch: pm/pr-1d8b2b7-shared-verdictregistry-unify-verdict-definitions-a
   status: pending
   depends_on: []
-  description: 'Follow-up to pr-abcf70f (FakeClaudeSession). That PR deferred the
-    shared verdict-registry refactor proposed in its forward-looking refactor request
-    (note-30c1a2e): verdict definitions currently live in two places — the detection
-    path (pm_core/qa_loop.py, pm_core/loop_shared.py, pm_core/verdict_transcript.py,
-    pm_core/prompt_gen.py) and pm_core/fake_claude.py (SINGLE_LINE_VERDICTS / BLOCK_VERDICTS
-    / SESSION_TYPE_VERDICTS).
-
-
-    Goal: introduce a shared VerdictRegistry/VerdictHandler that both the verdict-detection
-    path AND FakeClaudeSession import from. The registry declares the canonical set
-    of verdicts, their parsing rules (single-line vs START/END block), per-session-type
+  description: 'Follow-up to pr-abcf70f (FakeClaudeSession): introduce a shared VerdictRegistry/VerdictHandler
+    that BOTH the verdict-detection path (qa_loop.py, loop_shared.py, verdict_transcript.py,
+    prompt_gen.py) AND pm_core/fake_claude.py import from. The registry declares the
+    canonical verdicts, their parsing rules (single-line vs START/END block), per-session-type
     verdict sets, and per-verdict metadata. New verdicts are added in one place and
     test infra picks them up automatically.
 
 
-    Why: pr-fbda1a8 (the bridge PR after pr-abcf70f) depends on FakeClaudeSession
-    not drifting from production. With definitions in two places, later PRs that add
-    verdicts/verdict-state (pr-eb450a0 evidence markers, pr-b42059d coverage data,
-    pr-8ed578d fix-line gate, pr-b59f0c7 reason strings, pr-2680fbf NEW_REGRESSION
-    sub-status, pr-98f670e shallow-PASS amendments) can silently diverge the fake
-    from the detector — tests pass while production regresses.
+    Why: pr-fbda1a8 (the bridge) depends on FakeClaudeSession not drifting from production.
+    With definitions in two places, later PRs that add verdict state (pr-b42059d coverage
+    data, pr-8ed578d fix-line gate, pr-b59f0c7 reason strings, pr-2680fbf NEW_REGRESSION
+    sub-status, pr-98f670e shallow-PASS amendments, and the new sign_off verdicts
+    / router next-hop outcomes from pr-2d5f712) can silently diverge the fake from
+    the detector — tests pass while production regresses.
 
 
-    This is the follow-up the pr-abcf70f refactor request asked to be filed before
-    merge; should be linked as a prerequisite of pr-fbda1a8.'
+    Must include the sign_off step''s verdicts / router outcomes (pr-2d5f712) so the
+    fake and detector stay aligned on them too.
+
+
+    Filed as the prerequisite the pr-abcf70f refactor request (note-30c1a2e) asked
+    for before merge; prerequisite of pr-fbda1a8.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-18T21:03:10.950816+00:00'
-  updated_at: '2026-05-18T21:03:10.950816+00:00'
+  updated_at: '2026-05-25T15:41:46.013155+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

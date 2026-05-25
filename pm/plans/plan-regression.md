@@ -62,12 +62,12 @@ This is the load-bearing change: the regression library starts to *compound* —
 - Phase 5: pr-d60d185
 - Phase 7 prereq: pr-6be8ee6 (#190, tracked under improvements)
 
-**Pending (28)** — Phases 6-11:
+**Pending (27)** — Phases 6-11:
 - Phase 6 — test backfill (1): pr-fbda1a8
 - Phase 7 — evidence-gated bug fix loop (4): pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
 - Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
 - Phase 9 — headless / unsupervised hardening + single-prompt capstone (7): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf (realistic capstone), pr-0cf3626 (exact-ProgramBench offshoot)
-- Phase 10 — QA loop surface improvements (8): pr-9603d04, pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2
+- Phase 10 — QA loop surface improvements (8): pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2, pr-1d8b2b7 (pr-9603d04 + pr-abcf70f now merged)
 - Phase 11 — sign-off / acceptance gate (3): pr-2d5f712, pr-8e693f6, pr-ff9b728 (buildable now; soft-aligns with Phase 10)
 
 **Cross-phase sequencing note**: Phase 7 (evidence + coverage gates on the existing scenario model) and Phase 10 (scenarios → regression-test bindings, new-regression authoring, mocks at authoring surface) both reshape the QA loop. Phase 10 changes the underlying scenario model that Phase 7's gates measure against. Recommended order: land Phase 10's regressions-as-scenarios chain (pr-7d5d036 → pr-06a96fa → pr-2680fbf → pr-51586d2) before Phase 7's coverage stack (pr-b42059d → pr-8ed578d → pr-8422dea → pr-c2397e2), so the coverage gates measure the post-Phase-10 flow. If sequenced the other way, Phase 7 PRs may need amendment after Phase 10 lands.
@@ -147,19 +147,19 @@ Final integration PR. Single command (`pm watcher start regression-loop` or simi
 
 ## Phase 6: Test backfill — and bridge between old and new QA flows
 
-### PR: Bridge old and new QA flows — tests for merged watchers under Phase 10 model
-`pr-fbda1a8` (depends on: pr-d60d185, pr-06a96fa, pr-2680fbf, pr-51586d2)
+### PR: Bridge old and new QA flows — validate the loop under Phase 10 + 11
+`pr-fbda1a8` (depends on: pr-06a96fa, pr-2680fbf, pr-51586d2, pr-1d8b2b7, pr-ff9b728)
 
-The three concrete watcher classes and four new prompt builders shipped without direct unit tests — covered only by the BaseWatcher framework tests and the live operator markdown. **And** they shipped under the old INSTRUCTION+ARTIFACT scenario model. This PR is the bridge between Phases 1-5 and Phase 10: it adds the missing tests using FakeClaudeSession (`pr-abcf70f`) and FakeGitHubBackend (`pr-9603d04`, Phase 10), AND it re-exercises every merged Phase 1-5 feature against the new regressions-as-scenarios flow.
+The integration checkpoint before declaring the loop unsupervised-ready. **Reframed for Phase 11**: the two impl watchers (`pr-e3a711c`, `pr-d39a7fb`) and the programmatic `auto_start.py` are replaced by the single plan auto-start watcher (`pr-ff9b728`), and per-PR decisions move to the sign-off step (`pr-2d5f712`). So this PR validates the **generalized watcher + sign-off** under the Phase 10 regressions-as-scenarios model — not the old per-plan watchers or auto-merge/gated-merge behaviors — using FakeClaudeSession (`pr-abcf70f`) + FakeGitHubBackend (`pr-9603d04`) and the shared VerdictRegistry (`pr-1d8b2b7`) so the fakes don't drift.
 
 Scope:
-1. Per-class watcher tests (`tests/test_{discovery_supervisor,bug_fix_impl_watcher,improvement_fix_impl_watcher}.py`) — scenarios bind to regression tests (via `pr-06a96fa`) or trigger new-regression authoring (via `pr-2680fbf`), not INSTRUCTION+ARTIFACT.
-2. Prompt-string assertions for the four new prompt builders (discovery_supervisor, bug_fix_impl, improvement_fix_impl, watcher_review_session) — verifying mocks awareness is wired at the new-regression authoring surface (`pr-51586d2`) and NOT at scenario planning.
-3. Auto-sequence integration backstop covering the three paths flagged in `pr-e58459b`'s review.
-4. Behavioral tests for `launch_qa_item`'s `target_window` (`pr-97ddabf`) and the regression-filing addendum (`pr-47940bc`).
-5. **End-to-end re-validation of Phases 1-5 features under Phase 10's flow** — discovery supervisor launch+reconcile, bug-fix watcher pick-and-advance, improvement-fix watcher gated-merge, auto-sequence halt-at-pause, watcher review session opening, regression-filing routing. Prefer existing regression tests (`REGRESSION: <id>`); use `NEW_REGRESSION: <slug>` via `pr-2680fbf` where none exist, growing the library rather than expanding scaffolding.
+1. Plan auto-start watcher tests (`tests/test_plan_watcher.py`) — per-plan config (gated vs autonomous, mandated taste check), max-in-flight concurrency, picks ready PRs respecting deps, runs the per-PR auto-sequence chain (`qa → sign_off → merge`), defers per-PR decisions to sign-off. Scenarios bind to regression tests (`pr-06a96fa`) or author new ones (`pr-2680fbf`), not INSTRUCTION+ARTIFACT.
+2. Sign-off step (`pr-2d5f712`) integration — `qa → sign_off → merge` (autonomous) / hold (gated); verdict-router next-hops; re-loop on code change.
+3. Discovery supervisor (`pr-271cb3a`, unchanged) launch + reconcile; prompt-string assertions for its prompt and the generalized plan-watcher prompt, verifying mocks awareness at the new-regression authoring surface (`pr-51586d2`).
+4. Auto-sequence integration backstop (the three paths from `pr-e58459b`'s review), now including the `sign_off` stage.
+5. Behavioral tests for `launch_qa_item`'s `target_window` (`pr-97ddabf`), the regression-filing addendum (`pr-47940bc`), and the behavior interface reading plan notes (recast from work logs by `pr-ff9b728`).
 
-This is the checkpoint that confirms the merged Phase 1-5 features still behave correctly under the new model before declaring the regression loop ready for unsupervised operation.
+This is the checkpoint that confirms the loop behaves correctly under the Phase 10 + 11 model before it is declared ready for unsupervised operation.
 
 ## Phase 7: Evidence-gated bug fix loop (post-activation hardening)
 
@@ -219,38 +219,40 @@ Three Claude-driven regression-corpus expansion PRs, filed together. Same patter
 `pm/qa/regression/cli-output-widths.md` — resizes a tmux pane to randomly-chosen widths (60–180, seeded RNG, plus edge values), captures `pm pr list` / `pm pr ready` / `pm plan list` output, asks Claude to flag layout bugs (overflow, mid-word breaks, miscounted wide-char icons) and improvements (technically-correct-but-ugly). Motivated by two real bugs from a single manual session that unit tests cannot enumerate.
 
 #### PR: Regression coverage — watcher behavior and review session
-`pr-70d02ed` (pending)
+`pr-70d02ed` (depends on: pr-ff9b728)
 
-Four new markdowns covering the watcher / observation surfaces from Phases 2-4:
-- `discovery-supervisor-tick.md` — tick against fixture state; verify work-log read, regression-test launch in watcher window (`pr-97ddabf`), dedup + reconcile, log append, READY emit; variants for cold start / rolling context / in-flight continuation
-- `bug-fix-watcher-pick-and-advance.md` — pick correct candidate via prioritization + Watcher notes, invoke `pm pr auto-sequence`, advance impl→review→QA→auto-merge; variants for at-cap, stuck NEEDS_WORK loop, reproduce-failure
-- `improvement-fix-watcher-gated-merge.md` — same shape against `plan=ux`; stops at qa-pass, human merges between ticks, no re-attempt
-- `watcher-review-session-summary.md` — opening summary across all three watchers, follow-up query, remediation flow (add Watcher-section note, verify next tick picks it up)
+Reframed for Phase 11: the surfaces are now the single **plan auto-start watcher** + the **sign-off step**, not the two old impl watchers. Four markdowns:
+- `discovery-supervisor-tick.md` — discovery supervisor (`pr-271cb3a`, unchanged): work-log read, regression-test launch in watcher window (`pr-97ddabf`), dedup + reconcile, READY emit; variants for cold start / rolling context / in-flight continuation
+- `plan-watcher-pick-and-advance.md` — the generalized plan watcher: picks ready PRs respecting deps, honors max-in-flight, runs the per-PR auto-sequence chain (`qa → sign_off → merge`), defers the merge/route decision to sign-off; variants for at-cap (no-op), autonomous plan (sign-off merges), gated plan (sign-off holds for human), stuck PR (loop guard → INPUT_REQUIRED)
+- `sign-off-step.md` — `qa → sign_off`: comprehensive review, verdict-router next-hops (merge / re-qa / back-to-impl / escalate), audit notes
+- `watcher-review-session.md` — the behavior interface / review session reads **plan notes** (recast from the work logs by `pr-ff9b728`), PR descriptions, and PR notes; remediation via a note confirmed before applying; next tick picks it up
 
-Folds in the opportunistic audit: as scenarios run, Claude is asked to flag *other* uncovered surfaces and file improvement PRs proposing regression tests, complementing `pr-f4dc8a2`'s static auditor.
+Folds in the opportunistic audit: as scenarios run, Claude flags *other* uncovered surfaces and files improvement PRs, complementing `pr-f4dc8a2`'s static auditor.
 
 #### PR: Regression coverage — auto-sequence chain pause conditions
-`pr-a1f267a` (pending)
+`pr-a1f267a` (depends on: pr-ff9b728)
 
-`pm/qa/regression/auto-sequence-halt-conditions.md` — exercises every documented pause condition of the chain (`pr-e58459b`) on both entry points (TUI `O` keypress + `pm pr auto-sequence <id>` CLI): impl idle-no-spec, review INPUT_REQUIRED, QA INPUT_REQUIRED, stop-before-merge (auto-merge=false or improvement-gated), review NEEDS_WORK loop, QA NEEDS_WORK loop, max-iterations hit. Verifies each pause halts correctly and resumes from the right state.
+`pm/qa/regression/auto-sequence-halt-conditions.md` — exercises every pause/transition of the chain (`pr-e58459b`, now `start → review → QA → sign_off → merge`) on both entry points (TUI `O` keypress + `pm pr auto-sequence <id>` CLI): impl idle-no-spec, review INPUT_REQUIRED, QA INPUT_REQUIRED, the **sign_off stage** (qa-finalize enters sign_off, router runs, bounce routes back through review+qa), **gated sign-off hold** (replaces the old auto-merge=false: a gated plan's PR reaches sign_off and holds for the human), review NEEDS_WORK loop, QA NEEDS_WORK loop, max-iterations / no-progress stop (`pr-ed10ac4`). Verifies each halts correctly and resumes from the right state.
 
 ## Phase 9: Headless and unsupervised hardening + single-prompt capstone
 
-Push the loop from "autonomous with a human in reserve via INPUT_REQUIRED" to "autonomous and recoverable with no human in the path." Then exercise the hardened loop end-to-end as the realistic single-prompt task evaluation (`pr-e2b7fdf`) — the capstone of Phases 1-10. An exact-ProgramBench offshoot (`pr-0cf3626`) runs the same machinery against ProgramBench's public benchmark for leaderboard submission.
+Push the loop from "autonomous with a human in reserve via INPUT_REQUIRED" to "autonomous and recoverable with no human in the path." Then exercise the hardened loop end-to-end as the realistic single-prompt task evaluation (`pr-e2b7fdf`) — the capstone of Phases 1-11. An exact-ProgramBench offshoot (`pr-0cf3626`) runs the same machinery against ProgramBench's public benchmark for leaderboard submission.
+
+> **Sequencing after the Phase 11 reframing**: the self-recovery audit (`pr-ca6859f`) now audits the *generalized* plan-watcher prompt + the sign-off prompts, so it depends on `pr-ff9b728`; and the bridge (`pr-fbda1a8`) validates the generalized watcher + sign-off. Both therefore land **after Phase 11**, which pulls the rest of Phase 9 (headless mode, scenario-quality supervisor) and the capstone behind Phase 11 too. The capstone exercises the full Phase 10 **and** Phase 11 loop.
 
 Three pieces of hardening (self-recovery playbooks, no-progress detection, headless runtime), one scenario-quality safety net (false-PASS supervisor), and the auto-synthesis primitive that produces QA instructions from a task envelope. The capstone PR composes all of them.
 
 ### PR: Watcher self-recovery audit
-`pr-ca6859f` (pending). **Land first** — gates the headless/benchmark mode below.
+`pr-ca6859f` (depends on: pr-ff9b728). Gates the headless/benchmark mode below.
 
-Audit every escalation path in the watcher prompts and surrounding code (`generate_bug_fix_impl_prompt`, `generate_improvement_fix_impl_prompt`, `generate_discovery_supervisor_prompt`, the review and QA prompts) and add explicit recovery playbooks instead of INPUT_REQUIRED for technical issues that have a clear correct response. Examples: container creation failure → retry with backoff, missing dep → install, stuck loop → cap iterations, mark failed, move on, spec ambiguity → record assumption and proceed, push failure → retry then re-fetch and rebase. INPUT_REQUIRED stays available for genuinely human-judgment-required cases (e.g. the watcher review session adding notes); but the bar to escalate moves from "anything unexpected" to "no plausible automatic recovery." Manual testing: synthesize each failure mode in a controlled run and confirm the playbook fires; INPUT_REQUIRED rate on a representative bug-fix corpus should drop measurably.
+Audit every escalation path in the loop's prompts and add explicit recovery playbooks instead of INPUT_REQUIRED for technical issues that have a clear correct response. Reframed for Phase 11: the watcher prompts are now the **single generalized plan-watcher prompt** (`pr-ff9b728`); also audit the review, QA, and **sign-off** (`pr-2d5f712`) escalation paths. Examples: container creation failure → retry with backoff, missing dep → install, stuck loop → cap iterations, mark failed, move on, spec ambiguity → record assumption and proceed, push failure → retry then re-fetch and rebase. INPUT_REQUIRED stays available for genuinely human-judgment-required cases (e.g. the watcher review session adding notes); but the bar to escalate moves from "anything unexpected" to "no plausible automatic recovery." Manual testing: synthesize each failure mode in a controlled run and confirm the playbook fires; INPUT_REQUIRED rate on a representative bug-fix corpus should drop measurably.
 
 ### PR: Headless / benchmark mode for autonomous loops
 `pr-6f9301e` (depends on: pr-ca6859f, pr-438028c, pr-f17e22b).
 
 Single `benchmark_mode` flag covering the runtime and prompt layers:
 - **Runtime**: pm operates without a visible TUI (no picker, no popup, hooks bypassed where they assume a TUI surface), all session activity captured in a single structured log file. Builds on `pr-438028c` (CLI window management for review-loop / QA) and what's left after it lands.
-- **Prompt layer**: extends `pr-f17e22b`'s TUI-section gate to a project-wide flag that strips "ask the user" / interactive language from every prompt builder (`generate_prompt`, `generate_review_prompt`, `generate_merge_prompt`, the QA planner / refinement / scenario prompts, the watcher prompts).
+- **Prompt layer**: extends `pr-f17e22b`'s TUI-section gate to a project-wide flag that strips "ask the user" / interactive language from every prompt builder (`generate_prompt`, `generate_review_prompt`, `generate_merge_prompt`, the QA planner / refinement / scenario prompts, the generalized plan-watcher prompt, and the sign-off prompt).
 
 Coupling rationale: removing INPUT_REQUIRED from prompts is only safe once the self-recovery playbooks exist. Sequencing this PR after the self-recovery audit makes that explicit.
 
@@ -281,7 +283,7 @@ Per-scenario amendment cap (default 2) prevents supervisor loops; cap-exceeding 
 ### PR: Realistic single-prompt task — internet + directive + post-run integrity audit (CAPSTONE)
 `pr-e2b7fdf` (depends on: pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-fbda1a8).
 
-The end-to-end goal of Phases 1-10: a single-prompt task evaluation that mirrors how a real engineer works. Layer pm on top of a cleanroom image; a leader Claude session uses pm itself as its orchestration tool, files plan + PRs, drives them through the Phase 10 QA flow, produces a working result.
+The end-to-end goal of Phases 1-11: a single-prompt task evaluation that mirrors how a real engineer works. Layer pm on top of a cleanroom image; a leader Claude session uses pm itself as its orchestration tool, files plan + PRs, drives them through the full Phase 10 + 11 flow (`start → review → QA → sign_off → merge` via the plan auto-start watcher), produces a working result.
 
 Inspired by ProgramBench (https://programbench.com) but deliberately not its exact shape. ProgramBench's offline-only constraint (no internet, only `/workspace/executable` + docs) is artificial; real engineers have the internet. The realistic version uses three constraints instead:
 
@@ -291,7 +293,7 @@ Inspired by ProgramBench (https://programbench.com) but deliberately not its exa
 
 Pieces: leader prompt template (sibling of `generate_prompt` / `generate_review_prompt`), task envelope format, adapter CLI (`pm bench realistic --task <path>`), integrity audit module, reproducibility Dockerfile, end-to-end fixture test. Reuses the auto-synthesis primitive (`pr-b3b8df0`) to produce QA instructions from the task envelope.
 
-**Depends on `pr-fbda1a8`** (the bridge PR): the leader spawns the full autonomous loop, so any silently-regressed Phase 1-5 feature would make the leader fail for reasons unrelated to the task. The bridge confirms the loop is sound under Phase 10's flow before this PR depends on it end-to-end.
+**Depends on `pr-fbda1a8`** (the bridge PR): the leader spawns the full autonomous loop, so any silently-regressed feature would make the leader fail for reasons unrelated to the task. The bridge confirms the loop is sound under the Phase 10 + 11 flow (generalized plan watcher + sign-off) before this PR depends on it end-to-end.
 
 ### PR: Offshoot — exact ProgramBench task as a separate runnable
 `pr-0cf3626` (depends on: pr-e2b7fdf, pr-b3b8df0)
@@ -306,7 +308,7 @@ Filed in two waves: most during `pr-6be8ee6`'s QA iteration once the loop was ex
 
 The chain (PRs that together form the redesign): `pr-9603d04` (GitHub mock substrate) and `pr-abcf70f` (FakeClaudeSession, plan-regression, in_review) → `pr-7d5d036` (regression-runner containment cleanup) → `pr-06a96fa` (scenarios bind to regression tests) → `pr-2680fbf` (planner authors a new regression when none fits) → `pr-51586d2` (mocks awareness at the new-regression authoring surface). Other Phase 10 PRs (`pr-b59f0c7`, `pr-0b14f2c`, `pr-f4dc8a2`) are independent improvements that compose with the chain.
 
-> **Re-testing obligation for Phases 1-5**: every PR in Phases 1-5 was implemented and QA'd under the *pre-Phase-10* QA flow — INSTRUCTION+ARTIFACT scenarios, mocks injected at scenario planning (later stripped by `pr-6be8ee6` / commit `3eb89e6`), no regression-test binding, no new-regression authoring step. When Phase 10's chain lands (`pr-06a96fa` → `pr-2680fbf` → `pr-51586d2`), the regression library becomes the canonical surface and the QA loop's verdicts mean something different. Every merged feature in Phases 1-5 (the three watchers, the auto-sequence chain, the discovery supervisor, the regression-filing addendum, watcher-target windows, the human review session, the auto-start command) needs to be re-exercised under the new flow. The bridge PR that performs this re-validation is `pr-fbda1a8` (Phase 6 — see below), which depends on Phase 10's chain so it runs only after the new flow lands.
+> **Re-testing obligation for Phases 1-5**: every PR in Phases 1-5 was implemented and QA'd under the *pre-Phase-10* QA flow — INSTRUCTION+ARTIFACT scenarios, mocks injected at scenario planning (later stripped by `pr-6be8ee6` / commit `3eb89e6`), no regression-test binding, no new-regression authoring step. When Phase 10's chain lands (`pr-06a96fa` → `pr-2680fbf` → `pr-51586d2`), the regression library becomes the canonical surface and the QA loop's verdicts mean something different. Every merged feature in Phases 1-5 (the three watchers, the auto-sequence chain, the discovery supervisor, the regression-filing addendum, watcher-target windows, the human review session, the auto-start command) needs to be re-exercised under the new flow. The bridge PR that performs this re-validation is `pr-fbda1a8` (Phase 6 — see below). Note Phase 11 *replaces* the two impl watchers and the auto-start command with the generalized plan watcher + sign-off, so the bridge validates **those** (not the originals); it therefore depends on Phase 10's chain **and** `pr-ff9b728`.
 
 ### PR: GitHub backend mock for regression tests
 `pr-9603d04` (pending)
@@ -359,6 +361,11 @@ Static project-wide counterpart to `pr-2680fbf` (which authors regressions on-de
 3. **Instructions / artifact recipes (fallback-only)** — flag legacy INSTRUCTION+ARTIFACT scaffolding that should migrate to regression tests; do not propose new entries except for genuine one-shot probes/oracles.
 
 Proposals go to a report (no auto-apply) for human or scenario-author follow-up. Can be invoked manually (`pm qa audit`) or scheduled via the discovery supervisor (`pr-271cb3a`) as a periodic stale-library check.
+
+### PR: Shared VerdictRegistry — unify verdict definitions across the detector and the fake
+`pr-1d8b2b7` (pending)
+
+Follow-up to `pr-abcf70f` (FakeClaudeSession, merged): a shared `VerdictRegistry` that both the verdict-detection path (`qa_loop.py`, `loop_shared.py`, `verdict_transcript.py`, `prompt_gen.py`) and `pm_core/fake_claude.py` import from — canonical verdicts, parsing rules (single-line vs START/END block), per-session-type sets, per-verdict metadata. New verdicts are added once and the test infra picks them up. Without it, later PRs that add verdict state (`pr-b42059d` coverage, `pr-8ed578d` fix-line gate, `pr-b59f0c7` reasons, `pr-2680fbf` NEW_REGRESSION sub-status, `pr-98f670e` shallow-PASS amendments, and the **`sign_off` verdicts / router next-hops from `pr-2d5f712`**) silently diverge the fake from the detector — tests pass while production regresses. Prerequisite of the bridge (`pr-fbda1a8`).
 
 ## Phase 11: Sign-off / acceptance gate — the verdict router that closes auto-run
 
@@ -465,7 +472,7 @@ Replaces the two plan-specific impl watchers **and** the programmatic auto-start
 - Autonomous loops can run end-to-end with no human-reachable surface (headless / benchmark_mode)
 - No-progress safety stop short-circuits spinning review/QA loops before max-iterations
 - Scenario quality supervisor catches false-PASS scenarios in headless mode before verdicts propagate
-- **Capstone**: a single-prompt task (`pr-e2b7fdf`) produces a working result via the full Phase 10 autonomous loop under realistic constraints — internet on, written directive + provided materials, post-run integrity audit confirming no out-of-bounds references. The exact-ProgramBench offshoot (`pr-0cf3626`) succeeds on the public leaderboard.
+- **Capstone**: a single-prompt task (`pr-e2b7fdf`) produces a working result via the full Phase 10 + 11 autonomous loop under realistic constraints — internet on, written directive + provided materials, post-run integrity audit confirming no out-of-bounds references. The exact-ProgramBench offshoot (`pr-0cf3626`) succeeds on the public leaderboard.
 
 **QA flow redesign (Phase 10, pending — the most consequential):**
 - Regression library compounds: every QA run for an uncovered surface either binds to an existing regression test or authors a new one via `pr-2680fbf`; INSTRUCTION+ARTIFACT scaffolding decays toward zero except for genuine one-shot probes/oracles
