@@ -22936,59 +22936,84 @@ prs:
   notes: []
 - id: pr-ff9b728
   plan: plan-regression
-  title: 'Auto-run wiring: single-PR + dependency-aware auto-start, mid-run plan mutation,
-    loop guard'
+  title: Plan auto-start watcher — generalize impl watchers + become the auto-start
+    engine (replaces programmatic auto-start)
   branch: pm/pr-ff9b728-auto-run-wiring-re-loop-on-code-change-loop-guard-
   status: pending
   depends_on:
   - pr-2d5f712
-  description: "Wire the sign-off verdict router into both single-PR runs and dependency-aware\
-    \ auto-start, with the loop-safety rules and the dynamic plan/graph mutation the\
-    \ router's \"needs a new PR\" hops require.\n\nSINGLE-PR MODE: a CLI/TUI entry\
-    \ to run the full sign-off + auto-run loop on ONE pr (e.g. `pm pr signoff <id>`\
-    \ / `pm pr auto <id>`), independent of a full auto-start sweep. Reuses the router\
-    \ (pr-2d5f712), loop guard, and re-loop invariant. This is the \"start and run\
-    \ it on an individual PR\" path.\n\nAUTO-START INTEGRATION: insert sign-off as\
-    \ a stage in the dependency-aware orchestrator (pm_core/tui/auto_start.py check_and_start:\
-    \ review -> qa -> SIGN-OFF -> merge), scoped to the target's dependency tree (_transitive_deps)\
-    \ like the existing review/qa loops.\n\nRE-LOOP INVARIANT: any CODE/CONTENT change\
-    \ (impl, or a NEEDS_WORK fix a scenario worker made) routes back through review\
-    \ AND qa before merge — no shortcut. NOTE-ONLY actions do not re-trigger review\
-    \ (recording a limitation then merging; note->re-qa; notes left on OTHER PRs in\
-    \ project.yaml never require review).\n\nLOOP GUARD: default cap of 10 full bounces\
-    \ per PR (configurable global setting), reset on genuine progress; on exceeding\
-    \ it the checkoff raises INPUT_REQUIRED. REPEATED ROOT CAUSE: the prompt treats\
-    \ a recurring root cause/hop across bounces as a signal to raise INPUT_REQUIRED\
-    \ early, before the hard cap. A bounce that makes real progress (e.g. files a\
-    \ needed new dependency) is progress, not a no-progress spin — it resets the guard.\n\
-    \nDYNAMIC PLAN/GRAPH MUTATION (the new capability auto-start lacks today): when\
-    \ the router emits a \"needs a new PR\" hop — a missing dependency, an assumed-missing\
-    \ feature the PR depended on, or a new feature — the auto-run machinery must:\n\
-    \  1. File the new PR(s) via pm pr add and set depends_on so the blocked PR depends\
-    \ on them (insert UPSTREAM of the current target).\n  2. Edit the PLAN FILE to\
-    \ add the corresponding `### PR:` section(s) in the right place with dependency\
-    \ notation. No plan-file writer exists today (plan_parser only reads via parse_plan_prs)\
-    \ — this PR adds an ADDITIVE plan-section inserter: it appends/inserts PR sections\
-    \ without rewording or deleting existing ones, preserving human-authored content.\n\
-    \  3. RE-RESOLVE the dependency tree so check_and_start picks up the newly-inserted\
-    \ upstream PR(s) and starts them BEFORE resuming the blocked target. Today _transitive_deps(target)\
-    \ is computed once over a static graph; this is the \"new way auto-start doesn't\
-    \ handle\" — the target's tree GROWS mid-run, so the orchestrator must recompute\
-    \ the frontier and start a PR that didn't exist when the run began.\n  4. Commit\
-    \ the plan edit + project.yaml rows atomically and record the mutation as a pm\
-    \ pr note (audit trail).\n\nSAFETY ON PLAN MUTATION (autonomous edits to the human-readable\
-    \ source of truth):\n  - Additive-only: insert PR sections / set deps; never delete\
-    \ or reword existing sections.\n  - Cycle detection: refuse a dependency insertion\
-    \ that would create a cycle in the graph.\n  - In gated mode, surface the proposed\
-    \ plan edit + new upstream PR(s) for human review before starting them; in autonomous\
-    \ mode, proceed and rely on the note trail + additive-only guarantee.\n\nDepends\
-    \ on: pr-2d5f712 (verdict router) and the auto-sequence chain (merged). The plan-mutation\
-    \ piece is the heaviest sub-part and can be split out if it grows."
+  description: 'Replace the two plan-specific impl watchers AND the programmatic auto-start
+    with a single PLAN AUTO-START WATCHER that shepherds a plan while the sign-off
+    step (pr-2d5f712) shepherds each PR. Sign-off is a concretization of the taste-check/gated-merge
+    the impl watchers improvise today, so this supersedes that machinery and removes
+    the dead code.
+
+
+    GENERALIZE THE IMPL WATCHERS: fold pr-e3a711c (bug-fix) and pr-d39a7fb (improvement-fix)
+    into one watcher parameterized per plan — gated vs autonomous, mandated checks
+    (the improvements taste check), prioritization guidance. Same functionality, one
+    class; the two concrete watchers (bug_fix_impl_watcher.py, improvement_fix_impl_watcher.py)
+    and their near-duplicate prompt builders are removed.
+
+
+    BECOME THE AUTO-START ENGINE: this watcher IS the auto-start. Remove the programmatic
+    orchestration in pm_core/tui/auto_start.py (check_and_start, _auto_start_review_loops,
+    _auto_start_qa_loops, auto_sequence_for_pr, the one-shot _transitive_deps walk).
+    The watcher picks ready PRs from its plan (deps satisfied), runs the per-PR auto-sequence
+    chain (pr-e58459b, kept — now with the qa -> sign_off -> merge tail), resolves
+    high-level issues, and keeps the plan working as implementation + sign-offs proceed.
+    The TUI auto-start toggle becomes start/stop for this watcher. (Open: whether
+    the existing AutoStartWatcher pane-monitoring role folds into this watcher''s
+    "resolve high-level issues" duty or stays separate.)
+
+
+    MAX IN-FLIGHT PRS (new, a change to auto-start): the watcher chooses how many
+    PRs to drive concurrently rather than walking one target''s dependency tree serially.
+    Bounded, watcher-judged each tick from plan state + guidance.
+
+
+    DEFER PER-PR DECISIONS TO SIGN-OFF: the watcher does not decide merge/route per
+    PR — the sign-off step does. The watcher handles plan-level concerns: what to
+    start, concurrency, resolving high-level issues, keeping the plan correct as work
+    lands.
+
+
+    REAL-CODE FEEDBACK INTO THE PLAN (dynamic plan/graph mutation): when sign-off
+    (or the watcher) finds the plan needs a new PR — a missing dependency, an assumed-missing
+    feature, a new feature — the watcher files the PR(s) + sets depends_on (insert
+    upstream); ADDITIVELY edits the plan file to add the ### PR: section(s) (no plan-file
+    writer exists today — plan_parser only reads; never reword/delete existing content);
+    re-resolves which PRs are ready so newly-inserted upstream work starts before
+    the blocked PR; commits plan + project.yaml atomically and records a pm pr note.
+    Cycle detection on dependency insertion; gated mode surfaces the plan edit before
+    starting; additive-only is the autonomous-mode guarantee.
+
+
+    LOOP SAFETY: re-loop invariant — any code/content change routes back through review
+    AND qa before merge; note-only actions (incl. notes on other PRs) don''t re-trigger
+    review. Loop guard — default 10 bounces/PR (configurable), reset on real progress;
+    repeated root cause escalates to INPUT_REQUIRED early. Reuses pr-ed10ac4''s no-progress
+    hashing at the across-bounce layer.
+
+
+    SINGLE-PR MODE: the same per-PR auto-sequence chain (qa -> sign_off -> merge)
+    run on demand for one PR — pm pr auto-sequence <id> extended past merge, with
+    a thin pm pr signoff <id> to enter just the sign-off step. No parallel pm pr auto
+    command.
+
+
+    REMOVED (dead code): auto_start.py''s programmatic orchestration; bug_fix_impl_watcher.py
+    + improvement_fix_impl_watcher.py (generalized); the improvement watcher''s gated-at-QA-PASS
+    path and pr-b77702b''s auto_merge gating (superseded by sign-off + per-plan config);
+    any ad-hoc taste-check/sign-off code the sign-off step now owns.
+
+
+    Depends on: pr-2d5f712 (sign-off step).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T14:08:33.861642+00:00'
+  updated_at: '2026-05-25T14:30:29.427873+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
