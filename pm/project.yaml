@@ -22488,6 +22488,23 @@ prs:
       qa (line720).'
     created_at: '2026-05-25T03:20:37Z'
     last_edited: '2026-05-25T03:20:37Z'
+  - id: note-f4be9b6
+    text: 'Scenario 6 (picker idempotency + graceful degradation) refined to drive
+      the REAL fake-github facility (pm fake-github config set), not scenario-2''s
+      hand-rolled gh-shim — pr-9603d04 is now MERGED into this branch so bin/fake-github
+      + pm fake-github CLI + paths.fake_github_active all exist. Key mechanics: self-heal
+      gate session.py:1754-1762 (only when window display-id matches no tracked PR)
+      → _try_relink_window (session.py:1193) returns False fast for non-#N ids and
+      non-github backend; backfill_gh_numbers_by_branch (helpers.py:671) issues `gh
+      pr list --state open` (served by fake) and matches headRefName→PR.branch. Idempotency
+      observable: after 1st heal records gh_pr_number, the 1755 condition is False
+      on 2nd open so NO 2nd `pr list` (check ~/.pm/debug/<tag>.log [gh] entries; tag
+      = dir-name since no github remote). Graceful-degrade message branch session.py:1837-1847
+      picks stale-vs-merged by re-checking _pr_display_id match. fake gate precedes
+      _check_gh so real gh need NOT be installed. Use git_backed:false metadata-only
+      fake (picker only does pr list).'
+    created_at: '2026-05-25T03:19:50Z'
+    last_edited: '2026-05-25T03:19:50Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9b96145-bug-pr-actions-picker-reports-merged-904ede96
 - id: pr-3d1fa55
   plan: bugs
