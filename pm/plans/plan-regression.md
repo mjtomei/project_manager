@@ -376,17 +376,16 @@ Auto-runs after QA finalization. Reads every scenario's verdict + reason (`pr-b5
 - **NEEDS_WORK** (scenario fixed it itself) → a code change happened → back through review **and** qa; validate the fix is real and shortcut-free.
 - **INPUT_REQUIRED** → classify the cause and route: misframed/mistaken scenario → note for next qa run → re-qa (qa-gen reads notes, so this closes); real gap → note → back to impl; assumed-missing feature → agent decides between filing a new PR + `depends_on` (block) or expanding scope; nice-to-have → agent decides defer-to-new-PR vs include-if-trivial; impossible/out-of-scope → note the limitation → accept or bounce with the constraint.
 
-Every classification + chosen hop is recorded as a `pm pr note` (audit trail, prefer-pm-pr-notes), so an autonomous merge is inspectable after the fact. Gated vs autonomous is a config flag on this path. Loop-guard + re-loop wiring is `pr-ff9b728`; the behavior report + dashboard are `pr-8e693f6` / `pr-f156f9f`.
+Every classification + chosen hop is recorded as a `pm pr note` (audit trail, prefer-pm-pr-notes), so an autonomous merge is inspectable after the fact. Gated vs autonomous is a config flag on this path. Loop-guard + re-loop wiring is `pr-ff9b728`; the per-PR behavior report + dashboard are `pr-8e693f6`.
 
-### PR: Per-PR BDD behavior report (HTML, co-located with captures)
+### PR: Sign-off UI — per-PR BDD report + all-PR behavior dashboard (HTML)
 `pr-8e693f6` (depends on: pr-06a96fa, pr-2d5f712)
 
-The human-facing demo. A self-contained HTML report written **alongside** the captures it references (`~/.pm/sessions/<tag>/captures/<pr_id>/report.html`), pointing directly at the real webm/png/html evidence — no copy. (There is no capture GC today: `cleanup_pr_resources` never touches the captures dir, so co-locating is safe for v1; a future GC phase would snapshot instead.) BDD-shaped: per behavior, the flow (STEPS / Given-When-Then), the verdict + reason, and the evidence inline/linked, plus a top-of-page status summary and the checkoff's recommendation/next hop. Terminal panes can't show webm — so the browser page is the sign-off surface; the tmux checkoff window holds the discussion + approve/reject. Generated at sign-off time, regeneratable on demand (see `pr-f156f9f`).
+The human-facing surface for sign-off — the per-PR report plus the dashboard that indexes them, combined since they share a generator and storage layout.
 
-### PR: Behavior dashboard — all PRs, filtering, detect-missing + regenerate
-`pr-f156f9f` (depends on: pr-8e693f6)
+**Per-PR report (BDD):** A self-contained HTML report written **alongside** the captures it references (`~/.pm/sessions/<tag>/captures/<pr_id>/report.html`), pointing directly at the real webm/png/html evidence — no copy. (There is no capture GC today: `cleanup_pr_resources` never touches the captures dir, so co-locating is safe for v1; a future GC phase would snapshot instead.) BDD-shaped: per behavior, the flow (STEPS / Given-When-Then), the verdict + reason, and the evidence inline/linked, plus a top-of-page status summary and the checkoff's recommendation/next hop. Terminal panes can't show webm — so the browser page is the sign-off surface; the tmux checkoff window holds the discussion + approve/reject. Generated at sign-off time.
 
-A single top-level HTML index where all PRs are reviewed **by behavior + short status summaries** — fits the BDD goal. Lists every PR with a one-line behavior/status summary linking to its per-PR `report.html`; simple client-side **filtering** by merged/unmerged and by status, so reports for both merged and unmerged PRs are reviewable and each PR's position in the flow is visible. **Detect-missing**: when a per-PR report is absent (never generated, or removed by a future GC) the index shows that state instead of a dead link, with a **regenerate flow** to rebuild it on demand from retained verdicts/evidence (re-running a capture only if needed). Static export (open a file, no server) is the v1 lean; co-located with the captures.
+**Dashboard:** A single top-level HTML index where all PRs are reviewed **by behavior + short status summaries** — fits the BDD goal. Lists every PR with a one-line behavior/status summary linking to its per-PR `report.html`; simple client-side **filtering** by merged/unmerged and by status, so reports for both merged and unmerged PRs are reviewable and each PR's position in the flow is visible. **Detect-missing**: when a per-PR report is absent (never generated, or removed by a future GC) the index shows that state instead of a dead link, with a **regenerate flow** to rebuild it on demand from retained verdicts/evidence (re-running a capture only if needed). Static export (open a file, no server) is the v1 lean; co-located with the captures.
 
 ### PR: Auto-run wiring — re-loop on code change + loop guard + repeated-root-cause escalation
 `pr-ff9b728` (depends on: pr-2d5f712)
@@ -423,7 +422,7 @@ Wires the router into auto-run with the loop-safety rules. **Re-loop invariant**
 - All Phase 1-5 features re-validated under the new flow via the bridge PR (`pr-fbda1a8`) before the regression loop is declared unsupervised-ready
 
 **Sign-off / acceptance gate (Phase 11, pending — closes auto-run):**
-- Every PR that finalizes QA gets an auto-generated BDD behavior report (`pr-8e693f6`); the dashboard (`pr-f156f9f`) reviews all PRs by behavior + status with merged/unmerged filtering and regenerates missing reports
+- Every PR that finalizes QA gets an auto-generated BDD behavior report, and the dashboard (both `pr-8e693f6`) reviews all PRs by behavior + status with merged/unmerged filtering and regenerates missing reports
 - The verdict router (`pr-2d5f712`) maps every terminal verdict to a next hop, edits no code, and escalates to INPUT_REQUIRED on genuine ambiguity rather than merging incomplete work
 - Auto-run re-loops through review+qa on any code change, never on note-only actions; the loop guard (`pr-ff9b728`, default 10) and repeated-root-cause escalation prevent infinite bounce loops
 - With the gate in autonomous mode, the measured defect count trends **down** without per-change human review — the pitch's decisive open question answered in the affirmative
