@@ -72,6 +72,29 @@ For a `local` backend test project it is the `pr-<id>`.
 - **Then** no error is raised and no redundant teardown work occurs (the sweep
   is a cheap no-op once the windows are gone).
 
+### R7 — Loop-stop coordination when finalized mid-loop (added post-impl, Bug2)
+- **Given** a PR with a *running* QA or review loop (windows live, runtime-state
+  file present) that is flipped to a terminal status by an external
+  `pm pr edit --status merged|closed` while the loop is still iterating.
+- **When** the TUI reloads/syncs and the sweep reclaims the PR.
+- **Then** the active loop is requested to stop so it does not relaunch its
+  next scenario window / rewrite runtime-state in a tug-of-war with the sweep;
+  the cleanup trigger also fires when a loop is active or only a stale
+  runtime-state file lingers (so the runtime-state file is not leaked); and
+  the run reaches a steady state — no repeated relaunches, windows + container
+  + socket + registry + runtime-state all gone and stable.
+
+### R8 — Incidental: last QA scenario verdict survives a TUI restart
+- **Given** a QA loop driven to completion where the *final* scenario's verdict
+  (the one that empties the pending/verifying queues and exits the loop) was
+  just recorded.
+- **When** the TUI is restarted and the QA run is resumed from its snapshot.
+- **Then** the final scenario's verdict is still present in the resumed QA
+  view (not dropped). This is an incidental fix folded into this branch
+  (qa_loop.py now persists the resume snapshot at the bottom of each poll
+  iteration, not only at the top); it is *not* part of the window-reclaim
+  surface but ships here, so a regression in it would surface on this branch.
+
 ## Setup
 
 - Use the **TUI Manual Testing** instruction to stand up a throwaway `local`
