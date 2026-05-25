@@ -706,12 +706,53 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     Returns the workdir path (str) on success, or *None* on failure.
     Updates *pr_entry["workdir"]* and persists the change when a new
     clone is created.
+
+    Provisioning is serialized per-PR with an exclusive file lock: two
+    commands that both find the workdir missing (e.g. two ``pm pr signoff``
+    racing) would otherwise both clone into the fixed ``.tmp-{pr_id}`` path and
+    corrupt each other — one ``rmtree``/moves the dir out from under the other,
+    crashing its git ops with a traceback.  The lock makes the loser wait, then
+    adopt the winner's freshly-persisted workdir instead of re-cloning.
     """
-    import shutil
+    import fcntl
 
     workdir = pr_entry.get("workdir")
     if workdir and Path(workdir).exists():
         return workdir
+
+    pr_id = pr_entry.get("id")
+    project_dir = _workdirs_dir(data)
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    lock_path = project_dir / f".workdir-{pr_id}.lock"
+    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        # Double-checked: another caller may have created and persisted the
+        # workdir while we waited for the lock.  Re-read the authoritative
+        # on-disk record and adopt it if it now exists.
+        try:
+            fresh_pr = store.get_pr(store.load(root), pr_id)
+            fresh_wd = (fresh_pr or {}).get("workdir")
+        except Exception:
+            fresh_wd = None
+        if fresh_wd and Path(fresh_wd).exists():
+            pr_entry["workdir"] = fresh_wd
+            return fresh_wd
+        return _clone_workdir(data, pr_entry, root)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
+    """Clone + check out a PR's workdir.  Caller holds the per-PR lock.
+
+    Extracted from :func:`_ensure_workdir` so the actual clone/move/checkout
+    runs under the exclusive provisioning lock.  Do not call directly — go
+    through :func:`_ensure_workdir`, which serializes concurrent callers.
+    """
+    import shutil
 
     branch = pr_entry.get("branch")
     if not branch:
