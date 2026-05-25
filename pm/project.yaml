@@ -22486,7 +22486,7 @@ prs:
   title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
     router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
     stage between qa and merge with its own window, not logic embedded in the QA loop.
@@ -22595,9 +22595,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T18:35:36.171179+00:00'
+  updated_at: '2026-05-25T18:50:45.591385+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
   notes:
   - id: note-0357619
@@ -22781,7 +22781,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T16:59:08.396212+00:00'
+  updated_at: '2026-05-25T19:20:16.222930+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
@@ -22796,6 +22796,26 @@ prs:
       captures for bugs.'
     created_at: '2026-05-25T16:59:08Z'
     last_edited: '2026-05-25T16:59:08Z'
+  - id: note-f9f9525
+    text: "ADOPT #225's sign-off seams (now that #225 has passed review and its branch\
+      \ is current). Steps:\n1) git fetch origin && git merge origin/master (picks\
+      \ up this note) && git merge origin/pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru\
+      \ (picks up #225's code). Resolve any conflicts (likely qa_status.py / tech_tree.py)\
+      \ as normal.\n2) Adopt the seams from #225 (pm_core/signoff.py):\n   - pr['signoff']\
+      \ = {verdict, sha, ts, origin} — read this RECORD for the report's recommendation/next-hop\
+      \ block and the dashboard's per-PR latest verdict, instead of deriving.\n  \
+      \ - SIGNOFF_VERDICT_ICONS / SIGNOFF_VERDICT_STYLES (single source of truth in\
+      \ signoff.py) and the sign_off status icon — reuse them in the HTML report +\
+      \ dashboard so icons/colors match the TUI and pm pr list. Do not define your\
+      \ own.\n   - ready_to_merge framing — the recommendation is a ready_to_merge\
+      \ RECOMMENDATION (sign-off never merges; the plan watcher decides). Word it\
+      \ that way.\n3) Adopt anything ELSE relevant you see in #225's final shape (e.g.\
+      \ decide_signoff_hop vocabulary, the SIGNOFF verdict set, the verdict->display\
+      \ mapping) so the report stays a single source of truth with #225.\n4) Re-run\
+      \ your behavior-report tests; update the spec + leave a handoff note. Commit\
+      \ + push."
+    created_at: '2026-05-25T19:20:16Z'
+    last_edited: '2026-05-25T19:20:16Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
