@@ -64,7 +64,7 @@ def test_per_pr_report_bdd_shape(tmp_path):
     # Display id, recommendation derived
     assert "#42" in h
     assert "ready for sign-off" in h.lower()
-    assert "derived from verdicts" in h
+    assert "derived from QA verdicts" in h  # no router verdict recorded
     # Reachable context: description, PR notes, plan notes
     assert "desc line one" in h
     assert "handoff one" in h and "handoff two" in h
@@ -123,19 +123,39 @@ def test_no_captures_still_renders(tmp_path):
     assert rd.next_hop == "qa"
 
 
-def test_signoff_json_overrides_derived(tmp_path):
+def test_recorded_signoff_verdict_overrides_derived(tmp_path):
+    """The router's recorded pr['signoff'] verdict drives the recommendation."""
+    from pm_core import signoff
+    data = _data()
+    data["prs"][0]["signoff"] = {
+        "verdict": signoff.SIGNOFF_MERGE,
+        "sha": "abc123", "ts": "2026-05-25T19:00:00Z", "origin": "auto-sequence"}
     cap = _seed_captures(tmp_path)
-    (cap / "signoff.json").write_text(json.dumps({
-        "recommendation": "Router says merge.",
-        "next_hop": "merge",
-        "summary": "comprehensive review complete"}))
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
+    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
     assert rd.recommendation_source == "router"
-    assert rd.recommendation == "Router says merge."
-    assert rd.summary == "comprehensive review complete"
+    assert rd.signoff_verdict == signoff.SIGNOFF_MERGE
+    assert rd.next_hop == "ready_to_merge"
+    assert "Ready to merge" in rd.recommendation
+    # ready_to_merge framing: sign-off recommends, never merges
+    assert "never merges" in rd.recommendation
     h = br.render_pr_report_html(rd)
-    assert "Router says merge." in h
-    assert "derived from verdicts" not in h
+    assert "Sign-off verdict:" in h
+    # Reuses signoff.py's icon + style (single source of truth)
+    assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in h
+    assert "derived from QA verdicts" not in h
+
+
+def test_recorded_bounce_verdict_maps_to_hop(tmp_path):
+    """A bounce verdict maps to its hop via decide_signoff_hop."""
+    from pm_core import signoff
+    data = _data()
+    data["prs"][0]["signoff"] = {
+        "verdict": signoff.SIGNOFF_IMPL, "sha": "x", "ts": "t",
+        "origin": "auto-sequence"}
+    cap = _seed_captures(tmp_path)
+    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
+    assert rd.next_hop == "impl"
+    assert "implementation" in rd.recommendation.lower()
 
 
 def test_impl_evidence_section_non_bug(tmp_path):
@@ -287,6 +307,28 @@ def test_dashboard_groups_by_plan(tmp_path):
     assert "Regression loop" in h     # plan group header
     assert "watcher continuity" in h  # plan notes shown
     assert "Unplanned" in h           # pr-ccc has no plan
+
+
+def test_dashboard_surfaces_recorded_verdict_and_icons(tmp_path):
+    """Dashboard shows the latest sign-off verdict marker + status icon,
+    reusing signoff.py / helpers.py single sources (matches pm pr list)."""
+    from pm_core import signoff
+    from pm_core.cli.helpers import PR_STATUS_ICONS
+    data = _data()
+    data["prs"][0]["status"] = "sign_off"
+    data["prs"][0]["signoff"] = {
+        "verdict": signoff.SIGNOFF_MERGE, "sha": "s", "ts": "t",
+        "origin": "auto-sequence"}
+    rows = br.gather_dashboard_rows(data, tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.signoff_verdict == signoff.SIGNOFF_MERGE
+    h = br.render_dashboard_html(data, rows)
+    # status icon for sign_off matches pm pr list / TUI
+    assert PR_STATUS_ICONS["sign_off"] in h
+    # verdict marker icon reused from signoff.py
+    assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in h
+    # ready_to_merge recommendation framing in the summary
+    assert "Ready to merge" in h
 
 
 def test_dashboard_summary_from_captures(tmp_path):

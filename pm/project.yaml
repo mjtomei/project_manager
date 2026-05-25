@@ -22860,7 +22860,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T19:20:16.222930+00:00'
+  updated_at: '2026-05-25T19:26:54.494517+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
@@ -22935,6 +22935,21 @@ prs:
       \ + push."
     created_at: '2026-05-25T19:20:16Z'
     last_edited: '2026-05-25T19:20:16Z'
+  - id: note-aa05c58
+    text: 'Adopted #225 (pr-2d5f712) sign-off seams (merged). behavior_report.py now
+      reads pr[signoff]={verdict,sha,ts,origin} as authoritative recommendation source
+      via signoff.latest_signoff_verdict + decide_signoff_hop; derived heuristic is
+      fallback only (no verdict recorded). SIGNOFF_MERGE=ready_to_merge RECOMMENDATION
+      (text states sign-off never merges; plan watcher pr-ff9b728 decides). Verdict/status
+      icons reuse signoff.SIGNOFF_VERDICT_ICONS/STYLES + helpers.PR_STATUS_ICONS (sign_off
+      ✔️) so HTML matches TUI + pm pr list; Rich styles mapped to CSS via _RICH_COLOR_CSS.
+      Staleness: compare pr[signoff].sha to head_sha(workdir), annotate if stale.
+      REMOVED my speculative captures/<pr>/signoff.json seam (router records on the
+      PR, not JSON). Addresses note-f9f9525 + note-22f1fb3. Bug before/after (impl/pre-fix,post-fix)
+      already adopted earlier; sign-off hard-bounces a bug PR to impl if either capture
+      missing (note-22f1fb3) so both should exist by sign-off.'
+    created_at: '2026-05-25T19:26:54Z'
+    last_edited: '2026-05-25T19:26:54Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression

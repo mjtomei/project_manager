@@ -60,15 +60,27 @@ Contents, BDD-shaped:
   (plan notes read defensively; omitted cleanly when absent today).
 - A link back to the dashboard (`../index.html`).
 
-### R2 — Recommendation / next hop (forward-compatible with the verdict router)
-pr-2d5f712 owns the real verdict router. Until it lands, the generator:
-- reads an optional `signoff.json` in the captures dir root
-  (`captures/<pr_id>/signoff.json`) — the seam pr-2d5f712 can populate with
-  `{verdict, recommendation, next_hop, summary}` — and renders it when present;
-- otherwise **derives** a heuristic recommendation from the scenario verdicts
-  (all PASS → "Ready for sign-off / merge"; any INPUT_REQUIRED → "Input
-  required before sign-off"; any NEEDS_WORK → "Needs work — bounce back"; no
-  behaviors → "No recorded behaviors yet"), clearly labelled as derived.
+### R2 — Recommendation / next hop (adopts the merged sign-off router, #225)
+pr-2d5f712 (#225) merged, so we are a **single source of truth with
+`pm_core/signoff.py`** rather than guessing:
+- **Recorded verdict is authoritative.** Read `pr['signoff'] = {verdict, sha,
+  ts, origin}` via `signoff.latest_signoff_verdict(pr)`; map it to a hop with
+  `signoff.decide_signoff_hop(verdict)` and render the matching recommendation.
+  `SIGNOFF_MERGE → "ready_to_merge"` is always a **recommendation** — the
+  recommendation text says sign-off never merges; the plan auto-start watcher
+  (pr-ff9b728) makes the merge/hold call. Bounces map `REQA→qa`, `REVIEW→review`,
+  `IMPL→impl`, `BLOCKED→blocked`.
+- **Staleness:** best-effort compare `pr['signoff'].sha` to the workdir HEAD
+  (`signoff.head_sha`); when they differ, annotate "verdict predates the latest
+  code change — re-run sign-off". Degrades silently if the workdir is gone.
+- **Derived fallback only** when no verdict is recorded yet (labelled "derived
+  from QA verdicts — no sign-off verdict recorded yet").
+- **Markers reuse the single sources** — `signoff.SIGNOFF_VERDICT_ICONS` /
+  `SIGNOFF_VERDICT_STYLES` (Rich styles mapped to CSS) and
+  `helpers.PR_STATUS_ICONS` (incl. `sign_off` ✔️) — so the HTML report +
+  dashboard render verdict/status icons identically to the TUI tech tree and
+  `pm pr list`. The earlier speculative `captures/<pr>/signoff.json` seam is
+  **removed** (the router records on the PR, not a JSON file).
 
 ### R3 — Durable regeneration source
 Extend `_persist_scenario_verdicts` (`qa_loop.py`) to additionally write

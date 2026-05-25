@@ -16,13 +16,20 @@ Two human-facing surfaces sharing one generator and storage layout:
   status; detect-missing rows surface a regenerate command instead of a dead
   link.
 
-Forward-compatible with the dependencies that aren't merged yet:
+Single source of truth with the sign-off step (pr-2d5f712 / pm_core/signoff.py):
 
-* **pr-2d5f712** (the sign-off step + verdict router) can drop a
-  ``signoff.json`` next to a PR's captures —
-  ``{verdict, recommendation, next_hop, summary}`` — and we render it. Absent
-  that file we *derive* a heuristic recommendation from the scenario verdicts,
-  labelled as derived.
+* The recommendation / next-hop and the dashboard's per-PR verdict come from
+  the router's recorded verdict ``pr['signoff'] = {verdict, sha, ts, origin}``
+  (``signoff.latest_signoff_verdict`` + ``signoff.decide_signoff_hop``).
+  ``SIGNOFF_MERGE`` is always a *ready_to_merge recommendation* — sign-off never
+  merges; the plan auto-start watcher (pr-ff9b728) makes the merge/hold call.
+  When no verdict is recorded yet we fall back to a derived heuristic, labelled.
+* Verdict/status markers reuse ``signoff.SIGNOFF_VERDICT_ICONS`` /
+  ``SIGNOFF_VERDICT_STYLES`` and ``helpers.PR_STATUS_ICONS`` so the HTML matches
+  the TUI tech tree and ``pm pr list`` exactly — no marker is redefined here.
+
+Forward-compatible with deps not merged yet:
+
 * **pr-06a96fa** (the evidence model): evidence is discovered generically by
   walking the captures tree and classifying by extension, so new evidence
   kinds render without code changes here.
@@ -43,12 +50,39 @@ from urllib.parse import quote
 
 _log = logging.getLogger("pm.behavior_report")
 
-# Canonical sign-off verdicts (mirrors pm_core.qa_loop constants without
-# importing the heavy module).
+# Canonical per-scenario QA verdicts (mirrors pm_core.qa_loop constants
+# without importing the heavy module).
 _PASS = "PASS"
 _NEEDS_WORK = "NEEDS_WORK"
 _INPUT_REQUIRED = "INPUT_REQUIRED"
 _VERDICTS = (_PASS, _NEEDS_WORK, _INPUT_REQUIRED)
+
+# Sign-off routing-verdict -> reviewer-facing recommendation. The hop token
+# comes from signoff.decide_signoff_hop (single source of truth in #225 /
+# pm_core/signoff.py); SIGNOFF_MERGE is always a ready_to_merge RECOMMENDATION
+# — sign-off never merges; the plan auto-start watcher (pr-ff9b728) decides.
+_SIGNOFF_HOP_TEXT = {
+    "ready_to_merge": ("Ready to merge — sign-off recommends merge. Sign-off "
+                       "never merges; the plan watcher makes the final "
+                       "merge/hold call."),
+    "qa": ("Re-QA — sign-off routed the PR back to QA (PASS-unverified or a "
+           "misframed scenario)."),
+    "review": ("Back to review — a code change happened during QA; "
+               "re-validate through review and QA."),
+    "impl": "Back to implementation — sign-off found a real gap.",
+    "blocked": ("Blocked / escalated — sign-off held the PR (ambiguity, "
+                "out-of-scope, or a blocking PR was filed)."),
+}
+
+# Map Rich style strings (signoff.SIGNOFF_VERDICT_STYLES, e.g. "bold green")
+# to a CSS colour so the HTML verdict markers match the TUI / pm pr list.
+_RICH_COLOR_CSS = {
+    "green": "#1a7f37",
+    "magenta": "#8250df",
+    "cyan": "#1b7c83",
+    "yellow": "#9a6700",
+    "red": "#cf222e",
+}
 
 # Filenames inside a scenario dir that are metadata, not evidence.
 _NON_EVIDENCE = {"verdict.md", "scenario.json"}
@@ -109,7 +143,9 @@ class ReportData:
     recommendation: str
     recommendation_source: str   # "router" | "derived"
     next_hop: str
-    summary: str                 # free-text from signoff.json, may be ""
+    summary: str
+    signoff_verdict: str         # SIGNOFF_* keyword from pr['signoff'], or ""
+    signoff_stale: bool          # recorded verdict predates the current HEAD
 
 
 # ---------------------------------------------------------------------------
@@ -351,24 +387,11 @@ def _load_behavior(scenario_dir: Path, report_dir: Path,
     )
 
 
-def _load_signoff(captures_dir: Path) -> dict:
-    """Read the optional ``signoff.json`` the verdict router (pr-2d5f712)
-    may drop next to the captures. Returns {} when absent/unreadable."""
-    p = captures_dir / "signoff.json"
-    if not p.is_file():
-        return {}
-    try:
-        data = json.loads(p.read_text())
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
 def _derive_recommendation(behaviors: list[Behavior]) -> tuple[str, str]:
     """Heuristic recommendation / next-hop from scenario verdicts.
 
-    Used until pr-2d5f712's verdict router provides a real one via
-    signoff.json. Returns (recommendation_text, next_hop_keyword).
+    Fallback only — used when the sign-off router has not recorded a verdict
+    on the PR yet (``pr['signoff']``). Returns (recommendation, next_hop).
     """
     verdicts = [b.verdict for b in behaviors if b.verdict]
     if not verdicts:
@@ -433,11 +456,29 @@ def gather_pr_report_data(data: dict, pr_id: str,
     review_evidence = _iter_evidence(
         captures_dir / "review", captures_dir, captures_dir)
 
-    signoff = _load_signoff(captures_dir)
-    if signoff.get("recommendation"):
-        recommendation = str(signoff["recommendation"])
-        next_hop = str(signoff.get("next_hop", "") or "")
+    # Recommendation source priority: the sign-off router's recorded verdict
+    # (pr['signoff'], written by pm_core/signoff.py) is authoritative; we only
+    # fall back to a derived heuristic when no verdict has been recorded.
+    from pm_core.signoff import (
+        latest_signoff_verdict, decide_signoff_hop, head_sha,
+    )
+    signoff_verdict = latest_signoff_verdict(pr) or ""
+    signoff_stale = False
+    if signoff_verdict:
+        hop = decide_signoff_hop(signoff_verdict)
+        recommendation = _SIGNOFF_HOP_TEXT.get(
+            hop, f"Sign-off verdict: {signoff_verdict}.")
+        next_hop = hop
         rec_source = "router"
+        # Best-effort staleness: was the verdict computed against the current
+        # branch HEAD? (workdir may be gone — degrade silently.)
+        try:
+            record = (pr.get("signoff") or {})
+            cur = head_sha(pr.get("workdir"))
+            if record.get("sha") and cur and record["sha"] != cur:
+                signoff_stale = True
+        except Exception:
+            signoff_stale = False
     else:
         recommendation, next_hop = _derive_recommendation(behaviors)
         rec_source = "derived"
@@ -460,7 +501,9 @@ def gather_pr_report_data(data: dict, pr_id: str,
         recommendation=recommendation,
         recommendation_source=rec_source,
         next_hop=next_hop,
-        summary=str(signoff.get("summary", "") or ""),
+        summary="",
+        signoff_verdict=signoff_verdict,
+        signoff_stale=signoff_stale,
     )
 
 
@@ -488,6 +531,38 @@ def _verdict_class(v: str) -> str:
 
 def _verdict_label(v: str) -> str:
     return v if v else "pending"
+
+
+def _status_icon(status: str) -> str:
+    """The PR status icon, matching ``pm pr list`` / the TUI (single source)."""
+    from pm_core.cli.helpers import PR_STATUS_ICONS
+    return PR_STATUS_ICONS.get(status, "")
+
+
+def _rich_style_to_css(style: str) -> str:
+    """Map a Rich style string (e.g. "bold green") to a CSS colour."""
+    for word in (style or "").split():
+        if word in _RICH_COLOR_CSS:
+            return _RICH_COLOR_CSS[word]
+    return "#6e7781"
+
+
+def _signoff_marker_html(verdict: str) -> str:
+    """A coloured icon+label for a sign-off routing verdict.
+
+    Reuses signoff.SIGNOFF_VERDICT_ICONS / SIGNOFF_VERDICT_STYLES (the single
+    source of truth shared with the TUI tech tree and ``pm pr list``) so the
+    HTML marker matches every other surface.
+    """
+    if not verdict:
+        return ""
+    from pm_core.signoff import (
+        SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES,
+    )
+    icon = SIGNOFF_VERDICT_ICONS.get(verdict, "")
+    color = _rich_style_to_css(SIGNOFF_VERDICT_STYLES.get(verdict, ""))
+    return (f'<span class="signoff-marker" style="color:{color}">'
+            f'{_e(icon)} {_e(verdict)}</span>')
 
 
 _CSS = """
@@ -563,6 +638,7 @@ button.copy { font-size: .78rem; padding: .15rem .5rem; cursor: pointer;
 .phase { margin: 0; }
 .phase-pre { border-left: 4px solid #cf222e; }
 .phase-post { border-left: 4px solid #1a7f37; }
+.signoff-marker { font-weight: 600; white-space: nowrap; }
 """
 
 
@@ -754,7 +830,10 @@ def render_pr_report_html(rd: ReportData) -> str:
         key = b.verdict or "pending"
         tally[key] = tally.get(key, 0) + 1
 
-    badges = [f'<span class="badge status-pill">status: {_e(rd.status)}</span>']
+    status_icon = _status_icon(rd.status)
+    status_prefix = f"{status_icon} " if status_icon else ""
+    badges = [f'<span class="badge status-pill">{_e(status_prefix)}status: '
+              f'{_e(rd.status)}</span>']
     if rd.merged:
         badges.append('<span class="badge status-pill">merged</span>')
     for v in (_PASS, _NEEDS_WORK, _INPUT_REQUIRED, "pending"):
@@ -764,9 +843,14 @@ def render_pr_report_html(rd: ReportData) -> str:
                 f'<span class="badge {_verdict_class(v if v != "pending" else "")}">'
                 f'{_e(_verdict_label(v if v != "pending" else ""))}: {n}</span>')
 
-    rec_note = ("" if rd.recommendation_source == "router"
-                else ' <span class="muted">(derived from verdicts — the '
-                     'sign-off verdict router will refine this)</span>')
+    if rd.recommendation_source == "router":
+        rec_note = ""
+        if rd.signoff_stale:
+            rec_note = (' <span class="muted">(this verdict predates the '
+                        'latest code change — re-run sign-off)</span>')
+    else:
+        rec_note = (' <span class="muted">(derived from QA verdicts — no '
+                    'sign-off verdict recorded yet)</span>')
 
     parts: list[str] = []
     parts.append("<!DOCTYPE html><html lang=\"en\"><head>")
@@ -782,6 +866,9 @@ def render_pr_report_html(rd: ReportData) -> str:
 
     parts.append('<header class="summary">')
     parts.append(f'<div class="badges">{"".join(badges)}</div>')
+    if rd.signoff_verdict:
+        parts.append(f'<div class="rec"><b>Sign-off verdict:</b> '
+                     f'{_signoff_marker_html(rd.signoff_verdict)}</div>')
     parts.append(f'<div class="rec"><b>Recommendation:</b> '
                  f'{_e(rd.recommendation)}{rec_note}</div>')
     if rd.next_hop:
@@ -868,17 +955,22 @@ class _DashRow:
     has_report: bool
     summary: str
     rec: str
+    signoff_verdict: str  # SIGNOFF_* keyword (latest recorded), or ""
 
 
-def _pr_capture_summary(captures_dir: Path) -> tuple[str, str]:
-    """One-line (tally, recommendation) for a PR from its retained captures."""
+def _pr_capture_summary(pr: dict, captures_dir: Path) -> tuple[str, str]:
+    """One-line (tally, recommendation) for a PR.
+
+    The recommendation prefers the sign-off router's recorded verdict
+    (``pr['signoff']``); the per-scenario tally comes from retained captures.
+    """
+    from pm_core.signoff import latest_signoff_verdict, decide_signoff_hop
+
     behaviors: list[Behavior] = []
     for d in _scenario_dirs(captures_dir):
         b = _load_behavior(d, captures_dir, captures_dir)
         if b is not None:
             behaviors.append(b)
-    if not behaviors:
-        return ("no behaviors recorded", "")
     tally: dict[str, int] = {}
     for b in behaviors:
         tally[b.verdict or "pending"] = tally.get(b.verdict or "pending", 0) + 1
@@ -886,22 +978,30 @@ def _pr_capture_summary(captures_dir: Path) -> tuple[str, str]:
     for v in (_PASS, _NEEDS_WORK, _INPUT_REQUIRED, "pending"):
         if tally.get(v):
             bits.append(f"{tally[v]} {_verdict_label(v if v != 'pending' else '')}")
-    signoff = _load_signoff(captures_dir)
-    rec = (str(signoff.get("recommendation"))
-           if signoff.get("recommendation")
-           else _derive_recommendation(behaviors)[0])
-    return (", ".join(bits), rec)
+    tally_str = ", ".join(bits) if bits else "no behaviors recorded"
+
+    verdict = latest_signoff_verdict(pr) or ""
+    if verdict:
+        rec = _SIGNOFF_HOP_TEXT.get(decide_signoff_hop(verdict),
+                                    f"sign-off verdict: {verdict}")
+    elif behaviors:
+        rec = _derive_recommendation(behaviors)[0]
+    else:
+        rec = ""
+    return (tally_str, rec)
 
 
 def gather_dashboard_rows(data: dict,
                           captures_root_dir: Path) -> list[_DashRow]:
+    from pm_core.signoff import latest_signoff_verdict
+
     rows: list[_DashRow] = []
     for pr in data.get("prs") or []:
         pr_id = pr["id"]
         gh = pr.get("gh_pr_number")
         cdir = captures_root_dir / pr_id
         has_report = (cdir / "report.html").is_file()
-        summary, rec = _pr_capture_summary(cdir)
+        summary, rec = _pr_capture_summary(pr, cdir)
         rows.append(_DashRow(
             pr_id=pr_id,
             display_id=f"#{gh}" if gh else pr_id,
@@ -911,6 +1011,7 @@ def gather_dashboard_rows(data: dict,
             has_report=has_report,
             summary=summary,
             rec=rec,
+            signoff_verdict=latest_signoff_verdict(pr) or "",
         ))
     return rows
 
@@ -1014,12 +1115,19 @@ def render_dashboard_html(data: dict, rows: list[_DashRow]) -> str:
             summary = _e(r.summary)
             if r.rec:
                 summary += f' <span class="muted">— {_e(r.rec)}</span>'
+            # Status cell: status icon (matches pm pr list / TUI) + the
+            # latest recorded sign-off verdict marker for sign_off PRs.
+            s_icon = _status_icon(r.status)
+            status_cell = f'{_e(s_icon)} {_e(r.status)}' if s_icon \
+                else _e(r.status)
+            if r.signoff_verdict:
+                status_cell += f'<br>{_signoff_marker_html(r.signoff_verdict)}'
             parts.append(
                 f'<tr data-pr="{_e(r.pr_id)}" data-status="{_e(r.status)}" '
                 f'data-merged="{1 if r.merged else 0}">'
                 f'<td>{_e(r.display_id)}</td>'
                 f'<td>{_e(r.title)}</td>'
-                f'<td>{_e(r.status)}</td>'
+                f'<td>{status_cell}</td>'
                 f'<td>{summary}</td>'
                 f'<td>{report_cell}</td></tr>')
         parts.append('</tbody></table>')
