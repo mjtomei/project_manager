@@ -22567,7 +22567,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T17:56:51.246098+00:00'
+  updated_at: '2026-05-25T18:03:47.450341+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
@@ -22643,6 +22643,34 @@ prs:
       any non-auto-sequence path.'
     created_at: '2026-05-25T17:56:51Z'
     last_edited: '2026-05-25T17:56:51Z'
+  - id: note-942fa37
+    text: 'DECISION (supersedes parts of note-1a982f3):
+
+      A) REMOVE autonomy from this PR entirely. Auto-sequence ALWAYS gates at merge:
+      SIGNOFF_MERGE is ALWAYS a recommendation (report ready_to_merge / leave the
+      PR in sign_off; never merge here). Delete is_signoff_autonomous + the project.sign_off_autonomous
+      flag and the autonomous/held branching; act_on_signoff_verdict drops its ''autonomous''
+      param. The decision to actually auto-merge vs hold for a human belongs to the
+      plan auto-start watcher (pr-ff9b728) per its per-plan config. This makes refinement
+      #2 (per-plan autonomy seam) MOOT — just remove autonomy here.
+
+      B) REMOVE the capture gate entirely (reduce complexity). Delete bug_fix_capture_status,
+      _dir_has_content (if now unused), the bug_captures_ok param + the deterministic
+      SIGNOFF_MERGE->IMPL override in act_on_signoff_verdict, and the prompt''s injected
+      PRE-FIX/POST-FIX present/MISSING status + mandatory-route rule. The router''s
+      general per-step review still considers repro/verify evidence for a bug PR as
+      part of its judgment (no hardcoded gate); #226 still RENDERS pre/post-fix captures
+      in the HTML (display, keep).
+
+      C) KEEP refinement #3 (decouple the verdict decision from the status side-effect;
+      verdict->action only under auto-sequence) — simpler now without the autonomous
+      branch.
+
+      Net: act_on_signoff_verdict(verdict) -> hop in {ready_to_merge, qa, review,
+      impl, blocked}; no autonomous, no capture params; SIGNOFF_MERGE -> ready_to_merge
+      always.'
+    created_at: '2026-05-25T18:03:47Z'
+    last_edited: '2026-05-25T18:03:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
