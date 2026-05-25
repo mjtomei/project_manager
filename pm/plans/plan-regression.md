@@ -419,6 +419,10 @@ Then the verdict router runs after QA finalization over every scenario's verdict
 
 Every classification + chosen hop is recorded as a `pm pr note` (audit trail, prefer-pm-pr-notes), so a later merge is inspectable. Sign-off itself has **no autonomy flag** — it always recommends (`ready_to_merge`) and auto-sequence always gates at merge; the autonomous-vs-gated merge decision lives in the plan watcher (`pr-ff9b728`). Loop-guard + re-loop wiring (and the watcher) are `pr-ff9b728`; the per-PR behavior report + dashboard are `pr-8e693f6`.
 
+**Action only under auto-sequence, with adoption.** Verdict-driven actions (all hops) run only via `act_on_signoff_verdict`, called solely from auto-sequence — a hand-triggered `pm pr signoff` never acts on its own. The verdict is recorded on the PR with `{verdict, sha, ts, origin}`; auto-sequence **adopts** a recorded verdict when it's fresh (recorded sha == current branch HEAD) instead of relaunching, and re-runs only when it's stale or absent. The `origin`/`sha` record is both the legibility marker for the invariant and what makes adoption sound.
+
+**Visibility.** A running sign-off shows a TUI animation (reusing the review/qa/auto-start spinner), each sign-off verdict gets its own icon (plus an icon for the `sign_off` status) in the status map + tech tree, and `pm pr list` shows the `sign_off` status + latest verdict icon.
+
 This step **supersedes** the existing taste-check / gated-merge handling — the improvement watcher's gated-at-QA-PASS, `pr-b77702b`'s `auto_merge` gating, and any ad-hoc sign-off/approve code. That logic moves here; the old paths are removed (cleanup lives in `pr-ff9b728`).
 
 ### PR: Sign-off UI — per-PR BDD report + all-PR behavior dashboard (HTML)

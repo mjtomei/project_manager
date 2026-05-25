@@ -22521,20 +22521,16 @@ prs:
     reproduce->fix->verify and write repro/verify evidence to $(pm qa captures-path
     <pr-id>)/impl/ (the "primary evidence" per bug_fix_prompts.py), and QA scenarios
     write under scenarios/<n>/. Also factor in the harness-run regression result (Phase
-    10: fails at the pre-fix parent sha, passes at the fix sha) — provenance comes
-    from the harness running the regression at a known sha, not from any session-written
-    file. Sign-off includes impl + qa (+ review) so a bug-fix''s repro and post-fix
+    10). Sign-off includes impl + qa (+ review) so a bug-fix''s repro and post-fix
     verification are part of the record.
 
 
     VERDICT ROUTER (the decision logic): runs over every scenario''s verdict + reason,
     the aggregated captures/evidence, the diff vs master, and the PR''s scope. Two
     evaluations: (1) does the captured behavior support the diff''s claims (BDD);
-    (2) meta-QA / anti-shortcut — was the QA itself rigorous (thin evidence, a scenario
-    that drove a mock instead of the real path, an obvious uncovered edge case). This
-    meta-QA builds on the scenario quality supervisor (pr-98f670e), which catches
-    false-PASS per-scenario inline; sign-off is the PR-level pass over scenarios it
-    already vetted. Then route:
+    (2) meta-QA / anti-shortcut — was the QA itself rigorous. Builds on the scenario
+    quality supervisor (pr-98f670e) for per-scenario depth; sign-off is the PR-level
+    pass. Then route:
 
     - PASS (verified) -> ready_to_merge RECOMMENDATION; sign-off never merges (the
     plan watcher decides merge vs hold).
@@ -22542,51 +22538,64 @@ prs:
     - PASS (unverified, e.g. verifier-cwd) -> harness problem -> re-qa; do NOT bounce
     to impl.
 
-    - NEEDS_WORK (scenario fixed it itself) -> a code change happened -> back through
-    review AND qa; validate the fix is real and shortcut-free.
+    - NEEDS_WORK (scenario fixed it itself) -> code changed -> back through review
+    AND qa; validate the fix is real.
 
     - INPUT_REQUIRED -> classify: misframed scenario -> note -> re-qa; real gap ->
-    note -> impl; assumed-missing feature -> file new PR + depends_on (block) or expand
-    scope (agent decides); nice-to-have -> defer to new PR or include if trivial;
-    impossible/out-of-scope -> note the limitation.
+    note -> impl; assumed-missing feature -> file new PR + depends_on or expand scope;
+    nice-to-have -> defer to new PR or include if trivial; impossible/out-of-scope
+    -> note the limitation.
 
 
-    ROUTER-ONLY: never edits code (all edits happen in impl/qa so they re-pass review+qa).
-    CONSERVATIVE BIAS: on genuine ambiguity, raise INPUT_REQUIRED and escalate rather
-    than recommend merge. AUDIT TRAIL: record every classification + chosen hop as
-    a pm pr note so a later merge is inspectable.
+    ROUTER-ONLY: never edits code. CONSERVATIVE BIAS: on genuine ambiguity, raise
+    INPUT_REQUIRED rather than recommend merge. AUDIT TRAIL: record every classification
+    + chosen hop as a pm pr note.
 
 
-    VERDICT->ACTION ONLY UNDER AUTO-SEQUENCE: keep the verdict DECISION (compute the
-    hop / record the recommendation) separable from the SIDE-EFFECT (status transition
-    + relaunch). Outside auto-sequence, sign-off is recommendation-only with NO state
-    change; act_on_signoff_verdict must not mutate state from any non-auto-sequence
-    path. Applies to ALL hops, not just merge.
+    VERDICT->ACTION ONLY UNDER AUTO-SEQUENCE, WITH ADOPTION: verdict-driven actions
+    (ALL hops, not just merge) run only via act_on_signoff_verdict, called solely
+    from the auto-sequence sign_off branch — a hand-triggered pm pr signoff never
+    acts on its own. Record the verdict on the PR as pr[''signoff''] = {verdict, sha
+    (branch HEAD it was computed against), ts, origin: ''manual''|''auto-sequence''}.
+    Auto-sequence ADOPTS a recorded verdict when fresh (recorded sha == current branch
+    HEAD) instead of relaunching; if stale (sha differs) or absent, it relaunches.
+    So a manual signoff''s recorded verdict can be adopted by a later auto-sequence
+    run (no wasted re-run), while manual-alone still never acts. Keep the verdict
+    DECISION separable from the SIDE-EFFECT (transition + relaunch) so the invariant
+    holds structurally.
+
+
+    VISIBILITY: (a) a running sign-off shows a TUI ANIMATION while the router is in
+    progress (window open, no verdict yet), reusing the existing review/qa/auto-start
+    spinner mechanism (pr_view.py); (b) each sign-off verdict gets its own ICON (ready_to_merge
+    / SIGNOFF_REQA / SIGNOFF_REVIEW / SIGNOFF_IMPL / SIGNOFF_BLOCKED) plus an icon
+    for the sign_off status, in the qa_status status/icon map and the tech tree; (c)
+    pm pr list shows the sign_off status icon and the latest sign-off verdict icon,
+    consistent with the TUI.
 
 
     NO AUTONOMY FLAG ON THIS STEP: sign-off always recommends (ready_to_merge) and
     auto-sequence always gates at merge; the autonomous-vs-gated merge decision lives
-    entirely in the plan watcher (pr-ff9b728) per its per-plan config. NO deterministic
-    capture gate (removed for simplicity — file presence != provenance); the router
-    reviews a bug PR''s repro/verify evidence as part of its general per-step judgment,
-    and #226 still renders the captures.
+    in the plan watcher (pr-ff9b728) per its per-plan config. NO deterministic capture
+    gate (removed — file presence != provenance); the router reviews a bug PR''s repro/verify
+    evidence as part of its general per-step judgment, and #226 still renders the
+    captures.
 
 
-    SUPERSEDES the existing taste-check / gated-merge handling — the improvement watcher''s
+    SUPERSEDES the existing taste-check / gated-merge handling — improvement watcher
     gated-at-QA-PASS, pr-b77702b''s auto_merge gating, and any ad-hoc sign-off/approve
-    code. That logic moves to the plan watcher + this step; the old paths are removed
-    (cleanup lives in pr-ff9b728).
+    code. That logic moves to the plan watcher + this step; old paths removed (cleanup
+    in pr-ff9b728).
 
 
-    Buildable now against the current verdict+capture model; soft-aligns with pr-b59f0c7
-    (reason strings) and pr-06a96fa (evidence model) when they land. Loop-guard +
-    auto-run + the plan auto-start watcher are pr-ff9b728; the report/dashboard surface
-    is pr-8e693f6.'
+    Buildable now; soft-aligns with pr-b59f0c7 (reason strings) and pr-06a96fa (evidence
+    model). Loop-guard + auto-run + the plan watcher are pr-ff9b728; report/dashboard
+    are pr-8e693f6.'
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T18:34:36.779795+00:00'
+  updated_at: '2026-05-25T18:35:36.171179+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
