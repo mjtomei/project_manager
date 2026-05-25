@@ -347,6 +347,9 @@ class TestSignOff:
         assert pr["status"] == "qa"
         mock_tx.assert_not_called()        # adopted record, didn't read transcript
         mock_qa.assert_called_once()
+        # The adopted bounce verdict is consumed so a later sign_off re-entry
+        # (re-qa never changes HEAD) can't re-adopt it and loop forever.
+        assert "signoff" not in pr
 
     def test_records_transcript_verdict_when_no_fresh_record(self, runner, tmp_path):
         pr = _pr("sign_off")

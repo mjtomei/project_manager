@@ -108,6 +108,32 @@ class TestApplyHop:
         assert hop == "unknown"
         assert data["prs"][0]["status"] == "merged"
 
+    def test_bounce_consumes_recorded_verdict(self):
+        """A bounce must clear pr['signoff'] so it can't be re-adopted forever.
+
+        Re-qa never commits, so the branch HEAD is unchanged on re-entry to
+        sign_off; without consuming the record the same fresh verdict would be
+        adopted again and loop qa <-> sign_off indefinitely.
+        """
+        data = _data("sign_off")
+        data["prs"][0]["signoff"] = {
+            "verdict": SIGNOFF_REQA, "sha": "abc", "origin": "manual"}
+        with _patch_locked_update(data):
+            assert apply_signoff_hop(Path("/x"), "pr-001", "qa") == "qa"
+        assert data["prs"][0]["status"] == "qa"
+        assert "signoff" not in data["prs"][0]  # record consumed
+
+    def test_non_bounce_keeps_recorded_verdict(self):
+        """ready_to_merge/blocked stay in sign_off, so the record is preserved
+        (used for display + idempotent re-reporting; no loop)."""
+        data = _data("sign_off")
+        data["prs"][0]["signoff"] = {
+            "verdict": SIGNOFF_BLOCKED, "sha": "abc", "origin": "manual"}
+        with patch("pm_core.signoff.store.locked_update") as lu:
+            assert apply_signoff_hop(Path("/x"), "pr-001", "blocked") == "blocked"
+        lu.assert_not_called()
+        assert data["prs"][0]["signoff"]["verdict"] == SIGNOFF_BLOCKED
+
 
 class TestVerdictRecordAdoption:
     def test_record_writes_signoff_dict(self):
@@ -256,8 +282,10 @@ class TestPrompt:
         assert "Per-step acceptance criteria" in p
         for token in ("Implementation (impl)", "Review", "QA"):
             assert token in p
-        # verdict self-record instruction (adoption seam)
-        assert "pm pr signoff record pr-001" in p
+        # verdict self-record instruction (adoption seam) — must name the real
+        # CLI command (`pm pr signoff-record`); `pm pr signoff record` would be
+        # parsed by click as `signoff` with pr_id="record" and fail.
+        assert "pm pr signoff-record pr-001" in p
         # merge is always a recommendation now (no autonomy/hardcoded gate)
         assert "never merges" in p.lower()
 

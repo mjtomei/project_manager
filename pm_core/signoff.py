@@ -14,9 +14,10 @@ trail of ``pm pr note`` entries (so an autonomous merge is inspectable), but it
 pm reads the emitted verdict (same transcript-polling mechanic as qa-finalize)
 and performs the routed transition.
 
-Gated vs autonomous is the ``project.sign_off_autonomous`` flag (default gated —
-the conservative bias).  On genuine ambiguity the router emits
-``SIGNOFF_BLOCKED`` and escalates rather than merging.
+Sign-off **always gates at merge**: ``SIGNOFF_MERGE`` is a *recommendation*
+(``ready_to_merge``) — sign-off never merges, and the autonomous-vs-gated merge
+decision lives in the plan auto-start watcher (pr-ff9b728), not here.  On genuine
+ambiguity the router emits ``SIGNOFF_BLOCKED`` and escalates rather than merging.
 """
 
 from __future__ import annotations
@@ -415,6 +416,11 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
         if pr and pr.get("status") == "sign_off":
             pr["status"] = to_status
             _record_status_timestamp(pr, to_status)
+            # Consume the recorded verdict: a bounce sends the PR back through a
+            # step that may NOT change the branch HEAD (re-qa never commits), so
+            # leaving the record in place would let a later sign_off re-entry
+            # re-adopt the same (now spent) fresh verdict and loop forever.
+            pr.pop("signoff", None)
             transitioned["ok"] = True
 
     store.locked_update(root, _apply)

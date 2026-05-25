@@ -522,7 +522,7 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
 
 5. **Record your verdict** durably so it can be adopted without a re-run:
    ```
-   pm pr signoff record {pr_id} <VERDICT> --origin {origin}
+   pm pr signoff-record {pr_id} <VERDICT> --origin {origin}
    ```
    (replace `<VERDICT>` with the keyword you chose below). This only RECORDS a
    recommendation — it does not act. Sign-off never merges; the actual next hop
