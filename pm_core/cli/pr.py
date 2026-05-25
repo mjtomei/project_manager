@@ -1479,7 +1479,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          cwd: str | None = None,
                          companion: bool = False,
                          pull_from_workdir: str | None = None,
-                         pull_from_origin: bool = False) -> None:
+                         pull_from_origin: bool = False,
+                         stash_pop_conflict: bool = False) -> None:
     """Launch a tmux window with Claude to resolve a merge conflict.
 
     Args:
@@ -1532,6 +1533,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         data, pr_id, error_output, session_name=pm_session,
         pull_from_workdir=pull_from_workdir,
         pull_from_origin=pull_from_origin,
+        stash_pop_conflict=stash_pop_conflict,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir,
@@ -2464,10 +2466,13 @@ def _unstash_after_merge(cwd: Path, info: dict, *, data: dict | None = None,
         _reap_auto_stashes(cwd)
     elif data is not None and pr_entry is not None:
         # Launch a resolution session for the genuine conflict (PR-note 3).
+        # stash_pop_conflict frames the prompt as a stash-pop recovery (the
+        # merge itself succeeded) rather than a pull failure — takes precedence
+        # over any pull_from_* flag forwarded in window_kwargs.
         _launch_merge_window(
             data, pr_entry,
             "Auto-stash pop conflicted. Resolve the conflicts in this window.",
-            cwd=str(cwd), **window_kwargs,
+            cwd=str(cwd), stash_pop_conflict=True, **window_kwargs,
         )
 
     return clean

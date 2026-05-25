@@ -89,7 +89,12 @@ R5. **Stash-pop conflict launches a resolution session** (PR-note 3). If a
     `git stash pop` of *non-project.yaml* files genuinely conflicts, launch a
     `_launch_merge_window` (matching the real-merge-conflict paths) instead of
     only printing a warning — and still never leave `project.yaml` corrupt or a
-    stash leaked.
+    stash leaked. The launched window uses a dedicated
+    `generate_merge_prompt(stash_pop_conflict=True)` variant (added i2) so the
+    prompt describes the actual stash-pop recovery — the merge *succeeded*, only
+    restoring the auto-stashed local edits conflicted — rather than the
+    misleading pull-failure framing; the variant takes precedence over any
+    `pull_from_*` flag still forwarded in `window_kwargs`.
 
 R6. **Tests** simulating concurrent `project.yaml` edits across a merge assert:
     (a) `project.yaml` stays valid YAML, (b) no conflict markers are ever

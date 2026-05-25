@@ -403,7 +403,9 @@ def _three_way_dict(base: dict, ours: dict, theirs: dict) -> dict:
         o = ours.get(key, _MISSING)
         t = theirs.get(key, _MISSING)
         if o is _MISSING:
-            # ours deleted; honor theirs only if theirs == base (untouched).
+            # ours deleted the key. Respect the deletion when theirs left it at
+            # base (untouched); on a delete/modify conflict (theirs changed it)
+            # keep theirs' change rather than silently dropping it.
             if t is not _MISSING and t != b:
                 result[key] = t
             continue

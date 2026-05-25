@@ -334,11 +334,31 @@ class TestStashReconciliation:
 
         assert clean is False
         mock_launch.assert_called_once()
+        # The window is framed as a stash-pop recovery, not a pull failure.
+        assert mock_launch.call_args.kwargs.get("stash_pop_conflict") is True
         # project.yaml still reconciled & valid despite the code conflict.
         assert "<<<<<<<" not in (pm / "project.yaml").read_text()
         store.load(pm)
         # The conflicted stash is retained for manual resolution (not reaped).
         assert "auto-stash for merge" in _git("stash", "list", cwd=repo).stdout
+
+    def test_stash_pop_conflict_prompt_describes_stash_not_pull(self):
+        """The stash-pop variant of generate_merge_prompt describes the actual
+        stash-pop recovery and takes precedence over a forwarded pull_* flag."""
+        from pm_core import prompt_gen
+        data = {"project": {"name": "x", "base_branch": "master",
+                            "backend": "local"},
+                "prs": [{"id": "pr-001", "title": "T", "branch": "pm/pr-001"}],
+                "plans": []}
+        prompt = prompt_gen.generate_merge_prompt(
+            data, "pr-001", "CONFLICT (content): code.txt",
+            stash_pop_conflict=True, pull_from_origin=True)
+        # Describes the successful merge + stash recovery, not a pull failure.
+        assert "auto-stash" in prompt
+        assert "**succeeded**" in prompt
+        assert "git stash drop" in prompt
+        # Must not fall through to the pull-from-origin framing.
+        assert "pushed to origin" not in prompt
 
     def test_non_project_file_also_dirty_stashed_and_restored(self, tmp_path):
         """When a non-project.yaml file is also dirty it is stashed normally and

@@ -21781,7 +21781,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-25T03:11:52.079848+00:00'
+  updated_at: '2026-05-25T03:28:54.528866+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21863,6 +21863,33 @@ prs:
       (fails on clean master too).'
     created_at: '2026-05-25T03:11:51Z'
     last_edited: '2026-05-25T03:11:51Z'
+  - id: note-e167cfb
+    text: 'Review (loop eea3 i1): fixed a regression where store.load wrapped FileNotFoundError
+      as ProjectYamlParseError, breaking session.py/guide.py/tui-sync callers that
+      catch FileNotFoundError for "no project" (would crash session startup on missing
+      project.yaml) — now re-raises FileNotFoundError, wraps only other read errors.
+      Added test_stash_pop_conflict_launches_merge_window for R5. NON-BLOCKING: when
+      _unstash_after_merge launches a merge window for a stash-pop conflict at sites
+      1/2 it forwards pull_from_origin/pull_from_workdir, so generate_merge_prompt
+      describes a pull conflict rather than the actual stash-pop conflict (error_output
+      string is accurate; cwd correct; rare path). Consider a dedicated stash-pop
+      prompt variant in a follow-up.'
+    created_at: '2026-05-25T03:19:41Z'
+    last_edited: '2026-05-25T03:19:41Z'
+  - id: note-157729d
+    text: 'Review (loop eea3 i2): resolved the i1 NON-BLOCKING follow-up. Added a
+      dedicated generate_merge_prompt(stash_pop_conflict=True) variant + threaded
+      it through _launch_merge_window and the _unstash_after_merge conflict launch,
+      so a genuine stash-pop conflict now opens a window whose prompt correctly describes
+      a stash-pop recovery (merge SUCCEEDED, only auto-stash restore conflicted; steps
+      = resolve markers, git add, git stash drop) instead of the misleading pull-failure
+      framing. The variant takes precedence over any pull_from_* flag still forwarded
+      in window_kwargs. Also fixed an inverted/wrong inline comment in store._three_way_dict
+      (ours-deleted/delete-modify branch). Tests added: test_stash_pop_conflict_prompt_describes_stash_not_pull
+      + assert stash_pop_conflict=True forwarded. Full suite green (2705 passed, same
+      pre-existing unrelated test_hook_events failure on clean master).'
+    created_at: '2026-05-25T03:28:54Z'
+    last_edited: '2026-05-25T03:28:54Z'
 - id: pr-c41f029
   plan: bugs
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not

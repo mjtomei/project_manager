@@ -451,7 +451,8 @@ Auto-cleanup is enabled. After finishing your main work:
 def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
                           session_name: str | None = None,
                           pull_from_workdir: str | None = None,
-                          pull_from_origin: bool = False) -> str:
+                          pull_from_origin: bool = False,
+                          stash_pop_conflict: bool = False) -> str:
     """Generate a Claude Code prompt for resolving a merge failure.
 
     Args:
@@ -466,6 +467,10 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
         pull_from_origin: When True, this is a pull-from-origin failure
             (vanilla/github backend).  The merge window runs in the
             *repo dir* and needs to pull origin into the local checkout.
+        stash_pop_conflict: When True, the git merge itself *succeeded* but
+            popping the auto-stashed local (non-project.yaml) changes hit a
+            conflict.  Takes precedence over the pull_* framing so the prompt
+            describes the actual stash-pop conflict rather than a pull failure.
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -490,6 +495,42 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
         general_notes_block, merge_specific_block = notes.notes_for_prompt(root, "merge")
     except FileNotFoundError:
         pass
+
+    # --- Stash-pop-conflict variant ---
+    # The merge of the PR succeeded; only restoring the auto-stashed local
+    # changes conflicted.  project.yaml is already reconciled structurally, so
+    # the conflict is in ordinary (non-project.yaml) files the user had dirty.
+    if stash_pop_conflict:
+        prompt = f"""You're recovering local changes after a successful merge of PR {pr_id}: "{title}"
+
+The merge of `{branch}` into `{base_branch}` **succeeded**, but restoring your
+auto-stashed local changes (`pm: auto-stash for merge`) hit a conflict:
+
+```
+{error_output}
+```
+
+## Context
+
+You are running in the directory where the merge happened.  `{base_branch}` is
+already merged correctly — `pm/project.yaml` has been reconciled automatically.
+Only the previously-stashed local edits to ordinary files still need merging.
+The conflicted stash entry was left in place (`git stash list`) for you to finish.
+
+## Steps
+1. Inspect the conflicting files (`git status`) and resolve the conflict markers,
+   integrating both your stashed local changes and the merged-in changes.
+2. `git add` the resolved files.
+3. Drop the now-applied auto-stash entry: `git stash drop` the
+   `pm: auto-stash for merge` entry (verify with `git stash list` first).
+4. Confirm `git stash list` no longer shows that entry and the tree is clean.
+5. End with a verdict on its own line — one of:
+   - **MERGED** — Local changes are restored and the stash is resolved. Done.
+   - **INPUT_REQUIRED** — You need human help to resolve this.
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
+{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
+        return prompt.strip()
 
     # --- Pull-from-workdir variant ---
     # When this is set, the merge window is running in the *repo dir* and
