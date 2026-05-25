@@ -22498,8 +22498,10 @@ prs:
     in_progress, in_review, qa, merged, closed} (pm_core/cli/pr.py:169 valid_statuses,
     :314 --status Choice). Extend it across: store validation, the --status choices,
     qa_status color map, the tech tree rendering, and the transition points (qa-finalize
-    -> sign_off; sign_off -> merged, or sign_off -> back to in_progress/in_review/qa
-    on a bounce).
+    -> sign_off; sign_off -> back to in_progress/in_review/qa on a bounce). On a verified
+    PASS the PR STAYS in sign_off and the step reports a ready_to_merge recommendation
+    — the actual transition to `merged` is performed by the merge path / plan watcher,
+    NOT by the sign-off step.
 
 
     DEDICATED WINDOW: launch a sign-off window like the review/qa windows (pane registry,
@@ -22534,7 +22536,8 @@ prs:
     false-PASS per-scenario inline; sign-off is the PR-level pass over scenarios it
     already vetted. Then route:
 
-    - PASS (verified) -> merge (or human gate).
+    - PASS (verified) -> ready_to_merge RECOMMENDATION; sign-off never merges (the
+    plan watcher decides merge vs hold).
 
     - PASS (unverified, e.g. verifier-cwd) -> harness problem -> re-qa; do NOT bounce
     to impl.
@@ -22550,24 +22553,40 @@ prs:
 
     ROUTER-ONLY: never edits code (all edits happen in impl/qa so they re-pass review+qa).
     CONSERVATIVE BIAS: on genuine ambiguity, raise INPUT_REQUIRED and escalate rather
-    than merge. AUDIT TRAIL: record every classification + chosen hop as a pm pr note
-    so an autonomous merge is inspectable.
+    than recommend merge. AUDIT TRAIL: record every classification + chosen hop as
+    a pm pr note so a later merge is inspectable.
+
+
+    VERDICT->ACTION ONLY UNDER AUTO-SEQUENCE: keep the verdict DECISION (compute the
+    hop / record the recommendation) separable from the SIDE-EFFECT (status transition
+    + relaunch). Outside auto-sequence, sign-off is recommendation-only with NO state
+    change; act_on_signoff_verdict must not mutate state from any non-auto-sequence
+    path. Applies to ALL hops, not just merge.
+
+
+    NO AUTONOMY FLAG ON THIS STEP: sign-off always recommends (ready_to_merge) and
+    auto-sequence always gates at merge; the autonomous-vs-gated merge decision lives
+    entirely in the plan watcher (pr-ff9b728) per its per-plan config. NO deterministic
+    capture gate (removed for simplicity — file presence != provenance); the router
+    reviews a bug PR''s repro/verify evidence as part of its general per-step judgment,
+    and #226 still renders the captures.
 
 
     SUPERSEDES the existing taste-check / gated-merge handling — the improvement watcher''s
     gated-at-QA-PASS, pr-b77702b''s auto_merge gating, and any ad-hoc sign-off/approve
-    code. That logic moves here; the old paths are removed (cleanup lives in pr-ff9b728).
+    code. That logic moves to the plan watcher + this step; the old paths are removed
+    (cleanup lives in pr-ff9b728).
 
 
-    Gated vs autonomous is a config flag on this step. Buildable now against the current
-    verdict+capture model; soft-aligns with pr-b59f0c7 (reason strings) and pr-06a96fa
-    (evidence model) when they land. Loop-guard + auto-run + the plan auto-start watcher
-    are pr-ff9b728; the report/dashboard surface is pr-8e693f6.'
+    Buildable now against the current verdict+capture model; soft-aligns with pr-b59f0c7
+    (reason strings) and pr-06a96fa (evidence model) when they land. Loop-guard +
+    auto-run + the plan auto-start watcher are pr-ff9b728; the report/dashboard surface
+    is pr-8e693f6.'
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T18:03:47.450341+00:00'
+  updated_at: '2026-05-25T18:05:49.676466+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
@@ -22763,6 +22782,14 @@ prs:
     auto-start toggle becomes start/stop for this watcher.
 
 
+    SIGN-OFF RECOMMENDS; THIS WATCHER DECIDES THE MERGE: the sign-off step (pr-2d5f712)
+    routes each PR (bounce / ready_to_merge / blocked) but NEVER merges — auto-sequence
+    always gates at merge. AUTONOMY LIVES HERE: on a ready_to_merge recommendation
+    the watcher performs the merge (autonomous) or holds for a human (gated) per its
+    PER-PLAN config (e.g. bugs autonomous, ux gated). The sign-off step has no autonomy
+    flag of its own.
+
+
     DEP-MERGE ON START — STAYS IN THE IMPL SESSION (pr-b77702b), NOT this watcher:
     when a PR''s depends_on PRs aren''t merged yet, the dependency branches are merged
     into the workdir before work begins, via the IMPL session''s start prompt. The
@@ -22774,11 +22801,6 @@ prs:
     MAX IN-FLIGHT PRS (new, a change to auto-start): the watcher chooses how many
     PRs to drive concurrently rather than walking one target''s dep tree serially.
     Bounded, watcher-judged each tick.
-
-
-    DEFER PER-PR DECISIONS TO SIGN-OFF: the watcher handles plan-level concerns (what
-    to start, concurrency, high-level issues, keeping the plan correct); sign-off
-    makes the per-PR merge/route decision.
 
 
     REGRESSION LOOP CLOSES HERE: discovery still schedules regression runs; any session
@@ -22811,8 +22833,9 @@ prs:
 
 
     SINGLE-PR MODE: the per-PR auto-sequence chain (qa -> sign_off -> merge) run on
-    demand — pm pr auto-sequence <id> extended past merge, with a thin pm pr signoff
-    <id> for just the sign-off step. No parallel pm pr auto command.
+    demand — pm pr auto-sequence <id> (which always gates at merge: it reports ready_to_merge
+    and stops), with a thin pm pr signoff <id> for just the sign-off step. No parallel
+    pm pr auto command.
 
 
     REMOVED (dead code): auto_start.py programmatic orchestration; bug_fix_impl_watcher.py
@@ -22827,7 +22850,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T15:07:55.292133+00:00'
+  updated_at: '2026-05-25T18:06:08.382333+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
