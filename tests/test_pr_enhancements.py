@@ -767,6 +767,35 @@ class TestGitHubMergePull:
             assert cwd == repo_dir, f"git op cwd={cwd} should be repo dir, not workdir"
             assert cwd != workdir
 
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch.object(pr_mod, "_pull_after_merge", return_value=True)
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("pm_core.gh_ops.merge_pr")
+    @mock.patch("pm_core.paths.fake_github_active", return_value=True)
+    @mock.patch("shutil.which", return_value=None)
+    def test_github_merge_uses_fake_when_gh_binary_absent(
+        self, _mock_which, _mock_active, mock_merge_pr, mock_git_ops,
+        mock_pull, mock_finalize, tmp_github_merge_project,
+    ):
+        """R9 parity: with the real gh binary absent but a session fake active,
+        `pm pr merge` still runs the merge against the fake (via run_gh's
+        session gate) instead of falling through to the manual-merge fallback."""
+        mock_merge_pr.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.return_value = MagicMock(
+            returncode=0, stdout="", stderr="")
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0, result.output
+        # The github merge block was entered and used the fake-backed gh_ops,
+        # not the "Merge via GitHub" manual fallback.
+        mock_merge_pr.assert_called_once()
+        mock_finalize.assert_called_once()
+        assert "Merge via GitHub" not in result.output
+
     @mock.patch.object(pr_mod, "trigger_tui_restart")
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
@@ -938,9 +967,14 @@ class TestGitHubMergePull:
         mock_finalize, tmp_github_merge_project,
     ):
         """Re-attempt on already-merged PR should still pull and finalize."""
-        # gh pr merge fails (already merged)
-        mock_subprocess.return_value = MagicMock(
-            returncode=1, stdout="", stderr="already been merged")
+        # gh pr merge fails (already merged), but `gh auth status` (the
+        # gh_ops pre-flight check) must still succeed.
+        def gh_side_effect(*args, **kwargs):
+            argv = args[0] if args else []
+            if "auth" in argv:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="already been merged")
+        mock_subprocess.side_effect = gh_side_effect
 
         def run_git_side_effect(*args, **kwargs):
             if args[0] == "rev-parse":
@@ -1353,3 +1387,28 @@ class TestPrStartCommittedGate:
         mock_run_git.assert_called_once_with(
             "show", "master:project.yaml", cwd=str(standalone), check=False
         )
+
+
+class TestGitHubCloseResilience:
+    """`pm pr close` must still clean up local state when gh is unavailable."""
+
+    @mock.patch("pm_core.gh_ops.close_pr", side_effect=SystemExit(1))
+    def test_close_continues_local_cleanup_on_gh_systemexit(
+        self, _mock_close, tmp_github_merge_project,
+    ):
+        """gh missing/unauthed (SystemExit from _check_gh via run_gh) must not
+        abort close: warn, then still remove the workdir and the PR entry."""
+        pm_dir = tmp_github_merge_project["pm_dir"]
+        workdir = tmp_github_merge_project["workdir"]
+        assert workdir.exists()
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir):
+            result = runner.invoke(pr_mod.pr, ["close", "pr-001"])
+
+        assert result.exit_code == 0, result.output
+        assert "Warning: Could not close GitHub PR" in result.output
+        # Local cleanup still happened despite the gh failure.
+        assert not workdir.exists()
+        data = store.load(pm_dir)
+        assert all(p["id"] != "pr-001" for p in data.get("prs", []))

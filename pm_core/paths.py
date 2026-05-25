@@ -410,6 +410,38 @@ def clear_fake_claude(session_tag: str) -> None:
                 f.unlink()
 
 
+def fake_github_dir(session_tag: str | None = None) -> "Path | None":
+    """Return ``~/.pm/sessions/{tag}/fake-github/`` for the session, or None.
+
+    Does NOT create the directory (so it is cheap to probe on every ``run_gh``
+    call). The out-of-process fake-github lives here — a ``state.json`` holding
+    the serialized PR registry / scripted responses plus a ``remote.git/``
+    backing repo. Mirrors the per-session ``fake-claude`` config gate.
+    """
+    tag = session_tag or get_session_tag()
+    if not tag:
+        return None
+    return sessions_dir() / tag / "fake-github"
+
+
+def fake_github_active(session_tag: str | None = None) -> bool:
+    """True if an out-of-process fake-github is installed for the session.
+
+    Consulted by ``gh_ops.run_gh`` (when no in-process transport is installed)
+    to route ``gh`` commands to the fake instead of the real GitHub API.
+    """
+    d = fake_github_dir(session_tag)
+    return bool(d and (d / "state.json").exists())
+
+
+def clear_fake_github(session_tag: str | None = None) -> None:
+    """Remove the out-of-process fake-github state for a session."""
+    import shutil
+    d = fake_github_dir(session_tag)
+    if d and d.exists():
+        shutil.rmtree(d)
+
+
 def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10_000_000) -> logging.Logger:
     """Configure a logger that always writes to file with rotation.
 
