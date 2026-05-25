@@ -16721,12 +16721,14 @@ prs:
     Prompt layer: extends pr-f17e22b''s TUI-section gate to a project-wide flag that
     strips "ask the user" / interactive language from every prompt builder — generate_prompt,
     generate_review_prompt, generate_merge_prompt, the QA planner / refinement / scenario
-    prompts, and the watcher prompts.
+    prompts, the generalized plan-watcher prompt (pr-ff9b728), and the sign-off prompt
+    (pr-2d5f712).
 
 
     Coupling rationale: removing INPUT_REQUIRED from prompts is only safe once self-recovery
-    playbooks exist. Sequenced after pr-ca6859f (watcher self-recovery audit) for
-    that reason.
+    playbooks exist. Sequenced after pr-ca6859f (self-recovery audit) for that reason;
+    ca6859f in turn depends on pr-ff9b728 (it audits the generalized watcher prompt),
+    so this lands after Phase 11.
 
 
     Driven by the ProgramBench submission as a forcing function — the cleanroom image
@@ -16741,7 +16743,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-06T03:28:55.716780+00:00'
-  updated_at: '2026-05-06T03:28:55.716780+00:00'
+  updated_at: '2026-05-25T16:27:24.719786+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16796,7 +16798,7 @@ prs:
     \ evaluation that mirrors how a real engineer works — internet access, a written\
     \ directive specifying the task and its constraints, and a post-run integrity\
     \ audit confirming the agent didn't cheat by referencing the answer directly.\
-    \ This is the realistic shape of the \"single prompt flow\" Phases 1-10 have been\
+    \ This is the realistic shape of the \"single prompt flow\" Phases 1-11 have been\
     \ building toward.\n\nInspired by ProgramBench (https://programbench.com) but\
     \ deliberately not its exact submission format. ProgramBench tests an agent's\
     \ ability to rebuild a working codebase from a compiled binary + docs alone, with\
@@ -16807,62 +16809,65 @@ prs:
     \ task lives in `pr-0cf3626` (filed alongside, see Related) as a separate runnable;\
     \ this PR is the primary deliverable.\n\n## Shape\n\nLayer pm on top of a per-task\
     \ cleanroom image. A leader Claude session uses pm itself as its orchestration\
-    \ tool: files plan + PRs, drives them through start/review/QA/merge under the\
-    \ Phase 10 flow, produces a working result. Three constraints make this realistic\
-    \ where ProgramBench is artificial:\n\n1. **Internet access** — the agent has\
-    \ the same web access a real engineer would. Stack Overflow, library docs, vendor\
-    \ sites, search. No artificial sandboxing of common knowledge.\n\n2. **Directive\
-    \ + provided materials** — the task envelope is a written directive describing\
-    \ what to build, plus the same docs / specs / reference behavior a real engineer\
-    \ would be given (the reference binary's observable behavior, API documentation,\
-    \ examples). The agent is told explicitly which materials it may consult.\n\n\
-    3. **Post-run integrity audit** — after the run, audit the agent's tool-use transcript\
-    \ (web fetches, file reads, command executions) against an allowlist derived from\
-    \ (2). The audit verifies the agent did NOT reference:\n   - The reference implementation's\
-    \ source code\n   - Test cases for the task\n   - Walkthroughs or solutions specific\
-    \ to the task\n   - Anything else explicitly out-of-bounds in the directive\n\
-    \   \n   This is the load-bearing realism check: agents with internet can trivially\
-    \ Google the answer if it's findable. The integrity audit is what makes the score\
-    \ meaningful.\n\n## Pieces\n\n- **Leader prompt template** — new prompt builder\
-    \ (sibling of `generate_prompt`, `generate_review_prompt`) framing pm as the leader's\
-    \ tool. Lists relevant CLI commands, references the provided-materials manifest,\
-    \ instructs the leader to file the plan + PRs and drive them via the Phase 10\
-    \ QA flow (regression-bound scenarios, new-regression authoring where needed,\
-    \ etc.). Different prompt from `pr-b3b8df0`'s auto-synthesis primitive (which\
-    \ is setup-time / pre-leader); this is the leader prompt itself.\n\n- **Task envelope\
-    \ format** — `pm/tasks/<task_id>/` directory convention. Contains: `directive.md`\
-    \ (the prompt), `materials/` (the provided docs / reference binary / examples),\
-    \ `allowlist.yaml` (what the integrity audit permits), and post-run `audit.md`\
-    \ (the audit report). The cleanroom image mounts `/workspace/task/` to this directory.\n\
-    \n- **Adapter CLI** — `pm bench realistic --task <path>` (or similar) drops the\
-    \ task envelope into a workdir, generates the leader prompt, spawns the leader\
-    \ session in `benchmark_mode` (`pr-6f9301e`), extracts `/workspace/result/` as\
-    \ the produced artifact when the leader finishes.\n\n- **Integrity audit module**\
-    \ — `pm_core/bench/audit.py`. Inputs: tool-use transcript (from Claude's session\
-    \ logs), allowlist. Outputs: structured `audit.md` enumerating every out-of-bounds\
-    \ reference (or stating clean), with verdict PASS / FAIL. FAIL includes the offending\
-    \ tool call(s) with a one-line reason. Integrates with existing verdict surfaces.\n\
-    \n- **Reproducibility Dockerfile** — `FROM` whatever base the task envelope declares,\
-    \ layered with pm + Claude Code + pinned deps. Egress allowlist permits the model\
-    \ API + the explicitly-allowed materials sources; everything else is blocked at\
-    \ the network namespace (iptables-style harness).\n\n- **End-to-end test** — a\
-    \ fixture task envelope + expected artifact + expected integrity-audit verdict;\
-    \ verifies the adapter, leader prompt, post-run audit, and Phase 10 QA flow all\
-    \ interact correctly.\n\n## Why depends on pr-fbda1a8 (bridge PR)\n\n`pr-fbda1a8`\
-    \ re-validates Phases 1-5 features under Phase 10's flow. The leader session this\
-    \ PR spawns drives the entire autonomous loop end-to-end — if any Phase 1-5 feature\
-    \ has silently regressed under the new flow, the leader fails for reasons unrelated\
-    \ to the task. Bridge must land first so this PR's failures are signal, not noise.\n\
-    \n## Manual testing\n\nRun the adapter against the fixture task envelope and a\
-    \ held-back real task. Confirm: the leader produces a result, the QA flow drives\
-    \ scenarios under the Phase 10 model (regression-bound), the integrity audit catches\
-    \ a deliberately-seeded out-of-bounds reference, and the audit PASSes on a clean\
+    \ tool: files plan + PRs, drives them through `start -> review -> QA -> sign_off\
+    \ -> merge` under the full Phase 10 + 11 flow (via the plan auto-start watcher),\
+    \ produces a working result. Three constraints make this realistic where ProgramBench\
+    \ is artificial:\n\n1. **Internet access** — the agent has the same web access\
+    \ a real engineer would. Stack Overflow, library docs, vendor sites, search. No\
+    \ artificial sandboxing of common knowledge.\n\n2. **Directive + provided materials**\
+    \ — the task envelope is a written directive describing what to build, plus the\
+    \ same docs / specs / reference behavior a real engineer would be given (the reference\
+    \ binary's observable behavior, API documentation, examples). The agent is told\
+    \ explicitly which materials it may consult.\n\n3. **Post-run integrity audit**\
+    \ — after the run, audit the agent's tool-use transcript (web fetches, file reads,\
+    \ command executions) against an allowlist derived from (2). The audit verifies\
+    \ the agent did NOT reference:\n   - The reference implementation's source code\n\
+    \   - Test cases for the task\n   - Walkthroughs or solutions specific to the\
+    \ task\n   - Anything else explicitly out-of-bounds in the directive\n\n   This\
+    \ is the load-bearing realism check: agents with internet can trivially Google\
+    \ the answer if it's findable. The integrity audit is what makes the score meaningful.\n\
+    \n## Pieces\n\n- **Leader prompt template** — new prompt builder (sibling of `generate_prompt`,\
+    \ `generate_review_prompt`) framing pm as the leader's tool. Lists relevant CLI\
+    \ commands, references the provided-materials manifest, instructs the leader to\
+    \ file the plan + PRs and drive them via the Phase 10 + 11 flow (regression-bound\
+    \ scenarios, new-regression authoring where needed, sign-off, the plan watcher).\
+    \ Different prompt from `pr-b3b8df0`'s auto-synthesis primitive (which is setup-time\
+    \ / pre-leader); this is the leader prompt itself.\n\n- **Task envelope format**\
+    \ — `pm/tasks/<task_id>/` directory convention. Contains: `directive.md` (the\
+    \ prompt), `materials/` (the provided docs / reference binary / examples), `allowlist.yaml`\
+    \ (what the integrity audit permits), and post-run `audit.md` (the audit report).\
+    \ The cleanroom image mounts `/workspace/task/` to this directory.\n\n- **Adapter\
+    \ CLI** — `pm bench realistic --task <path>` (or similar) drops the task envelope\
+    \ into a workdir, generates the leader prompt, spawns the leader session in `benchmark_mode`\
+    \ (`pr-6f9301e`), extracts `/workspace/result/` as the produced artifact when\
+    \ the leader finishes.\n\n- **Integrity audit module** — `pm_core/bench/audit.py`.\
+    \ Inputs: tool-use transcript (from Claude's session logs), allowlist. Outputs:\
+    \ structured `audit.md` enumerating every out-of-bounds reference (or stating\
+    \ clean), with verdict PASS / FAIL. FAIL includes the offending tool call(s) with\
+    \ a one-line reason. Integrates with existing verdict surfaces.\n\n- **Reproducibility\
+    \ Dockerfile** — `FROM` whatever base the task envelope declares, layered with\
+    \ pm + Claude Code + pinned deps. Egress allowlist permits the model API + the\
+    \ explicitly-allowed materials sources; everything else is blocked at the network\
+    \ namespace (iptables-style harness).\n\n- **End-to-end test** — a fixture task\
+    \ envelope + expected artifact + expected integrity-audit verdict; verifies the\
+    \ adapter, leader prompt, post-run audit, and the Phase 10 + 11 flow all interact\
+    \ correctly.\n\n## Why depends on pr-fbda1a8 (bridge PR)\n\n`pr-fbda1a8` validates\
+    \ the loop (the generalized plan watcher + sign-off) under the Phase 10 + 11 flow.\
+    \ The leader session this PR spawns drives the entire autonomous loop end-to-end\
+    \ — if any feature has silently regressed under the new flow, the leader fails\
+    \ for reasons unrelated to the task. Bridge must land first so this PR's failures\
+    \ are signal, not noise. (Via the bridge and pr-ca6859f, this PR transitively\
+    \ depends on the Phase 11 watcher + sign-off.)\n\n## Manual testing\n\nRun the\
+    \ adapter against the fixture task envelope and a held-back real task. Confirm:\
+    \ the leader produces a result, the loop drives scenarios under the Phase 10 +\
+    \ 11 model (regression-bound, through sign-off), the integrity audit catches a\
+    \ deliberately-seeded out-of-bounds reference, and the audit PASSes on a clean\
     \ run.\n\n## Depends on\n\n- pr-ca6859f (self-recovery audit — required for unattended\
     \ operation)\n- pr-6f9301e (headless / benchmark_mode — runtime substrate)\n-\
     \ pr-ed10ac4 (no-progress safety stop — prevents the leader from spinning)\n-\
     \ pr-b3b8df0 (auto-synthesis primitive — produces QA instructions from the task\
-    \ envelope)\n- pr-fbda1a8 (bridge PR — confirms Phase 1-5 features work under\
-    \ Phase 10 flow)\n\n## Out of scope\n\n- The exact ProgramBench offline task —\
+    \ envelope)\n- pr-fbda1a8 (bridge PR — confirms the loop works under the Phase\
+    \ 10 + 11 flow)\n\n## Out of scope\n\n- The exact ProgramBench offline task —\
     \ separate PR, see Related.\n- Multi-task benchmark harness — this PR runs one\
     \ task at a time; batching is follow-up.\n- Reference-implementation comparison\
     \ via behavior diff — that's the synthesis primitive's job.\n\n## Related\n\n\
@@ -16873,7 +16878,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-06T03:29:28.294226+00:00'
-  updated_at: '2026-05-14T15:12:05.067732+00:00'
+  updated_at: '2026-05-25T16:28:00.387197+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -18361,15 +18366,20 @@ prs:
     \ is satisfied or escalates.\n\n## Problem\n\nScenarios reliably produce artifacts\
     \ that work in the session that wrote them but don't actually exercise the functionality.\
     \ The scenario nominally passes because its (thin) assertions hold; the QA verdict\
-    \ says PASS; the bug-fix loop moves on; the bug is still there. This is false-PASS,\
-    \ not false-NEEDS_WORK, and it is invisible from raw verdicts alone. In supervised\
+    \ says PASS; the loop moves on; the bug is still there. This is false-PASS, not\
+    \ false-NEEDS_WORK, and it is invisible from raw verdicts alone. In supervised\
     \ mode a human reading the artifacts sees \"oh, you just printed the help text\
     \ — that doesn't test the feature.\" In headless mode (pr-6f9301e) nobody catches\
-    \ it.\n\n## Shape\n\n- New module hooked into the QA verdict path, before verdict\
-    \ propagates to the bug-fix or improvement-fix watchers.\n- Inputs: scenario's\
-    \ produced artifacts, scenario instruction text, the diff of the PR under test,\
-    \ the QA planner output that generated the scenarios (so the supervisor can amend\
-    \ the planner prompt for repeat failure modes).\n- A leader Claude session judges\
+    \ it.\n\nRelationship to sign-off (pr-2d5f712): this supervisor is the PER-SCENARIO,\
+    \ inline false-PASS catcher (it can amend + re-run a thin scenario before verdict-emit).\
+    \ The sign-off step is the PR-LEVEL pass over all scenarios this supervisor already\
+    \ vetted (cross-scenario gaps + whole-PR mergeability). They compose; sign-off\
+    \ trusts per-scenario depth to this supervisor rather than re-deriving it.\n\n\
+    ## Shape\n\n- New module hooked into the QA verdict path, before the verdict propagates\
+    \ to the plan auto-start watcher (pr-ff9b728).\n- Inputs: scenario's produced\
+    \ artifacts, scenario instruction text, the diff of the PR under test, the QA\
+    \ planner output that generated the scenarios (so the supervisor can amend the\
+    \ planner prompt for repeat failure modes).\n- A leader Claude session judges\
     \ artifact depth: did the scenario actually invoke the changed code path? Did\
     \ it observe the side effect it claimed to verify? Are assertions tied to the\
     \ behavior the PR changes, or to incidental output? Does the captured evidence\
@@ -18405,30 +18415,29 @@ prs:
     \ edits: the supervisor can propose edits to the QA planner prompt (or the synthesis\
     \ primitive's per-task-type instruction in pr-b3b8df0) so future scenarios don't\
     \ repeat the shortcut. These edits are higher-leverage but riskier than per-scenario\
-    \ amendments. Default: planner edits go through the improvement-fix watcher (gated\
-    \ merge) rather than applying in-place.\n\n## Sequencing\n\nDepends on pr-b3b8df0\
+    \ amendments. Default: planner edits route through the plan watcher's gated mode\
+    \ (sign-off) rather than applying in-place.\n\n## Sequencing\n\nDepends on pr-b3b8df0\
     \ (synthesis primitive — the supervisor's planner-level fixes target the per-task-type\
     \ instructions there) and pr-6f9301e (headless mode is what makes shallow-PASS\
     \ invisible without this supervisor). Independent of pr-ed10ac4 and pr-ca6859f.\n\
-    \nThe bug-fix watcher (pr-e3a711c) and improvement-fix watcher (pr-d39a7fb) only\
-    \ see verdicts after the supervisor releases them. Shallow-PASS scenarios that\
-    \ were amended and re-run produce a verdict the watchers can trust; shallow-PASS\
-    \ scenarios that hit the amendment cap produce an improvement PR rather than a\
-    \ PASS.\n\n## Manual testing\n\nConstruct a PR whose change is \"make function\
-    \ X return the corrected value Y\" and a scenario that only checks \"function\
-    \ X is callable without crashing.\" Run the scenario; supervisor should:\n- judge\
-    \ the artifact as shallow (no observation of return value),\n- query the session\
-    \ about what it checked,\n- amend the instruction to require asserting the return\
-    \ value equals Y,\n- re-run the scenario,\n- propagate the resulting verdict.\n\
-    Confirm that a deeper scenario (one that actually checks the return value) passes\
-    \ the supervisor without amendment. Confirm amendment-cap escalation: a scenario\
-    \ that resists amendment 2 times is marked for human attention with an improvement\
-    \ PR filed, and the supervisor does not block indefinitely."
+    \nThe plan auto-start watcher (pr-ff9b728) only sees verdicts after the supervisor\
+    \ releases them. Shallow-PASS scenarios that were amended and re-run produce a\
+    \ verdict the watcher can trust; shallow-PASS scenarios that hit the amendment\
+    \ cap produce an improvement PR rather than a PASS.\n\n## Manual testing\n\nConstruct\
+    \ a PR whose change is \"make function X return the corrected value Y\" and a\
+    \ scenario that only checks \"function X is callable without crashing.\" Run the\
+    \ scenario; supervisor should:\n- judge the artifact as shallow (no observation\
+    \ of return value),\n- query the session about what it checked,\n- amend the instruction\
+    \ to require asserting the return value equals Y,\n- re-run the scenario,\n- propagate\
+    \ the resulting verdict.\nConfirm that a deeper scenario (one that actually checks\
+    \ the return value) passes the supervisor without amendment. Confirm amendment-cap\
+    \ escalation: a scenario that resists amendment 2 times is marked for human attention\
+    \ with an improvement PR filed, and the supervisor does not block indefinitely."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-12T13:14:57.292205+00:00'
-  updated_at: '2026-05-12T13:16:30.263716+00:00'
+  updated_at: '2026-05-25T16:27:42.515482+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
