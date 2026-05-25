@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3d1fa55
+  active_pr: pr-48cb564
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13402,7 +13402,7 @@ prs:
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
   branch: pm/pr-48cb564-picker-popup-indicate-per-session-window-selected-
-  status: pending
+  status: qa
   depends_on: []
   description: 'The prefix+P PR action picker (pm _popup-picker, pm_core/cli/session.py:1448)
     lists active PR windows with their status and phase, but does not show which windows
@@ -13455,15 +13455,16 @@ prs:
     Out of scope: live-updating the indicators while the popup is open. The popup
     is a snapshot; if a session changes its active window mid-popup, the user closes
     and reopens to see the new state.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/218
+  gh_pr_number: 218
   created_at: '2026-05-04T12:02:52.811047+00:00'
-  updated_at: '2026-05-04T12:02:52.811047+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-24T23:11:57.220681+00:00'
+  started_at: '2026-05-24T22:07:05.116285+00:00'
+  reviewed_at: '2026-05-24T23:11:57.220681+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-48cb564-picker-popup-indicate-per-session-wi-e2348b0f
 - id: pr-c3bf868
   plan: bugs
   title: 'Bug: stale TUI pidfile lets picker / reload IPC silently target a dead or
@@ -15988,11 +15989,25 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/200
   gh_pr_number: 200
   created_at: '2026-05-04T19:50:22.167828+00:00'
-  updated_at: '2026-05-05T17:29:39.794582+00:00'
+  updated_at: '2026-05-25T00:42:58.086578+00:00'
   started_at: '2026-05-04T19:53:30.713246+00:00'
   reviewed_at: '2026-05-05T17:29:39.794582+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9f916a2
+    text: 'Scope gap (found via lost #213/pr-37073ad workdir): this PR commits the
+      PR ROW at the pre-start "not committed on master" gate (pr.py:858-886) — which
+      fires BEFORE pm pr start assigns workdir and before the draft PR yields gh_pr_number.
+      So the post-start live-state fields (workdir, gh_pr_number, status) are still
+      never committed to master, and any working-tree reset (git checkout -- project.yaml,
+      FF/reconcile, the stash-pop bug, fresh clone, or another machine) silently drops
+      them. Confirmed: `git log -S "pm-pr-37073ad-container-pre-install" -- pm/project.yaml`
+      is empty (workdir never committed); pr-48cb564 started this session already
+      has workdir=None in HEAD. This is the same root as the #213/#214 gh_pr_number
+      desyncs. Fix should persist workdir+gh_pr_number+status to master after start
+      completes AND on review/qa/merge transitions, not just the start-gate row.'
+    created_at: '2026-05-25T00:42:57Z'
+    last_edited: '2026-05-25T00:42:57Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f74988c-improvement-pm-pr-start-auto-commits-203ee4e9
 - id: pr-23d97f8
   plan: null
@@ -21701,6 +21716,7 @@ prs:
   reviewed_at: '2026-05-24T22:03:24.149232+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-37073ad-container-pre-install-headless-chrom-e2348b0f
 - id: pr-1d8b2b7
   plan: plan-regression
   title: 'Shared VerdictRegistry: unify verdict definitions across detection path
@@ -21928,7 +21944,7 @@ prs:
   title: 'Bug: PR actions picker reports "merged or closed" for an open PR when its
     window display id desyncs; self-heal by re-linking gh_pr_number'
   branch: pm/pr-9b96145-bug-pr-actions-picker-reports-merged-or-closed-for
-  status: in_progress
+  status: qa
   depends_on: []
   description: '## Symptom
 
@@ -22002,18 +22018,26 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/216
   gh_pr_number: 216
   created_at: '2026-05-22T22:52:39.457111+00:00'
-  updated_at: '2026-05-24T21:56:02.396650+00:00'
+  updated_at: '2026-05-24T22:22:02.164315+00:00'
   started_at: '2026-05-24T21:56:02.396650+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-24T22:22:02.164315+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0e1abd1
+    text: 'QA INPUT_REQUIRED: Desynced #N picker window self-heals and shows real
+      actions: PASS; Accurate picker messaging — desynced vs. terminal vs. non-github:
+      PASS; pm pr sync-github backfills a missing number by branch (CLI): INPUT_REQUIRED;
+      Concurrent backfill writers leave project.yaml valid and fully linked: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-9b96145-52038d4438c9a623)'
+    created_at: '2026-05-24T23:05:14Z'
+    last_edited: '2026-05-24T23:05:14Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9b96145-bug-pr-actions-picker-reports-merged-904ede96
 - id: pr-3d1fa55
   plan: bugs
   title: 'Bug: terminal-status PRs keep their tmux windows when finalized outside
     pm merge flow'
   branch: pm/pr-3d1fa55-bug-terminal-status-prs-keep-their-tmux-windows-wh
-  status: in_progress
+  status: qa
   depends_on: []
   description: '## Symptom
 
@@ -22060,9 +22084,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/217
   gh_pr_number: 217
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-24T21:58:50.019678+00:00'
+  updated_at: '2026-05-24T22:24:57.753379+00:00'
   started_at: '2026-05-24T21:58:50.019678+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-24T22:24:57.753379+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d1fa55-bug-terminal-status-prs-keep-their-t-c52f26ee
