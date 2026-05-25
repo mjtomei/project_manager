@@ -24,16 +24,33 @@ param. Affected real paths:
   for the branch and returns it instead of `None`.
 
 **The consumer of the fake is a regression-test author / the regression
-runner.** The fake is installed *in-process* via `gh_ops.set_gh_runner` (or
-the `installed()` context manager / `fake_github` & `fake_github_repo` pytest
-fixtures). Unlike fake-claude, there is **no subprocess/CLI-level installer**
-for the github fake in this PR — a separately-spawned `pm pr ...` subprocess
-would not see the fake and would hit real `gh`. So the user-observable surface
-under test is: driving pm's github-backend functions in-process with the fake
-installed, and observing real outcomes (PR records, pm PR status changes in
-`project.yaml`, real git state in the backing repo and a consumer clone, and
-`gh`-shaped error output). This is exactly how the regression runner
-(pr-7d5d036) will consume it.
+runner.** The fake can be installed two ways:
+
+1. **In-process** via `gh_ops.set_gh_runner` (or the `installed()` context
+   manager / `fake_github` & `fake_github_repo` pytest fixtures). This is the
+   multi-threaded-test / regression-runner consumption shape and the route
+   used by scenarios 1–6.
+2. **Out-of-process, per session (R9, added after the initial spec)** via
+   `pm fake-github config set` — mirroring fake-claude. State lives at
+   `~/.pm/sessions/<tag>/fake-github/` (`state.json` PR registry +
+   `remote.git/` backing repo). `gh_ops.run_gh` consults
+   `paths.fake_github_active()` when no in-process runner is set and dispatches
+   via `fake_github.dispatch_session`. This makes a freshly-spawned
+   `pm pr sync-github` / `pm pr merge` / `pm pr close` / `pm push` subprocess
+   (or TUI pane) serve `gh` from the fake instead of real GitHub — so the
+   github backend is now drivable from a **real CLI pane**, not only in-process.
+   Caveats: predicate/callable scripts are in-process only (out-of-process
+   scripts are string-match only); out-of-process dispatch assumes serial `gh`
+   calls per session; and the git-plumbing half of merge-with-pull needs the
+   consumer repo's origin pointed at the fake's `remote.git` + real git
+   (push-proxy note in impl.md) — full pm-driven pull is pr-7d5d036's job.
+
+The user-observable surface under test is therefore: driving pm's
+github-backend operations (in-process functions **or** real `pm pr ...` /
+`pm push` / `pm fake-github` CLI against the out-of-process fake) and observing
+real outcomes (PR records, pm PR status changes in `project.yaml`, real git
+state in the backing repo and a consumer clone, and `gh`-shaped error output).
+This is exactly how the regression runner (pr-7d5d036) will consume it.
 
 ## Shared resources touched by the diff (concurrency targets)
 
@@ -201,12 +218,17 @@ non-deterministic / order-dependent corruption under concurrency.
 
 ## 6. Ambiguities (resolved)
 
-- **No subprocess-level installer for the github fake.** Unlike fake-claude
-  (installed via a `bin/fake-claude` shim + per-session config), the github
-  fake is in-process only. Resolution: QA drives pm's github-backend functions
-  in-process with the fake installed (the regression-runner consumption shape),
-  not by spawning `pm pr ...` subprocesses — those would bypass the fake. This
-  is by design; full pm-subprocess-driven integration is pr-7d5d036's job.
+- **Subprocess-level installer for the github fake — RESOLVED by R9 (post-spec
+  update).** The initial spec said the github fake was in-process only and that
+  spawning `pm pr ...` subprocesses would bypass it. That is no longer true:
+  commit 4589a41/ab85e48 added an out-of-process per-session installer
+  (`pm fake-github config set/show/clear`) that mirrors fake-claude. `run_gh`
+  consults `paths.fake_github_active()` and dispatches to the on-disk fake when
+  no in-process runner is set. So both consumption shapes are now valid: (a)
+  in-process function drivers (scenarios 1–6), and (b) real CLI panes against
+  the session fake (scenarios 7+). The git-plumbing half of merge-with-pull is
+  still pr-7d5d036's responsibility (consumer origin must point at the fake's
+  `remote.git`).
 - **Consumer pull vs pm's wrapped git.** `_pull_after_merge` runs git through
   pm's push-proxy wrapper, which would proxy `git fetch` away from the local
   fake remote. Resolution (per impl.md): exercise the consumer pull directly
