@@ -22586,7 +22586,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T18:34:36.779795+00:00'
+  updated_at: '2026-05-25T18:49:10.663074+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
@@ -22773,6 +22773,25 @@ prs:
       All four are part of this PR.'
     created_at: '2026-05-25T18:34:36Z'
     last_edited: '2026-05-25T18:34:36Z'
+  - id: note-8ff101d
+    text: 'Round landed (2cd5f4da) — note-942fa37 removals + note-511d725 additions:
+      (A) AUTONOMY REMOVED: sign-off always gates; decide_signoff_hop(verdict) ->
+      {ready_to_merge,qa,review,impl,blocked,unknown}; SIGNOFF_MERGE always = ready_to_merge
+      recommendation (PR stays sign_off). Deleted is_signoff_autonomous + project.sign_off_autonomous
+      + per-plan seam. Merge decision -> pr-ff9b728. (B) CAPTURE GATE REMOVED: deleted
+      bug_fix_capture_status/_dir_has_content/override/prompt injection; router still
+      reviews repro/verify evidence generally; #226 still renders captures. (C) KEPT
+      decide/apply decouple. (1) ADOPTION: pr["signoff"]={verdict,sha,ts,origin};
+      hidden `pm pr signoff record <id> <V> --origin <o>` (agent self-records, origin
+      threaded); auto-sequence adopts fresh record (sha==HEAD) else records transcript
+      verdict (origin auto-sequence) then acts; only auto-sequence acts (invariant).
+      (2/3/4) DISPLAY: tech-tree sign_off node spins while running / shows verdict
+      icon once recorded; SIGNOFF_VERDICT_ICONS/STYLES single source in signoff.py
+      (re-exported by tech_tree; colors also in qa_status._VERDICT_COLORS); pm pr
+      list shows [sign_off <icon>]. Full suite 2755 pass (1 pre-existing unrelated
+      hook failure).'
+    created_at: '2026-05-25T18:49:10Z'
+    last_edited: '2026-05-25T18:49:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
