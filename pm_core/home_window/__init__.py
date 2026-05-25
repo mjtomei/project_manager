@@ -145,8 +145,9 @@ def park_if_on(session: str | None, target_window_id: str | None) -> list[str]:
         if not home_win:
             return []
         # Park each watching session on the home window.  ``select_window``
-        # routes through ``current_or_base_session`` which doesn't accept
-        # an explicit target session, so use the per-session variant.
+        # only ever targets the caller's own client (via
+        # ``caller_switch_target``), so use the per-session variant to switch
+        # an explicit (possibly other) session.
         # Target by window-id (@N) rather than index — indices can shift
         # if windows are added/removed concurrently.
         for sess in watching:
@@ -193,8 +194,8 @@ def park(session: str, home_window: str | None = None) -> None:
 
     Call this *after* killing the user's focused window so the post-kill
     landing is the home window (instead of tmux's previous-window).
-    Scoped to the caller's grouped session via ``select_window``'s use
-    of ``current_or_base_session``.
+    Scoped to the caller's own client via ``select_window``'s use of
+    ``caller_switch_target`` (guarded here by an ``in_tmux`` check).
     """
     if not tmux_mod.in_tmux() or not session:
         return

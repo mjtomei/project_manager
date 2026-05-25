@@ -153,10 +153,18 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
               session, name,
               (win or {}).get("id"), (win or {}).get("index"), switch)
     if switch and win:
-        current = current_or_base_session(session)
-        _run(
-            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-        )
+        # Switch only the caller's OWN client.  If the caller can't be
+        # identified (non-interactive/CLI context, or a different session
+        # group), leave the window detached rather than hijacking an
+        # arbitrary attached grouped session's focus.
+        target = caller_switch_target(session)
+        if target:
+            _run(
+                _tmux_cmd("select-window", "-t", f"{target}:{win['index']}"),
+            )
+        else:
+            _log.info("new_window: no identifiable caller client; left "
+                      "window %s detached (no switch)", name)
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
@@ -181,11 +189,17 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     if not win:
         return None
     if switch:
-        # Switch the current grouped session to the new window
-        current = current_or_base_session(session)
-        _run(
-            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-        )
+        # Switch only the caller's OWN client to the new window.  If the
+        # caller can't be identified, leave it detached rather than
+        # hijacking an arbitrary attached grouped session's focus.
+        target = caller_switch_target(session)
+        if target:
+            _run(
+                _tmux_cmd("select-window", "-t", f"{target}:{win['index']}"),
+            )
+        else:
+            _log.info("new_window_get_pane: no identifiable caller client; "
+                      "left window %s detached (no switch)", name)
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:
@@ -402,9 +416,18 @@ def find_window_by_name(session: str, name: str) -> dict | None:
 def select_window(session: str, window: str) -> bool:
     """Select (switch to) a window by index or name. Returns True on success.
 
-    Targets the current grouped session so only the caller's terminal switches.
+    Targets only the caller's OWN client's session so a focus change never
+    leaks onto an unrelated grouped session.  When the caller's client can't
+    be identified (non-interactive/CLI context, or a different session
+    group), no switch is issued and this returns False — see
+    :func:`caller_switch_target`.  Use :func:`select_window_in_session` to
+    deliberately switch a specific (possibly other) session.
     """
-    target = current_or_base_session(session)
+    target = caller_switch_target(session)
+    if target is None:
+        _log.info("select_window: no identifiable caller client; "
+                  "skipping switch for %s:%s", session, window)
+        return False
     result = _run(
         _tmux_cmd("select-window", "-t", f"{target}:{window}"),
     )
@@ -498,8 +521,38 @@ def set_shared_window_size(session: str, window: str) -> None:
         )
 
 
+def caller_switch_target(base: str) -> str | None:
+    """Return the caller's OWN grouped session for a focus-mutating switch.
+
+    Unlike :func:`current_or_base_session` (which is for read-only *queries*
+    and may fall back to an *arbitrary* attached grouped session), this only
+    resolves the session belonging to the caller's own tmux client:
+
+    * if we're inside tmux and the current pane's session is *base* or one of
+      its grouped sessions (``base~N``), return it;
+    * otherwise — not in tmux, or the current pane is in a different session
+      group — return ``None``.
+
+    A ``None`` result means the caller has no identifiable client, so a
+    focus-mutating switch must be skipped (the window is left detached)
+    rather than hijacking an unrelated attached grouped session's focus.
+    No attached-client check is needed: by construction the caller is *in*
+    this session, so switching it steals nobody else's focus.
+    """
+    if in_tmux():
+        current = get_session_name()
+        if current and (current == base or current.startswith(base + "~")):
+            return current
+    return None
+
+
 def current_or_base_session(base: str) -> str:
-    """Return the best session to target for query operations.
+    """Return the best session to target for read-only query operations.
+
+    NOTE: query-only.  Do NOT use this to choose the target of a
+    focus-mutating ``select-window`` — its step-2 fallback returns an
+    *arbitrary* attached grouped session, which would hijack that session's
+    focus.  Use :func:`caller_switch_target` for switches instead.
 
     Priority:
     1. Current session (from $TMUX_PANE) if it's in the same group
