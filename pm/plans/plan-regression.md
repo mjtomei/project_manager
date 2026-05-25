@@ -387,10 +387,22 @@ The human-facing surface for sign-off — the per-PR report plus the dashboard t
 
 **Dashboard:** A single top-level HTML index where all PRs are reviewed **by behavior + short status summaries** — fits the BDD goal. Lists every PR with a one-line behavior/status summary linking to its per-PR `report.html`; simple client-side **filtering** by merged/unmerged and by status, so reports for both merged and unmerged PRs are reviewable and each PR's position in the flow is visible. **Detect-missing**: when a per-PR report is absent (never generated, or removed by a future GC) the index shows that state instead of a dead link, with a **regenerate flow** to rebuild it on demand from retained verdicts/evidence (re-running a capture only if needed). Static export (open a file, no server) is the v1 lean; co-located with the captures.
 
-### PR: Auto-run wiring — re-loop on code change + loop guard + repeated-root-cause escalation
+### PR: Auto-run wiring — single-PR + dependency-aware auto-start, mid-run plan mutation, loop guard
 `pr-ff9b728` (depends on: pr-2d5f712)
 
-Wires the router into auto-run with the loop-safety rules. **Re-loop invariant**: any code/content change (impl, or a NEEDS_WORK fix a scenario worker made) routes back through review **and** qa before merge — no shortcut; note-only actions don't re-trigger review (recording a limitation then merging; note→re-qa; and notes left on *other* PRs in `project.yaml` never require review). **Loop guard**: default cap of **10** full bounces per PR (configurable global setting), reset on genuine progress; on exceeding it the checkoff raises INPUT_REQUIRED. **Repeated root cause**: the prompt treats a recurring root cause across bounces as a signal to escalate to INPUT_REQUIRED *early*, before the hard cap, when the same hop recurs without progress.
+Wires the router into both single-PR runs and the dependency-aware auto-start, with the loop-safety rules and the dynamic plan/graph mutation the router's "needs a new PR" hops require.
+
+**Single-PR mode.** A CLI/TUI entry to run the full sign-off + auto-run loop on one PR (e.g. `pm pr signoff <id>` / `pm pr auto <id>`), independent of a full auto-start sweep — reuses the router, loop guard, and re-loop invariant.
+
+**Auto-start integration.** Insert sign-off as a stage in the dependency-aware orchestrator (`pm_core/tui/auto_start.py` `check_and_start`: review → qa → **sign-off** → merge), scoped to the target's dependency tree (`_transitive_deps`) like the existing loops.
+
+**Re-loop invariant.** Any code/content change (impl, or a NEEDS_WORK fix a scenario worker made) routes back through review **and** qa before merge — no shortcut; note-only actions don't re-trigger review (recording a limitation then merging; note→re-qa; and notes on *other* PRs in `project.yaml` never require review).
+
+**Loop guard.** Default cap of **10** full bounces per PR (configurable global setting), reset on genuine progress; on exceeding it the checkoff raises INPUT_REQUIRED. **Repeated root cause**: a recurring hop across bounces escalates to INPUT_REQUIRED *early*, before the hard cap. A bounce that makes real progress (e.g. files a needed new dependency) is progress, not a spin — it resets the guard.
+
+**Dynamic plan/graph mutation (the new capability auto-start lacks today).** When the router decides a new PR is needed — a missing dependency, an assumed-missing feature the PR depended on, or a new feature — the machinery: (1) files the new PR(s) via `pm pr add` and sets `depends_on` so the blocked PR depends on them, inserting them **upstream** of the current target; (2) edits the **plan file** to add the corresponding `### PR:` section(s) with dependency notation — no plan-file writer exists today (`plan_parser` only reads via `parse_plan_prs`), so this adds an **additive** section inserter that never rewords or deletes existing human-authored content; (3) **re-resolves** the dependency tree so `check_and_start` starts the newly-inserted upstream PR(s) *before* resuming the blocked target — today `_transitive_deps(target)` is computed once over a static graph, so a tree that grows mid-run is exactly what auto-start doesn't handle; (4) commits the plan edit + `project.yaml` rows atomically and records the mutation as a `pm pr note`.
+
+**Safety on plan mutation** (autonomous edits to the human-readable source of truth): additive-only (insert sections / set deps, never delete/reword); cycle detection (refuse a dependency insertion that would create a cycle); in gated mode the proposed plan edit + new upstream PR(s) are surfaced for human review before they start, in autonomous mode it proceeds on the note trail + additive-only guarantee. The plan-mutation piece is the heaviest sub-part and can split out if it grows.
 
 ## Success criteria
 
@@ -424,5 +436,6 @@ Wires the router into auto-run with the loop-safety rules. **Re-loop invariant**
 **Sign-off / acceptance gate (Phase 11, pending — closes auto-run):**
 - Every PR that finalizes QA gets an auto-generated BDD behavior report, and the dashboard (both `pr-8e693f6`) reviews all PRs by behavior + status with merged/unmerged filtering and regenerates missing reports
 - The verdict router (`pr-2d5f712`) maps every terminal verdict to a next hop, edits no code, and escalates to INPUT_REQUIRED on genuine ambiguity rather than merging incomplete work
-- Auto-run re-loops through review+qa on any code change, never on note-only actions; the loop guard (`pr-ff9b728`, default 10) and repeated-root-cause escalation prevent infinite bounce loops
+- The gate runs both on a single PR on demand and as a stage inside dependency-aware auto-start (`pr-ff9b728`); auto-run re-loops through review+qa on any code change, never on note-only actions; the loop guard (default 10) + repeated-root-cause escalation prevent infinite bounce loops
+- When the router needs a new PR mid-run (missing dependency / assumed-missing feature / new feature), auto-start mutates the plan and graph live — files the upstream PR(s), inserts plan sections additively, re-resolves the dependency tree, and starts the new upstream work before resuming the blocked target — a case static auto-start can't handle today
 - With the gate in autonomous mode, the measured defect count trends **down** without per-change human review — the pitch's decisive open question answered in the affirmative
