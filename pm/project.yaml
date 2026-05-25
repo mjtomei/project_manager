@@ -22734,3 +22734,22 @@ prs:
       never the TUI event loop.'
     created_at: '2026-05-25T04:06:15Z'
     last_edited: '2026-05-25T04:06:15Z'
+  - id: note-9240d8e
+    text: 'QA scenario 1 refiner: drive the REAL popup via its own program — in a
+      foreign-cwd window run `S=$(tmux display-message -p "#{session_name}"); W=$(tmux
+      display-message -p "#{window_name}"); pm _popup-picker "$S" "$W"` (exactly _POPUP_PICKER_BODY,
+      session.py:59). The display-popup OVERLAY is not headlessly driveable (no client;
+      keys do not route to it; capture-pane cannot read it), so run the picker program
+      in a normal pane instead — same args, same fzf chord, same dispatch+spinner,
+      only overlay-vs-pane rendering differs (irrelevant to the cwd/root-resolution
+      logic under test). Bug surfaces only if the foreign window has NO PM_PROJECT
+      in env and no project.yaml up-tree (state_root() then walks up from foreign
+      cwd and fails); explicitly `unset PM_PROJECT` in that window. PR must be selectable
+      in the picker: a started PR (pm pr start) keeps its impl window "pr-<id>" open
+      which makes _pr_has_open_window true even with no review window (session.py:1745).
+      Observe the switch via `tmux display-message -p -t <session> "#{window_name}"`
+      (MUST pass -t <session> — no -t returns the client window, not the session active
+      window). No spinner timeout (session.py:1253) so pre-fix is an indefinite hang,
+      not a 30s exit.'
+    created_at: '2026-05-25T03:50:54Z'
+    last_edited: '2026-05-25T03:50:54Z'
