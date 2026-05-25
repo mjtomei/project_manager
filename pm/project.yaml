@@ -20139,6 +20139,24 @@ prs:
       have no cross-process flock; only in-process threading locks). Captures: /pm-captures/scenarios/11/{triple1-counter,triple2-nonconflicting-merges,triple3-conflicting-merges}.'
     created_at: '2026-05-25T02:45:05Z'
     last_edited: '2026-05-25T02:45:05Z'
+  - id: note-c944f2d
+    text: 'Scenario 12 refiner (concretized): fake-github config CLI is metadata-only-sufficient
+      for all 3 triples (no git_backed/remote.git/origin setup needed — only gh pr
+      list on init-import + gh pr view on sync). Session tag derives from the TEST
+      PROJECT git root (paths.get_session_tag), so plain shell from $TEST_DIR works,
+      no tmux needed; run every pm + fake-github command from $TEST_DIR so the tag
+      matches. pm init --backend github --no-import STILL runs github PR import (only
+      skips plan import), so a fake seeded with one open-draft PR yields a pm entry
+      with gh_pr_number=1 status in_progress. KEY sync-count nuance for the scripted-failure
+      triple: pm pr sync-github issues exactly ONE gh pr view per PR per run, so a
+      2-entry pr-view failure queue (403 then 5xx, times=1 each) drains over TWO syncs
+      (each prints No status changes, status unchanged, warning to log, no crash);
+      the THIRD sync hits the real record. Make the real record DIFFER from current
+      status (e.g. seed ready/non-draft so in_progress->in_review) so the post-drain
+      Updated 1 PR(s) is observable. Re-seed = full replace, numbering restarts at
+      1 (install_session always _next_number=1).'
+    created_at: '2026-05-25T02:32:47Z'
+    last_edited: '2026-05-25T02:32:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
