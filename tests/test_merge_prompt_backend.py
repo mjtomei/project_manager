@@ -35,8 +35,16 @@ def test_github_merge_prompt_merges_master_into_branch_and_reruns_gh():
     assert "Push the PR branch" in p
     # Re-run the GitHub merge with the PR number.
     assert "gh pr merge 212 --merge" in p
-    # Pull master into the local repo afterwards.
-    assert "Pull `master`" in p
+
+
+def test_github_merge_prompt_leaves_local_repo_pull_to_pm():
+    # pm pulls master into the main repo via --propagation-only; the agent
+    # (in the PR-branch workdir) must not touch the main checkout itself.
+    p = prompt_gen.generate_merge_prompt(_data("github"), "pr-test", "not mergeable")
+    assert "Do NOT touch the main repo" in p
+    assert "pm pulls the merged `master` into it automatically" in p
+    # No step instructing the agent to pull master into the local repo.
+    assert "Pull `master` into the local repo" not in p
 
 
 def test_github_merge_prompt_does_not_push_master():

@@ -603,6 +603,9 @@ so the PR is recorded as merged.  You are in the PR branch (`{branch}`) workdir.
 Do NOT merge into `{base_branch}` locally and do NOT `git push origin {base_branch}` —
 that bypasses GitHub entirely.  Instead, bring `{base_branch}` into the PR branch, push
 the branch, and re-run the GitHub merge.
+
+Work only in this workdir on the `{branch}` branch.  Do NOT touch the main repo
+checkout — pm pulls the merged `{base_branch}` into it automatically once you finish.
 """
         merged_desc = (
             f"The conflict is resolved by merging `{base_branch}` into `{branch}`, the "
@@ -614,8 +617,7 @@ the branch, and re-run the GitHub merge.
 3. Run any relevant tests to verify the resolution
 4. Push the PR branch `{branch}` to origin
 5. Re-run the GitHub merge so GitHub merges the branch into `{base_branch}` and records the PR as merged: `{gh_merge_cmd}`
-6. Pull `{base_branch}` into the local repo
-7. End with a verdict on its own line — one of:"""
+6. End with a verdict on its own line — one of:"""
     else:
         backend_block = f"""
 ## Repository Setup (vanilla git backend)

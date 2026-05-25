@@ -41,8 +41,9 @@ The bug is specific to the **github** backend reusing the vanilla framing.
    - Merge `base_branch` (master) **INTO** the PR branch in the workdir, resolving conflicts there.
    - Push the **PR branch** to origin.
    - Re-run the GitHub merge: `gh pr merge <#> --merge`.
-   - Pull `base_branch` into the local repo.
    - It must NOT instruct merging into master locally or `git push origin master`.
+   - It must NOT instruct the agent to pull `base_branch` into the local repo — pm does
+     that automatically (see Finalize below). The agent works only in the PR-branch workdir.
 2. **R2** — Update the github MERGED verdict description and the failure-framing line
    ("The merge of `branch` into `master` failed") to match the new direction (the failure
    is the GitHub merge; success = branch pushed + GitHub merge completed).
@@ -60,12 +61,20 @@ The bug is specific to the **github** backend reusing the vanilla framing.
   `pr.get("gh_pr_number")` (the merge window is only launched on the github path when
   `gh_pr_number` is truthy — `pr.py:1828`). Guard with a `<PR#>` placeholder fallback so
   the prompt never crashes if it is missing.
-- Finalization re-invokes the GitHub merge already: after the window emits MERGED, the
-  idle/auto re-runs `pm pr merge`, whose github path runs `gh pr merge` again; if the agent
-  already merged, `gh_ops.is_pr_merged` short-circuits it to success, then
-  `_pull_after_merge` + `_finalize_merge` run (`pr.py:1845-1881`). So no new finalize code
-  is required — the prompt instructing the agent to run `gh pr merge` is idempotent with
-  the re-attempt. Documenting this; no code change to the merge re-attempt path.
+- **Finalize (corrected):** after the merge window emits MERGED,
+  `review_loop_ui._finalize_detected_merge` (`review_loop_ui.py:705`) re-runs
+  `pm pr merge --propagation-only`. On the github backend, `--propagation-only`
+  **skips `gh pr merge`** (`pr.py:1831-1834`) and goes straight to `_pull_after_merge`,
+  which pulls `origin/{base_branch}` into the **main repo dir** (not the workdir —
+  `pr.py:1555-1556`), then `_finalize_merge`. Consequences:
+  - Step 5 (agent runs `gh pr merge`) is **load-bearing**, not idempotent decoration:
+    pm will not run the GitHub merge itself on the propagation re-attempt, so if the agent
+    skips it the PR stays OPEN on GitHub while pm marks it merged.
+  - The local-repo pull is **pm's job, not the agent's**. The prompt must NOT tell the
+    agent to pull master into the local repo — the agent's cwd is the PR-branch workdir
+    and "the local repo" would misdirect it onto the workdir. The github prompt instead
+    states pm pulls the merged base into the main checkout automatically.
+  - No code change to the re-attempt path is required.
 
 ## Ambiguities
 
