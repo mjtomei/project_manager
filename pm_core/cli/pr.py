@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -709,6 +710,26 @@ def pr_spec_approve(pr_id: str):
     trigger_tui_refresh()
 
 
+def _persist_with_backoff(root: Path, apply, *, attempts: int = 5,
+                          timeout: float = 5.0) -> dict:
+    """``store.locked_update`` with exponential backoff across the timeout.
+
+    For persisting an irreversible external side effect (e.g. a just-created
+    GitHub PR number) so a transient ``project.yaml.lock`` contention burst
+    can't strand it.  Raises the last :class:`StoreLockTimeout` if every
+    attempt times out.
+    """
+    delay = 0.2
+    for attempt in range(1, attempts + 1):
+        try:
+            return store.locked_update(root, apply, timeout=timeout)
+        except store.StoreLockTimeout:
+            if attempt == attempts:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+
+
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
@@ -964,7 +985,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             pr["gh_pr_number"] = gh_pr_info["number"]
         data["project"]["active_pr"] = pr_id
 
-    data = store.locked_update(root, apply)
+    if gh_pr_info:
+        # A draft PR was just created on GitHub — an irreversible external side
+        # effect.  If persisting its number is lost to a transient lock timeout
+        # under concurrent pm operations, the PR is orphaned (created on GitHub
+        # but gh_pr_number=None) with no record to reconcile it. Retry the
+        # persist with backoff so a contention burst can't strand it.
+        data = _persist_with_backoff(root, apply)
+    else:
+        data = store.locked_update(root, apply)
     # Reload pr_entry from updated data (now contains gh_pr_number)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()

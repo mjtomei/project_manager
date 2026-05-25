@@ -171,6 +171,41 @@ def _seed_project(repo) -> Path:
     return pm
 
 
+class TestPersistWithBackoff:
+    """pr-d887f4c class: a transient lock timeout must not orphan a just-created
+    GitHub PR (persist the gh_pr_number with backoff)."""
+
+    def test_succeeds_after_transient_timeout(self, tmp_path):
+        root = tmp_path / "pm"
+        root.mkdir()
+        store.save({"project": {}, "prs": [{"id": "pr-001"}], "plans": []}, root)
+        calls = {"n": 0}
+        real = store.locked_update
+
+        def flaky(r, fn, **kw):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise store.StoreLockTimeout("contended")
+            return real(r, fn, **kw)
+
+        with mock.patch.object(store, "locked_update", side_effect=flaky), \
+             mock.patch.object(pr_mod.time, "sleep"):
+            out = pr_mod._persist_with_backoff(
+                root, lambda d: d["prs"][0].__setitem__("gh_pr_number", 210))
+        assert calls["n"] == 3
+        assert out["prs"][0]["gh_pr_number"] == 210
+        assert store.load(root)["prs"][0]["gh_pr_number"] == 210
+
+    def test_raises_after_exhausting_attempts(self, tmp_path):
+        root = tmp_path / "pm"
+        root.mkdir()
+        with mock.patch.object(store, "locked_update",
+                               side_effect=store.StoreLockTimeout("x")), \
+             mock.patch.object(pr_mod.time, "sleep"):
+            with pytest.raises(store.StoreLockTimeout):
+                pr_mod._persist_with_backoff(root, lambda d: None, attempts=3)
+
+
 class TestStashReconciliation:
     def test_concurrent_edit_across_merge_no_corruption(self, tmp_path):
         """The core pr-ca6981c repro: concurrent project.yaml edits across a

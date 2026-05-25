@@ -280,3 +280,24 @@ builds) into the three `_unstash_after_merge` call sites so R5 can fire.
   stash / corrupt their project.yaml.
 
 No **[UNRESOLVED]** ambiguities.
+
+## 7. Second failure class (pr-d887f4c / #210) — partial, scoped
+
+PR-notes flag a related lock-contention class: `pr start` runs `gh pr create`
+(irreversible) at `pr.py:943`, then persists `gh_pr_number` via
+`store.locked_update` at `pr.py:967`. Under concurrent pm operations that
+persist can hit the 2 s `StoreLockTimeout` and exit, orphaning the GitHub PR
+(`gh_pr_number=None`). `create_draft_pr` idempotent recovery was already fixed
+in a prior session.
+
+Scoped fix here (the notes' "longer/backoff lock acquisition" direction):
+`_persist_with_backoff(root, apply, attempts=5, timeout=5.0)` — retry the
+persist with exponential backoff (0.2 s→2 s cap) so a transient contention
+burst can't strand the just-created PR. Used in `pr_start` only when
+`gh_pr_info` was created; the no-side-effect path keeps the default single
+`locked_update`. Tested for retry-then-succeed and exhaustion.
+
+**Still open (out of scope, larger):** create-after-reserve ordering so the
+external PR is never created before a record exists, and branch-based orphan
+reconciliation in `pm pr sync-github` (it currently matches by
+`gh_pr_number`, so it can't backfill an orphan). Left for a follow-up.
