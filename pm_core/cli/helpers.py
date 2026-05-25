@@ -282,8 +282,8 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     # For a sign_off PR, append the latest recorded router verdict icon.
     verdict_str = ""
     if p.get("status") == "sign_off":
-        from pm_core.signoff import signoff_verdict_icon
-        v_icon = signoff_verdict_icon((p.get("signoff") or {}).get("verdict"))
+        from pm_core.signoff import signoff_verdict_icon, latest_signoff_verdict
+        v_icon = signoff_verdict_icon(latest_signoff_verdict(p))
         if v_icon:
             verdict_str = f" {v_icon}"
     deps = p.get("depends_on") or []

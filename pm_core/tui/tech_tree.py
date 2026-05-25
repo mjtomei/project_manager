@@ -56,7 +56,7 @@ VERDICT_STYLES = {
 # Sign-off verdict markers/styles live in pm_core.signoff (single source of
 # truth shared with `pm pr list`); re-exported here for the node renderer.
 from pm_core.signoff import (  # noqa: E402
-    SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES,
+    SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES, latest_signoff_verdict,
 )
 
 SPINNER_FRAMES = "◐◓◑◒"
@@ -598,7 +598,7 @@ class PRNode(Widget):
             elif status == "sign_off":
                 # Sign-off is running until the router records a verdict: show
                 # the latest verdict icon if recorded, else animate the spinner.
-                verdict = (pr.get("signoff") or {}).get("verdict")
+                verdict = latest_signoff_verdict(pr)
                 if verdict in SIGNOFF_VERDICT_ICONS:
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = SIGNOFF_VERDICT_STYLES.get(verdict, "bold blue")

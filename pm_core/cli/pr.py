@@ -2874,12 +2874,14 @@ def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
 @pr.command("auto-sequence")
 @click.argument("pr_id")
 def pr_auto_sequence(pr_id: str):
-    """Advance a PR through start → review → QA, stopping before merge.
+    """Advance a PR through start → review → QA → sign-off, stopping before merge.
 
     Idempotent and non-blocking: each invocation examines the PR's current
     state and advances it by at most one phase.  Designed to be called
     repeatedly (e.g. by an implementation watcher) until the PR reports
-    ``ready_to_merge`` or ``paused: ...``.
+    ``ready_to_merge`` or ``paused: ...``.  On a QA PASS the PR enters the
+    ``sign_off`` step (comprehensive review + verdict router); a verified
+    sign-off reports ``ready_to_merge`` (sign-off never merges itself).
 
     Output is a single status line on stdout.  Exit codes:
       0 — advanced or status reported normally
