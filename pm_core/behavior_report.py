@@ -105,6 +105,7 @@ class ReportData:
     is_bug: bool
     behaviors: list[Behavior]
     impl_evidence: list[Evidence]
+    review_evidence: list[Evidence]
     recommendation: str
     recommendation_source: str   # "router" | "derived"
     next_hop: str
@@ -427,6 +428,10 @@ def gather_pr_report_data(data: dict, pr_id: str,
 
     impl_evidence = _iter_evidence(
         captures_dir / "impl", captures_dir, captures_dir)
+    # Review captures are not written today; surface a review/ dir if a
+    # future evidence model (pr-06a96fa / pr-2d5f712) lands one.
+    review_evidence = _iter_evidence(
+        captures_dir / "review", captures_dir, captures_dir)
 
     signoff = _load_signoff(captures_dir)
     if signoff.get("recommendation"):
@@ -451,6 +456,7 @@ def gather_pr_report_data(data: dict, pr_id: str,
         is_bug=_is_bug_pr(pr),
         behaviors=behaviors,
         impl_evidence=impl_evidence,
+        review_evidence=review_evidence,
         recommendation=recommendation,
         recommendation_source=rec_source,
         next_hop=next_hop,
@@ -655,15 +661,16 @@ def _acceptance_html(criteria: list[str], fallback: str = "") -> str:
 
 
 def _render_impl_step(rd: ReportData) -> str:
-    """Render the implementation step: for bug fixes the before/after
-    (pre-fix = bug reproduced; post-fix = symptom gone), each paired with
-    its acceptance criterion; otherwise a flat implementation-evidence
-    block. Returns "" when there is nothing to show.
+    """Render the implementation step (always present so impl/review/qa are
+    uniform, per note-e1ff391).
+
+    For bug fixes: the before/after — pre-fix = bug reproduced, post-fix =
+    symptom gone — each paired with its acceptance criterion. Otherwise: the
+    impl acceptance ("change implemented per the description") with a flat
+    evidence block or an explicit empty state.
     """
     pre, post, other = _partition_phase(rd.impl_evidence)
     show_beforeafter = rd.is_bug or bool(pre) or bool(post)
-    if not (rd.impl_evidence or show_beforeafter):
-        return ""
 
     out: list[str] = ['<h2>Implementation</h2>']
     if show_beforeafter:
@@ -700,10 +707,40 @@ def _render_impl_step(rd: ReportData) -> str:
             out.append(_render_evidence_html(other))
             out.append('</section>')
     else:
-        out.append('<p class="muted">Captured during implementation.</p>')
         out.append('<section class="card">')
-        out.append(_render_evidence_html(rd.impl_evidence))
+        out.append('<h4 style="margin:.2rem 0 .1rem">Acceptance</h4>')
+        out.append('<ul class="acceptance"><li>The change is implemented and '
+                   'self-verified per the PR description.</li></ul>')
+        out.append('<h4 style="margin:.6rem 0 .1rem">Evidence</h4>')
+        if rd.impl_evidence:
+            out.append(_render_evidence_html(rd.impl_evidence))
+        else:
+            out.append('<p class="muted">No implementation captures '
+                       'recorded.</p>')
         out.append('</section>')
+    return "".join(out)
+
+
+def _render_review_step(rd: ReportData) -> str:
+    """Render the review step (always present, per note-e1ff391's impl/review/qa).
+
+    Review doesn't write captures today, so this is forward-compatible: it
+    surfaces a ``review/`` captures dir when one exists and otherwise shows
+    the step's acceptance criterion with an explicit empty state — keeping
+    review a visible step rather than collapsing the report onto QA.
+    """
+    out: list[str] = ['<h2>Review</h2>']
+    out.append('<section class="card">')
+    out.append('<h4 style="margin:.2rem 0 .1rem">Acceptance</h4>')
+    out.append('<ul class="acceptance"><li>The diff passes review — approved '
+               'with no blocking findings.</li></ul>')
+    out.append('<h4 style="margin:.6rem 0 .1rem">Evidence</h4>')
+    if rd.review_evidence:
+        out.append(_render_evidence_html(rd.review_evidence))
+    else:
+        out.append('<p class="muted">No review captures recorded (review '
+                   'verdicts are tracked on the PR; see the notes below).</p>')
+    out.append('</section>')
     return "".join(out)
 
 
@@ -756,8 +793,10 @@ def render_pr_report_html(rd: ReportData) -> str:
     parts.append('<p class="muted">Each step below pairs its acceptance '
                  'criteria with the evidence that demonstrates them.</p>')
 
-    # Implementation step (bug-fix before/after, or other impl evidence).
+    # Steps in lifecycle order: impl -> review -> qa, each pairing its
+    # acceptance criteria with the evidence that demonstrates them.
     parts.append(_render_impl_step(rd))
+    parts.append(_render_review_step(rd))
 
     # QA step — one behavior per scenario, evidence against its criteria.
     parts.append('<h2>QA behaviors</h2>')

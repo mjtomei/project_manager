@@ -212,6 +212,46 @@ def test_acceptance_criteria_from_then(tmp_path):
     assert '<ul class="acceptance">' in h
 
 
+def test_three_steps_present_impl_review_qa(tmp_path):
+    """note-e1ff391: impl/review/qa are each presented as steps, uniformly."""
+    cap = _seed_captures(tmp_path)
+    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
+    h = br.render_pr_report_html(rd)
+    assert "<h2>Implementation</h2>" in h
+    assert "<h2>Review</h2>" in h
+    assert "<h2>QA behaviors</h2>" in h
+    # Order: impl before review before qa
+    assert (h.index("<h2>Implementation</h2>")
+            < h.index("<h2>Review</h2>")
+            < h.index("<h2>QA behaviors</h2>"))
+    # Review acceptance shown even with no review captures today
+    assert "passes review" in h
+    assert "No review captures recorded" in h
+
+
+def test_review_evidence_surfaced_when_present(tmp_path):
+    """Forward-compat: a review/ captures dir is surfaced under the step."""
+    cap = _seed_captures(tmp_path)
+    rev = cap / "review"
+    rev.mkdir()
+    (rev / "review-notes.txt").write_text("approved; no blocking findings")
+    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
+    assert any("review-notes.txt" in e.name for e in rd.review_evidence)
+    h = br.render_pr_report_html(rd)
+    assert "approved; no blocking findings" in h
+    assert "No review captures recorded" not in h
+
+
+def test_impl_step_present_without_evidence(tmp_path):
+    """Impl step renders with acceptance + empty state when no captures."""
+    cap = tmp_path / "pr-aaa"
+    cap.mkdir()
+    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
+    h = br.render_pr_report_html(rd)
+    assert "<h2>Implementation</h2>" in h
+    assert "No implementation captures recorded" in h
+
+
 def test_acceptance_extraction_multiline():
     steps = ("GIVEN: x\nWHEN: y\nTHEN: first outcome\n  AND: second outcome\n"
              "  - third bullet outcome")

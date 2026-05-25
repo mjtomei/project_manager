@@ -131,6 +131,13 @@ before/after is visible. Coordinated with the sign-off step (#225 / pr-2d5f712).
   incl. trailing AND/BUT and sub-bullets, parsed from the scenario steps) above
   the evidence, making the criteria→evidence pairing explicit. A bug-fix scenario
   that captured `pre-fix`/`post-fix` evidence is also shown before/after.
+- **All three steps (impl / review / qa) are presented uniformly** — the note
+  enumerates `impl/review/qa`, not just final-QA. Implementation and Review steps
+  always render with their acceptance criterion (review's: "the diff passes review
+  — approved, no blocking findings"). Review writes no captures today, so the
+  Review step is forward-compatible: it surfaces a `review/` captures dir when one
+  exists and otherwise shows an explicit empty state (review verdicts live on the
+  PR/notes), keeping review a visible step rather than collapsing onto QA.
 - **Coordination with #225**: pr-2d5f712's sign-off window deliberately keeps its
   second pane a plain evidence-summary shell and links to *this* report as the
   rich surface; its router reads the same `impl/` (bug "primary evidence") +
