@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8d8b360
+  active_pr: pr-9330dec
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -19770,7 +19770,7 @@ prs:
   plan: plan-regression
   title: GitHub backend mock for regression tests
   branch: pm/pr-9603d04-github-backend-mock-for-regression-tests
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Provide a mock/fake GitHub backend so regression tests can exercise
     the github-backend code paths (PR create, status sync, comments, merges, post-merge
@@ -20172,6 +20172,14 @@ prs:
       1 (install_session always _next_number=1).'
     created_at: '2026-05-25T02:32:47Z'
     last_edited: '2026-05-25T02:32:47Z'
+  - id: note-165cc2a
+    text: 'QA NEEDS_WORK: GitHub status sync driven from a real pane against the out-of-process
+      fake: PASS; Full git-touching PR lifecycle from real panes — create via push,
+      merge-with-pull, and close against the git-backed session fake: NEEDS_WORK;
+      GitHub backend degrades gracefully when gh is unavailable and no fake is installed:
+      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9603d04-a4103507e4db84e8)'
+    created_at: '2026-05-25T02:16:29Z'
+    last_edited: '2026-05-25T02:16:29Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
@@ -20605,10 +20613,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/212
   gh_pr_number: 212
   created_at: '2026-05-14T14:37:18.381479+00:00'
-  updated_at: '2026-05-25T02:16:28.446537+00:00'
+  updated_at: '2026-05-25T02:16:35.483732+00:00'
   started_at: '2026-05-21T15:47:09.402440+00:00'
   reviewed_at: '2026-05-25T00:54:49.998234+00:00'
-  merged_at: '2026-05-25T02:16:28.446491+00:00'
+  merged_at: '2026-05-25T02:16:35.483732+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b4b68f3-bug-decouple-tui-in-memory-state-fro-d07aaad6
 - id: pr-70d02ed
@@ -21836,7 +21844,7 @@ prs:
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
     at action-execution time'
   branch: pm/pr-c41f029-bug-capture-originating-tmux-session-when-the-pr-a
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'When a TUI action (pr start/review/qa/merge, review-loop, qa-loop)
     creates or replaces a window, pm tries to move the session that initiated the
@@ -21893,15 +21901,16 @@ prs:
     action-execution and assert the originally-capturing session is the one switched
     to the new window; assert switch_sessions_to_window uses the captured session
     without calling sessions_on_window when context is present.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/220
+  gh_pr_number: 220
   created_at: '2026-05-21T15:56:33.458586+00:00'
-  updated_at: '2026-05-21T15:56:33.458586+00:00'
-  started_at: null
+  updated_at: '2026-05-25T02:46:34.752207+00:00'
+  started_at: '2026-05-25T02:46:34.752207+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
 - id: pr-5db0e85
   plan: plan-3119574
   title: 'QA instruction: review walker UI fixture setup'
@@ -22109,7 +22118,7 @@ prs:
   title: 'Bug: home-window line truncation undercounts emoji width, can soft-wrap
     on narrow panes'
   branch: pm/pr-9330dec-bug-home-window-line-truncation-undercounts-emoji-
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Location: pm_core/home_window/pr_list.py:_truncate (and callers in
     _render_content/_compose).
@@ -22132,15 +22141,16 @@ prs:
     helper with an emoji heuristic). Deferred from pr-28bda5d, whose spec explicitly
     scoped wide-char awareness out (its premise that format_pr_line is plain ASCII
     is incorrect — it carries emoji).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/221
+  gh_pr_number: 221
   created_at: '2026-05-21T15:56:55.362547+00:00'
-  updated_at: '2026-05-21T15:56:55.362547+00:00'
-  started_at: null
+  updated_at: '2026-05-25T02:46:52.119308+00:00'
+  started_at: '2026-05-25T02:46:52.119308+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9330dec-bug-home-window-line-truncation-unde-07edf135
 - id: pr-6566901
   plan: null
   title: 'Verdict-loop robustness: surface/retry when an expected verdict is never
@@ -22500,7 +22510,7 @@ prs:
   title: 'Bug: merge-conflict resolution pushes a local master merge on GitHub backend
     instead of re-running the GitHub merge'
   branch: pm/pr-8d8b360-bug-merge-conflict-resolution-pushes-a-local-maste
-  status: in_progress
+  status: in_review
   depends_on: []
   description: '## Symptom
 
@@ -22578,9 +22588,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/219
   gh_pr_number: 219
   created_at: '2026-05-25T02:12:54.366523+00:00'
-  updated_at: '2026-05-25T02:15:11.346775+00:00'
+  updated_at: '2026-05-25T02:49:14.098738+00:00'
   started_at: '2026-05-25T02:15:11.346775+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-25T02:49:14.098738+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8d8b360-bug-merge-conflict-resolution-pushes-37062cb3
