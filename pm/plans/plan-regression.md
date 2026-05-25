@@ -54,21 +54,25 @@ This is the load-bearing change: the regression library starts to *compound* —
 
 ## Status
 
-**Merged (12)** — Phases 1-5 plus the Phase 7 prerequisite:
+**Merged (14)** — Phases 1-5, the Phase 7 prerequisite, and the Phase 10 fake-substrate:
 - Phase 1: pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b
 - Phase 2: pr-47940bc, pr-97ddabf, pr-271cb3a
 - Phase 3: pr-e3a711c, pr-d39a7fb
 - Phase 4: pr-e84b43c
 - Phase 5: pr-d60d185
 - Phase 7 prereq: pr-6be8ee6 (#190, tracked under improvements)
+- Phase 10 substrate: pr-abcf70f (FakeClaudeSession), pr-9603d04 (FakeGitHubBackend)
 
-**Pending (27)** — Phases 6-11:
+**In progress (2)** — Phase 11 (the sign-off process + web viewer, prioritized):
+- pr-2d5f712 (#225, sign-off step), pr-8e693f6 (#226, web viewer)
+
+**Pending (26)** — Phases 6-11:
 - Phase 6 — test backfill (1): pr-fbda1a8
 - Phase 7 — evidence-gated bug fix loop (4): pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
 - Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
 - Phase 9 — headless / unsupervised hardening + single-prompt capstone (7): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf (realistic capstone), pr-0cf3626 (exact-ProgramBench offshoot)
-- Phase 10 — QA loop surface improvements (8): pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2, pr-1d8b2b7 (pr-9603d04 + pr-abcf70f now merged)
-- Phase 11 — sign-off / acceptance gate (3): pr-2d5f712, pr-8e693f6, pr-ff9b728 (buildable now; soft-aligns with Phase 10)
+- Phase 10 — QA loop surface improvements (8): pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2, pr-1d8b2b7
+- Phase 11 — sign-off / acceptance gate (2): pr-ff9b728 (plan auto-start watcher); pr-8015c1d (deferred — in-place re-run on a merged PR)
 
 **Cross-phase sequencing note**: Phase 7 (evidence + coverage gates on the existing scenario model) and Phase 10 (scenarios → regression-test bindings, new-regression authoring, mocks at authoring surface) both reshape the QA loop. Phase 10 changes the underlying scenario model that Phase 7's gates measure against. Recommended order: land Phase 10's regressions-as-scenarios chain (pr-7d5d036 → pr-06a96fa → pr-2680fbf → pr-51586d2) before Phase 7's coverage stack (pr-b42059d → pr-8ed578d → pr-8422dea → pr-c2397e2), so the coverage gates measure the post-Phase-10 flow. If sequenced the other way, Phase 7 PRs may need amendment after Phase 10 lands.
 
@@ -382,6 +386,8 @@ It is also a **concretization** of the taste-check / merge-gating the impl watch
 - **Router-only.** The checkoff never edits code. It judges, annotates (`pm pr note`), files follow-up PRs, and sets the next hop. Every code edit happens in impl/qa, so it always passes back through review+qa — including edits the checkoff prompted. A judge that never writes the code it approves is what makes an autonomous merge defensible.
 - **Conservative toward not-merging.** Misclassifying a real gap as "scenario error → re-qa" merges incomplete work (the predicted failure mode); the reverse only wastes an impl cycle. So on genuine ambiguity the checkoff *raises INPUT_REQUIRED itself* and escalates rather than merging.
 
+**Sign-off is also the rollout mechanism for process / acceptance-criteria updates.** Because it checks each step against the *current* standard, a process change does not require manual backfill. The standard lives in the sign-off + step prompts, so **updating the prompt *is* updating the acceptance bar** — and every PR that goes through sign-off from then on must meet it. When *existing* work doesn't meet an updated standard, the remediation is to **create new work**: a **single new PR** for a one-off gap, or a **plan respin** (a set of new PRs) for a broad update, each driven through the normal forward flow under the updated prompting. Example: bug PRs implemented before the pre/post-fix-capture requirement — a respin re-does that work *with* captures. (Re-running sign-off *in place* on an already-merged PR — detecting drift and re-opening the merged work directly — is a desirable later optimization, deferred to its own PR `pr-8015c1d`; the new-PR / plan-respin flow is what we use now, so sign-off only needs the normal forward lifecycle here.)
+
 **Supersedes and consolidates earlier work (and removes the dead code):**
 
 Sign-off concretizes the taste-check / merge-gating the impl watchers improvise today, so Phase 11 *replaces* that machinery rather than sitting beside it; the superseded code is removed (`pr-ff9b728`).
@@ -450,6 +456,11 @@ Replaces the two plan-specific impl watchers **and** the programmatic auto-start
 **Single-PR mode.** The same per-PR auto-sequence chain (`qa → sign_off → merge`) run on demand for one PR — `pm pr auto-sequence <id>` extended past merge, with a thin `pm pr signoff <id>` to enter just the sign-off step. No parallel `pm pr auto` command.
 
 **Removed (dead code):** `auto_start.py`'s programmatic orchestration; `bug_fix_impl_watcher.py` + `improvement_fix_impl_watcher.py` and the `AutoStartWatcher` (all folded into the plan watcher); the `pm/watchers/*.log` flat files (replaced by plan notes); the improvement watcher's gated-at-QA-PASS path and `pr-b77702b`'s `auto_merge` gating (superseded by sign-off + per-plan config — its dep-merge preamble stays in the impl session, rescoped as `pr-b77702b`); any ad-hoc taste-check/sign-off code the sign-off step now owns.
+
+### PR: Re-run sign-off in place on an already-merged PR (deferred)
+`pr-8015c1d` (depends on: pr-2d5f712, pr-ff9b728)
+
+A later optimization, deferred out of `pr-2d5f712`. Re-run the sign-off step **in place** on an already-merged PR to enforce an updated standard: detect drift vs the current standard and re-open the merged work to bring it into compliance. *Not* how process updates work for now — the current flow creates **new** work (a single new PR, or a plan respin) rather than re-opening merged PRs. When built it needs: `sign_off` enterable from a merged PR, a bounce able to re-open merged work (regenerate now-missing evidence by re-running repro/verify against the merged fix), and the merged → `sign_off` → merged transitions; triggered via single-PR mode or a plan-watcher batch sweep.
 
 ## Success criteria
 

@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-ff9b728
+  active_pr: pr-8015c1d
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22486,7 +22486,7 @@ prs:
   title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
     router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
     stage between qa and merge with its own window, not logic embedded in the QA loop.
@@ -22563,12 +22563,12 @@ prs:
     verdict+capture model; soft-aligns with pr-b59f0c7 (reason strings) and pr-06a96fa
     (evidence model) when they land. Loop-guard + auto-run + the plan auto-start watcher
     are pr-ff9b728; the report/dashboard surface is pr-8e693f6.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/225
+  gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T17:13:41.349952+00:00'
-  started_at: null
+  updated_at: '2026-05-25T17:56:51.246098+00:00'
+  started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -22604,11 +22604,83 @@ prs:
       = pr-8e693f6 (cross-PR note added there).'
     created_at: '2026-05-25T17:13:41Z'
     last_edited: '2026-05-25T17:13:41Z'
+  - id: note-0357619
+    text: 'ACCEPTANCE / shepherding requirement (was not in the description): the
+      sign-off step must be aware of the PURPOSE and ACCEPTANCE MEASURES of EVERY
+      step in a PR''s lifecycle (impl, review, qa) and check each one INDIVIDUALLY
+      — confirm that step''s own success conditions were actually met — in addition
+      to the generic ''does the captured behavior prove the claim / no shortcuts''
+      checks. SPECIFICALLY for bug PRs: confirm BOTH a pre-fix capture (bug reproduced
+      on pre-fix code) AND a post-fix capture (bug gone on the fixed code) exist;
+      absence of either is a fail/bounce (the reproduce->fix->verify step''s acceptance
+      was not met). Those captures live under $(pm qa captures-path <pr-id>)/impl/
+      (pre-fix/ + post-fix). They must also be surfaced in the HTML report (pr-8e693f6
+      / #226).'
+    created_at: '2026-05-25T16:59:06Z'
+    last_edited: '2026-05-25T16:59:06Z'
+  - id: note-6f7abcd
+    text: 'Design principle — sign-off is the rollout mechanism for PROCESS / ACCEPTANCE-CRITERIA
+      updates. It checks each step against the CURRENT standard, so it must be RE-RUNNABLE
+      on existing and already-MERGED PRs. When a standard changes (e.g. the new pre/post-fix-capture
+      requirement), re-running sign-off on an old PR should detect the gap, add a
+      note, and bounce it through the relevant steps under updated prompting to bring
+      it into compliance — never manual backfill. Implications for the lifecycle/transitions
+      you are building: sign_off must be enterable FROM a merged PR, and a bounce
+      must be able to re-open already-merged work (to regenerate now-missing evidence
+      by re-running repro/verify against the merged fix). Trigger is single-PR mode
+      (pr-ff9b728: pm pr signoff <id>); the plan watcher can batch it across a plan.
+      Net: updating a step/sign-off PROMPT is how the acceptance bar is raised, and
+      re-running sign-off propagates it.'
+    created_at: '2026-05-25T17:01:35Z'
+    last_edited: '2026-05-25T17:01:35Z'
+  - id: note-2566eba
+    text: 'CORRECTION — supersedes note-6f7abcd: DISREGARD the requirement that sign-off
+      be re-runnable on already-merged PRs / that a bounce re-open merged work / that
+      sign_off be enterable from a merged PR. That is FUTURE work, now tracked as
+      its own PR (pr-8015c1d, deferred). For THIS PR, the process-update flow does
+      NOT re-open merged PRs — instead a NEW PR is created (a single new PR for a
+      one-off gap, or a plan respin = a set of new PRs for a broad update), driven
+      through the normal forward flow under updated prompting. So pr-2d5f712 only
+      needs sign_off in the normal forward lifecycle (qa -> sign_off -> merge, or
+      bounce within a not-yet-merged PR). The pre/post-fix-capture acceptance check
+      (note-0357619) still stands for bug PRs going through sign-off.'
+    created_at: '2026-05-25T17:09:04Z'
+    last_edited: '2026-05-25T17:09:04Z'
+  - id: note-1a982f3
+    text: 'Routing refinements from review (please incorporate):
+
+      1) CAPTURE GATE is presence-only, NOT verification. bug_fix_capture_status just
+      checks impl/pre-fix and impl/post-fix each hold >=1 file. File presence does
+      not prove the pre-fix capture was taken against pre-fix code (provenance) —
+      same limitation as the closed pr-eb450a0. It is a deterministic FLOOR (no captureless
+      bug auto-merges), and genuineness is judged by the LLM router + eventually the
+      harness-run regression-as-repro (Phase 10, provenance-bound). Do NOT label it
+      ''verified'' anywhere in the prompt/report — say ''captures present''. [The
+      user may decide to DROP this deterministic gate entirely; hold for that decision
+      before hardening it.]
+
+      2) AUTONOMY is project-level today (is_signoff_autonomous reads project.sign_off_autonomous).
+      The plan watcher (pr-ff9b728) needs PER-PLAN gated/autonomous (e.g. bugs autonomous,
+      ux gated). Either thread the plan through is_signoff_autonomous now or leave
+      a clean seam to generalize it to per-plan when ff9b728 lands; note the gap in
+      the spec.
+
+      3) INVARIANT — verdict -> action ONLY under auto-sequence, for ALL hops (transitions
+      + bounces, not just merge). This holds today (act_on_signoff_verdict is called
+      only from the auto-sequence sign_off branch; manual pm pr signoff never acts).
+      Harden it structurally: DECOUPLE the decision (compute the hop / record the
+      verdict as a recommendation, e.g. a note) from the SIDE-EFFECT (status transition
+      + relaunch). Outside auto-sequence, sign-off must be recommendation-only with
+      NO state change. act_on_signoff_verdict should not be able to mutate state from
+      any non-auto-sequence path.'
+    created_at: '2026-05-25T17:56:51Z'
+    last_edited: '2026-05-25T17:56:51Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: pending
+  status: in_progress
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -22645,12 +22717,12 @@ prs:
     Static export (open a file, no server) is the v1 lean; co-located with the captures.
     Depends on pr-2d5f712 (the sign-off window/step) and the pr-06a96fa evidence model
     (forward-compatible).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/226
+  gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
   updated_at: '2026-05-25T17:13:39.603556+00:00'
-  started_at: null
+  started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -22665,6 +22737,17 @@ prs:
       per-scenario captures under scenarios/<n>/.'
     created_at: '2026-05-25T17:13:39Z'
     last_edited: '2026-05-25T17:13:39Z'
+  - id: note-e1ff391
+    text: 'Report requirement (was not in the description): for bug PRs the per-PR
+      HTML report must surface the PRE-FIX capture (bug reproduced) and the POST-FIX
+      capture (bug gone) so the before/after is visible. More generally, present each
+      PR step''s evidence against THAT step''s acceptance criteria (impl/review/qa),
+      not only the final-QA scenarios. Coordinate with pr-2d5f712 (#225, sign-off
+      step), which checks each step''s acceptance individually and requires the pre/post-fix
+      captures for bugs.'
+    created_at: '2026-05-25T16:59:08Z'
+    last_edited: '2026-05-25T16:59:08Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
   title: Plan auto-start watcher — generalize impl watchers + become the auto-start
@@ -22760,6 +22843,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
   updated_at: '2026-05-25T15:07:55.292133+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8015c1d
+  plan: plan-regression
+  title: Re-run sign-off in place on an already-merged PR (deferred)
+  branch: pm/pr-8015c1d-re-run-sign-off-in-place-on-an-already-merged-pr-d
+  status: pending
+  depends_on:
+  - pr-2d5f712
+  - pr-ff9b728
+  description: 'FUTURE capability, deferred out of pr-2d5f712: allow re-running the
+    sign-off step IN PLACE on an already-merged PR to enforce updated process / acceptance-criteria
+    standards — detect drift vs the current standard and re-open the merged work to
+    bring it into compliance.
+
+
+    NOT how process updates work for now. The current flow creates NEW work instead:
+    a single new PR for a one-off gap, or a plan respin (a set of new PRs) for a broad
+    update, driven through the normal forward flow under the updated prompting. This
+    PR adds the in-place path later as an optimization once the new-PR / respin flow
+    is proven.
+
+
+    Scope when built: sign_off enterable FROM a merged PR; a bounce able to re-open
+    merged work (regenerate now-missing evidence by re-running repro/verify against
+    the merged fix); lifecycle/status transitions for merged -> sign_off -> merged;
+    drift detection against the current standard. Trigger via single-PR mode (pm pr
+    signoff <id>) and/or a plan-watcher batch sweep.
+
+
+    Depends on: pr-2d5f712 (sign-off step), pr-ff9b728 (single-PR mode + plan watcher).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T17:08:54.875615+00:00'
+  updated_at: '2026-05-25T17:08:54.875615+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
