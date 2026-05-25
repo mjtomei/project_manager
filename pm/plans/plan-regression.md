@@ -54,21 +54,25 @@ This is the load-bearing change: the regression library starts to *compound* —
 
 ## Status
 
-**Merged (12)** — Phases 1-5 plus the Phase 7 prerequisite:
+**Merged (14)** — Phases 1-5, the Phase 7 prerequisite, and the Phase 10 fake-substrate:
 - Phase 1: pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b
 - Phase 2: pr-47940bc, pr-97ddabf, pr-271cb3a
 - Phase 3: pr-e3a711c, pr-d39a7fb
 - Phase 4: pr-e84b43c
 - Phase 5: pr-d60d185
 - Phase 7 prereq: pr-6be8ee6 (#190, tracked under improvements)
+- Phase 10 substrate: pr-abcf70f (FakeClaudeSession), pr-9603d04 (FakeGitHubBackend)
 
-**Pending (28)** — Phases 6-11:
+**In progress (2)** — Phase 11 (the sign-off process + web viewer, prioritized):
+- pr-2d5f712 (#225, sign-off step), pr-8e693f6 (#226, web viewer)
+
+**Pending (26)** — Phases 6-11:
 - Phase 6 — test backfill (1): pr-fbda1a8
 - Phase 7 — evidence-gated bug fix loop (4): pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
 - Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
 - Phase 9 — headless / unsupervised hardening + single-prompt capstone (7): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf (realistic capstone), pr-0cf3626 (exact-ProgramBench offshoot)
-- Phase 10 — QA loop surface improvements (8): pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2, pr-1d8b2b7 (pr-9603d04 + pr-abcf70f now merged)
-- Phase 11 — sign-off / acceptance gate (4): pr-2d5f712, pr-8e693f6, pr-ff9b728 (buildable now; soft-aligns with Phase 10); pr-8015c1d (deferred — in-place re-run on a merged PR)
+- Phase 10 — QA loop surface improvements (8): pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2, pr-1d8b2b7
+- Phase 11 — sign-off / acceptance gate (2): pr-ff9b728 (plan auto-start watcher); pr-8015c1d (deferred — in-place re-run on a merged PR)
 
 **Cross-phase sequencing note**: Phase 7 (evidence + coverage gates on the existing scenario model) and Phase 10 (scenarios → regression-test bindings, new-regression authoring, mocks at authoring surface) both reshape the QA loop. Phase 10 changes the underlying scenario model that Phase 7's gates measure against. Recommended order: land Phase 10's regressions-as-scenarios chain (pr-7d5d036 → pr-06a96fa → pr-2680fbf → pr-51586d2) before Phase 7's coverage stack (pr-b42059d → pr-8ed578d → pr-8422dea → pr-c2397e2), so the coverage gates measure the post-Phase-10 flow. If sequenced the other way, Phase 7 PRs may need amendment after Phase 10 lands.
 
