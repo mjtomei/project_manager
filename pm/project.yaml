@@ -19770,7 +19770,7 @@ prs:
   plan: plan-regression
   title: GitHub backend mock for regression tests
   branch: pm/pr-9603d04-github-backend-mock-for-regression-tests
-  status: qa
+  status: in_review
   depends_on: []
   description: 'Provide a mock/fake GitHub backend so regression tests can exercise
     the github-backend code paths (PR create, status sync, comments, merges, post-merge
@@ -20199,7 +20199,7 @@ prs:
   title: 'Bug: decouple TUI in-memory state from project.yaml via a coalescing write
     queue'
   branch: pm/pr-b4b68f3-bug-decouple-tui-in-memory-state-from-project-yaml
-  status: in_review
+  status: merged
   depends_on: []
   description: "## Symptom\n\nTUI key handling exhibits a \"first press lags, next\
     \ few queue, results appear all at once\" pattern when navigating PR selection\
@@ -20259,10 +20259,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/212
   gh_pr_number: 212
   created_at: '2026-05-14T14:37:18.381479+00:00'
-  updated_at: '2026-05-25T02:06:00.226269+00:00'
+  updated_at: '2026-05-25T02:16:28.446537+00:00'
   started_at: '2026-05-21T15:47:09.402440+00:00'
   reviewed_at: '2026-05-25T00:54:49.998234+00:00'
-  merged_at: '2026-05-24T21:47:30.303610+00:00'
+  merged_at: '2026-05-25T02:16:28.446491+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b4b68f3-bug-decouple-tui-in-memory-state-fro-d07aaad6
 - id: pr-70d02ed
@@ -22154,7 +22154,7 @@ prs:
   title: 'Bug: merge-conflict resolution pushes a local master merge on GitHub backend
     instead of re-running the GitHub merge'
   branch: pm/pr-8d8b360-bug-merge-conflict-resolution-pushes-a-local-maste
-  status: pending
+  status: in_progress
   depends_on: []
   description: '## Symptom
 
@@ -22228,12 +22228,13 @@ prs:
 
     - Tests assert the github-backend prompt mentions pushing the branch + gh pr merge
     (not pushing master); local-backend prompt unchanged.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/219
+  gh_pr_number: 219
   created_at: '2026-05-25T02:12:54.366523+00:00'
-  updated_at: '2026-05-25T02:12:54.366523+00:00'
-  started_at: null
+  updated_at: '2026-05-25T02:15:11.346775+00:00'
+  started_at: '2026-05-25T02:15:11.346775+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8d8b360-bug-merge-conflict-resolution-pushes-37062cb3
