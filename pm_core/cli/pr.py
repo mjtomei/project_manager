@@ -2856,14 +2856,10 @@ def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bo
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     """Find the latest QA status.json for *pr_id*; return (overall, path)."""
     import json
-    qa_dirs = Path.home() / ".pm" / "workdirs" / "qa"
-    if not qa_dirs.is_dir():
+    from pm_core.paths import latest_qa_status_path
+    latest = latest_qa_status_path(pr_id)
+    if latest is None:
         return None, None
-    candidates = sorted(qa_dirs.glob(f"{pr_id}-*/qa_status.json"),
-                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
-    if not candidates:
-        return None, None
-    latest = candidates[-1]
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):

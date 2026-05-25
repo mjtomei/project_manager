@@ -261,6 +261,41 @@ def _patch_locked_update_fn(data: dict):
     return _side
 
 
+class TestLatestQaStatusPath:
+    """The shared QA-status locator used by both the auto-sequence gate and the
+    sign-off prompt (single source of truth for the glob)."""
+
+    def test_none_when_no_qa_dir(self, tmp_path):
+        from pm_core import paths
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") is None
+
+    def test_picks_newest_mtime(self, tmp_path):
+        import os
+        from pm_core import paths
+        qa = tmp_path / "qa"
+        old = qa / "pr-001-aaaa"
+        new = qa / "pr-001-bbbb"
+        old.mkdir(parents=True)
+        new.mkdir(parents=True)
+        (old / "qa_status.json").write_text("{}")
+        newp = new / "qa_status.json"
+        newp.write_text("{}")
+        # Make `new` strictly newer than `old`.
+        os.utime(old / "qa_status.json", (1000, 1000))
+        os.utime(newp, (2000, 2000))
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") == newp
+
+    def test_other_pr_ignored(self, tmp_path):
+        from pm_core import paths
+        qa = tmp_path / "qa"
+        (qa / "pr-999-aaaa").mkdir(parents=True)
+        (qa / "pr-999-aaaa" / "qa_status.json").write_text("{}")
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") is None
+
+
 class TestPrompt:
     def test_prompt_contains_router_contract_and_verdicts(self):
         from pm_core import prompt_gen

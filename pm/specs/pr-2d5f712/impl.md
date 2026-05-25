@@ -155,8 +155,9 @@ on already-merged PRs (re-open merged work to roll out process updates). This wa
 PR, sign-off only covers the normal forward lifecycle (qa → sign_off → merge, or
 a bounce within a not-yet-merged PR). Process updates are handled by creating NEW
 PRs, not by re-opening merged ones. `pm pr signoff` therefore rejects `merged`
-PRs (entry from `qa`/`sign_off` only). The pre/post-fix capture gate (R8,
-note-0357619) still applies.
+PRs (entry from `qa`/`sign_off` only). The deterministic pre/post-fix capture
+*gate* was removed (R8); the router's LLM-judged review of repro/verify evidence
+for a bug PR (note-0357619) still applies.
 
 ### R10 — Routing refinements (orchestrator note-1a982f3, then note-942fa37)
 1. **Capture gate** was first clarified as presence-only and then **removed
@@ -254,10 +255,12 @@ and the auto-sequence. This keeps the large existing QA-flow test/QA surface sta
   behavioral risk.
 - **A2 — Agent vs pm executes the hop?** Resolved: agent emits one structured routing verdict +
   records audit notes (router-only, never edits/merges); pm polls the verdict and executes the
-  hop (status transition / relaunch / merge-in-autonomous). Mirrors qa-finalize exactly →
-  inspectable + unit-testable.
-- **A3 — Flag location/default.** Resolved: `project.sign_off_autonomous`, default False (gated),
-  matching `skip_qa`.
+  hop (status transition / relaunch). Mirrors qa-finalize exactly → inspectable + unit-testable.
+  Note: sign-off never merges (R5) — `SIGNOFF_MERGE` is always a `ready_to_merge` recommendation.
+- **A3 — Flag location/default.** OBSOLETE: autonomy was removed from this PR entirely (R5,
+  orchestrator note-942fa37). There is no `project.sign_off_autonomous` flag; sign-off always
+  gates at merge and the autonomous-vs-hold merge decision belongs to the plan watcher
+  (pr-ff9b728).
 - **A4 — Second pane content.** Resolved: a plain evidence-summary shell pane (captures listing +
   per-scenario verdicts + diff stat); the rich report surface is pr-8e693f6.
 - **A5 — Whether to redirect the TUI auto-merge path now.** Resolved: no — left to pr-ff9b728's
