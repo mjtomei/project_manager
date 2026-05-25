@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import contextlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1099,6 +1100,43 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     click.echo("Added companion pane.")
 
 
+@contextlib.contextmanager
+def _review_window_launch_lock(pm_session: str, window_name: str):
+    """Serialise concurrent fresh review-window launches for one window.
+
+    The review window for a PR is a single shared tmux window
+    (``review-<display_id>``).  Each ``pm pr review --fresh`` runs in its
+    own subprocess and performs a non-atomic *find existing window → kill
+    if fresh → create new window* sequence.  Two such launches firing at
+    nearly the same instant (e.g. two ``review-loop`` popups on the same
+    PR) both observe "no window" and both create one, leaving a duplicate
+    ``review-<display_id>``.  A duplicate makes ``select-window -t
+    sess:review-<display_id>`` ambiguous (it fails), so the popup spinner's
+    focus switch silently no-ops.
+
+    An ``fcntl.flock`` on a per-(session, window) lock file makes the
+    find/kill/create sequence atomic across processes: the second launch
+    blocks until the first has created its window, then finds and
+    supersedes it (fresh-mode kill+recreate) instead of racing — the
+    session converges on exactly one review window.
+    """
+    import fcntl
+    from pm_core.paths import pm_home
+    safe = window_name.replace("/", "_")
+    lock_dir = pm_home() / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"review-launch-{pm_session}-{safe}.lock"
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           background: bool = False,
                           review_loop: bool = False, review_iteration: int = 0,
@@ -1135,194 +1173,195 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     # Fast path: if review window already exists and we don't need fresh,
     # just switch to it — skip expensive prompt generation and container setup.
-    existing = tmux_mod.find_window_by_name(pm_session, window_name)
-    sessions_on_review: list[str] = []
-    if existing:
-        if fresh:
-            if review_loop:
-                sessions_on_review = tmux_mod.sessions_on_window(
-                    pm_session, existing["id"],
-                )
-            from pm_core import home_window
-            home_window.park_if_on(pm_session, existing["id"])
-            tmux_mod.kill_window(pm_session, existing["id"])
-            click.echo(f"Killed existing review window '{window_name}'")
-        else:
-            tmux_mod.select_window(pm_session, existing["id"])
-            click.echo(f"Switched to existing review window '{window_name}'")
-            return
+    with _review_window_launch_lock(pm_session, window_name):
+        existing = tmux_mod.find_window_by_name(pm_session, window_name)
+        sessions_on_review: list[str] = []
+        if existing:
+            if fresh:
+                if review_loop:
+                    sessions_on_review = tmux_mod.sessions_on_window(
+                        pm_session, existing["id"],
+                    )
+                from pm_core import home_window
+                home_window.park_if_on(pm_session, existing["id"])
+                tmux_mod.kill_window(pm_session, existing["id"])
+                click.echo(f"Killed existing review window '{window_name}'")
+            else:
+                tmux_mod.select_window(pm_session, existing["id"])
+                click.echo(f"Switched to existing review window '{window_name}'")
+                return
 
-    title = pr_entry.get("title", "")
-    base_branch = data.get("project", {}).get("base_branch", "master")
+        title = pr_entry.get("title", "")
+        base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Resolve model/provider for review session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
-    _resolution = resolve_model_and_provider(
-        "review",
-        pr_model=get_pr_model_override(pr_entry),
-        project_data=data,
-    )
-
-    # Generate review prompt and build Claude command
-    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
-                                                      review_loop=review_loop,
-                                                      review_iteration=review_iteration,
-                                                      review_loop_id=review_loop_id)
-    # When the review runs in a container, Claude's cwd is /workspace —
-    # the transcript symlink must target ~/.claude/projects/-workspace/
-    # where Claude actually writes, not the host workdir's mangled dir.
-    # Host path is passed as write_dir so the prompt file lands on the
-    # mounted volume.  Matches the QA pattern in qa_loop.py.
-    from pm_core.container import is_container_mode_enabled as _is_container_enabled, _CONTAINER_WORKDIR
-    if _is_container_enabled():
-        _claude_cwd = _CONTAINER_WORKDIR
-        _claude_write_dir = workdir
-    else:
-        _claude_cwd = workdir
-        _claude_write_dir = None
-    claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
-                                         transcript=transcript,
-                                         cwd=_claude_cwd,
-                                         write_dir=_claude_write_dir,
-                                         model=_resolution.model,
-                                         provider=_resolution.provider,
-                                         effort=_resolution.effort,
-                                         session_type="review")
-    # Optionally wrap in a container for isolation.
-    # Always remove any existing container for this review before creating a
-    # new one.  The previous session's bash EXIT trap runs "docker rm -f"
-    # asynchronously after its pane is killed; if wrap_claude_cmd runs while
-    # that rm is still in flight it will "reuse" the dying container, then
-    # the old trap's rm completes and kills the new session mid-init.
-    # Removing it here (synchronously) closes that race regardless of whether
-    # an existing tmux window was found above.
-    branch = pr_entry.get("branch", "")
-    from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
-    if is_container_mode_enabled():
-        remove_container(_make_container_name(f"review-{pr_id}"))
-    # Resolve a session_tag for the captures bind-mount so the review
-    # container's /pm-captures points at the same per-PR captures dir
-    # the impl and QA containers use (lets a reviewer read pre/post-fix
-    # captures and scenario captures from inside their pane).
-    _review_pm_session = _get_pm_session()
-    _review_stag = _review_pm_session.removeprefix("pm-") if _review_pm_session else None
-    try:
-        claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
-                                              allowed_push_branch=branch,
-                                              session_tag=_review_stag,
-                                              pr_id=pr_id)
-    except ContainerError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1)
-
-    # In review loop mode or background mode, create the window without
-    # switching focus.  For review loops the explicit per-session switching
-    # below handles moving exactly the sessions that were watching the old
-    # window.  Background mode is used by auto-start to avoid stealing focus.
-    switch = not review_loop and not background
-
-    try:
-        # Build the diff pane command first.  We use git --no-pager
-        # and pipe through less ourselves so that quitting the pager
-        # doesn't kill the pane (git's built-in pager can cause SIGPIPE
-        # exit codes that break && chains).
-        shell = os.environ.get("SHELL", "/bin/bash")
-        header = f"=== Review: {display_id} — {title} ==="
-        # Use backend-appropriate diff base:
-        #   local:   merge-base between base_branch and HEAD (no remote)
-        #   vanilla/github: origin/{base_branch}...HEAD
-        backend_name = data.get("project", {}).get("backend", "vanilla")
-        if backend_name == "local":
-            diff_ref = base_branch
-        else:
-            diff_ref = f"origin/{base_branch}"
-        # User-controlled values (workdir, title via header) MUST be
-        # shell_quote'd. An apostrophe in a PR title would otherwise
-        # break the surrounding single-quote and turn the rest of the
-        # title into shell tokens, killing the pane shell before tmux
-        # can register the new window.
-        diff_cmd = (
-            f"cd {shell_quote(workdir)}"
-            f" && {{ echo {shell_quote(header)}"
-            f" && echo ''"
-            f" && git status"
-            f" && echo ''"
-            f" && echo '--- Change summary ---'"
-            f" && git --no-pager diff --stat {diff_ref}...HEAD"
-            f" && echo ''"
-            f" && echo '--- Full diff ---'"
-            f" && git --no-pager diff {diff_ref}...HEAD"
-            f"; }} | less -R"
-            f"; exec {shell}"
+        # Resolve model/provider for review session
+        from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+        _resolution = resolve_model_and_provider(
+            "review",
+            pr_model=get_pr_model_override(pr_entry),
+            project_data=data,
         )
 
-        # Create the window with the diff pane first, then split to add
-        # the claude pane.  This ensures the window is already at its
-        # final 2-pane width before docker exec launches — so the
-        # container PTY inherits the correct column count and Claude
-        # Code renders at the right width.
-        diff_pane = tmux_mod.new_window_get_pane(
-            pm_session, window_name, diff_cmd, workdir,
-            switch=switch,
-        )
-        if not diff_pane:
-            _log.warning(
-                "Review window: new_window_get_pane returned None for "
-                "window=%s session=%s. The diff pane shell likely exited "
-                "before tmux registered the window — check that "
-                "user-controlled values in diff_cmd are shell_quote'd "
-                "(e.g. PR title containing an apostrophe).",
-                window_name, pm_session,
+        # Generate review prompt and build Claude command
+        review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
+                                                          review_loop=review_loop,
+                                                          review_iteration=review_iteration,
+                                                          review_loop_id=review_loop_id)
+        # When the review runs in a container, Claude's cwd is /workspace —
+        # the transcript symlink must target ~/.claude/projects/-workspace/
+        # where Claude actually writes, not the host workdir's mangled dir.
+        # Host path is passed as write_dir so the prompt file lands on the
+        # mounted volume.  Matches the QA pattern in qa_loop.py.
+        from pm_core.container import is_container_mode_enabled as _is_container_enabled, _CONTAINER_WORKDIR
+        if _is_container_enabled():
+            _claude_cwd = _CONTAINER_WORKDIR
+            _claude_write_dir = workdir
+        else:
+            _claude_cwd = workdir
+            _claude_write_dir = None
+        claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
+                                             transcript=transcript,
+                                             cwd=_claude_cwd,
+                                             write_dir=_claude_write_dir,
+                                             model=_resolution.model,
+                                             provider=_resolution.provider,
+                                             effort=_resolution.effort,
+                                             session_type="review")
+        # Optionally wrap in a container for isolation.
+        # Always remove any existing container for this review before creating a
+        # new one.  The previous session's bash EXIT trap runs "docker rm -f"
+        # asynchronously after its pane is killed; if wrap_claude_cmd runs while
+        # that rm is still in flight it will "reuse" the dying container, then
+        # the old trap's rm completes and kills the new session mid-init.
+        # Removing it here (synchronously) closes that race regardless of whether
+        # an existing tmux window was found above.
+        branch = pr_entry.get("branch", "")
+        from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
+        if is_container_mode_enabled():
+            remove_container(_make_container_name(f"review-{pr_id}"))
+        # Resolve a session_tag for the captures bind-mount so the review
+        # container's /pm-captures points at the same per-PR captures dir
+        # the impl and QA containers use (lets a reviewer read pre/post-fix
+        # captures and scenario captures from inside their pane).
+        _review_pm_session = _get_pm_session()
+        _review_stag = _review_pm_session.removeprefix("pm-") if _review_pm_session else None
+        try:
+            claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
+                                                  allowed_push_branch=branch,
+                                                  session_tag=_review_stag,
+                                                  pr_id=pr_id)
+        except ContainerError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
+
+        # In review loop mode or background mode, create the window without
+        # switching focus.  For review loops the explicit per-session switching
+        # below handles moving exactly the sessions that were watching the old
+        # window.  Background mode is used by auto-start to avoid stealing focus.
+        switch = not review_loop and not background
+
+        try:
+            # Build the diff pane command first.  We use git --no-pager
+            # and pipe through less ourselves so that quitting the pager
+            # doesn't kill the pane (git's built-in pager can cause SIGPIPE
+            # exit codes that break && chains).
+            shell = os.environ.get("SHELL", "/bin/bash")
+            header = f"=== Review: {display_id} — {title} ==="
+            # Use backend-appropriate diff base:
+            #   local:   merge-base between base_branch and HEAD (no remote)
+            #   vanilla/github: origin/{base_branch}...HEAD
+            backend_name = data.get("project", {}).get("backend", "vanilla")
+            if backend_name == "local":
+                diff_ref = base_branch
+            else:
+                diff_ref = f"origin/{base_branch}"
+            # User-controlled values (workdir, title via header) MUST be
+            # shell_quote'd. An apostrophe in a PR title would otherwise
+            # break the surrounding single-quote and turn the rest of the
+            # title into shell tokens, killing the pane shell before tmux
+            # can register the new window.
+            diff_cmd = (
+                f"cd {shell_quote(workdir)}"
+                f" && {{ echo {shell_quote(header)}"
+                f" && echo ''"
+                f" && git status"
+                f" && echo ''"
+                f" && echo '--- Change summary ---'"
+                f" && git --no-pager diff --stat {diff_ref}...HEAD"
+                f" && echo ''"
+                f" && echo '--- Full diff ---'"
+                f" && git --no-pager diff {diff_ref}...HEAD"
+                f"; }} | less -R"
+                f"; exec {shell}"
             )
-            click.echo(f"Review window: failed to create tmux window '{window_name}'.")
-            return
 
-        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd, background=True)
+            # Create the window with the diff pane first, then split to add
+            # the claude pane.  This ensures the window is already at its
+            # final 2-pane width before docker exec launches — so the
+            # container PTY inherits the correct column count and Claude
+            # Code renders at the right width.
+            diff_pane = tmux_mod.new_window_get_pane(
+                pm_session, window_name, diff_cmd, workdir,
+                switch=switch,
+            )
+            if not diff_pane:
+                _log.warning(
+                    "Review window: new_window_get_pane returned None for "
+                    "window=%s session=%s. The diff pane shell likely exited "
+                    "before tmux registered the window — check that "
+                    "user-controlled values in diff_cmd are shell_quote'd "
+                    "(e.g. PR title containing an apostrophe).",
+                    window_name, pm_session,
+                )
+                click.echo(f"Review window: failed to create tmux window '{window_name}'.")
+                return
 
-        # Register review panes under the review window (multi-window safe).
-        # Derive window ID from the pane we just created rather than
-        # searching by name, which is more robust.
-        wid_result = subprocess.run(
-            tmux_mod._tmux_cmd("display", "-t", diff_pane, "-p", "#{window_id}"),
-            capture_output=True, text=True,
-        )
-        review_win_id = wid_result.stdout.strip()
-        if review_win_id:
-            tmux_mod.set_shared_window_size(pm_session, review_win_id)
-            panes = [(claude_pane, "review-claude", claude_cmd)]
-            if diff_pane:
-                panes.append((diff_pane, "review-diff", "diff-shell"))
-            # Register and reset user_modified, but defer rebalance until
-            # after session switches so get_reliable_window_size() sees the
-            # correct dimensions.
-            from pm_core import pane_registry as _reg
-            for pane_id, role, cmd in panes:
-                _reg.register_pane(pm_session, review_win_id, pane_id, role, cmd)
+            claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd, background=True)
 
-            def _reset_user_modified(raw):
-                data = _reg._prepare_registry_data(raw, pm_session)
-                wd = _reg.get_window_data(data, review_win_id)
-                wd["user_modified"] = False
-                return data
+            # Register review panes under the review window (multi-window safe).
+            # Derive window ID from the pane we just created rather than
+            # searching by name, which is more robust.
+            wid_result = subprocess.run(
+                tmux_mod._tmux_cmd("display", "-t", diff_pane, "-p", "#{window_id}"),
+                capture_output=True, text=True,
+            )
+            review_win_id = wid_result.stdout.strip()
+            if review_win_id:
+                tmux_mod.set_shared_window_size(pm_session, review_win_id)
+                panes = [(claude_pane, "review-claude", claude_cmd)]
+                if diff_pane:
+                    panes.append((diff_pane, "review-diff", "diff-shell"))
+                # Register and reset user_modified, but defer rebalance until
+                # after session switches so get_reliable_window_size() sees the
+                # correct dimensions.
+                from pm_core import pane_registry as _reg
+                for pane_id, role, cmd in panes:
+                    _reg.register_pane(pm_session, review_win_id, pane_id, role, cmd)
 
-            _reg.locked_read_modify_write(
-                _reg.registry_path(pm_session), _reset_user_modified)
+                def _reset_user_modified(raw):
+                    data = _reg._prepare_registry_data(raw, pm_session)
+                    wd = _reg.get_window_data(data, review_win_id)
+                    wd["user_modified"] = False
+                    return data
 
-        # Switch ALL grouped sessions that were watching the old review
-        # window to the new one.
-        if sessions_on_review:
-            tmux_mod.switch_sessions_to_window(
-                sessions_on_review, pm_session, window_name)
+                _reg.locked_read_modify_write(
+                    _reg.registry_path(pm_session), _reset_user_modified)
 
-        # Rebalance AFTER session switches so get_reliable_window_size()
-        # sees the correct dimensions.
-        if review_win_id:
-            pane_layout.rebalance(pm_session, review_win_id)
+            # Switch ALL grouped sessions that were watching the old review
+            # window to the new one.
+            if sessions_on_review:
+                tmux_mod.switch_sessions_to_window(
+                    sessions_on_review, pm_session, window_name)
 
-        click.echo(f"Opened review window '{window_name}'")
-    except Exception as e:
-        _log.warning("Failed to launch review window: %s", e)
-        click.echo(f"Review window error: {e}")
+            # Rebalance AFTER session switches so get_reliable_window_size()
+            # sees the correct dimensions.
+            if review_win_id:
+                pane_layout.rebalance(pm_session, review_win_id)
+
+            click.echo(f"Opened review window '{window_name}'")
+        except Exception as e:
+            _log.warning("Failed to launch review window: %s", e)
+            click.echo(f"Review window error: {e}")
 
 
 @pr.command("review")

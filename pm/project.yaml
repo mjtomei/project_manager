@@ -22665,7 +22665,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-05-25T03:38:26.926812+00:00'
+  updated_at: '2026-05-25T04:06:15.120806+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22688,3 +22688,49 @@ prs:
       unit tests in tests/test_spinner_review_loop_switch.py (fail pre-fix, pass post-fix).'
     created_at: '2026-05-25T03:38:26Z'
     last_edited: '2026-05-25T03:38:26Z'
+  - id: note-8198927
+    text: 'QA scenario-4 refinement (concretizer): (1) fzf is NOT installed in this
+      env, so the picker chord "zz d" is unreachable — the fallback numbered picker
+      only exposes single-key shortcuts (s/e/d/t/g = start/edit/review/qa/merge),
+      no z/zz chord. The only review-loop user surface here is the command popup (prefix
+      M -> pm _popup-cmd) typing "review-loop <pr>", which routes through the SAME
+      _run_picker_command -> _wait_for_tui_command spinner (the code under test).
+      display-popup overlays cant be driven by send-keys headlessly, so host the real
+      popup command "pm _popup-cmd <session>" in a regular tmux window cd-ed to the
+      foreign cwd (same code path; established scenario-2 technique). (2) The spinner
+      switch is select_window(base, target) (session arg = base, set in _run_picker_command
+      line 1646), so it moves the BASE sessions active window, NOT a per-client grouped
+      session. The two-attached-clients "invoking client focus follows" behaviour
+      belongs to pr-c41f029 (#220, origin-session capture / followers_for_window),
+      NOT this PR. I reshaped triple-2 away from per-client focus-following onto the
+      rebuild/supersede path (pre-existing review window killed+recreated -> spinner
+      waits for the NEW window id via fresh-mode, switches base active window to it,
+      no stranded spinner), which IS this PRs spinner logic. (3) Spinner debug lines
+      land in ~/.pm/debug/<tag>.log keyed by the popups CWD git-repo tag (foreign-project
+      tag, or default.log for a non-git scratch dir), NOT the owner-project tag —
+      look there for "target_window=None"/repeating "window_open=False" (pre-fix)
+      vs "select_window ... ok=True"/"exit: reason=window_open" (post-fix). PM_SPINNER_TRACE=1
+      enables per-tick logging.'
+    created_at: '2026-05-25T03:51:09Z'
+    last_edited: '2026-05-25T03:51:09Z'
+  - id: note-70be9d0
+    text: 'QA scenario-4 incidental fix (concurrency): the spinner display_id fix
+      works for all cases (verified real surface), but the SEQUENTIAL supersede triple
+      passed while the TRUE-CONCURRENT triple (two review-loop popups on the same
+      PR fired with no delay) exposed a SEPARATE pre-existing race in _launch_review_window
+      (pm_core/cli/pr.py): each pm pr review --fresh runs in its own subprocess and
+      does a non-atomic find-window/kill-if-fresh/create; two simultaneous launches
+      both saw "no window" and both created one -> TWO review-<id> windows. A duplicate
+      makes select-window -t sess:review-<id> ambiguous so the spinner switch returned
+      ok=False (trace) and the base active window did NOT move (stayed on the invoking
+      window). Both panes still resolved (no infinite spin), but the THEN "exactly
+      ONE review window" + "active window switches" failed. FIX: wrapped the find/kill/create
+      section in _review_window_launch_lock(), an fcntl.flock keyed by (session, window_name),
+      so concurrent launches serialise and the second supersedes the first. Re-verified
+      on real surface: post-fix two concurrent foreign-cwd popups -> exactly ONE window
+      @19, active=review-pr-95325c4, both traces select_window ok=True / exit reason=window_open,
+      loop ran to PASS, runtime_state single terminal entry. Added tests/test_review_window_launch_lock.py.
+      Lock only runs in the pm-pr-review subprocess (TUI builds it as a pane cmd),
+      never the TUI event loop.'
+    created_at: '2026-05-25T04:06:15Z'
+    last_edited: '2026-05-25T04:06:15Z'
