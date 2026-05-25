@@ -22595,7 +22595,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T18:49:10.663074+00:00'
+  updated_at: '2026-05-25T19:08:56.981533+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
@@ -22801,6 +22801,19 @@ prs:
       hook failure).'
     created_at: '2026-05-25T18:49:10Z'
     last_edited: '2026-05-25T18:49:10Z'
+  - id: note-450e68e
+    text: 'review-loop i2: fixed sign_off running spinner never animating — three
+      "active PR" gates (tech_tree._is_active_pr, review_loop_ui.ensure_animation_timer
+      + poll-timer stop check) excluded sign_off, so refresh_active_nodes never repainted
+      the node and the poll timer wouldn''t start/stay alive for a sign_off-only active
+      PR (defeated R12 §2). Added sign_off to all three. Also added the sign_off status
+      icon to two display-only status maps that had been missed (graph.render_static_graph,
+      cli __init__ status summary). Reconciled the impl spec: R4 executor section
+      still described the removed act_on_signoff_verdict(autonomous,...) and R6 still
+      echoed sign_off_autonomous/held — updated to the implemented decide_signoff_hop/apply_signoff_hop
+      split + always-gates; fixed signoff-record command name (hyphen).'
+    created_at: '2026-05-25T19:08:56Z'
+    last_edited: '2026-05-25T19:08:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
@@ -22972,11 +22985,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T18:06:08.382333+00:00'
+  updated_at: '2026-05-25T18:59:05.780861+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-bebf7cb
+    text: 'pr-2d5f712 inserted a sign_off step into `pm pr auto-sequence`. New output
+      strings the bug-fix/improvement watcher prompts (prompt_gen.generate_bug_fix_impl_prompt
+      ~L1323) do NOT yet document: `advanced: sign_off`, `advanced: sign_off_relaunched`,
+      `running: sign_off`, `sign_off: re-qa`, `sign_off: returning to review`, `sign_off:
+      returning to impl`, `paused: sign_off_blocked`. They degrade gracefully today
+      (advanced:/running: read as progress; ready_to_merge still emitted on SIGNOFF_MERGE
+      so auto-merge still fires) but should be documented when the watcher cleanup
+      lands here.'
+    created_at: '2026-05-25T18:59:05Z'
+    last_edited: '2026-05-25T18:59:05Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)

@@ -367,7 +367,7 @@ def ensure_animation_timer(app) -> None:
     the spinner animation runs for in_progress/in_review PRs.
     """
     has_active = any(
-        pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir")
+        pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
     qa_running = any(s.running for s in app._qa_loops.values())
@@ -450,7 +450,7 @@ def _poll_loop_state_inner(app) -> None:
     # Stop the timer if no loops are running AND no active PRs need animation
     # AND watcher is not running
     has_active_prs = any(
-        pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir")
+        pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
     qa_running = any(s.running for s in app._qa_loops.values())

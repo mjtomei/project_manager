@@ -101,16 +101,24 @@ call); nice-to-have→agent files new PR then MERGE (defer) or IMPL (include if 
 impossible/out-of-scope→note + MERGE or BLOCKED. `pm pr add` creates a *pending* PR (no Claude
 session) so the agent may run it; it must not run session-spawning commands.
 
-Executor `signoff.act_on_signoff_verdict(root, pr_id, verdict, *, autonomous, launch)`:
-- `SIGNOFF_MERGE`: if `autonomous` → perform the merge via the existing merge path
-  (`pm pr merge` invocation / `pr_merge`); else stay in `sign_off`, log "ready to merge
-  (gated — awaiting human)". (ROUTER never merges; pm executes it.)
-- `SIGNOFF_REQA`: `sign_off → qa`, relaunch QA (`_launch_qa_detached`).
-- `SIGNOFF_REVIEW`: `sign_off → in_review`, relaunch a review-loop iteration.
-- `SIGNOFF_IMPL`: `sign_off → in_progress`, relaunch impl (`pr_start` background).
-- `SIGNOFF_BLOCKED`: stay in `sign_off`, log "paused: sign_off_blocked".
+Executor (SUPERSEDED — see R5/R10/R11 for the implemented shape). The original
+single `act_on_signoff_verdict(..., autonomous, launch)` executor was **removed**
+when autonomy was dropped (R5) and replaced by a decision/side-effect split (R10
+§3): a pure `decide_signoff_hop(verdict) -> {ready_to_merge, qa, review, impl,
+blocked, unknown}` (no state change, safe anywhere) plus `apply_signoff_hop(root,
+pr_id, hop)` (the `sign_off → qa/in_review/in_progress` transition, auto-sequence
+only). The mapping each verdict drives is:
+- `SIGNOFF_MERGE` → `ready_to_merge` recommendation; PR stays `sign_off`, sign-off
+  never merges (the merge decision belongs to pr-ff9b728). No `autonomous` branch.
+- `SIGNOFF_REQA` → `sign_off → qa`, relaunch QA (`_launch_qa_detached`).
+- `SIGNOFF_REVIEW` → `sign_off → in_review`, relaunch a review-loop iteration.
+- `SIGNOFF_IMPL` → `sign_off → in_progress`, relaunch impl (`pr_start` background).
+- `SIGNOFF_BLOCKED` → stay in `sign_off`, echo "paused: sign_off_blocked".
 Status writes use `store.locked_update` + `_record_status_timestamp`, guarded on the
-current status being `sign_off` (mirrors existing transition helpers).
+current status being `sign_off` (mirrors existing transition helpers); a bounce hop
+also consumes the recorded verdict (`pr.pop("signoff")`) so a later re-entry can't
+re-adopt a spent verdict and loop. The wiring lives in the auto-sequence
+`sign_off` branch (R6), not in a standalone executor.
 
 ### R5 — Autonomy: REMOVED (orchestrator note-942fa37)
 Autonomy was removed from this PR. Sign-off **always gates at merge**:
@@ -168,8 +176,10 @@ computed against; `origin` ∈ {`manual`, `auto-sequence`}).
 - `signoff.record_signoff_verdict(root, pr_id, verdict, sha, origin)` writes it;
   `fresh_recorded_verdict(pr, current_sha)` returns the verdict iff the record's
   sha == current HEAD (fresh); `head_sha(workdir)` reads HEAD.
-- The router self-records via hidden `pm pr signoff record <id> <VERDICT>
-  --origin <origin>` (the prompt instructs it; `origin` is threaded
+- The router self-records via hidden `pm pr signoff-record <id> <VERDICT>
+  --origin <origin>` (a separate hyphenated command — `pm pr signoff record`
+  would be parsed by click as `signoff` with `pr_id="record"`; the prompt
+  instructs it; `origin` is threaded
   manual/auto-sequence through `pr_signoff` → `launch_signoff_window` →
   `generate_signoff_prompt`). Recording NEVER acts.
 - **Auto-sequence ADOPTS** a fresh recorded verdict (sha == HEAD) instead of
@@ -201,13 +211,15 @@ Primary autonomous driver = the auto-sequence state machine (`pr_auto_sequence`,
 - New `status == "sign_off"` branch: read the sign-off verdict via a new
   `_check_signoff_verdict(tdir, pr_id)` (mirrors `_check_review_verdict` — scan the auto-seq
   transcript with `extract_verdict_from_transcript(..., SIGNOFF_VERDICTS)`):
-  - no verdict yet → relaunch window if its tmux window is gone, else `running: sign_off`.
-  - `SIGNOFF_MERGE` → if `sign_off_autonomous` echo `ready_to_merge` (and merge happens via the
-    same downstream path that already handles ready_to_merge today, i.e. keep auto-sequence's
-    "stop before merge" contract: auto-sequence still does NOT itself merge); else
-    `held: sign_off_gated`. (Auto-sequence's documented contract is "stopping before merge", so
-    it reports `ready_to_merge`; the actual merge stays the caller's job, preserving today's
-    behavior and deferring autonomous-merge orchestration to pr-ff9b728's auto-run.)
+  - First ADOPT a fresh recorded verdict (R11: `fresh_recorded_verdict`, sha == HEAD);
+    else read the running window's transcript and, on a verdict, record it
+    (`origin auto-sequence`) before acting.
+  - no verdict (record stale/absent AND transcript empty) → relaunch window if its
+    tmux window is gone (echo `advanced: sign_off_relaunched`), else `running: sign_off`.
+  - `SIGNOFF_MERGE` → always a recommendation (autonomy removed, R5): echo
+    `ready_to_merge`; the PR stays in `sign_off`. Auto-sequence never merges
+    (documented "stop before merge" contract); the autonomous-merge-vs-hold decision
+    is deferred to pr-ff9b728's plan watcher.
   - `SIGNOFF_REQA` → `sign_off → qa`, `_launch_qa_detached`, echo `sign_off: re-qa`.
   - `SIGNOFF_REVIEW` → `sign_off → in_review`, launch fresh review-loop iteration, echo `sign_off: returning to review`.
   - `SIGNOFF_IMPL` → `sign_off → in_progress`, relaunch impl, echo `sign_off: returning to impl`.

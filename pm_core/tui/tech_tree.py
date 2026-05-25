@@ -1175,7 +1175,7 @@ class TechTree(Widget):
     def _is_active_pr(self, pr: dict) -> bool:
         """True if *pr*'s node may be animating (spinner / loop / merge marker)."""
         pr_id = pr.get("id")
-        if pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir"):
+        if pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir"):
             return True
         try:
             if self.app._review_loops.get(pr_id):
