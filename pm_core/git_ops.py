@@ -267,18 +267,27 @@ def push_pm_branch(pm_root: Path, backend: str = "vanilla") -> dict:
             _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
             return result_info
 
-        import subprocess as sp
-        pr_result = sp.run(
-            ["gh", "pr", "create",
-             "--title", "pm: update project state",
-             "--body", "Automated pm state sync.",
-             "--head", branch_name],
-            cwd=repo_root, capture_output=True, text=True,
-        )
-        if pr_result.returncode == 0:
-            result_info["pr_url"] = pr_result.stdout.strip()
-        else:
-            result_info["pr_error"] = pr_result.stderr.strip()
+        # Routed through gh_ops.run_gh so it shares the one `gh` chokepoint
+        # (and is intercepted by FakeGitHubBackend in regression tests).
+        from pm_core import gh_ops
+        try:
+            pr_result = gh_ops.run_gh(
+                "pr", "create",
+                "--title", "pm: update project state",
+                "--body", "Automated pm state sync.",
+                "--head", branch_name,
+                cwd=repo_root, check=False,
+            )
+            if pr_result.returncode == 0:
+                result_info["pr_url"] = pr_result.stdout.strip()
+            else:
+                result_info["pr_error"] = pr_result.stderr.strip()
+        except SystemExit:
+            # run_gh -> _check_gh() exits when gh is missing/unauthenticated.
+            # Degrade gracefully (the push already succeeded): record the error
+            # and still restore the original branch below, rather than aborting
+            # and leaving the repo stranded on the sync branch.
+            result_info["pr_error"] = "gh CLI unavailable or unauthenticated"
 
         _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
         pull_rebase(repo_root)

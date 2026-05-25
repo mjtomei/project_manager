@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8d8b360
+  active_pr: pr-9330dec
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -19770,7 +19770,7 @@ prs:
   plan: plan-regression
   title: GitHub backend mock for regression tests
   branch: pm/pr-9603d04-github-backend-mock-for-regression-tests
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Provide a mock/fake GitHub backend so regression tests can exercise
     the github-backend code paths (PR create, status sync, comments, merges, post-merge
@@ -19821,11 +19821,365 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-17T22:36:47.323283+00:00'
+  updated_at: '2026-05-25T02:45:05.887640+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-54753b4
+    text: 'Scope correction (description oversight): the fake must be backed by a
+      real local git repo so git-affecting gh operations produce real git state. A
+      ''pm pr merge'' on the github backend has two halves — the gh API call and the
+      git plumbing that follows (git fetch / merge --ff-only via _pull_after_merge);
+      a pure in-memory fake only covers the first. Implemented as FakeGitHubRepo +
+      FakeGitHubBackend.with_git_repo(): gh pr create ensures the head branch exists,
+      gh pr merge does a real git merge, a consumer clone can fetch + merge --ff-only.
+      Also: every gh CLI operation pm runs today (incl. the git_ops pm-state-sync
+      ''gh pr create'') is now routed through the gh_ops chokepoint and handled by
+      the fake. Carve-out: comment/admin operations (gh pr comment, repo settings)
+      stay pure-metadata stubs for now — only git operations need a working repo.
+      See pm/specs/pr-9603d04/impl.md (R8) for details.'
+    created_at: '2026-05-17T22:15:37Z'
+    last_edited: '2026-05-17T22:15:37Z'
+  - id: note-a60d337
+    text: 'QA scenario-6 (concurrency) refiner findings — empirically probed in-process
+      against the public surface (pm_core.gh_ops + pm_core.fake_github, thread + barrier
+      driver). (1) Shared counter / registry: concurrent add_pr / gh_ops.create_draft_pr
+      mint distinct numbers with no reuse or lost registrations (the _next_number
+      read+increment window is tight enough that the GIL keeps it effectively atomic).
+      HOLDS. (2) Single scripted response + transport pointer under concurrent installed()/gh_runner:
+      the one queued response is served at most once and gh_ops._GH_RUNNER is restored
+      to its prior value (no leaked fake) — both HOLD in practice (tight critical
+      sections). (3) Concurrent merges into one git-backed FakeGitHubRepo: FAILS the
+      spec invariant. There is NO lock serializing FakeGitHubRepo.merge_branch, and
+      it operates on a single non-bare working tree. Under concurrent gh_ops.merge_pr
+      several actors hit git index.lock collisions; merge_branch._git("checkout",
+      base) uses check=True so it raises an UNHANDLED RuntimeError out through _pr_merge/run_gh
+      (not a conflict-shaped CompletedProcess). Non-conflicting merges are lost (0-3
+      of 6 land instead of all 6, the rest get a spurious "not mergeable" conflict-shaped
+      stderr + merge --abort), and the repo is sometimes left with a dangling .git/MERGE_HEAD.
+      Fix direction: a per-repo threading.Lock around branch/merge mutations in FakeGitHubRepo
+      (and have _git surface lock/checkout failures as a conflict-shaped failure rather
+      than raising), so concurrent merges serialize, non-conflicting ones all land,
+      the colliding pair yields one winner + one rc=1 conflict with base unchanged,
+      and no dangling merge state remains.'
+    created_at: '2026-05-23T06:59:16Z'
+    last_edited: '2026-05-23T06:59:16Z'
+  - id: note-ae5cd82
+    text: 'QA scenario-6 (concurrency) RESULT: NEEDS_WORK -> fixed. Drove the public
+      surface (gh_ops + fake_github) with thread+barrier drivers (see captures scenarios/6).
+      Triple 1 (counter/registry) HOLDS as predicted. Triple 2 (concurrent git-backed
+      merges) FAILED exactly as note-a60d337 predicted (index.lock collisions, unhandled
+      RuntimeError out of merge_pr, 0-3/6 non-conflicting merges lost, 0 winners on
+      colliding pair) — FIXED with a per-repo RLock around ensure_branch/merge_branch
+      + check=False checkout + _cleanup_worktree() scrubbing dangling MERGE_HEAD/index.lock
+      + conflict-shaped return. CORRECTION to note-a60d337: Triple 3 (global transport
+      pointer) does NOT hold — concurrent installed()/gh_runner cycles leak _GH_RUNNER
+      (interleaved save/restore reinstates a stale runner; also a TypeError NoneType
+      race in run_gh). Reproduced 10/10 with a realistic op window and on the real
+      run_gh path (log file I/O releases the GIL). FIXED in gh_ops: lock+depth-counter
+      so the outermost context forces _GH_RUNNER back to None, plus snapshot the runner
+      in run_gh. Single-threaded nesting contract preserved (test_runner_nests/install_and_restore
+      still pass; 32 fake_github tests + 193 gh/sync/merge tests green).'
+    created_at: '2026-05-23T07:07:19Z'
+    last_edited: '2026-05-23T07:07:19Z'
+  - id: note-93bc0af
+    text: 'QA scenario 3 (status sync via fake github backend) was REJECTED at concretization:
+      not drivable from the user-facing CLI/TUI surface. FakeGitHubBackend installs
+      its gh transport only IN-PROCESS via gh_ops.gh_runner/set_gh_runner (process-global
+      _GH_RUNNER) — there is no env var, config file, or CLI to install it into a
+      separate `pm pr sync-github` subprocess (which falls through to _check_gh +
+      the real GitHub API). The only way to combine the fake with sync is to call
+      pr_sync.sync_from_github() directly in-process with backend.installed(), which
+      is the pytest-harness path, not a real surface. Those exact behaviors are already
+      covered in tests/test_fake_github.py (test_sync_from_github_detects_merge, _draft_to_ready,
+      test_simulate_rate_limit, test_simulate_server_error_repeats). UNBLOCK: add
+      an out-of-process installation hook for the gh fake mirroring fake-claude (which
+      writes ~/.pm/sessions/<tag>/fake-claude and is read by subprocess panes) — e.g.
+      a PM_FAKE_GH env var / state file that run_gh consults — then `pm pr sync-github`
+      could be driven against the fake from a real pane. Also note: the bound instruction
+      file (TUI Manual Testing / fake-claude) does not cover the github mock; future
+      planning should bind a github-backend instruction or treat this PR as in-process-regression-test-only.'
+    created_at: '2026-05-23T06:59:28Z'
+    last_edited: '2026-05-23T06:59:28Z'
+  - id: note-0e6cf63
+    text: 'QA scenario-5 refiner: FakeGitHubBackend has NO CLI/subprocess installer
+      (in-process only, by design — qa.md ambiguity #1). Real surface = Python driver:
+      backend.installed()/gh_runner ctx mgr, backend.calls/backend.prs assertions,
+      and real pm fns it intercepts (gh_ops.create_pr, git_ops.push_pm_branch). R9
+      restore is observable behaviorally (post-exit op routes to outer fake / not
+      recorded) plus gh_ops._GH_RUNNER pointer. R8 chokepoint: drive git_ops.push_pm_branch(pm_root,
+      backend="github") end-to-end (not a hand-rolled run_gh) so calls log proves
+      the conversion; it issues `pr create --head <sync-branch>` with NO --base, fake
+      defaults base to default_branch. GOTCHA: push_pm_branch does a real `git push
+      -u origin` BEFORE gh create — if push fails it returns {"error":...} and never
+      reaches the chokepoint. Use a plain tmp repo with a local bare origin (NOT a
+      pm workdir, whose push-proxy git shim rejects local-origin pushes); if a proxy
+      shim is on PATH, put real git (pm_core.fake_github.REAL_GIT dir) first.'
+    created_at: '2026-05-23T06:59:05Z'
+    last_edited: '2026-05-23T06:59:05Z'
+  - id: note-f5cb66e
+    text: 'R9 (out-of-process / CLI installer) implemented — addresses the UNBLOCK
+      in note-93bc0af / note-0e6cf63. The github fake is now installable per-session
+      like fake-claude: state at ~/.pm/sessions/<tag>/fake-github/ (state.json + remote.git),
+      gh_ops.run_gh consults paths.fake_github_active() when no in-process runner
+      is set and dispatches via fake_github.dispatch_session (load->run->persist),
+      and ''pm fake-github config set/show/clear'' seeds it. So scenario 3 (status
+      sync) and merge flows are now drivable from a real pane: ''pm fake-github config
+      set ...'' then real ''pm pr sync-github''/''pm pr merge''. In-process installed()/fixtures
+      unchanged (still the multi-threaded-test route); out-of-process dispatch assumes
+      serial gh calls per session. Predicate (callable) scripts are in-process only.
+      NOTE for regression runner (pr-7d5d036): the git-plumbing half of merge-with-pull
+      still needs the consumer repo origin pointed at the fake''s remote.git + real
+      git (push-proxy note in impl.md). Full suite 2643 passed.'
+    created_at: '2026-05-24T02:09:39Z'
+    last_edited: '2026-05-24T02:09:39Z'
+  - id: note-1d42503
+    text: 'PLANNING: RE-EMIT scenario 3 (status sync) as a REAL-CLI scenario next
+      pass. It was rejected as undrivable in note-93bc0af (fake was in-process only),
+      but that blocker is FIXED by the R9 out-of-process installer (note-f5cb66e,
+      commits 4589a41/ab85e48): the github fake is now installable per-session like
+      fake-claude. Corrected drivable steps — GIVEN pm installed (./install.sh --local)
+      + a throwaway github-backend project (pm init --backend github) with a PR carrying
+      gh_pr_number, with the fake seeded for the session via `pm fake-github config
+      set` (e.g. {"prs":[{"head":"<branch>","draft":true}]}) so that PR is served
+      as an open draft. WHEN the author runs `pm pr sync-github` from a real pane.
+      THEN PR status stays in_progress (draft). Then re-seed the fake with the PR
+      as ready (draft:false) and sync again -> in_review; re-seed as merged (state
+      MERGED) and sync again -> reported merged. Edge: seed scripts (string match
+      only — predicate/callable scripts are in-process only per note-f5cb66e) like
+      {"match":"pr view","returncode":1,"stderr":"...403...","times":2} so sync warns/skips
+      without crashing, then succeeds once exhausted. CAVEAT: out-of-process dispatch
+      assumes serial gh calls per session (fine for sync). INSTRUCTION GAP: the bound
+      TUI-Manual-Testing instruction does not cover the github mock — next planning
+      should either add a github-backend instruction file or rely on `pm fake-github
+      config set/show/clear --help`. Verify state with `pm fake-github config show`.'
+    created_at: '2026-05-24T22:58:06Z'
+    last_edited: '2026-05-24T22:58:06Z'
+  - id: note-9f322a1
+    text: 'Review-loop i1 (9eb3): fixed a regression introduced by routing gh through
+      gh_ops.run_gh. _check_gh() raises SystemExit (BaseException) on missing/unauthed
+      gh; pr_close caught only Exception so SystemExit aborted BEFORE local cleanup
+      (workdir + PR-entry removal), and git_ops.push_pm_branch aborted BEFORE _checkout_and_restore_pm
+      (stranding the repo on the pm/sync-* branch). Both previously degraded gracefully
+      via raw subprocess.run. Now both catch SystemExit (pr_close warns+continues;
+      push_pm_branch records pr_error+restores). Added regression tests: tests/test_pr_enhancements.py::TestGitHubCloseResilience
+      and tests/test_git_ops.py::TestPushPmBranch::test_github_gh_unavailable_still_restores
+      (both verified to fail without the fix). NOTE: pr_merge was intentionally left
+      as-is — its github branch is guarded by shutil.which("gh") (missing gh is skipped),
+      and a hard exit with "gh auth login" guidance on unauthed merge is acceptable;
+      the author already accommodated the new auth preflight in test_pr_enhancements.
+      Full suite 2683 passed (1 pre-existing unrelated hook_events env failure deselected).
+      Committed a57a8ac.'
+    created_at: '2026-05-24T23:11:25Z'
+    last_edited: '2026-05-24T23:11:25Z'
+  - id: note-85548d2
+    text: 'review-loop i2 (9eb3): fixed R9 parity gap in pr_merge — the github merge
+      block was gated on shutil.which("gh") so with no gh binary it skipped to the
+      manual-merge SystemExit fallback, unlike sync-github/close which already serve
+      the out-of-process fake via run_gh session gate. Now gh_usable = which(gh) or
+      paths.fake_github_active(); real no-fake behavior unchanged. Added TestGitHubMergePull::test_github_merge_uses_fake_when_gh_binary_absent.
+      167 gh/sync/merge/fake tests green. Committed 195cb606.'
+    created_at: '2026-05-24T23:16:28Z'
+    last_edited: '2026-05-24T23:16:28Z'
+  - id: note-7f0eaaa
+    text: 'review-loop i3 (9eb3): added committed concurrency regression tests in
+      tests/test_fake_github.py for the QA-scenario-6 fixes that previously had no
+      committed guard — test_concurrent_merges_all_land_no_dangling_state (per-repo
+      RLock + _cleanup_worktree; verified it fails without the lock: lost merges),
+      test_concurrent_conflicting_merges_yield_one_winner, and test_concurrent_installs_restore_to_none_baseline
+      (deterministic enter/enter/exit/exit interleaving; verified it fails with a
+      naive save/restore: leaked runner). No source changes. Full suite 2687 passed
+      (1 pre-existing unrelated hook_events env failure deselected). Committed 9f9161d8.'
+    created_at: '2026-05-24T23:25:47Z'
+    last_edited: '2026-05-24T23:25:47Z'
+  - id: note-cde4030
+    text: 'QA scenario 8 refiner (git-touching lifecycle): verified drivable via real
+      CLI surface but with key corrections worth knowing. (1) WRAPPER SHADOW IS MANDATORY:
+      /home/pm/.local/bin/git is a push-proxy wrapper that hijacks ALL push/fetch/pull/ls-remote
+      to a fixed host workdir; pm git_ops.run_git uses bare "git" so pm push / pm
+      pr merge post-merge pull go to the proxy, NOT the local fake remote. Worker
+      must prepend a real-git shim (ln -s /usr/bin/git) on PATH so pm reaches the
+      fake remote.git; the fake itself already uses REAL_GIT=/usr/bin/git internally.
+      (2) pm init --backend github ALWAYS runs _import_github_prs (no flag skips it;
+      --no-import only skips plan import) -> the fake MUST be active (config set)
+      BEFORE pm init, else run_gh._check_gh SystemExits with no gh and aborts init.
+      The import also auto-creates pm PR entries from seeded fake PRs (status mapped
+      from state) but does NOT set workdir; the github merge path REQUIRES an existing
+      workdir, so hand-edit the entry to add workdir=<any existing dir> (bootstrap
+      project.yaml edit, allowed). (3) TRIPLE 3 reshape: re-running pm pr merge after
+      a LOCAL merge hits the status==merged guard (pr.py:1817 -> exits 1 "already
+      merged"), NOT the merged-elsewhere fallback. The real merged-elsewhere path
+      needs pm status still in_review while the REMOTE PR is MERGED (re-seed fake
+      with state=MERGED to flip remote without touching project.yaml) -> gh pr merge
+      returns rc1 already-merged -> is_pr_merged fallback recognizes -> proceeds.
+      (4) TRIPLE 4 conflict: run pm pr merge --no-resolve-window so it prints manual
+      guidance + exits 1 instead of launching a Claude merge window (resolve_window
+      defaults True under PM_IN_TMUX_SESSION). (5) Observe fake PR states via pm fake-github
+      config show (state.json); raw gh in a pane does NOT hit the fake (no gh shim;
+      only pm run_gh is gated). For ff pull, align test repo master to origin/master
+      (git checkout -B master origin/master via real git) before pm init so post-merge
+      ff-only succeeds.'
+    created_at: '2026-05-25T01:57:37Z'
+    last_edited: '2026-05-25T01:57:37Z'
+  - id: note-47d96cc
+    text: 'QA scenario 8 (git-touching lifecycle) RESULT: NEEDS_WORK -> fixed (commit
+      91450659). Triples 1/2/3/5 (pm push R8 chokepoint, pm pr merge+post-merge pull,
+      merged-elsewhere, pm pr close) all PASS on the real CLI surface against the
+      per-session git-backed fake. Triple 4 (conflicting merge) FAILED: a seed of
+      [feat-a state=MERGED, feat-b OPEN] meant to produce an add/add conflict instead
+      merged cleanly with rc=0. ROOT CAUSE: install_session applied state=MERGED transitions
+      INLINE during branch creation, so feat-b forked off the post-feat-a-merge base
+      (clean A->B modify) instead of the original base. FIX: two-pass seed in install_session
+      — create every head branch first (all forked from the base at its original tip),
+      then apply MERGED/CLOSED. Matches real GitHub PR semantics + the in-process
+      add_pr conflict test. Post-fix triple 4 PASSES: gh pr merge surfaces conflict-shaped
+      failure, pm falls back to manual instructions + exits 1, backing master:conflict.txt
+      stays "A", feat-b not ancestor, no dangling MERGE_HEAD/index.lock, feat-b stays
+      OPEN/in_review. Added committed regression test test_session_seed_merged_then_open_conflicts
+      (verified rc=0 without fix). Suites: 185 passed (fake_github/gh_ops/pr_sync/pr_enhancements/git_ops).'
+    created_at: '2026-05-25T02:07:50Z'
+    last_edited: '2026-05-25T02:07:50Z'
+  - id: note-77053b0
+    text: 'Scenario 7 (sync-github vs out-of-process fake) refined. Key facts for
+      the worker: (1) fake assigns PR numbers from 1 per install_session, fresh each
+      `config set` (full replace), so seed exactly ONE PR and set the project.yaml
+      entry gh_pr_number: 1 to match. (2) git_backed:false is sufficient — _do_merge
+      returns ok without a backing repo, so state:"MERGED" works metadata-only; avoids
+      real-git setup. (3) get_pr_state runs `gh pr view <ref> --json state,isDraft,mergedAt`;
+      a scripts entry with match:"pr view", returncode:1 makes get_pr_state return
+      None → sync logs "Could not fetch..." and leaves status unchanged (no crash).
+      (4) sync transitions: OPEN+draft→in_progress, OPEN+ready→in_review, MERGED→merged.
+      qa status is preserved (skipped) — keep entry status in_progress, not qa. (5)
+      _import_github_prs at `pm init --backend github` catches SystemExit when gh
+      missing ("Skipping PR import") so init is safe without gh. (6) Hand-editing
+      project.yaml to add gh_pr_number/status is bootstrap fixture setup (instruction-sanctioned).
+      (7) Each new pane resets PATH/PYTHONPATH — re-source /tmp/pm-venv and export
+      PYTHONPATH=/workspace, confirm with `pm which`.'
+    created_at: '2026-05-25T01:55:59Z'
+    last_edited: '2026-05-25T01:55:59Z'
+  - id: note-8b2f973
+    text: 'QA s9 refiner (verified on real surface, all 3 triples PASS-able): (1)
+      MUST run with PYTHONPATH=/workspace (master at /opt/pm-src lacks i1/i2 fixes;
+      gh_usable count 0 there, 2 in /workspace) — confirm via `pm which`. (2) MUST
+      prepend /usr/bin to PATH so pm uses real git, not the host push-proxy wrapper
+      at ~/.local/bin/git (it hijacks ALL push/fetch/pull to the outer PR workdir
+      and rejects the throwaway sync branch) — needed for triple1 sync-branch push
+      to the local bare origin and triple3 post-merge pull. (3) Throwaway needs a
+      local bare repo as `origin` (git init --bare) with master pushed, github backend
+      (`pm init --backend github --no-import`; the github PR-import still runs but
+      degrades gracefully w/o gh). (4) No real gh in env (good). (5) fake-github session
+      tag is derived from git ROOT path (get_session_tag), NOT tmux — `pm fake-github
+      config set` + `pm pr merge` just need same cwd; no tmux session required. (6)
+      Triple2/3 need a PR with gh_pr_number+workdir; w/o gh you cannot get a real
+      gh_pr_number, so bootstrap those fields as fixture (sanctioned). Exact outputs
+      captured in refined steps.'
+    created_at: '2026-05-25T01:56:13Z'
+    last_edited: '2026-05-25T01:56:13Z'
+  - id: note-b12c268
+    text: 'QA scenario 10 (full git-touching lifecycle, re-verify of prior NEEDS_WORK)
+      RESULT: PASS on real CLI surface vs per-session out-of-process git-backed fake
+      (R8+R9). All 4 triples pass: (1) create via pm push gh-pr-create chokepoint
+      + merge-with-pull FF (marker lands in working repo, status->merged); (2) merged-elsewhere:
+      re-seed feat-elsewhere state=MERGED w/o touching project.yaml, pm pr merge hits
+      is_pr_merged fallback and settles merged, no crash; (3) conflicting merge --no-resolve-window
+      surfaces conflict-shaped failure + manual guidance + exit1, backing master conflict.txt
+      unchanged (AAA), feat-b not ancestor, no dangling MERGE_HEAD/index.lock, stays
+      in_review (two-pass seed fix 91450659 confirmed holding); (4) pm pr close: fake
+      feat-close CLOSED, merged feat-a stays MERGED. No source changes. FIXTURE GOTCHA
+      for next runner: give each PR its OWN clone workdir; pm pr close removes the
+      workdir, so workdir==project dir self-destructs the project mid-run. Captures:
+      /pm-captures/scenarios/10/lifecycle/.'
+    created_at: '2026-05-25T02:37:26Z'
+    last_edited: '2026-05-25T02:37:26Z'
+  - id: note-15ff414
+    text: 'Scenario 11 (out-of-process concurrency on the session fake) refiner —
+      REFINED, drivable on real CLI surface (builds on s8/s9 recipe). KEY FACTS for
+      the worker: (1) dispatch_session/save_session are UNSYNCHRONIZED across processes
+      — only in-process threading locks exist (FakeGitHubRepo._lock RLock, _scripts_lock);
+      state.json is written via non-atomic write_text and load->run->save has no flock.
+      So inter-process races (counter clobber on _next_number, last-writer-wins on
+      state.json registry, cross-process .git/index.lock collisions in remote.git)
+      are EXPECTED per the design (docstring lines 742-744: "dispatch assumes a session
+      gh calls are serial"). The scenario is a CHARACTERIZATION — race-manifests OR
+      race-doesnt-manifest are both valid findings; do not treat as a pass/fail bug
+      unless a CRASH/half-written-file/dangling-merge-state appears. (2) session tag
+      = git root path (get_session_tag), NOT tmux — concurrent processes just need
+      same cwd ($TEST_DIR); no tmux session needed for the merge triples. (3) MUST
+      run PYTHONPATH=/workspace (confirm pm which) + prepend /usr/bin to PATH (real
+      git, not ~/.local/bin push-proxy wrapper). (4) `pm fake-github config set` is
+      a FULL REPLACE and re-mints numbers from 1 each call — re-seed per triple. (5)
+      Triple-1 counter window is NARROW out-of-process for git_backed:false (state.json
+      I/O only ~ms) — use 3-4 concurrent `pm pr start` released from a barrier and
+      repeat several rounds; mint happens at gh_ops.create_draft_pr (pr.py:948) BEFORE
+      any pane launch, so seed fake-claude {"_all":{}} + use --background so pr_start
+      completes cleanly; observe via `pm fake-github config show` (count prs + next_number).
+      (6) Triples 2/3 merge via `pm pr merge <id> --no-resolve-window` (avoids Claude
+      merge window/hang); seed git_backed:true fake with heads touching distinct files
+      (t2) or the SAME file (t3, add/add conflict), bootstrap pm entries gh_pr_number
+      1/2 + workdir=$TEST_DIR + status in_review; keep $TEST_DIR on a NON-master side
+      branch so _pull_after_merge is skipped (pr.py:1578) — isolates the finding to
+      the fake backing repo (remote.git) not the consumer pull. Observe remote.git
+      via REAL git at ~/.pm/sessions/*/fake-github/remote.git: merge-base --is-ancestor
+      <head> master, and ls .git for dangling MERGE_HEAD/index.lock; observe registry
+      via `pm fake-github config show`. Loser of a conflict exits 1 conflict-shaped
+      (is_pr_merged fallback on own OPEN head -> False). Cross-process index.lock
+      collisions degrade to conflict-shaped rc1 (check=False+_cleanup_worktree), NOT
+      crashes.'
+    created_at: '2026-05-25T02:34:29Z'
+    last_edited: '2026-05-25T02:34:29Z'
+  - id: note-216c033
+    text: 'QA scenario 11 (out-of-process concurrency on the session fake) RESULT:
+      PASS (characterization, no hard fail). Drove the real CLI surface with barrier-released
+      concurrent pm processes against the shared per-session fake. T1 (counter/registry):
+      4 rounds x 4 concurrent `pm pr start --background` minted DISTINCT contiguous
+      PR numbers (no reuse, no lost registrations, next_number==count+1) — the cross-process
+      RMW race on next_number did NOT manifest because each pr start clones+pushes
+      before the mint, so dispatch_session writes serialize. T2 (3 concurrent non-conflicting
+      `pm pr merge --no-resolve-window` into one git-backed remote.git, 20+ rounds):
+      every round all 3 distinct-file heads LANDED (merge-base --is-ancestor), remote.git
+      stayed clean (no dangling MERGE_HEAD/index.lock), state.json always parseable,
+      zero tracebacks. Documented serial-only races DID surface as findings (not bugs):
+      (a) occasional rc=1 conflict-shaped exit on a head that still landed (cross-process
+      index.lock collision degraded via check=False+_cleanup_worktree), (b) registry/repo
+      DIVERGENCE — a landed head shows OPEN in state.json because its MERGED transition
+      was clobbered by last-writer-wins on the non-atomic write_text. T3 (2 concurrent
+      genuinely-conflicting merges, 12 rounds): EXACTLY ONE winner each round (master:conflict.txt=winner
+      content, winner head ancestor), loser exits rc=1 conflict-shaped ("not mergeable...CONFLICT
+      (add/add)...Falling back to manual instructions") and STAYS OPEN — never silently
+      flipped to MERGED; winner sometimes shows OPEN too (clobbered transition) but
+      loser never wrongly MERGED. NO hard-fail across any triple (no crash/traceback,
+      no half-written/unparseable state.json, no dangling merge state, no silent conflict->MERGED).
+      These races are the design-documented per-session-serial-only limitation (dispatch_session/save_session
+      have no cross-process flock; only in-process threading locks). Captures: /pm-captures/scenarios/11/{triple1-counter,triple2-nonconflicting-merges,triple3-conflicting-merges}.'
+    created_at: '2026-05-25T02:45:05Z'
+    last_edited: '2026-05-25T02:45:05Z'
+  - id: note-c944f2d
+    text: 'Scenario 12 refiner (concretized): fake-github config CLI is metadata-only-sufficient
+      for all 3 triples (no git_backed/remote.git/origin setup needed — only gh pr
+      list on init-import + gh pr view on sync). Session tag derives from the TEST
+      PROJECT git root (paths.get_session_tag), so plain shell from $TEST_DIR works,
+      no tmux needed; run every pm + fake-github command from $TEST_DIR so the tag
+      matches. pm init --backend github --no-import STILL runs github PR import (only
+      skips plan import), so a fake seeded with one open-draft PR yields a pm entry
+      with gh_pr_number=1 status in_progress. KEY sync-count nuance for the scripted-failure
+      triple: pm pr sync-github issues exactly ONE gh pr view per PR per run, so a
+      2-entry pr-view failure queue (403 then 5xx, times=1 each) drains over TWO syncs
+      (each prints No status changes, status unchanged, warning to log, no crash);
+      the THIRD sync hits the real record. Make the real record DIFFER from current
+      status (e.g. seed ready/non-draft so in_progress->in_review) so the post-drain
+      Updated 1 PR(s) is observable. Re-seed = full replace, numbering restarts at
+      1 (install_session always _next_number=1).'
+    created_at: '2026-05-25T02:32:47Z'
+    last_edited: '2026-05-25T02:32:47Z'
+  - id: note-165cc2a
+    text: 'QA NEEDS_WORK: GitHub status sync driven from a real pane against the out-of-process
+      fake: PASS; Full git-touching PR lifecycle from real panes — create via push,
+      merge-with-pull, and close against the git-backed session fake: NEEDS_WORK;
+      GitHub backend degrades gracefully when gh is unavailable and no fake is installed:
+      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9603d04-a4103507e4db84e8)'
+    created_at: '2026-05-25T02:16:29Z'
+    last_edited: '2026-05-25T02:16:29Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
@@ -20259,10 +20613,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/212
   gh_pr_number: 212
   created_at: '2026-05-14T14:37:18.381479+00:00'
-  updated_at: '2026-05-25T02:16:28.446537+00:00'
+  updated_at: '2026-05-25T02:16:35.483732+00:00'
   started_at: '2026-05-21T15:47:09.402440+00:00'
   reviewed_at: '2026-05-25T00:54:49.998234+00:00'
-  merged_at: '2026-05-25T02:16:28.446491+00:00'
+  merged_at: '2026-05-25T02:16:35.483732+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b4b68f3-bug-decouple-tui-in-memory-state-fro-d07aaad6
 - id: pr-70d02ed
@@ -21490,7 +21844,7 @@ prs:
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
     at action-execution time'
   branch: pm/pr-c41f029-bug-capture-originating-tmux-session-when-the-pr-a
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'When a TUI action (pr start/review/qa/merge, review-loop, qa-loop)
     creates or replaces a window, pm tries to move the session that initiated the
@@ -21547,15 +21901,16 @@ prs:
     action-execution and assert the originally-capturing session is the one switched
     to the new window; assert switch_sessions_to_window uses the captured session
     without calling sessions_on_window when context is present.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/220
+  gh_pr_number: 220
   created_at: '2026-05-21T15:56:33.458586+00:00'
-  updated_at: '2026-05-21T15:56:33.458586+00:00'
-  started_at: null
+  updated_at: '2026-05-25T02:46:34.752207+00:00'
+  started_at: '2026-05-25T02:46:34.752207+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
 - id: pr-5db0e85
   plan: plan-3119574
   title: 'QA instruction: review walker UI fixture setup'
@@ -21763,7 +22118,7 @@ prs:
   title: 'Bug: home-window line truncation undercounts emoji width, can soft-wrap
     on narrow panes'
   branch: pm/pr-9330dec-bug-home-window-line-truncation-undercounts-emoji-
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Location: pm_core/home_window/pr_list.py:_truncate (and callers in
     _render_content/_compose).
@@ -21786,15 +22141,16 @@ prs:
     helper with an emoji heuristic). Deferred from pr-28bda5d, whose spec explicitly
     scoped wide-char awareness out (its premise that format_pr_line is plain ASCII
     is incorrect — it carries emoji).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/221
+  gh_pr_number: 221
   created_at: '2026-05-21T15:56:55.362547+00:00'
-  updated_at: '2026-05-21T15:56:55.362547+00:00'
-  started_at: null
+  updated_at: '2026-05-25T02:46:52.119308+00:00'
+  started_at: '2026-05-25T02:46:52.119308+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9330dec-bug-home-window-line-truncation-unde-07edf135
 - id: pr-6566901
   plan: null
   title: 'Verdict-loop robustness: surface/retry when an expected verdict is never
@@ -22154,7 +22510,7 @@ prs:
   title: 'Bug: merge-conflict resolution pushes a local master merge on GitHub backend
     instead of re-running the GitHub merge'
   branch: pm/pr-8d8b360-bug-merge-conflict-resolution-pushes-a-local-maste
-  status: in_progress
+  status: in_review
   depends_on: []
   description: '## Symptom
 
@@ -22232,9 +22588,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/219
   gh_pr_number: 219
   created_at: '2026-05-25T02:12:54.366523+00:00'
-  updated_at: '2026-05-25T02:15:11.346775+00:00'
+  updated_at: '2026-05-25T02:49:14.098738+00:00'
   started_at: '2026-05-25T02:15:11.346775+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-25T02:49:14.098738+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8d8b360-bug-merge-conflict-resolution-pushes-37062cb3

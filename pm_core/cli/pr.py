@@ -1834,7 +1834,14 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         workdir = pr_entry.get("workdir")
         if workdir and not Path(workdir).exists():
             workdir = _ensure_workdir(data, pr_entry, root)
-        if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
+        # An out-of-process fake-github (R9, regression runner) serves `gh` via
+        # run_gh's session gate even when the real `gh` binary is absent — treat
+        # it as usable so `pm pr merge` is drivable against the fake, matching
+        # `pm pr sync-github` / `pm pr close` (neither of which has a which(gh)
+        # guard). Real (no-fake) behavior is unchanged.
+        from pm_core.paths import fake_github_active
+        gh_usable = bool(shutil.which("gh")) or fake_github_active()
+        if gh_pr_number and workdir and Path(workdir).exists() and gh_usable:
             gh_merged = False
 
             if propagation_only:
@@ -1843,16 +1850,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                 gh_merged = True
             else:
                 click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
-                merge_result = subprocess.run(
-                    ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
-                    cwd=workdir, capture_output=True, text=True,
-                )
+                from pm_core import gh_ops
+                merge_result = gh_ops.merge_pr(workdir, gh_pr_number)
                 gh_merged = merge_result.returncode == 0
                 if gh_merged:
                     click.echo(f"GitHub PR #{gh_pr_number} merged.")
                 else:
                     # Check if PR was already merged (e.g. re-attempt after conflict resolution)
-                    from pm_core import gh_ops
                     if gh_ops.is_pr_merged(workdir, branch):
                         click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
                         gh_merged = True
@@ -2627,15 +2631,18 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
     if gh_pr_number and not keep_github:
         click.echo(f"Closing GitHub PR #{gh_pr_number}...")
         try:
-            delete_flag = [] if keep_branch else ["--delete-branch"]
-            result = subprocess.run(
-                ["gh", "pr", "close", str(gh_pr_number), *delete_flag],
-                capture_output=True, text=True
-            )
+            from pm_core import gh_ops
+            result = gh_ops.close_pr(gh_pr_number, delete_branch=not keep_branch)
             if result.returncode == 0:
                 click.echo(f"GitHub PR #{gh_pr_number} closed.")
             else:
                 click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
+        except SystemExit:
+            # gh_ops.run_gh -> _check_gh() raises SystemExit when gh is missing
+            # or unauthenticated. Don't let that abort the local close/cleanup
+            # (workdir + PR-entry removal below) — warn and continue, preserving
+            # the pre-chokepoint behavior where a raw `gh` failure was tolerated.
+            click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
 
