@@ -351,6 +351,30 @@ class TestSignOff:
         # (re-qa never changes HEAD) can't re-adopt it and loop forever.
         assert "signoff" not in pr
 
+    def test_stale_record_retires_and_relaunches(self, runner, tmp_path):
+        """A stale record (sha != HEAD) is an outdated run: retire it + relaunch
+        a fresh router instead of replaying its verdict/transcript (R11)."""
+        pr = _pr("sign_off")
+        pr["signoff"] = {"verdict": "SIGNOFF_BLOCKED", "sha": "old",
+                         "origin": "auto-sequence"}
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.signoff.head_sha", return_value="new"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._retire_signoff_window") as mock_retire, \
+             patch("pm_core.cli.pr._check_signoff_verdict") as mock_tx, \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: sign_off_relaunched" in result.output
+        mock_retire.assert_called_once()
+        mock_tx.assert_not_called()        # stale run is not replayed
+        assert "signoff" not in pr         # stale record cleared
+
     def test_records_transcript_verdict_when_no_fresh_record(self, runner, tmp_path):
         pr = _pr("sign_off")
         data = _data_with(pr)
@@ -380,12 +404,36 @@ class TestSignOff:
                    return_value="SIGNOFF_REQA"), \
              patch("pm_core.cli.pr.store.locked_update",
                    side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._retire_signoff_window") as mock_retire, \
              patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
         assert "sign_off: re-qa" in result.output
         assert pr["status"] == "qa"
         mock_qa.assert_called_once()
+        # The stale sign-off window + transcript are retired so the next
+        # sign_off entry runs a fresh router (no stale-verdict replay loop).
+        mock_retire.assert_called_once()
+
+    def test_bounce_retires_window_but_recommendation_does_not(self, runner, tmp_path):
+        """A bounce retires the sign-off window; ready_to_merge/blocked don't
+        (the PR legitimately stays in sign_off, so its window/verdict persist)."""
+        for verdict, hop_echo in (("SIGNOFF_MERGE", "ready_to_merge"),
+                                  ("SIGNOFF_BLOCKED", "paused: sign_off_blocked")):
+            pr = _pr("sign_off")
+            data = _data_with(pr)
+            with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+                 patch("pm_core.cli.pr.store.load", return_value=data), \
+                 patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+                 patch("pm_core.cli.pr._check_signoff_verdict",
+                       return_value=verdict), \
+                 patch("pm_core.cli.pr.store.locked_update",
+                       side_effect=_locked_update_runs(data)), \
+                 patch("pm_core.cli.pr._retire_signoff_window") as mock_retire:
+                result = runner.invoke(pr_auto_sequence, ["pr-001"])
+            assert result.exit_code == 0, result.output
+            assert hop_echo in result.output
+            mock_retire.assert_not_called()
 
     def test_review_relaunches_review(self, runner, tmp_path):
         pr = _pr("sign_off")
@@ -405,6 +453,28 @@ class TestSignOff:
         assert result.exit_code == 0, result.output
         assert "sign_off: returning to review (iteration 3)" in result.output
         assert pr["status"] == "in_review"
+
+    def test_retire_signoff_window_kills_and_unlinks(self, tmp_path):
+        from pm_core.cli.pr import _retire_signoff_window
+        pr = _pr("sign_off")
+        transcript = tmp_path / "signoff-pr-001.jsonl"
+        transcript.write_text("{}")
+        with patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@7", "index": 3, "name": "signoff-pr-001"}), \
+             patch("pm_core.home_window.park_if_on") as mock_park, \
+             patch("pm_core.tmux.kill_window") as mock_kill:
+            _retire_signoff_window("pm-test", pr, tmp_path)
+        mock_park.assert_called_once_with("pm-test", "@7")
+        mock_kill.assert_called_once_with("pm-test", "@7")
+        assert not transcript.exists()  # stale transcript removed
+
+    def test_retire_signoff_window_no_window_is_safe(self, tmp_path):
+        from pm_core.cli.pr import _retire_signoff_window
+        pr = _pr("sign_off")
+        with patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.kill_window") as mock_kill:
+            _retire_signoff_window("pm-test", pr, tmp_path)  # no transcript, no window
+        mock_kill.assert_not_called()
 
     def test_impl_relaunches_impl(self, runner, tmp_path):
         pr = _pr("sign_off")

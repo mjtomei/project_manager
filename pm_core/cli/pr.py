@@ -2829,6 +2829,32 @@ def _check_signoff_verdict(tdir: Path, pr_id: str) -> str | None:
     return extract_verdict_from_transcript(str(transcript), SIGNOFF_VERDICTS)
 
 
+def _retire_signoff_window(session: str, pr_entry: dict, tdir: Path) -> None:
+    """Tear down a PR's sign-off window + transcript when bouncing out of sign_off.
+
+    A bounce hop (re-qa / review / impl) moves the PR out of ``sign_off`` while
+    the router's window and its single ``signoff-<id>.jsonl`` transcript live on
+    (the QA loop only sweeps ``qa-*`` windows).  Unlike review's
+    iteration-numbered transcripts, sign-off reuses one transcript path, so on
+    re-entry the existing-window fast path would switch to the stale window and
+    ``_check_signoff_verdict`` would replay the *old* verdict — re-bouncing
+    forever (a re-qa never changes HEAD, so the consumed record can't guard it).
+    Retiring both forces a genuine fresh router run on the next sign_off entry.
+    """
+    from pm_core import signoff as signoff_mod, home_window
+    win = tmux_mod.find_window_by_name(
+        session, signoff_mod.signoff_window_name(pr_entry))
+    if win:
+        home_window.park_if_on(session, win["id"])
+        tmux_mod.kill_window(session, win["id"])
+    transcript = tdir / f"signoff-{pr_entry['id']}.jsonl"
+    try:
+        if transcript.is_symlink() or transcript.exists():
+            transcript.unlink()
+    except OSError:
+        pass
+
+
 def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
     """Return (idle, gone): polls the impl pane via PaneIdleTracker.
 
@@ -3065,10 +3091,33 @@ def pr_auto_sequence(pr_id: str):
         # than relaunching — this picks up a hand-triggered `pm pr signoff`
         # verdict without a wasted re-run.
         verdict = signoff_mod.fresh_recorded_verdict(pr_entry, current_sha)
+
+        # A STALE record (a completed run, now outdated because HEAD moved
+        # since it ran) must NOT be trusted: neither its recorded verdict nor
+        # its transcript reflect the current code, so replaying either would
+        # recommend on unreviewed changes.  Retire that run and relaunch a
+        # fresh router against current HEAD (R11: stale -> relaunch).  The
+        # record is cleared so this doesn't re-fire every tick until the fresh
+        # router self-records.
+        if verdict is None and (pr_entry.get("signoff") or {}).get("verdict"):
+            _retire_signoff_window(pm_session, pr_entry, tdir)
+
+            def _clear_signoff(d):
+                p = store.get_pr(d, pr_id)
+                if p:
+                    p.pop("signoff", None)
+            store.locked_update(root, _clear_signoff)
+            signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
+                       transcript=str(signoff_transcript), origin="auto-sequence")
+            click.echo("advanced: sign_off_relaunched")
+            return
+
         if verdict is None:
-            # No fresh record: read the running window's transcript. If it has
-            # emitted a verdict, record it (origin auto-sequence) so future
-            # ticks adopt it, then act on it below.
+            # No record: read the current run's transcript. If it has emitted a
+            # verdict, record it (origin auto-sequence) so future ticks adopt
+            # it, then act on it below.
             tverdict = _check_signoff_verdict(tdir, pr_id)
             if tverdict is not None:
                 signoff_mod.record_signoff_verdict(
@@ -3076,8 +3125,8 @@ def pr_auto_sequence(pr_id: str):
                 verdict = tverdict
 
         if verdict is None:
-            # No verdict yet (record stale/absent, transcript empty). Relaunch
-            # the window if it's gone, otherwise the router is still running.
+            # No verdict yet (no record, transcript empty). Relaunch the window
+            # if it's gone, otherwise the router is still running.
             if _signoff_window_pane(pm_session, pr_entry) is None:
                 signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
                 ctx = click.get_current_context()
@@ -3093,6 +3142,11 @@ def pr_auto_sequence(pr_id: str):
         # verdict can only mutate state here, never from a manual signoff run.
         hop = signoff_mod.decide_signoff_hop(verdict)
         hop = signoff_mod.apply_signoff_hop(root, pr_id, hop)
+        if hop in ("qa", "review", "impl"):
+            # A bounce moved the PR out of sign_off: retire the stale sign-off
+            # window + transcript so re-entry runs a genuine fresh router
+            # instead of replaying this verdict (which would loop forever).
+            _retire_signoff_window(pm_session, pr_entry, tdir)
         if hop == "ready_to_merge":
             # Sign-off always gates at merge: this is a recommendation only.
             # The PR stays in sign_off; the merge decision is made elsewhere
