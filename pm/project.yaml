@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8015c1d
+  active_pr: pr-7ab0a99
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22486,7 +22486,7 @@ prs:
   title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
     router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
     stage between qa and merge with its own window, not logic embedded in the QA loop.
@@ -22954,6 +22954,91 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-25T17:08:54.875615+00:00'
   updated_at: '2026-05-25T17:08:54.875615+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4265093
+  plan: bugs
+  title: 'Bug: leaked containers exhaust the podman keyring (uid 100000 200/200),
+    breaking container QA — scenario workers can''t exec'
+  branch: pm/pr-4265093-bug-leaked-containers-exhaust-the-podman-keyring-u
+  status: pending
+  depends_on: []
+  description: "## Root cause (diagnosed during #225 QA)\npm does not reliably reap\
+    \ finished PRs' containers. Observed 79 running / 128 total podman containers\
+    \ (30 impl + 69 qa + 29 review across many PRs). The rootless-podman namespaced-root\
+    \ subuid (uid 100000) keyring hit its quota — 200/200 keys (and 14000/20000 bytes).\
+    \ With the keyring full, `podman exec` fails:\n\n    runc: exec failed: unable\
+    \ to start container process: unable to join session keyring: unable to create\
+    \ session key: disk quota exceeded\n\nSince QA launches each scenario worker via\
+    \ `podman exec` into a per-scenario container, the workers cannot start once the\
+    \ keyring is full → the scenario degrades (see sibling bug). #225 QA s1–s7 are\
+    \ a live example: containers show \"Up\" but workers never ran; overall verdict\
+    \ never settled.\n\n## Notes\n- Pruning STOPPED containers does NOT free the keyring\
+    \ — the 200 keys are held by the RUNNING containers. Confirmed: `podman container\
+    \ prune` took 128→79 with keyring still 200/200.\n- This silently breaks ALL container-based\
+    \ QA once the ceiling is hit, on any PR.\n\n## Fix\n- Reap orphaned containers\
+    \ (running AND stopped) on session/PR teardown and periodically: containers whose\
+    \ PR is merged/closed or whose tmux session/window is gone. (`cleanup_orphaned_qa_containers`\
+    \ / `pm session cleanup` exist but aren't keeping up.)\n- Bound the number of\
+    \ concurrent containers.\n- Consider owning/raising the keyring quota for the\
+    \ podman subuid (kernel.keys.maxkeys/maxbytes) as a safety margin, but reaping\
+    \ is the real fix.\n- Surface a clear error when the keyring/quota is exhausted\
+    \ instead of letting QA silently degrade."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T21:41:45.984364+00:00'
+  updated_at: '2026-05-25T21:41:45.984364+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7ab0a99
+  plan: bugs
+  title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
+    fails to launch (masks a dead run as a verdict)'
+  branch: pm/pr-7ab0a99-bug-qa-records-spurious-input-required-when-a-scen
+  status: pending
+  depends_on:
+  - pr-4265093
+  description: '## Symptom
+
+    When a QA scenario''s worker cannot be launched (e.g. `podman exec` fails on keyring/quota
+    exhaustion — see the container-leak bug), the orchestrator records the scenario
+    as INPUT_REQUIRED and the pane closes — indistinguishable from a genuine human-judgment
+    INPUT_REQUIRED. A dead run masquerades as a real verdict.
+
+
+    ## Observed (#225 QA)
+
+    s2–s6 recorded INPUT_REQUIRED with EMPTY verdict_reason, panes gone, no captures,
+    transcript_path=None — because the workers never started (keyring exhaustion).
+    s1/s7 stuck "running" forever; overall never settled. There was no way to tell
+    from qa_status that the scenarios hadn''t actually run.
+
+
+    ## Fix
+
+    - Distinguish LAUNCH/EXEC FAILURE from a real verdict: if container create/exec
+    fails, record an explicit error state (or INPUT_REQUIRED with reason "container
+    exec failed: <stderr>"), not a silent fallback.
+
+    - Record the launch error as the verdict reason (ties to pr-b59f0c7 — capture
+    reason strings).
+
+    - Persist each scenario''s transcript to the per-PR host captures dir so post-hoc
+    triage works even after panes/containers churn (today only some scenarios write
+    captures; failed ones write nothing).
+
+    - A scenario stuck "running" with a dead pane/container should time out to an
+    error, not hang the overall verdict indefinitely.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T21:41:47.459945+00:00'
+  updated_at: '2026-05-25T21:41:47.459945+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
