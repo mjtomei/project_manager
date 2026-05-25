@@ -22586,7 +22586,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T18:05:49.676466+00:00'
+  updated_at: '2026-05-25T18:34:36.779795+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
@@ -22690,6 +22690,42 @@ prs:
       always.'
     created_at: '2026-05-25T18:03:47Z'
     last_edited: '2026-05-25T18:03:47Z'
+  - id: note-511d725
+    text: 'Scope additions for THIS PR (#225), per the user:
+
+
+      1) ADOPTION + explicit verdict record. When the router emits a verdict, record
+      it durably on the PR, e.g. pr[''signoff''] = {verdict, sha (branch HEAD it was
+      computed against), ts, origin: ''manual''|''auto-sequence''}. Auto-sequence
+      should ADOPT an existing recorded verdict instead of relaunching IF it is fresh
+      — recorded sha == current branch HEAD (no code change since). If stale (sha
+      differs) or absent, relaunch. INVARIANT preserved: act_on_signoff_verdict remains
+      the ONLY actor and runs ONLY under auto-sequence, so a hand-triggered ''pm pr
+      signoff'' still never acts on its own — but its recorded verdict can be ADOPTED
+      by a later auto-sequence run (no wasted re-run). This supersedes the earlier
+      ''always relaunch / discard the manual verdict'' behavior, and the explicit
+      origin/sha record is also the legible marker for the auto-sequence-only invariant.
+
+
+      2) TUI — running sign-off visibility. While the sign-off router is running (window
+      open, no verdict yet) the PR shows a running ANIMATION in the TUI, hooking into
+      the existing spinner/animation used for the review/qa/auto-start running states
+      (see pr_view.py).
+
+
+      3) VERDICT ICONS. Give each sign-off verdict its own icon — ready_to_merge /
+      SIGNOFF_REQA / SIGNOFF_REVIEW / SIGNOFF_IMPL / SIGNOFF_BLOCKED — plus an icon
+      for the sign_off status itself, in the status/icon map (qa_status) and the tech
+      tree.
+
+
+      4) pm pr list. The list command shows the sign_off status icon and the latest
+      sign-off verdict icon, consistent with the TUI.
+
+
+      All four are part of this PR.'
+    created_at: '2026-05-25T18:34:36Z'
+    last_edited: '2026-05-25T18:34:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
