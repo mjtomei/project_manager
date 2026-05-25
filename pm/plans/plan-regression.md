@@ -66,10 +66,10 @@ This is the load-bearing change: the regression library starts to *compound* —
 **In progress (2)** — Phase 11 (the sign-off process + web viewer, prioritized):
 - pr-2d5f712 (#225, sign-off step), pr-8e693f6 (#226, web viewer)
 
-**Pending (26)** — Phases 6-11:
+**Pending (27)** — Phases 6-11:
 - Phase 6 — test backfill (1): pr-fbda1a8
 - Phase 7 — evidence-gated bug fix loop (4): pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
-- Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
+- Phase 8 — post-activation refinements + regression-corpus expansion (5): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a, pr-3ca6b36
 - Phase 9 — headless / unsupervised hardening + single-prompt capstone (7): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf (realistic capstone), pr-0cf3626 (exact-ProgramBench offshoot)
 - Phase 10 — QA loop surface improvements (8): pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2, pr-1d8b2b7
 - Phase 11 — sign-off / acceptance gate (2): pr-ff9b728 (plan auto-start watcher); pr-8015c1d (deferred — in-place re-run on a merged PR)
@@ -237,6 +237,11 @@ Folds in the opportunistic audit: as scenarios run, Claude flags *other* uncover
 `pr-a1f267a` (depends on: pr-ff9b728)
 
 `pm/qa/regression/auto-sequence-halt-conditions.md` — exercises every pause/transition of the chain (`pr-e58459b`, now `start → review → QA → sign_off → merge`) on both entry points (TUI `O` keypress + `pm pr auto-sequence <id>` CLI): impl idle-no-spec, review INPUT_REQUIRED, QA INPUT_REQUIRED, the **sign_off stage** (qa-finalize enters sign_off, router runs, bounce routes back through review+qa), **always-gate-at-merge** (a verified PASS yields `ready_to_merge` and the chain stops — sign-off never merges; the plan watcher decides merge vs hold per its per-plan config, replacing the old auto-merge=false), review NEEDS_WORK loop, QA NEEDS_WORK loop, max-iterations / no-progress stop (`pr-ed10ac4`). Verifies each halts correctly and resumes from the right state.
+
+#### PR: Regression coverage — CLI/command-bar help completeness, flag consistency, stale-help
+`pr-3ca6b36` (depends on: pr-06a96fa)
+
+A regression test that audits pm's command surface so help/flag/error drift doesn't recur after the fixes in `pr-fa9f172` (improvements). Checks: (1) each command's `--help` lists all its real subcommands/modes/options (would have caught `pr qa`'s undiscoverable `fresh` mode); (2) flag consistency across sibling commands (`--fresh` on start/review/qa/merge; no positional-vs-flag divergence for the same idea); (3) common wrong-state errors name a corrective command; (4) no stale help (removed/renamed commands, flags, or plans — e.g. `plan=ux` when the plan is `improvements`). Runs via the discovery supervisor (`pr-271cb3a`) and files improvement/bug PRs on drift. This is the durable counterpart that keeps `pr-fa9f172`'s one-time sweep from regressing — directly motivated by the `pr qa fresh` discoverability miss.
 
 ## Phase 9: Headless and unsupervised hardening + single-prompt capstone
 
