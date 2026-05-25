@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7ab0a99
+  active_pr: pr-001
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -10742,11 +10742,31 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-04-24T20:54:20.188876+00:00'
+  updated_at: '2026-05-25T22:43:55.409584+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5ea6dd5
+    text: 'KEYRING-EXHAUSTION diagnosis (from #225 QA; absorbs the closed duplicate
+      pr-4265093). The leak''s concrete failure mode: the rootless-podman subuid (uid
+      100000) keyring fills at maxkeys=200 (each container holds ~2-3 keys). Once
+      full, ''podman exec'' fails — ''unable to start container process: unable to
+      join session keyring: unable to create session key: disk quota exceeded'' —
+      so QA scenario workers can''t launch and silently degrade to spurious INPUT_REQUIRED
+      (see pr-7ab0a99). KEY FACT: pruning STOPPED containers does NOT free the keyring;
+      the keys are held by RUNNING containers, so only reaping running orphans frees
+      them (verified: 128->79 stopped-prune left keyring at 200/200; reaping 15 merged-PR
+      running containers dropped it to 157/200 and unblocked exec). Add to scope:
+      (1) reap own containers at QA completion on ALL exit paths (PASS / NEEDS_WORK
+      / INPUT_REQUIRED / cancel), plus periodic reaping of running orphans (merged/closed
+      PRs, dead sessions); (2) bound max concurrent containers; (3) optionally raise
+      the keyring quota (kernel.keys.maxkeys/maxbytes) as headroom — but that only
+      masks the leak (shifts the next failure to RAM/disk/PIDs), so reaping is the
+      real fix. Adjacent surfaces: pr-cb2a29d (kill merged-PR windows/containers on
+      TUI startup, in_progress), pr-ac12b47 (session stale-container cleanup).'
+    created_at: '2026-05-25T22:43:55Z'
+    last_edited: '2026-05-25T22:43:55Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -22958,43 +22978,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-4265093
-  plan: bugs
-  title: 'Bug: leaked containers exhaust the podman keyring (uid 100000 200/200),
-    breaking container QA — scenario workers can''t exec'
-  branch: pm/pr-4265093-bug-leaked-containers-exhaust-the-podman-keyring-u
-  status: pending
-  depends_on: []
-  description: "## Root cause (diagnosed during #225 QA)\npm does not reliably reap\
-    \ finished PRs' containers. Observed 79 running / 128 total podman containers\
-    \ (30 impl + 69 qa + 29 review across many PRs). The rootless-podman namespaced-root\
-    \ subuid (uid 100000) keyring hit its quota — 200/200 keys (and 14000/20000 bytes).\
-    \ With the keyring full, `podman exec` fails:\n\n    runc: exec failed: unable\
-    \ to start container process: unable to join session keyring: unable to create\
-    \ session key: disk quota exceeded\n\nSince QA launches each scenario worker via\
-    \ `podman exec` into a per-scenario container, the workers cannot start once the\
-    \ keyring is full → the scenario degrades (see sibling bug). #225 QA s1–s7 are\
-    \ a live example: containers show \"Up\" but workers never ran; overall verdict\
-    \ never settled.\n\n## Notes\n- Pruning STOPPED containers does NOT free the keyring\
-    \ — the 200 keys are held by the RUNNING containers. Confirmed: `podman container\
-    \ prune` took 128→79 with keyring still 200/200.\n- This silently breaks ALL container-based\
-    \ QA once the ceiling is hit, on any PR.\n\n## Fix\n- Reap orphaned containers\
-    \ (running AND stopped) on session/PR teardown and periodically: containers whose\
-    \ PR is merged/closed or whose tmux session/window is gone. (`cleanup_orphaned_qa_containers`\
-    \ / `pm session cleanup` exist but aren't keeping up.)\n- Bound the number of\
-    \ concurrent containers.\n- Consider owning/raising the keyring quota for the\
-    \ podman subuid (kernel.keys.maxkeys/maxbytes) as a safety margin, but reaping\
-    \ is the real fix.\n- Surface a clear error when the keyring/quota is exhausted\
-    \ instead of letting QA silently degrade."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-25T21:41:45.984364+00:00'
-  updated_at: '2026-05-25T21:41:45.984364+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-7ab0a99
   plan: bugs
   title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
@@ -23038,8 +23021,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T21:41:47.459945+00:00'
-  updated_at: '2026-05-25T21:41:47.459945+00:00'
+  updated_at: '2026-05-25T22:43:57.109042+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a2edde7
+    text: 'ERROR MESSAGE must include the remediation. When this PR surfaces a container
+      launch/exec failure (instead of a spurious INPUT_REQUIRED), the message must
+      be ACTIONABLE — capture the exec stderr AND name the likely fix. Specifically
+      detect the keyring case (''unable to create session key: disk quota exceeded'')
+      and emit e.g.: ''QA scenario could not launch — podman exec failed: keyring
+      quota exhausted (rootless subuid at kernel.keys.maxkeys=200). Fix: reap orphaned
+      containers (pm session cleanup / pr-1139060) and/or raise kernel.keys.maxkeys
+      & kernel.keys.maxbytes via sysctl.'' Generally: surface stderr + most-likely
+      remediation in the error/verdict-reason so a human (or watcher) can act without
+      archaeology.'
+    created_at: '2026-05-25T22:43:57Z'
+    last_edited: '2026-05-25T22:43:57Z'
