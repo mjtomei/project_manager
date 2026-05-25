@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0b4e1a9
+  active_pr: pr-ff9b728
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -21839,6 +21839,15 @@ prs:
       so picker merges self-heal like real merge conflicts do.'
     created_at: '2026-05-24T21:48:25Z'
     last_edited: '2026-05-24T21:48:25Z'
+  - id: note-cf984e7
+    text: 'QA NEEDS_WORK: Local merge with divergent project.yaml reconciles cleanly
+      and reaps stashes: PASS; store.load surfaces a clear error on conflict markers
+      and preserves "no project" behavior: PASS; Concurrent project.yaml writer during
+      a merge: NEEDS_WORK; Stash-pop conflict on a non-project file launches a stash-pop
+      recovery session: PASS; pr start does not orphan a created GitHub PR under lock
+      contention: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-ca6981c-6468acca1746917c)'
+    created_at: '2026-05-25T04:51:27Z'
+    last_edited: '2026-05-25T04:51:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -22388,13 +22397,19 @@ prs:
       (workdir: /home/matt/.pm/workdirs/qa/pr-9b96145-52038d4438c9a623)'
     created_at: '2026-05-24T23:05:14Z'
     last_edited: '2026-05-24T23:05:14Z'
+  - id: note-0093b00
+    text: 'QA PASS: pm pr sync-github backfills a missing PR number by branch (CLI):
+      PASS; Healed picker is idempotent and the self-heal degrades gracefully: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-9b96145-59e921eb9d41f17e)'
+    created_at: '2026-05-25T03:36:05Z'
+    last_edited: '2026-05-25T03:36:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9b96145-bug-pr-actions-picker-reports-merged-904ede96
 - id: pr-3d1fa55
   plan: bugs
   title: 'Bug: terminal-status PRs keep their tmux windows when finalized outside
     pm merge flow'
   branch: pm/pr-3d1fa55-bug-terminal-status-prs-keep-their-tmux-windows-wh
-  status: in_review
+  status: qa
   depends_on: []
   description: '## Symptom
 
@@ -22445,7 +22460,13 @@ prs:
   started_at: '2026-05-24T21:58:50.019678+00:00'
   reviewed_at: '2026-05-25T03:22:10.165069+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e09afbf
+    text: 'QA PASS: Active PRs survive, repeated syncs stay quiet, and a no-window
+      terminal PR is a clean no-op: PASS; The last QA scenario''s verdict survives
+      a TUI restart: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-3d1fa55-c66689e5322c9701)'
+    created_at: '2026-05-25T04:20:49Z'
+    last_edited: '2026-05-25T04:20:49Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d1fa55-bug-terminal-status-prs-keep-their-t-c52f26ee
 - id: pr-d82e0f1
   plan: null
@@ -22600,7 +22621,7 @@ prs:
   title: 'Bug: zz d review-loop popup spinner never switches to the review window
     (new or existing)'
   branch: pm/pr-8409c64-bug-zz-d-review-loop-popup-spinner-never-switches-
-  status: in_progress
+  status: in_review
   depends_on: []
   description: '## Symptom
 
@@ -22665,18 +22686,38 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/223
   gh_pr_number: 223
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-05-25T03:27:03.889385+00:00'
+  updated_at: '2026-05-25T03:47:14.237012+00:00'
   started_at: '2026-05-25T03:27:03.889385+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-25T03:39:45.883451+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9bc2324
+    text: 'Also seen on QA runs started from the actions pane: same symptom — the
+      popup spinner doesn''t switch to the QA window after it opens. Likely the SAME
+      root cause as the review-loop switch (the switch firing against the wrong/no
+      client, or the spinner not observing the launching->running transition). When
+      fixing, check the QA-run-from-actions-pane path too (pm_core/qa_loop.py switch_sessions_to_window
+      at ~3067, and the actions-pane command dispatch) and add a test covering it,
+      so the fix covers review AND qa, not just review.'
+    created_at: '2026-05-25T03:47:14Z'
+    last_edited: '2026-05-25T03:47:14Z'
+  - id: note-cb0dca1
+    text: 'QA NEEDS_WORK: Review-loop chord from a foreign-cwd window switches focus
+      in all three states: PASS; Nominal review-loop from the project''s own window
+      still switches (fallback regression guard): PASS; Dismissing the spinner with
+      q/Esc suppresses the switch: PASS; Concurrent review-loop invocations against
+      the shared review window and runtime state: NEEDS_WORK; Bundled reproduction
+      test fails pre-fix and passes post-fix; adjacent spinner tests stay green: INPUT_REQUIRED
+      (workdir: /home/matt/.pm/workdirs/qa/pr-8409c64-2c35187964371a17)'
+    created_at: '2026-05-25T04:12:27Z'
+    last_edited: '2026-05-25T04:12:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
   title: 'Bug: pr start window-switch hijacks an arbitrary attached grouped session
     (steals focus from a mid-review-loop session)'
   branch: pm/pr-0b4e1a9-bug-pr-start-window-switch-hijacks-an-arbitrary-at
-  status: pending
+  status: qa
   depends_on: []
   description: '## Symptom
 
@@ -22756,11 +22797,188 @@ prs:
 
     - Tests cover: (a) caller identifiable → only caller switches; (b) caller not
     identifiable → no session''s active window changes (no arbitrary-session hijack).'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/224
+  gh_pr_number: 224
+  created_at: '2026-05-25T03:31:48.369386+00:00'
+  updated_at: '2026-05-25T03:41:37.028145+00:00'
+  started_at: '2026-05-25T03:32:06.341060+00:00'
+  reviewed_at: '2026-05-25T03:41:37.028145+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b4e1a9-bug-pr-start-window-switch-hijacks-a-bb78bd4e
+- id: pr-2d5f712
+  plan: plan-regression
+  title: 'Sign-off / acceptance gate: QA verdict router (auto-run capstone)'
+  branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
+  status: pending
+  depends_on: []
+  description: "The capstone of the autonomous loop: an acceptance/sign-off stage\
+    \ that auto-runs after QA finalization and acts as the **verdict router** — mapping\
+    \ every terminal QA outcome to a next hop so a PR can advance from QA to merge\
+    \ (or back) without a human. This is the missing piece that closes auto-run end\
+    \ to end.\n\nROUTER-ONLY: the checkoff never edits code. It judges, annotates\
+    \ (pm pr notes), files follow-up PRs, and sets the next hop. All code edits happen\
+    \ in impl/qa so they always pass back through review+qa.\n\nInputs: every scenario's\
+    \ verdict (PASS/NEEDS_WORK/INPUT_REQUIRED) + reason string (pr-b59f0c7), the captures/evidence,\
+    \ the diff vs master, and the PR's scope (plan/description + bound regression\
+    \ tests post-Phase-10).\n\nTwo evaluations:\n1. Evidence supports the claim (BDD:\
+    \ does the captured behavior prove what the diff claims?).\n2. Meta-QA / anti-shortcut:\
+    \ was the QA itself rigorous? Thin evidence, a scenario that drove a mock instead\
+    \ of the real path, or an obvious uncovered edge case is caught HERE.\n\nVerdict\
+    \ -> next-hop matrix:\n- PASS (verified): evidence + anti-shortcut review -> merge\
+    \ (or human gate).\n- PASS (unverified, e.g. verifier-cwd): harness problem ->\
+    \ re-qa, do NOT bounce to impl.\n- NEEDS_WORK (scenario fixed it itself): a code\
+    \ change happened -> back through review AND qa (no shortcut to merge); validate\
+    \ the fix is real + shortcut-free.\n- INPUT_REQUIRED: classify the cause and route:\n\
+    \  * misframed/mistaken scenario (\"only run tests\", scenario pane just wrong)\
+    \ -> note for next qa run -> re-qa (no PR change). qa-gen reads notes today, so\
+    \ this closes.\n  * real gap (PR should cover it but doesn't) -> note on PR ->\
+    \ back to impl.\n  * assumed-missing feature (PR depends on something that mistakenly\
+    \ doesn't exist yet) -> agent decides: file a new PR + depends_on (block), or\
+    \ expand scope.\n  * nice-to-have the generator imagined -> agent decides: defer\
+    \ to a NEW PR, or include if trivially in scope.\n  * impossible/out-of-scope\
+    \ -> note recording the limitation -> accept or bounce with the constraint.\n\n\
+    CONSERVATIVE BIAS: the cost of misclassifying a real gap as \"scenario error ->\
+    \ re-qa\" is merging incomplete work (the pitch's predicted failure mode); the\
+    \ reverse only wastes an impl cycle. So when a bucket is genuinely ambiguous,\
+    \ the checkoff RAISES INPUT_REQUIRED itself and escalates to a human rather than\
+    \ merging.\n\nAUDIT TRAIL: every classification + chosen hop is recorded as a\
+    \ pm pr note (prefer-pm-pr-notes pattern) so an autonomous merge is inspectable\
+    \ after the fact — essential for defending autonomous mode in the pitch.\n\nGated\
+    \ vs autonomous is a config flag on the same path: gated presents the behavior\
+    \ report + recommendation and waits; autonomous executes the hop. Flipping to\
+    \ autonomous and watching the bug count is the pitch experiment.\n\nDepends on:\
+    \ pr-b59f0c7 (verdict reason strings), the auto-sequence chain (merged), and ideally\
+    \ the Phase 10 regressions-as-scenarios evidence model (pr-06a96fa). Loop-guard\
+    \ + re-loop wiring is a sibling PR; per-PR HTML report + dashboard are siblings."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-25T03:31:48.369386+00:00'
-  updated_at: '2026-05-25T03:31:48.369386+00:00'
+  created_at: '2026-05-25T13:58:59.541347+00:00'
+  updated_at: '2026-05-25T13:58:59.541347+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8e693f6
+  plan: plan-regression
+  title: Per-PR BDD behavior report (HTML, co-located with captures)
+  branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
+  status: pending
+  depends_on: []
+  description: 'Per-PR BDD behavior report generated by the sign-off stage (sibling
+    of the verdict router). Self-contained HTML written ALONGSIDE the captures it
+    references, at the captures dir (~/.pm/sessions/<tag>/captures/<pr_id>/report.html),
+    so it points directly at the real webm/png/html evidence without copying. (There
+    is no capture GC today — cleanup_pr_resources never touches the captures dir —
+    so co-locating is safe for now; a future GC phase would snapshot.)
+
+
+    Shape (BDD, fits the project goal): for each scenario/behavior — the user flow
+    (Given/When/Then or STEPS), the verdict + reason, and the captured evidence inline/linked.
+    Plus a short top-of-page status summary (what the PR does, overall verdict, the
+    checkoff''s recommendation/next hop). This is the artifact a human opens to sign
+    off — terminal panes can''t show webm, so the human-facing demo is the browser
+    page; the tmux checkoff window holds the discussion + approve/reject.
+
+
+    Generated at sign-off time (auto after QA finalization). Regeneratable on demand
+    (see the dashboard PR''s detect-missing + regenerate flow).
+
+
+    Depends on: the evidence model (Phase 10 captures feeding the evidence record,
+    pr-06a96fa) and the verdict router PR for the recommendation/next-hop block.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T13:59:01.287051+00:00'
+  updated_at: '2026-05-25T13:59:01.287051+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f156f9f
+  plan: plan-regression
+  title: 'Behavior dashboard: all PRs, filtering, detect-missing + regenerate'
+  branch: pm/pr-f156f9f-behavior-dashboard-all-prs-filtering-detect-missin
+  status: pending
+  depends_on: []
+  description: 'Top-level behavior dashboard aggregating the per-PR BDD reports —
+    a single HTML index where all PRs are reviewed by behavior + short text status
+    summaries (fits the BDD goal: review by behavior, not code).
+
+
+    Features:
+
+    - Lists all PRs with a one-line behavior/status summary, linking to each per-PR
+    report.html in its captures dir.
+
+    - Simple client-side FILTERING: merged vs unmerged, and by status (in_review/qa/sign_off/merged/etc.),
+    so you can review reports for both merged and unmerged PRs and see where each
+    PR sits.
+
+    - MISSING-DETECTION: detect when a per-PR report is absent (captures never generated,
+    or cleaned by a future GC) and surface that state in the index instead of a dead
+    link.
+
+    - REGENERATE FLOW: a way to regenerate a missing/stale per-PR report on demand
+    (re-run the report generator from retained verdicts/evidence, or re-run the relevant
+    capture if needed).
+
+
+    Static export (open a file, no server required) is the v1 lean; can grow a served
+    mode later. Lives where the captures live so it co-locates with evidence.
+
+
+    Depends on: the per-PR BDD report PR (it indexes those).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T13:59:03.295598+00:00'
+  updated_at: '2026-05-25T13:59:03.295598+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ff9b728
+  plan: plan-regression
+  title: 'Auto-run wiring: re-loop on code change + loop guard (default 10) + repeated-root-cause
+    escalation'
+  branch: pm/pr-ff9b728-auto-run-wiring-re-loop-on-code-change-loop-guard-
+  status: pending
+  depends_on: []
+  description: 'Wire the sign-off verdict router into auto-run with the loop-safety
+    invariants we settled on.
+
+
+    RE-LOOP INVARIANT: any CODE/CONTENT change (by impl, or a NEEDS_WORK fix a scenario
+    worker made) routes back through review AND qa before it can reach merge — no
+    shortcut. NOTE-ONLY actions do not re-trigger review (recording a limitation then
+    merging; note->re-qa; and notes left on OTHER PRs in project.yaml never require
+    review).
+
+
+    LOOP GUARD: default cap of 10 full bounces per PR. On exceeding the cap, the checkoff
+    raises INPUT_REQUIRED (escalate to human) rather than looping further.
+
+
+    REPEATED ROOT CAUSE: the checkoff prompt should treat a repeating root cause across
+    bounces as a signal to raise INPUT_REQUIRED early (before the hard cap) — i.e.
+    if the same classification/hop recurs without progress, escalate.
+
+
+    Default loop-guard value (10) configurable via a global setting. Decrements/tracking
+    per PR; reset on genuine progress.
+
+
+    Depends on: the verdict router PR (pr for the core sign-off stage) and the auto-sequence
+    chain (merged).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T13:59:05.152331+00:00'
+  updated_at: '2026-05-25T13:59:05.152331+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
