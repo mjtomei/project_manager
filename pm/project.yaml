@@ -21781,7 +21781,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-25T04:05:14.527356+00:00'
+  updated_at: '2026-05-25T04:47:30.106033+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21965,6 +21965,59 @@ prs:
       -C bypasses the proxy (only $1=fetch matches) which can mask the issue.'
     created_at: '2026-05-25T04:05:14Z'
     last_edited: '2026-05-25T04:05:14Z'
+  - id: note-63dd9a2
+    text: 'QA s3 (concurrent-writer-during-merge) refiner findings, verified on real
+      local-backend surface 2026-05-25. ENV PREREQS (all three required or scenario
+      tests the wrong thing): (1) export PYTHONPATH=/workspace before every pm call
+      — default container PYTHONPATH=/opt/pm-src runs MASTER (pre-fix) code; confirm
+      with `pm which`→/workspace/pm_core. (2) The git at ~/.local/bin/git is a push-proxy
+      SHIM that hijacks fetch/pull/push/ls-remote to a host socket bound to ONE hardcoded
+      repo — it breaks local-backend `git fetch <workdir>` ("does not appear to be
+      a git repository"). Move it aside / drop ~/.local/bin from PATH so git=/usr/bin/git.
+      (3) `git config --global protocol.file.allow always` — pm does NOT pass it and
+      this env`s real-git default blocks local file fetch, so propagation fails without
+      it. CMD CORRECTIONS: `pm pr show` and `pm pr update` do NOT exist — use `pm
+      pr list` (status), `pm pr note list <id>` (notes), and read pm/project.yaml
+      for merged_at; use `pm pr edit` for updates. CONFIRMED RESIDUAL BUG: the fix
+      narrows but does NOT close the concurrency race. _stash_for_merge has an unguarded
+      window between _project_yaml_dirty_entry`s `git checkout -- project.yaml` (revert)
+      and `git stash push`; a concurrent `pm pr note add` re-dirties project.yaml
+      in that window so it gets TEXT-stashed after all, then the pop conflicts ->
+      conflict markers in project.yaml + leaked `pm: auto-stash for merge`. Repro
+      (fix, src verified): 15 iters, stash path engaged 2x, 1 of those corrupted (markers=3,
+      leaked_stash=1, every pm cmd then fails on load-guard). Note: the stash/reconcile
+      path only engages when the local uncommitted project.yaml edit OVERLAPS the
+      incoming branch change (so git merge --ff-only fails dirty-overlap); else ff
+      succeeds and reconcile is skipped (still clean). To hit the race, run MANY merge
+      iterations with a tight concurrent note loop on a DIFFERENT pr during each merge.'
+    created_at: '2026-05-25T04:20:10Z'
+    last_edited: '2026-05-25T04:20:10Z'
+  - id: note-8f194dd
+    text: 'QA scenario 3 (concurrent project.yaml writer during merge): NEEDS_WORK
+      — reproduced the residual race from note-63dd9a2 on the real local-backend CLI
+      surface, then FIXED + verified. PRE-FIX (pr.py at HEAD): an 8-concurrent-writer
+      batch hit it within 1-3 iters — `pm pr merge` left pm/project.yaml with 3 conflict
+      markers (<<<<<<</=======/>>>>>>> at lines 22/31/40) AND a leaked `pm: auto-stash
+      for merge`, merge did not complete (PR stayed in_review, merged_at unset), the
+      writers notes were clobbered (0/320), and every subsequent pm command died on
+      store.load`s marker guard. ROOT CAUSE: _stash_for_merge reverts project.yaml
+      then re-scans+`git stash push`es all dirty; a concurrent `pm pr note add` landing
+      between the revert and the stash re-dirties project.yaml so it gets TEXT-stashed,
+      and the pop then conflicts it with the merged file. FIX (pm_core/cli/pr.py):
+      (1) hold the project.yaml lock across the whole revert->stash->merge->reapply
+      so concurrent writers serialize against the merge (store.locked_update uses
+      the same lock); _reapply_project_yaml gained lock_held mode to avoid self-deadlock;
+      lock released in _unstash_after_merge`s finally; hold spans local git only (no
+      network). (2) never text-stash project.yaml/its .lock — the auto-stash now uses
+      explicit pathspecs that exclude _NEVER_STASH_RELS, so project.yaml can never
+      enter the text stash even if re-dirtied. POST-FIX: 20/20 iters @8 writers and
+      5/5 @ the scenario`s single writer (80/80 notes each) — 0 markers, 0 leaks,
+      0 failed merges, all PRs merged+merged_at, all notes unioned. Tests: +2 regression
+      tests in test_merge_stash.py (writer re-dirty excluded from text stash [fails
+      pre-fix]; lock held-then-released); 21 pass; full suite 2725 passed / 1 pre-existing
+      unrelated test_hook_events failure. Casts under captures scenarios/3 {pre,post}-fix.'
+    created_at: '2026-05-25T04:47:29Z'
+    last_edited: '2026-05-25T04:47:29Z'
 - id: pr-c41f029
   plan: bugs
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not

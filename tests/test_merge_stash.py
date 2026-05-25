@@ -409,3 +409,76 @@ class TestStashReconciliation:
         assert "<<<<<<<" not in (pm / "project.yaml").read_text()
         assert (repo / "code.txt").read_text() == "v1\nlocal change\n"
         assert _git("stash", "list", cwd=repo).stdout.strip() == ""
+
+    def test_writer_redirty_in_window_excluded_from_text_stash(
+            self, tmp_path, monkeypatch):
+        """pr-ca6981c residual race (QA scenario 3): even if a concurrent writer
+        re-dirties project.yaml in the unguarded window between the revert and
+        the stash, project.yaml must NEVER be swept into the text stash (it is
+        excluded by explicit pathspec), so the later pop cannot corrupt it with
+        conflict markers or leak the auto-stash."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "code.txt").write_text("base\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-qam", "add code", cwd=repo)
+
+        # Local: dirty project.yaml AND a dirty non-project file (so a real
+        # auto-stash gets created and we can inspect what went into it).
+        d = store.load(pm)
+        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
+        store.save(d, pm)
+        (repo / "code.txt").write_text("local change\n")
+
+        # Simulate the concurrent writer: re-dirty project.yaml right AFTER the
+        # real revert inside _project_yaml_dirty_entry — the exact TOCTOU the
+        # bug exploited.  (Writes directly, modelling a writer that slipped in.)
+        real_entry = pr_mod._project_yaml_dirty_entry
+
+        def racing_entry(cwd, dirty):
+            result = real_entry(cwd, dirty)   # captures + reverts project.yaml
+            py = pm / "project.yaml"
+            py.write_text(py.read_text() + "# concurrent writer re-dirty\n")
+            return result
+
+        monkeypatch.setattr(pr_mod, "_project_yaml_dirty_entry", racing_entry)
+
+        info = pr_mod._stash_for_merge(repo, lock_tui=False)
+        assert info is not None
+        assert info["stashed"] is True
+        stashed_files = _git("stash", "show", "--name-only", cwd=repo).stdout
+        assert "code.txt" in stashed_files
+        # The fix: project.yaml is excluded by explicit pathspec even though it
+        # was re-dirtied in the window.  Pre-fix this contained project.yaml.
+        assert "project.yaml" not in stashed_files
+
+        pr_mod._unstash_after_merge(repo, info)
+        text = (pm / "project.yaml").read_text()
+        assert store.find_conflict_markers(text) == []          # no corruption
+        store.load(pm)                                          # valid YAML
+        assert "auto-stash for merge" not in \
+            _git("stash", "list", cwd=repo).stdout              # no leak
+
+    def test_merge_reconcile_lock_held_then_released(self, tmp_path):
+        """When project.yaml is dirty, _stash_for_merge holds its lock across
+        the reconcile (so concurrent writers serialize) and _unstash_after_merge
+        releases it."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        d = store.load(pm)
+        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
+        store.save(d, pm)
+
+        info = pr_mod._stash_for_merge(repo, lock_tui=False)
+        assert info["_lock"] is not None
+        # A concurrent writer cannot acquire the lock while it is held.
+        with pytest.raises(store.StoreLockTimeout):
+            cm = store._lock(pm, timeout=0.2)
+            cm.__enter__()
+
+        pr_mod._unstash_after_merge(repo, info)
+        assert info["_lock"] is None
+        # Lock is free again afterwards.
+        cm = store._lock(pm, timeout=1.0)
+        cm.__enter__()
+        cm.__exit__(None, None, None)
