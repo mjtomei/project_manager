@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -709,6 +710,26 @@ def pr_spec_approve(pr_id: str):
     trigger_tui_refresh()
 
 
+def _persist_with_backoff(root: Path, apply, *, attempts: int = 5,
+                          timeout: float = 5.0) -> dict:
+    """``store.locked_update`` with exponential backoff across the timeout.
+
+    For persisting an irreversible external side effect (e.g. a just-created
+    GitHub PR number) so a transient ``project.yaml.lock`` contention burst
+    can't strand it.  Raises the last :class:`StoreLockTimeout` if every
+    attempt times out.
+    """
+    delay = 0.2
+    for attempt in range(1, attempts + 1):
+        try:
+            return store.locked_update(root, apply, timeout=timeout)
+        except store.StoreLockTimeout:
+            if attempt == attempts:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+
+
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
@@ -964,7 +985,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             pr["gh_pr_number"] = gh_pr_info["number"]
         data["project"]["active_pr"] = pr_id
 
-    data = store.locked_update(root, apply)
+    if gh_pr_info:
+        # A draft PR was just created on GitHub — an irreversible external side
+        # effect.  If persisting its number is lost to a transient lock timeout
+        # under concurrent pm operations, the PR is orphaned (created on GitHub
+        # but gh_pr_number=None) with no record to reconcile it. Retry the
+        # persist with backoff so a contention burst can't strand it.
+        data = _persist_with_backoff(root, apply)
+    else:
+        data = store.locked_update(root, apply)
     # Reload pr_entry from updated data (now contains gh_pr_number)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
@@ -1609,7 +1638,9 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         return False
 
     if stash_info:
-        _unstash_after_merge(repo_path, stash_info)
+        _unstash_after_merge(repo_path, stash_info, data=data, pr_entry=pr_entry,
+                             background=background, transcript=transcript,
+                             companion=companion, pull_from_origin=True)
     click.echo(f"Pulled latest {base_branch}.")
     return True
 
@@ -1704,7 +1735,9 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         return False
 
     if stash_info:
-        _unstash_after_merge(repo_path, stash_info)
+        _unstash_after_merge(repo_path, stash_info, data=data, pr_entry=pr_entry,
+                             background=background, transcript=transcript,
+                             companion=companion, pull_from_workdir=workdir)
     click.echo(f"Updated {base_branch} in repo.")
 
     return True
@@ -1970,7 +2003,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                 click.echo("The merge commit exists but may not include all branch commits.", err=True)
 
         if stash_info:
-            _unstash_after_merge(work_path, stash_info)
+            _unstash_after_merge(work_path, stash_info, data=data, pr_entry=pr_entry,
+                                 background=background, transcript=transcript,
+                                 companion=companion)
 
     # --- Propagate merged base_branch to the main repo / origin ---
     if backend_name == "local":
@@ -2251,7 +2286,10 @@ def _dirty_file_paths(cwd: Path) -> list[str]:
     """Return relative paths of dirty files in the working tree."""
     result = git_ops.run_git("status", "--porcelain", cwd=cwd, check=False)
     paths = []
-    for line in result.stdout.strip().splitlines():
+    # NB: do not strip() the whole output — porcelain lines begin with a
+    # two-char status column, and a worktree-only change (" M file") has a
+    # leading space that strip() would eat, shifting line[3:] off by one.
+    for line in result.stdout.splitlines():
         if not line.strip():
             continue
         # porcelain format: XY filename  (or XY orig -> renamed)
@@ -2262,16 +2300,59 @@ def _dirty_file_paths(cwd: Path) -> list[str]:
     return paths
 
 
+_PROJECT_YAML_RELS = ("pm/project.yaml", "project.yaml")
+_AUTO_STASH_MSG = "pm: auto-stash for merge"
+
+
+def _project_yaml_dirty_entry(cwd: Path, dirty: list[str]) -> dict | None:
+    """If project.yaml is among *dirty*, capture it for structured re-apply.
+
+    project.yaml is structured, lock-guarded data — reconciling concurrent
+    edits with git's *text* stash/pop is what corrupts it with conflict
+    markers (pr-ca6981c).  Instead we capture the local (dirty) content and the
+    committed ancestor here, revert the file to HEAD so it is excluded from the
+    stash and the merge can replace it freely, and re-apply the local edits
+    structurally afterwards via :func:`store.three_way_merge`.
+
+    Returns ``{"root", "rel", "base", "overlay"}`` or None.
+    """
+    rel = next((p for p in dirty if p in _PROJECT_YAML_RELS
+                or p.replace("\\", "/") in _PROJECT_YAML_RELS), None)
+    if rel is None:
+        return None
+    rel = rel.replace("\\", "/")
+    root = cwd / "pm" if rel == "pm/project.yaml" else cwd
+
+    # Local dirty content (the bookkeeping to preserve).
+    try:
+        overlay = yaml.safe_load((cwd / rel).read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    # Committed ancestor at current HEAD.
+    show = git_ops.run_git("show", f"HEAD:{rel}", cwd=cwd, check=False)
+    base = {}
+    if show.returncode == 0:
+        try:
+            base = yaml.safe_load(show.stdout) or {}
+        except yaml.YAMLError:
+            base = {}
+
+    # Revert the working file to HEAD so it is clean (excluded from the stash).
+    git_ops.run_git("checkout", "--", rel, cwd=cwd, check=False)
+    return {"root": root, "rel": rel, "base": base, "overlay": overlay}
+
+
 def _stash_for_merge(cwd: Path, pr_display_id: str = "",
                      lock_tui: bool = True) -> dict | None:
-    """Stash dirty files so a merge can proceed.
+    """Prepare dirty files so a merge can proceed.
 
-    If pm/ files are among the dirty files and *lock_tui* is True, writes
-    a merge-lock marker so the TUI shows an overlay while the files are
-    temporarily reverted.
+    project.yaml is handled structurally (captured + reverted, never stashed);
+    any remaining dirty files are git-stashed.  If pm/ files are among the
+    dirty files and *lock_tui* is True, writes a merge-lock marker so the TUI
+    shows an overlay while the files are temporarily reverted.
 
-    Returns a dict with stash metadata (``has_pm``, ``count``) on success,
-    or None if stashing failed or there was nothing to stash.
+    Returns a dict with reconciliation metadata, or None if there was nothing
+    to do (or stashing failed).
     """
     dirty = _dirty_file_paths(cwd)
     if not dirty:
@@ -2282,34 +2363,113 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
     if has_pm and lock_tui:
         trigger_tui_merge_lock(pr_display_id)
 
-    click.echo(f"Stashing {len(dirty)} dirty file(s) to proceed with merge...")
-    stash_r = git_ops.run_git("stash", "push", "--include-untracked",
-                               "-m", "pm: auto-stash for merge",
-                               cwd=cwd, check=False)
-    if stash_r.returncode != 0:
-        click.echo(f"Failed to stash: {stash_r.stderr.strip()}", err=True)
+    info: dict = {"has_pm": has_pm, "lock_tui": lock_tui, "stashed": False}
+
+    # Pull project.yaml out of the text-stash path entirely.
+    info["py"] = _project_yaml_dirty_entry(cwd, dirty)
+
+    # Stash whatever remains dirty (project.yaml is now reverted/clean).
+    remaining = _dirty_file_paths(cwd)
+    if remaining:
+        click.echo(f"Stashing {len(remaining)} dirty file(s) to proceed with merge...")
+        stash_r = git_ops.run_git("stash", "push", "--include-untracked",
+                                   "-m", _AUTO_STASH_MSG, cwd=cwd, check=False)
+        if stash_r.returncode != 0:
+            click.echo(f"Failed to stash: {stash_r.stderr.strip()}", err=True)
+            if has_pm and lock_tui:
+                trigger_tui_merge_unlock()
+            return None
+        info["stashed"] = True
+        info["count"] = len(remaining)
+
+    # Nothing to reconcile at all (shouldn't happen given dirty was non-empty).
+    if not info["py"] and not info["stashed"]:
         if has_pm and lock_tui:
             trigger_tui_merge_unlock()
         return None
+    return info
 
-    return {"has_pm": has_pm, "count": len(dirty), "lock_tui": lock_tui}
 
+def _reap_auto_stashes(cwd: Path) -> int:
+    """Drop any leaked ``pm: auto-stash for merge`` stashes. Returns count.
 
-def _unstash_after_merge(cwd: Path, info: dict) -> bool:
-    """Pop the stash and remove the TUI merge-lock if one was set.
-
-    Returns True if the stash popped cleanly.
+    Only pm's own auto-stash entries are dropped — never arbitrary WIP — so a
+    previously-leaked auto-stash is cleaned up without risking unrelated work.
     """
-    pop_r = git_ops.run_git("stash", "pop", cwd=cwd, check=False)
-    clean = pop_r.returncode == 0
+    listing = git_ops.run_git("stash", "list", cwd=cwd, check=False)
+    if listing.returncode != 0:
+        return 0
+    refs = []
+    for line in listing.stdout.splitlines():
+        # Format: "stash@{N}: <branch/desc>: <message>"
+        ref, _, rest = line.partition(":")
+        if ref.startswith("stash@{") and _AUTO_STASH_MSG in rest:
+            refs.append(ref)
+    # Drop highest index first so lower refs stay valid.
+    dropped = 0
+    for ref in sorted(refs, key=lambda r: int(r[len("stash@{"):-1]), reverse=True):
+        if git_ops.run_git("stash", "drop", ref, cwd=cwd, check=False).returncode == 0:
+            dropped += 1
+    return dropped
+
+
+def _reapply_project_yaml(py: dict) -> None:
+    """Structurally re-apply local project.yaml edits over the merged state."""
+    base, overlay = py["base"], py["overlay"]
+
+    def apply(data: dict) -> None:
+        merged = store.three_way_merge(base, data, overlay)
+        data.clear()
+        data.update(merged)
+
+    store.locked_update(py["root"], apply, validate=False)
+
+
+def _unstash_after_merge(cwd: Path, info: dict, *, data: dict | None = None,
+                         pr_entry: dict | None = None,
+                         **window_kwargs) -> bool:
+    """Restore stashed files and re-apply project.yaml edits structurally.
+
+    Returns True if everything was restored cleanly (no outstanding conflict).
+    On a genuine (non-project.yaml) stash-pop conflict, launches a resolution
+    window when *data*/*pr_entry* are supplied, and never leaves project.yaml
+    corrupt or a stash leaked.
+    """
+    clean = True
+
+    if info.get("stashed"):
+        pop_r = git_ops.run_git("stash", "pop", cwd=cwd, check=False)
+        if pop_r.returncode == 0:
+            click.echo(f"Restored {info.get('count', 0)} stashed file(s).")
+        else:
+            clean = False
+            click.echo("Warning: stash pop had conflicts in non-project files.",
+                       err=True)
+
+    # Re-apply project.yaml edits via the lock-serialized structured merge —
+    # never a text conflict, so no markers can be written.
+    if info.get("py"):
+        try:
+            _reapply_project_yaml(info["py"])
+        except (store.ProjectYamlParseError, store.StoreLockTimeout) as e:
+            clean = False
+            click.echo(f"Warning: could not re-apply project.yaml edits: {e}",
+                       err=True)
 
     if info.get("has_pm") and info.get("lock_tui"):
         trigger_tui_merge_unlock()
 
     if clean:
-        click.echo(f"Restored {info['count']} stashed file(s).")
-    else:
-        click.echo("Warning: stash pop had conflicts. Resolve manually.", err=True)
+        # Reap our own (now auto-dropped) plus any previously-leaked auto-stashes.
+        _reap_auto_stashes(cwd)
+    elif data is not None and pr_entry is not None:
+        # Launch a resolution session for the genuine conflict (PR-note 3).
+        _launch_merge_window(
+            data, pr_entry,
+            "Auto-stash pop conflicted. Resolve the conflicts in this window.",
+            cwd=str(cwd), **window_kwargs,
+        )
+
     return clean
 
 

@@ -98,6 +98,27 @@ def is_internal_pm_dir(root: Path) -> bool:
     return root.name == "pm" and (root.parent / ".git").exists()
 
 
+# Git conflict-marker line prefixes. A bare ``=======`` (exactly seven equals)
+# is also a marker; we match it separately so a legitimate YAML value never
+# trips the check.
+_CONFLICT_MARKER_PREFIXES = ("<<<<<<< ", "||||||| ", ">>>>>>> ")
+
+
+def find_conflict_markers(text: str) -> list[tuple[int, str]]:
+    """Return ``(1-based line number, line)`` for any git conflict markers.
+
+    Detects the markers left by a failed ``git stash pop`` / merge:
+    ``<<<<<<< ``, ``||||||| `` (diff3 base), ``>>>>>>> `` and a bare
+    ``=======`` separator.  The separator must be exactly seven equals so a
+    normal YAML scalar/key never counts as a false positive.
+    """
+    hits: list[tuple[int, str]] = []
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.startswith(_CONFLICT_MARKER_PREFIXES) or line.rstrip() == "=======":
+            hits.append((i, line))
+    return hits
+
+
 def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     """Load project.yaml from root directory.
 
@@ -110,7 +131,31 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     path = root / "project.yaml"
     try:
         with open(path) as f:
-            data = yaml.load(f, Loader=_yaml_loader())
+            text = f.read()
+    except FileNotFoundError:
+        # Preserve the historical contract: a missing project.yaml raises
+        # FileNotFoundError, which several callers catch to mean "no project"
+        # (guide.detect_state, tui.sync, session init).  Only wrap *other*
+        # read errors (permission, IsADirectory, …) as a parse error.
+        raise
+    except OSError as e:
+        raise ProjectYamlParseError(f"Could not read {path}: {e}") from e
+
+    # Guard against git conflict markers (e.g. a failed auto-stash pop during
+    # a merge).  project.yaml is the lock-protected source of truth, so a raw
+    # YAML scanner traceback here would be opaque; report the offending line
+    # and remediation instead.
+    markers = find_conflict_markers(text)
+    if markers:
+        lineno, marker = markers[0]
+        raise ProjectYamlParseError(
+            f"{path} contains git conflict markers from a failed stash/merge: "
+            f"line {lineno}: {marker.rstrip()!r}. Resolve the markers (or restore "
+            f"the file from git, e.g. 'git checkout -- {path.name}'), then re-run."
+        )
+
+    try:
+        data = yaml.load(text, Loader=_yaml_loader())
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
@@ -305,6 +350,123 @@ def locked_update(
         fn(data)
         save(data, root)
     return data
+
+
+# ---------------------------------------------------------------------------
+# Structured 3-way merge for reconciling concurrent project.yaml edits
+# ---------------------------------------------------------------------------
+
+_MISSING = object()
+
+# Lists in project.yaml that are collections of dicts keyed by ``id`` and so
+# should be merged element-wise (by id) rather than as opaque scalars.
+_ID_KEYED_LISTS = ("prs", "plans")
+
+
+def _is_id_list(value) -> bool:
+    return (
+        isinstance(value, list)
+        and value
+        and all(isinstance(x, dict) and "id" in x for x in value)
+    )
+
+
+def _three_way_value(base, ours, theirs):
+    """3-way merge a single value (recursing into dicts / id-keyed lists)."""
+    if ours == theirs:
+        return ours
+    if base == ours:
+        # Only theirs changed → take theirs.
+        return theirs
+    if base == theirs:
+        # Only ours changed → take ours.
+        return ours
+    # Both sides diverged from base.
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        return _three_way_dict(
+            base if isinstance(base, dict) else {}, ours, theirs
+        )
+    if _is_id_list(ours) and _is_id_list(theirs):
+        return _three_way_id_list(
+            base if isinstance(base, list) else [], ours, theirs
+        )
+    # Unmergeable conflicting leaves: prefer ours (the committed / post-merge
+    # authority).  The dropped side is almost always a transient bookkeeping
+    # field (e.g. updated_at) that the next locked_update re-asserts.
+    return ours
+
+
+def _three_way_dict(base: dict, ours: dict, theirs: dict) -> dict:
+    result: dict = {}
+    for key in list(ours.keys()) + [k for k in theirs if k not in ours]:
+        b = base.get(key, _MISSING)
+        o = ours.get(key, _MISSING)
+        t = theirs.get(key, _MISSING)
+        if o is _MISSING:
+            # ours deleted; honor theirs only if theirs == base (untouched).
+            if t is not _MISSING and t != b:
+                result[key] = t
+            continue
+        if t is _MISSING:
+            # theirs deleted; drop only if ours == base (ours untouched).
+            if o != b:
+                result[key] = o
+            continue
+        result[key] = _three_way_value(
+            None if b is _MISSING else b, o, t
+        )
+    return result
+
+
+def _three_way_id_list(base: list, ours: list, theirs: list) -> list:
+    """Merge two lists of id-keyed dicts against their common ancestor."""
+    def by_id(items):
+        return {x["id"]: x for x in items if isinstance(x, dict) and "id" in x}
+
+    b, o, t = by_id(base), by_id(ours), by_id(theirs)
+    result: list = []
+    seen: set = set()
+    # Preserve ours' order, then append theirs-only entries.
+    for item in ours:
+        if not (isinstance(item, dict) and "id" in item):
+            continue
+        pid = item["id"]
+        seen.add(pid)
+        if pid in t:
+            result.append(_three_way_dict(b.get(pid, {}), item, t[pid]))
+        elif pid in b and pid not in t:
+            # theirs deleted it; keep only if ours changed it from base.
+            if item != b[pid]:
+                result.append(item)
+        else:
+            result.append(item)
+    for item in theirs:
+        if not (isinstance(item, dict) and "id" in item):
+            continue
+        pid = item["id"]
+        if pid in seen:
+            continue
+        # theirs-only: a new entry unless ours deleted a base entry untouched.
+        if pid in b and item == b[pid]:
+            continue
+        result.append(item)
+    return result
+
+
+def three_way_merge(base: dict, ours: dict, theirs: dict) -> dict:
+    """Reconcile two divergent project.yaml dicts against a common ancestor.
+
+    Used to re-apply local (uncommitted) bookkeeping edits on top of a freshly
+    merged project.yaml without a text-level conflict.  ``ours`` is the
+    post-merge / current on-disk state (the authority on tie-breaks);
+    ``theirs`` is the stashed-aside local edit; ``base`` is the committed
+    ancestor both derive from.  ``prs`` and ``plans`` are merged element-wise
+    by ``id``.
+    """
+    base = base if isinstance(base, dict) else {}
+    ours = ours if isinstance(ours, dict) else {}
+    theirs = theirs if isinstance(theirs, dict) else {}
+    return _three_way_dict(base, ours, theirs)
 
 
 class WriteQueue:
