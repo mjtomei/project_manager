@@ -8,6 +8,7 @@ from pm_core.tmux import (
     in_tmux,
     session_exists,
     create_session,
+    new_window,
     new_window_get_pane,
     split_pane,
     split_pane_background,
@@ -28,6 +29,7 @@ from pm_core.tmux import (
     unzoom_pane,
     get_session_name,
     current_or_base_session,
+    caller_switch_target,
     list_grouped_sessions,
     find_unattached_grouped_session,
     sessions_on_window,
@@ -287,17 +289,36 @@ class TestFindWindowByName:
 # ---------------------------------------------------------------------------
 
 class TestSelectWindow:
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess")
     @patch("pm_core.tmux.subprocess.run")
-    def test_success(self, mock_run, mock_cobs):
+    def test_success(self, mock_run, mock_cst):
         mock_run.return_value = MagicMock(returncode=0)
         assert select_window("sess", "1") is True
 
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess")
     @patch("pm_core.tmux.subprocess.run")
-    def test_failure(self, mock_run, mock_cobs):
+    def test_failure(self, mock_run, mock_cst):
         mock_run.return_value = MagicMock(returncode=1)
         assert select_window("sess", "99") is False
+
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess~2")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_targets_caller_session(self, mock_run, mock_cst):
+        """Switch targets the caller's own session, not the passed base."""
+        mock_run.return_value = MagicMock(returncode=0)
+        select_window("sess", "1")
+        cmd = mock_run.call_args[0][0]
+        assert "select-window" in cmd
+        assert "sess~2:1" in cmd
+
+    @patch("pm_core.tmux.caller_switch_target", return_value=None)
+    @patch("pm_core.tmux.subprocess.run")
+    def test_no_caller_client_does_not_switch(self, mock_run, mock_cst):
+        """When the caller's client can't be identified, no switch is issued
+        (must not hijack an arbitrary attached grouped session)."""
+        result = select_window("sess", "1")
+        assert result is False
+        mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -404,10 +425,10 @@ class TestCurrentOrBaseSession:
 
 class TestNewWindowGetPane:
     @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess")
     @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_pane_id(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
+    def test_returns_pane_id(self, mock_run, mock_fwbn, mock_cst, mock_gpi):
         mock_run.return_value = MagicMock(returncode=0)
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result == "%5"
@@ -420,19 +441,19 @@ class TestNewWindowGetPane:
         assert result is None
 
     @patch("pm_core.tmux.get_pane_indices", return_value=[])
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess")
     @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_none_when_no_panes(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
+    def test_returns_none_when_no_panes(self, mock_run, mock_fwbn, mock_cst, mock_gpi):
         mock_run.return_value = MagicMock(returncode=0)
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result is None
 
     @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess")
     @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
     @patch("pm_core.tmux.subprocess.run")
-    def test_switch_false_skips_select_window(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
+    def test_switch_false_skips_select_window(self, mock_run, mock_fwbn, mock_cst, mock_gpi):
         mock_run.return_value = MagicMock(returncode=0)
         result = new_window_get_pane("sess", "review", "bash", "/tmp", switch=False)
         assert result == "%5"
@@ -441,7 +462,100 @@ class TestNewWindowGetPane:
         cmds = [c[0][0] for c in calls]
         assert any("new-window" in cmd for cmd in cmds)
         assert not any("select-window" in cmd for cmd in cmds)
-        mock_cobs.assert_not_called()
+        mock_cst.assert_not_called()
+
+    @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess~2")
+    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_switch_targets_caller_session(self, mock_run, mock_fwbn, mock_cst, mock_gpi):
+        """When the caller is identifiable, select-window targets it."""
+        mock_run.return_value = MagicMock(returncode=0)
+        new_window_get_pane("sess", "review", "bash", "/tmp")
+        cmds = [c[0][0] for c in mock_run.call_args_list]
+        assert any("new-window" in cmd for cmd in cmds)
+        sel = [cmd for cmd in cmds if "select-window" in cmd]
+        assert sel and "sess~2:1" in sel[0]
+
+    @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
+    @patch("pm_core.tmux.caller_switch_target", return_value=None)
+    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_no_caller_client_creates_detached(self, mock_run, mock_fwbn, mock_cst, mock_gpi):
+        """No identifiable caller → window created detached, no select-window
+        (must not hijack an arbitrary attached grouped session)."""
+        mock_run.return_value = MagicMock(returncode=0)
+        result = new_window_get_pane("sess", "review", "bash", "/tmp")
+        assert result == "%5"
+        cmds = [c[0][0] for c in mock_run.call_args_list]
+        assert any("new-window" in cmd and "-d" in cmd for cmd in cmds)
+        assert not any("select-window" in cmd for cmd in cmds)
+
+
+# ---------------------------------------------------------------------------
+# new_window
+# ---------------------------------------------------------------------------
+
+class TestNewWindow:
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess~2")
+    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_switch_targets_caller_session(self, mock_run, mock_fwbn, mock_cst):
+        mock_run.return_value = MagicMock(returncode=0)
+        new_window("sess", "review", "bash", "/tmp")
+        cmds = [c[0][0] for c in mock_run.call_args_list]
+        sel = [cmd for cmd in cmds if "select-window" in cmd]
+        assert sel and "sess~2:1" in sel[0]
+
+    @patch("pm_core.tmux.caller_switch_target", return_value=None)
+    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_no_caller_client_creates_detached(self, mock_run, mock_fwbn, mock_cst):
+        """The reported bug: a CLI-shell caller (no identifiable client) must
+        not switch any session's active window — the -d window stays detached
+        instead of hijacking an arbitrary attached grouped session."""
+        mock_run.return_value = MagicMock(returncode=0)
+        new_window("sess", "review", "bash", "/tmp")
+        cmds = [c[0][0] for c in mock_run.call_args_list]
+        assert any("new-window" in cmd and "-d" in cmd for cmd in cmds)
+        assert not any("select-window" in cmd for cmd in cmds)
+
+    @patch("pm_core.tmux.caller_switch_target", return_value="sess")
+    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_switch_false_skips_select_window(self, mock_run, mock_fwbn, mock_cst):
+        mock_run.return_value = MagicMock(returncode=0)
+        new_window("sess", "review", "bash", "/tmp", switch=False)
+        cmds = [c[0][0] for c in mock_run.call_args_list]
+        assert not any("select-window" in cmd for cmd in cmds)
+        mock_cst.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# caller_switch_target (focus-safe resolver)
+# ---------------------------------------------------------------------------
+
+class TestCallerSwitchTarget:
+    @patch("pm_core.tmux.in_tmux", return_value=False)
+    def test_not_in_tmux_returns_none(self, mock_in):
+        assert caller_switch_target("proj") is None
+
+    @patch("pm_core.tmux.get_session_name", return_value="proj")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_in_base_session_returns_it(self, mock_in, mock_gsn):
+        assert caller_switch_target("proj") == "proj"
+
+    @patch("pm_core.tmux.get_session_name", return_value="proj~3")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_in_grouped_session_returns_it(self, mock_in, mock_gsn):
+        assert caller_switch_target("proj") == "proj~3"
+
+    @patch("pm_core.tmux.get_session_name", return_value="otherproj")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_in_different_group_returns_none(self, mock_in, mock_gsn):
+        """Caller in a different project's session must not be treated as this
+        base's client — no arbitrary grouped session is targeted."""
+        assert caller_switch_target("proj") is None
 
 
 # ---------------------------------------------------------------------------
