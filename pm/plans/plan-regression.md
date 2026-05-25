@@ -72,7 +72,7 @@ This is the load-bearing change: the regression library starts to *compound* —
 
 **Cross-phase sequencing note**: Phase 7 (evidence + coverage gates on the existing scenario model) and Phase 10 (scenarios → regression-test bindings, new-regression authoring, mocks at authoring surface) both reshape the QA loop. Phase 10 changes the underlying scenario model that Phase 7's gates measure against. Recommended order: land Phase 10's regressions-as-scenarios chain (pr-7d5d036 → pr-06a96fa → pr-2680fbf → pr-51586d2) before Phase 7's coverage stack (pr-b42059d → pr-8ed578d → pr-8422dea → pr-c2397e2), so the coverage gates measure the post-Phase-10 flow. If sequenced the other way, Phase 7 PRs may need amendment after Phase 10 lands.
 
-**Phase 11 supersessions**: the bug-fix (`pr-e3a711c`) and improvement-fix (`pr-d39a7fb`) watchers are generalized into one plan auto-start watcher and the programmatic `auto_start.py` orchestration is removed (both in `pr-ff9b728`); `pr-b77702b` (per-plan `auto_merge`) is subsumed by sign-off + per-plan gating. The merged watchers stay in history; their plan-specific code is replaced.
+**Phase 11 supersessions**: the bug-fix (`pr-e3a711c`) and improvement-fix (`pr-d39a7fb`) watchers are generalized into one plan auto-start watcher and the programmatic `auto_start.py` orchestration is removed (both in `pr-ff9b728`); `pr-b77702b`'s per-plan `auto_merge` gating is subsumed by sign-off + per-plan gating, but its **dep-merge preamble survives** (rescoped, stays in the impl session's start prompt). The merged watchers stay in history; their plan-specific code is replaced.
 
 ## Prerequisites
 
@@ -201,14 +201,16 @@ When coverage gates fail, the refinement prompt asks the QA planner for addition
 
 ## Phase 8: Post-activation refinements + regression-corpus expansion
 
-PRs added after the loop landed, addressing gaps surfaced once the watchers were running in anger. Two themes — a per-plan workflow refinement (`pr-b77702b`) and three regression-corpus expansion PRs (`pr-2c060b2`, `pr-70d02ed`, `pr-a1f267a`).
+PRs added after the loop landed, addressing gaps surfaced once the watchers were running in anger. Two themes — a dep-merge-on-start refinement (`pr-b77702b`, rescoped — see below) and three regression-corpus expansion PRs (`pr-2c060b2`, `pr-70d02ed`, `pr-a1f267a`).
 
 ### Theme 1: workflow refinement
 
-#### PR: Per-plan auto-merge=false mode with dep-merge in start prompt
+#### PR: Dep-merge preamble in the PR start/impl prompt for unmerged deps
 `pr-b77702b` (pending)
 
-Adds a per-plan `auto_merge` setting (default true) so plans that need human review before shipping (ambient surfaces, UX iteration) can let watchers run impl/review/QA but stop short of merging. Also injects a dep-merge preamble into the start prompt when the PR has unmerged deps, so iteratively-developed plans stay coherent without each PR landing on master first.
+Injects a dep-merge preamble into the **implementation session's** start prompt when the PR has unmerged `depends_on` deps: it lists the unmerged deps + their branches and instructs the session to merge each into its workdir before working, so iteratively-developed chains stay coherent without each PR landing on master first. The merge must run in the impl session because the workdir is set up programmatically at start and is only available there — not to the plan watcher, which only decides *when* to start. Omitted entirely when all deps are already merged or there are none.
+
+*(Rescoped: the per-plan `auto_merge=false` half of this PR's original scope is superseded by Phase 11 — the plan auto-start watcher's per-plan gated config + the sign-off step's gated mode. See Phase 11.)*
 
 ### Theme 2: regression-corpus expansion (3 PRs)
 
@@ -382,7 +384,7 @@ Sign-off concretizes the taste-check / merge-gating the impl watchers improvise 
 
 - **The two impl watchers generalize into one plan auto-start watcher.** `pr-e3a711c` (bug-fix, merged) and `pr-d39a7fb` (improvement-fix, merged) become a single watcher parameterized per plan — gated vs autonomous, mandated checks (the improvements *taste* check), and a watcher-chosen **max in-flight PR** count. Same functionality, one class; the two plan-specific watchers and their near-duplicate prompt builders are removed.
 - **That plan watcher *is* the auto-start.** It replaces the programmatic engine in `pm_core/tui/auto_start.py` (`check_and_start`, `_auto_start_review_loops`, `_auto_start_qa_loops`, `auto_sequence_for_pr`, the one-shot `_transitive_deps` walk). The watcher starts ready PRs from its plan, runs the per-PR auto-sequence chain (`pr-e58459b`, kept), resolves high-level issues, and keeps the plan working as implementation + sign-offs proceed. The TUI auto-start toggle starts/stops this watcher; the old programmatic orchestration is removed. The existing `AutoStartWatcher` (pane monitoring) folds into this watcher's "resolve high-level issues" duty.
-- **Sign-off owns the per-PR decision; the watcher shepherds the plan.** Per-PR merge/route decisions defer to the sign-off step. `pr-b77702b`'s per-plan `auto_merge=false` and the improvement watcher's gated-at-QA-PASS are subsumed by the watcher's per-plan gated config + sign-off's gated mode — `pr-b77702b` is superseded (its dep-merge-preamble bit, if still wanted, folds into the plan watcher).
+- **Sign-off owns the per-PR decision; the watcher shepherds the plan.** Per-PR merge/route decisions defer to the sign-off step. `pr-b77702b`'s per-plan `auto_merge=false` and the improvement watcher's gated-at-QA-PASS are subsumed by the watcher's per-plan gated config + sign-off's gated mode. Its **dep-merge preamble is not absorbed** — that stays in the implementation session's start prompt (the workdir is programmatic, only available to the impl session); `pr-b77702b` is rescoped to just that part.
 - **Real-code feedback flows back into the plan.** The watcher integrates what implementation/sign-off learns into the plan file (the dynamic plan/graph mutation), so the plan stays accurate as reality diverges from the original design.
 - **Watcher work logs become plan notes.** Per-watcher continuity (`pm/watchers/*.log`) is recast as **plan notes** carried in the plan files (analogous to PR notes), so a plan watcher's state is human-readable in the plan and reachable from the behavior interface. The flat log files are removed.
 
@@ -429,7 +431,7 @@ Replaces the two plan-specific impl watchers **and** the programmatic auto-start
 
 **Become the auto-start engine.** This watcher *is* the auto-start. Remove the programmatic orchestration in `pm_core/tui/auto_start.py` (`check_and_start`, `_auto_start_review_loops`, `_auto_start_qa_loops`, `auto_sequence_for_pr`, the one-shot `_transitive_deps` walk). The watcher picks ready PRs from its plan (deps satisfied), runs the per-PR **auto-sequence chain** (`pr-e58459b`, kept — now with the `qa → sign_off → merge` tail), and stops. The TUI auto-start toggle becomes start/stop for this watcher.
 
-**Dep-merge on start.** When starting a PR whose `depends_on` PRs aren't merged yet, the watcher injects a dep-merge preamble (folded in from `pr-b77702b`) so the session builds on its dependency branches rather than stale master — keeping an iteratively-developed chain coherent without each PR landing on master first.
+**Dep-merge on start.** When a PR's `depends_on` PRs aren't merged yet, its dependency branches must be merged into the workdir before work begins — this stays in the **implementation session's** start prompt (`pr-b77702b`), *not* the watcher. The workdir is set up programmatically at start and is only available to the impl session, so the watcher can only decide *when* to start the PR; the merge happens inside the session. (Omitted when all deps are already merged.)
 
 **Max in-flight PRs (new).** The watcher chooses how many PRs to drive concurrently rather than walking one target's dependency tree serially — a change to auto-start. Bounded, watcher-judged each tick from plan state + guidance.
 
@@ -443,7 +445,7 @@ Replaces the two plan-specific impl watchers **and** the programmatic auto-start
 
 **Single-PR mode.** The same per-PR auto-sequence chain (`qa → sign_off → merge`) run on demand for one PR — `pm pr auto-sequence <id>` extended past merge, with a thin `pm pr signoff <id>` to enter just the sign-off step. No parallel `pm pr auto` command.
 
-**Removed (dead code):** `auto_start.py`'s programmatic orchestration; `bug_fix_impl_watcher.py` + `improvement_fix_impl_watcher.py` and the `AutoStartWatcher` (all folded into the plan watcher); the `pm/watchers/*.log` flat files (replaced by plan notes); the improvement watcher's gated-at-QA-PASS path and `pr-b77702b`'s `auto_merge` gating (superseded by sign-off + per-plan config — its dep-merge preamble folds in above); any ad-hoc taste-check/sign-off code the sign-off step now owns.
+**Removed (dead code):** `auto_start.py`'s programmatic orchestration; `bug_fix_impl_watcher.py` + `improvement_fix_impl_watcher.py` and the `AutoStartWatcher` (all folded into the plan watcher); the `pm/watchers/*.log` flat files (replaced by plan notes); the improvement watcher's gated-at-QA-PASS path and `pr-b77702b`'s `auto_merge` gating (superseded by sign-off + per-plan config — its dep-merge preamble stays in the impl session, rescoped as `pr-b77702b`); any ad-hoc taste-check/sign-off code the sign-off step now owns.
 
 ## Success criteria
 

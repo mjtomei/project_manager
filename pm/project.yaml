@@ -12435,77 +12435,47 @@ prs:
   notes: []
 - id: pr-b77702b
   plan: plan-regression
-  title: Per-plan auto-merge=false mode with dep-merge in start prompt
+  title: Dep-merge preamble in PR start/impl prompt for unmerged deps
   branch: pm/pr-b77702b-per-plan-auto-merge-false-mode-with-dep-merge-in-s
   status: pending
   depends_on: []
-  description: 'Add a per-plan setting that lets auto-start work through PRs without
-    merging them to master, and have the start prompt instruct Claude to merge in
-    any unmerged dependency branches before working. Together these enable iterating
-    on a coherent set of PRs in a plan without the changes touching master until the
-    user manually merges each one.
+  description: 'Inject a dep-merge preamble into the IMPLEMENTATION SESSION''s start
+    prompt when the PR has unmerged depends_on deps, so iteratively-developed chains
+    stay coherent without each PR landing on master first.
 
 
-    Motivation: today''s auto-start watchers (bug-fix-impl, improvement-fix-impl,
-    regression supervisor, and others) auto-merge PRs on QA PASS. That''s the right
-    default for narrow bug fixes, but for plans where the user expects to iterate
-    on the result before shipping (e.g. ambient surfaces, ux improvements, anything
-    new), there''s no way to let auto-start do the implementation work and stop short
-    of merging. Today the only way to get auto-start to chew through a plan is to
-    accept that everything will land in master.
+    WHY THE IMPL SESSION (not the plan watcher): the workdir is set up programmatically
+    at start and is only available to the impl session. The plan auto-start watcher
+    decides WHEN to start a PR, but the dependency-branch merge must happen inside
+    the session that owns the workdir. So this stays in the start/impl prompt builder.
 
 
-    Approach (chosen over a per-plan staging branch alternative because plans iterate
-    after first release — a graduate model assumes a clean ship-and-done lifecycle
-    that real plans do not have, whereas keeping each PR independently merge-able
-    composes with continuous amendment):
+    BEHAVIOR (pm_core/prompt_gen.py + start/impl prompts): add the preamble ONLY WHEN
+    the PR has at least one depends_on entry not yet merged. If there are no deps,
+    or all deps are already merged, omit the preamble entirely (merged deps are already
+    in the branch via the master base). When added, list only the still-unmerged deps
+    with branch names and instruct: "This PR depends on N PRs that have not yet merged:
+    [pr-A: branch, ...]. Before doing anything else, merge each into the current branch;
+    resolve conflicts as usual." Topological order is unneeded (if B depends on A,
+    B already merged A during its own start, so merging B transitively brings A).
+    Re-runs are no-ops (a dep merged to master is already in the branch via master).
+    Dep-merge only happens at start.
 
 
-    (1) Per-plan field ''auto_merge: bool'' in project.yaml plans entries, default
-    true (current behavior). When false, auto-start watchers run impl/review/QA as
-    normal but skip the merge step on QA PASS — the PR sits in qa-pass / in_review
-    state awaiting explicit human merge.
+    Files: pm_core/prompt_gen.py (start prompt preamble for unmerged deps; omitted
+    when all deps merged or none exist), plus tests: preamble INCLUDED when >=1 dep
+    unmerged and lists only those; OMITTED when all deps merged; OMITTED when no deps.
 
 
-    (2) The ''pm pr start'' prompt builder (pm_core/prompt_gen.py and the start-related
-    impl/spec prompts) gets a new preamble ONLY WHEN the PR has at least one depends_on
-    entry that is not yet merged. If the PR has no dependencies, or all its dependencies
-    are already merged, the preamble is omitted entirely (the merged deps are already
-    in the current branch via the master base — nothing to do). When the preamble
-    is added, it lists only the still-unmerged deps with their branch names and instructs
-    Claude: ''This PR depends on N PRs that have not yet merged: [pr-A: branch, pr-B:
-    branch, ...]. Before doing anything else, merge each of these into the current
-    branch. Resolve any conflicts as you would any other merge conflict.'' Topological
-    order is not needed because if B depends on A then B has already merged A in during
-    B''s own start, so when C starts depending on both, merging B alone transitively
-    brings in A. Re-runs are not an issue because if a dep merged to master in the
-    meantime its branch may be gone but its commits are already in the current branch
-    via master — the merge is a no-op. Dep-merge only happens in start; done/qa do
-    not need it because the impl session already integrated the deps and any subsequent
-    dep advances are handled when the user explicitly restarts.
-
-
-    (3) Watcher behavior: existing auto-start watchers (bug_fix_impl_watcher, improvement_fix_impl_watcher,
-    regression supervisor, plus any future ones) check the PR''s plan''s auto_merge
-    setting before invoking the merge step. When false, they stop at QA PASS, log
-    that the PR is awaiting manual merge, and move on to the next candidate.
-
-
-    Files: pm/project.yaml schema (the plans entry shape — document the field), pm_core/store.py
-    (read auto_merge with default True), pm_core/prompt_gen.py (start prompt preamble
-    for unmerged deps, omitted entirely when all deps merged or none exist), pm_core/watchers/bug_fix_impl_watcher.py
-    and improvement_fix_impl_watcher.py and any other watchers that auto-merge (skip
-    merge when plan''s auto_merge is false), tests for: schema default, watcher respects
-    flag, start prompt INCLUDES the preamble when at least one dep is unmerged and
-    lists only those unmerged deps, start prompt OMITS the preamble entirely when
-    all deps are merged, start prompt OMITS the preamble entirely when there are no
-    deps, end-to-end flow where a plan with auto_merge=false has its PRs picked up
-    by a watcher and reaches qa-pass without merging.'
+    RESCOPED: the per-plan auto_merge=false half of this PR''s original scope is SUPERSEDED
+    by Phase 11 — the plan auto-start watcher''s per-plan gated config + the sign-off
+    step''s gated mode (pr-2d5f712 / pr-ff9b728). Only the dep-merge preamble remains
+    here.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T00:39:59.719819+00:00'
-  updated_at: '2026-05-03T01:10:41.519198+00:00'
+  updated_at: '2026-05-25T15:07:33.460791+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22976,9 +22946,12 @@ prs:
     auto-start toggle becomes start/stop for this watcher.
 
 
-    DEP-MERGE ON START: when starting a PR whose depends_on PRs aren''t merged yet,
-    inject a dep-merge preamble (folded in from pr-b77702b) so the session builds
-    on its dependency branches rather than stale master.
+    DEP-MERGE ON START — STAYS IN THE IMPL SESSION (pr-b77702b), NOT this watcher:
+    when a PR''s depends_on PRs aren''t merged yet, the dependency branches are merged
+    into the workdir before work begins, via the IMPL session''s start prompt. The
+    workdir is set up programmatically at start and is only available to the impl
+    session, so the watcher only decides WHEN to start; the merge happens inside the
+    session. This PR does not own that logic — see pr-b77702b.
 
 
     MAX IN-FLIGHT PRS (new, a change to auto-start): the watcher chooses how many
@@ -23028,7 +23001,8 @@ prs:
     REMOVED (dead code): auto_start.py programmatic orchestration; bug_fix_impl_watcher.py
     + improvement_fix_impl_watcher.py + AutoStartWatcher; pm/watchers/*.log files
     (replaced by plan notes); the improvement watcher''s gated-at-QA-PASS path and
-    pr-b77702b''s auto_merge gating; any ad-hoc taste-check/sign-off code.
+    pr-b77702b''s auto_merge gating (its dep-merge preamble is retained, rescoped,
+    in pr-b77702b); any ad-hoc taste-check/sign-off code.
 
 
     Depends on: pr-2d5f712 (sign-off step).'
@@ -23036,7 +23010,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T14:39:04.607842+00:00'
+  updated_at: '2026-05-25T15:07:55.292133+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
