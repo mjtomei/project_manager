@@ -1054,11 +1054,31 @@ def _format_action_status(pr_id: str, action: str) -> str:
     return ""
 
 
+def _session_active_windows(base: str) -> dict[str, str]:
+    """Map each *attached* session in the group to its active window id.
+
+    Iterates ``[base] + list_grouped_sessions(base)`` and queries each
+    session's active window via ``tmux display-message``.  Sessions with no
+    client attached (or that error) are omitted — see
+    ``tmux.attached_active_window``.  Drives the picker's ●/○ per-session
+    window-selected indicators.
+    """
+    result: dict[str, str] = {}
+    for name in [base] + tmux_mod.list_grouped_sessions(base):
+        wid = tmux_mod.attached_active_window(name)
+        if wid:
+            result[name] = wid
+    return result
+
+
 def _build_picker_lines(
     prs: list[dict],
     current_pr_display: str | None,
     open_windows: set[str] | None = None,
     current_phase: str | None = None,
+    caller_wid: str | None = None,
+    other_wids: set[str] | None = None,
+    name_to_wid: dict[str, str] | None = None,
 ) -> list[tuple[str, str, str]]:
     """Build display lines for the action-based PR picker.
 
@@ -1068,6 +1088,14 @@ def _build_picker_lines(
 
     If `open_windows` is provided (set of tmux window names), actions
     whose windows are already open are annotated with ``[open]``.
+
+    The leading indicator column shows which session is currently viewing
+    each action's window.  When `name_to_wid` (window name → window id) is
+    provided, each row is marked ``●`` if its window is the active window
+    in the caller's session (`caller_wid`), ``○`` if it is the active
+    window in some other attached grouped session (`other_wids`), or blank
+    otherwise (caller takes priority).  Without `name_to_wid`, the column
+    falls back to the phase-derived dot (the invoking window's own phase).
     """
     from pm_core.cli.helpers import _pr_display_id
 
@@ -1115,21 +1143,38 @@ def _build_picker_lines(
         if label not in _LIST_ACTIONS:
             continue  # shortcut-only; status (if any) folded in above
         cmd = cmd_template.format(pr_id=pr["id"])
-        indicator = "●" if label == phase else " "
+
+        pattern = _ACTION_WINDOW_PATTERNS.get(label)
+        win_name = pattern.format(display_id=display_id) if pattern else None
+        # qa windows can have scenario suffixes (qa-#158-s1); match the
+        # bare name or any "<name>-…" variant for both [open] and the
+        # per-session indicator below.
+        def _matches(name: str) -> bool:
+            if not win_name:
+                return False
+            if label == "qa":
+                return name == win_name or name.startswith(win_name + "-")
+            return name == win_name
+
+        # Per-session window-selected indicator (●/○) when the caller
+        # supplied the active-window map; otherwise fall back to the
+        # phase-derived dot (current window of the invoking session).
+        if name_to_wid is not None:
+            wids = {wid for name, wid in name_to_wid.items() if _matches(name)}
+            if caller_wid and caller_wid in wids:
+                indicator = "●"
+            elif other_wids and (wids & other_wids):
+                indicator = "○"
+            else:
+                indicator = " "
+        else:
+            indicator = "●" if label == phase else " "
 
         # Check if this action's window is open
         open_tag = ""
-        if open_windows is not None:
-            pattern = _ACTION_WINDOW_PATTERNS.get(label)
-            if pattern:
-                win_name = pattern.format(display_id=display_id)
-                # qa windows can have scenario suffixes (qa-#158-s1)
-                if label == "qa":
-                    if any(w == win_name or w.startswith(win_name + "-")
-                           for w in open_windows):
-                        open_tag = " [open]"
-                elif win_name in open_windows:
-                    open_tag = " [open]"
+        if open_windows is not None and win_name is not None:
+            if any(_matches(w) for w in open_windows):
+                open_tag = " [open]"
 
         # Live status from the shared runtime-state file (loop iteration,
         # idle/waiting derived from the latest hook event, etc.).
@@ -1716,8 +1761,19 @@ def popup_picker_cmd(session: str, window_name: str):
             _log.exception(
                 "popup-picker: self-heal relink failed for %s", current_pr)
 
-    # Gather open windows to annotate the picker
-    open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
+    # Gather open windows to annotate the picker.  One list_windows call
+    # feeds both the [open] tags (by name) and the per-session ●/○
+    # indicator (which needs name → window-id resolution).
+    all_windows = tmux_mod.list_windows(base)
+    open_windows = {w["name"] for w in all_windows}
+    name_to_wid = {w["name"]: w["id"] for w in all_windows}
+
+    # Per-session active-window map: which window each attached session in
+    # the group is currently viewing.  The caller's own active window gets
+    # ●; any other attached session's gets ○.
+    active_map = _session_active_windows(base)
+    caller_wid = active_map.get(session)
+    other_wids = {wid for s, wid in active_map.items() if s != session}
 
     # Build the navigation list: PRs that the user has at least one
     # open window for.  The invoking window's PR (if any) is included
@@ -1770,7 +1826,9 @@ def popup_picker_cmd(session: str, window_name: str):
         # as "no phase" rather than falling back to status-derived.
         phase = invoking_phase if pr_disp == home_pr else ""
         pr_lines = _build_picker_lines(
-            prs, pr_disp, open_windows, current_phase=phase)
+            prs, pr_disp, open_windows, current_phase=phase,
+            caller_wid=caller_wid, other_wids=other_wids,
+            name_to_wid=name_to_wid)
         return pr_lines, picked, label_to_cmd
 
     current_pr = nav_pr_ids[nav_index]

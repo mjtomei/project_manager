@@ -564,16 +564,10 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_detects_merged(self, tmp_pm_root_github):
         """sync_from_github detects merged PRs from GitHub API."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "MERGED",
-            "isDraft": False,
-            "mergedAt": "2024-01-15T10:00:00Z"
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):  # Don't actually spawn background process
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "MERGED", "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z",
+        }), patch("subprocess.Popen"):  # Don't actually spawn background process
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -581,16 +575,9 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_detects_closed(self, tmp_pm_root_github):
         """sync_from_github detects closed PRs from GitHub API."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "CLOSED",
-            "isDraft": False,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):  # Don't actually spawn background process
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "CLOSED", "isDraft": False, "mergedAt": None,
+        }), patch("subprocess.Popen"):  # Don't actually spawn background process
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -603,16 +590,9 @@ class TestSyncFromGitHub:
         data["prs"][0]["status"] = "in_review"
         store.save(data, tmp_pm_root_github)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "OPEN",
-            "isDraft": True,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "OPEN", "isDraft": True, "mergedAt": None,
+        }), patch("subprocess.Popen"):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -620,16 +600,9 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_detects_ready_as_in_review(self, tmp_pm_root_github):
         """sync_from_github sets ready PRs to in_review."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "OPEN",
-            "isDraft": False,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "OPEN", "isDraft": False, "mergedAt": None,
+        }), patch("subprocess.Popen"):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -638,16 +611,10 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_skips_prs_without_gh_pr_number(self, tmp_pm_root_github):
         """sync_from_github skips PRs without gh_pr_number."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "MERGED",
-            "isDraft": False,
-            "mergedAt": "2024-01-15T10:00:00Z"
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "MERGED", "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z",
+        }), patch("subprocess.Popen"):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         # pr-003 has no gh_pr_number, should not appear in results
@@ -656,11 +623,7 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_handles_api_errors(self, tmp_pm_root_github):
         """sync_from_github handles GitHub API errors gracefully."""
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value=None):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         # Should still return synced=True but with no updates
@@ -674,15 +637,9 @@ class TestSyncFromGitHub:
         data["prs"][1]["status"] = "qa"
         store.save(data, tmp_pm_root_github)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "OPEN",
-            "isDraft": False,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "OPEN", "isDraft": False, "mergedAt": None,
+        }):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -699,15 +656,10 @@ class TestSyncFromGitHub:
         data["prs"][1]["status"] = "qa"
         store.save(data, tmp_pm_root_github)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "MERGED",
-            "isDraft": False,
-            "mergedAt": "2024-01-15T10:00:00Z"
-        })
-
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "MERGED", "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z",
+        }):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -719,15 +671,9 @@ class TestSyncFromGitHub:
         data["prs"][1]["status"] = "qa"
         store.save(data, tmp_pm_root_github)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "CLOSED",
-            "isDraft": False,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "CLOSED", "isDraft": False, "mergedAt": None,
+        }):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True

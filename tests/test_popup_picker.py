@@ -230,6 +230,109 @@ class TestBuildPickerLines:
         assert not any("[open]" in d for d in rl_lines)
 
 
+class TestPerSessionWindowIndicator:
+    """●/○ markers for which session is viewing each action's window."""
+
+    # Window-id map for an in_progress PR displayed as #158.
+    NAME_TO_WID = {
+        "#158": "@1",
+        "review-#158": "@2",
+        "qa-#158": "@3",
+        "merge-#158": "@4",
+        "tui": "@9",
+    }
+
+    def _rows(self, **kw):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(
+            prs, "#158", name_to_wid=self.NAME_TO_WID, **kw)
+        return {
+            # key each action row by its label
+            ("qa" if "qa" in d and "review" not in d
+             else "review" if "review" in d and "review-loop" not in d
+             else "merge" if "merge" in d
+             else "start"): d
+            for d, cmd, _ in lines if cmd
+        }
+
+    def test_caller_active_window_gets_filled_dot(self):
+        rows = self._rows(caller_wid="@1", other_wids=set())
+        assert "●" in rows["start"]
+        assert "○" not in rows["start"]
+        # No other session → everything else blank.
+        assert "●" not in rows["review"] and "○" not in rows["review"]
+        assert "●" not in rows["qa"] and "○" not in rows["qa"]
+
+    def test_other_session_active_window_gets_open_circle(self):
+        rows = self._rows(caller_wid="@1", other_wids={"@2"})
+        assert "●" in rows["start"]
+        assert "○" in rows["review"]
+        assert "●" not in rows["review"]
+
+    def test_caller_and_other_on_same_window_shows_filled_dot(self):
+        # Same window active in caller AND another session → ● wins.
+        rows = self._rows(caller_wid="@1", other_wids={"@1"})
+        assert "●" in rows["start"]
+        assert "○" not in rows["start"]
+
+    def test_unselected_window_is_blank(self):
+        rows = self._rows(caller_wid="@1", other_wids={"@2"})
+        # merge window (@4) is selected by nobody.
+        assert "●" not in rows["merge"]
+        assert "○" not in rows["merge"]
+
+    def test_caller_on_non_pr_window_no_filled_dot(self):
+        # Caller sitting on the tui window → no action row is ●.
+        rows = self._rows(caller_wid="@9", other_wids={"@3"})
+        assert all("●" not in d for d in rows.values())
+        assert "○" in rows["qa"]
+
+    def test_qa_scenario_window_prefix_match(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        name_to_wid = {"#158": "@1", "qa-#158-s1": "@7"}
+        lines = _build_picker_lines(
+            prs, "#158", name_to_wid=name_to_wid,
+            caller_wid="@1", other_wids={"@7"})
+        qa_line = next(d for d, cmd, _ in lines
+                       if cmd and "qa" in d and "review" not in d)
+        assert "○" in qa_line
+
+    def test_falls_back_to_phase_without_window_map(self):
+        # No name_to_wid → legacy phase dot on the status's phase row.
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, "#158")
+        start_line = next(d for d, cmd, _ in lines if cmd and "start" in d)
+        assert "●" in start_line
+
+    def test_open_tag_still_works_with_window_map(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(
+            prs, "#158", open_windows={"#158", "review-#158"},
+            name_to_wid=self.NAME_TO_WID, caller_wid="@1", other_wids=set())
+        review_line = next(d for d, cmd, _ in lines
+                           if cmd and "review" in d and "review-loop" not in d)
+        assert "[open]" in review_line
+
+
+class TestSessionActiveWindows:
+    """_session_active_windows builds the per-session active-window map."""
+
+    def test_builds_map_over_group_skipping_unattached(self):
+        from pm_core.cli.session import _session_active_windows
+
+        def fake_active(name):
+            # base unattached → None; two grouped sessions attached.
+            return {"base~1": "@2", "base~2": "@5"}.get(name)
+
+        with patch("pm_core.cli.session.tmux_mod") as tmux:
+            tmux.list_grouped_sessions.return_value = ["base~1", "base~2"]
+            tmux.attached_active_window.side_effect = fake_active
+            result = _session_active_windows("base")
+
+        assert result == {"base~1": "@2", "base~2": "@5"}
+        tmux.list_grouped_sessions.assert_called_once_with("base")
+
+
 class TestPickerMergeDispatch:
     def test_merge_action_passes_resolve_window(self):
         """Picker merge entry must pass --resolve-window so conflicts launch
@@ -306,7 +409,9 @@ class TestPickerWindowDesync:
              patch("pm_core.cli.session.pane_registry.base_session_name",
                    return_value="sess"), \
              patch("pm_core.cli.session.tmux_mod.list_windows",
-                   return_value=[{"name": window}]), \
+                   return_value=[{"name": window, "id": "@1"}]), \
+             patch("pm_core.cli.session._session_active_windows",
+                   return_value={}), \
              patch("pm_core.gh_ops.list_prs", return_value=gh_prs), \
              patch("pm_core.cli.session._wait_dismiss"), \
              patch("shutil.which", return_value=None), \
