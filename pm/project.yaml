@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-9330dec
+  active_pr: pr-8409c64
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -19770,7 +19770,7 @@ prs:
   plan: plan-regression
   title: GitHub backend mock for regression tests
   branch: pm/pr-9603d04-github-backend-mock-for-regression-tests
-  status: qa
+  status: merged
   depends_on: []
   description: 'Provide a mock/fake GitHub backend so regression tests can exercise
     the github-backend code paths (PR create, status sync, comments, merges, post-merge
@@ -19821,10 +19821,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-25T02:45:05.887640+00:00'
+  updated_at: '2026-05-25T02:57:48.157769+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
-  merged_at: null
+  merged_at: '2026-05-25T02:57:48.157769+00:00'
   notes:
   - id: note-54753b4
     text: 'Scope correction (description oversight): the fake must be backed by a
@@ -21737,7 +21737,7 @@ prs:
   title: 'Bug: pm merge''s git stash/pop corrupts project.yaml with conflict markers
     and leaks un-popped stashes'
   branch: pm/pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupts-project-yaml
-  status: pending
+  status: in_review
   depends_on: []
   description: "Observed while merging PR #209 (gh #209 / pr-1160366). The merge left\
     \ pm/project.yaml containing raw git conflict markers:\n\n    <<<<<<< Updated\
@@ -21777,13 +21777,13 @@ prs:
     \ up status=merged with merged_at set.\n\nfiles: the pm merge implementation (pm_core/git_ops.py\
     \ / pm_core/pr_sync.py / wherever 'auto-stash for merge' is created — grep that\
     \ string), pm_core/store.py (load guard / locked_update), and merge-flow tests."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/222
+  gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-24T21:48:25.739643+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-25T03:13:02.415469+00:00'
+  started_at: '2026-05-25T02:58:20.169677+00:00'
+  reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
   notes:
   - id: note-4b81277
@@ -21839,12 +21839,13 @@ prs:
       so picker merges self-heal like real merge conflicts do.'
     created_at: '2026-05-24T21:48:25Z'
     last_edited: '2026-05-24T21:48:25Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
     at action-execution time'
   branch: pm/pr-c41f029-bug-capture-originating-tmux-session-when-the-pr-a
-  status: in_progress
+  status: qa
   depends_on: []
   description: 'When a TUI action (pr start/review/qa/merge, review-loop, qa-loop)
     creates or replaces a window, pm tries to move the session that initiated the
@@ -21905,9 +21906,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/220
   gh_pr_number: 220
   created_at: '2026-05-21T15:56:33.458586+00:00'
-  updated_at: '2026-05-25T02:46:34.752207+00:00'
+  updated_at: '2026-05-25T03:05:18.047602+00:00'
   started_at: '2026-05-25T02:46:34.752207+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-25T03:05:18.047602+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
@@ -22118,7 +22119,7 @@ prs:
   title: 'Bug: home-window line truncation undercounts emoji width, can soft-wrap
     on narrow panes'
   branch: pm/pr-9330dec-bug-home-window-line-truncation-undercounts-emoji-
-  status: in_progress
+  status: qa
   depends_on: []
   description: 'Location: pm_core/home_window/pr_list.py:_truncate (and callers in
     _render_content/_compose).
@@ -22145,9 +22146,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/221
   gh_pr_number: 221
   created_at: '2026-05-21T15:56:55.362547+00:00'
-  updated_at: '2026-05-25T02:46:52.119308+00:00'
+  updated_at: '2026-05-25T03:05:01.889435+00:00'
   started_at: '2026-05-25T02:46:52.119308+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-25T03:05:01.889435+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9330dec-bug-home-window-line-truncation-unde-07edf135
@@ -22393,7 +22394,7 @@ prs:
   title: 'Bug: terminal-status PRs keep their tmux windows when finalized outside
     pm merge flow'
   branch: pm/pr-3d1fa55-bug-terminal-status-prs-keep-their-tmux-windows-wh
-  status: qa
+  status: in_review
   depends_on: []
   description: '## Symptom
 
@@ -22440,9 +22441,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/217
   gh_pr_number: 217
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-24T22:24:57.753379+00:00'
+  updated_at: '2026-05-25T03:22:10.165069+00:00'
   started_at: '2026-05-24T21:58:50.019678+00:00'
-  reviewed_at: '2026-05-24T22:24:57.753379+00:00'
+  reviewed_at: '2026-05-25T03:22:10.165069+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d1fa55-bug-terminal-status-prs-keep-their-t-c52f26ee
@@ -22594,3 +22595,78 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8d8b360-bug-merge-conflict-resolution-pushes-37062cb3
+- id: pr-8409c64
+  plan: bugs
+  title: 'Bug: zz d review-loop popup spinner never switches to the review window
+    (new or existing)'
+  branch: pm/pr-8409c64-bug-zz-d-review-loop-popup-spinner-never-switches-
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    Pressing `zz d` to start/restart a review loop from another window: the review
+    window opens, but the popup spinner pane **stays on the "starting" frame and never
+    switches focus to the review window**. The user is left in the spinner, not the
+    review session. Happens for BOTH cases:
+
+    - **No review window open (fresh)** → window is created, but no switch.
+
+    - **Review window already open** (running or terminal loop) → still no switch.
+
+
+    Longstanding — predates the recent gh_pr_number/desync work. NOT the wrong-window
+    / cwd-yaml case (pr-c1f8086 / #206) — the spinner is watching the right window;
+    it just never fires the switch.
+
+
+    ## Relationship to prior PRs
+
+    - Same *shape* as #186 (pr-7b3b639, "popup hangs after `pr start <new-pr>` even
+    though impl window opens") — but for **review-loop**, and worse: in #186 the client
+    DID switch (only the popup pane failed to close); here it does **not switch at
+    all**.
+
+    - Effectively a **regression of / gap in #201** (pr-f27b882), which claimed the
+    switch works for the "no review window open" and "loop running" cases. Now neither
+    switches.
+
+
+    ## Likely area
+
+    The popup spinner''s window-switch path: `_wait_for_tui_command` (pm_core/cli/session.py
+    ~1291-1366) polls runtime_state transitions (queued→launching→running) and window
+    appearance, then calls `switch_sessions_to_window` once the review window appears.
+    For review-loop it''s holding the "starting"/launching frame and never firing
+    the switch for either new or existing windows. Suspects:
+
+    - the launching→running state transition for review-loop start vs what the spinner
+    waits for (the spinner may never observe the transition it keys off);
+
+    - the suppress-switch flag (pr-6553192) being set/not cleared;
+
+    - `switch_sessions_to_window` not being invoked (or invoked against a window the
+    spinner doesn''t confirm).
+
+    Cross-reference the observability added in #203 (pr-813cc19) — the spinner now
+    logs `target_window`, `initial_window_ids`, `initial_state`, and `consume_suppress_switch`;
+    use those logs to pinpoint where the switch is skipped.
+
+
+    ## Acceptance
+
+    - `zz d` from a non-review window lands focus on `review-{display_id}` and dismisses
+    the spinner, for: (a) no review window open, (b) review window open with a running
+    loop, (c) review window open with a terminal loop.
+
+    - The spinner never holds the "starting" frame after the review window has opened.
+
+    - Tests cover the new-window and existing-window cases.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T03:25:04.533357+00:00'
+  updated_at: '2026-05-25T03:25:04.533357+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
