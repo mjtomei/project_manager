@@ -22792,3 +22792,20 @@ prs:
       run switches active to review-<display_id>, proving no-switch is meaningful.'
     created_at: '2026-05-25T03:51:07Z'
     last_edited: '2026-05-25T03:51:07Z'
+  - id: note-74ee751
+    text: 'QA scenario 5 ("bundled reproduction test fails pre-fix / passes post-fix;
+      adjacent spinner tests stay green") was REFINER-REJECTED/deferred. It is a pure
+      code-level test-harness scenario: tests/test_spinner_review_loop_switch.py and
+      the adjacent tests/test_picker_spinner_terminal.py both call the PRIVATE _wait_for_tui_command
+      directly with monkeypatched tmux_mod/state_root/store.load/runtime_state/_wait_dismiss/select.select
+      — no real tmux, no CLI/TUI surface. Verifying "the unit test fails when the
+      one-line fix is reverted" is monkeypatched-private-function inspection, which
+      the QA mandate excludes (real-surface only; reshape-or-reject, never convert
+      to a code-reading exercise). The user-facing spinner-switch behavior for all
+      three acceptance cases (no window / running loop / terminal loop) is already
+      the job of the sibling real-tmux scenarios and was verified on the real surface
+      in commit 2b2953b9. The bundled pytest is fine as a CI regression net; it just
+      is not a QA-surface scenario. If a future run wants this covered, drive zz d
+      from a foreign-cwd popup on a real tmux session and assert focus lands on review-<display_id>.'
+    created_at: '2026-05-25T03:47:47Z'
+    last_edited: '2026-05-25T03:47:47Z'
