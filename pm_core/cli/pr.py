@@ -3174,7 +3174,15 @@ def pr_auto_sequence(pr_id: str):
         if hop == "impl":
             impl_transcript = tdir / f"impl-{pr_id}.jsonl"
             ctx = click.get_current_context()
-            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=False,
+            # fresh=True: a bounce must RELAUNCH the impl agent so it actually
+            # reworks against the sign-off feedback.  With fresh=False the
+            # pre-existing (idle) impl window short-circuits pr_start's
+            # background fast path ("already exists, no focus change") and no
+            # new agent ever runs — the next tick would just re-advance to
+            # in_review with zero rework.  fresh=True reuses the existing
+            # workdir (status is in_progress) but kills the stale window and
+            # starts a fresh session, mirroring the sign_off->review hop.
+            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
                        background=True, transcript=str(impl_transcript),
                        companion=False)
             click.echo("sign_off: returning to impl")

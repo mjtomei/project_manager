@@ -492,3 +492,8 @@ class TestSignOff:
         assert result.exit_code == 0, result.output
         assert "sign_off: returning to impl" in result.output
         assert pr["status"] == "in_progress"
+        # A bounce must RELAUNCH the impl agent (fresh=True): with fresh=False
+        # an existing idle impl window short-circuits pr_start's background
+        # fast path and no rework ever runs.
+        mock_start.assert_called_once()
+        assert mock_start.call_args.kwargs["fresh"] is True
