@@ -17,25 +17,49 @@ class TestCallerSwitchTarget:
     def test_no_tmux_pane_returns_none(self):
         assert qa_status._caller_switch_target("proj") is None
 
-    @patch.dict("os.environ", {"TMUX_PANE": "%1"})
+    # ``TMUX`` empty so these exercise the ``$TMUX_PANE`` fallback path
+    # deterministically (even when the suite itself runs inside tmux).
+    @patch.dict("os.environ", {"TMUX_PANE": "%1", "TMUX": ""})
     @patch("pm_core.qa_status.subprocess.run")
     def test_in_base_session_returns_it(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="proj\n", stderr="")
         assert qa_status._caller_switch_target("proj") == "proj"
 
-    @patch.dict("os.environ", {"TMUX_PANE": "%1"})
+    @patch.dict("os.environ", {"TMUX_PANE": "%1", "TMUX": ""})
     @patch("pm_core.qa_status.subprocess.run")
     def test_in_grouped_session_returns_it(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="proj~3\n", stderr="")
         assert qa_status._caller_switch_target("proj") == "proj~3"
 
-    @patch.dict("os.environ", {"TMUX_PANE": "%1"})
+    @patch.dict("os.environ", {"TMUX_PANE": "%1", "TMUX": ""})
     @patch("pm_core.qa_status.subprocess.run")
     def test_in_different_group_returns_none(self, mock_run):
         """Caller in a different project's session is not this base's client —
         no arbitrary grouped session is targeted."""
         mock_run.return_value = MagicMock(returncode=0, stdout="otherproj\n", stderr="")
         assert qa_status._caller_switch_target("proj") is None
+
+    @patch.dict("os.environ", {"TMUX": "/tmp/tmux-1000/default,932,0", "TMUX_PANE": "%9"})
+    @patch("pm_core.qa_status.subprocess.run")
+    def test_env_session_id_wins_over_pane_activity(self, mock_run):
+        """Regression (pr-0b4e1a9): for a window shared across grouped sessions
+        ``display-message -t <pane>`` resolves to the most-recently-attached
+        grouped session, which can be an unrelated one.  The caller's true
+        session must come from ``$TMUX``'s session id, not the pane."""
+        def fake(cmd, **kw):
+            # `-t $0` (env session id) -> our own base; `-t %9` (pane) -> the
+            # wrong, hijack-prone grouped session.
+            if "$0" in cmd:
+                return MagicMock(returncode=0, stdout="proj\n", stderr="")
+            return MagicMock(returncode=0, stdout="proj~7\n", stderr="")
+        mock_run.side_effect = fake
+        assert qa_status._caller_switch_target("proj") == "proj"
+
+    @patch.dict("os.environ", {"TMUX": "", "TMUX_PANE": "%9"})
+    @patch("pm_core.qa_status.subprocess.run")
+    def test_falls_back_to_pane_when_no_tmux_env(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="proj~2\n", stderr="")
+        assert qa_status._caller_switch_target("proj") == "proj~2"
 
 
 class TestSwitchToWindow:

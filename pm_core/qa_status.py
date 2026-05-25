@@ -218,7 +218,46 @@ def _caller_switch_target(base: str) -> str | None:
     in pr-0b4e1a9).  No attached-client check is needed — the caller is by
     construction in this pane's session, so switching it steals nobody's
     focus.
+
+    The caller's session is resolved from ``$TMUX`` (its session id is fixed
+    at pane-spawn time, so it deterministically names the session the pane
+    *belongs to*).  ``display-message -t <pane>`` is only a fallback: for a
+    window shared across grouped sessions it resolves to the most-recently-
+    *attached* grouped session, which may be an unrelated one — using it
+    alone could hijack that session's focus.
     """
+    current = _caller_session_from_env() or _session_name_for_pane()
+    if current and (current == base or current.startswith(base + "~")):
+        return current
+    return None
+
+
+def _caller_session_from_env() -> str | None:
+    """Resolve the caller pane's OWN session name from ``$TMUX``.
+
+    ``$TMUX`` is ``socket_path,server_pid,session_id``; the session id is
+    set when the pane process is spawned, so it names the session the pane
+    belongs to even for a window shared across grouped sessions.
+    """
+    tmux_env = os.environ.get("TMUX", "")
+    parts = tmux_env.split(",")
+    if len(parts) < 3 or not parts[-1].strip():
+        return None
+    session_id = "$" + parts[-1].strip()
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", session_id, "#{session_name}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _session_name_for_pane() -> str | None:
+    """Fallback caller-session resolution via ``$TMUX_PANE`` (activity-based)."""
     pane = os.environ.get("TMUX_PANE")
     if not pane:
         return None
@@ -227,12 +266,9 @@ def _caller_switch_target(base: str) -> str | None:
             ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
             capture_output=True, text=True,
         )
-        current = result.stdout.strip()
-        if current and (current == base or current.startswith(base + "~")):
-            return current
+        return result.stdout.strip() or None
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _switch_to_window(session: str, window_name: str) -> None:

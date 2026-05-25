@@ -521,6 +521,36 @@ def set_shared_window_size(session: str, window: str) -> None:
         )
 
 
+def _caller_session_from_env() -> str | None:
+    """Resolve the caller pane's OWN session name from the ``$TMUX`` env var.
+
+    ``$TMUX`` is ``socket_path,server_pid,session_id`` and the session_id is
+    set when the pane process is spawned, so it deterministically names the
+    session the pane *belongs to* — even when the window is shared across
+    grouped sessions.  This is more reliable than
+    :func:`get_session_name` for that case: ``display-message -t <pane>``
+    resolves an ambiguous (shared) window to whichever grouped session was
+    most recently *attached*, which may be an unrelated session, not the
+    caller's own (see :func:`caller_switch_target`).
+
+    Returns ``None`` when ``$TMUX`` is absent/malformed or the id no longer
+    maps to a live session.
+    """
+    tmux_env = os.environ.get("TMUX", "")
+    parts = tmux_env.split(",")
+    if len(parts) < 3 or not parts[-1].strip():
+        return None
+    session_id = "$" + parts[-1].strip()
+    result = _run(
+        _tmux_cmd("display-message", "-t", session_id, "-p", "#{session_name}"),
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    name = result.stdout.strip()
+    return name or None
+
+
 def caller_switch_target(base: str) -> str | None:
     """Return the caller's OWN grouped session for a focus-mutating switch.
 
@@ -538,9 +568,16 @@ def caller_switch_target(base: str) -> str | None:
     rather than hijacking an unrelated attached grouped session's focus.
     No attached-client check is needed: by construction the caller is *in*
     this session, so switching it steals nobody else's focus.
+
+    The caller's session is resolved from ``$TMUX`` (the session id is fixed
+    at pane-spawn time) and only falls back to :func:`get_session_name` if
+    that fails.  Using ``get_session_name`` alone is unsafe here: for a
+    window shared across grouped sessions it resolves to the most-recently-
+    *attached* grouped session, so a pane in session A could otherwise yield
+    B and hijack B's focus.
     """
     if in_tmux():
-        current = get_session_name()
+        current = _caller_session_from_env() or get_session_name()
         if current and (current == base or current.startswith(base + "~")):
             return current
     return None

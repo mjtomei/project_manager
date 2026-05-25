@@ -540,22 +540,63 @@ class TestCallerSwitchTarget:
     def test_not_in_tmux_returns_none(self, mock_in):
         assert caller_switch_target("proj") is None
 
+    @patch("pm_core.tmux._caller_session_from_env", return_value=None)
     @patch("pm_core.tmux.get_session_name", return_value="proj")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_in_base_session_returns_it(self, mock_in, mock_gsn):
+    def test_in_base_session_returns_it(self, mock_in, mock_gsn, mock_env):
         assert caller_switch_target("proj") == "proj"
 
+    @patch("pm_core.tmux._caller_session_from_env", return_value=None)
     @patch("pm_core.tmux.get_session_name", return_value="proj~3")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_in_grouped_session_returns_it(self, mock_in, mock_gsn):
+    def test_in_grouped_session_returns_it(self, mock_in, mock_gsn, mock_env):
         assert caller_switch_target("proj") == "proj~3"
 
+    @patch("pm_core.tmux._caller_session_from_env", return_value=None)
     @patch("pm_core.tmux.get_session_name", return_value="otherproj")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_in_different_group_returns_none(self, mock_in, mock_gsn):
+    def test_in_different_group_returns_none(self, mock_in, mock_gsn, mock_env):
         """Caller in a different project's session must not be treated as this
         base's client — no arbitrary grouped session is targeted."""
         assert caller_switch_target("proj") is None
+
+    @patch("pm_core.tmux._caller_session_from_env", return_value="proj")
+    @patch("pm_core.tmux.get_session_name", return_value="proj~9")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_env_resolution_wins_over_activity(self, mock_in, mock_gsn, mock_env):
+        """Regression (pr-0b4e1a9): for a window shared across grouped sessions,
+        ``get_session_name`` (``display-message -t <pane>``) resolves to the
+        most-recently-*attached* grouped session, which can be an unrelated
+        one — switching it would hijack its focus.  The caller's true session
+        comes from ``$TMUX`` (resolved by ``_caller_session_from_env``) and
+        must take precedence so we never select the wrong session."""
+        assert caller_switch_target("proj") == "proj"
+        mock_gsn.assert_not_called()
+
+    @patch("pm_core.tmux._caller_session_from_env", return_value=None)
+    @patch("pm_core.tmux.get_session_name", return_value="proj~2")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_falls_back_to_get_session_name(self, mock_in, mock_gsn, mock_env):
+        """When ``$TMUX`` is absent/malformed, fall back to the pane-based
+        resolver rather than skipping the switch entirely."""
+        assert caller_switch_target("proj") == "proj~2"
+
+    @patch("pm_core.tmux._run")
+    def test_caller_session_from_env_parses_tmux_var(self, mock_run):
+        """``$TMUX`` is ``socket,pid,session_id``; the id is mapped to a name."""
+        from pm_core.tmux import _caller_session_from_env
+        mock_run.return_value = MagicMock(returncode=0, stdout="proj~1\n")
+        with patch.dict("os.environ", {"TMUX": "/tmp/tmux-1000/default,932,1"}):
+            assert _caller_session_from_env() == "proj~1"
+        args = mock_run.call_args[0][0]
+        assert "$1" in args  # resolved by session id, not pane
+
+    @patch("pm_core.tmux._run")
+    def test_caller_session_from_env_no_tmux(self, mock_run):
+        from pm_core.tmux import _caller_session_from_env
+        with patch.dict("os.environ", {}, clear=True):
+            assert _caller_session_from_env() is None
+        mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
