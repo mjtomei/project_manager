@@ -187,6 +187,25 @@ class TestPickerCapture:
         from pm_core.cli.session import _origin_action_for_cmd
         assert _origin_action_for_cmd(cmd) == (pr_id, action)
 
+    @pytest.mark.parametrize("cmd,expected", [
+        ("", (None, None)),                  # empty
+        ("garbage", (None, None)),           # not a recognized form
+        ("pr foo pr-x", (None, None)),       # unknown pr subcommand
+        ("tui:garbage", (None, None)),       # tui: route, unparseable
+        ("pr start", (None, "start")),       # direct route, no pr id token
+    ])
+    def test_origin_action_parser_no_match(self, cmd, expected):
+        """Malformed / no-pr-id commands return without a usable
+        (pr_id, action) so the caller's `if o_pr and o_action` guard skips
+        capture — the spec's "capture skipped; no crash" edge case."""
+        from pm_core.cli.session import _origin_action_for_cmd
+        result = _origin_action_for_cmd(cmd)
+        assert result == expected
+        # The capture guard only fires when BOTH are truthy; verify these
+        # all fail it so no spurious entry is recorded.
+        o_pr, o_action = result
+        assert not (o_pr and o_action)
+
     def test_run_picker_command_captures_session(self):
         """_run_picker_command must pin the popup session at dispatch time
         for the (pr_id, action) the action will later consume."""
