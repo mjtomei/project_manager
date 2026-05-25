@@ -21781,7 +21781,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-24T21:48:25.739643+00:00'
+  updated_at: '2026-05-25T03:11:52.079848+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21839,6 +21839,30 @@ prs:
       so picker merges self-heal like real merge conflicts do.'
     created_at: '2026-05-24T21:48:25Z'
     last_edited: '2026-05-24T21:48:25Z'
+  - id: note-87e64d7
+    text: 'Implemented (commits 51c2a27, dafc30f). STASH/POP CORRUPTION (primary):
+      root cause was reconciling concurrent project.yaml edits with git TEXT stash/pop.
+      Fix keeps project.yaml OUT of the text stash entirely — _stash_for_merge captures
+      local edits + committed ancestor and `git checkout --` reverts the file so the
+      merge replaces it cleanly; _unstash_after_merge re-applies the local edits structurally
+      via new store.three_way_merge() under store.locked_update (re-reads merged on-disk
+      state under the lock → no text conflict possible). Added _reap_auto_stashes
+      (drops only "pm: auto-stash for merge", never other WIP). Added store.load()
+      conflict-marker guard (clear error w/ file+line+remediation, store.find_conflict_markers).
+      On a genuine NON-project.yaml stash-pop conflict, _unstash_after_merge now launches
+      _launch_merge_window (PR-note 3). Also fixed incidental _dirty_file_paths off-by-one:
+      .strip() on whole `git status` output ate the leading status-column space of
+      a worktree-only change, mangling pm/project.yaml→m/project.yaml (broke has_pm
+      + project.yaml detection). Tests: tests/test_merge_stash.py (real-git reconciliation
+      asserting valid YAML / no markers / no leaked stash / PR→merged+merged_at; three_way_merge;
+      guard; _dirty_file_paths). #210 ORPHAN CLASS (partial): added _persist_with_backoff
+      for pr_start gh_pr_number persist so a transient lock timeout cannot orphan
+      a just-created GitHub PR. STILL OPEN: create-after-reserve ordering + branch-based
+      orphan reconciliation in sync-github (matches by gh_pr_number, cannot backfill).
+      Full suite green except pre-existing unrelated test_hook_events::test_installer_writes_standalone_receiver
+      (fails on clean master too).'
+    created_at: '2026-05-25T03:11:51Z'
+    last_edited: '2026-05-25T03:11:51Z'
 - id: pr-c41f029
   plan: bugs
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
