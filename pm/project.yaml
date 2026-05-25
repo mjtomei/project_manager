@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8e693f6
+  active_pr: pr-8015c1d
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22567,7 +22567,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T17:01:35.814384+00:00'
+  updated_at: '2026-05-25T17:09:04.420787+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: null
   merged_at: null
@@ -22601,6 +22601,19 @@ prs:
       re-running sign-off propagates it.'
     created_at: '2026-05-25T17:01:35Z'
     last_edited: '2026-05-25T17:01:35Z'
+  - id: note-2566eba
+    text: 'CORRECTION — supersedes note-6f7abcd: DISREGARD the requirement that sign-off
+      be re-runnable on already-merged PRs / that a bounce re-open merged work / that
+      sign_off be enterable from a merged PR. That is FUTURE work, now tracked as
+      its own PR (pr-8015c1d, deferred). For THIS PR, the process-update flow does
+      NOT re-open merged PRs — instead a NEW PR is created (a single new PR for a
+      one-off gap, or a plan respin = a set of new PRs for a broad update), driven
+      through the normal forward flow under updated prompting. So pr-2d5f712 only
+      needs sign_off in the normal forward lifecycle (qa -> sign_off -> merge, or
+      bounce within a not-yet-merged PR). The pre/post-fix-capture acceptance check
+      (note-0357619) still stands for bug PRs going through sign-off.'
+    created_at: '2026-05-25T17:09:04Z'
+    last_edited: '2026-05-25T17:09:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
@@ -22758,6 +22771,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
   updated_at: '2026-05-25T15:07:55.292133+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8015c1d
+  plan: plan-regression
+  title: Re-run sign-off in place on an already-merged PR (deferred)
+  branch: pm/pr-8015c1d-re-run-sign-off-in-place-on-an-already-merged-pr-d
+  status: pending
+  depends_on:
+  - pr-2d5f712
+  - pr-ff9b728
+  description: 'FUTURE capability, deferred out of pr-2d5f712: allow re-running the
+    sign-off step IN PLACE on an already-merged PR to enforce updated process / acceptance-criteria
+    standards — detect drift vs the current standard and re-open the merged work to
+    bring it into compliance.
+
+
+    NOT how process updates work for now. The current flow creates NEW work instead:
+    a single new PR for a one-off gap, or a plan respin (a set of new PRs) for a broad
+    update, driven through the normal forward flow under the updated prompting. This
+    PR adds the in-place path later as an optimization once the new-PR / respin flow
+    is proven.
+
+
+    Scope when built: sign_off enterable FROM a merged PR; a bounce able to re-open
+    merged work (regenerate now-missing evidence by re-running repro/verify against
+    the merged fix); lifecycle/status transitions for merged -> sign_off -> merged;
+    drift detection against the current standard. Trigger via single-PR mode (pm pr
+    signoff <id>) and/or a plan-watcher batch sweep.
+
+
+    Depends on: pr-2d5f712 (sign-off step), pr-ff9b728 (single-PR mode + plan watcher).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T17:08:54.875615+00:00'
+  updated_at: '2026-05-25T17:08:54.875615+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
