@@ -22156,6 +22156,20 @@ prs:
       show 6 orphaned windows -> 0. PASS.'
     created_at: '2026-05-25T03:36:54Z'
     last_edited: '2026-05-25T03:36:54Z'
+  - id: note-d70f9d4
+    text: 'Scenario5 refiner: status-based sweep test (no containers, local backend).
+      Setup gotchas: (1) set fake-claude config {"_all":{}} BEFORE `pm pr start` so
+      impl/review panes are no-verdict mocks that STAY OPEN (real claude w/o key exits
+      -> window vanishes). (2) commit pm/project.yaml on master (git add -A && git
+      commit) after `pm pr add` x3 else `pm pr start` errors "not committed on master".
+      (3) review- window via TUI `zz d` (start_or_stop_loop) on a started PR; needs
+      PR selected + workdir, so press r first so TUI sees workdir. (4) sweep _reclaim_terminal_pr_windows
+      runs in do_normal_sync EVEN when result.was_skipped (rate-limited), so repeated
+      manual r each reload+sweep -> idempotent. (5) background sync=300s so manual
+      r is the attributable trigger. (6) side panes reset PATH to system venv: re-source
+      /tmp/pm-venv + export PYTHONPATH=/workspace, confirm `pm which`.'
+    created_at: '2026-05-25T03:53:38Z'
+    last_edited: '2026-05-25T03:53:38Z'
   - id: note-c846870
     text: 'QA scenario 6 (last-verdict-survives-restart) concretization: the fix (commit
       8dd2b2f6, 8-line verdict-change _write_resume_file at qa_loop.py:2490) is ONLY
