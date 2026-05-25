@@ -51,6 +51,23 @@ def test_github_merge_prompt_fast_forwards_main_repo_itself():
     assert "main repo checkout" in p.lower()
 
 
+def test_github_merge_prompt_stashes_dirty_main_repo_around_ff():
+    # The main checkout usually has uncommitted project.yaml edits that would
+    # block a bare --ff-only; mirror pm's stash + ff + pop (with pop-conflict
+    # resolution) instead of failing.
+    p = prompt_gen.generate_merge_prompt(_data("github"), "pr-test", "not mergeable")
+    assert "stash push --include-untracked" in p
+    assert "stash pop" in p
+    assert "project.yaml" in p
+    # Pop conflicts must be resolved (not abandoned), without committing.
+    assert "conflict" in p.lower()
+    assert "Do NOT commit" in p
+    # ff-only is kept as the divergence guard: committed local divergence ->
+    # INPUT_REQUIRED, never a local merge commit.
+    assert "do NOT create a merge commit" in p
+    assert "INPUT_REQUIRED" in p
+
+
 def test_github_merge_prompt_two_directories_are_different(monkeypatch):
     # The workdir (agent cwd) and the resolved main repo dir must be distinct,
     # so the agent can't confuse them.
@@ -60,6 +77,7 @@ def test_github_merge_prompt_two_directories_are_different(monkeypatch):
     assert "/tmp/wd" in p          # the PR-branch workdir
     assert "/main/repo" in p       # the main repo checkout
     assert "git -C /main/repo merge --ff-only origin/master" in p
+    assert "git -C /main/repo stash push --include-untracked" in p
 
 
 def test_github_merge_prompt_does_not_push_master():

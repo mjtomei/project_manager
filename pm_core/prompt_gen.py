@@ -601,16 +601,16 @@ Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
             repo_dir = ""
         workdir_disp = workdir or "(this directory)"
         repo_dir_disp = repo_dir or "the main repo checkout (the directory pm runs from)"
-        if repo_dir:
-            ff_cmd = (
-                f"`git -C {repo_dir} fetch origin` then "
-                f"`git -C {repo_dir} merge --ff-only origin/{base_branch}`"
-            )
-        else:
-            ff_cmd = (
-                f"in {repo_dir_disp}: `git fetch origin` then "
-                f"`git merge --ff-only origin/{base_branch}`"
-            )
+        # All main-repo commands are run with an explicit `-C <dir>` so the
+        # agent never has to leave the PR-branch workdir (and can't confuse
+        # the two directories).  Falls back to plain `git` if the path didn't
+        # resolve, in which case the agent must cd into the main checkout.
+        gc = f"git -C {repo_dir}" if repo_dir else "git"
+        ff_procedure = f"""   - `{gc} fetch origin`
+   - The main checkout usually has small uncommitted edits (most often `project.yaml`, which pm writes live).  These do NOT block the update, but stash them first so the fast-forward is clean: `{gc} stash push --include-untracked -m "pm: auto-stash for merge"` (skip if `{gc} status --porcelain` is empty).
+   - Fast-forward the base branch: `{gc} merge --ff-only origin/{base_branch}`.
+   - If you stashed, restore the edits: `{gc} stash pop`.  If the pop conflicts (e.g. on `project.yaml`), resolve it — keep the incoming merged content AND re-apply the local uncommitted edits — then `{gc} add` the resolved files.  Do NOT commit; these stay as uncommitted working-tree changes.
+   - If `--ff-only` itself fails because the checkout has *committed* local commits not on origin (genuine divergence, not just dirty files), do NOT create a merge commit — stop and report **INPUT_REQUIRED** describing the divergence."""
         failure_line = (
             f"The GitHub merge of `{branch}` into `{base_branch}` failed with the following error:"
         )
@@ -633,12 +633,15 @@ You will work across TWO separate directories — keep them straight:
 
 Do NOT merge into `{base_branch}` locally and do NOT `git push origin {base_branch}` in
 either directory — GitHub performs the merge via `gh pr merge`.  The only change to the
-main repo checkout is a fast-forward (`--ff-only`), never a new merge commit or a push.
+main repo checkout is a fast-forward (`--ff-only`) to origin; you may stash/pop its small
+uncommitted edits (e.g. `project.yaml`) around the fast-forward, but never create a new
+merge commit on `{base_branch}` and never push it.
 """
         merged_desc = (
             f"The conflict is resolved by merging `{base_branch}` into `{branch}`, the branch "
             f"is pushed, the GitHub merge has completed (PR recorded as merged), and the main "
-            f"repo checkout's `{base_branch}` is fast-forwarded to match origin."
+            f"repo checkout's `{base_branch}` is fast-forwarded to match origin (its uncommitted "
+            f"edits preserved)."
         )
         steps_block = f"""## Steps
 1. Investigate the error and resolve the conflict in the PR-branch workdir (your current directory, on branch `{branch}`)
@@ -646,7 +649,8 @@ main repo checkout is a fast-forward (`--ff-only`), never a new merge commit or 
 3. Run any relevant tests to verify the resolution
 4. Push the PR branch `{branch}` to origin
 5. Re-run the GitHub merge so GitHub merges the branch into `{base_branch}` and records the PR as merged: `{gh_merge_cmd}`
-6. Update the **main repo checkout** (NOT the workdir): if it is on `{base_branch}`, fast-forward it — {ff_cmd}; if it is on another branch, leave it untouched
+6. Update the **main repo checkout** (NOT the workdir) so its `{base_branch}` includes the GitHub merge.  Do this only if it is on `{base_branch}`; if it is on another branch, leave it untouched.  The merge already happened on GitHub, so this is a fast-forward, not a re-merge:
+{ff_procedure}
 7. End with a verdict on its own line — one of:"""
     else:
         backend_block = f"""

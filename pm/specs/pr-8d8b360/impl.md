@@ -43,9 +43,15 @@ The bug is specific to the **github** backend reusing the vanilla framing.
    - Re-run the GitHub merge: `gh pr merge <#> --merge`.
    - Fast-forward the **main repo checkout's** `base_branch` to origin (`--ff-only`), in a
      directory distinct from the PR-branch workdir (see Finalize below for why the agent
-     does this itself rather than leaving it to pm).
+     does this itself rather than leaving it to pm). Because the main checkout almost always
+     carries small uncommitted edits (esp. `project.yaml`, which pm writes live) that would
+     block a bare `--ff-only`, the procedure mirrors pm's `_pull_after_merge`: stash
+     (`stash push --include-untracked`) → `merge --ff-only origin/<base>` → `stash pop`,
+     resolving any pop conflict (e.g. on `project.yaml`) without committing. `--ff-only` is
+     kept as a guard against *committed* divergence: if it fails for that reason, the agent
+     stops with INPUT_REQUIRED rather than minting a local merge commit on master.
    - It must NOT instruct merging into master locally or `git push origin master` in either
-     directory; the main-repo change is a fast-forward only (no merge commit, no push).
+     directory; the only main-repo mutation is the fast-forward (+ stash/pop of dirty edits).
    - The two directories (PR-branch workdir = agent cwd; main repo checkout = resolved via
      `_resolve_repo_dir`) must be spelled out explicitly so the agent can't confuse them.
 2. **R2** — Update the github MERGED verdict description and the failure-framing line
