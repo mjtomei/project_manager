@@ -22595,7 +22595,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T19:08:56.981533+00:00'
+  updated_at: '2026-05-25T22:31:10.736635+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22814,6 +22814,16 @@ prs:
       split + always-gates; fixed signoff-record command name (hyphen).'
     created_at: '2026-05-25T19:08:56Z'
     last_edited: '2026-05-25T19:08:56Z'
+  - id: note-2eead0c
+    text: 'QA scenario 1 observation (not fixed): the sign-off evidence pane pipes
+      its output through `less -R` (_evidence_pane_cmd in signoff.py); on a host without
+      `less` installed the whole left pane renders blank (just a shell prompt) — the
+      captures/qa_status/diff data sources themselves resolve fine. Consider falling
+      back to a no-pager/cat path (e.g. `${PAGER:-less}` or `command -v less`) so
+      the evidence is still visible where less is absent. less is standard so this
+      is low-priority/environmental.'
+    created_at: '2026-05-25T22:31:10Z'
+    last_edited: '2026-05-25T22:31:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
