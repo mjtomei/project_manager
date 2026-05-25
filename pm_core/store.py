@@ -132,6 +132,12 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     try:
         with open(path) as f:
             text = f.read()
+    except FileNotFoundError:
+        # Preserve the historical contract: a missing project.yaml raises
+        # FileNotFoundError, which several callers catch to mean "no project"
+        # (guide.detect_state, tui.sync, session init).  Only wrap *other*
+        # read errors (permission, IsADirectory, …) as a parse error.
+        raise
     except OSError as e:
         raise ProjectYamlParseError(f"Could not read {path}: {e}") from e
 

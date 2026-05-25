@@ -304,6 +304,42 @@ class TestStashReconciliation:
         assert "auto-stash for merge" not in listing  # reaped
         assert "important WIP refactor" in listing     # preserved
 
+    def test_stash_pop_conflict_launches_merge_window(self, tmp_path):
+        """R5: a genuine (non-project.yaml) stash-pop conflict launches a
+        resolution window, retains the stash, and still reconciles
+        project.yaml structurally (no corruption)."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "code.txt").write_text("base\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-qam", "add code", cwd=repo)
+
+        # Local: dirty project.yaml AND dirty code.txt.
+        d = store.load(pm)
+        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
+        store.save(d, pm)
+        (repo / "code.txt").write_text("local edit\n")
+
+        info = pr_mod._stash_for_merge(repo, lock_tui=False)
+        assert info["stashed"] is True
+
+        # Simulate the merge bringing in a CONFLICTING change to code.txt so the
+        # subsequent stash pop conflicts.
+        (repo / "code.txt").write_text("incoming edit\n")
+        _git("commit", "-qam", "incoming code", cwd=repo)
+
+        with mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
+            clean = pr_mod._unstash_after_merge(
+                repo, info, data={"prs": [info]}, pr_entry={"id": "pr-001"})
+
+        assert clean is False
+        mock_launch.assert_called_once()
+        # project.yaml still reconciled & valid despite the code conflict.
+        assert "<<<<<<<" not in (pm / "project.yaml").read_text()
+        store.load(pm)
+        # The conflicted stash is retained for manual resolution (not reaped).
+        assert "auto-stash for merge" in _git("stash", "list", cwd=repo).stdout
+
     def test_non_project_file_also_dirty_stashed_and_restored(self, tmp_path):
         """When a non-project.yaml file is also dirty it is stashed normally and
         restored, while project.yaml is reconciled structurally."""
