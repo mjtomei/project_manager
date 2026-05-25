@@ -264,6 +264,7 @@ PR_STATUS_ICONS = {
     "in_progress": "🔨",
     "in_review": "👀",
     "qa": "🧪",
+    "sign_off": "✔️",
     "merged": "✅",
     "closed": "🚫",
     "blocked": "🚫",
@@ -443,6 +444,7 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
 
     * ``started_at`` — set once on the first transition to ``in_progress``.
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
+    * ``signed_off_at`` — updated each time the PR enters ``sign_off``.
     * ``merged_at`` — set when the PR is ``merged``.
     """
     now = datetime.now(timezone.utc).isoformat()
@@ -451,6 +453,8 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["started_at"] = now
     elif status == "in_review":
         pr_entry["reviewed_at"] = now
+    elif status == "sign_off":
+        pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
 

@@ -16,6 +16,7 @@ import click
 import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen
+from pm_core.pr_utils import VALID_PR_STATES
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -166,7 +167,7 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             changes.append("description updated")
 
         # Status (skip invalid values silently)
-        valid_statuses = {"pending", "in_progress", "in_review", "qa", "merged", "closed"}
+        valid_statuses = VALID_PR_STATES
         if parsed["status"] is not None:
             current_status = pr_entry.get("status", "pending")
             if parsed["status"] != current_status and parsed["status"] in valid_statuses:
@@ -311,8 +312,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--title", default=None, help="New title")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs (replaces existing)")
 @click.option("--description", "desc", default=None, help="New description")
-@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "qa", "merged", "closed"]),
-              help="New status (pending, in_progress, in_review, qa, merged, closed)")
+@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"]),
+              help="New status (pending, in_progress, in_review, qa, sign_off, merged, closed)")
 @click.option("--plan", default=None, help="Associated plan ID")
 def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None, plan: str | None):
     """Edit an existing PR's title, description, dependencies, or status."""
@@ -1408,6 +1409,63 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                           transcript=transcript)
 
 
+@pr.command("signoff")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--fresh", is_flag=True, default=False,
+              help="Kill existing sign-off window and create a new one")
+@click.option("--background", is_flag=True, default=False, hidden=True,
+              help="Create sign-off window without switching focus (auto-sequence)")
+@click.option("--transcript", default=None, hidden=True,
+              help="Path to save Claude transcript symlink (used by auto-sequence)")
+def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
+               transcript: str | None):
+    """Move a PR into sign_off and launch its sign-off window.
+
+    Sign-off is the comprehensive PR-level review + verdict router that runs
+    between QA and merge.  If PR_ID is omitted, infers from cwd or auto-selects
+    a single ``qa``/``sign_off`` PR.  A PR currently in ``qa`` is transitioned
+    to ``sign_off``.
+    """
+    from pm_core import signoff as signoff_mod
+
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("sign_off", "qa"))
+        if pr_id is None:
+            click.echo("No qa/sign_off PR to sign off. Specify one.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    status = pr_entry.get("status")
+
+    if status == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+    if status not in ("qa", "sign_off"):
+        click.echo(
+            f"PR {pr_id} is {status} — sign-off runs after QA "
+            f"(expected qa or sign_off).", err=True)
+        raise SystemExit(1)
+
+    if status == "qa":
+        def apply(d):
+            pr = store.get_pr(d, pr_id)
+            if pr and pr.get("status") == "qa":
+                pr["status"] = "sign_off"
+                _record_status_timestamp(pr, "sign_off")
+        store.locked_update(root, apply)
+        click.echo(f"PR {_pr_display_id(pr_entry)} marked as sign_off.")
+        trigger_tui_refresh()
+
+    signoff_mod.launch_signoff_window(
+        data, pr_entry, fresh=fresh, background=background,
+        transcript=transcript)
+
+
 def _finalize_merge(root, pr_entry: dict, pr_id: str,
                     transcript: str | None = None) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
@@ -2081,7 +2139,7 @@ def pr_sync():
     # Check merge status outside the lock (network/git calls)
     merged_ids = set()
     for pr_entry in prs:
-        if pr_entry.get("status") not in ("in_review", "in_progress", "qa"):
+        if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
             continue
         branch = pr_entry.get("branch", "")
         # Prefer PR's own workdir if it exists
@@ -2714,6 +2772,28 @@ def _check_review_verdict(tdir: Path, pr_id: str) -> tuple[str | None, int]:
     return verdict, latest_iter
 
 
+def _signoff_window_pane(session: str, pr_entry: dict) -> str | None:
+    """Return the first pane id of the sign-off tmux window, or None."""
+    from pm_core import signoff as signoff_mod
+    win = tmux_mod.find_window_by_name(
+        session, signoff_mod.signoff_window_name(pr_entry))
+    if not win:
+        return None
+    panes = tmux_mod.get_pane_indices(session, win["index"])
+    return panes[0][0] if panes else None
+
+
+def _check_signoff_verdict(tdir: Path, pr_id: str) -> str | None:
+    """Return the sign-off routing verdict, or None if none emitted yet."""
+    from pm_core.verdict_transcript import extract_verdict_from_transcript
+    from pm_core.signoff import SIGNOFF_VERDICTS
+
+    transcript = tdir / f"signoff-{pr_id}.jsonl"
+    if not (transcript.is_file() or transcript.is_symlink()):
+        return None
+    return extract_verdict_from_transcript(str(transcript), SIGNOFF_VERDICTS)
+
+
 def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
     """Return (idle, gone): polls the impl pane via PaneIdleTracker.
 
@@ -2881,7 +2961,20 @@ def pr_auto_sequence(pr_id: str):
     if status == "qa":
         overall, _path = _qa_status_for(pr_id)
         if overall == "PASS":
-            click.echo("ready_to_merge")
+            # QA passed and finalized -> advance to the sign_off step, which
+            # runs the comprehensive PR-level review + verdict router.  The
+            # sign_off branch below polls the router's verdict and routes on.
+            def _to_signoff(d):
+                p = store.get_pr(d, pr_id)
+                if p and p.get("status") == "qa":
+                    p["status"] = "sign_off"
+                    _record_status_timestamp(p, "sign_off")
+            store.locked_update(root, _to_signoff)
+            signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
+                       transcript=str(signoff_transcript))
+            click.echo("advanced: sign_off")
             return
         if overall == "INPUT_REQUIRED":
             click.echo("paused: input_required (qa)")
@@ -2926,6 +3019,67 @@ def pr_auto_sequence(pr_id: str):
             click.echo("running: qa (launched)")
             return
         click.echo("running: qa")
+        return
+
+    if status == "sign_off":
+        if not pm_session:
+            click.echo("paused: no pm tmux session")
+            return
+        from pm_core import signoff as signoff_mod
+        verdict = _check_signoff_verdict(tdir, pr_id)
+        if verdict is None:
+            # No routing verdict yet.  Relaunch the window if it's gone,
+            # otherwise the router is still running.
+            if _signoff_window_pane(pm_session, pr_entry) is None:
+                signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
+                ctx = click.get_current_context()
+                ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False,
+                           background=True, transcript=str(signoff_transcript))
+                click.echo("advanced: sign_off_relaunched")
+                return
+            click.echo("running: sign_off")
+            return
+
+        autonomous = signoff_mod.is_signoff_autonomous(data)
+        hop = signoff_mod.act_on_signoff_verdict(
+            root, pr_id, verdict, autonomous=autonomous)
+        if hop == "merge":
+            # Autonomous + verified PASS.  Auto-sequence reports
+            # ready_to_merge (its documented contract stops before merge);
+            # the caller performs the merge.
+            click.echo("ready_to_merge")
+            return
+        if hop == "held":
+            click.echo("held: sign_off_gated")
+            return
+        if hop == "blocked":
+            click.echo("paused: sign_off_blocked")
+            return
+        if hop == "qa":
+            _launch_qa_detached(root, pr_id)
+            click.echo("sign_off: re-qa")
+            return
+        if hop == "review":
+            _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+            next_iter = latest_iter + 1
+            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
+                       review_loop=True, review_iteration=next_iter,
+                       review_loop_id="", transcript=str(iter_transcript))
+            click.echo(
+                f"sign_off: returning to review (iteration {next_iter})")
+            return
+        if hop == "impl":
+            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=False,
+                       background=True, transcript=str(impl_transcript),
+                       companion=False)
+            click.echo("sign_off: returning to impl")
+            return
+        # hop == "unknown": verdict not actionable or PR moved concurrently.
+        click.echo("running: sign_off")
         return
 
     click.echo(f"unknown status: {status}", err=True)

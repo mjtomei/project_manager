@@ -38,6 +38,11 @@ SINGLE_LINE_VERDICTS = (
     "READY",             # watcher loop: iteration complete
     "FINALIZE_DONE",     # qa finalize: push + fast-forward succeeded
     "FINALIZE_BLOCKED",  # qa finalize: a prerequisite blocked completion
+    "SIGNOFF_MERGE",     # sign-off router: verified PASS -> merge / gate
+    "SIGNOFF_REQA",      # sign-off router: harness/misframed -> re-qa
+    "SIGNOFF_REVIEW",    # sign-off router: code changed in QA -> review + qa
+    "SIGNOFF_IMPL",      # sign-off router: real gap -> implementation
+    "SIGNOFF_BLOCKED",   # sign-off router: ambiguity / out-of-scope -> escalate
 )
 
 # Block-style verdicts: emitted as START … END pairs
@@ -88,6 +93,8 @@ SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "qa_concretize":   ("REFINED_STEPS", "REFINER_REJECT"),
     "qa_verification": ("VERIFIED", "FLAGGED"),
     "qa_finalize":     ("FINALIZE_DONE", "FINALIZE_BLOCKED"),
+    "signoff":         ("SIGNOFF_MERGE", "SIGNOFF_REQA", "SIGNOFF_REVIEW",
+                        "SIGNOFF_IMPL", "SIGNOFF_BLOCKED"),
     "watcher":         ("READY", "INPUT_REQUIRED"),
     "merge":           (),   # merge conflict: no verdict, interactive
     # --- non-loop interactive sessions: no verdict, fake-claude routing only ---
