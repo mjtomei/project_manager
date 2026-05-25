@@ -779,16 +779,31 @@ def install_session(config: dict, session_tag: Optional[str] = None) -> FakeGitH
         default_branch=default_branch,
         git_repo=git_repo,
     )
+    # Two-pass seed: create every head branch first (all forked from the base
+    # at its original tip), then apply MERGED/CLOSED transitions. Real GitHub
+    # PRs branch from the base when opened, independent of one another's later
+    # merges — so a PR meant to conflict with an already-merged sibling must be
+    # forked from the *original* base, not the base the earlier merge advanced.
+    # Applying merges inline during pass 1 would fork later branches off the
+    # advanced base and silently dissolve such conflicts.
+    seeded: list[tuple[dict, FakePR]] = []
     for prd in config.get("prs", []):
-        backend.add_pr(
+        pr = backend.add_pr(
             title=prd.get("title", "Test PR"),
             head=prd["head"],
             base=prd.get("base"),
             body=prd.get("body", ""),
             is_draft=prd.get("draft", prd.get("is_draft", False)),
-            state=prd.get("state", "OPEN"),
+            state="OPEN",
             files=prd.get("files"),
         )
+        seeded.append((prd, pr))
+    for prd, pr in seeded:
+        state = prd.get("state", "OPEN")
+        if state == "MERGED":
+            backend.merge(pr)
+        elif state == "CLOSED":
+            backend.close(pr)
     for sd in config.get("scripts", []):
         backend.queue_response(
             sd["match"], returncode=sd.get("returncode", 0),

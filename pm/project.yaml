@@ -19806,7 +19806,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-24T23:25:47.533065+00:00'
+  updated_at: '2026-05-25T01:57:37.718933+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
@@ -19978,6 +19978,35 @@ prs:
       (1 pre-existing unrelated hook_events env failure deselected). Committed 9f9161d8.'
     created_at: '2026-05-24T23:25:47Z'
     last_edited: '2026-05-24T23:25:47Z'
+  - id: note-cde4030
+    text: 'QA scenario 8 refiner (git-touching lifecycle): verified drivable via real
+      CLI surface but with key corrections worth knowing. (1) WRAPPER SHADOW IS MANDATORY:
+      /home/pm/.local/bin/git is a push-proxy wrapper that hijacks ALL push/fetch/pull/ls-remote
+      to a fixed host workdir; pm git_ops.run_git uses bare "git" so pm push / pm
+      pr merge post-merge pull go to the proxy, NOT the local fake remote. Worker
+      must prepend a real-git shim (ln -s /usr/bin/git) on PATH so pm reaches the
+      fake remote.git; the fake itself already uses REAL_GIT=/usr/bin/git internally.
+      (2) pm init --backend github ALWAYS runs _import_github_prs (no flag skips it;
+      --no-import only skips plan import) -> the fake MUST be active (config set)
+      BEFORE pm init, else run_gh._check_gh SystemExits with no gh and aborts init.
+      The import also auto-creates pm PR entries from seeded fake PRs (status mapped
+      from state) but does NOT set workdir; the github merge path REQUIRES an existing
+      workdir, so hand-edit the entry to add workdir=<any existing dir> (bootstrap
+      project.yaml edit, allowed). (3) TRIPLE 3 reshape: re-running pm pr merge after
+      a LOCAL merge hits the status==merged guard (pr.py:1817 -> exits 1 "already
+      merged"), NOT the merged-elsewhere fallback. The real merged-elsewhere path
+      needs pm status still in_review while the REMOTE PR is MERGED (re-seed fake
+      with state=MERGED to flip remote without touching project.yaml) -> gh pr merge
+      returns rc1 already-merged -> is_pr_merged fallback recognizes -> proceeds.
+      (4) TRIPLE 4 conflict: run pm pr merge --no-resolve-window so it prints manual
+      guidance + exits 1 instead of launching a Claude merge window (resolve_window
+      defaults True under PM_IN_TMUX_SESSION). (5) Observe fake PR states via pm fake-github
+      config show (state.json); raw gh in a pane does NOT hit the fake (no gh shim;
+      only pm run_gh is gated). For ff pull, align test repo master to origin/master
+      (git checkout -B master origin/master via real git) before pm init so post-merge
+      ff-only succeeds.'
+    created_at: '2026-05-25T01:57:37Z'
+    last_edited: '2026-05-25T01:57:37Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression

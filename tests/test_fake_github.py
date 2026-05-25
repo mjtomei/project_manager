@@ -397,6 +397,46 @@ def test_session_git_backed_merge_persists(session_fake):
     assert reloaded.git_repo.is_merged("feat-x") is True
 
 
+def test_session_seed_merged_then_open_conflicts(session_fake):
+    """A seeded list whose earlier PR is MERGED still lets a later, conflicting
+    OPEN PR conflict.
+
+    Regression: install_session used to apply MERGED transitions inline while
+    building branches, so a later head branch forked off the *advanced* base and
+    a conflict meant to exist silently dissolved into a clean modify. Branches
+    must fork from the original base (real PRs branch at open-time, independent
+    of one another's later merges); merges are applied only after every branch
+    exists.
+    """
+    from pm_core import fake_github
+
+    fake_github.install_session({
+        "prs": [
+            {"head": "feat-a", "state": "MERGED", "files": {"conflict.txt": "A\n"}},
+            {"head": "feat-b", "state": "OPEN", "files": {"conflict.txt": "B\n"}},
+        ],
+    })
+
+    # feat-a landed at seed time; feat-b is forked from the original base and
+    # still conflicts against the advanced master.
+    reloaded = fake_github.load_session()
+    assert reloaded.prs[1].state == "MERGED"
+    assert reloaded.git_repo.is_merged("feat-a") is True
+    assert reloaded.git_repo.is_merged("feat-b") is False
+
+    result = gh_ops.merge_pr("/tmp/repo", 2)
+    assert result.returncode == 1
+    assert "conflict" in result.stderr.lower()
+
+    # base unchanged, PR stays OPEN, no dangling merge state.
+    after = fake_github.load_session()
+    assert after.prs[2].state == "OPEN"
+    assert after.git_repo.is_merged("feat-b") is False
+    git_dir = Path(after.git_repo.path) / ".git"
+    assert not (git_dir / "MERGE_HEAD").exists()
+    assert not (git_dir / "index.lock").exists()
+
+
 def test_session_inactive_returns_none(session_fake):
     """The gate returns None (→ real gh) when no fake is installed."""
     assert gh_ops._maybe_dispatch_session_fake(("pr", "list"), None) is None
