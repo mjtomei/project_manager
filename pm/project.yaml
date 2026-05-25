@@ -21790,11 +21790,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-21T15:56:55.362547+00:00'
-  updated_at: '2026-05-21T15:56:55.362547+00:00'
+  updated_at: '2026-05-25T02:50:07.032418+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-3492ff3
+    text: 'Fix already in master (f07b95f5, authored during pr-28bda5d QA): _truncate
+      measures display width via unicodedata.east_asian_width (W/F=2 cells, combining=0),
+      reserving 1 cell for the ellipsis; _compose sizes the ruler by display width.
+      All 6 PR_STATUS_ICONS glyphs classify as W, so the zero-dependency stdlib path
+      is correct — no wcwidth needed. This branch had NO diff vs master for pr_list.py.
+      This PR therefore adds only the missing regression test (tests/test_home_window.py::TestRenderHelpers::test_truncate_fits_every_status_emoji_from_format_pr_line)
+      that drives the real format_pr_line + every status through _truncate at boundary
+      widths (the prior test used a single hardcoded ⏳ literal and would miss a future
+      narrow-classified status emoji). Pre/post-fix captures under captures-path impl/.
+      Spec at pm/specs/pr-9330dec/impl.md.'
+    created_at: '2026-05-25T02:50:06Z'
+    last_edited: '2026-05-25T02:50:06Z'
 - id: pr-6566901
   plan: null
   title: 'Verdict-loop robustness: surface/retry when an expected verdict is never
