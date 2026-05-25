@@ -19806,7 +19806,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/208
   gh_pr_number: 208
   created_at: '2026-05-14T01:46:56.386043+00:00'
-  updated_at: '2026-05-25T02:07:50.217758+00:00'
+  updated_at: '2026-05-25T02:37:26.612113+00:00'
   started_at: '2026-05-17T21:39:46.867540+00:00'
   reviewed_at: '2026-05-17T22:36:47.323283+00:00'
   merged_at: null
@@ -20061,6 +20061,22 @@ prs:
       captured in refined steps.'
     created_at: '2026-05-25T01:56:13Z'
     last_edited: '2026-05-25T01:56:13Z'
+  - id: note-b12c268
+    text: 'QA scenario 10 (full git-touching lifecycle, re-verify of prior NEEDS_WORK)
+      RESULT: PASS on real CLI surface vs per-session out-of-process git-backed fake
+      (R8+R9). All 4 triples pass: (1) create via pm push gh-pr-create chokepoint
+      + merge-with-pull FF (marker lands in working repo, status->merged); (2) merged-elsewhere:
+      re-seed feat-elsewhere state=MERGED w/o touching project.yaml, pm pr merge hits
+      is_pr_merged fallback and settles merged, no crash; (3) conflicting merge --no-resolve-window
+      surfaces conflict-shaped failure + manual guidance + exit1, backing master conflict.txt
+      unchanged (AAA), feat-b not ancestor, no dangling MERGE_HEAD/index.lock, stays
+      in_review (two-pass seed fix 91450659 confirmed holding); (4) pm pr close: fake
+      feat-close CLOSED, merged feat-a stays MERGED. No source changes. FIXTURE GOTCHA
+      for next runner: give each PR its OWN clone workdir; pm pr close removes the
+      workdir, so workdir==project dir self-destructs the project mid-run. Captures:
+      /pm-captures/scenarios/10/lifecycle/.'
+    created_at: '2026-05-25T02:37:26Z'
+    last_edited: '2026-05-25T02:37:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9603d04-github-backend-mock-for-regression-t-11fc933f
 - id: pr-51586d2
   plan: plan-regression
