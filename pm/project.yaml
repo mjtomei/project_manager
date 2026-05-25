@@ -22567,7 +22567,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T16:53:59.055075+00:00'
+  updated_at: '2026-05-25T17:13:41.349952+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22591,6 +22591,19 @@ prs:
       verdict SIGNOFF_MERGE).'
     created_at: '2026-05-25T16:53:58Z'
     last_edited: '2026-05-25T16:53:58Z'
+  - id: note-4567d12
+    text: 'Follow-ups landed (cd323a8f): (R7) per-step acceptance criteria — prompt
+      now states purpose+criteria for impl/review/qa and routes on the first step
+      that falls short. (R8) bug-PR capture gate — signoff.bug_fix_capture_status
+      reads $CAP/impl/{pre-fix,post-fix}; prompt injects present/MISSING + mandatory
+      route-to-IMPL; act_on_signoff_verdict has a DETERMINISTIC safety net: a bug
+      PR missing either capture has SIGNOFF_MERGE overridden to an impl bounce (can
+      never merge). CORRECTION: re-runnable-on-merged / re-open-merged (earlier note-6f7abcd)
+      was WITHDRAWN by orchestrator and deferred to pr-8015c1d; pm pr signoff still
+      rejects merged PRs (qa/sign_off entry only). HTML-report surfacing of captures
+      = pr-8e693f6 (cross-PR note added there).'
+    created_at: '2026-05-25T17:13:41Z'
+    last_edited: '2026-05-25T17:13:41Z'
 - id: pr-8e693f6
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
@@ -22636,11 +22649,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T14:39:06.066606+00:00'
+  updated_at: '2026-05-25T17:13:39.603556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-22f1fb3
+    text: 'From sign-off (pr-2d5f712, note-0357619 requirement): the HTML report/dashboard
+      (#226) must SURFACE the bug-PR pre-fix AND post-fix captures. Sign-off provides
+      the discovery seam: signoff.bug_fix_capture_status(pr_id) -> (has_pre, has_post),
+      reading $(pm qa captures-path <id>)/impl/pre-fix/ and /impl/post-fix/ (each
+      present = dir holds >=1 file). Sign-off hard-fails/bounces a bug PR to impl
+      when either is missing, so by the time a bug PR is signed off both should exist.
+      The report should render both captures (and flag any missing) alongside the
+      per-scenario captures under scenarios/<n>/.'
+    created_at: '2026-05-25T17:13:39Z'
+    last_edited: '2026-05-25T17:13:39Z'
 - id: pr-ff9b728
   plan: plan-regression
   title: Plan auto-start watcher — generalize impl watchers + become the auto-start
