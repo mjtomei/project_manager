@@ -8,6 +8,7 @@ Establish a continuous quality improvement loop where the existing Claude-based 
 - Ensure findings discovered during review/QA don't get lost
 - Enforce a disciplined reproduce-first bug fix flow
 - Give humans a conversational surface for checking in on the autonomous loops
+- Close the loop: an autonomous sign-off step that reviews behavior, gates merges, and routes each PR forward to merge or back to the right step — with the human optional, not required (Phase 11)
 
 > See `pm/docs/literature-review.md` for context on the academic and industry work surrounding this plan — benchmarks, autonomous coding agents, LLM-driven test generation, self-improving loops, integrity audits, and watcher architectures. Includes pointers to what's reused, what's adapted, and where this plan is making its own bet.
 >
@@ -59,12 +60,13 @@ This is the load-bearing change: the regression library starts to *compound* —
 - Phase 5: pr-d60d185
 - Phase 7 prereq: pr-6be8ee6 (#190, tracked under improvements)
 
-**Pending (25)** — Phases 6-10:
+**Pending (28)** — Phases 6-11:
 - Phase 6 — test backfill (1): pr-fbda1a8
 - Phase 7 — evidence-gated bug fix loop (5): pr-eb450a0, pr-b42059d, pr-8ed578d, pr-8422dea, pr-c2397e2
 - Phase 8 — post-activation refinements + regression-corpus expansion (4): pr-b77702b, pr-2c060b2, pr-70d02ed, pr-a1f267a
 - Phase 9 — headless / unsupervised hardening + single-prompt capstone (7): pr-ca6859f, pr-6f9301e, pr-ed10ac4, pr-b3b8df0, pr-98f670e, pr-e2b7fdf (realistic capstone), pr-0cf3626 (exact-ProgramBench offshoot)
 - Phase 10 — QA loop surface improvements (8): pr-9603d04, pr-7d5d036, pr-06a96fa, pr-2680fbf, pr-51586d2, pr-b59f0c7, pr-0b14f2c, pr-f4dc8a2
+- Phase 11 — sign-off / acceptance gate (3): pr-2d5f712, pr-8e693f6, pr-ff9b728 (buildable now; soft-aligns with Phase 10)
 
 **Cross-phase sequencing note**: Phase 7 (evidence + coverage gates on the existing scenario model) and Phase 10 (scenarios → regression-test bindings, new-regression authoring, mocks at authoring surface) both reshape the QA loop. Phase 10 changes the underlying scenario model that Phase 7's gates measure against. Recommended order: land Phase 10's regressions-as-scenarios chain (pr-7d5d036 → pr-06a96fa → pr-2680fbf → pr-51586d2) before Phase 7's coverage stack (pr-b42059d → pr-8ed578d → pr-8422dea → pr-c2397e2), so the coverage gates measure the post-Phase-10 flow. If sequenced the other way, Phase 7 PRs may need amendment after Phase 10 lands.
 
@@ -366,6 +368,15 @@ It is distinct from the review loop. Review asks *is the code correct/clean*; si
 - **Router-only.** The checkoff never edits code. It judges, annotates (`pm pr note`), files follow-up PRs, and sets the next hop. Every code edit happens in impl/qa, so it always passes back through review+qa — including edits the checkoff prompted. A judge that never writes the code it approves is what makes an autonomous merge defensible.
 - **Conservative toward not-merging.** Misclassifying a real gap as "scenario error → re-qa" merges incomplete work (the predicted failure mode); the reverse only wastes an impl cycle. So on genuine ambiguity the checkoff *raises INPUT_REQUIRED itself* and escalates rather than merging.
 
+**Relationship to earlier phases (overlaps reconciled — no parallel mechanisms):**
+
+- **The watchers' merge step reroutes through sign-off.** The bug-fix watcher (`pr-e3a711c`, merged) currently *auto-merges on QA PASS* and the improvement-fix watcher (`pr-d39a7fb`, merged) advances to ready-for-merge for a human taste check. Phase 11 makes the sign-off step the only thing that merges: both watchers advance a QA-passed PR to `sign_off` instead of merging (or holding) directly. This is a behavioral change to two merged PRs and is part of `pr-ff9b728`.
+- **Merge gating is unified at sign-off.** The per-plan `auto_merge=false` setting (`pr-b77702b`) and the improvement watcher's taste-check are the *same thing* as sign-off's gated mode — they feed its merge-vs-hold decision, not parallel gates. Autonomous sign-off = it merges; gated sign-off = held for the human in the sign-off window.
+- **Single-PR mode extends `pm pr auto-sequence` (`pr-e58459b`), not a new command.** That chain stops before merge today; Phase 11 adds the `qa → sign_off → merge` tail. The single-PR entry is the extended chain — there is no parallel `pm pr auto`.
+- **Meta-QA builds on the scenario quality supervisor (`pr-98f670e`), doesn't duplicate it.** `98f670e` catches false-PASS *per scenario, inline, before verdict-emit* (and can amend+rerun a thin scenario). Sign-off's anti-shortcut evaluation is the *PR-level, post-finalization* pass over all scenarios `98f670e` already vetted — it looks for cross-scenario gaps and whole-PR mergeability and trusts per-scenario depth to `98f670e` rather than re-deriving it.
+- **The loop guard reuses the no-progress primitive (`pr-ed10ac4`).** `ed10ac4` detects no-progress *within* a review/QA loop (same-diff-same-verdict hashing); the Phase 11 loop guard is the *across-bounce* counterpart at the sign-off layer and reuses that hashing/detection rather than a parallel mechanism.
+- **Evidence comes from both stores.** Implementation evidence is both `pr-eb450a0`'s machine-checkable `pm/evidence/<pr_id>/{pre,post}-fix.md` and the raw `impl/` captures; sign-off reads both.
+
 ### PR: Sign-off step — dedicated window + lifecycle status + comprehensive verdict router
 `pr-2d5f712` (buildable now — no hard deps; *soft*: aligns with `pr-b59f0c7` reason strings and the `pr-06a96fa` evidence model when they land, but reads the current verdict+capture surface and degrades gracefully)
 
@@ -396,7 +407,7 @@ The human-facing surface for sign-off — the per-PR report plus the dashboard t
 
 Wires the router into both single-PR runs and the dependency-aware auto-start, with the loop-safety rules and the dynamic plan/graph mutation the router's "needs a new PR" hops require.
 
-**Single-PR mode.** A CLI/TUI entry to run the full sign-off + auto-run loop on one PR (e.g. `pm pr signoff <id>` / `pm pr auto <id>`), independent of a full auto-start sweep — reuses the router, loop guard, and re-loop invariant.
+**Single-PR mode.** Extend `pr-e58459b`'s `pm pr auto-sequence <id>` (which stops before merge today) with the `qa → sign_off → merge` tail, so one PR can be driven through sign-off on demand, independent of a full auto-start sweep — not a parallel `pm pr auto` command. Reuses the router, loop guard, and re-loop invariant. (A thin `pm pr signoff <id>` to enter just the sign-off step on a QA-finalized PR is fine, but it shares the extended-chain machinery rather than duplicating it.)
 
 **Auto-start integration.** Insert the sign-off step into the dependency-aware orchestrator (`pm_core/tui/auto_start.py` `check_and_start`: review → qa → **sign_off** → merge), driving the `sign_off` status transitions (added in `pr-2d5f712`) and scoped to the target's dependency tree (`_transitive_deps`) like the existing loops. Single-PR mode and auto-start drive the same sign-off window/step.
 
