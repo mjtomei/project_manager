@@ -22607,7 +22607,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T23:24:43.872492+00:00'
+  updated_at: '2026-05-25T23:34:50.750112+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22926,6 +22926,21 @@ prs:
       failure).'
     created_at: '2026-05-25T23:24:43Z'
     last_edited: '2026-05-25T23:24:43Z'
+  - id: note-c1799e2
+    text: 'QA scenario 3 (auto-sequence sign_off routing): all 5 stories PASS on real
+      local-backend surface. Found+fixed (commit c16f7015, now rebased): sign_off->impl
+      bounce invoked pr_start(fresh=False); since the impl window normally still exists
+      at sign_off time, the background fast path returned "already exists, no focus
+      change" and NEVER relaunched the impl agent — the bounce did zero rework and
+      the next tick re-advanced straight to in_review. Changed to fresh=True (mirrors
+      sign_off->review): keeps in_progress workdir, kills stale window, fresh impl
+      session. Verified live (@id @35->@59, new impl transcript). sign_off->review/qa/blocked/merge
+      all correct as-is. PREREQ for driving QA via auto-sequence (omitted from this
+      scenario GIVEN): must run `pm pr spec <pr> qa` after the PR is started — else
+      the QA spec-gate (qa_loop.py:3187) halts the loop at INPUT_REQUIRED before any
+      scenario runs.'
+    created_at: '2026-05-25T23:34:50Z'
+    last_edited: '2026-05-25T23:34:50Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
