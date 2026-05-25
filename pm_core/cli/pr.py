@@ -2981,3 +2981,99 @@ def pr_qa_run_bg(pr_id: str):
     except Exception as e:
         _log.exception("pr_qa_run_bg: QA crashed for %s: %s", pr_id, e)
         raise SystemExit(1)
+
+
+def _maybe_open(path: Path, do_open: bool) -> None:
+    """Best-effort open of a generated HTML file in a browser."""
+    if not do_open or path is None:
+        return
+    import webbrowser
+    try:
+        webbrowser.open(path.as_uri())
+    except Exception:
+        click.echo(f"(could not open a browser; open {path} manually)",
+                   err=True)
+
+
+@pr.command("report")
+@click.argument("pr_id", required=False)
+@click.option("--all", "do_all", is_flag=True,
+              help="Generate reports for every PR (plus the dashboard).")
+@click.option("--open", "do_open", is_flag=True,
+              help="Open the generated HTML in a browser.")
+def pr_report(pr_id: str | None, do_all: bool, do_open: bool):
+    """Generate the per-PR BDD behavior report (report.html).
+
+    Writes a self-contained HTML report alongside the PR's captures
+    (``~/.pm/sessions/<tag>/captures/<pr-id>/report.html``), linking the
+    real webm/png/html evidence in place, and refreshes the all-PR
+    dashboard. Open report.html in a browser to review behavior and sign
+    off — terminal panes can't show recordings.
+
+    With ``--all`` every PR's report is regenerated. Accepts the canonical
+    pm id, a GitHub number, or ``#N`` (same resolution as ``pm pr cd``).
+    """
+    from pm_core import behavior_report
+
+    root = state_root()
+    data = store.load(root)
+
+    if do_all:
+        prs = data.get("prs") or []
+        if not prs:
+            click.echo("No PRs to report on.")
+            return
+        written = 0
+        first: Path | None = None
+        for pr_entry in prs:
+            out = behavior_report.generate_pr_report(
+                root, pr_entry["id"], data=data, refresh_dashboard=False)
+            if out is not None:
+                written += 1
+                first = first or out
+        dash = behavior_report.generate_dashboard(root, data=data)
+        click.echo(f"Generated {written} report(s).")
+        if dash is not None:
+            click.echo(f"Dashboard: {dash}")
+        _maybe_open(dash, do_open)
+        return
+
+    if not pr_id:
+        click.echo("Provide a PR id or use --all.", err=True)
+        raise SystemExit(1)
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if pr_entry is None:
+        click.echo(f"PR '{pr_id}' not found.", err=True)
+        raise SystemExit(1)
+    out = behavior_report.generate_pr_report(root, pr_entry["id"], data=data)
+    if out is None:
+        click.echo(
+            "Could not resolve the captures dir (not inside a git repo / no "
+            "session tag?).", err=True)
+        raise SystemExit(1)
+    click.echo(f"Report: {out}")
+    _maybe_open(out, do_open)
+
+
+@pr.command("dashboard")
+@click.option("--open", "do_open", is_flag=True,
+              help="Open the dashboard in a browser.")
+def pr_dashboard(do_open: bool):
+    """(Re)generate the all-PR behavior dashboard (index.html).
+
+    Writes ``~/.pm/sessions/<tag>/captures/index.html`` — every PR reviewed
+    by behavior with a one-line status summary linking to its per-PR
+    report.html, client-side filtering, and a regenerate prompt for PRs
+    whose report hasn't been generated yet.
+    """
+    from pm_core import behavior_report
+
+    root = state_root()
+    out = behavior_report.generate_dashboard(root)
+    if out is None:
+        click.echo(
+            "Could not resolve the captures root (not inside a git repo / no "
+            "session tag?).", err=True)
+        raise SystemExit(1)
+    click.echo(f"Dashboard: {out}")
+    _maybe_open(out, do_open)

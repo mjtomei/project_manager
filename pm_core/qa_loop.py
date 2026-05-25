@@ -1438,6 +1438,24 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
             state.pr_id, s.index, "verdict.md", body,
             session_tag=state.session_tag,
         )
+        # Also persist a structured record so the behavior report
+        # (pr-8e693f6) can be rebuilt from retained captures alone —
+        # verdict.md drops the steps/focus the BDD report needs, and the
+        # live qa_status.json lives in an ephemeral workdir. JSON is
+        # additive; older captures without it fall back to verdict.md.
+        record = {
+            "index": s.index,
+            "title": s.title,
+            "focus": s.focus,
+            "steps": s.steps,
+            "verdict": verdict,
+            "reason": reason,
+        }
+        _write_scenario_capture_file(
+            state.pr_id, s.index, "scenario.json",
+            json.dumps(record, indent=2),
+            session_tag=state.session_tag,
+        )
 
 
 def _install_artifact_files(pm_root: Path, scenario: QAScenario,

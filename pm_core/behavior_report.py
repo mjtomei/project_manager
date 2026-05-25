@@ -1,0 +1,903 @@
+"""HTML behavior reports for sign-off (pr-8e693f6).
+
+Two human-facing surfaces sharing one generator and storage layout:
+
+* **Per-PR BDD report** — ``~/.pm/sessions/<tag>/captures/<pr_id>/report.html``.
+  A self-contained HTML page written ALONGSIDE the captures it references
+  (relative links, no copy), so it opens over ``file://`` with no server.
+  BDD-shaped: per behavior the flow (Given/When/Then), the verdict + reason,
+  the evidence inline/linked, plus a top-of-page status summary and the
+  sign-off recommendation / next hop. Terminal panes can't show webm; this
+  browser page is the sign-off surface.
+
+* **All-PR dashboard** — ``~/.pm/sessions/<tag>/captures/index.html``. Lists
+  every PR (grouped by plan) with a one-line behavior/status summary linking
+  to its ``report.html``; client-side filtering by merged/unmerged and by
+  status; detect-missing rows surface a regenerate command instead of a dead
+  link.
+
+Forward-compatible with the dependencies that aren't merged yet:
+
+* **pr-2d5f712** (the sign-off step + verdict router) can drop a
+  ``signoff.json`` next to a PR's captures —
+  ``{verdict, recommendation, next_hop, summary}`` — and we render it. Absent
+  that file we *derive* a heuristic recommendation from the scenario verdicts,
+  labelled as derived.
+* **pr-06a96fa** (the evidence model): evidence is discovered generically by
+  walking the captures tree and classifying by extension, so new evidence
+  kinds render without code changes here.
+* **pr-ff9b728** (plan notes): read defensively — rendered when present,
+  omitted cleanly when absent today.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import logging
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+from urllib.parse import quote
+
+_log = logging.getLogger("pm.behavior_report")
+
+# Canonical sign-off verdicts (mirrors pm_core.qa_loop constants without
+# importing the heavy module).
+_PASS = "PASS"
+_NEEDS_WORK = "NEEDS_WORK"
+_INPUT_REQUIRED = "INPUT_REQUIRED"
+_VERDICTS = (_PASS, _NEEDS_WORK, _INPUT_REQUIRED)
+
+# Filenames inside a scenario dir that are metadata, not evidence.
+_NON_EVIDENCE = {"verdict.md", "scenario.json"}
+
+_VIDEO_EXT = {".webm", ".mp4", ".mov", ".ogg"}
+_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+_HTML_EXT = {".html", ".htm"}
+_TEXT_EXT = {".txt", ".log", ".json", ".md", ".diff", ".patch", ".yaml",
+             ".yml", ".csv"}
+
+# Inline text/json evidence up to this size; larger files are linked.
+_INLINE_TEXT_MAX = 16 * 1024
+
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Evidence:
+    """A single evidence file referenced from a report."""
+    rel: str          # POSIX path relative to the report's directory
+    kind: str         # "video" | "image" | "html" | "text" | "other"
+    name: str         # display name (path relative to the captures dir)
+    size: int         # bytes
+    inline_text: Optional[str] = None  # small text/json bodies, read at gather
+
+
+@dataclass
+class Behavior:
+    """One QA scenario rendered as a behavior."""
+    index: int
+    title: str
+    focus: str
+    steps: str
+    verdict: str      # normalized: PASS | NEEDS_WORK | INPUT_REQUIRED | ""
+    reason: str
+    evidence: list[Evidence] = field(default_factory=list)
+
+
+@dataclass
+class ReportData:
+    pr_id: str
+    display_id: str
+    title: str
+    status: str
+    merged: bool
+    description: str
+    notes: list[str]
+    plan_id: Optional[str]
+    plan_name: Optional[str]
+    plan_notes: list[str]
+    behaviors: list[Behavior]
+    impl_evidence: list[Evidence]
+    recommendation: str
+    recommendation_source: str   # "router" | "derived"
+    next_hop: str
+    summary: str                 # free-text from signoff.json, may be ""
+
+
+# ---------------------------------------------------------------------------
+# Gathering
+# ---------------------------------------------------------------------------
+
+def _normalize_notes(raw) -> list[str]:
+    """Coerce a notes field into a list of text strings.
+
+    PR notes are ``[{id, text, ...}]``. Plan notes (pr-ff9b728, not merged)
+    may arrive as a list of dicts, a list of strings, or a single string —
+    handle all defensively so we render whatever lands.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, dict):
+            text = item.get("text")
+            if text:
+                out.append(str(text))
+        elif item:
+            out.append(str(item))
+    return out
+
+
+def _norm_verdict(v: str) -> str:
+    """Normalize a possibly-decorated verdict to a canonical keyword or ""."""
+    if not v:
+        return ""
+    for cand in _VERDICTS:
+        if cand in v:
+            return cand
+    return ""
+
+
+def _classify(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in _VIDEO_EXT:
+        return "video"
+    if ext in _IMAGE_EXT:
+        return "image"
+    if ext in _HTML_EXT:
+        return "html"
+    if ext in _TEXT_EXT:
+        return "text"
+    return "other"
+
+
+def _iter_evidence(scan_dir: Path, report_dir: Path,
+                   captures_dir: Path) -> list[Evidence]:
+    """Walk *scan_dir* recursively, classifying every file as evidence.
+
+    Skips metadata files (verdict.md / scenario.json) and dotfiles. Paths
+    are POSIX-relative to *report_dir* (where report.html lives) so links
+    resolve over file://; display names are relative to *captures_dir*.
+    """
+    out: list[Evidence] = []
+    if not scan_dir.is_dir():
+        return out
+    for p in sorted(scan_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.name in _NON_EVIDENCE or p.name.startswith("."):
+            continue
+        try:
+            rel = os.path.relpath(p, report_dir)
+            name = os.path.relpath(p, captures_dir)
+            size = p.stat().st_size
+        except OSError:
+            continue
+        kind = _classify(p)
+        inline = None
+        if kind == "text" and size <= _INLINE_TEXT_MAX:
+            try:
+                inline = p.read_text(errors="replace")
+            except OSError:
+                inline = None
+        out.append(Evidence(
+            rel=Path(rel).as_posix(),
+            kind=kind,
+            name=Path(name).as_posix(),
+            size=size,
+            inline_text=inline,
+        ))
+    return out
+
+
+def _parse_verdict_md(text: str) -> tuple[str, str, str]:
+    """Parse a legacy verdict.md → (title, verdict, reason).
+
+    Format written by qa_loop ``_persist_scenario_verdicts``:
+        # Scenario <n>: <title>
+
+        <verdict>
+
+        <reason...>
+    """
+    title = verdict = ""
+    reason_lines: list[str] = []
+    seen_verdict = False
+    for line in text.splitlines():
+        s = line.strip()
+        if not title and s.startswith("#"):
+            head = s.lstrip("#").strip()
+            if ":" in head:
+                title = head.split(":", 1)[1].strip()
+            else:
+                title = head
+            continue
+        if not s:
+            continue
+        if not seen_verdict:
+            verdict = s
+            seen_verdict = True
+            continue
+        reason_lines.append(line)
+    return title, verdict, "\n".join(reason_lines).strip()
+
+
+def _load_behavior(scenario_dir: Path, report_dir: Path,
+                   captures_dir: Path) -> Optional[Behavior]:
+    """Load one behavior from a ``scenarios/<n>/`` dir.
+
+    Prefers the structured ``scenario.json`` (steps + focus); falls back to
+    parsing ``verdict.md`` (steps then unavailable). Returns None when the
+    dir holds neither.
+    """
+    try:
+        index = int(scenario_dir.name)
+    except (ValueError, TypeError):
+        index = -1
+
+    title = focus = steps = verdict = reason = ""
+    sj = scenario_dir / "scenario.json"
+    vmd = scenario_dir / "verdict.md"
+    if sj.is_file():
+        try:
+            rec = json.loads(sj.read_text())
+            index = int(rec.get("index", index))
+            title = str(rec.get("title", "") or "")
+            focus = str(rec.get("focus", "") or "")
+            steps = str(rec.get("steps", "") or "")
+            verdict = str(rec.get("verdict", "") or "")
+            reason = str(rec.get("reason", "") or "")
+        except (OSError, ValueError, TypeError):
+            pass
+    if (not title and not verdict) and vmd.is_file():
+        try:
+            title, verdict, reason = _parse_verdict_md(vmd.read_text())
+        except OSError:
+            pass
+
+    if not title and not verdict and not sj.is_file() and not vmd.is_file():
+        # No metadata at all — still surface the dir if it holds evidence.
+        ev = _iter_evidence(scenario_dir, report_dir, captures_dir)
+        if not ev:
+            return None
+        return Behavior(index=index, title=f"Scenario {index}", focus="",
+                        steps="", verdict="", reason="", evidence=ev)
+
+    return Behavior(
+        index=index,
+        title=title or f"Scenario {index}",
+        focus=focus,
+        steps=steps,
+        verdict=_norm_verdict(verdict),
+        reason=reason,
+        evidence=_iter_evidence(scenario_dir, report_dir, captures_dir),
+    )
+
+
+def _load_signoff(captures_dir: Path) -> dict:
+    """Read the optional ``signoff.json`` the verdict router (pr-2d5f712)
+    may drop next to the captures. Returns {} when absent/unreadable."""
+    p = captures_dir / "signoff.json"
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _derive_recommendation(behaviors: list[Behavior]) -> tuple[str, str]:
+    """Heuristic recommendation / next-hop from scenario verdicts.
+
+    Used until pr-2d5f712's verdict router provides a real one via
+    signoff.json. Returns (recommendation_text, next_hop_keyword).
+    """
+    verdicts = [b.verdict for b in behaviors if b.verdict]
+    if not verdicts:
+        return ("No recorded behaviors yet — run QA before sign-off.", "qa")
+    if any(v == _INPUT_REQUIRED for v in verdicts):
+        return ("Input required before sign-off — a human-guided step is "
+                "pending.", "input_required")
+    if any(v == _NEEDS_WORK for v in verdicts):
+        return ("Needs work — at least one behavior did not pass; bounce back "
+                "through review/QA.", "needs_work")
+    if all(v == _PASS for v in verdicts):
+        return ("All recorded behaviors PASS — ready for sign-off / merge.",
+                "merge")
+    return ("Behaviors incomplete — some verdicts are still pending.",
+            "pending")
+
+
+def _scenario_dirs(captures_dir: Path) -> list[Path]:
+    sc = captures_dir / "scenarios"
+    if not sc.is_dir():
+        return []
+    dirs = [d for d in sc.iterdir() if d.is_dir()]
+
+    def _key(d: Path):
+        try:
+            return (0, int(d.name))
+        except ValueError:
+            return (1, d.name)
+    return sorted(dirs, key=_key)
+
+
+def gather_pr_report_data(data: dict, pr_id: str,
+                          captures_dir: Path) -> ReportData:
+    """Assemble everything the per-PR report renders.
+
+    *data* is the loaded project.yaml dict; *captures_dir* is the PR's
+    captures directory (where report.html will be written, and the report's
+    relative-link base).
+    """
+    from pm_core import store
+
+    pr = store.get_pr(data, pr_id) or {}
+    gh = pr.get("gh_pr_number")
+    display_id = f"#{gh}" if gh else pr_id
+
+    plan_id = pr.get("plan")
+    plan = store.get_plan(data, plan_id) if plan_id else None
+    plan_name = plan.get("name") if plan else None
+    plan_notes = _normalize_notes(plan.get("notes")) if plan else []
+
+    behaviors: list[Behavior] = []
+    for d in _scenario_dirs(captures_dir):
+        b = _load_behavior(d, captures_dir, captures_dir)
+        if b is not None:
+            behaviors.append(b)
+
+    impl_evidence = _iter_evidence(
+        captures_dir / "impl", captures_dir, captures_dir)
+
+    signoff = _load_signoff(captures_dir)
+    if signoff.get("recommendation"):
+        recommendation = str(signoff["recommendation"])
+        next_hop = str(signoff.get("next_hop", "") or "")
+        rec_source = "router"
+    else:
+        recommendation, next_hop = _derive_recommendation(behaviors)
+        rec_source = "derived"
+
+    return ReportData(
+        pr_id=pr_id,
+        display_id=display_id,
+        title=pr.get("title", pr_id),
+        status=pr.get("status", "unknown"),
+        merged=bool(pr.get("merged_at")),
+        description=pr.get("description", "") or "",
+        notes=_normalize_notes(pr.get("notes")),
+        plan_id=plan_id,
+        plan_name=plan_name,
+        plan_notes=plan_notes,
+        behaviors=behaviors,
+        impl_evidence=impl_evidence,
+        recommendation=recommendation,
+        recommendation_source=rec_source,
+        next_hop=next_hop,
+        summary=str(signoff.get("summary", "") or ""),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rendering — shared
+# ---------------------------------------------------------------------------
+
+def _e(text) -> str:
+    """HTML-escape any value to text content."""
+    return html.escape("" if text is None else str(text))
+
+
+def _href(rel: str) -> str:
+    """URL-encode a relative path for an href/src attribute (keeps '/')."""
+    return html.escape(quote(rel), quote=True)
+
+
+def _verdict_class(v: str) -> str:
+    return {
+        _PASS: "v-pass",
+        _NEEDS_WORK: "v-needswork",
+        _INPUT_REQUIRED: "v-input",
+    }.get(v, "v-pending")
+
+
+def _verdict_label(v: str) -> str:
+    return v if v else "pending"
+
+
+_CSS = """
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  Helvetica, Arial, sans-serif; margin: 0; padding: 0 1.25rem 4rem;
+  line-height: 1.5; color: #1b1f23; background: #fff;
+  max-width: 1000px; margin-left: auto; margin-right: auto; }
+@media (prefers-color-scheme: dark) {
+  body { color: #d8dde3; background: #0d1117; }
+  a { color: #58a6ff; }
+  .card, header.summary { background: #161b22; border-color: #30363d; }
+  pre, code { background: #161b22; }
+  .steps { background: #0b1622; }
+  th { background: #161b22; }
+}
+a { color: #0969da; text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1 { font-size: 1.6rem; margin: 1.2rem 0 0.2rem; }
+h2 { font-size: 1.25rem; margin: 2rem 0 0.6rem;
+  border-bottom: 1px solid rgba(127,127,127,.3); padding-bottom: .2rem; }
+h3 { font-size: 1.05rem; margin: .2rem 0; }
+.muted { color: #6a737d; }
+.crumbs { font-size: .85rem; margin: .8rem 0; }
+header.summary { border: 1px solid #d0d7de; border-radius: 10px;
+  padding: 1rem 1.2rem; margin: 1rem 0 1.5rem; background: #f6f8fa; }
+.badges { margin: .4rem 0; }
+.badge { display: inline-block; font-size: .78rem; font-weight: 600;
+  padding: .12rem .55rem; border-radius: 999px; margin: .15rem .3rem .15rem 0;
+  border: 1px solid transparent; }
+.v-pass { background: #1a7f37; color: #fff; }
+.v-needswork { background: #9a6700; color: #fff; }
+.v-input { background: #cf222e; color: #fff; }
+.v-pending { background: #6e7781; color: #fff; }
+.status-pill { background: rgba(127,127,127,.18); color: inherit;
+  border: 1px solid rgba(127,127,127,.4); }
+.rec { font-size: 1.05rem; margin: .6rem 0 .2rem; }
+.card { border: 1px solid #d0d7de; border-radius: 10px; padding: 1rem 1.2rem;
+  margin: 1rem 0; background: #fafbfc; }
+.behavior-head { display: flex; align-items: baseline; gap: .6rem;
+  flex-wrap: wrap; }
+.steps { background: #f0f6ff; border-radius: 6px; padding: .6rem .9rem;
+  margin: .6rem 0; }
+.gwt { margin: .15rem 0; }
+.gwt b { display: inline-block; min-width: 4.2rem; }
+pre { white-space: pre-wrap; word-wrap: break-word; background: #f6f8fa;
+  padding: .7rem .9rem; border-radius: 6px; overflow-x: auto; font-size: .85rem; }
+.evidence { margin: .6rem 0; }
+.evidence figure { margin: .8rem 0; }
+.evidence video, .evidence img { max-width: 100%; border-radius: 6px;
+  border: 1px solid rgba(127,127,127,.3); }
+figcaption { font-size: .8rem; color: #6a737d; margin-top: .2rem; }
+details > summary { cursor: pointer; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+th, td { text-align: left; padding: .5rem .6rem;
+  border-bottom: 1px solid rgba(127,127,127,.25); vertical-align: top; }
+th { background: #f6f8fa; font-size: .85rem; }
+.filters { margin: 1rem 0; display: flex; gap: 1.2rem; flex-wrap: wrap;
+  align-items: center; font-size: .9rem; }
+.filters label { margin-right: .4rem; }
+.missing { color: #9a6700; font-weight: 600; }
+.regen code { background: rgba(127,127,127,.18); padding: .1rem .4rem;
+  border-radius: 4px; font-size: .85rem; }
+button.copy { font-size: .78rem; padding: .15rem .5rem; cursor: pointer;
+  border: 1px solid rgba(127,127,127,.5); border-radius: 5px;
+  background: transparent; color: inherit; }
+.notes li { margin: .25rem 0; }
+"""
+
+
+def _render_steps_html(steps: str) -> str:
+    """Render free-form STEPS as Given/When/Then lines when recognizable."""
+    if not steps.strip():
+        return '<p class="muted">Steps not recorded.</p>'
+    keywords = ("GIVEN", "WHEN", "THEN", "AND", "BUT")
+    lines = steps.splitlines()
+    structured = any(
+        line.strip().upper().startswith(k + ":") or
+        line.strip().upper().startswith(k + " ")
+        for line in lines for k in keywords
+    )
+    if not structured:
+        return f'<pre>{_e(steps)}</pre>'
+    out = ['<div class="steps">']
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        upper = s.upper()
+        kw = next((k for k in keywords
+                   if upper.startswith(k + ":") or upper.startswith(k + " ")),
+                  None)
+        if kw:
+            rest = s[len(kw):].lstrip(": ").strip()
+            out.append(f'<div class="gwt"><b>{_e(kw.title())}</b> '
+                       f'{_e(rest)}</div>')
+        else:
+            out.append(f'<div class="gwt" style="margin-left:4.2rem">'
+                       f'{_e(s)}</div>')
+    out.append('</div>')
+    return "".join(out)
+
+
+def _render_evidence_html(evidence: list[Evidence]) -> str:
+    if not evidence:
+        return '<p class="muted">No evidence captured.</p>'
+    out = ['<div class="evidence">']
+    for ev in evidence:
+        href = _href(ev.rel)
+        cap = (f'<figcaption><a href="{href}">{_e(ev.name)}</a> '
+               f'<span class="muted">({_human_size(ev.size)})</span>'
+               f'</figcaption>')
+        if ev.kind == "video":
+            out.append(
+                f'<figure><video controls preload="metadata" '
+                f'src="{href}"></video>{cap}</figure>')
+        elif ev.kind == "image":
+            out.append(
+                f'<figure><img loading="lazy" src="{href}" '
+                f'alt="{_e(ev.name)}">{cap}</figure>')
+        elif ev.kind == "text" and ev.inline_text is not None:
+            body = ev.inline_text
+            out.append(
+                f'<figure><details><summary>{_e(ev.name)} '
+                f'<span class="muted">({_human_size(ev.size)})</span>'
+                f'</summary><pre>{_e(body)}</pre></details>'
+                f'<figcaption><a href="{href}">open file</a></figcaption>'
+                f'</figure>')
+        else:  # html, other, or oversized text → link
+            label = ("open page" if ev.kind == "html" else "download")
+            out.append(
+                f'<figure><figcaption><a href="{href}">{_e(ev.name)}</a> '
+                f'<span class="muted">({_human_size(ev.size)})</span> — '
+                f'{label}</figcaption></figure>')
+    out.append('</div>')
+    return "".join(out)
+
+
+def _human_size(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            if unit == "B":
+                return f"{int(size)} B"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{int(n)} B"
+
+
+def _notes_html(notes: list[str], empty: str) -> str:
+    if not notes:
+        return f'<p class="muted">{_e(empty)}</p>'
+    items = "".join(f"<li>{_e(n)}</li>" for n in notes)
+    return f'<ul class="notes">{items}</ul>'
+
+
+# ---------------------------------------------------------------------------
+# Rendering — per-PR report
+# ---------------------------------------------------------------------------
+
+def render_pr_report_html(rd: ReportData) -> str:
+    tally: dict[str, int] = {}
+    for b in rd.behaviors:
+        key = b.verdict or "pending"
+        tally[key] = tally.get(key, 0) + 1
+
+    badges = [f'<span class="badge status-pill">status: {_e(rd.status)}</span>']
+    if rd.merged:
+        badges.append('<span class="badge status-pill">merged</span>')
+    for v in (_PASS, _NEEDS_WORK, _INPUT_REQUIRED, "pending"):
+        n = tally.get(v, 0)
+        if n:
+            badges.append(
+                f'<span class="badge {_verdict_class(v if v != "pending" else "")}">'
+                f'{_e(_verdict_label(v if v != "pending" else ""))}: {n}</span>')
+
+    rec_note = ("" if rd.recommendation_source == "router"
+                else ' <span class="muted">(derived from verdicts — the '
+                     'sign-off verdict router will refine this)</span>')
+
+    parts: list[str] = []
+    parts.append("<!DOCTYPE html><html lang=\"en\"><head>")
+    parts.append('<meta charset="utf-8">')
+    parts.append('<meta name="viewport" content="width=device-width, '
+                 'initial-scale=1">')
+    parts.append(f"<title>{_e(rd.display_id)} — behavior report</title>")
+    parts.append(f"<style>{_CSS}</style></head><body>")
+
+    parts.append('<div class="crumbs"><a href="../index.html">'
+                 '&larr; All-PR behavior dashboard</a></div>')
+    parts.append(f"<h1>{_e(rd.display_id)} — {_e(rd.title)}</h1>")
+
+    parts.append('<header class="summary">')
+    parts.append(f'<div class="badges">{"".join(badges)}</div>')
+    parts.append(f'<div class="rec"><b>Recommendation:</b> '
+                 f'{_e(rd.recommendation)}{rec_note}</div>')
+    if rd.next_hop:
+        parts.append(f'<div class="muted">Next hop: {_e(rd.next_hop)}</div>')
+    if rd.summary:
+        parts.append(f'<p>{_e(rd.summary)}</p>')
+    parts.append('</header>')
+
+    # Behaviors
+    parts.append('<h2>Behaviors</h2>')
+    if not rd.behaviors:
+        parts.append('<p class="muted">No recorded behaviors yet. Run QA for '
+                     'this PR, then regenerate this report.</p>')
+    for b in rd.behaviors:
+        parts.append('<section class="card">')
+        parts.append('<div class="behavior-head">')
+        parts.append(f'<h3>Behavior {b.index}: {_e(b.title)}</h3>')
+        parts.append(f'<span class="badge {_verdict_class(b.verdict)}">'
+                     f'{_e(_verdict_label(b.verdict))}</span>')
+        parts.append('</div>')
+        if b.focus:
+            parts.append(f'<p class="muted">Focus: {_e(b.focus)}</p>')
+        parts.append('<h4 style="margin:.6rem 0 .1rem">Flow</h4>')
+        parts.append(_render_steps_html(b.steps))
+        if b.reason:
+            parts.append(f'<p><b>Reason:</b> {_e(b.reason)}</p>')
+        parts.append('<h4 style="margin:.6rem 0 .1rem">Evidence</h4>')
+        parts.append(_render_evidence_html(b.evidence))
+        parts.append('</section>')
+
+    # Implementation evidence (bug-fix repro/verify, etc.)
+    if rd.impl_evidence:
+        parts.append('<h2>Implementation evidence</h2>')
+        parts.append('<p class="muted">Captured during implementation '
+                     '(e.g. bug-fix reproduce / verify).</p>')
+        parts.append('<section class="card">')
+        parts.append(_render_evidence_html(rd.impl_evidence))
+        parts.append('</section>')
+
+    # Reachable context
+    parts.append('<h2>Context for sign-off</h2>')
+    parts.append('<section class="card">')
+    parts.append('<h3>PR description</h3>')
+    if rd.description.strip():
+        parts.append(f'<pre>{_e(rd.description)}</pre>')
+    else:
+        parts.append('<p class="muted">No description.</p>')
+    parts.append('<h3>PR notes</h3>')
+    parts.append(_notes_html(rd.notes, "No PR notes."))
+    if rd.plan_id:
+        parts.append(f'<h3>Plan: {_e(rd.plan_name or rd.plan_id)}</h3>')
+        parts.append(_notes_html(rd.plan_notes, "No plan notes."))
+    parts.append('</section>')
+
+    parts.append('</body></html>')
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Rendering — dashboard
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _DashRow:
+    pr_id: str
+    display_id: str
+    title: str
+    status: str
+    merged: bool
+    has_report: bool
+    summary: str
+    rec: str
+
+
+def _pr_capture_summary(captures_dir: Path) -> tuple[str, str]:
+    """One-line (tally, recommendation) for a PR from its retained captures."""
+    behaviors: list[Behavior] = []
+    for d in _scenario_dirs(captures_dir):
+        b = _load_behavior(d, captures_dir, captures_dir)
+        if b is not None:
+            behaviors.append(b)
+    if not behaviors:
+        return ("no behaviors recorded", "")
+    tally: dict[str, int] = {}
+    for b in behaviors:
+        tally[b.verdict or "pending"] = tally.get(b.verdict or "pending", 0) + 1
+    bits = []
+    for v in (_PASS, _NEEDS_WORK, _INPUT_REQUIRED, "pending"):
+        if tally.get(v):
+            bits.append(f"{tally[v]} {_verdict_label(v if v != 'pending' else '')}")
+    signoff = _load_signoff(captures_dir)
+    rec = (str(signoff.get("recommendation"))
+           if signoff.get("recommendation")
+           else _derive_recommendation(behaviors)[0])
+    return (", ".join(bits), rec)
+
+
+def gather_dashboard_rows(data: dict,
+                          captures_root_dir: Path) -> list[_DashRow]:
+    rows: list[_DashRow] = []
+    for pr in data.get("prs") or []:
+        pr_id = pr["id"]
+        gh = pr.get("gh_pr_number")
+        cdir = captures_root_dir / pr_id
+        has_report = (cdir / "report.html").is_file()
+        summary, rec = _pr_capture_summary(cdir)
+        rows.append(_DashRow(
+            pr_id=pr_id,
+            display_id=f"#{gh}" if gh else pr_id,
+            title=pr.get("title", pr_id),
+            status=pr.get("status", "unknown"),
+            merged=bool(pr.get("merged_at")),
+            has_report=has_report,
+            summary=summary,
+            rec=rec,
+        ))
+    return rows
+
+
+_DASH_JS = """
+function pmFilter() {
+  var st = document.getElementById('f-status').value;
+  var mg = document.getElementById('f-merged').value;
+  var rows = document.querySelectorAll('tr[data-pr]');
+  rows.forEach(function(r) {
+    var okStatus = (st === 'all') || (r.dataset.status === st);
+    var okMerged = (mg === 'all') ||
+      (mg === 'merged' ? r.dataset.merged === '1'
+                       : r.dataset.merged === '0');
+    r.style.display = (okStatus && okMerged) ? '' : 'none';
+  });
+}
+function pmCopy(cmd, btn) {
+  navigator.clipboard && navigator.clipboard.writeText(cmd);
+  var old = btn.textContent; btn.textContent = 'copied';
+  setTimeout(function(){ btn.textContent = old; }, 1200);
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var s = document.getElementById('f-status');
+  var m = document.getElementById('f-merged');
+  if (s) s.addEventListener('change', pmFilter);
+  if (m) m.addEventListener('change', pmFilter);
+});
+"""
+
+
+def render_dashboard_html(data: dict, rows: list[_DashRow]) -> str:
+    statuses = sorted({r.status for r in rows})
+    status_opts = "".join(
+        f'<option value="{_e(s)}">{_e(s)}</option>' for s in statuses)
+
+    # Group rows by plan, preserving plan order from project.yaml.
+    plans = data.get("plans") or []
+    plan_order = [p["id"] for p in plans]
+    plan_by_id = {p["id"]: p for p in plans}
+    pr_plan = {pr["id"]: pr.get("plan") for pr in (data.get("prs") or [])}
+
+    groups: dict[Optional[str], list[_DashRow]] = {}
+    for r in rows:
+        groups.setdefault(pr_plan.get(r.pr_id), []).append(r)
+
+    ordered_keys: list[Optional[str]] = [
+        pid for pid in plan_order if pid in groups]
+    ordered_keys += [k for k in groups
+                     if k is not None and k not in plan_order]
+    if None in groups:
+        ordered_keys.append(None)
+
+    parts: list[str] = []
+    parts.append('<!DOCTYPE html><html lang="en"><head>')
+    parts.append('<meta charset="utf-8">')
+    parts.append('<meta name="viewport" content="width=device-width, '
+                 'initial-scale=1">')
+    parts.append('<title>Behavior dashboard — all PRs</title>')
+    parts.append(f'<style>{_CSS}</style></head><body>')
+    parts.append('<h1>Behavior dashboard</h1>')
+    parts.append('<p class="muted">Every PR reviewed by behavior. '
+                 'Click a PR to open its per-PR BDD report.</p>')
+
+    parts.append('<div class="filters">')
+    parts.append('<span><label for="f-status">Status</label>'
+                 '<select id="f-status"><option value="all">all</option>'
+                 f'{status_opts}</select></span>')
+    parts.append('<span><label for="f-merged">Merged</label>'
+                 '<select id="f-merged"><option value="all">all</option>'
+                 '<option value="merged">merged</option>'
+                 '<option value="unmerged">unmerged</option>'
+                 '</select></span>')
+    parts.append('</div>')
+
+    for key in ordered_keys:
+        grp = groups[key]
+        if key is None:
+            parts.append('<h2>Unplanned</h2>')
+        else:
+            plan = plan_by_id.get(key, {})
+            parts.append(f'<h2>{_e(plan.get("name", key))}</h2>')
+            plan_notes = _normalize_notes(plan.get("notes"))
+            if plan_notes:
+                parts.append(_notes_html(plan_notes, ""))
+        parts.append('<table>')
+        parts.append('<thead><tr><th>PR</th><th>Title</th><th>Status</th>'
+                     '<th>Behaviors</th><th>Report</th></tr></thead><tbody>')
+        for r in grp:
+            href = _href(f"{r.pr_id}/report.html")
+            if r.has_report:
+                report_cell = f'<a href="{href}">open report</a>'
+            else:
+                cmd = f"pm pr report {r.pr_id}"
+                report_cell = (
+                    f'<span class="missing">no report</span> &middot; '
+                    f'<span class="regen">regenerate: <code>{_e(cmd)}</code> '
+                    f'<button class="copy" type="button" '
+                    f'onclick="pmCopy(\'{_e(cmd)}\', this)">copy</button>'
+                    f'</span>')
+            summary = _e(r.summary)
+            if r.rec:
+                summary += f' <span class="muted">— {_e(r.rec)}</span>'
+            parts.append(
+                f'<tr data-pr="{_e(r.pr_id)}" data-status="{_e(r.status)}" '
+                f'data-merged="{1 if r.merged else 0}">'
+                f'<td>{_e(r.display_id)}</td>'
+                f'<td>{_e(r.title)}</td>'
+                f'<td>{_e(r.status)}</td>'
+                f'<td>{summary}</td>'
+                f'<td>{report_cell}</td></tr>')
+        parts.append('</tbody></table>')
+
+    parts.append(f'<script>{_DASH_JS}</script>')
+    parts.append('</body></html>')
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Public generation API
+# ---------------------------------------------------------------------------
+
+def generate_pr_report(root: Path, pr_id: str, *,
+                       session_tag: str | None = None,
+                       data: dict | None = None,
+                       refresh_dashboard: bool = True) -> Optional[Path]:
+    """Generate ``report.html`` for *pr_id* into its captures dir.
+
+    Returns the written path, or None when the captures dir can't be
+    resolved (no session tag). Unless *refresh_dashboard* is False, also
+    refreshes the dashboard so the PR's "missing report" row flips to a
+    live link (callers regenerating many reports pass False and rebuild the
+    dashboard once at the end). Safe to call at sign-off time (pr-2d5f712)
+    or by hand via ``pm pr report``.
+    """
+    from pm_core import store
+    from pm_core.paths import captures_dir
+
+    if data is None:
+        data = store.load(root)
+    cdir = captures_dir(pr_id, session_tag=session_tag)
+    if cdir is None:
+        _log.warning("Cannot resolve captures dir for %s (no session tag)",
+                     pr_id)
+        return None
+    cdir.mkdir(parents=True, exist_ok=True)
+    rd = gather_pr_report_data(data, pr_id, cdir)
+    out_path = cdir / "report.html"
+    out_path.write_text(render_pr_report_html(rd))
+    # Keep the dashboard in sync (best effort).
+    if refresh_dashboard:
+        try:
+            generate_dashboard(root, session_tag=session_tag, data=data)
+        except Exception:
+            _log.warning("dashboard refresh failed after %s report", pr_id,
+                         exc_info=True)
+    return out_path
+
+
+def generate_dashboard(root: Path, *, session_tag: str | None = None,
+                       data: dict | None = None) -> Optional[Path]:
+    """Generate the all-PR dashboard ``index.html`` at the captures root.
+
+    Returns the written path, or None when the captures root can't be
+    resolved (no session tag).
+    """
+    from pm_core import store
+    from pm_core.paths import captures_root
+
+    if data is None:
+        data = store.load(root)
+    croot = captures_root(session_tag=session_tag)
+    if croot is None:
+        _log.warning("Cannot resolve captures root (no session tag)")
+        return None
+    croot.mkdir(parents=True, exist_ok=True)
+    rows = gather_dashboard_rows(data, croot)
+    out_path = croot / "index.html"
+    out_path.write_text(render_dashboard_html(data, rows))
+    return out_path

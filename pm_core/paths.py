@@ -113,6 +113,35 @@ def captures_dir(pr_id: str,
         return host_path
     return None
 
+
+def captures_root(session_tag: str | None = None,
+                  start_path: Path | None = None) -> Path | None:
+    """Return the host captures *root* (``~/.pm/sessions/<tag>/captures/``).
+
+    This is the directory that holds every per-PR captures dir plus the
+    all-PR behavior dashboard (``index.html``). Tag resolution mirrors
+    :func:`captures_dir`: *session_tag* if supplied, else the pm-session
+    tag, else the cwd/tmux-derived tag. Returns ``None`` when no tag can
+    be derived (e.g. not inside a git repo). The directory is created if
+    it doesn't exist when a tag is available.
+    """
+    if session_tag is None:
+        try:
+            from pm_core.cli.helpers import _get_pm_session
+            pm_sess = _get_pm_session()
+        except Exception:
+            pm_sess = None
+        if pm_sess:
+            session_tag = pm_sess.removeprefix("pm-")
+        else:
+            session_tag = get_session_tag(start_path=start_path)
+    if not session_tag:
+        return None
+    root = sessions_dir() / session_tag / "captures"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 # Container-internal path where the host's captures_dir is bind-mounted
 # during container creation. Workers running in containers reference
 # this fixed path; the host filesystem path is invisible to them.

@@ -22617,11 +22617,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T14:39:06.066606+00:00'
+  updated_at: '2026-05-25T16:40:45.813169+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a9626ec
+    text: 'Behavior report/dashboard shipped standalone since deps (pr-2d5f712 sign-off
+      step, pr-ff9b728 plan notes) are NOT merged. Module: pm_core/behavior_report.py.
+      CLI: `pm pr report PR_ID [--all] [--open]` + `pm pr dashboard`. API for sign-off
+      step: generate_pr_report(root, pr_id) / generate_dashboard(root). SEAM for pr-2d5f712
+      verdict router: drop captures/<pr_id>/signoff.json {verdict,recommendation,next_hop,summary}
+      and the report renders it; absent it, we derive a heuristic recommendation.
+      Durable regen source: qa_loop._persist_scenario_verdicts now also writes scenarios/<n>/scenario.json
+      (index,title,focus,steps,verdict,reason) so reports rebuild from captures after
+      the workdir is gone (verdict.md fallback for old captures). Dashboard index.html
+      at captures root; per-PR report.html co-located with evidence (relative links,
+      file://). Detect-missing rows surface `pm pr report <id>` (static = no server,
+      so regenerate = copy the command).'
+    created_at: '2026-05-25T16:40:45Z'
+    last_edited: '2026-05-25T16:40:45Z'
 - id: pr-ff9b728
   plan: plan-regression
   title: Plan auto-start watcher — generalize impl watchers + become the auto-start
