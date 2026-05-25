@@ -556,6 +556,15 @@ IMPORTANT: Always end your response with the verdict keyword on its own line —
         return prompt.strip()
 
     # --- Standard merge-conflict variant ---
+    # Default failure framing / goal (overridden per-backend below).
+    failure_line = (
+        f"The merge of `{branch}` into `{base_branch}` failed with the following error:"
+    )
+    goal_desc = (
+        f"Resolve the merge conflict so that `{base_branch}` contains the merged "
+        f"result of both branches."
+    )
+
     if backend == "local":
         backend_block = f"""
 ## Repository Setup (local backend)
@@ -566,14 +575,47 @@ pushing to origin will be rejected.
 
 Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
 """
+        merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
+        steps_block = f"""## Steps
+1. Investigate the error and resolve the issue in the workdir
+2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
+3. Run any relevant tests to verify the resolution
+4. End with a verdict on its own line — one of:"""
     elif backend == "github":
+        gh_pr_number = pr.get("gh_pr_number")
+        gh_merge_cmd = (
+            f"gh pr merge {gh_pr_number} --merge" if gh_pr_number
+            else "gh pr merge <PR#> --merge"
+        )
+        failure_line = (
+            f"The GitHub merge of `{branch}` into `{base_branch}` failed with the following error:"
+        )
+        goal_desc = (
+            f"Resolve the merge conflict so the GitHub merge of `{branch}` into "
+            f"`{base_branch}` can complete and GitHub records the PR as merged."
+        )
         backend_block = f"""
 ## Repository Setup (GitHub backend)
 
-This project is hosted on GitHub.
+This project is hosted on GitHub, and **GitHub must perform the merge into `{base_branch}`**
+so the PR is recorded as merged.  You are in the PR branch (`{branch}`) workdir.
 
-After resolving the conflict, push the merged `{base_branch}` to origin.
+Do NOT merge into `{base_branch}` locally and do NOT `git push origin {base_branch}` —
+that bypasses GitHub entirely.  Instead, bring `{base_branch}` into the PR branch, push
+the branch, and re-run the GitHub merge.
 """
+        merged_desc = (
+            f"The conflict is resolved by merging `{base_branch}` into `{branch}`, the "
+            f"branch is pushed, and the GitHub merge has completed so the PR is recorded as merged."
+        )
+        steps_block = f"""## Steps
+1. Investigate the error and resolve the conflict in the workdir (you are on branch `{branch}`)
+2. Merge `{base_branch}` INTO the PR branch `{branch}`, resolving the conflicts on the branch
+3. Run any relevant tests to verify the resolution
+4. Push the PR branch `{branch}` to origin
+5. Re-run the GitHub merge so GitHub merges the branch into `{base_branch}` and records the PR as merged: `{gh_merge_cmd}`
+6. Pull `{base_branch}` into the local repo
+7. End with a verdict on its own line — one of:"""
     else:
         backend_block = f"""
 ## Repository Setup (vanilla git backend)
@@ -582,15 +624,6 @@ This project uses a remote git server.
 
 After resolving the conflict, push the merged `{base_branch}` to origin.
 """
-
-    if backend == "local":
-        merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
-        steps_block = f"""## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-4. End with a verdict on its own line — one of:"""
-    else:
         merged_desc = f"The conflict is resolved, merged, and pushed to origin."
         steps_block = f"""## Steps
 1. Investigate the error and resolve the issue in the workdir
@@ -601,7 +634,7 @@ After resolving the conflict, push the merged `{base_branch}` to origin.
 
     prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
 
-The merge of `{branch}` into `{base_branch}` failed with the following error:
+{failure_line}
 
 ```
 {error_output}
@@ -609,7 +642,7 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 {backend_block}
 ## Goal
 
-Resolve the merge conflict so that `{base_branch}` contains the merged result of both branches.
+{goal_desc}
 
 {steps_block}
    - **MERGED** — {merged_desc}
