@@ -556,6 +556,15 @@ IMPORTANT: Always end your response with the verdict keyword on its own line —
         return prompt.strip()
 
     # --- Standard merge-conflict variant ---
+    # Default failure framing / goal (overridden per-backend below).
+    failure_line = (
+        f"The merge of `{branch}` into `{base_branch}` failed with the following error:"
+    )
+    goal_desc = (
+        f"Resolve the merge conflict so that `{base_branch}` contains the merged "
+        f"result of both branches."
+    )
+
     if backend == "local":
         backend_block = f"""
 ## Repository Setup (local backend)
@@ -566,14 +575,83 @@ pushing to origin will be rejected.
 
 Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
 """
+        merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
+        steps_block = f"""## Steps
+1. Investigate the error and resolve the issue in the workdir
+2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
+3. Run any relevant tests to verify the resolution
+4. End with a verdict on its own line — one of:"""
     elif backend == "github":
+        gh_pr_number = pr.get("gh_pr_number")
+        gh_merge_cmd = (
+            f"gh pr merge {gh_pr_number} --merge" if gh_pr_number
+            else "gh pr merge <PR#> --merge"
+        )
+        # Resolve the main repo checkout — a DIFFERENT directory from this
+        # PR-branch workdir.  After the GitHub merge, the agent fast-forwards
+        # its base branch directly: pm's post-MERGED propagation re-attempt
+        # (which would otherwise do the pull) can be killed by a concurrent
+        # sync that detects the merge on GitHub mid-flow, so we don't rely on
+        # it here.  See pr-6bf587b for the complementary window-protection fix.
+        repo_dir = ""
+        try:
+            from pm_core.cli.helpers import _resolve_repo_dir
+            repo_dir = str(_resolve_repo_dir(store.find_project_root(), data))
+        except Exception:
+            repo_dir = ""
+        workdir_disp = workdir or "(this directory)"
+        repo_dir_disp = repo_dir or "the main repo checkout (the directory pm runs from)"
+        # All main-repo commands are run with an explicit `-C <dir>` so the
+        # agent never has to leave the PR-branch workdir (and can't confuse
+        # the two directories).  Falls back to plain `git` if the path didn't
+        # resolve, in which case the agent must cd into the main checkout.
+        gc = f"git -C {repo_dir}" if repo_dir else "git"
+        ff_procedure = f"""   - `{gc} fetch origin`
+   - The main checkout usually has small uncommitted edits (most often `project.yaml`, which pm writes live).  These do NOT block the update, but stash them first so the fast-forward is clean: `{gc} stash push --include-untracked -m "pm: auto-stash for merge"` (skip if `{gc} status --porcelain` is empty).
+   - Fast-forward the base branch: `{gc} merge --ff-only origin/{base_branch}`.
+   - If you stashed, restore the edits: `{gc} stash pop`.  If the pop conflicts (e.g. on `project.yaml`), resolve it — keep the incoming merged content AND re-apply the local uncommitted edits — then `{gc} add` the resolved files.  Do NOT commit; these stay as uncommitted working-tree changes.
+   - If `--ff-only` itself fails because the checkout has *committed* local commits not on origin (genuine divergence, not just dirty files), do NOT create a merge commit — stop and report **INPUT_REQUIRED** describing the divergence."""
+        failure_line = (
+            f"The GitHub merge of `{branch}` into `{base_branch}` failed with the following error:"
+        )
+        goal_desc = (
+            f"Resolve the merge conflict so the GitHub merge of `{branch}` into "
+            f"`{base_branch}` can complete and GitHub records the PR as merged."
+        )
         backend_block = f"""
 ## Repository Setup (GitHub backend)
 
-This project is hosted on GitHub.
+This project is hosted on GitHub, and **GitHub must perform the merge into `{base_branch}`**
+so the PR is recorded as merged.
 
-After resolving the conflict, push the merged `{base_branch}` to origin.
+You will work across TWO separate directories — keep them straight:
+- **PR-branch workdir** = your current directory (`{workdir_disp}`), checked out on `{branch}`.
+  Resolve the conflict, merge `{base_branch}` into the branch, push the branch, and run
+  `gh pr merge` here.
+- **Main repo checkout** = `{repo_dir_disp}`, a *different* clone normally on `{base_branch}`.
+  After GitHub records the merge, fast-forward its `{base_branch}` to match origin.
+
+Do NOT merge into `{base_branch}` locally and do NOT `git push origin {base_branch}` in
+either directory — GitHub performs the merge via `gh pr merge`.  The only change to the
+main repo checkout is a fast-forward (`--ff-only`) to origin; you may stash/pop its small
+uncommitted edits (e.g. `project.yaml`) around the fast-forward, but never create a new
+merge commit on `{base_branch}` and never push it.
 """
+        merged_desc = (
+            f"The conflict is resolved by merging `{base_branch}` into `{branch}`, the branch "
+            f"is pushed, the GitHub merge has completed (PR recorded as merged), and the main "
+            f"repo checkout's `{base_branch}` is fast-forwarded to match origin (its uncommitted "
+            f"edits preserved)."
+        )
+        steps_block = f"""## Steps
+1. Investigate the error and resolve the conflict in the PR-branch workdir (your current directory, on branch `{branch}`)
+2. Merge `{base_branch}` INTO the PR branch `{branch}`, resolving the conflicts on the branch
+3. Run any relevant tests to verify the resolution
+4. Push the PR branch `{branch}` to origin
+5. Re-run the GitHub merge so GitHub merges the branch into `{base_branch}` and records the PR as merged: `{gh_merge_cmd}`
+6. Update the **main repo checkout** (NOT the workdir) so its `{base_branch}` includes the GitHub merge.  Do this only if it is on `{base_branch}`; if it is on another branch, leave it untouched.  The merge already happened on GitHub, so this is a fast-forward, not a re-merge:
+{ff_procedure}
+7. End with a verdict on its own line — one of:"""
     else:
         backend_block = f"""
 ## Repository Setup (vanilla git backend)
@@ -582,15 +660,6 @@ This project uses a remote git server.
 
 After resolving the conflict, push the merged `{base_branch}` to origin.
 """
-
-    if backend == "local":
-        merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
-        steps_block = f"""## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-4. End with a verdict on its own line — one of:"""
-    else:
         merged_desc = f"The conflict is resolved, merged, and pushed to origin."
         steps_block = f"""## Steps
 1. Investigate the error and resolve the issue in the workdir
@@ -601,7 +670,7 @@ After resolving the conflict, push the merged `{base_branch}` to origin.
 
     prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
 
-The merge of `{branch}` into `{base_branch}` failed with the following error:
+{failure_line}
 
 ```
 {error_output}
@@ -609,7 +678,7 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 {backend_block}
 ## Goal
 
-Resolve the merge conflict so that `{base_branch}` contains the merged result of both branches.
+{goal_desc}
 
 {steps_block}
    - **MERGED** — {merged_desc}
