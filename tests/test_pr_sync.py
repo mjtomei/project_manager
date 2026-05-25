@@ -761,3 +761,119 @@ class TestSyncIncludesQaStatus:
 
         # Only qa PR should be checked (merged/closed are skipped)
         assert mock_backend.is_merged.call_count == 1
+
+
+class TestBackfillGhNumbersByBranch:
+    """Tests for re-linking PRs that lost their gh_pr_number by branch."""
+
+    def test_links_missing_number_by_branch(self, tmp_pm_root_github):
+        from pm_core.cli.helpers import backfill_gh_numbers_by_branch
+
+        # pr-003 in the fixture has a branch but no gh_pr_number.
+        data = store.load(tmp_pm_root_github)
+        gh_prs = [
+            {"number": 103, "headRefName": "pm/pr-003-third",
+             "state": "OPEN", "isDraft": False,
+             "url": "https://github.com/test/repo/pull/103"},
+        ]
+        with patch("pm_core.gh_ops.list_prs", return_value=gh_prs):
+            linked = backfill_gh_numbers_by_branch(
+                tmp_pm_root_github, data, "/repo", save_state=True)
+
+        assert linked == [("pr-003", 103)]
+        saved = store.load(tmp_pm_root_github)
+        pr3 = next(p for p in saved["prs"] if p["id"] == "pr-003")
+        assert pr3["gh_pr_number"] == 103
+        assert pr3["gh_pr"] == "https://github.com/test/repo/pull/103"
+        assert pr3["status"] == "in_review"
+
+    def test_noop_when_no_branch_match(self, tmp_pm_root_github):
+        from pm_core.cli.helpers import backfill_gh_numbers_by_branch
+
+        data = store.load(tmp_pm_root_github)
+        gh_prs = [
+            {"number": 999, "headRefName": "some/other-branch",
+             "state": "OPEN", "isDraft": False, "url": "u"},
+        ]
+        with patch("pm_core.gh_ops.list_prs", return_value=gh_prs):
+            linked = backfill_gh_numbers_by_branch(
+                tmp_pm_root_github, data, "/repo", save_state=True)
+
+        assert linked == []
+        saved = store.load(tmp_pm_root_github)
+        pr3 = next(p for p in saved["prs"] if p["id"] == "pr-003")
+        assert not pr3.get("gh_pr_number")
+
+    def test_skips_prs_that_already_have_a_number(self, tmp_pm_root_github):
+        from pm_core.cli.helpers import backfill_gh_numbers_by_branch
+
+        data = store.load(tmp_pm_root_github)
+        # pr-001 already has gh_pr_number 101; a same-branch GH PR with a
+        # different number must not overwrite it.
+        gh_prs = [
+            {"number": 555, "headRefName": "pm/pr-001-first",
+             "state": "OPEN", "isDraft": False, "url": "u"},
+        ]
+        with patch("pm_core.gh_ops.list_prs", return_value=gh_prs):
+            linked = backfill_gh_numbers_by_branch(
+                tmp_pm_root_github, data, "/repo", save_state=True)
+
+        assert linked == []
+        saved = store.load(tmp_pm_root_github)
+        pr1 = next(p for p in saved["prs"] if p["id"] == "pr-001")
+        assert pr1["gh_pr_number"] == 101
+
+    def test_preserves_local_qa_status(self, tmp_pm_root_github):
+        from pm_core.cli.helpers import backfill_gh_numbers_by_branch
+
+        data = store.load(tmp_pm_root_github)
+        for p in data["prs"]:
+            if p["id"] == "pr-003":
+                p["status"] = "qa"
+        store.save(data, tmp_pm_root_github)
+        data = store.load(tmp_pm_root_github)
+
+        gh_prs = [
+            {"number": 103, "headRefName": "pm/pr-003-third",
+             "state": "OPEN", "isDraft": False, "url": "u"},
+        ]
+        with patch("pm_core.gh_ops.list_prs", return_value=gh_prs):
+            backfill_gh_numbers_by_branch(
+                tmp_pm_root_github, data, "/repo", save_state=True)
+
+        saved = store.load(tmp_pm_root_github)
+        pr3 = next(p for p in saved["prs"] if p["id"] == "pr-003")
+        assert pr3["gh_pr_number"] == 103
+        # qa is a local refinement of in_review and must survive the relink.
+        assert pr3["status"] == "qa"
+
+    def test_sync_github_command_backfills_missing_number(
+            self, tmp_pm_root_github):
+        """`pm pr sync-github` re-links a tracked PR missing its number by
+        branch match before running the status sync (R4)."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        gh_prs = [
+            {"number": 103, "headRefName": "pm/pr-003-third",
+             "state": "OPEN", "isDraft": False,
+             "url": "https://github.com/test/repo/pull/103"},
+        ]
+        # Stub the status-sync step so the test isolates the backfill
+        # wiring (the helper and full sync are covered separately).
+        sync_result = MagicMock(
+            error=None, updated_count=0, merged_prs=[], closed_prs=[])
+        with patch("pm_core.gh_ops.list_prs", return_value=gh_prs), \
+             patch("pm_core.cli.pr.pr_sync_mod.sync_from_github",
+                   return_value=sync_result):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli, ["-C", str(tmp_pm_root_github), "pr", "sync-github"])
+
+        assert result.exit_code == 0, result.output
+        assert "Re-linked 1 PR(s)" in result.output
+        assert "pr-003 (#103)" in result.output
+        saved = store.load(tmp_pm_root_github)
+        pr3 = next(p for p in saved["prs"] if p["id"] == "pr-003")
+        assert pr3["gh_pr_number"] == 103
+        assert pr3["status"] == "in_review"

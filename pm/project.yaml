@@ -22375,7 +22375,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/216
   gh_pr_number: 216
   created_at: '2026-05-22T22:52:39.457111+00:00'
-  updated_at: '2026-05-24T22:22:02.164315+00:00'
+  updated_at: '2026-05-25T03:20:37.646819+00:00'
   started_at: '2026-05-24T21:56:02.396650+00:00'
   reviewed_at: '2026-05-24T22:22:02.164315+00:00'
   merged_at: null
@@ -22388,6 +22388,124 @@ prs:
       (workdir: /home/matt/.pm/workdirs/qa/pr-9b96145-52038d4438c9a623)'
     created_at: '2026-05-24T23:05:14Z'
     last_edited: '2026-05-24T23:05:14Z'
+  - id: note-ad8a8a6
+    text: 'QA scenario-1 refiner note: there is NO bundled fake-github on this branch
+      (run_gh in pm_core/gh_ops.py shells out to the real gh; the instruction file
+      only ships fake-claude). To drive the picker self-heal you MUST hand-roll a
+      fake `gh` shell script on PATH (first) that answers `gh auth status` (exit 0)
+      and `gh pr list --state open --json ...` (JSON array with the desynced PR: number/headRefName/state
+      OPEN/url/isDraft). Also: fzf is NOT installed here, so the picker takes the
+      plain-text numbered-list fallback (capturable). The display-popup overlay (prefix+P)
+      cannot be captured by tmux capture-pane, so observe by running the exact command
+      the binding runs — `pm _popup-picker "$SESSION" "#214"` — inside a regular pane.
+      The self-heal backfill (backfill_gh_numbers_by_branch, save_state=True) fires
+      on picker OPEN, not on choosing an action.'
+    created_at: '2026-05-24T22:50:55Z'
+    last_edited: '2026-05-24T22:50:55Z'
+  - id: note-4b2a846
+    text: 'QA scenario 2 PASS (real surface): picker messaging distinguishes desynced/terminal/non-github.
+      Triple1 #999 (github, PR-A unnumbered)→"No PR matches display id #999 (window
+      may be stale or desynced)" + gh-calls.log shows "pr list" self-heal lookup,
+      no "merged or closed". Triple2 #101 (merged PR-B)→"No actions available (PR
+      is merged or closed)", no gh lookup. Triple3 #42 (local backend)→stale message,
+      NO gh log created (_try_relink_window returns early). HEADLESS GOTCHA for next
+      run: with no attached client, plain `tmux display-message -p "#{window_name}"`
+      resolves to window 0 (main), not the pane it runs in or the active window —
+      the picker then targets the wrong window. Fix: attach a real client (asciinema
+      `tmux attach`) and select-window the target so display-message resolves correctly
+      (this is what the real prefix+P popup gets). Also the interactive window bash
+      resets PATH to /home/pm/.local/share/pm/venv; re-export PATH=/tmp/gh-shim:/tmp/pm-venv/bin:$PATH
+      in the pane so gh=shim and pm=editable /workspace.'
+    created_at: '2026-05-24T22:57:58Z'
+    last_edited: '2026-05-24T22:57:58Z'
+  - id: note-2122c31
+    text: 'QA scenario 3 (pm pr sync-github backfills missing number by branch, CLI)
+      REFINER_REJECT / deferred: the scenario Given presupposes a "fake gh" whose
+      `gh pr list` returns scripted open PRs (number/branch/state/isDraft/url). That
+      facility = the FakeGitHubBackend (pr-9603d04, Phase 10) which is only FILED,
+      not implemented on this branch. Verified: no bin/fake-github, no `pm fake-github`
+      CLI cmd, no fake_github_active gate; gh_ops.list_prs() (pm_core/gh_ops.py:96)
+      unconditionally shells to real `gh` via run_gh()->_check_gh(), and `gh` is NOT
+      installed in this env (so even the plain status-sync path SystemExits at _check_gh).
+      Real gh would also need GitHub auth/network and cannot deterministically yield
+      PRs with chosen numbers/branches. NOTE: the auto-memory claim that pr-9603d04
+      R9 added an out-of-process fake-github gate (paths.fake_github_active / run_gh
+      consults it) is FALSE on this branch. To unblock: land pr-9603d04 with a session-config
+      gate so gh_ops.list_prs returns scripted open PRs from the user surface. The
+      backfill logic itself is well covered by unit tests in tests/test_pr_sync.py::TestBackfillGhNumbersByBranch
+      (incl. end-to-end CLI test_sync_github_command_backfills_missing_number via
+      monkeypatch).'
+    created_at: '2026-05-24T22:49:27Z'
+    last_edited: '2026-05-24T22:49:27Z'
+  - id: note-efcff89
+    text: 'QA scenario 4 (concurrent backfill): this repo has NO built-in fake-github
+      gate (gh_ops.run_gh shells out to the real `gh` binary; tests mock pm_core.gh_ops.list_prs,
+      not usable from the CLI surface). Drive the fake by putting a `gh` shim first
+      on PATH that answers: `gh auth status` (rc 0, needed by gh_ops._check_gh), `gh
+      pr list --state open --json ...` (JSON array of the open PRs), and `gh pr view
+      <n> --json state,isDraft,mergedAt` (sync_from_github calls this directly via
+      subprocess, bypassing _check_gh). gh and fzf are BOTH absent in the container,
+      so the picker uses its numbered-list fallback (feed </dev/null so input() EOFs
+      and it exits after printing actions). Concurrency is serialized by store.locked_update
+      flock (2s timeout); GitHub reads happen outside the lock, so the end state is
+      deterministic regardless of interleaving. Picker entry point = `pm _popup-picker
+      <base-session> <window-name>` (exactly what the prefix+P binding runs).'
+    created_at: '2026-05-24T22:48:44Z'
+    last_edited: '2026-05-24T22:48:44Z'
+  - id: note-086e67a
+    text: 'SCENARIO 3 UNBLOCKED (supersedes deferral note-2122c31): the fake-github
+      facility from pr-9603d04 (#208) IS now merged to master — gh_ops.run_gh consults
+      paths.fake_github_active() and dispatches to the per-session fake BEFORE _check_gh(),
+      so a freshly-spawned `pm pr sync-github` subprocess is served the seeded `gh
+      pr list` with NO real gh/auth needed (exactly the read backfill_gh_numbers_by_branch
+      relies on). To drive scenario 3 from the CLI surface: (1) `pm fake-github config
+      set ''{"git_backed":true,"prs":[{"head":"<local-branch>","title":"Open PR","state":"OPEN"}]}''`
+      for the session; (2) make the tracked PR carry that exact branch but have NO
+      gh_pr_number; (3) run `pm pr sync-github` and observe "Re-linked 1 PR(s): <pr-id>
+      (#N)" + project.yaml backfilled. CAVEATS: (a) THIS BRANCH is currently 52 commits
+      behind master and does NOT contain pm_core/fake_github.py or the `pm fake-github`
+      command — master must be merged into the branch so the QA clone has the facility.
+      (b) Fake PR numbers are auto-assigned sequentially from 1 in seed ORDER; do
+      NOT hardcode #103 — read the assigned number via `pm fake-github config show`
+      (or assert the local PR.gh_pr_number equals it post-sync). The same `pm fake-github
+      config set` facility replaces the hand-rolled gh shim described for scenarios
+      1/2/4.'
+    created_at: '2026-05-25T03:01:50Z'
+    last_edited: '2026-05-25T03:01:50Z'
+  - id: note-868322a
+    text: 'QA scenario5 (sync-github backfill) refined+validated end-to-end (2026-05-25).
+      Setup gotchas: (1) PYTHONPATH=/workspace so `pm which`=/workspace/pm_core not
+      /opt/pm-src; (2) `pm init --backend github` runs _import_github_prs even with
+      --no-import (pr.py:180), so seed fake-github EMPTY first: `pm fake-github config
+      set {"git_backed":false,"prs":[]}`; (3) fake-github session tag = git-root of
+      cwd, so NO tmux needed — run fake config + sync-github from the test dir; (4)
+      `pm pr add` auto-generates branch pm/<id>-<slug>; seed fake with that ACTUAL
+      branch, not literal pm/feature-x; (5) NO `pm pr show` — use `pm pr list`: number
+      shows as display-id #N (_pr_display_id), status in [..]; URL only in project.yaml
+      gh_pr field; (6) project.yaml is 0444 -> chmod u+w before bootstrap-editing
+      gh_pr_number for the already-linked PR; (7) fake assigns numbers sequentially
+      from 1 in seed order; set bootstrap gh_pr_number high (e.g.555) so it differs.
+      backfill (helpers.py:671) skips PRs that already have a number and preserves
+      qa (line720).'
+    created_at: '2026-05-25T03:20:37Z'
+    last_edited: '2026-05-25T03:20:37Z'
+  - id: note-f4be9b6
+    text: 'Scenario 6 (picker idempotency + graceful degradation) refined to drive
+      the REAL fake-github facility (pm fake-github config set), not scenario-2''s
+      hand-rolled gh-shim — pr-9603d04 is now MERGED into this branch so bin/fake-github
+      + pm fake-github CLI + paths.fake_github_active all exist. Key mechanics: self-heal
+      gate session.py:1754-1762 (only when window display-id matches no tracked PR)
+      → _try_relink_window (session.py:1193) returns False fast for non-#N ids and
+      non-github backend; backfill_gh_numbers_by_branch (helpers.py:671) issues `gh
+      pr list --state open` (served by fake) and matches headRefName→PR.branch. Idempotency
+      observable: after 1st heal records gh_pr_number, the 1755 condition is False
+      on 2nd open so NO 2nd `pr list` (check ~/.pm/debug/<tag>.log [gh] entries; tag
+      = dir-name since no github remote). Graceful-degrade message branch session.py:1837-1847
+      picks stale-vs-merged by re-checking _pr_display_id match. fake gate precedes
+      _check_gh so real gh need NOT be installed. Use git_backed:false metadata-only
+      fake (picker only does pr list).'
+    created_at: '2026-05-25T03:19:50Z'
+    last_edited: '2026-05-25T03:19:50Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9b96145-bug-pr-actions-picker-reports-merged-904ede96
 - id: pr-3d1fa55
   plan: bugs

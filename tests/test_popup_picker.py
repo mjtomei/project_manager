@@ -371,3 +371,89 @@ class TestPickerMergeDispatch:
              patch("pm_core.cli.session._wait_dismiss") as wait_mock:
             _run_picker_command("pr start pr-123", "sess")
         assert not wait_mock.called
+
+
+class TestPickerWindowDesync:
+    """The picker self-heals a desynced #N window and reports an accurate
+    message when it genuinely can't resolve the window to a PR."""
+
+    @staticmethod
+    def _github_data(prs):
+        return {
+            "project": {"name": "p", "backend": "github",
+                        "repo": "https://github.com/test/repo.git"},
+            "prs": prs,
+        }
+
+    @staticmethod
+    def _run(tmp_path, window, data, gh_prs):
+        """Invoke the picker command against a real tmp root.
+
+        Returns the CliRunner result.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        from pm_core import store
+
+        root = tmp_path / "pm"
+        root.mkdir()
+        store.save(data, root)
+
+        rp = MagicMock()
+        rp.exists.return_value = True
+
+        with patch("pm_core.cli.session._resolve_root_from_session",
+                   return_value=root), \
+             patch("pm_core.cli.session.pane_registry.registry_path",
+                   return_value=rp), \
+             patch("pm_core.cli.session.pane_registry.base_session_name",
+                   return_value="sess"), \
+             patch("pm_core.cli.session.tmux_mod.list_windows",
+                   return_value=[{"name": window, "id": "@1"}]), \
+             patch("pm_core.cli.session._session_active_windows",
+                   return_value={}), \
+             patch("pm_core.gh_ops.list_prs", return_value=gh_prs), \
+             patch("pm_core.cli.session._wait_dismiss"), \
+             patch("shutil.which", return_value=None), \
+             patch("builtins.input", side_effect=EOFError):
+            runner = CliRunner()
+            return runner.invoke(cli, ["_popup-picker", "sess", window])
+
+    def test_desynced_window_self_heals_and_shows_actions(self, tmp_path):
+        # PR is OPEN but lost its gh_pr_number; its window is still '#214'.
+        data = self._github_data([
+            {"id": "pr-ac58803", "status": "in_review", "title": "Open PR",
+             "branch": "pm/feature-x"},
+        ])
+        gh_prs = [
+            {"number": 214, "headRefName": "pm/feature-x", "state": "OPEN",
+             "isDraft": False,
+             "url": "https://github.com/test/repo/pull/214"},
+        ]
+        result = self._run(tmp_path, "#214", data, gh_prs)
+        out = result.output
+        assert "merged or closed" not in out
+        # The real actions are shown after the relink.
+        assert "start" in out and "review" in out
+
+    def test_not_found_no_match_reports_desync_not_terminal(self, tmp_path):
+        # Window '#999' maps to no PR and GitHub has no match → accurate msg.
+        data = self._github_data([
+            {"id": "pr-ac58803", "status": "in_review", "title": "Open PR",
+             "branch": "pm/feature-x", "gh_pr_number": 5},
+        ])
+        result = self._run(tmp_path, "#999", data, [])
+        out = result.output
+        assert "merged or closed" not in out
+        assert "No PR matches display id #999" in out
+
+    def test_terminal_status_still_reports_merged_or_closed(self, tmp_path):
+        # Window '#101' resolves to a PR that is genuinely merged.
+        data = self._github_data([
+            {"id": "pr-001", "status": "merged", "title": "Done",
+             "branch": "pm/done", "gh_pr_number": 101},
+        ])
+        result = self._run(tmp_path, "#101", data, [])
+        out = result.output
+        assert "No actions available (PR is merged or closed)." in out
+        assert "stale or desynced" not in out

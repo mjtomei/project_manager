@@ -2132,6 +2132,20 @@ def pr_sync_github():
         click.echo("This command only works with the GitHub backend.", err=True)
         raise SystemExit(1)
 
+    # First, re-link any tracked PR that lost its gh_pr_number by matching
+    # its branch to an open GitHub PR.  sync_from_github only updates PRs
+    # that already have a number, so without this a desynced PR can never
+    # recover its link.
+    from pm_core.cli.helpers import backfill_gh_numbers_by_branch
+    repo_dir = str(_resolve_repo_dir(root, data))
+    linked = backfill_gh_numbers_by_branch(root, data, repo_dir, save_state=True)
+    if linked:
+        click.echo("Re-linked %d PR(s) by branch: %s" % (
+            len(linked),
+            ", ".join(f"{pid} (#{n})" for pid, n in linked),
+        ))
+        data = store.load(root)  # reload so the status sync sees new numbers
+
     # Use the shared sync function
     result = pr_sync_mod.sync_from_github(root, data, save_state=True)
 

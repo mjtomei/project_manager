@@ -1190,6 +1190,40 @@ def _build_picker_lines(
     return lines
 
 
+def _try_relink_window(root, data: dict, display_id: str) -> bool:
+    """Self-heal a desynced ``#N`` picker window by re-linking its PR.
+
+    When a PR's ``gh_pr_number`` is cleared, its display id flips from
+    ``#N`` back to ``pr-xxx`` while its tmux windows keep the ``#N`` name,
+    so the picker can no longer resolve the window to a PR.  Attempt to
+    backfill the missing number by matching the GitHub PR's branch to a
+    tracked PR (``backfill_gh_numbers_by_branch``).
+
+    Only attempts on the GitHub backend and only for ``#N``-form display
+    ids (a vanished ``pr-xxx`` window can't be healed via a GitHub
+    lookup).  Returns True if, after backfill, some PR resolves to
+    *display_id*.
+    """
+    from pm_core.cli.helpers import (
+        _pr_display_id, _resolve_repo_dir, backfill_gh_numbers_by_branch,
+    )
+
+    if not display_id.startswith("#"):
+        return False
+    if data.get("project", {}).get("backend") != "github":
+        return False
+
+    repo_dir = str(_resolve_repo_dir(root, data))
+    linked = backfill_gh_numbers_by_branch(
+        root, data, repo_dir, save_state=True)
+    if not linked:
+        return False
+
+    fresh = store.load(root)
+    return any(_pr_display_id(p) == display_id
+               for p in (fresh.get("prs") or []))
+
+
 def _fzf_supports_no_input() -> bool:
     """Whether the installed fzf accepts ``--no-input`` (fzf 0.59+).
 
@@ -1710,6 +1744,23 @@ def popup_picker_cmd(session: str, window_name: str):
     prs = data.get("prs") or []
     current_pr = _current_window_pr_id(window_name)
 
+    from pm_core.cli.helpers import _pr_display_id
+
+    # Self-heal a desynced window: if the invoking window's display id is
+    # a GitHub-style ``#N`` that no tracked PR currently claims (its
+    # gh_pr_number was cleared, flipping its display id back to pr-xxx
+    # while the window kept the ``#N`` name), re-link by matching the
+    # GitHub PR's branch to a tracked PR and backfilling the number.
+    if (current_pr
+            and not any(_pr_display_id(p) == current_pr for p in prs)):
+        try:
+            if _try_relink_window(root, data, current_pr):
+                data = store.load(root)
+                prs = data.get("prs") or []
+        except Exception:
+            _log.exception(
+                "popup-picker: self-heal relink failed for %s", current_pr)
+
     # Gather open windows to annotate the picker.  One list_windows call
     # feeds both the [open] tags (by name) and the per-session ●/○
     # indicator (which needs name → window-id resolution).
@@ -1723,8 +1774,6 @@ def popup_picker_cmd(session: str, window_name: str):
     active_map = _session_active_windows(base)
     caller_wid = active_map.get(session)
     other_wids = {wid for s, wid in active_map.items() if s != session}
-
-    from pm_core.cli.helpers import _pr_display_id
 
     # Build the navigation list: PRs that the user has at least one
     # open window for.  The invoking window's PR (if any) is included
@@ -1787,7 +1836,14 @@ def popup_picker_cmd(session: str, window_name: str):
 
     if not lines:
         click.echo(f"PR Actions — {current_pr}")
-        click.echo("No actions available (PR is merged or closed).")
+        # Distinguish "this window doesn't map to any PR" (stale/desynced,
+        # and self-heal couldn't re-link it) from "the PR exists but is in
+        # a terminal status".  Only the latter is genuinely merged/closed.
+        if not any(_pr_display_id(p) == current_pr for p in prs):
+            click.echo(f"No PR matches display id {current_pr} "
+                       "(window may be stale or desynced).")
+        else:
+            click.echo("No actions available (PR is merged or closed).")
         _pause_and_exit(0)
 
     has_fzf = shutil.which("fzf") is not None

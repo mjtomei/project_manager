@@ -668,6 +668,81 @@ def _gh_state_to_status(state: str, is_draft: bool) -> str:
     return "pending"
 
 
+def backfill_gh_numbers_by_branch(
+    root: Path,
+    data: dict,
+    repo_dir: str,
+    *,
+    save_state: bool = True,
+) -> list[tuple[str, int]]:
+    """Re-link tracked PRs that lost their ``gh_pr_number`` by branch.
+
+    For each PR in *data* that has a ``branch`` but no ``gh_pr_number``,
+    look up an OPEN GitHub PR whose ``headRefName`` equals that branch and
+    backfill ``gh_pr_number``, ``gh_pr`` (URL), and ``status`` (derived
+    from the GitHub state via :func:`_gh_state_to_status`).  A local
+    ``qa`` status is preserved when GitHub reports the PR merely OPEN and
+    ready, since ``qa`` is a local refinement of ``in_review`` (mirrors
+    ``pr_sync.sync_from_github``).
+
+    This closes the gap where neither ``pr sync-github`` (only updates PRs
+    that already have a number) nor ``pr import-github`` (skips entries
+    already tracked by branch) can re-link a tracked PR whose number was
+    cleared.
+
+    Returns a list of ``(pr_id, gh_pr_number)`` pairs that were linked.
+    Persists via ``store.locked_update`` when *save_state* is True;
+    otherwise mutates *data* in place.
+    """
+    from pm_core import gh_ops
+
+    prs = data.get("prs") or []
+    # Map branch -> PR for entries missing a GitHub number.
+    missing: dict[str, dict] = {}
+    for p in prs:
+        branch = p.get("branch")
+        if branch and not p.get("gh_pr_number"):
+            missing[branch] = p
+    if not missing:
+        return []
+
+    gh_prs = gh_ops.list_prs(repo_dir, state="open")
+    # pr_id -> (number, url, status)
+    updates: dict[str, tuple[int, str, str]] = {}
+    for gh in gh_prs:
+        branch = gh.get("headRefName", "")
+        pr = missing.get(branch)
+        number = gh.get("number")
+        if pr is None or not number:
+            continue
+        status = _gh_state_to_status(
+            gh.get("state", "OPEN"), gh.get("isDraft", False))
+        if pr.get("status") == "qa" and status == "in_review":
+            status = "qa"
+        updates[pr["id"]] = (number, gh.get("url", ""), status)
+    if not updates:
+        return []
+
+    def apply(fresh: dict) -> None:
+        for p in fresh.get("prs") or []:
+            u = updates.get(p["id"])
+            if not u:
+                continue
+            number, url, status = u
+            p["gh_pr_number"] = number
+            if url:
+                p["gh_pr"] = url
+            p["status"] = status
+            _record_status_timestamp(p, status)
+
+    if save_state:
+        store.locked_update(root, apply)
+    else:
+        apply(data)
+
+    return [(pid, u[0]) for pid, u in updates.items()]
+
+
 def _workdirs_dir(data: dict) -> Path:
     """Return the workdirs base path for this project.
 
