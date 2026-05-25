@@ -367,7 +367,7 @@ It is distinct from the review loop. Review asks *is the code correct/clean*; si
 - **Conservative toward not-merging.** Misclassifying a real gap as "scenario error → re-qa" merges incomplete work (the predicted failure mode); the reverse only wastes an impl cycle. So on genuine ambiguity the checkoff *raises INPUT_REQUIRED itself* and escalates rather than merging.
 
 ### PR: Sign-off / acceptance gate — QA verdict router (auto-run capstone)
-`pr-2d5f712` (depends on: pr-b59f0c7, pr-06a96fa)
+`pr-2d5f712` (buildable now — no hard deps; *soft*: aligns with `pr-b59f0c7` reason strings and the `pr-06a96fa` evidence model when they land, but reads the current verdict+capture surface and degrades gracefully)
 
 Auto-runs after QA finalization. Reads every scenario's verdict + reason (`pr-b59f0c7`), the captures/evidence, the diff vs master, and the PR's scope (description/plan + bound regression tests). Performs two evaluations — (1) does the captured behavior support the diff's claims; (2) meta-QA / anti-shortcut: was the QA itself rigorous (thin evidence, a scenario that drove a mock instead of the real path, an obvious uncovered edge case) — then routes:
 
@@ -379,7 +379,7 @@ Auto-runs after QA finalization. Reads every scenario's verdict + reason (`pr-b5
 Every classification + chosen hop is recorded as a `pm pr note` (audit trail, prefer-pm-pr-notes), so an autonomous merge is inspectable after the fact. Gated vs autonomous is a config flag on this path. Loop-guard + re-loop wiring is `pr-ff9b728`; the per-PR behavior report + dashboard are `pr-8e693f6`.
 
 ### PR: Sign-off UI — per-PR BDD report + all-PR behavior dashboard (HTML)
-`pr-8e693f6` (depends on: pr-06a96fa, pr-2d5f712)
+`pr-8e693f6` (buildable now in parallel with the router — no hard deps; *soft*: renders the router's recommendation block once `pr-2d5f712` lands, forward-compatible with the `pr-06a96fa` evidence model)
 
 The human-facing surface for sign-off — the per-PR report plus the dashboard that indexes them, combined since they share a generator and storage layout.
 

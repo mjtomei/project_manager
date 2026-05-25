@@ -22911,7 +22911,8 @@ prs:
     loop guard'
   branch: pm/pr-ff9b728-auto-run-wiring-re-loop-on-code-change-loop-guard-
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-2d5f712
   description: "Wire the sign-off verdict router into both single-PR runs and dependency-aware\
     \ auto-start, with the loop-safety rules and the dynamic plan/graph mutation the\
     \ router's \"needs a new PR\" hops require.\n\nSINGLE-PR MODE: a CLI/TUI entry\
@@ -22958,7 +22959,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T14:04:19.192091+00:00'
+  updated_at: '2026-05-25T14:08:33.861642+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
