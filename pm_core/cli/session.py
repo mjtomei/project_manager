@@ -1275,7 +1275,17 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         return
     _trace = os.environ.get("PM_SPINNER_TRACE") == "1"
     try:
-        root = state_root()
+        # Resolve the project root from the session — the same way the
+        # popup picker resolves it for its listing — rather than from the
+        # popup's cwd / PM_PROJECT.  A popup launched from a non-project
+        # window (or a workdir clone for a *different* PR) would otherwise
+        # have state_root() load the wrong project.yaml, fail to find
+        # pr_id, leave display_id (and thus target_window) None, and spin
+        # forever without ever matching — or switching to — the review
+        # window.  Fall back to state_root() when session metadata is
+        # absent (older sessions), preserving prior behavior.
+        saved_root = _resolve_root_from_session(session)
+        root = saved_root if saved_root is not None else state_root()
         data = store.load(root)
         from pm_core.cli.helpers import _pr_display_id
         display_id = None
