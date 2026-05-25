@@ -204,59 +204,50 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     return _CLEAR_SCREEN + "\n".join(padded)
 
 
-def _find_attached_session(base: str) -> str:
-    """Find the correct grouped session for window switching.
+def _caller_switch_target(base: str) -> str | None:
+    """Return the caller's OWN grouped session for a focus-mutating switch.
 
-    Mirrors the logic of pm_core.tmux.current_or_base_session:
-    1. Use $TMUX_PANE to identify which grouped session we're in
-    2. Fall back to first attached grouped session
-    3. Fall back to base session
+    Standalone mirror of ``pm_core.tmux.caller_switch_target`` (this script
+    runs by path and deliberately avoids importing the tmux module).  Uses
+    ``$TMUX_PANE`` to identify the pane's session; returns it only when it is
+    *base* or one of its grouped sessions (``base~N``), else ``None``.
+
+    Crucially there is NO "first attached grouped session" fallback: a
+    focus-mutating ``select-window`` must never hijack an *arbitrary* attached
+    grouped session that happens to be viewing something else (the bug fixed
+    in pr-0b4e1a9).  No attached-client check is needed — the caller is by
+    construction in this pane's session, so switching it steals nobody's
+    focus.
     """
-    # Priority 1: use $TMUX_PANE to find our actual session
     pane = os.environ.get("TMUX_PANE")
-    if pane:
-        try:
-            result = subprocess.run(
-                ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
-                capture_output=True, text=True,
-            )
-            current = result.stdout.strip()
-            if current and (current == base or current.startswith(base + "~")):
-                # Verify it has attached clients
-                att = subprocess.run(
-                    ["tmux", "display-message", "-t", current, "-p", "#{session_attached}"],
-                    capture_output=True, text=True,
-                )
-                if att.returncode == 0 and att.stdout.strip() != "0":
-                    return current
-        except Exception:
-            pass
-
-    # Priority 2: first attached grouped session
+    if not pane:
+        return None
     try:
         result = subprocess.run(
-            ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],
+            ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
             capture_output=True, text=True,
         )
-        for line in result.stdout.strip().splitlines():
-            parts = line.rsplit(" ", 1)
-            if len(parts) == 2:
-                name, attached = parts
-                if (name == base or name.startswith(base + "~")) and attached != "0":
-                    return name
+        current = result.stdout.strip()
+        if current and (current == base or current.startswith(base + "~")):
+            return current
     except Exception:
         pass
-    return base
+    return None
 
 
 def _switch_to_window(session: str, window_name: str) -> None:
     """Switch tmux to the given window.
 
-    Uses the attached grouped session (not the base session) so only the
-    current terminal switches windows.
+    Targets only the caller's OWN client's session (the pane this mirror runs
+    in), so a focus change never leaks onto an unrelated grouped session.
+    When the caller can't be identified, no switch is issued.
     """
     try:
-        target = _find_attached_session(session)
+        target = _caller_switch_target(session)
+        if target is None:
+            _log.info("switch_to_window: no identifiable caller client; "
+                      "skipping switch for %s:%s", session, window_name)
+            return
         result = subprocess.run(
             ["tmux", "select-window", "-t", f"{target}:{window_name}"],
             capture_output=True, text=True,
