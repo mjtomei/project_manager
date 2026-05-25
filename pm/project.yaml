@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8409c64
+  active_pr: pr-0b4e1a9
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22600,7 +22600,7 @@ prs:
   title: 'Bug: zz d review-loop popup spinner never switches to the review window
     (new or existing)'
   branch: pm/pr-8409c64-bug-zz-d-review-loop-popup-spinner-never-switches-
-  status: pending
+  status: in_progress
   depends_on: []
   description: '## Symptom
 
@@ -22661,11 +22661,106 @@ prs:
     - The spinner never holds the "starting" frame after the review window has opened.
 
     - Tests cover the new-window and existing-window cases.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/223
+  gh_pr_number: 223
+  created_at: '2026-05-25T03:25:04.533357+00:00'
+  updated_at: '2026-05-25T03:27:03.889385+00:00'
+  started_at: '2026-05-25T03:27:03.889385+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
+- id: pr-0b4e1a9
+  plan: bugs
+  title: 'Bug: pr start window-switch hijacks an arbitrary attached grouped session
+    (steals focus from a mid-review-loop session)'
+  branch: pm/pr-0b4e1a9-bug-pr-start-window-switch-hijacks-an-arbitrary-at
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+    Running `pm pr start` (and likely any window-launching command) can **switch a
+    different, unrelated grouped session onto the newly created window** — observed
+    live: starting a PR yanked another session that was in the middle of a review
+    loop onto the new PR window. The caller did not intend to touch that session''s
+    focus.
+
+
+    ## Root cause
+
+    `new_window` / `new_window_get_pane` (pm_core/tmux.py:134-193) do `select-window`
+    with `switch=True`, and pick the target session via `current_or_base_session()`
+    (pm_core/tmux.py:501-529). That helper''s docstring explicitly says it returns
+    "the best session to target for **query operations**", and its fallback chain
+    is only safe for read-only queries:
+
+    1. If `in_tmux()` and the current session is the base/grouped session AND it has
+    an attached client → return current. (good)
+
+    2. Otherwise — caller not in tmux, or current session has no client (e.g. `pr
+    start` invoked from a plain CLI shell) — it loops `list_grouped_sessions(base)`
+    and returns the **first attached grouped session it finds**, regardless of what
+    window that session is currently viewing.
+
+    3. `new_window`/`new_window_get_pane` then run `select-window -t <that-arbitrary-session>:<new-index>`,
+    which **hijacks whatever that session was viewing** (e.g. a running review loop)
+    onto the new window.
+
+
+    So the "prefer any attached grouped session" fallback is harmless for queries
+    but **wrong for focus-mutating `select-window`**: when the caller''s own client
+    can''t be identified, it should not steal an unrelated session''s focus.
+
+
+    `select_window` (tmux.py:402-413) has the same hazard (also routes through `current_or_base_session`).
+
+
+    ## Relationship to existing PRs
+
+    - `pr-021` / #39 (merged) introduced "target the current grouped session, not
+    base." This bug is the **residual case #39 didn''t cover**: when there is no identifiable
+    caller client, the helper falls back to an *arbitrary attached* session.
+
+    - `pr-442e51c` (plan: bugs, pending) — "Fix tmux commands targeting one session
+    disconnecting other sessions" — same family (cross-session focus interference);
+    coordinate so the two don''t regress each other.
+
+
+    ## Fix direction
+
+    Separate "best session for a **query**" from "the client to **switch**." For focus-mutating
+    switches (`new_window`/`new_window_get_pane` switch=True, `select_window`):
+
+    - target only the **caller''s own client** (resolve via `$TMUX`/`$TMUX_PANE` →
+    that client''s session), and
+
+    - if the caller''s own client cannot be determined (non-interactive/CLI context),
+    **do not switch any other session** — create the window detached (`-d`, switch=False)
+    rather than grabbing an arbitrary attached grouped session.
+
+    Keep `current_or_base_session`''s existing behavior for genuine read-only query
+    callers, but stop routing focus changes through it (or add a focus-safe variant).
+
+
+    ## Acceptance
+
+    - With two attached grouped sessions where session B is on a review-loop window,
+    `pr start <pr>` invoked from a CLI shell (and from session A) **must not** move
+    session B''s active window.
+
+    - The caller''s own client (when identifiable) still switches to the new window.
+
+    - When no caller client is identifiable, the window is created without switching
+    any session''s focus.
+
+    - Tests cover: (a) caller identifiable → only caller switches; (b) caller not
+    identifiable → no session''s active window changes (no arbitrary-session hijack).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-05-25T03:25:04.533357+00:00'
+  created_at: '2026-05-25T03:31:48.369386+00:00'
+  updated_at: '2026-05-25T03:31:48.369386+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
