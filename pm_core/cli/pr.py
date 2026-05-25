@@ -1135,13 +1135,22 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     # Fast path: if review window already exists and we don't need fresh,
     # just switch to it — skip expensive prompt generation and container setup.
+    # Prefer the originating session captured when the PR-actions pane
+    # opened over re-detecting it now (which races with focus changes
+    # between popup-open and execution).  Only review-loop iterations
+    # follow sessions onto the replacement window.
+    captured_origin = None
+    if review_loop:
+        from pm_core import runtime_state as _rs
+        captured_origin = _rs.consume_origin_session(pr_id, "review-loop")
+
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     sessions_on_review: list[str] = []
     if existing:
         if fresh:
             if review_loop:
-                sessions_on_review = tmux_mod.sessions_on_window(
-                    pm_session, existing["id"],
+                sessions_on_review = tmux_mod.followers_for_window(
+                    pm_session, existing["id"], captured_origin,
                 )
             from pm_core import home_window
             home_window.park_if_on(pm_session, existing["id"])

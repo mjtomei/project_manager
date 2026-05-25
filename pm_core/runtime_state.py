@@ -294,6 +294,49 @@ def consume_suppress_switch(pr_id: str, action: str) -> bool:
     return True
 
 
+def capture_origin_session(pr_id: str, action: str, session: str) -> None:
+    """Record the tmux session that *invoked* this action.
+
+    Captured at PR-actions-pane / picker open time (when we still know
+    which client/session triggered the action) so window-following can
+    switch that exact session onto the action's freshly (re)created
+    window — instead of re-detecting late via
+    :func:`pm_core.tmux.sessions_on_window`, which races with focus
+    changes between popup-open and action-execution.
+
+    Stored on the per-``(pr_id, action)`` runtime-state record (the same
+    channel as ``suppress_switch``) so it survives the SIGUSR2 command
+    queue and the review-loop relauncher subprocess.  Writing only the
+    field (state=None, extras set) leaves any other recorded fields and
+    the current state alone; it persists across the action's later
+    launching/running transitions until :func:`consume_origin_session`
+    clears it.
+    """
+    if not session:
+        return
+    set_action_state(pr_id, action, None, origin_session=session)
+    _log.info("capture_origin_session: pr=%s action=%s session=%s",
+              pr_id, action, session)
+
+
+def consume_origin_session(pr_id: str, action: str) -> str | None:
+    """Read and atomically clear the captured originating session.
+
+    Returns the session name captured at pane/picker open time, or
+    ``None`` when none was recorded (CLI invocations, the project-level
+    watcher, multi-client ambiguity) — in which case the caller falls
+    back to live detection.
+    """
+    entry = get_action_state(pr_id, action)
+    session = entry.get("origin_session")
+    if not session:
+        return None
+    set_action_state(pr_id, action, None, origin_session=None)
+    _log.info("consume_origin_session: pr=%s action=%s session=%s",
+              pr_id, action, session)
+    return session
+
+
 def _hook_state_for(session_id: str) -> str | None:
     """Return ``idle``/``waiting`` for the latest hook event, or None."""
     if not session_id:

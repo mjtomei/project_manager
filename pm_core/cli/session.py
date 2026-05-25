@@ -1245,6 +1245,31 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     return None, None, False
 
 
+def _origin_action_for_cmd(cmd: str) -> tuple[str | None, str | None]:
+    """Best-effort ``(pr_id, action)`` for a picker command.
+
+    Covers both the ``tui:`` route (delegated to :func:`_parse_tui_action`)
+    and the direct ``pr start|review|merge`` subprocess route, so the
+    invoking session can be captured under the same ``(pr_id, action)`` key
+    the action implementation later consumes.
+    """
+    if not cmd:
+        return None, None
+    if cmd.startswith("tui:"):
+        pr_id, action, _fresh = _parse_tui_action(cmd[4:])
+        return pr_id, action
+    parts = shlex.split(cmd)
+    if len(parts) >= 2 and parts[0] == "pr" and parts[1] in (
+            "start", "review", "merge"):
+        # pr_id is the pr-* token (skip flags like --fresh / --resolve-window).
+        pr_id = next((t for t in parts[2:] if t.startswith("pr-")), None)
+        if pr_id is None:
+            pr_id = next((t for t in reversed(parts[2:])
+                          if not t.startswith("-")), None)
+        return pr_id, parts[1]
+    return None, None
+
+
 def _wait_for_tui_command(session: str, tui_cmd: str,
                           tick_s: float = 0.15) -> None:
     """Show a spinner while a queued TUI command transitions states.
@@ -1618,6 +1643,20 @@ def _run_picker_command(cmd: str, session: str) -> None:
 
     route = "tui" if cmd.startswith("tui:") else "direct"
     _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
+
+    # Capture the invoking session NOW — this `session` was resolved by the
+    # popup shell when the PR-actions pane opened, so recording it here pins
+    # the originating session at open time.  Window-following then switches
+    # THIS session onto the action's new window instead of re-detecting late
+    # (which races with focus changes between popup-open and execution).
+    try:
+        from pm_core import runtime_state as _rs
+        o_pr, o_action = _origin_action_for_cmd(cmd)
+        if o_pr and o_action:
+            _rs.capture_origin_session(o_pr, o_action, session)
+    except Exception:
+        _log.debug("picker: capture origin session failed", exc_info=True)
+
     if cmd.startswith("tui:"):
         # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
         # independent: doesn't depend on tmux send-keys timing, can't

@@ -796,7 +796,39 @@ class ProjectManagerApp(App):
     def on_prselected(self, message: PRSelected) -> None:
         pr_view.handle_pr_selected(self, message.pr_id)
 
+    def _capture_origin_session(self, pr_id: str, action: str) -> None:
+        """Capture the originating session for an in-TUI dispatch.
+
+        For commands typed in the command bar or triggered by keybindings,
+        the originating session is the attached client.  When exactly one
+        client is attached we pin it so window-following switches that
+        session onto the action's new window; when zero or multiple are
+        attached the originator is ambiguous, so we record nothing and the
+        action falls back to live detection (sessions_on_window).  Purely
+        additive — a no-op when ambiguous reproduces today's behavior.
+        """
+        if not (pr_id and action and self._session_name):
+            return
+        try:
+            from pm_core import runtime_state as _rs
+            origin = tmux_mod.active_client_session(self._session_name)
+            if origin:
+                _rs.capture_origin_session(pr_id, action, origin)
+        except Exception:
+            _log.debug("capture origin session (in-TUI) failed", exc_info=True)
+
     def on_command_submitted(self, message: CommandSubmitted) -> None:
+        from pm_core.cli.session import _parse_tui_action
+        try:
+            o_pr, o_action, _fresh = _parse_tui_action(message.command)
+            if o_action in ("review-loop", "qa"):
+                if not o_pr:
+                    tree = self.query_one("#tech-tree", TechTree)
+                    o_pr = tree.selected_pr_id
+                self._capture_origin_session(o_pr, o_action)
+        except Exception:
+            _log.debug("on_command_submitted: origin capture failed",
+                       exc_info=True)
         pr_view.handle_command_submitted(self, message.command)
 
     # --- PR action delegates (see tui/pr_view.py) ---
@@ -817,6 +849,12 @@ class ProjectManagerApp(App):
             review_loop_ui.stop_loop_or_fresh_review(self)
         else:
             # zz d = start a fresh review loop (supersedes any running)
+            try:
+                tree = self.query_one("#tech-tree", TechTree)
+                self._capture_origin_session(tree.selected_pr_id, "review-loop")
+            except Exception:
+                _log.debug("action_review_pr: origin capture failed",
+                           exc_info=True)
             review_loop_ui.start_or_stop_loop(self)
 
     def action_merge_pr(self) -> None:
@@ -1338,6 +1376,7 @@ class ProjectManagerApp(App):
         if not pr_id:
             self.log_message("No PR selected")
             return
+        self._capture_origin_session(pr_id, "qa")
         z = self._consume_z()
         if z == 0:
             qa_loop_ui.focus_or_start_qa(self, pr_id)

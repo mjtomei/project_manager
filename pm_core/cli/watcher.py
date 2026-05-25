@@ -386,8 +386,11 @@ def _create_watcher_window(iteration: int, loop_id: str,
     _log.info("_create_watcher_window: iteration=%d pm_session=%s existing=%s",
                iteration, pm_session, existing)
     if existing:
-        sessions_watching = tmux_mod.sessions_on_window(
-            pm_session, existing["id"])
+        # The watcher is project-level (no per-PR picker action), so there
+        # is no captured originating session — followers_for_window falls
+        # back to live detection here.
+        sessions_watching = tmux_mod.followers_for_window(
+            pm_session, existing["id"], None)
         _log.info("_create_watcher_window: sessions_watching=%s, killing old window %s",
                     sessions_watching, existing["id"])
         # Park as a safety net: if the recreate fails partway, parked

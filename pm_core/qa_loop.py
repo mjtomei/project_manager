@@ -3021,14 +3021,20 @@ def run_qa_sync(
             session_type="qa_planning",
             session_tag=state.session_tag)
 
+        # Prefer the originating session captured when the PR-actions pane
+        # opened over re-detecting it now (which races with focus changes
+        # between popup-open and this point).
+        from pm_core import runtime_state as _rs
+        captured_origin = _rs.consume_origin_session(state.pr_id, "qa")
+
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
         # (same pattern as the review loop's --fresh window replacement).
         sessions_on_qa: list[str] = []
         existing_win = tmux_mod.find_window_by_name(session, window_name)
         if existing_win:
-            sessions_on_qa = tmux_mod.sessions_on_window(
-                session, existing_win["id"],
+            sessions_on_qa = tmux_mod.followers_for_window(
+                session, existing_win["id"], captured_origin,
             )
             _cleanup_stale_scenario_windows(session, pr_data)
 
@@ -3066,11 +3072,18 @@ def run_qa_sync(
         if sessions_on_qa:
             tmux_mod.switch_sessions_to_window(
                 sessions_on_qa, session, window_name)
+        elif not existing_win and captured_origin:
+            # First-time creation with a captured originating session:
+            # switch that exact session onto the new window so a grouped
+            # client that opened the picker actually follows — unless the
+            # user dismissed the popup spinner (q/Esc).
+            if not _rs.consume_suppress_switch(state.pr_id, "qa"):
+                tmux_mod.switch_sessions_to_window(
+                    [captured_origin], session, window_name)
         elif not existing_win:
             # First-time creation — select the window so user sees it,
             # unless the popup spinner was dismissed (q/Esc) and the
             # user explicitly asked to keep focus where they were.
-            from pm_core import runtime_state as _rs
             if not _rs.consume_suppress_switch(state.pr_id, "qa"):
                 tmux_mod.select_window(session, window_name)
 
