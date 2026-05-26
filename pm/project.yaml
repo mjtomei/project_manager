@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2d5f712
+  active_pr: pr-8e693f6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22538,7 +22538,7 @@ prs:
   title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
     router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
     stage between qa and merge with its own window, not logic embedded in the QA loop.
@@ -22647,7 +22647,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T02:51:23.639145+00:00'
+  updated_at: '2026-05-26T17:06:25.050331+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -23250,12 +23250,83 @@ prs:
       \ fallback — that can come later if needed."
     created_at: '2026-05-26T02:49:56Z'
     last_edited: '2026-05-26T02:49:56Z'
+  - id: note-6179177
+    text: 'QA PASS: Manual sign-off entry — transition, two-pane window, dedup, wrong-status
+      rejection, manual-never-mutates contract: PASS; Signoff session-type registration
+      and fake-claude scriptability of router verdicts: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-85a527f2b04265f3)'
+    created_at: '2026-05-26T03:41:03Z'
+    last_edited: '2026-05-26T03:41:03Z'
+  - id: note-738679f
+    text: 'Scope completion for THIS PR (#225) — missing TUI keybinding for the sign-off
+      action.
+
+
+      GAP
+
+
+      `pm_core/tui/app.py` declares `Binding(...)` entries for every other lifecycle
+      action — `s` start, `d` review, `t` QA, `g` merge, `O` auto-sequence — but no
+      key for sign-off. As a result the `?` help modal (sourced from `show=True` bindings)
+      does not list sign-off, even though the rest of #225''s surface (status icon,
+      sign_off in valid_statuses, `pm pr list` glyph, TUI tech tree, verdict icons,
+      recorded record / adoption rule, sign-off window launcher) IS in place.
+
+
+      This is the same type-hygiene shape as the missed `signoff` session type registration
+      (note-358c351): when adding a new INSTANCE of an existing concept (here: a lifecycle
+      action key), the surrounding siblings have to be checked for consistency. The
+      siblings here are the other lifecycle keys; the consistent move is one more
+      `Binding(...)` line + a corresponding `action_<name>` handler + a help entry.
+
+
+      FIX (small, single-commit on this PR)
+
+
+      1) `pm_core/tui/app.py`: add a `Binding(...)` for the sign-off action. Suggested
+      letter `i` (the only obvious unused lowercase, mnemonic "sign-off **i**t"; alternatives
+      `Y` or `K` if you want a capital). `show=True` so it appears in `?` help.
+
+
+      2) Add the matching `action_<name>` handler on the App that launches `pm pr
+      signoff <selected_pr_id>` through the existing pane-launch / command path used
+      by `start_qa_on_pr` and the other lifecycle actions. Re-use `_launch_pane` /
+      the role-based dedup so a stale sign-off window for the same PR is reaped first
+      (consistent with `pr-3a8111d`-class concerns and the `signoff-<id>` prefix cleanup
+      from `f0cd8cff`).
+
+
+      3) Update the `?` help modal label (the binding''s third arg) — something concise
+      like "Sign-off" so the help row reads like the others.
+
+
+      4) Acceptance: the existing #225 QA scenarios already cover the sign-off window
+      launch; one small scenario or unit test should additionally assert (a) the keybinding
+      is present in the `BINDINGS` tuple with `show=True`, and (b) the help-modal
+      output (the existing `show_help` action''s output / its rendered widget) includes
+      the new row. No new prompt changes.
+
+
+      NON-GOAL
+
+
+      The command bar already accepts `pr signoff <id>`; that''s not changing. This
+      is only about adding the direct key + making it discoverable through `?`.
+
+
+      ROLLBACK / RISK
+
+
+      Trivial: 1 line in the BINDINGS tuple + 1 method + a help-row assertion. No
+      other lifecycle action''s behavior changes. If the chosen letter conflicts with
+      an existing local mode somewhere I missed, swap it.'
+    created_at: '2026-05-26T17:06:24Z'
+    last_edited: '2026-05-26T17:06:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: in_progress
+  status: qa
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -23296,9 +23367,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T02:09:25.741549+00:00'
+  updated_at: '2026-05-26T16:58:56.187976+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-26T13:00:09.140826+00:00'
   merged_at: null
   notes:
   - id: note-22f1fb3
@@ -23384,6 +23455,407 @@ prs:
       regenerate = plain `pm pr signoff`.'
     created_at: '2026-05-26T02:09:25Z'
     last_edited: '2026-05-26T02:09:25Z'
+  - id: note-a8bc547
+    text: "Scope addition to the per-PR sign-off HTML report (folds into the #226\
+      \ prompt-extension surface defined in note-537e1a0): the report must include\
+      \ a short, bulleted top-of-page section summarizing what changed during the\
+      \ loop, written so a reader UNFAMILIAR with the PR's description / notes / commits\
+      \ can understand it and decide whether to look closer.\n\nTWO BULLETED GROUPS\
+      \ (short, no prose; one line per item; each item links to the relevant commit\
+      \ / scenario / note where applicable):\n\n1) BUGS FIXED BY REVIEW AND QA\n \
+      \  - Real defects the review-loop or QA scenarios found and fixed in this PR's\
+      \ branch DURING the loop (not part of the original implementation). Each item:\
+      \ one-sentence plain-English description of the user-visible problem + how it\
+      \ was fixed.\n   - Examples that should have been captured for pr-2d5f712: \"\
+      sign-off router pane was opening in the main repo cwd instead of the PR workdir\
+      \ → pinned to workdir\"; \"evidence pane crashed on captures-path/git failure\
+      \ → degrades gracefully\"; \"detached QA could be clobbered by an out-of-band\
+      \ merge during sign_off→qa bounce → guarded\"; \"sign-off windows were orphaned\
+      \ on PR merge → added to cleanup prefix list\"; \"_signoff_qa_scenarios_block\
+      \ crashed on non-list scenarios → defensive coerce\"; \"signoff session type\
+      \ was not registered → added to model_config + fake_claude + launch site\".\n\
+      \n2) SPEC AMBIGUITIES RESOLVED\n   - Places where the original PR scope / spec\
+      \ was ambiguous or under-specified and got pinned down by user decisions or\
+      \ loop discoveries. Each item: the ambiguity + the resolution adopted, in plain\
+      \ language.\n   - Examples that should have been captured for pr-2d5f712: \"\
+      should sign-off be able to auto-merge in autonomous mode? → no: always recommend\
+      \ ready_to_merge; autonomy moved to the plan watcher\"; \"should there be a\
+      \ deterministic capture gate? → no: removed; the LLM router judges captures\
+      \ in context\"; \"what is the manual vs auto-sequence boundary? → manual never\
+      \ mutates state; auto-sequence is the only actor; manual verdicts may be adopted\
+      \ by a later auto-sequence run if fresh\".\n\nAUDIENCE & STYLE\n- Aimed at someone\
+      \ who has NOT read the PR description, notes, or commit log. They should be\
+      \ able to scan these two lists and form a quick mental model of \"what got found\
+      \ and decided during this PR\" without needing to open anything else.\n- Plain\
+      \ English. Each bullet is one line, scannable. No internal jargon (no naked\
+      \ function/file names without a one-clause \"what it is\").\n\nWHY IT GOES HERE\
+      \ (the report, not just the PR notes)\n- The sign-off HTML report is the reader-facing\
+      \ surface (terminal panes can't show captures; the browser page is). PR notes/description\
+      \ are dense and chronological — most reviewers won't scroll them. The bulleted\
+      \ summary makes the \"what was discovered and decided\" obvious and PROMPTS\
+      \ a closer look (open the relevant scenario evidence, the relevant commit, or\
+      \ the relevant note) where warranted.\n\nSIDECAR / DASHBOARD HOOK\n- The report.json\
+      \ sidecar (the dashboard's only structured contract per note-537e1a0) should\
+      \ expose simple counts: bugs_fixed_in_loop (int), spec_clarifications (int).\
+      \ The dashboard surfaces these as small badges on the per-PR row so an outside\
+      \ reviewer can spot PRs whose loop did substantive work without opening each\
+      \ report.\n\nSOURCING DURING SIGN-OFF\n- The sign-off agent already reviews\
+      \ scenario verdicts/reasons + the per-PR captures + the diff vs master + the\
+      \ PR notes/description. Synthesizing the two lists is a derivation pass over\
+      \ that same evidence — it doesn't need new inputs. Source bug fixes from: review-loop\
+      \ and QA commits since the impl phase, and any notes that record a finding.\
+      \ Source spec ambiguities from: notes that begin with DECISION / CORRECTION\
+      \ / supersedes / Scope addition, and any pr description rewrites within the\
+      \ PR's history.\n\nThis stays inside the #226 prompt extension to pr-2d5f712;\
+      \ no new code path."
+    created_at: '2026-05-26T03:02:49Z'
+    last_edited: '2026-05-26T03:02:49Z'
+  - id: note-596f78b
+    text: 'QA NEEDS_WORK: Dashboard renders from scratch with no sidecars: PASS; Dashboard
+      surfaces an agent-written sidecar with verdict, tally, and loop badges: PASS;
+      Filtering by status and merged/unmerged narrows the visible rows: PASS; Regenerate
+      cycle — empty row, run pm pr signoff, re-render shows populated row: PASS; Sign-off
+      prompt names the two deliverables and the sidecar schema: PASS; pm status and
+      the TUI tech tree recognize sign_off: PASS; Robustness — garbage sidecar, partial
+      sidecar, and HTML-injection-safe titles: NEEDS_WORK; Concurrent dashboard generations
+      and a parallel sign-off write do not corrupt the index or the sidecar: PASS;
+      No session tag — dashboard fails clearly: NEEDS_WORK; qa_loop writes scenario.json
+      alongside verdict.md for the sign-off agent: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-47b30e4a8869f42d)'
+    created_at: '2026-05-26T04:06:44Z'
+    last_edited: '2026-05-26T04:06:44Z'
+  - id: note-926072a
+    text: 'QA-authoring guidance for scenarios that test the per-PR HTML surface (report.html
+      / report.json):
+
+
+      THE REPORT FILES ARE AGENT-WRITTEN, NOT DETERMINISTIC. Per the architecture
+      pinned down in note-537e1a0, `report.html` and the `report.json` sidecar are
+      produced by the real Claude SIGN-OFF AGENT via its prompt instructions (the
+      prompt-extension to pr-2d5f712, see prompt_gen.py:527-602), NOT by `pm pr signoff`
+      directly and NOT by fake-claude (which only emits stdout verdicts and never
+      writes files into the captures dir).
+
+
+      Consequence: a scenario that drives `pm pr signoff` against fake-claude will
+      never produce `report.html` / `report.json`, no matter how the fake is scripted.
+      The scenario will either appear vacuous (no shared-resource write to race, no
+      file to inspect) or be REFINER_REJECTed at concretize time (see s19 in QA round
+      2 of this PR, workdir pr-8e693f6-18068b7b… — REFINER_REJECT + note-a591940).
+
+
+      RULE: Any scenario whose THENs assert the existence, content, or contention
+      semantics of `report.html` / `report.json` MUST run the sign-off step against
+      the REAL Claude session (not fake-claude). Opt in to real Claude for that step
+      inside the scenario. The deterministic / fake-claude path stays appropriate
+      for scenarios that only exercise the verdict ROUTER''s hops (decide_signoff_hop,
+      act_on_signoff_verdict) — those don''t depend on the agent''s file-writing.
+
+
+      WHAT THE DASHBOARD GENERATOR CAN STILL TEST WITH FAKE: the dashboard''s HTML
+      rendering (behavior_report.py:462 generate_dashboard) is deterministic Python
+      — globbing per-PR `report.json` sidecars and emitting `index.html`. Scenarios
+      that test the dashboard alone can SYNTHESIZE the sidecars on disk directly and
+      then call the dashboard generator; no Claude session needed at all. Use that
+      path for dashboard-only assertions (filtering, missing-report empty-state, sidecar
+      schema robustness). Reserve the real-Claude path for scenarios that exercise
+      the end-to-end agent-writes-files path.
+
+
+      QA-PLANNER PROMPT NOTE: this distinction (agent-written vs deterministic-write)
+      should be reflected when planning scenarios for sign-off-touching PRs in general
+      — the planner should pick the cheaper synthesize-sidecars path whenever the
+      assertions don''t actually require the agent to produce the file.'
+    created_at: '2026-05-26T12:56:38Z'
+    last_edited: '2026-05-26T12:56:38Z'
+  - id: note-083c051
+    text: 'QA NEEDS_WORK: Dashboard tolerates garbage/partial sidecars and HTML-escapes
+      user content: PASS; Dashboard fails clearly when no session tag is resolvable:
+      PASS; Filtering collapses plan sections whose rows are all hidden: PASS; Dashboard
+      sign-off marker is sourced from pr[''signoff''] when no sidecar is present:
+      NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-bb8854012f0ad8f2)'
+    created_at: '2026-05-26T13:25:00Z'
+    last_edited: '2026-05-26T13:25:00Z'
+  - id: note-809407d
+    text: "DECISION (supersedes the dual-read added by 769d009e): the dashboard renders\
+      \ SIDECAR-ONLY. `pr['signoff']` is NOT consulted anywhere in HTML rendering\
+      \ — `behavior_report.py` drops the record fallback. The inconsistency the s23\
+      \ scenario surfaced (PR2 = sidecar-only showing on dashboard, hidden on list/tree)\
+      \ goes away by design once each surface has exactly one source.\n\nTHE RATIONALE\n\
+      - `pr['signoff']` is project-yaml runtime state. The dashboard is a static HTML\
+      \ file (open as a file, no server, no Python runtime). Mixing runtime state\
+      \ into an artifact you can hand to someone without pm installed is a category\
+      \ error.\n- The agent writes the sidecar (`report.json`) alongside `report.html`\
+      \ as its structured output. That is the dashboard's native input format. Reading\
+      \ `pr['signoff']` in addition was a leftover convenience, not a design choice.\n\
+      - The two surfaces (dashboard vs list/tree) serve different needs: dashboard\
+      \ is the rich, evidence-aware review surface; list/tree are lightweight runtime\
+      \ status views. They were never meant to be a single source of truth.\n\nCHANGES\
+      \ IN THIS PR\n1) `pm_core/behavior_report.py` — remove the `pr['signoff']` lookup\
+      \ from the dashboard render path (the dual-read added by 769d009e). When a sidecar\
+      \ is absent, the dashboard row simply has no sign-off marker. No fallback to\
+      \ `pr['signoff']`. This may be a partial revert of 769d009e plus a small simplification\
+      \ of the merged-read code at behavior_report.py:143-160.\n2) `pm pr list` and\
+      \ the TUI tech tree — UNCHANGED. They continue to read `pr['signoff']` only\
+      \ and gate on `status==sign_off`. That is correct and intentional.\n3) Update\
+      \ the s23 scenario (or its replacement in the next QA round) to assert the INTENDED\
+      \ division rather than lockstep:\n   - dashboard ↔ sidecars: PR with sidecar\
+      \ → marker shown; PR without sidecar → no marker (regardless of `pr['signoff']`)\n\
+      \   - list/tree ↔ `pr['signoff']`: PR with record + `status==sign_off` → marker\
+      \ shown; otherwise → no marker (regardless of sidecar)\n   - The two surfaces\
+      \ will diverge for sidecar-only or record-only PRs — that is the intent, not\
+      \ a bug.\n\nARCHITECTURAL NOTE\n- This makes the dashboard's input contract\
+      \ explicit: \"everything I show is in a sidecar.\" Anyone hand-authoring a sidecar\
+      \ for testing or one-off display can rely on that.\n- Combined with note-537e1a0's\
+      \ regenerate-via-`pm pr signoff`, this gives the dashboard a clean shape: glob\
+      \ sidecars → render. No runtime state in the loop."
+    created_at: '2026-05-26T13:35:02Z'
+    last_edited: '2026-05-26T13:35:02Z'
+  - id: note-c3932ca
+    text: "Sharper restatement of note-809407d (the user clarified):\n\nTHE RULE —\
+      \ sign-off-derived ONLY in sidecar and per-PR HTML\n\nThe sidecar (`report.json`)\
+      \ and the per-PR `report.html` are produced only by the sign-off agent and updated\
+      \ only when sign-off runs. They must therefore contain ONLY sign-off-derived\
+      \ content. Any field they currently carry that mirrors PR runtime state (status,\
+      \ merged, title-from-record, the `pr['signoff']` record) goes STALE the moment\
+      \ that state changes — the sidecar isn't regenerated when a PR is merged or\
+      \ its status flips, so any state field baked into it lies whenever sign-off\
+      \ didn't run last.\n\nTHE RIGHT SHAPE\n\n- **Sidecar (`report.json`)** carries:\
+      \ `verdict`, `next_hop`, `tally`, `bugs_fixed_in_loop`, `spec_clarifications`,\
+      \ `report_html` relative link, the sign-off summary, evidence links. **Drop**\
+      \ anything that is just a snapshot of project.yaml.\n- **Per-PR `report.html`**\
+      \ carries: the BDD report content the agent produces — flow / STEPS / Given-When-Then\
+      \ / verdict + reason / inline evidence / next hop, plus the top-of-page bulleted\
+      \ \"bugs fixed / spec ambiguities resolved\" section. **No status badge, no\
+      \ merged badge, no record fallback** — those are not the agent's outputs.\n\
+      - **Dashboard `index.html` (the only thing rendered by deterministic Python)**\
+      \ is allowed and expected to combine: per-PR runtime state read from `project.yaml`\
+      \ AT GENERATION TIME, with the sign-off content read from each PR's sidecar.\
+      \ The index reads project.yaml fresh, every time it's regenerated — so PR state\
+      \ in the index is current, while the sidecar/per-PR HTML can stay frozen at\
+      \ their last sign-off pass.\n\nCONCRETE CODE CHANGES — `pm_core/behavior_report.py`\n\
+      \n1) **`gather_dashboard_rows` (around lines 131-188): drop everything that\
+      \ pulls state from the sidecar.** The sidecar should not carry `title`, `status`,\
+      \ `merged`. Today the row construction does:\n     - `display_id=str(loaded.get(\"\
+      display_id\") or default_display)` → keep `default_display` only.\n     - `title=str(loaded.get(\"\
+      title\") or pr.get(\"title\", pr_id))` → use `pr.get(\"title\", pr_id)` only.\n\
+      \     - `status=str(loaded.get(\"status\") or pr.get(\"status\", \"unknown\"\
+      ))` → use `pr.get(\"status\", \"unknown\")` only.\n     - `merged=bool(loaded.get(\"\
+      merged\", pr.get(\"merged_at\")))` → use `bool(pr.get(\"merged_at\"))` only.\n\
+      \   These four lines all collapse to \"read from project.yaml\". The sidecar\
+      \ isn't consulted for any of them.\n\n2) **Drop the `pr['signoff']` dual-read**\
+      \ (the lines 145-149 fallback added by 769d009e plus its uses at the no-sidecar\
+      \ branch and the with-sidecar fallback expression):\n     - Delete `pr_signoff\
+      \ = pr.get(\"signoff\") ...` and `pr_verdict = ...`.\n     - No-sidecar branch:\
+      \ `verdict=\"\"` (not `pr_verdict`).\n     - With-sidecar branch: `verdict=str(loaded.get(\"\
+      verdict\") or \"\")` (no `or pr_verdict` tail).\n\n3) **Module docstring (lines\
+      \ 4-22)** is already correct in its intent — keep its existing promise (\"sidecar\
+      \ is the dashboard's only contract\" for per-PR content) and add one short clarifying\
+      \ line: \"PR runtime state — status, merged, title — is read fresh from project.yaml\
+      \ at dashboard-generation time, not from the sidecar.\"\n\n4) **`_DashRow` (around\
+      \ line 76)**: keep the fields, but mentally split them — `pr_id, display_id,\
+      \ title, status, merged` are sourced from project.yaml; `has_sidecar, sidecar_path,\
+      \ report_html_rel, verdict, next_hop, tally, bugs_fixed_in_loop, spec_clarifications`\
+      \ are sourced from the sidecar. The dataclass shape doesn't change; the row\
+      \ constructor just stops reading state-shaped fields from the sidecar.\n\nCONCRETE\
+      \ PROMPT-EXTENSION CHANGES — `pm_core/prompt_gen.py` (sign-off prompt around\
+      \ lines 527-602)\n\n5) **Sidecar schema specified to the agent**: ensure the\
+      \ prompt instructs the sign-off agent to write ONLY sign-off-derived keys into\
+      \ `report.json` — `verdict`, `next_hop`, `tally`, `bugs_fixed_in_loop`, `spec_clarifications`,\
+      \ `report_html`, summary fields. Explicitly forbid `title`, `status`, `merged`,\
+      \ `display_id` (these are project.yaml's responsibility; the dashboard reads\
+      \ them fresh).\n\n6) **Per-PR `report.html` schema**: the prompt should instruct\
+      \ the agent NOT to render PR status / merged badges in the per-PR page (or to\
+      \ clearly mark them as \"as of sign-off run\" if any historical context is needed\
+      \ — but the cleaner choice is to omit them entirely since the agent has no good\
+      \ way to keep them current).\n\nTESTS — `tests/test_behavior_report.py`\n\n\
+      7) **Remove** tests that exercise the `pr['signoff']` fallback path in `gather_dashboard_rows`.\n\
+      8) **Remove** tests that assert the sidecar's `title` / `status` / `merged`\
+      \ fields are honored over project.yaml — those fields are no longer in the sidecar\
+      \ contract.\n9) **Add**:\n     - `test_sidecar_absent_row_has_no_verdict` —\
+      \ `pr['signoff']` set, no sidecar → `_DashRow.verdict == \"\"`, empty state\
+      \ shown.\n     - `test_pr_state_read_from_project_yaml_not_sidecar` — sidecar\
+      \ with hypothetical `title`/`status`/`merged` fields is fed in, but those fields\
+      \ are ignored; row uses project.yaml values. This locks in the \"sidecar carries\
+      \ no state\" rule.\n     - `test_sidecar_verdict_wins_over_pr_signoff` — sidecar\
+      \ verdict != `pr['signoff']` verdict; the rendered dashboard shows sidecar's\
+      \ verdict (and `pr['signoff']` is never consulted).\n\nQA SCENARIO REWRITE (replaces\
+      \ s23 in the next round)\n\nGIVEN three PRs in a throwaway project:\n  PR1:\
+      \ status=in_review, sidecar with `verdict=SIGNOFF_MERGE`, no `pr['signoff']`\
+      \ record.\n  PR2: status=sign_off, no sidecar, `pr['signoff']={verdict: \"SIGNOFF_IMPL\"\
+      , sha: …}`.\n  PR3: status=in_progress, neither sidecar nor `pr['signoff']`.\n\
+      \nWHEN the user generates the dashboard, runs `pm pr list`, and views the TUI\
+      \ tech tree.\n\nTHEN:\n  - Dashboard: PR1 shows ▲ SIGNOFF_MERGE + open-report\
+      \ link (sidecar-driven). PR2 shows the regenerate empty state (no marker; `pr['signoff']`\
+      \ not consulted). PR3 shows the regenerate empty state.\n  - `pm pr list`: PR1\
+      \ shows no verdict glyph (status != sign_off). PR2 shows ⇤ SIGNOFF_IMPL (status==sign_off\
+      \ AND record set). PR3 shows nothing.\n  - TUI tech tree: same as `pm pr list`.\n\
+      \nExplicitly assert that dashboard and list/tree disagree on PR1 and PR2 — this\
+      \ is the intended division of responsibilities, not a bug.\n\nROLLBACK SCOPE\n\
+      \nThis effectively undoes the verdict-fallback piece of 769d009e while keeping\
+      \ the *intent* of 769d009e (the dashboard marker still works for the PR that\
+      \ actually has a sidecar). Plus a small pruning of the row constructor to also\
+      \ drop `title`/`status`/`merged` reads from the sidecar. Not a full revert of\
+      \ 769d009e.\n\nNON-GOAL\n\n`pm pr list` and the TUI tech tree are not touched.\
+      \ They continue to gate on `status==sign_off` and read `pr['signoff']` only.\
+      \ Do not change them in this PR."
+    created_at: '2026-05-26T13:39:58Z'
+    last_edited: '2026-05-26T13:39:58Z'
+  - id: note-d01545e
+    text: "Expansion to the inline-evidence policy in the sign-off report (extends\
+      \ the embed list at prompt_gen.py:569-575 — currently webm → `<video controls>`,\
+      \ png → `<img>`, small text → `<details><pre>`).\n\nNEW INLINE EMBEDS TO ADD\n\
+      \n1) Audio files (`.wav`, `.mp3`, audio-only `.webm`, `.ogg`, `.opus`) → `<audio\
+      \ controls src=\"…\">` inline. Becomes important once plan-ambient's TTS surface\
+      \ lands and sign-off has audio evidence.\n\n2) Asciinema cast files (`.cast`)\
+      \ → embed via the asciinema-player widget inline. Two acceptable shapes:\n \
+      \  - CDN: `<asciinema-player src=\"…\">` + `<link rel=\"stylesheet\" …>` + `<script\
+      \ src=\"…\">` from a stable asciinema-player CDN (file:// pages can load these\
+      \ as long as the host browser allows). Note this requires the reader to be online.\n\
+      \   - Vendored: drop a copy of asciinema-player (CSS + JS) under the captures\
+      \ session-tag dir (or under a shared static dir referenced by all per-PR reports)\
+      \ and reference it by RELATIVE path. Offline-safe, slightly larger footprint.\n\
+      \   Prefer the vendored copy when available; fall back to CDN if not. Asciinema\
+      \ casts ALREADY appear in captures (see s23: `recording.cast`), so this is not\
+      \ hypothetical.\n\nMARKDOWN: RENDER, DON'T LINK RAW\n\n3) For every `.md` file\
+      \ the report would otherwise link to, render it to a sibling `.html` file at\
+      \ sign-off time and link to the rendered HTML instead. Raw `.md` over `file://`\
+      \ displays as plaintext in most browsers — a bad reader experience.\n   - Pick\
+      \ a small, dependency-light Python markdown renderer (e.g. `markdown` or `mistune`\
+      \ — sign-off doesn't need pluggable extensions, just CommonMark + tables + fenced\
+      \ code).\n   - Generated path convention: alongside `foo.md`, write `foo.md.html`\
+      \ (or `foo.html` if no name conflict). Keep `.md.html` so the source `.md` is\
+      \ still discoverable.\n   - Wrap in a minimal styled shell (the same minimal\
+      \ style the per-PR report.html uses) so it looks consistent.\n   - The link\
+      \ in the report should point to the `.html`, not the `.md`. The raw `.md` stays\
+      \ on disk for grep / diff / archival.\n\nHTML STAYS LINKED\n\n4) `.html` files\
+      \ (existing) — keep linking as-is, no change. Already render natively in the\
+      \ browser.\n\nUPDATED INLINE-EVIDENCE TABLE FOR THE PROMPT\n\n| Type | Treatment\
+      \ |\n|---|---|\n| `.webm` (video) | `<video controls>` inline |\n| `.png`, `.jpg`,\
+      \ `.gif`, `.svg` | `<img>` inline |\n| `.wav`, `.mp3`, `.ogg`, `.opus`, audio-only\
+      \ `.webm` | `<audio controls>` inline |\n| `.cast` (asciinema) | asciinema-player\
+      \ widget inline (vendored CSS+JS preferred; CDN fallback) |\n| small `.txt`\
+      \ / log under N KB | `<details><pre>` inline |\n| `.md` | render to sibling\
+      \ `.html` at sign-off time; link to the rendered HTML |\n| `.html` | link as-is\
+      \ |\n| Large/other binary | link as-is |\n\nPOSITIVE FRAMING (per the prompt-hygiene\
+      \ discussion in plan-quality)\n\nPrefer \"embed when supported by the browser\
+      \ (video/audio/img/asciinema/small text); pre-render markdown to HTML before\
+      \ linking; link only for HTML or large/other files\" over a \"do NOT just link\"\
+      \ framing — the negative form is fine but a single positive rule is shorter\
+      \ and ages better.\n\nSCOPE\n\nThis is a small follow-on to the sidecar-only\
+      \ refactor (note-c3932ca). Land sidecar-only first, then this embed/render expansion\
+      \ either as the next commit on the same PR or — if the diff is getting heavy\
+      \ — split into a follow-up PR. Either is fine."
+    created_at: '2026-05-26T16:07:01Z'
+    last_edited: '2026-05-26T16:07:01Z'
+  - id: note-8cfdf73
+    text: "Prompt-wording rule for the sign-off prompt: STATE INLINE-EVIDENCE POLICY\
+      \ AS A SINGLE POSITIVE DEFAULT.\n\nWHAT TO REPLACE\n\nIn `pm_core/prompt_gen.py`\
+      \ around lines 569-575, the sign-off prompt currently lists inline-evidence\
+      \ treatment as a series of bullets (\"INLINE for webm, INLINE for png, … or\
+      \ LINKED\"). With the table expanded by note-d01545e (audio, asciinema, rendered\
+      \ .md), that list gets long. Rephrase it around a single positive default:\n\
+      \n  > **Embed evidence inline whenever the browser supports it. Link only the\
+      \ listed exceptions.**\n\nThen enumerate the embeds as positives (one line each)\
+      \ and call out the link-as-is exceptions explicitly. Avoid `do NOT link X` phrasing\
+      \ — the default IS embed; link is the listed exception.\n\nCONCRETE SHAPE FOR\
+      \ THE PROMPT (target wording, not literal copy)\n\n  > **Evidence rendering:\
+      \ prefer embedded viewers.**\n  > Embed inline using the appropriate native\
+      \ HTML control for each type:\n  >   - `<video controls>` for `.webm` (video)\n\
+      \  >   - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`\n  >   - `<audio controls>`\
+      \ for `.wav` / `.mp3` / `.ogg` / `.opus` / audio-only `.webm`\n  >   - the asciinema-player\
+      \ widget for `.cast` (vendored copy preferred; CDN fallback)\n  >   - `<details><pre>`\
+      \ for small text / log files under ~50 KB\n  > For Markdown evidence, render\
+      \ to a sibling `.html` at sign-off time and link to the rendered HTML.\n  >\
+      \ Link as-is for `.html` files and any binary larger than ~10 MB.\n\nWHY THIS\
+      \ FRAMING\n\n- One positive default + a short list of exceptions ages better\
+      \ than a list of \"do/don't\" pairs. Adding a new media type later is one bullet,\
+      \ not two.\n- It also matches the prompt-hygiene rule going into `plan-quality`'s\
+      \ Track A: \"removed concepts get clean deletions, not negation residue; new\
+      \ policies get a positive default, not a list of negatives.\"\n\nSCOPE\n\nThis\
+      \ is a wording change in the prompt text itself, not the report-generator code.\
+      \ Land it together with note-d01545e's embed-types expansion (one diff to prompt_gen.py\
+      \ covers both). The impl session implementing the sidecar-only refactor (note-c3932ca)\
+      \ should plan to also pick this up in the same pass — the three notes (c3932ca,\
+      \ d01545e, this one) together fully specify the sign-off prompt's evidence-rendering\
+      \ surface after the refactor."
+    created_at: '2026-05-26T16:09:31Z'
+    last_edited: '2026-05-26T16:09:31Z'
+  - id: note-0a52232
+    text: 'QA INPUT_REQUIRED: Markdown evidence appears as a styled, browser-readable
+      page in the sign-off report: INPUT_REQUIRED; Sign-off prompt''s evidence-rendering
+      policy lists the expanded media types as embed-first: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-52ceab6a4b9efba7)'
+    created_at: '2026-05-26T16:53:47Z'
+    last_edited: '2026-05-26T16:53:47Z'
+  - id: note-1374935
+    text: 'QA-authoring guidance for the remaining scenarios on this PR (and retroactively
+      for s19 / s24 if they''re rerun).
+
+
+      RULE — when to use real Claude vs fake-claude in this PR''s scenarios
+
+
+      A QA scenario should ONLY enable fake-claude (`pm fake-claude config set …`
+      in its setup) when every THEN it asserts on is restricted to the verdict the
+      agent emits — PASS / NEEDS_WORK / SIGNOFF_MERGE / etc. fake-claude emits verdicts
+      on stdout but does NOT author files, run tools, or otherwise execute the prompt''s
+      side effects.
+
+
+      If any THEN inspects a file the agent is supposed to author, a tool call the
+      agent should make, or any state the agent''s prompt body is supposed to mutate,
+      the scenario MUST NOT enable fake-claude — the scenario''s setup should leave
+      fake-claude UNCONFIGURED so the real Claude session runs (per `pm/qa/instructions/tui-manual-test.md`:
+      "with no config the flow uses real Claude").
+
+
+      ON THIS PR SPECIFICALLY
+
+
+      The sign-off agent''s deliverables — `$CAP/report.html`, `$CAP/report.json`,
+      the rendered `.md.html` siblings from `pm_core.markdown_render.render_md_file`,
+      the per-step embedded evidence — are ALL agent-authored side effects of the
+      sign-off prompt, not verdicts. Any scenario asserting on these MUST run against
+      real Claude:
+
+
+      - s19 (concurrent dashboard + sign-off write) — REFINER_REJECTed in QA round
+      2 because it enabled fake-claude.
+
+      - s24 (Markdown evidence appears as a styled, browser-readable page) — REFINER_REJECTed
+      in QA round 4 for the same reason.
+
+
+      Both are testable; their setup was wrong. The fix is to drop the `pm fake-claude
+      config set` line from their shared setup. Don''t change the THENs.
+
+
+      Scenarios that DO belong on fake-claude in this PR''s surface are the verdict-router
+      / routing-decision ones (signoff verdict → next hop), because their THENs only
+      inspect the recorded verdict + the resulting `pr[''signoff'']` record / status
+      transition. Those keep their fake-claude config.
+
+
+      DEFERRAL — broader prompt fix is out of scope here
+
+
+      The corresponding general fix — telling the QA-planner / scenario-author / refiner
+      prompts WHEN to pick fake vs real — naturally lives in pr-51586d2 (Mocks awareness
+      in the new-regression authoring flow, plan-regression). Keep this PR scoped:
+      do not edit `pm_core/prompt_gen.py` for this issue. This note is sufficient
+      guidance for #226''s remaining QA rounds; the broader prompting addendum lands
+      when mocks are overhauled.
+
+
+      NEXT QA ROUND ON THIS PR
+
+
+      When the next QA round on pr-8e693f6 replans, scenarios for HTML / sidecar /
+      markdown-render assertions should be authored WITHOUT a `pm fake-claude config
+      set` in their shared setup. Verdict-only scenarios can keep the fake config.
+      The refiner should reject any scenario whose THENs assert agent side effects
+      AND whose GIVEN enables fake-claude, with this note as the redirect.'
+    created_at: '2026-05-26T16:58:56Z'
+    last_edited: '2026-05-26T16:58:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
