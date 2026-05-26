@@ -66,6 +66,27 @@ def workdirs_base() -> Path:
     return d
 
 
+def _resolve_session_tag(start_path: Path | None = None) -> str | None:
+    """Resolve the active session tag.
+
+    Only consults the pm-session helper when actually inside a tmux pm
+    session — its cwd-based fallback synthesises a bogus
+    "pm-<name>-00000000" tag for any cwd, which would silently route
+    captures to a fake session dir when run from a non-git cwd.
+    """
+    pm_sess = None
+    try:
+        from pm_core import tmux as tmux_mod
+        if tmux_mod.in_tmux():
+            from pm_core.cli.helpers import _get_pm_session
+            pm_sess = _get_pm_session()
+    except Exception:
+        pm_sess = None
+    if pm_sess:
+        return pm_sess.removeprefix("pm-")
+    return get_session_tag(start_path=start_path)
+
+
 def captures_dir(pr_id: str,
                  session_tag: str | None = None,
                  start_path: Path | None = None) -> Path | None:
@@ -91,15 +112,7 @@ def captures_dir(pr_id: str,
     present.
     """
     if session_tag is None:
-        try:
-            from pm_core.cli.helpers import _get_pm_session
-            pm_sess = _get_pm_session()
-        except Exception:
-            pm_sess = None
-        if pm_sess:
-            session_tag = pm_sess.removeprefix("pm-")
-        else:
-            session_tag = get_session_tag(start_path=start_path)
+        session_tag = _resolve_session_tag(start_path)
     host_path: Path | None = None
     if session_tag:
         host_path = sessions_dir() / session_tag / "captures" / pr_id
@@ -126,15 +139,7 @@ def captures_root(session_tag: str | None = None,
     it doesn't exist when a tag is available.
     """
     if session_tag is None:
-        try:
-            from pm_core.cli.helpers import _get_pm_session
-            pm_sess = _get_pm_session()
-        except Exception:
-            pm_sess = None
-        if pm_sess:
-            session_tag = pm_sess.removeprefix("pm-")
-        else:
-            session_tag = get_session_tag(start_path=start_path)
+        session_tag = _resolve_session_tag(start_path)
     if not session_tag:
         return None
     root = sessions_dir() / session_tag / "captures"
