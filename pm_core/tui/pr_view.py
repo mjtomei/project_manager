@@ -213,6 +213,47 @@ def review_pr(app, fresh: bool = False) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
+def signoff_pr(app, fresh: bool = False) -> None:
+    """Launch sign-off for the selected PR (transitions qa->sign_off if needed)."""
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: signoff_pr selected=%s fresh=%s", pr_id, fresh)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    if not fresh:
+        from pm_core.loop_shared import get_pm_session
+        from pm_core import tmux as tmux_mod, store
+        session = get_pm_session()
+        if session and app._root:
+            try:
+                data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                data = None
+            if data:
+                pr_entry = store.get_pr(data, pr_id)
+                if pr_entry:
+                    from pm_core.cli.pr import _pr_display_id
+                    display_id = _pr_display_id(pr_entry)
+                    window_name = f"signoff-{display_id}"
+                    existing = tmux_mod.find_window_by_name(session, window_name)
+                    if existing:
+                        tmux_mod.select_window(session, existing["id"])
+                        app.log_message(f"Switched to sign-off window '{window_name}'")
+                        return
+
+    action_key = f"Sign-off {pr_id}" + (" (fresh)" if fresh else "")
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    fresh_arg = " --fresh" if fresh else ""
+    cmd = f"pr signoff{fresh_arg} {pr_id}"
+    run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+
 def merge_pr(app, companion: bool = False) -> None:
     """Merge the selected PR."""
     from pm_core.tui.tech_tree import TechTree

@@ -394,6 +394,27 @@ class TestPrompt:
             data, "pr-001", origin="auto-sequence")
         assert "--origin auto-sequence" in p
 
+class TestTuiKeybinding:
+    def test_signoff_binding_present_and_shown(self):
+        from pm_core.tui.app import ProjectManagerApp
+        b = next((x for x in ProjectManagerApp.BINDINGS
+                  if getattr(x, "action", None) == "signoff_pr"), None)
+        assert b is not None, "no signoff_pr Binding"
+        assert b.key == "i"
+        assert b.show is True
+        assert hasattr(ProjectManagerApp, "action_signoff_pr")
+
+    def test_help_modal_lists_signoff(self):
+        from pm_core.tui import screens
+        src = Path(screens.__file__).read_text()
+        assert "Sign-off" in src
+
+    def test_pr_view_exposes_signoff_pr(self):
+        from pm_core.tui import pr_view
+        assert callable(getattr(pr_view, "signoff_pr", None))
+
+
+class TestPromptCaptureLanguage:
     def test_no_capture_gate_language(self):
         """The deterministic capture gate was removed (display moved to #226)."""
         from pm_core import prompt_gen
