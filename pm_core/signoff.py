@@ -323,8 +323,19 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
                 return
 
+            # Pin the router pane's cwd to the workdir explicitly.  Without
+            # ``cwd`` the split inherits the evidence pane's *current* cwd, but
+            # that pane was created moments earlier and tmux's
+            # ``pane_current_path`` has not yet settled to the ``-c`` workdir —
+            # so the split races and lands the router in the session's default
+            # dir (the umbrella project) instead of the PR workdir.  That makes
+            # Claude review the wrong repo and breaks the transcript symlink
+            # (which is computed from the workdir cwd), forcing the
+            # verdict-detection band-aid to recover by session-id glob.  The
+            # host workdir always exists (container mode bind-mounts it), so it
+            # is the correct cwd for the host pane in both modes.
             claude_pane = tmux_mod.split_pane_at(
-                evidence_pane, "h", claude_cmd, background=True)
+                evidence_pane, "h", claude_cmd, background=True, cwd=workdir)
 
             wid_result = subprocess.run(
                 tmux_mod._tmux_cmd("display", "-t", evidence_pane, "-p",

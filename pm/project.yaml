@@ -22607,7 +22607,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T00:28:15.976684+00:00'
+  updated_at: '2026-05-26T01:02:33.677023+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22979,6 +22979,59 @@ prs:
       changes needed.'
     created_at: '2026-05-26T00:28:15Z'
     last_edited: '2026-05-26T00:28:15Z'
+  - id: note-710ff64
+    text: 'QA scenario-8 (verdict-router fan-out) refiner notes — verified surface
+      mechanics: (1) command is `pm pr auto-sequence <id>` (hyphen). (2) The fake-claude
+      does NOT run `pm pr signoff-record`; with fake, a signoff verdict lives ONLY
+      in the transcript, so auto-sequence reaches it via the transcript-read path
+      (pr.py:3117-3125), NOT the fresh-record adoption path. (3) Drive entirely via
+      auto-sequence: from sign_off with no record/window, tick #1 relaunches the router
+      itself at the correct path `<TEST_DIR>/pm/transcripts/auto-sequence/<id>/signoff-<id>.jsonl`
+      and prints "advanced: sign_off_relaunched"; the fake writes the scripted SIGNOFF_*
+      there; tick #2 reads + routes. (4) Exact echoes: IMPL->"sign_off: returning
+      to impl" (status->in_progress, pr_start fresh=True), REVIEW->"sign_off: returning
+      to review (iteration N)" (N=latest review iter+1, =1 for fresh; status->in_review),
+      REQA->"sign_off: re-qa" (status->qa), BLOCKED->"paused: sign_off_blocked" (stays
+      sign_off), no-verdict+window->"running: sign_off", stale/no-window->"advanced:
+      sign_off_relaunched". (5) Bounce hops (qa/review/impl) call _retire_signoff_window
+      (kills signoff-<id> window + unlinks the signoff transcript) and apply_signoff_hop
+      pops pr["signoff"]; BLOCKED/MERGE do NOT retire (window persists). (6) Stale
+      path: record carries sha; auto-sequence compares to head_sha(workdir); to make
+      stale, after a recorded verdict commit into the workdir (git commit --allow-empty)
+      so HEAD moves. (7) Setup: local backend; bootstrap PR status->sign_off via project.yaml
+      fixture edit (allowed); workdir is auto-provisioned by launch_signoff_window/_ensure_workdir
+      on first tick (real git worktree, commit-able). fake config: `pm fake-claude
+      config set ''{"signoff":{"verdicts":["SIGNOFF_IMPL"]}}''`; run triples sequentially,
+      reconfiguring fake per verdict (config is per-session-type, not per-PR). For
+      no-verdict triple use a long delay entry so transcript stays verdict-free while
+      window is open.'
+    created_at: '2026-05-26T00:47:27Z'
+    last_edited: '2026-05-26T00:47:27Z'
+  - id: note-7ca15a1
+    text: 'QA scenario 8 (verdict-router fan-out) PASS, all 6 triples on real local-backend
+      surface, after fixing ONE in-scope bug. Bug: signoff.launch_signoff_window split
+      the Claude ROUTER pane with split_pane_at(evidence_pane,"h",...) WITHOUT cwd.
+      The split runs immediately after new_window_get_pane created the evidence pane
+      with -c <workdir>, before tmux pane_current_path settles, so it races and inherits
+      the session default dir (the umbrella TEST_DIR project) — the router pane (and
+      real Claude) ran in the WRONG repo, and the transcript symlink (computed from
+      the workdir cwd) was left broken so verdict detection only worked via the _read_transcript_text
+      session-id glob band-aid (pr-488b748). Fixed by passing cwd=workdir to split_pane_at
+      (signoff.py ~337); now router pane + symlink both land on the workdir (pre/post-fix
+      captures under scenarios/8). 36/36 test_signoff green. Triples verified: SIGNOFF_IMPL->"sign_off:
+      returning to impl" (in_progress, fresh impl relaunch "Launched Claude", signoff
+      window+transcript retired, record consumed, ticks 3/4 "running: implementation"
+      no-replay); SIGNOFF_REVIEW->"sign_off: returning to review (iteration 1)" (in_review,
+      review-i1 transcript); SIGNOFF_REQA->"sign_off: re-qa" (qa, qa window); SIGNOFF_BLOCKED->"paused:
+      sign_off_blocked" (stays sign_off + window/transcript persist + record written);
+      no-verdict(delayed)->"running: sign_off" (window intact); stale-record (committed
+      --allow-empty in workdir to move HEAD)->"advanced: sign_off_relaunched" (stale
+      BLOCKED NOT replayed, window @id changed, record cleared, fresh run re-records
+      vs new HEAD). NOTE: the analogous review-window split (pr.py:1281) has the IDENTICAL
+      no-cwd race — out of scope here, but worth the same fix; already-tracked review-window
+      bug PRs are pr-3f85ad7/pr-71e9ec7.'
+    created_at: '2026-05-26T01:02:33Z'
+    last_edited: '2026-05-26T01:02:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
