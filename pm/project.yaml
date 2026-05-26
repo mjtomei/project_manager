@@ -22509,7 +22509,7 @@ prs:
   title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
     router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
     stage between qa and merge with its own window, not logic embedded in the QA loop.
@@ -22618,7 +22618,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T02:51:23.639145+00:00'
+  updated_at: '2026-05-26T02:54:23.263954+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22886,7 +22886,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T02:09:25.741549+00:00'
+  updated_at: '2026-05-26T03:02:49.508853+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
@@ -22963,6 +22963,61 @@ prs:
       regenerate = plain `pm pr signoff`.'
     created_at: '2026-05-26T02:09:25Z'
     last_edited: '2026-05-26T02:09:25Z'
+  - id: note-a8bc547
+    text: "Scope addition to the per-PR sign-off HTML report (folds into the #226\
+      \ prompt-extension surface defined in note-537e1a0): the report must include\
+      \ a short, bulleted top-of-page section summarizing what changed during the\
+      \ loop, written so a reader UNFAMILIAR with the PR's description / notes / commits\
+      \ can understand it and decide whether to look closer.\n\nTWO BULLETED GROUPS\
+      \ (short, no prose; one line per item; each item links to the relevant commit\
+      \ / scenario / note where applicable):\n\n1) BUGS FIXED BY REVIEW AND QA\n \
+      \  - Real defects the review-loop or QA scenarios found and fixed in this PR's\
+      \ branch DURING the loop (not part of the original implementation). Each item:\
+      \ one-sentence plain-English description of the user-visible problem + how it\
+      \ was fixed.\n   - Examples that should have been captured for pr-2d5f712: \"\
+      sign-off router pane was opening in the main repo cwd instead of the PR workdir\
+      \ → pinned to workdir\"; \"evidence pane crashed on captures-path/git failure\
+      \ → degrades gracefully\"; \"detached QA could be clobbered by an out-of-band\
+      \ merge during sign_off→qa bounce → guarded\"; \"sign-off windows were orphaned\
+      \ on PR merge → added to cleanup prefix list\"; \"_signoff_qa_scenarios_block\
+      \ crashed on non-list scenarios → defensive coerce\"; \"signoff session type\
+      \ was not registered → added to model_config + fake_claude + launch site\".\n\
+      \n2) SPEC AMBIGUITIES RESOLVED\n   - Places where the original PR scope / spec\
+      \ was ambiguous or under-specified and got pinned down by user decisions or\
+      \ loop discoveries. Each item: the ambiguity + the resolution adopted, in plain\
+      \ language.\n   - Examples that should have been captured for pr-2d5f712: \"\
+      should sign-off be able to auto-merge in autonomous mode? → no: always recommend\
+      \ ready_to_merge; autonomy moved to the plan watcher\"; \"should there be a\
+      \ deterministic capture gate? → no: removed; the LLM router judges captures\
+      \ in context\"; \"what is the manual vs auto-sequence boundary? → manual never\
+      \ mutates state; auto-sequence is the only actor; manual verdicts may be adopted\
+      \ by a later auto-sequence run if fresh\".\n\nAUDIENCE & STYLE\n- Aimed at someone\
+      \ who has NOT read the PR description, notes, or commit log. They should be\
+      \ able to scan these two lists and form a quick mental model of \"what got found\
+      \ and decided during this PR\" without needing to open anything else.\n- Plain\
+      \ English. Each bullet is one line, scannable. No internal jargon (no naked\
+      \ function/file names without a one-clause \"what it is\").\n\nWHY IT GOES HERE\
+      \ (the report, not just the PR notes)\n- The sign-off HTML report is the reader-facing\
+      \ surface (terminal panes can't show captures; the browser page is). PR notes/description\
+      \ are dense and chronological — most reviewers won't scroll them. The bulleted\
+      \ summary makes the \"what was discovered and decided\" obvious and PROMPTS\
+      \ a closer look (open the relevant scenario evidence, the relevant commit, or\
+      \ the relevant note) where warranted.\n\nSIDECAR / DASHBOARD HOOK\n- The report.json\
+      \ sidecar (the dashboard's only structured contract per note-537e1a0) should\
+      \ expose simple counts: bugs_fixed_in_loop (int), spec_clarifications (int).\
+      \ The dashboard surfaces these as small badges on the per-PR row so an outside\
+      \ reviewer can spot PRs whose loop did substantive work without opening each\
+      \ report.\n\nSOURCING DURING SIGN-OFF\n- The sign-off agent already reviews\
+      \ scenario verdicts/reasons + the per-PR captures + the diff vs master + the\
+      \ PR notes/description. Synthesizing the two lists is a derivation pass over\
+      \ that same evidence — it doesn't need new inputs. Source bug fixes from: review-loop\
+      \ and QA commits since the impl phase, and any notes that record a finding.\
+      \ Source spec ambiguities from: notes that begin with DECISION / CORRECTION\
+      \ / supersedes / Scope addition, and any pr description rewrites within the\
+      \ PR's history.\n\nThis stays inside the #226 prompt extension to pr-2d5f712;\
+      \ no new code path."
+    created_at: '2026-05-26T03:02:49Z'
+    last_edited: '2026-05-26T03:02:49Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
