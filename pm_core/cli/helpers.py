@@ -324,7 +324,7 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
     # caller isn't on the doomed window but another grouped session is.
     # No recreate follows here, so parked clients stay on home.
     for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}",
-                     f"qa-{display_id}"):
+                     f"qa-{display_id}", f"signoff-{display_id}"):
         win = tmux_mod.find_window_by_name(session, win_name)
         if win:
             home_window.park_if_on(session, win["id"])

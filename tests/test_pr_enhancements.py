@@ -24,8 +24,9 @@ class TestKillPrWindows:
              patch("pm_core.tmux.kill_window") as mock_kill, \
              patch("pm_core.tmux.list_windows", return_value=[]):
             killed = kill_pr_windows("test-session", pr)
-        assert killed == ["pr-001", "review-pr-001", "merge-pr-001", "qa-pr-001"]
-        assert mock_kill.call_count == 4
+        assert killed == ["pr-001", "review-pr-001", "merge-pr-001",
+                          "qa-pr-001", "signoff-pr-001"]
+        assert mock_kill.call_count == 5
 
     def test_skips_missing_windows(self):
         """kill_pr_windows skips windows that don't exist."""
@@ -44,7 +45,8 @@ class TestKillPrWindows:
              patch("pm_core.tmux.kill_window"), \
              patch("pm_core.tmux.list_windows", return_value=[]):
             killed = kill_pr_windows("test-session", pr)
-        assert killed == ["#42", "review-#42", "merge-#42", "qa-#42"]
+        assert killed == ["#42", "review-#42", "merge-#42", "qa-#42",
+                          "signoff-#42"]
 
 
 # ---------------------------------------------------------------------------
