@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from click.testing import CliRunner
 
-from pm_core.cli.pr import pr_auto_sequence
+from pm_core.cli.pr import pr_auto_sequence, pr_qa_run_bg
 
 
 def _pr(status: str, **extra) -> dict:
@@ -497,3 +497,53 @@ class TestSignOff:
         # fast path and no rework ever runs.
         mock_start.assert_called_once()
         assert mock_start.call_args.kwargs["fresh"] is True
+
+
+class TestQaRunBgGuard:
+    """The detached QA driver must not run against an out-of-band merged PR.
+
+    A concurrent merge (e.g. a GitHub sync) can land between the
+    auto-sequence sign_off->qa bounce that spawns ``pr qa-run-bg`` and that
+    subprocess starting.  ``apply_signoff_hop``'s lock only guards the status
+    transition, so without a guard the detached driver opens a qa-<id> window
+    and runs a full QA loop against an already-merged PR.
+    """
+
+    def test_skips_qa_when_pr_merged(self, runner, tmp_path):
+        pr = _pr("merged")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.qa_loop.run_qa_sync") as mock_run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        # run_qa_sync creates the qa-<id> window; it must never be reached.
+        mock_run.assert_not_called()
+        assert pr["status"] == "merged"
+
+    def test_skips_qa_when_pr_closed(self, runner, tmp_path):
+        pr = _pr("closed")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.qa_loop.run_qa_sync") as mock_run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        mock_run.assert_not_called()
+
+    def test_runs_qa_when_pr_in_qa(self, runner, tmp_path):
+        pr = _pr("qa")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.qa_loop.run_qa_sync") as mock_run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        # A genuinely qa-eligible PR still drives the loop.
+        mock_run.assert_called_once()

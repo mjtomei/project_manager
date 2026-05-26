@@ -3238,6 +3238,20 @@ def pr_qa_run_bg(pr_id: str):
     data = store.load(root)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
 
+    # Guard against an out-of-band status change that landed between the
+    # auto-sequence sign_off->qa bounce (apply_signoff_hop) that spawned this
+    # detached driver and this process actually starting: a concurrent merge
+    # (e.g. a GitHub sync marking the PR merged) can move the PR to
+    # merged/closed.  apply_signoff_hop's lock only guards the *status*
+    # transition, not this subprocess; without this check we'd open a qa-<id>
+    # window and run a full QA loop against an already-merged PR.  Bail BEFORE
+    # run_qa_sync (which creates the window) so no QA window/subprocess is left
+    # running against the merged PR.
+    if (pr_entry.get("status") or "") in ("merged", "closed"):
+        _log.info("pr_qa_run_bg: %s is %s; skipping QA (no longer qa-eligible)",
+                  pr_id, pr_entry.get("status"))
+        return
+
     state = QALoopState(pr_id=pr_id)
     try:
         run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)
