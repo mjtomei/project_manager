@@ -22851,7 +22851,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: in_review
+  status: qa
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -22892,7 +22892,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T16:09:31.940312+00:00'
+  updated_at: '2026-05-26T16:58:56.187976+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-05-26T13:00:09.140826+00:00'
   merged_at: null
@@ -23294,6 +23294,82 @@ prs:
       \ surface after the refactor."
     created_at: '2026-05-26T16:09:31Z'
     last_edited: '2026-05-26T16:09:31Z'
+  - id: note-0a52232
+    text: 'QA INPUT_REQUIRED: Markdown evidence appears as a styled, browser-readable
+      page in the sign-off report: INPUT_REQUIRED; Sign-off prompt''s evidence-rendering
+      policy lists the expanded media types as embed-first: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-52ceab6a4b9efba7)'
+    created_at: '2026-05-26T16:53:47Z'
+    last_edited: '2026-05-26T16:53:47Z'
+  - id: note-1374935
+    text: 'QA-authoring guidance for the remaining scenarios on this PR (and retroactively
+      for s19 / s24 if they''re rerun).
+
+
+      RULE — when to use real Claude vs fake-claude in this PR''s scenarios
+
+
+      A QA scenario should ONLY enable fake-claude (`pm fake-claude config set …`
+      in its setup) when every THEN it asserts on is restricted to the verdict the
+      agent emits — PASS / NEEDS_WORK / SIGNOFF_MERGE / etc. fake-claude emits verdicts
+      on stdout but does NOT author files, run tools, or otherwise execute the prompt''s
+      side effects.
+
+
+      If any THEN inspects a file the agent is supposed to author, a tool call the
+      agent should make, or any state the agent''s prompt body is supposed to mutate,
+      the scenario MUST NOT enable fake-claude — the scenario''s setup should leave
+      fake-claude UNCONFIGURED so the real Claude session runs (per `pm/qa/instructions/tui-manual-test.md`:
+      "with no config the flow uses real Claude").
+
+
+      ON THIS PR SPECIFICALLY
+
+
+      The sign-off agent''s deliverables — `$CAP/report.html`, `$CAP/report.json`,
+      the rendered `.md.html` siblings from `pm_core.markdown_render.render_md_file`,
+      the per-step embedded evidence — are ALL agent-authored side effects of the
+      sign-off prompt, not verdicts. Any scenario asserting on these MUST run against
+      real Claude:
+
+
+      - s19 (concurrent dashboard + sign-off write) — REFINER_REJECTed in QA round
+      2 because it enabled fake-claude.
+
+      - s24 (Markdown evidence appears as a styled, browser-readable page) — REFINER_REJECTed
+      in QA round 4 for the same reason.
+
+
+      Both are testable; their setup was wrong. The fix is to drop the `pm fake-claude
+      config set` line from their shared setup. Don''t change the THENs.
+
+
+      Scenarios that DO belong on fake-claude in this PR''s surface are the verdict-router
+      / routing-decision ones (signoff verdict → next hop), because their THENs only
+      inspect the recorded verdict + the resulting `pr[''signoff'']` record / status
+      transition. Those keep their fake-claude config.
+
+
+      DEFERRAL — broader prompt fix is out of scope here
+
+
+      The corresponding general fix — telling the QA-planner / scenario-author / refiner
+      prompts WHEN to pick fake vs real — naturally lives in pr-51586d2 (Mocks awareness
+      in the new-regression authoring flow, plan-regression). Keep this PR scoped:
+      do not edit `pm_core/prompt_gen.py` for this issue. This note is sufficient
+      guidance for #226''s remaining QA rounds; the broader prompting addendum lands
+      when mocks are overhauled.
+
+
+      NEXT QA ROUND ON THIS PR
+
+
+      When the next QA round on pr-8e693f6 replans, scenarios for HTML / sidecar /
+      markdown-render assertions should be authored WITHOUT a `pm fake-claude config
+      set` in their shared setup. Verdict-only scenarios can keep the fake config.
+      The refiner should reject any scenario whose THENs assert agent side effects
+      AND whose GIVEN enables fake-claude, with this note as the redirect.'
+    created_at: '2026-05-26T16:58:56Z'
+    last_edited: '2026-05-26T16:58:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
