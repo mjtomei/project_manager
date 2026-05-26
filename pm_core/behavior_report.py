@@ -311,6 +311,12 @@ function pmFilter() {
       || (mg === 'unmerged' && r.dataset.merged === '0');
     r.style.display = (okS && okM) ? '' : 'none';
   });
+  document.querySelectorAll('section[data-plan]').forEach(function(sec) {
+    var anyVisible = Array.prototype.some.call(
+      sec.querySelectorAll('tr[data-pr]'),
+      function(r) { return r.style.display !== 'none'; });
+    sec.style.display = anyVisible ? '' : 'none';
+  });
 }
 function pmCopy(cmd, btn) {
   if (navigator.clipboard) navigator.clipboard.writeText(cmd);
@@ -397,6 +403,7 @@ def render_dashboard_html(data: dict, rows: list[_DashRow]) -> str:
 
     for key in ordered:
         grp = groups[key]
+        parts.append(f'<section data-plan="{_e(str(key) if key else "_unplanned")}">')
         if key is None:
             parts.append('<h2>Unplanned</h2>')
         else:
@@ -433,6 +440,7 @@ def render_dashboard_html(data: dict, rows: list[_DashRow]) -> str:
                 f'<td>{_loop_badges_html(r)}</td>'
                 f'<td>{report_cell}</td></tr>')
         parts.append('</tbody></table>')
+        parts.append('</section>')
 
     parts.append(f'<script>{_DASH_JS}</script>')
     parts.append('</body></html>')
