@@ -22892,7 +22892,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T16:07:01.422424+00:00'
+  updated_at: '2026-05-26T16:09:31.940312+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-05-26T13:00:09.140826+00:00'
   merged_at: null
@@ -23261,6 +23261,39 @@ prs:
       \ — split into a follow-up PR. Either is fine."
     created_at: '2026-05-26T16:07:01Z'
     last_edited: '2026-05-26T16:07:01Z'
+  - id: note-8cfdf73
+    text: "Prompt-wording rule for the sign-off prompt: STATE INLINE-EVIDENCE POLICY\
+      \ AS A SINGLE POSITIVE DEFAULT.\n\nWHAT TO REPLACE\n\nIn `pm_core/prompt_gen.py`\
+      \ around lines 569-575, the sign-off prompt currently lists inline-evidence\
+      \ treatment as a series of bullets (\"INLINE for webm, INLINE for png, … or\
+      \ LINKED\"). With the table expanded by note-d01545e (audio, asciinema, rendered\
+      \ .md), that list gets long. Rephrase it around a single positive default:\n\
+      \n  > **Embed evidence inline whenever the browser supports it. Link only the\
+      \ listed exceptions.**\n\nThen enumerate the embeds as positives (one line each)\
+      \ and call out the link-as-is exceptions explicitly. Avoid `do NOT link X` phrasing\
+      \ — the default IS embed; link is the listed exception.\n\nCONCRETE SHAPE FOR\
+      \ THE PROMPT (target wording, not literal copy)\n\n  > **Evidence rendering:\
+      \ prefer embedded viewers.**\n  > Embed inline using the appropriate native\
+      \ HTML control for each type:\n  >   - `<video controls>` for `.webm` (video)\n\
+      \  >   - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`\n  >   - `<audio controls>`\
+      \ for `.wav` / `.mp3` / `.ogg` / `.opus` / audio-only `.webm`\n  >   - the asciinema-player\
+      \ widget for `.cast` (vendored copy preferred; CDN fallback)\n  >   - `<details><pre>`\
+      \ for small text / log files under ~50 KB\n  > For Markdown evidence, render\
+      \ to a sibling `.html` at sign-off time and link to the rendered HTML.\n  >\
+      \ Link as-is for `.html` files and any binary larger than ~10 MB.\n\nWHY THIS\
+      \ FRAMING\n\n- One positive default + a short list of exceptions ages better\
+      \ than a list of \"do/don't\" pairs. Adding a new media type later is one bullet,\
+      \ not two.\n- It also matches the prompt-hygiene rule going into `plan-quality`'s\
+      \ Track A: \"removed concepts get clean deletions, not negation residue; new\
+      \ policies get a positive default, not a list of negatives.\"\n\nSCOPE\n\nThis\
+      \ is a wording change in the prompt text itself, not the report-generator code.\
+      \ Land it together with note-d01545e's embed-types expansion (one diff to prompt_gen.py\
+      \ covers both). The impl session implementing the sidecar-only refactor (note-c3932ca)\
+      \ should plan to also pick this up in the same pass — the three notes (c3932ca,\
+      \ d01545e, this one) together fully specify the sign-off prompt's evidence-rendering\
+      \ surface after the refactor."
+    created_at: '2026-05-26T16:09:31Z'
+    last_edited: '2026-05-26T16:09:31Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
