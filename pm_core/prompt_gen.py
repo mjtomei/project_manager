@@ -535,13 +535,15 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
 
    ### `report.html` — required structure (top → bottom)
 
-   1. **Header** with the PR display id + title; badges for status (use the
-      `sign_off` icon), merged flag, recorded sign-off verdict
-      (▲ {SIGNOFF_MERGE} etc.), scenario verdict tally
+   1. **Header** with the PR display id + title; the recorded sign-off
+      verdict (▲ {SIGNOFF_MERGE} etc.) and the scenario verdict tally
       (e.g. "3 PASS / 1 NEEDS_WORK"); a one-line **Recommendation** that
       reflects the routing decision (e.g. for {SIGNOFF_MERGE} say
       "ready_to_merge — sign-off recommends merge; sign-off never merges; the
       plan watcher makes the final call"); a link back to `../index.html`.
+      Do NOT render PR `status` or `merged` badges in this page — those are
+      project.yaml runtime state that goes stale relative to a frozen
+      sign-off pass. The dashboard surfaces current state instead.
 
    2. **What this loop found and decided** (top-of-page summary, REQUIRED).
       Two short bulleted lists, **one line per item, plain English**, written
@@ -583,16 +585,18 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
 
    ### `report.json` — strict schema (dashboard's only contract)
 
-   The dashboard reads ONLY this sidecar. Write stable sorted keys. UTF-8
-   encoded. Every additional fact you want surfaced on the dashboard goes here:
+   The dashboard reads ONLY this sidecar, and the sidecar carries ONLY
+   sign-off-derived content. **Do NOT write** `title`, `status`, `merged`, or
+   `display_id` — those are project.yaml's responsibility and the dashboard
+   reads them fresh at generation time. Baking them into the sidecar would
+   make it stale the moment those values changed without a re-sign-off.
+
+   Write stable sorted keys. UTF-8 encoded. Every additional fact you want
+   surfaced on the dashboard goes here:
 
    ```
    {{
      "pr_id":              "<pm canonical id, e.g. pr-8e693f6>",
-     "display_id":         "<gh #N or pr-... fallback>",
-     "title":              "<PR title>",
-     "status":             "<PR status, e.g. sign_off>",
-     "merged":             <true|false>,
      "verdict":            "<one of {SIGNOFF_MERGE},{SIGNOFF_REQA},{SIGNOFF_REVIEW},{SIGNOFF_IMPL},{SIGNOFF_BLOCKED} | null>",
      "next_hop":           "<ready_to_merge | qa | review | impl | blocked>",
      "tally":              {{"PASS": <int>, "NEEDS_WORK": <int>, "INPUT_REQUIRED": <int>, "pending": <int>}},

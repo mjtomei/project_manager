@@ -13,15 +13,14 @@ Per PR it reads one **sidecar** file the agent wrote alongside its report:
 
     ~/.pm/sessions/<tag>/captures/<pr_id>/report.json
 
-This sidecar is the dashboard's *only* contract — the dashboard never
-interprets captures. Schema (frozen):
+This sidecar is the dashboard's *only* contract for sign-off-derived content
+— the dashboard never interprets captures. PR runtime state (status, merged,
+title, display_id) is read fresh from ``project.yaml`` at
+dashboard-generation time, **not** from the sidecar; the sidecar carries only
+fields the sign-off agent produced. Schema (frozen):
 
     {
       "pr_id":              str,                          # pm canonical id
-      "display_id":         str,                          # "#42" or "pr-..."
-      "title":              str,
-      "status":             str,
-      "merged":             bool,
       "verdict":            "SIGNOFF_MERGE" | ... | null,
       "next_hop":           "ready_to_merge"|"qa"|"review"|"impl"|"blocked",
       "tally":              {"PASS": int, "NEEDS_WORK": int,
@@ -142,24 +141,24 @@ def gather_dashboard_rows(data: dict,
         default_display = f"#{gh}" if gh else pr_id
         sidecar = captures_root_dir / pr_id / "report.json"
         loaded = _load_sidecar(sidecar)
-        # Fall back to the PR's recorded sign-off verdict (pr['signoff'])
-        # when no sidecar verdict is available — keeps the dashboard marker
-        # in lockstep with the TUI tech tree's verdict glyph, which sources
-        # the same record via signoff.latest_signoff_verdict.
-        pr_signoff = pr.get("signoff") or {}
-        pr_verdict = str(pr_signoff.get("verdict") or "") if isinstance(
-            pr_signoff, dict) else ""
+        # PR runtime state always comes from project.yaml — the sidecar
+        # carries only sign-off-derived content (verdict, tally, loop counts,
+        # ...) so it never goes stale relative to status / merged / title.
+        display_id = default_display
+        title = pr.get("title", pr_id)
+        status = pr.get("status", "unknown")
+        merged = bool(pr.get("merged_at"))
         if loaded is None:
             rows.append(_DashRow(
                 pr_id=pr_id,
-                display_id=default_display,
-                title=pr.get("title", pr_id),
-                status=pr.get("status", "unknown"),
-                merged=bool(pr.get("merged_at")),
+                display_id=display_id,
+                title=title,
+                status=status,
+                merged=merged,
                 has_sidecar=False,
                 sidecar_path=None,
                 report_html_rel=None,
-                verdict=pr_verdict,
+                verdict="",
                 next_hop="",
                 tally={},
                 bugs_fixed_in_loop=0,
@@ -170,14 +169,14 @@ def gather_dashboard_rows(data: dict,
         report_html = str(loaded.get("report_html") or "report.html")
         rows.append(_DashRow(
             pr_id=pr_id,
-            display_id=str(loaded.get("display_id") or default_display),
-            title=str(loaded.get("title") or pr.get("title", pr_id)),
-            status=str(loaded.get("status") or pr.get("status", "unknown")),
-            merged=bool(loaded.get("merged", pr.get("merged_at"))),
+            display_id=display_id,
+            title=title,
+            status=status,
+            merged=merged,
             has_sidecar=True,
             sidecar_path=sidecar,
             report_html_rel=f"{pr_id}/{report_html}",
-            verdict=str(loaded.get("verdict") or "") or pr_verdict,
+            verdict=str(loaded.get("verdict") or ""),
             next_hop=str(loaded.get("next_hop") or ""),
             tally={k: int(tally.get(k, 0) or 0) for k in _TALLY_KEYS},
             bugs_fixed_in_loop=int(loaded.get("bugs_fixed_in_loop") or 0),

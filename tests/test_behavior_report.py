@@ -40,13 +40,10 @@ def _data():
 
 
 def _write_sidecar(root: Path, pr_id: str, **overrides) -> Path:
-    """Write a complete report.json sidecar; *overrides* tweak keys."""
+    """Write a report.json sidecar with only sign-off-derived keys; *overrides*
+    tweak keys (and may inject state-shaped fields to verify they're ignored)."""
     payload = {
         "pr_id": pr_id,
-        "display_id": f"#{42}" if pr_id == "pr-aaa" else pr_id,
-        "title": "Add thing",
-        "status": "sign_off",
-        "merged": False,
         "verdict": signoff.SIGNOFF_MERGE,
         "next_hop": "ready_to_merge",
         "tally": {"PASS": 3, "NEEDS_WORK": 0, "INPUT_REQUIRED": 0,
@@ -105,13 +102,72 @@ def test_partial_sidecar_renders(tmp_path):
     """A sidecar missing optional keys still produces a row (no crash)."""
     (tmp_path / "pr-aaa").mkdir()
     (tmp_path / "pr-aaa" / "report.json").write_text(json.dumps({
-        "pr_id": "pr-aaa", "title": "X", "status": "sign_off"}))
+        "pr_id": "pr-aaa"}))
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     aaa = next(r for r in rows if r.pr_id == "pr-aaa")
     assert aaa.has_sidecar
     assert aaa.tally == {"PASS": 0, "NEEDS_WORK": 0,
                          "INPUT_REQUIRED": 0, "pending": 0}
     assert aaa.bugs_fixed_in_loop == 0
+
+
+# ---------------------------------------------------------------------------
+# Sidecar contract: sign-off-derived ONLY (note-c3932ca)
+# ---------------------------------------------------------------------------
+
+def test_sidecar_absent_row_has_no_verdict(tmp_path):
+    """pr['signoff'] is NOT a fallback for the dashboard verdict.
+
+    The dashboard renders sidecar-only — when no report.json is present, the
+    row's verdict stays empty even if the PR carries a recorded sign-off
+    verdict in project.yaml. (pm pr list / the TUI tree still surface it; the
+    dashboard intentionally diverges.)
+    """
+    data = _data()
+    for pr in data["prs"]:
+        if pr["id"] == "pr-aaa":
+            pr["signoff"] = {"verdict": signoff.SIGNOFF_IMPL,
+                             "sha": "deadbeef", "ts": "2026-05-26T00:00:00Z",
+                             "origin": "manual"}
+    rows = br.gather_dashboard_rows(data, tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.has_sidecar is False
+    assert aaa.verdict == ""
+
+
+def test_pr_state_read_from_project_yaml_not_sidecar(tmp_path):
+    """State-shaped fields in the sidecar are ignored — project.yaml wins.
+
+    Locks in the rule that the sidecar carries only sign-off-derived content:
+    title / status / merged / display_id come from project.yaml every time
+    the dashboard is generated, so a stale sidecar can't lie about them.
+    """
+    _write_sidecar(tmp_path, "pr-aaa",
+                   title="STALE TITLE FROM SIDECAR",
+                   status="STALE_STATUS",
+                   merged=True,
+                   display_id="#999")
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    # project.yaml values (from _data()) win:
+    assert aaa.title == "Add thing"
+    assert aaa.status == "sign_off"
+    assert aaa.merged is False           # no merged_at in _data()
+    assert aaa.display_id == "#42"       # from gh_pr_number
+
+
+def test_sidecar_verdict_wins_over_pr_signoff(tmp_path):
+    """Sidecar verdict is authoritative; pr['signoff'] is never consulted."""
+    data = _data()
+    for pr in data["prs"]:
+        if pr["id"] == "pr-aaa":
+            pr["signoff"] = {"verdict": signoff.SIGNOFF_IMPL,
+                             "sha": "deadbeef", "ts": "2026-05-26T00:00:00Z",
+                             "origin": "manual"}
+    _write_sidecar(tmp_path, "pr-aaa", verdict=signoff.SIGNOFF_MERGE)
+    rows = br.gather_dashboard_rows(data, tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.verdict == signoff.SIGNOFF_MERGE
 
 
 # ---------------------------------------------------------------------------
