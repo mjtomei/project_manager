@@ -570,11 +570,34 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
 
    3. **Per-step sections** — one section per lifecycle step (Implementation,
       Review, QA). For each: the step's acceptance criteria explicit, then the
-      evidence paired with those criteria — INLINE where possible (`<video
-      controls>` for webm, `<img>` for png, small text in `<details><pre>`) or
-      LINKED (html files, large files). For a **bug PR** render Implementation
-      as a Before/After (pre-fix: bug reproduces; post-fix: symptom gone),
-      flagging a missing phase rather than dropping it.
+      evidence paired with those criteria. For a **bug PR** render
+      Implementation as a Before/After (pre-fix: bug reproduces; post-fix:
+      symptom gone), flagging a missing phase rather than dropping it.
+
+      **Evidence rendering: embed inline whenever the browser supports it.
+      Link only the listed exceptions.** Pick the appropriate native HTML
+      control per type:
+
+        - `<video controls>` for `.webm` video
+        - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`
+        - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus` /
+          audio-only `.webm`
+        - the **asciinema-player** widget for `.cast` (vendored CSS + JS
+          copy preferred — drop the player files under the captures
+          session-tag dir and reference them by relative path so the page
+          stays offline-safe; CDN fallback when no vendored copy is
+          available)
+        - `<details><pre>` for small text / log files under ~50 KB
+
+      For **Markdown** evidence (`.md`), pre-render to a sibling `.html`
+      at sign-off time and link to the rendered HTML — raw `.md` over
+      `file://` shows as plaintext in most browsers. Use the
+      `pm_core.markdown_render.render_md_file(md_path)` helper, which writes
+      `<name>.md.html` next to the source and returns the path; keep the
+      original `.md` on disk so it stays grep-/diff-able.
+
+      **Link as-is** for `.html` files (already render natively) and for
+      any binary larger than ~10 MB.
 
    4. **Context for sign-off** — PR description, PR notes, plan name + plan
       notes (when present).
