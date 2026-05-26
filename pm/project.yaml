@@ -22965,7 +22965,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T03:20:40.521981+00:00'
+  updated_at: '2026-05-26T13:21:57.867205+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
@@ -23174,6 +23174,37 @@ prs:
       test naturally lives in #225 territory (the prompt is producer-side).'
     created_at: '2026-05-26T03:20:40Z'
     last_edited: '2026-05-26T03:20:40Z'
+  - id: note-ec8f0a6
+    text: 'QA s23 (signoff marker from pr[signoff] when sidecar absent): dashboard
+      fix 769d009e verifies cleanly — PR1 (record-only) → ▲ SIGNOFF_MERGE + regenerate
+      empty-state, PR2 (sidecar-only) → ⇤ SIGNOFF_IMPL + open-report link, PR3 (neither)
+      → no marker. Caveat: scenario THEN asserts pm pr list AND tech tree also show
+      ⇤ next to PR2, but neither surface displays a verdict glyph in this case — list/tree
+      (helpers.py:285, tech_tree.py:598) gate on status==sign_off AND read pr[signoff]
+      only; PR2 is in_review with sidecar-only, so by design neither shows a glyph.
+      The 769d009e fix only changed dashboard rendering; list/tree behavior is unchanged.
+      If lockstep across all three surfaces for sidecar-only PRs is the goal, list/tree
+      would need to (a) also consult the sidecar and (b) show glyphs for non-sign_off
+      PRs — not done in this PR.'
+    created_at: '2026-05-26T13:15:03Z'
+    last_edited: '2026-05-26T13:15:03Z'
+  - id: note-49b256e
+    text: 'QA s23 re-eval (after review flag): scenario THEN failed on user surface.
+      dashboard meets THEN (PR1 ▲ SIGNOFF_MERGE + regen empty-state, PR2 ⇤ SIGNOFF_IMPL
+      + open-report link, PR3 status-only). BUT pm pr list and pm tui view (post-Ctrl+R
+      refresh) both show PR1 ▲, PR3 no glyph, PR2 NO ⇤. Gap: helpers.py:format_pr_line
+      (~285) and tech_tree.py:598-605 read verdict via signoff.latest_signoff_verdict
+      (pr[signoff] only, no sidecar) AND gate on status==sign_off. PR2 (in_review,
+      sidecar-only) skipped by both. Dashboard merges sidecar + record (behavior_report.py:143-160)
+      so it shows ⇤; list/tree do not — they silently diverge from dashboard in the
+      sidecar-only case. The 769d009e fix comment claims lockstep with tree, but only
+      the record-only path (PR1) is actually in lockstep; sidecar-only (PR2) is not.
+      Two ways to close: (a) extend list/tree to also load report.json (real I/O cost
+      per render; needs a state-root resolver in helpers); (b) narrow the scenario
+      expectation to record-only lockstep, since dashboard intentionally aggregates
+      both sources and list/tree intentionally do not. Captures: /pm-captures/scenarios/23/{manifest,index.html,pm-pr-list.txt,pm-tui-view.txt,recording.cast,transcript.log}.'
+    created_at: '2026-05-26T13:21:57Z'
+    last_edited: '2026-05-26T13:21:57Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
