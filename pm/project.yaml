@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-c77561b
+  active_pr: pr-2d5f712
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22647,7 +22647,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T02:03:18.812480+00:00'
+  updated_at: '2026-05-26T02:51:23.639145+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -23179,52 +23179,77 @@ prs:
       PASS (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-ad009382b7b0e6d6)'
     created_at: '2026-05-25T23:42:58Z'
     last_edited: '2026-05-25T23:42:58Z'
-  - id: note-b4d81df
-    text: 'QA scenario 10 (verdict-router fan-out + adoption + stale + no-re-bounce
-      + no-verdict) PASS on real local-backend surface, no in-scope bugs found. Verified
-      all 5 verdict routing lines (ready_to_merge / sign_off: re-qa / sign_off: returning
-      to review (iteration N) / sign_off: returning to impl / paused: sign_off_blocked)
-      with the expected window/transcript retirement (REQA/REVIEW/IMPL retire, MERGE/BLOCKED
-      persist) and status flips. Adoption: manual-origin record at fresh HEAD adopted
-      by auto-sequence tick without re-record or new window/transcript; origin stays
-      manual. Stale: empty commit moves HEAD past recorded sha -> advanced: sign_off_relaunched
-      + window id changes + transcript symlink target changes + pr.signoff cleared.
-      Bounce-then-reenter: SIGNOFF_REQA pops pr.signoff during apply_signoff_hop,
-      so re-entering sign_off prints advanced: sign_off_relaunched (or running: sign_off
-      if window already up) and never re-routes on the consumed verdict. No-verdict
-      mock (fake-claude signoff.verdicts=[]): window-present tick = running: sign_off,
-      kill-window tick = advanced: sign_off_relaunched with fresh window+transcript.
-      Setup gotchas worth surfacing for next runs: (a) auto-sequence command needs
-      a tmux env to launch the signoff window (in_tmux() gate at signoff.py:216) so
-      drive ticks from inside a pm-session window (send-keys to a driver window) rather
-      than from a bare shell, otherwise the launch path bails with Sign-off window
-      requires tmux. (b) fake-claude session types are constrained: use qa_planning/qa_concretize/qa_scenario
-      (not qa_planner/qa_concretizer/qa_worker), and qa_planning''s only valid verdict
-      is QA_PLAN. (c) For the no-verdict signoff mock you have to add an explicit
-      signoff: {verdicts: []} entry; _all: {} resolves to default SIGNOFF_MERGE and
-      the fake emits it, defeating the no-verdict test. (d) pm pr show <id> does not
-      exist; use pm pr list. (e) Driving auto-sequence from /workspace without PYTHONPATH=/workspace
-      silently picks up /opt/pm-src and shows the wrong project status; always source
-      the venv and export PYTHONPATH before pm pr list.'
-    created_at: '2026-05-26T02:03:18Z'
-    last_edited: '2026-05-26T02:03:18Z'
-  - id: note-bdce532
-    text: 'QA scenario 14 (concurrent sign-off resources) PASS on real local-backend
-      surface across all 3 triples. Triple 1: two concurrent `pm pr signoff` -> exactly
-      one signoff-<id> window (Opened/Switched split under per-PR launch flock), single
-      workdir key, valid yaml, flock file present, both exit 0. Triple 2: two concurrent
-      `pm pr signoff-record` with different verdicts -> single well-formed {verdict,sha,ts,origin}
-      mapping, exactly one verdict icon on pm pr list, both exit 0. Triple 3: 8 trials
-      racing `pm pr auto-sequence` (apply SIGNOFF_IMPL bounce) vs out-of-band `pm
-      pr edit --status merged` -> every trial status=merged (never clobbered to in_progress),
-      zero leaked qa windows, zero leaked pm pr (qa-run-bg|review|signoff) processes,
-      valid yaml, no tracebacks. Acknowledged TOCTOU per note-3055e3f: in trials where
-      apply_signoff_hop won the race, a transient impl pane can persist (pr_start
-      fresh=True relaunch on a now-merged PR) — not a "loop" process and not in the
-      THEN pgrep pattern; deeper fix (out-of-band-merge sweeps in-flight signoff/impl
-      windows too) belongs to pr-ff9b728. Captures: /pm-captures/scenarios/14/.'
-    created_at: '2026-05-26T01:59:02Z'
-    last_edited: '2026-05-26T01:59:02Z'
+  - id: note-c9aeedc
+    text: 'QA NEEDS_WORK: Forward lifecycle into sign_off ends at a held merge recommendation,
+      with the sign_off status and verdict shown consistently on every surface: NEEDS_WORK;
+      The verdict router fans out every bounce/hold verdict, retires its window+transcript
+      on a bounce so it never re-bounces in a loop, and relaunches a fresh run on
+      a stale record: NEEDS_WORK; Manual sign-off recommends but never mutates, records
+      verdicts safely, rejects bad input/wrong status, dedups its window, and a fresh
+      manual verdict is later adopted by: NEEDS_WORK; Concurrent actors hitting the
+      shared sign-off resources stay race-free — one window, one well-formed verdict
+      record, and a guarded transition that never clobbers external state: NEEDS_WORK
+      (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-a953490cbd95dbd7)'
+    created_at: '2026-05-26T01:29:43Z'
+    last_edited: '2026-05-26T01:29:43Z'
+  - id: note-e2e71ef
+    text: 'QA NEEDS_WORK: Forward lifecycle to a held merge recommendation, with sign_off
+      shown consistently on every status surface: PASS; Manual sign-off window — transition,
+      two-pane evidence surface, dedup, wrong-status rejection, and the manual-never-mutates
+      / record-only contract: NEEDS_WORK; Verdict router fan-out, fresh-verdict adoption,
+      stale-record relaunch, and no-re-bounce-loop under auto-sequence: PASS; Concurrent
+      actors on the shared sign-off resources stay race-free: PASS; GitHub sync preserves
+      a local sign_off refinement while still detecting a real merge: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-2d5f712-90cd44caf25e1f07)'
+    created_at: '2026-05-26T02:33:05Z'
+    last_edited: '2026-05-26T02:33:05Z'
+  - id: note-358c351
+    text: "Scope addition for THIS PR (#225), per the user: register `signoff` as\
+      \ a first-class session type so the sign-off router can be mocked with FakeClaudeSession\
+      \ (pr-abcf70f, merged) instead of always spinning up a real Claude session.\n\
+      \nGAP TO CLOSE (confirmed by grep against current branch):\n- `pm_core/model_config.py::SESSION_TYPES`\
+      \ — current tuple is `(\"impl\", \"review\", \"qa\", \"qa_planning\", \"qa_scenario\"\
+      , \"qa_concretize\", \"qa_verification\", \"qa_finalize\", \"watcher\", \"merge\"\
+      )`. **No `signoff`.**\n- `pm_core/fake_claude.py::SESSION_TYPE_VERDICTS` — no\
+      \ `signoff` entry. FakeClaudeSession therefore can't script any of the SIGNOFF_*\
+      \ verdicts.\n- The sign-off pane launch site never passes `session_type=\"signoff\"\
+      ` to `build_claude_shell_cmd`. It currently falls back to the launcher's default,\
+      \ so even the model resolution path doesn't know it's a sign-off session.\n\n\
+      CONSEQUENCES (today):\n- Every QA scenario that exercises auto-sequence + sign-off\
+      \ (s3/s4 on ad009382, s7/s8/s9 on a953490, s11/s13 on 90cd44, etc.) runs a real\
+      \ Claude session for the sign-off router. Expensive, slow, contributes to the\
+      \ container/keyring pressure that broke QA earlier (pr-1139060 / pr-7ab0a99\
+      \ region).\n- Routing scenarios (s8/s13) can't deterministically script a specific\
+      \ SIGNOFF_REQA / SIGNOFF_REVIEW / SIGNOFF_IMPL / SIGNOFF_BLOCKED to assert the\
+      \ resulting fan-out — they have to wait for a real LLM to emit one. Flake risk\
+      \ and long cycles trace partly to this.\n- Model resolution / effort / provider\
+      \ for the sign-off agent is unspecified (no entry in `_FALLBACK_TYPES`), so\
+      \ it can't be configured per-session-type from project.yaml.\n\nTHREE-TOUCH\
+      \ FIX (folded into THIS PR, not a follow-on):\n\n1) `pm_core/model_config.py`:\n\
+      \   - Add `\"signoff\"` to `SESSION_TYPES`.\n   - Add `_FALLBACK_TYPES[\"signoff\"\
+      ] = \"review\"` so it inherits review's model resolution until configured. (Sign-off\
+      \ is a reviewer-class agent — same model class is a sensible default.)\n\n2)\
+      \ `pm_core/fake_claude.py::SESSION_TYPE_VERDICTS`:\n   - Add `\"signoff\": (\"\
+      SIGNOFF_MERGE\", \"SIGNOFF_REQA\", \"SIGNOFF_REVIEW\", \"SIGNOFF_IMPL\", \"\
+      SIGNOFF_BLOCKED\")`. Use the exact verdict tokens the router consumes (per `pm_core/signoff.py`).\n\
+      \n3) Sign-off pane launch site (in signoff.py / cli/pr.py — wherever `build_claude_shell_cmd`\
+      \ is called for the sign-off router):\n   - Pass `session_type=\"signoff\"`.\
+      \ No other launch-call signature change.\n\nACCEPTANCE:\n- `pm which-session\
+      \ signoff` (or equivalent introspection) returns the configured/fallback model\
+      \ resolution.\n- A FakeClaudeSession-driven unit test scripts each of the five\
+      \ SIGNOFF_* verdicts and asserts `decide_signoff_hop` plus the auto-sequence\
+      \ side-effect lands on the right next hop (ready_to_merge / qa / review / impl\
+      \ / blocked). At minimum: one happy-path test per verdict; that gives deterministic\
+      \ regression coverage of the router that the real-Claude scenarios can't.\n\
+      - One QA scenario in the next pass (or an existing routing scenario that gets\
+      \ ported) runs against the fake instead of real Claude, demonstrating the seam\
+      \ works end-to-end.\n\nNON-GOALS (keep out of this PR):\n- Replacing the existing\
+      \ real-Claude scenarios; they stay as the integration check. The fake unblocks\
+      \ deterministic UNIT tests of the router and gives the scenarios a way to opt\
+      \ in later.\n- Per-session-type model configuration in project.yaml beyond the\
+      \ fallback — that can come later if needed."
+    created_at: '2026-05-26T02:49:56Z'
+    last_edited: '2026-05-26T02:49:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
@@ -23271,7 +23296,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-25T19:20:16.222930+00:00'
+  updated_at: '2026-05-26T02:09:25.741549+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
@@ -23317,6 +23342,48 @@ prs:
       \ + push."
     created_at: '2026-05-25T19:20:16Z'
     last_edited: '2026-05-25T19:20:16Z'
+  - id: note-537e1a0
+    text: 'Clarifying the description (which currently reads as if #226 builds a deterministic
+      HTML renderer):
+
+
+      1) PER-PR report.html IS AGENT-WRITTEN; #226 IS A SCOPE EXTENSION TO #225''s
+      SIGN-OFF PROMPT. Captures are heterogeneous (different artifact types per scenario/step),
+      so coherent per-behavior framing requires the same semantic pass that produces
+      the verdict — the sign-off agent itself. #226''s main work is therefore extending
+      pr-2d5f712''s sign-off prompt to add `report.html` (+ a small `report.json`
+      sidecar) as required deliverables of every sign-off pass, plus the BDD section
+      schema (flow / STEPS / Given-When-Then / verdict + reason / evidence inline-or-linked
+      / next hop) and the relative-link discipline to the real capture files in the
+      same dir. No HTML rendering in code for the per-PR page.
+
+
+      2) DASHBOARD IS THE DETERMINISTIC PART. The top-level `index.html` is the only
+      thing this PR renders in code: glob the per-PR `report.json` sidecars across
+      `~/.pm/sessions/<tag>/captures/*/`, render the index + client-side filtering
+      by merged/unmerged and by status. The dashboard never interprets captures; the
+      sidecar contract is the only thing it depends on.
+
+
+      3) REGENERATE IS A PLAIN `pm pr signoff <id>` — NOT A "WRITE-ONLY" MODE. When
+      the dashboard''s DETECT-MISSING surfaces a PR whose report.html / report.json
+      is absent (never generated, removed, etc.), regenerate just invokes `pm pr signoff
+      <id>` (the single-PR entry from pr-ff9b728). No special mode needed: outside
+      auto-sequence, sign-off is recommendation-only and takes no state-changing action
+      — that''s the manual-never-acts invariant established here in note-1a982f3 /
+      note-942fa37 ("verdict -> action ONLY under auto-sequence"). So re-running sign-off
+      on an unmerged PR re-emits the report (and may adopt an existing fresh verdict
+      per the adoption rule in note-511d725) without triggering another action. Drop
+      the earlier "write-only mode" framing from any working notes.
+
+
+      Net: purpose/outputs are unchanged (per-PR BDD report + dashboard, co-located
+      with captures, static export, depends on pr-2d5f712, forward-compatible with
+      pr-06a96fa). What this note pins down is the MECHANISM: prompt extension to
+      #225 for the per-PR report; deterministic generator only for the dashboard;
+      regenerate = plain `pm pr signoff`.'
+    created_at: '2026-05-26T02:09:25Z'
+    last_edited: '2026-05-26T02:09:25Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
@@ -23740,6 +23807,150 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-25T23:10:18.419956+00:00'
   updated_at: '2026-05-26T00:28:05.814378+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6412997
+  plan: bugs
+  title: 'Bug: TUI input lag + dropped/garbled keystrokes when the event loop is blocked
+    by synchronous work'
+  branch: pm/pr-6412997-bug-tui-input-lag-dropped-garbled-keystrokes-when-
+  status: pending
+  depends_on: []
+  description: '## Symptom
+
+
+    Two related TUI input failures, both reproduced 2026-05-25 while driving the command
+    bar:
+
+
+    1. Pressing `/` is slow to open the command bar — a visible lag before the input
+    appears and starts accepting keys.
+
+    2. Rapidly-arriving keystrokes are dropped and reordered. A literal send of `review-loop
+    start pr-2d5f712` (tmux `send-keys -l`) landed as `rvi` — most characters lost.
+    Even keys spaced ~0.5s apart dropped.
+
+
+    Workaround that reliably succeeds: tmux bracketed paste (`tmux paste-buffer -p`),
+    which Textual inserts as a single atomic event instead of per-key. Atomic paste
+    succeeding where rapid per-key input fails isolates the problem to per-key event
+    handling under load, not to the input widget''s content handling.
+
+
+    ## Likely root cause
+
+
+    The Textual event loop is starved by synchronous/blocking work on the UI thread
+    — tmux subprocess calls, project.yaml reads, pane/window scans and similar I/O
+    run inline in handlers/timers rather than in a worker. While the loop is busy,
+    Key events queue and some are coalesced/dropped, and the `/` -> focus_command
+    action is delayed. This is the same "the loop missed keypresses" class documented
+    in pr-eb4b7e3 (there caused by an orphan editor stealing pty bytes); here the
+    cause is in-process blocking, so it persists even with no orphan on the TUI''s
+    pty.
+
+
+    ## Distinct from existing PRs
+
+
+    - pr-853126a (merged) / pr-e9d4b24 (pending): the `/`-race and replaying chars
+    typed in the brief window before the input gains focus — the sub-100ms focus-acquisition
+    window. THIS bug drops keys well after focus AND lags the bar opening: a throughput/event-loop
+    problem, not the focus race.
+
+    - pr-eb4b7e3: orphan $EDITOR stealing pty input bytes. Same symptom, different
+    cause (external byte theft vs in-process blocking on the UI thread).
+
+
+    ## Fix direction
+
+
+    - Move blocking calls (tmux subprocess, file reads, pane scans) off the main loop
+    via run_worker/threads; keep handlers and the 1s poll timer non-blocking.
+
+    - Debounce/coalesce periodic pane/window scans so they don''t pile up on the UI
+    thread.
+
+    - Audit the command-bar open path so `/` focuses the input synchronously and cheaply.
+
+
+    ## Acceptance
+
+
+    - A command string sent rapidly (e.g. tmux `send-keys -l "review-loop start <id>"`)
+    lands in the command bar intact — no dropped/reordered characters — even while
+    background loops/watchers are active.
+
+    - `/` opens and focuses the command input within a small bounded time under load.
+
+    - Stress check: with N background tmux operations in flight, a burst of K keystrokes
+    all register.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-26T01:44:38.301246+00:00'
+  updated_at: '2026-05-26T01:44:38.301246+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5f729ab
+  plan: tui-ux
+  title: Generalize launch responsiveness / progress feedback to all session launches
+    (review-loop, sign-off, pr start), not just QA
+  branch: pm/pr-5f729ab-generalize-launch-responsiveness-progress-feedback
+  status: pending
+  depends_on:
+  - pr-98bf8df
+  description: 'Generalize the launch-responsiveness / progress feedback built for
+    QA in pr-98bf8df to EVERY session-launch path, so the TUI never appears to hang
+    silently while a window is being prepared.
+
+
+    ## Motivation
+
+
+    pr-98bf8df adds a progress popup for `pr qa` (loading state -> generating prompts
+    -> creating workdir -> launching tmux -> starting Claude), because today there
+    is "an immediate status message but no window appears for a while with no indication."
+    The same silent gap exists for the other launches: `review-loop start`, the sign-off
+    step (pr-2d5f712), `pr start` / auto-sequence step launches, and any future lifecycle
+    window. Each should surface the same kind of live progress. The lag is especially
+    visible alongside the event-loop input-lag bug (a laggy launch is worse when the
+    UI thread is also blocked).
+
+
+    ## Scope
+
+
+    - Extract the QA progress-popup mechanism (from pr-98bf8df) into a shared launch-progress
+    surface usable by all window launches.
+
+    - Wire it into: review-loop start, sign-off launch, pr start / auto-sequence step
+    launches, and the generic _launch_pane path so new launch types inherit it for
+    free.
+
+    - Per-step progress lines appropriate to each launch (state load -> prompt build
+    -> workdir setup -> tmux window -> Claude session), with errors shown inline on
+    failure (no silent failure — relates to pr-8a56712 "auto-start silently swallows
+    command launch failures"), auto-dismiss when the window is ready, dismissable
+    early to keep working.
+
+
+    ## Depends on / relates to
+
+
+    - Depends on pr-98bf8df (establishes the QA progress popup this generalizes).
+
+    - Soft-relates to pr-8a56712 (surface launch failures) and the event-loop input-lag
+    bug.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-26T01:44:40.144012+00:00'
+  updated_at: '2026-05-26T01:44:40.144012+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
