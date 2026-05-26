@@ -1438,11 +1438,12 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
             state.pr_id, s.index, "verdict.md", body,
             session_tag=state.session_tag,
         )
-        # Also persist a structured record so the behavior report
-        # (pr-8e693f6) can be rebuilt from retained captures alone —
-        # verdict.md drops the steps/focus the BDD report needs, and the
-        # live qa_status.json lives in an ephemeral workdir. JSON is
-        # additive; older captures without it fall back to verdict.md.
+        # Also persist a structured per-scenario record so the sign-off
+        # agent (pr-2d5f712 + pr-8e693f6) can synthesize the BDD framing
+        # (steps / focus / verdict / reason) into report.html without
+        # re-parsing the markdown verdict.md, and the live qa_status.json
+        # lives in an ephemeral workdir. JSON is additive; older captures
+        # without it fall back to verdict.md.
         record = {
             "index": s.index,
             "title": s.title,

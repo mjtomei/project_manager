@@ -1,4 +1,10 @@
-"""Tests for the sign-off behavior report + dashboard (pr-8e693f6)."""
+"""Tests for the all-PR behavior dashboard + the sign-off prompt extension
+(pr-8e693f6).
+
+Per-PR ``report.html`` is agent-written (via the sign-off prompt's report
+deliverable), so we test the prompt content. The dashboard is the only
+deterministic surface, and we test that it reads the ``report.json`` sidecar.
+"""
 
 import json
 from pathlib import Path
@@ -7,11 +13,12 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 import pm_core.behavior_report as br
-from pm_core.cli.pr import pr_report, pr_dashboard
+from pm_core.cli.pr import pr_dashboard
+from pm_core import signoff
 
 
 # ---------------------------------------------------------------------------
-# Fixtures / helpers
+# Fixtures
 # ---------------------------------------------------------------------------
 
 def _data():
@@ -21,11 +28,10 @@ def _data():
              "notes": [{"text": "watcher continuity"}]},
         ],
         "prs": [
-            {"id": "pr-aaa", "title": "Add thing", "status": "qa",
+            {"id": "pr-aaa", "title": "Add thing", "status": "sign_off",
              "plan": "plan-x", "gh_pr_number": 42,
-             "description": "desc line one\ndesc line two",
-             "notes": [{"text": "handoff one"}, {"text": "handoff two"}]},
-            {"id": "pr-bbb", "title": "No captures", "status": "pending",
+             "description": "desc"},
+            {"id": "pr-bbb", "title": "No sidecar PR", "status": "pending",
              "plan": "plan-x"},
             {"id": "pr-ccc", "title": "Merged one", "status": "merged",
              "merged_at": "2026-01-01T00:00:00Z"},
@@ -33,387 +39,225 @@ def _data():
     }
 
 
-def _seed_captures(root: Path, pr_id: str = "pr-aaa") -> Path:
-    cap = root / pr_id
-    sc1 = cap / "scenarios" / "1"
-    sc1.mkdir(parents=True)
-    (sc1 / "scenario.json").write_text(json.dumps({
-        "index": 1, "title": "Login flow", "focus": "auth",
-        "steps": "GIVEN: a logged-out user\nWHEN: submit creds\n"
-                 "THEN: dashboard shows",
-        "verdict": "PASS", "reason": "all good"}))
-    (sc1 / "rec.webm").write_bytes(b"\x00" * 2048)
-    (sc1 / "shot.png").write_bytes(b"\x00" * 500)
-    (sc1 / "out.txt").write_text("hello log")
-    return cap
-
-
-# ---------------------------------------------------------------------------
-# Per-PR report
-# ---------------------------------------------------------------------------
-
-def test_per_pr_report_bdd_shape(tmp_path):
-    cap = _seed_captures(tmp_path)
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    h = br.render_pr_report_html(rd)
-
-    # Given/When/Then rendered
-    assert "<b>Given</b>" in h and "<b>When</b>" in h and "<b>Then</b>" in h
-    # Verdict + reason
-    assert "PASS" in h and "all good" in h
-    # Display id, recommendation derived
-    assert "#42" in h
-    assert "ready for sign-off" in h.lower()
-    assert "derived from QA verdicts" in h  # no router verdict recorded
-    # Reachable context: description, PR notes, plan notes
-    assert "desc line one" in h
-    assert "handoff one" in h and "handoff two" in h
-    assert "watcher continuity" in h
-
-
-def test_per_pr_report_evidence_inline_and_relative(tmp_path):
-    cap = _seed_captures(tmp_path)
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    h = br.render_pr_report_html(rd)
-
-    # webm → <video> with relative src; png → <img>; txt inlined
-    assert '<video controls' in h
-    assert 'src="scenarios/1/rec.webm"' in h
-    assert '<img' in h and 'scenarios/1/shot.png' in h
-    assert "hello log" in h
-    # No absolute paths leaked into links
-    assert str(tmp_path) not in h
-
-
-def test_html_escaping(tmp_path):
-    data = _data()
-    data["prs"][0]["description"] = "<script>alert(1)</script>"
-    data["prs"][0]["title"] = "<b>bad</b>"
-    cap = tmp_path / "pr-aaa"
-    cap.mkdir()
-    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
-    h = br.render_pr_report_html(rd)
-    assert "<script>alert" not in h
-    assert "&lt;script&gt;" in h
-    assert "<b>bad</b>" not in h
-
-
-def test_legacy_verdict_md_fallback(tmp_path):
-    cap = tmp_path / "pr-aaa"
-    sc = cap / "scenarios" / "2"
-    sc.mkdir(parents=True)
-    (sc / "verdict.md").write_text(
-        "# Scenario 2: Logout\n\nNEEDS_WORK\n\nbutton missing")
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    assert len(rd.behaviors) == 1
-    b = rd.behaviors[0]
-    assert b.title == "Logout"
-    assert b.verdict == "NEEDS_WORK"
-    assert "button missing" in b.reason
-    h = br.render_pr_report_html(rd)
-    assert "Steps not recorded" in h  # steps unavailable in legacy format
-
-
-def test_no_captures_still_renders(tmp_path):
-    cap = tmp_path / "pr-bbb"  # never created
-    rd = br.gather_pr_report_data(_data(), "pr-bbb", cap)
-    h = br.render_pr_report_html(rd)
-    assert "No recorded behaviors yet" in h
-    # Recommendation routes to qa when nothing recorded
-    assert rd.next_hop == "qa"
-
-
-def test_recorded_signoff_verdict_overrides_derived(tmp_path):
-    """The router's recorded pr['signoff'] verdict drives the recommendation."""
-    from pm_core import signoff
-    data = _data()
-    data["prs"][0]["signoff"] = {
+def _write_sidecar(root: Path, pr_id: str, **overrides) -> Path:
+    """Write a complete report.json sidecar; *overrides* tweak keys."""
+    payload = {
+        "pr_id": pr_id,
+        "display_id": f"#{42}" if pr_id == "pr-aaa" else pr_id,
+        "title": "Add thing",
+        "status": "sign_off",
+        "merged": False,
         "verdict": signoff.SIGNOFF_MERGE,
-        "sha": "abc123", "ts": "2026-05-25T19:00:00Z", "origin": "auto-sequence"}
-    cap = _seed_captures(tmp_path)
-    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
-    assert rd.recommendation_source == "router"
-    assert rd.signoff_verdict == signoff.SIGNOFF_MERGE
-    assert rd.next_hop == "ready_to_merge"
-    assert "Ready to merge" in rd.recommendation
-    # ready_to_merge framing: sign-off recommends, never merges
-    assert "never merges" in rd.recommendation
-    h = br.render_pr_report_html(rd)
-    assert "Sign-off verdict:" in h
-    # Reuses signoff.py's icon + style (single source of truth)
-    assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in h
-    assert "derived from QA verdicts" not in h
-
-
-def test_recorded_bounce_verdict_maps_to_hop(tmp_path):
-    """A bounce verdict maps to its hop via decide_signoff_hop."""
-    from pm_core import signoff
-    data = _data()
-    data["prs"][0]["signoff"] = {
-        "verdict": signoff.SIGNOFF_IMPL, "sha": "x", "ts": "t",
-        "origin": "auto-sequence"}
-    cap = _seed_captures(tmp_path)
-    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
-    assert rd.next_hop == "impl"
-    assert "implementation" in rd.recommendation.lower()
-
-
-def test_impl_evidence_section_non_bug(tmp_path):
-    """Non-bug PR with flat impl evidence → plain Implementation block."""
-    cap = _seed_captures(tmp_path)
-    impl = cap / "impl"
-    impl.mkdir()
-    (impl / "build.txt").write_text("compiled cleanly")
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    assert rd.is_bug is False
-    assert any("build.txt" in e.name for e in rd.impl_evidence)
-    h = br.render_pr_report_html(rd)
-    assert "<h2>Implementation</h2>" in h
-    assert "compiled cleanly" in h
-    # No before/after framing for a non-bug PR without pre/post captures.
-    assert "Before — pre-fix" not in h
-
-
-def test_bug_pr_before_after(tmp_path):
-    """Bug PR surfaces pre-fix (reproduced) and post-fix (gone) captures."""
-    data = _data()
-    data["prs"][0]["plan"] = "bugs"  # canonical bug signal
-    cap = tmp_path / "pr-aaa"
-    pre = cap / "impl" / "pre-fix"
-    post = cap / "impl" / "post-fix"
-    pre.mkdir(parents=True)
-    post.mkdir(parents=True)
-    (pre / "repro.webm").write_bytes(b"\x00" * 1000)
-    (pre / "trace.txt").write_text("TypeError: cannot read x")
-    (post / "fixed.webm").write_bytes(b"\x00" * 1000)
-
-    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
-    assert rd.is_bug is True
-    pre_ev, post_ev, _ = br._partition_phase(rd.impl_evidence)
-    assert any("repro.webm" in e.name for e in pre_ev)
-    assert any("fixed.webm" in e.name for e in post_ev)
-
-    h = br.render_pr_report_html(rd)
-    # Before/after blocks present with acceptance criteria
-    assert "Before — pre-fix (bug reproduced)" in h
-    assert "After — post-fix (symptom gone)" in h
-    assert "bug reproduces on" in h.lower()
-    assert "no longer" in h.lower()
-    # The actual captures are surfaced in the right phase
-    assert 'src="impl/pre-fix/repro.webm"' in h
-    assert 'src="impl/post-fix/fixed.webm"' in h
-    assert "TypeError: cannot read x" in h
-
-
-def test_bug_pr_missing_post_fix_flagged(tmp_path):
-    """A bug PR with only a pre-fix capture flags the incomplete before/after."""
-    data = _data()
-    data["prs"][0]["type"] = "bug"  # forward-looking bug signal
-    cap = tmp_path / "pr-aaa"
-    pre = cap / "impl" / "pre-fix"
-    pre.mkdir(parents=True)
-    (pre / "repro.txt").write_text("boom")
-    rd = br.gather_pr_report_data(data, "pr-aaa", cap)
-    assert rd.is_bug is True
-    h = br.render_pr_report_html(rd)
-    assert "Before — pre-fix (bug reproduced)" in h
-    assert "After — post-fix (symptom gone)" in h
-    assert "No post-fix capture recorded" in h
-
-
-def test_acceptance_criteria_from_then(tmp_path):
-    """QA behavior surfaces acceptance criteria (THEN clauses) by themselves."""
-    cap = _seed_captures(tmp_path)
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    b = rd.behaviors[0]
-    assert b.acceptance == ["dashboard shows"]
-    h = br.render_pr_report_html(rd)
-    assert "Acceptance criteria" in h
-    assert '<ul class="acceptance">' in h
-
-
-def test_three_steps_present_impl_review_qa(tmp_path):
-    """note-e1ff391: impl/review/qa are each presented as steps, uniformly."""
-    cap = _seed_captures(tmp_path)
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    h = br.render_pr_report_html(rd)
-    assert "<h2>Implementation</h2>" in h
-    assert "<h2>Review</h2>" in h
-    assert "<h2>QA behaviors</h2>" in h
-    # Order: impl before review before qa
-    assert (h.index("<h2>Implementation</h2>")
-            < h.index("<h2>Review</h2>")
-            < h.index("<h2>QA behaviors</h2>"))
-    # Review acceptance shown even with no review captures today
-    assert "passes review" in h
-    assert "No review captures recorded" in h
-
-
-def test_review_evidence_surfaced_when_present(tmp_path):
-    """Forward-compat: a review/ captures dir is surfaced under the step."""
-    cap = _seed_captures(tmp_path)
-    rev = cap / "review"
-    rev.mkdir()
-    (rev / "review-notes.txt").write_text("approved; no blocking findings")
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    assert any("review-notes.txt" in e.name for e in rd.review_evidence)
-    h = br.render_pr_report_html(rd)
-    assert "approved; no blocking findings" in h
-    assert "No review captures recorded" not in h
-
-
-def test_impl_step_present_without_evidence(tmp_path):
-    """Impl step renders with acceptance + empty state when no captures."""
-    cap = tmp_path / "pr-aaa"
-    cap.mkdir()
-    rd = br.gather_pr_report_data(_data(), "pr-aaa", cap)
-    h = br.render_pr_report_html(rd)
-    assert "<h2>Implementation</h2>" in h
-    assert "No implementation captures recorded" in h
-
-
-def test_acceptance_extraction_multiline():
-    steps = ("GIVEN: x\nWHEN: y\nTHEN: first outcome\n  AND: second outcome\n"
-             "  - third bullet outcome")
-    assert br._extract_acceptance(steps) == [
-        "first outcome", "second outcome", "third bullet outcome"]
+        "next_hop": "ready_to_merge",
+        "tally": {"PASS": 3, "NEEDS_WORK": 0, "INPUT_REQUIRED": 0,
+                  "pending": 0},
+        "bugs_fixed_in_loop": 2,
+        "spec_clarifications": 1,
+        "generated_at": "2026-05-26T12:00:00Z",
+        "report_html": "report.html",
+    }
+    payload.update(overrides)
+    pdir = root / pr_id
+    pdir.mkdir(parents=True, exist_ok=True)
+    sidecar = pdir / "report.json"
+    sidecar.write_text(json.dumps(payload, indent=2))
+    return sidecar
 
 
 # ---------------------------------------------------------------------------
-# Dashboard
+# Sidecar reading
 # ---------------------------------------------------------------------------
 
-def test_dashboard_detect_missing_and_links(tmp_path):
-    _seed_captures(tmp_path)
-    (tmp_path / "pr-aaa" / "report.html").write_text("x")  # report exists
+def test_sidecar_drives_dashboard_row(tmp_path):
+    _write_sidecar(tmp_path, "pr-aaa")
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.has_sidecar
+    assert aaa.verdict == signoff.SIGNOFF_MERGE
+    assert aaa.next_hop == "ready_to_merge"
+    assert aaa.tally == {"PASS": 3, "NEEDS_WORK": 0,
+                         "INPUT_REQUIRED": 0, "pending": 0}
+    assert aaa.bugs_fixed_in_loop == 2
+    assert aaa.spec_clarifications == 1
+    assert aaa.report_html_rel == "pr-aaa/report.html"
+
+
+def test_missing_sidecar_row_still_appears(tmp_path):
+    """A PR without a sidecar still shows up — with an empty state."""
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    bbb = next(r for r in rows if r.pr_id == "pr-bbb")
+    assert bbb.has_sidecar is False
+    assert bbb.report_html_rel is None
+    assert bbb.tally == {}
+    assert bbb.verdict == ""
+
+
+def test_unreadable_sidecar_falls_back(tmp_path):
+    """Garbage in report.json falls back to the empty-state row."""
+    (tmp_path / "pr-aaa").mkdir()
+    (tmp_path / "pr-aaa" / "report.json").write_text("{not json")
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.has_sidecar is False
+
+
+def test_partial_sidecar_renders(tmp_path):
+    """A sidecar missing optional keys still produces a row (no crash)."""
+    (tmp_path / "pr-aaa").mkdir()
+    (tmp_path / "pr-aaa" / "report.json").write_text(json.dumps({
+        "pr_id": "pr-aaa", "title": "X", "status": "sign_off"}))
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.has_sidecar
+    assert aaa.tally == {"PASS": 0, "NEEDS_WORK": 0,
+                         "INPUT_REQUIRED": 0, "pending": 0}
+    assert aaa.bugs_fixed_in_loop == 0
+
+
+# ---------------------------------------------------------------------------
+# Dashboard rendering
+# ---------------------------------------------------------------------------
+
+def test_dashboard_links_to_agent_written_report(tmp_path):
+    _write_sidecar(tmp_path, "pr-aaa")
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(_data(), rows)
-
-    # Present report → live link
+    # Live link to the agent's report.html for the PR with a sidecar
     assert 'href="pr-aaa/report.html"' in h
-    # Missing report → no dead link, regenerate command surfaced
-    assert "no report" in h
-    assert "pm pr report pr-bbb" in h
-    # Filtering controls + data attributes
-    assert 'id="f-status"' in h and 'id="f-merged"' in h
-    assert 'data-status="qa"' in h
-    assert 'data-merged="1"' in h  # merged pr-ccc
-    assert 'data-merged="0"' in h  # unmerged
+    # And the next-hop framing from the sidecar
+    assert "next: ready_to_merge" in h
 
 
-def test_dashboard_groups_by_plan(tmp_path):
+def test_dashboard_missing_state_uses_pm_pr_signoff(tmp_path):
+    """Detect-missing rows surface `pm pr signoff <id>`, not the old report cmd."""
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(_data(), rows)
-    assert "Regression loop" in h     # plan group header
-    assert "watcher continuity" in h  # plan notes shown
-    assert "Unplanned" in h           # pr-ccc has no plan
+    assert "no report yet" in h
+    assert "pm pr signoff pr-bbb" in h
+    # The retired `pm pr report` command must not be advertised anywhere.
+    assert "pm pr report" not in h
 
 
-def test_dashboard_surfaces_recorded_verdict_and_icons(tmp_path):
-    """Dashboard shows the latest sign-off verdict marker + status icon,
-    reusing signoff.py / helpers.py single sources (matches pm pr list)."""
-    from pm_core import signoff
+def test_dashboard_reuses_signoff_icons_and_status_icons(tmp_path):
+    """Verdict + status markers match signoff.py and helpers.PR_STATUS_ICONS."""
     from pm_core.cli.helpers import PR_STATUS_ICONS
-    data = _data()
-    data["prs"][0]["status"] = "sign_off"
-    data["prs"][0]["signoff"] = {
-        "verdict": signoff.SIGNOFF_MERGE, "sha": "s", "ts": "t",
-        "origin": "auto-sequence"}
-    rows = br.gather_dashboard_rows(data, tmp_path)
-    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    assert aaa.signoff_verdict == signoff.SIGNOFF_MERGE
-    h = br.render_dashboard_html(data, rows)
-    # status icon for sign_off matches pm pr list / TUI
+    _write_sidecar(tmp_path, "pr-aaa")
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(_data(), rows)
     assert PR_STATUS_ICONS["sign_off"] in h
-    # verdict marker icon reused from signoff.py
     assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in h
-    # ready_to_merge recommendation framing in the summary
-    assert "Ready to merge" in h
 
 
-def test_dashboard_summary_from_captures(tmp_path):
-    _seed_captures(tmp_path)
+def test_dashboard_loop_badges_from_sidecar(tmp_path):
+    """bugs_fixed_in_loop / spec_clarifications surface as badges."""
+    _write_sidecar(tmp_path, "pr-aaa", bugs_fixed_in_loop=3,
+                   spec_clarifications=2)
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(_data(), rows)
+    assert "3 fixed" in h
+    assert "2 clarified" in h
+
+
+def test_dashboard_loop_badges_hidden_when_zero(tmp_path):
+    _write_sidecar(tmp_path, "pr-aaa", bugs_fixed_in_loop=0,
+                   spec_clarifications=0)
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(_data(), rows)
+    assert "fixed" not in h or "🐞" not in h
+    assert "clarified" not in h
+
+
+def test_dashboard_filters_and_groups_by_plan(tmp_path):
+    _write_sidecar(tmp_path, "pr-aaa")
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(_data(), rows)
+    assert 'id="f-status"' in h and 'id="f-merged"' in h
+    assert 'data-status="sign_off"' in h
+    assert 'data-merged="1"' in h and 'data-merged="0"' in h
+    # Plan grouping + plan notes pass-through
+    assert "Regression loop" in h
+    assert "watcher continuity" in h
+    assert "Unplanned" in h
+
+
+def test_dashboard_never_interprets_captures(tmp_path):
+    """Captures dir contents must NOT affect the dashboard — only the sidecar."""
+    pdir = tmp_path / "pr-aaa"
+    sc = pdir / "scenarios" / "1"
+    sc.mkdir(parents=True)
+    (sc / "verdict.md").write_text("# Scenario 1: x\n\nPASS\n")
+    (sc / "rec.webm").write_bytes(b"\x00")
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    assert "1 PASS" in aaa.summary
-    assert aaa.rec  # derived recommendation present
+    # No sidecar => empty state, even though captures exist
+    assert aaa.has_sidecar is False
+    assert aaa.tally == {}
+
+
+# ---------------------------------------------------------------------------
+# Sign-off prompt extension — the per-PR report's actual producer
+# ---------------------------------------------------------------------------
+
+def test_signoff_prompt_includes_report_deliverable(tmp_path):
+    """The extended prompt instructs the agent to write report.html + json."""
+    from pm_core import prompt_gen
+    data = _data()
+    # The prompt builder reads PR fields and the plan — minimal seed is fine.
+    p = prompt_gen.generate_signoff_prompt(
+        data, "pr-aaa", session_name="pm-test", origin="manual")
+    # Both deliverables explicitly required
+    assert "report.html" in p and "report.json" in p
+    # Top-of-page summary section
+    assert "Bugs fixed by review and QA" in p
+    assert "Spec ambiguities resolved" in p
+    # Sidecar schema keys called out
+    for key in ("bugs_fixed_in_loop", "spec_clarifications",
+                "tally", "next_hop", "report_html", "generated_at"):
+        assert key in p, f"sidecar key missing from prompt: {key}"
+    # Audience guidance for the bulleted summary
+    assert "UNFAMILIAR" in p
+    # Reuses #225's single sources for icons/styles
+    assert "SIGNOFF_VERDICT_ICONS" in p
+
+
+def test_signoff_prompt_keeps_route_step_numbered_last():
+    """Adding the report step must not duplicate the routing step number."""
+    from pm_core import prompt_gen
+    p = prompt_gen.generate_signoff_prompt(
+        _data(), "pr-aaa", session_name="pm-test", origin="manual")
+    # New ordering: 5. report, 6. record verdict, 7. route
+    assert "5. **Write the sign-off report" in p
+    assert "6. **Record your verdict" in p
+    assert "7. **Route" in p
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
-def test_cli_report_and_dashboard(tmp_path, monkeypatch):
+def test_cli_dashboard_generates_index(tmp_path, monkeypatch):
     pm_root = tmp_path / "pm"
     pm_root.mkdir()
     caps = tmp_path / "captures"
     caps.mkdir()
-    _seed_captures(caps)
+    _write_sidecar(caps, "pr-aaa")
 
     from pm_core import store
     store.save(_data(), pm_root)
 
-    def fake_captures_dir(pr_id, session_tag=None, start_path=None):
-        d = caps / pr_id
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    def fake_captures_root(session_tag=None, start_path=None):
-        return caps
-
-    monkeypatch.setattr("pm_core.paths.captures_dir", fake_captures_dir)
-    monkeypatch.setattr("pm_core.paths.captures_root", fake_captures_root)
-
-    with patch("pm_core.cli.pr.state_root", return_value=pm_root):
-        res = CliRunner().invoke(pr_report, ["pr-aaa"])
-    assert res.exit_code == 0, res.output
-    assert (caps / "pr-aaa" / "report.html").is_file()
-    # Generating one report refreshes the dashboard
-    assert (caps / "index.html").is_file()
-
-    with patch("pm_core.cli.pr.state_root", return_value=pm_root):
-        res = CliRunner().invoke(pr_dashboard, [])
-    assert res.exit_code == 0, res.output
-    assert (caps / "index.html").is_file()
-
-
-def test_cli_report_all(tmp_path, monkeypatch):
-    pm_root = tmp_path / "pm"
-    pm_root.mkdir()
-    caps = tmp_path / "captures"
-    caps.mkdir()
-    _seed_captures(caps)
-
-    from pm_core import store
-    store.save(_data(), pm_root)
-
-    def fake_captures_dir(pr_id, session_tag=None, start_path=None):
-        d = caps / pr_id
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    monkeypatch.setattr("pm_core.paths.captures_dir", fake_captures_dir)
     monkeypatch.setattr(
         "pm_core.paths.captures_root",
         lambda session_tag=None, start_path=None: caps)
 
     with patch("pm_core.cli.pr.state_root", return_value=pm_root):
-        res = CliRunner().invoke(pr_report, ["--all"])
+        res = CliRunner().invoke(pr_dashboard, [])
     assert res.exit_code == 0, res.output
-    assert "Generated 3 report(s)." in res.output
-    for pid in ("pr-aaa", "pr-bbb", "pr-ccc"):
-        assert (caps / pid / "report.html").is_file()
+    out = (caps / "index.html").read_text()
+    assert 'href="pr-aaa/report.html"' in out
+    assert "pm pr signoff pr-bbb" in out  # missing-state regenerate cmd
 
 
-def test_cli_report_unknown_pr(tmp_path, monkeypatch):
-    pm_root = tmp_path / "pm"
-    pm_root.mkdir()
-    from pm_core import store
-    store.save(_data(), pm_root)
-    monkeypatch.setattr(
-        "pm_core.paths.captures_root",
-        lambda session_tag=None, start_path=None: tmp_path / "c")
-    with patch("pm_core.cli.pr.state_root", return_value=pm_root):
-        res = CliRunner().invoke(pr_report, ["pr-zzz"])
-    assert res.exit_code != 0
-    assert "not found" in res.output
+def test_pr_report_command_is_removed():
+    """The retired `pm pr report` command must not be registered anymore."""
+    import pm_core.cli.pr as pr_cli
+    assert not hasattr(pr_cli, "pr_report")

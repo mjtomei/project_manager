@@ -520,7 +520,93 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
    add a `pm pr note add {pr_id} '...'` entry stating what you found and why you
    routed where you did, so the recommendation is fully inspectable.
 
-5. **Record your verdict** durably so it can be adopted without a re-run:
+5. **Write the sign-off report (deliverable).** Two files are REQUIRED on
+   every sign-off pass — they are how a reviewer (and the all-PR dashboard)
+   reads what you concluded without running anything:
+
+   * `$CAP/report.html` — the human-facing BDD behaviour report.
+   * `$CAP/report.json` — a small structured sidecar (the dashboard's only
+     contract).
+
+   Both live ALONGSIDE the captures (`$CAP = $(pm qa captures-path {pr_id})`)
+   and reference every evidence file by RELATIVE path so the page opens over
+   `file://`. Re-running `pm pr signoff {pr_id}` regenerates them — safe outside
+   auto-sequence because manual sign-off is recommendation-only.
+
+   ### `report.html` — required structure (top → bottom)
+
+   1. **Header** with the PR display id + title; badges for status (use the
+      `sign_off` icon), merged flag, recorded sign-off verdict
+      (▲ {SIGNOFF_MERGE} etc.), scenario verdict tally
+      (e.g. "3 PASS / 1 NEEDS_WORK"); a one-line **Recommendation** that
+      reflects the routing decision (e.g. for {SIGNOFF_MERGE} say
+      "ready_to_merge — sign-off recommends merge; sign-off never merges; the
+      plan watcher makes the final call"); a link back to `../index.html`.
+
+   2. **What this loop found and decided** (top-of-page summary, REQUIRED).
+      Two short bulleted lists, **one line per item, plain English**, written
+      so a reader UNFAMILIAR with the PR's description / notes / commits can
+      scan them and decide whether to look closer. No internal jargon (no
+      naked function or file names without a one-clause "what it is"). Where
+      applicable, link each bullet to the relevant commit / scenario / note.
+
+      * **Bugs fixed by review and QA** — real defects the review-loop or QA
+        scenarios found and fixed **in this PR's branch during the loop**
+        (NOT part of the original implementation). Each bullet: one-sentence
+        plain-English problem + how it was fixed.
+
+      * **Spec ambiguities resolved** — places where the original PR scope /
+        spec was ambiguous and got pinned down by a user decision or loop
+        discovery. Each bullet: the ambiguity + the resolution adopted, in
+        plain language.
+
+      Source `bugs_fixed_in_loop` from the review-loop / QA commits since the
+      impl phase and from notes that record a finding. Source
+      `spec_clarifications` from notes that begin with DECISION / CORRECTION
+      / supersedes / "Scope addition", and any PR description rewrites in the
+      PR's history. Use empty lists when none apply.
+
+   3. **Per-step sections** — one section per lifecycle step (Implementation,
+      Review, QA). For each: the step's acceptance criteria explicit, then the
+      evidence paired with those criteria — INLINE where possible (`<video
+      controls>` for webm, `<img>` for png, small text in `<details><pre>`) or
+      LINKED (html files, large files). For a **bug PR** render Implementation
+      as a Before/After (pre-fix: bug reproduces; post-fix: symptom gone),
+      flagging a missing phase rather than dropping it.
+
+   4. **Context for sign-off** — PR description, PR notes, plan name + plan
+      notes (when present).
+
+   Match the icons/colors used by `pm pr list` and the TUI: the `sign_off`
+   status icon and the `SIGNOFF_VERDICT_ICONS` / `SIGNOFF_VERDICT_STYLES`
+   tokens (single source in `pm_core/signoff.py`).
+
+   ### `report.json` — strict schema (dashboard's only contract)
+
+   The dashboard reads ONLY this sidecar. Write stable sorted keys. UTF-8
+   encoded. Every additional fact you want surfaced on the dashboard goes here:
+
+   ```
+   {{
+     "pr_id":              "<pm canonical id, e.g. pr-8e693f6>",
+     "display_id":         "<gh #N or pr-... fallback>",
+     "title":              "<PR title>",
+     "status":             "<PR status, e.g. sign_off>",
+     "merged":             <true|false>,
+     "verdict":            "<one of {SIGNOFF_MERGE},{SIGNOFF_REQA},{SIGNOFF_REVIEW},{SIGNOFF_IMPL},{SIGNOFF_BLOCKED} | null>",
+     "next_hop":           "<ready_to_merge | qa | review | impl | blocked>",
+     "tally":              {{"PASS": <int>, "NEEDS_WORK": <int>, "INPUT_REQUIRED": <int>, "pending": <int>}},
+     "bugs_fixed_in_loop": <int>,
+     "spec_clarifications":<int>,
+     "generated_at":       "<UTC ISO 8601, e.g. 2026-05-26T12:34:56Z>",
+     "report_html":        "report.html"
+   }}
+   ```
+
+   Write the files atomically (write to a temp file then rename) so a reader
+   never sees a half-written sidecar.
+
+6. **Record your verdict** durably so it can be adopted without a re-run:
    ```
    pm pr signoff-record {pr_id} <VERDICT> --origin {origin}
    ```
@@ -528,7 +614,7 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
    recommendation — it does not act. Sign-off never merges; the actual next hop
    is executed later, only under the auto-sequence driver.
 
-6. **Route** by ending with exactly ONE verdict keyword on its own line:
+7. **Route** by ending with exactly ONE verdict keyword on its own line:
 
    - **{SIGNOFF_MERGE}** — PASS: the evidence supports the diff and the QA was
      rigorous. This is a RECOMMENDATION to merge — sign-off never merges itself;

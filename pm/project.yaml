@@ -22965,7 +22965,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T03:02:49.508853+00:00'
+  updated_at: '2026-05-26T03:20:40.521981+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: null
   merged_at: null
@@ -23152,6 +23152,28 @@ prs:
       \ no new code path."
     created_at: '2026-05-26T03:02:49Z'
     last_edited: '2026-05-26T03:02:49Z'
+  - id: note-7c8d8ab
+    text: 'ARCHITECTURE FLIP (note-537e1a0 + note-a8bc547 incorporated). Per-PR report.html
+      is now AGENT-WRITTEN via a new section in prompt_gen.generate_signoff_prompt
+      (the sign-off prompt) — required deliverables on every sign-off pass: $CAP/report.html
+      (BDD report) + $CAP/report.json (frozen sidecar schema: pr_id, display_id, title,
+      status, merged, verdict, next_hop, tally{PASS,NEEDS_WORK,INPUT_REQUIRED,pending},
+      bugs_fixed_in_loop, spec_clarifications, generated_at, report_html). Top-of-page
+      "What this loop found and decided" — Bugs fixed by review and QA + Spec ambiguities
+      resolved (plain English, one line per item, audience UNFAMILIAR with PR). DELETED
+      my deterministic per-PR HTML renderer (was the wrong abstraction — captures
+      too heterogeneous). DELETED the `pm pr report` CLI command. behavior_report.py
+      is now ONLY the dashboard: globs report.json sidecars and renders index.html
+      with status/verdict icons (from signoff.SIGNOFF_VERDICT_ICONS + helpers.PR_STATUS_ICONS),
+      tally badges, 🐞/❓ loop-discovery badges from sidecar counts, client-side filter
+      by status/merged. Dashboard never interprets captures. Regenerate = `pm pr signoff
+      <id>` (manual sign-off is recommendation-only; safe re-run). scenario.json persistence
+      in qa_loop stays (helps the agent build the BDD framing). 15 dashboard+prompt
+      tests pass; 207 in broader sweep. NEXT: real end-to-end with FakeClaudeSession-driven
+      signoff to verify the agent actually writes both deliverables — that integration
+      test naturally lives in #225 territory (the prompt is producer-side).'
+    created_at: '2026-05-26T03:20:40Z'
+    last_edited: '2026-05-26T03:20:40Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
