@@ -142,6 +142,13 @@ def gather_dashboard_rows(data: dict,
         default_display = f"#{gh}" if gh else pr_id
         sidecar = captures_root_dir / pr_id / "report.json"
         loaded = _load_sidecar(sidecar)
+        # Fall back to the PR's recorded sign-off verdict (pr['signoff'])
+        # when no sidecar verdict is available — keeps the dashboard marker
+        # in lockstep with the TUI tech tree's verdict glyph, which sources
+        # the same record via signoff.latest_signoff_verdict.
+        pr_signoff = pr.get("signoff") or {}
+        pr_verdict = str(pr_signoff.get("verdict") or "") if isinstance(
+            pr_signoff, dict) else ""
         if loaded is None:
             rows.append(_DashRow(
                 pr_id=pr_id,
@@ -152,7 +159,7 @@ def gather_dashboard_rows(data: dict,
                 has_sidecar=False,
                 sidecar_path=None,
                 report_html_rel=None,
-                verdict="",
+                verdict=pr_verdict,
                 next_hop="",
                 tally={},
                 bugs_fixed_in_loop=0,
@@ -170,7 +177,7 @@ def gather_dashboard_rows(data: dict,
             has_sidecar=True,
             sidecar_path=sidecar,
             report_html_rel=f"{pr_id}/{report_html}",
-            verdict=str(loaded.get("verdict") or "") or "",
+            verdict=str(loaded.get("verdict") or "") or pr_verdict,
             next_hop=str(loaded.get("next_hop") or ""),
             tally={k: int(tally.get(k, 0) or 0) for k in _TALLY_KEYS},
             bugs_fixed_in_loop=int(loaded.get("bugs_fixed_in_loop") or 0),
