@@ -22919,12 +22919,18 @@ prs:
       \ fallback — that can come later if needed."
     created_at: '2026-05-26T02:49:56Z'
     last_edited: '2026-05-26T02:49:56Z'
+  - id: note-6179177
+    text: 'QA PASS: Manual sign-off entry — transition, two-pane window, dedup, wrong-status
+      rejection, manual-never-mutates contract: PASS; Signoff session-type registration
+      and fake-claude scriptability of router verdicts: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-85a527f2b04265f3)'
+    created_at: '2026-05-26T03:41:03Z'
+    last_edited: '2026-05-26T03:41:03Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -22965,9 +22971,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T13:21:57.867205+00:00'
+  updated_at: '2026-05-26T13:35:02.541165+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-05-26T13:00:09.140826+00:00'
   merged_at: null
   notes:
   - id: note-a9626ec
@@ -23152,59 +23158,106 @@ prs:
       \ no new code path."
     created_at: '2026-05-26T03:02:49Z'
     last_edited: '2026-05-26T03:02:49Z'
-  - id: note-7c8d8ab
-    text: 'ARCHITECTURE FLIP (note-537e1a0 + note-a8bc547 incorporated). Per-PR report.html
-      is now AGENT-WRITTEN via a new section in prompt_gen.generate_signoff_prompt
-      (the sign-off prompt) — required deliverables on every sign-off pass: $CAP/report.html
-      (BDD report) + $CAP/report.json (frozen sidecar schema: pr_id, display_id, title,
-      status, merged, verdict, next_hop, tally{PASS,NEEDS_WORK,INPUT_REQUIRED,pending},
-      bugs_fixed_in_loop, spec_clarifications, generated_at, report_html). Top-of-page
-      "What this loop found and decided" — Bugs fixed by review and QA + Spec ambiguities
-      resolved (plain English, one line per item, audience UNFAMILIAR with PR). DELETED
-      my deterministic per-PR HTML renderer (was the wrong abstraction — captures
-      too heterogeneous). DELETED the `pm pr report` CLI command. behavior_report.py
-      is now ONLY the dashboard: globs report.json sidecars and renders index.html
-      with status/verdict icons (from signoff.SIGNOFF_VERDICT_ICONS + helpers.PR_STATUS_ICONS),
-      tally badges, 🐞/❓ loop-discovery badges from sidecar counts, client-side filter
-      by status/merged. Dashboard never interprets captures. Regenerate = `pm pr signoff
-      <id>` (manual sign-off is recommendation-only; safe re-run). scenario.json persistence
-      in qa_loop stays (helps the agent build the BDD framing). 15 dashboard+prompt
-      tests pass; 207 in broader sweep. NEXT: real end-to-end with FakeClaudeSession-driven
-      signoff to verify the agent actually writes both deliverables — that integration
-      test naturally lives in #225 territory (the prompt is producer-side).'
-    created_at: '2026-05-26T03:20:40Z'
-    last_edited: '2026-05-26T03:20:40Z'
-  - id: note-ec8f0a6
-    text: 'QA s23 (signoff marker from pr[signoff] when sidecar absent): dashboard
-      fix 769d009e verifies cleanly — PR1 (record-only) → ▲ SIGNOFF_MERGE + regenerate
-      empty-state, PR2 (sidecar-only) → ⇤ SIGNOFF_IMPL + open-report link, PR3 (neither)
-      → no marker. Caveat: scenario THEN asserts pm pr list AND tech tree also show
-      ⇤ next to PR2, but neither surface displays a verdict glyph in this case — list/tree
-      (helpers.py:285, tech_tree.py:598) gate on status==sign_off AND read pr[signoff]
-      only; PR2 is in_review with sidecar-only, so by design neither shows a glyph.
-      The 769d009e fix only changed dashboard rendering; list/tree behavior is unchanged.
-      If lockstep across all three surfaces for sidecar-only PRs is the goal, list/tree
-      would need to (a) also consult the sidecar and (b) show glyphs for non-sign_off
-      PRs — not done in this PR.'
-    created_at: '2026-05-26T13:15:03Z'
-    last_edited: '2026-05-26T13:15:03Z'
-  - id: note-49b256e
-    text: 'QA s23 re-eval (after review flag): scenario THEN failed on user surface.
-      dashboard meets THEN (PR1 ▲ SIGNOFF_MERGE + regen empty-state, PR2 ⇤ SIGNOFF_IMPL
-      + open-report link, PR3 status-only). BUT pm pr list and pm tui view (post-Ctrl+R
-      refresh) both show PR1 ▲, PR3 no glyph, PR2 NO ⇤. Gap: helpers.py:format_pr_line
-      (~285) and tech_tree.py:598-605 read verdict via signoff.latest_signoff_verdict
-      (pr[signoff] only, no sidecar) AND gate on status==sign_off. PR2 (in_review,
-      sidecar-only) skipped by both. Dashboard merges sidecar + record (behavior_report.py:143-160)
-      so it shows ⇤; list/tree do not — they silently diverge from dashboard in the
-      sidecar-only case. The 769d009e fix comment claims lockstep with tree, but only
-      the record-only path (PR1) is actually in lockstep; sidecar-only (PR2) is not.
-      Two ways to close: (a) extend list/tree to also load report.json (real I/O cost
-      per render; needs a state-root resolver in helpers); (b) narrow the scenario
-      expectation to record-only lockstep, since dashboard intentionally aggregates
-      both sources and list/tree intentionally do not. Captures: /pm-captures/scenarios/23/{manifest,index.html,pm-pr-list.txt,pm-tui-view.txt,recording.cast,transcript.log}.'
-    created_at: '2026-05-26T13:21:57Z'
-    last_edited: '2026-05-26T13:21:57Z'
+  - id: note-596f78b
+    text: 'QA NEEDS_WORK: Dashboard renders from scratch with no sidecars: PASS; Dashboard
+      surfaces an agent-written sidecar with verdict, tally, and loop badges: PASS;
+      Filtering by status and merged/unmerged narrows the visible rows: PASS; Regenerate
+      cycle — empty row, run pm pr signoff, re-render shows populated row: PASS; Sign-off
+      prompt names the two deliverables and the sidecar schema: PASS; pm status and
+      the TUI tech tree recognize sign_off: PASS; Robustness — garbage sidecar, partial
+      sidecar, and HTML-injection-safe titles: NEEDS_WORK; Concurrent dashboard generations
+      and a parallel sign-off write do not corrupt the index or the sidecar: PASS;
+      No session tag — dashboard fails clearly: NEEDS_WORK; qa_loop writes scenario.json
+      alongside verdict.md for the sign-off agent: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-47b30e4a8869f42d)'
+    created_at: '2026-05-26T04:06:44Z'
+    last_edited: '2026-05-26T04:06:44Z'
+  - id: note-926072a
+    text: 'QA-authoring guidance for scenarios that test the per-PR HTML surface (report.html
+      / report.json):
+
+
+      THE REPORT FILES ARE AGENT-WRITTEN, NOT DETERMINISTIC. Per the architecture
+      pinned down in note-537e1a0, `report.html` and the `report.json` sidecar are
+      produced by the real Claude SIGN-OFF AGENT via its prompt instructions (the
+      prompt-extension to pr-2d5f712, see prompt_gen.py:527-602), NOT by `pm pr signoff`
+      directly and NOT by fake-claude (which only emits stdout verdicts and never
+      writes files into the captures dir).
+
+
+      Consequence: a scenario that drives `pm pr signoff` against fake-claude will
+      never produce `report.html` / `report.json`, no matter how the fake is scripted.
+      The scenario will either appear vacuous (no shared-resource write to race, no
+      file to inspect) or be REFINER_REJECTed at concretize time (see s19 in QA round
+      2 of this PR, workdir pr-8e693f6-18068b7b… — REFINER_REJECT + note-a591940).
+
+
+      RULE: Any scenario whose THENs assert the existence, content, or contention
+      semantics of `report.html` / `report.json` MUST run the sign-off step against
+      the REAL Claude session (not fake-claude). Opt in to real Claude for that step
+      inside the scenario. The deterministic / fake-claude path stays appropriate
+      for scenarios that only exercise the verdict ROUTER''s hops (decide_signoff_hop,
+      act_on_signoff_verdict) — those don''t depend on the agent''s file-writing.
+
+
+      WHAT THE DASHBOARD GENERATOR CAN STILL TEST WITH FAKE: the dashboard''s HTML
+      rendering (behavior_report.py:462 generate_dashboard) is deterministic Python
+      — globbing per-PR `report.json` sidecars and emitting `index.html`. Scenarios
+      that test the dashboard alone can SYNTHESIZE the sidecars on disk directly and
+      then call the dashboard generator; no Claude session needed at all. Use that
+      path for dashboard-only assertions (filtering, missing-report empty-state, sidecar
+      schema robustness). Reserve the real-Claude path for scenarios that exercise
+      the end-to-end agent-writes-files path.
+
+
+      QA-PLANNER PROMPT NOTE: this distinction (agent-written vs deterministic-write)
+      should be reflected when planning scenarios for sign-off-touching PRs in general
+      — the planner should pick the cheaper synthesize-sidecars path whenever the
+      assertions don''t actually require the agent to produce the file.'
+    created_at: '2026-05-26T12:56:38Z'
+    last_edited: '2026-05-26T12:56:38Z'
+  - id: note-083c051
+    text: 'QA NEEDS_WORK: Dashboard tolerates garbage/partial sidecars and HTML-escapes
+      user content: PASS; Dashboard fails clearly when no session tag is resolvable:
+      PASS; Filtering collapses plan sections whose rows are all hidden: PASS; Dashboard
+      sign-off marker is sourced from pr[''signoff''] when no sidecar is present:
+      NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-bb8854012f0ad8f2)'
+    created_at: '2026-05-26T13:25:00Z'
+    last_edited: '2026-05-26T13:25:00Z'
+  - id: note-809407d
+    text: "DECISION (supersedes the dual-read added by 769d009e): the dashboard renders\
+      \ SIDECAR-ONLY. `pr['signoff']` is NOT consulted anywhere in HTML rendering\
+      \ — `behavior_report.py` drops the record fallback. The inconsistency the s23\
+      \ scenario surfaced (PR2 = sidecar-only showing on dashboard, hidden on list/tree)\
+      \ goes away by design once each surface has exactly one source.\n\nTHE RATIONALE\n\
+      - `pr['signoff']` is project-yaml runtime state. The dashboard is a static HTML\
+      \ file (open as a file, no server, no Python runtime). Mixing runtime state\
+      \ into an artifact you can hand to someone without pm installed is a category\
+      \ error.\n- The agent writes the sidecar (`report.json`) alongside `report.html`\
+      \ as its structured output. That is the dashboard's native input format. Reading\
+      \ `pr['signoff']` in addition was a leftover convenience, not a design choice.\n\
+      - The two surfaces (dashboard vs list/tree) serve different needs: dashboard\
+      \ is the rich, evidence-aware review surface; list/tree are lightweight runtime\
+      \ status views. They were never meant to be a single source of truth.\n\nCHANGES\
+      \ IN THIS PR\n1) `pm_core/behavior_report.py` — remove the `pr['signoff']` lookup\
+      \ from the dashboard render path (the dual-read added by 769d009e). When a sidecar\
+      \ is absent, the dashboard row simply has no sign-off marker. No fallback to\
+      \ `pr['signoff']`. This may be a partial revert of 769d009e plus a small simplification\
+      \ of the merged-read code at behavior_report.py:143-160.\n2) `pm pr list` and\
+      \ the TUI tech tree — UNCHANGED. They continue to read `pr['signoff']` only\
+      \ and gate on `status==sign_off`. That is correct and intentional.\n3) Update\
+      \ the s23 scenario (or its replacement in the next QA round) to assert the INTENDED\
+      \ division rather than lockstep:\n   - dashboard ↔ sidecars: PR with sidecar\
+      \ → marker shown; PR without sidecar → no marker (regardless of `pr['signoff']`)\n\
+      \   - list/tree ↔ `pr['signoff']`: PR with record + `status==sign_off` → marker\
+      \ shown; otherwise → no marker (regardless of sidecar)\n   - The two surfaces\
+      \ will diverge for sidecar-only or record-only PRs — that is the intent, not\
+      \ a bug.\n\nARCHITECTURAL NOTE\n- This makes the dashboard's input contract\
+      \ explicit: \"everything I show is in a sidecar.\" Anyone hand-authoring a sidecar\
+      \ for testing or one-off display can rely on that.\n- Combined with note-537e1a0's\
+      \ regenerate-via-`pm pr signoff`, this gives the dashboard a clean shape: glob\
+      \ sidecars → render. No runtime state in the loop."
+    created_at: '2026-05-26T13:35:02Z'
+    last_edited: '2026-05-26T13:35:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
