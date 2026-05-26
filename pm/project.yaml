@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2d5f712
+  active_pr: pr-8e693f6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22892,7 +22892,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T13:35:02.541165+00:00'
+  updated_at: '2026-05-26T13:39:58.272447+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-05-26T13:00:09.140826+00:00'
   merged_at: null
@@ -23124,6 +23124,96 @@ prs:
       \ sidecars → render. No runtime state in the loop."
     created_at: '2026-05-26T13:35:02Z'
     last_edited: '2026-05-26T13:35:02Z'
+  - id: note-c3932ca
+    text: "Sharper restatement of note-809407d (the user clarified):\n\nTHE RULE —\
+      \ sign-off-derived ONLY in sidecar and per-PR HTML\n\nThe sidecar (`report.json`)\
+      \ and the per-PR `report.html` are produced only by the sign-off agent and updated\
+      \ only when sign-off runs. They must therefore contain ONLY sign-off-derived\
+      \ content. Any field they currently carry that mirrors PR runtime state (status,\
+      \ merged, title-from-record, the `pr['signoff']` record) goes STALE the moment\
+      \ that state changes — the sidecar isn't regenerated when a PR is merged or\
+      \ its status flips, so any state field baked into it lies whenever sign-off\
+      \ didn't run last.\n\nTHE RIGHT SHAPE\n\n- **Sidecar (`report.json`)** carries:\
+      \ `verdict`, `next_hop`, `tally`, `bugs_fixed_in_loop`, `spec_clarifications`,\
+      \ `report_html` relative link, the sign-off summary, evidence links. **Drop**\
+      \ anything that is just a snapshot of project.yaml.\n- **Per-PR `report.html`**\
+      \ carries: the BDD report content the agent produces — flow / STEPS / Given-When-Then\
+      \ / verdict + reason / inline evidence / next hop, plus the top-of-page bulleted\
+      \ \"bugs fixed / spec ambiguities resolved\" section. **No status badge, no\
+      \ merged badge, no record fallback** — those are not the agent's outputs.\n\
+      - **Dashboard `index.html` (the only thing rendered by deterministic Python)**\
+      \ is allowed and expected to combine: per-PR runtime state read from `project.yaml`\
+      \ AT GENERATION TIME, with the sign-off content read from each PR's sidecar.\
+      \ The index reads project.yaml fresh, every time it's regenerated — so PR state\
+      \ in the index is current, while the sidecar/per-PR HTML can stay frozen at\
+      \ their last sign-off pass.\n\nCONCRETE CODE CHANGES — `pm_core/behavior_report.py`\n\
+      \n1) **`gather_dashboard_rows` (around lines 131-188): drop everything that\
+      \ pulls state from the sidecar.** The sidecar should not carry `title`, `status`,\
+      \ `merged`. Today the row construction does:\n     - `display_id=str(loaded.get(\"\
+      display_id\") or default_display)` → keep `default_display` only.\n     - `title=str(loaded.get(\"\
+      title\") or pr.get(\"title\", pr_id))` → use `pr.get(\"title\", pr_id)` only.\n\
+      \     - `status=str(loaded.get(\"status\") or pr.get(\"status\", \"unknown\"\
+      ))` → use `pr.get(\"status\", \"unknown\")` only.\n     - `merged=bool(loaded.get(\"\
+      merged\", pr.get(\"merged_at\")))` → use `bool(pr.get(\"merged_at\"))` only.\n\
+      \   These four lines all collapse to \"read from project.yaml\". The sidecar\
+      \ isn't consulted for any of them.\n\n2) **Drop the `pr['signoff']` dual-read**\
+      \ (the lines 145-149 fallback added by 769d009e plus its uses at the no-sidecar\
+      \ branch and the with-sidecar fallback expression):\n     - Delete `pr_signoff\
+      \ = pr.get(\"signoff\") ...` and `pr_verdict = ...`.\n     - No-sidecar branch:\
+      \ `verdict=\"\"` (not `pr_verdict`).\n     - With-sidecar branch: `verdict=str(loaded.get(\"\
+      verdict\") or \"\")` (no `or pr_verdict` tail).\n\n3) **Module docstring (lines\
+      \ 4-22)** is already correct in its intent — keep its existing promise (\"sidecar\
+      \ is the dashboard's only contract\" for per-PR content) and add one short clarifying\
+      \ line: \"PR runtime state — status, merged, title — is read fresh from project.yaml\
+      \ at dashboard-generation time, not from the sidecar.\"\n\n4) **`_DashRow` (around\
+      \ line 76)**: keep the fields, but mentally split them — `pr_id, display_id,\
+      \ title, status, merged` are sourced from project.yaml; `has_sidecar, sidecar_path,\
+      \ report_html_rel, verdict, next_hop, tally, bugs_fixed_in_loop, spec_clarifications`\
+      \ are sourced from the sidecar. The dataclass shape doesn't change; the row\
+      \ constructor just stops reading state-shaped fields from the sidecar.\n\nCONCRETE\
+      \ PROMPT-EXTENSION CHANGES — `pm_core/prompt_gen.py` (sign-off prompt around\
+      \ lines 527-602)\n\n5) **Sidecar schema specified to the agent**: ensure the\
+      \ prompt instructs the sign-off agent to write ONLY sign-off-derived keys into\
+      \ `report.json` — `verdict`, `next_hop`, `tally`, `bugs_fixed_in_loop`, `spec_clarifications`,\
+      \ `report_html`, summary fields. Explicitly forbid `title`, `status`, `merged`,\
+      \ `display_id` (these are project.yaml's responsibility; the dashboard reads\
+      \ them fresh).\n\n6) **Per-PR `report.html` schema**: the prompt should instruct\
+      \ the agent NOT to render PR status / merged badges in the per-PR page (or to\
+      \ clearly mark them as \"as of sign-off run\" if any historical context is needed\
+      \ — but the cleaner choice is to omit them entirely since the agent has no good\
+      \ way to keep them current).\n\nTESTS — `tests/test_behavior_report.py`\n\n\
+      7) **Remove** tests that exercise the `pr['signoff']` fallback path in `gather_dashboard_rows`.\n\
+      8) **Remove** tests that assert the sidecar's `title` / `status` / `merged`\
+      \ fields are honored over project.yaml — those fields are no longer in the sidecar\
+      \ contract.\n9) **Add**:\n     - `test_sidecar_absent_row_has_no_verdict` —\
+      \ `pr['signoff']` set, no sidecar → `_DashRow.verdict == \"\"`, empty state\
+      \ shown.\n     - `test_pr_state_read_from_project_yaml_not_sidecar` — sidecar\
+      \ with hypothetical `title`/`status`/`merged` fields is fed in, but those fields\
+      \ are ignored; row uses project.yaml values. This locks in the \"sidecar carries\
+      \ no state\" rule.\n     - `test_sidecar_verdict_wins_over_pr_signoff` — sidecar\
+      \ verdict != `pr['signoff']` verdict; the rendered dashboard shows sidecar's\
+      \ verdict (and `pr['signoff']` is never consulted).\n\nQA SCENARIO REWRITE (replaces\
+      \ s23 in the next round)\n\nGIVEN three PRs in a throwaway project:\n  PR1:\
+      \ status=in_review, sidecar with `verdict=SIGNOFF_MERGE`, no `pr['signoff']`\
+      \ record.\n  PR2: status=sign_off, no sidecar, `pr['signoff']={verdict: \"SIGNOFF_IMPL\"\
+      , sha: …}`.\n  PR3: status=in_progress, neither sidecar nor `pr['signoff']`.\n\
+      \nWHEN the user generates the dashboard, runs `pm pr list`, and views the TUI\
+      \ tech tree.\n\nTHEN:\n  - Dashboard: PR1 shows ▲ SIGNOFF_MERGE + open-report\
+      \ link (sidecar-driven). PR2 shows the regenerate empty state (no marker; `pr['signoff']`\
+      \ not consulted). PR3 shows the regenerate empty state.\n  - `pm pr list`: PR1\
+      \ shows no verdict glyph (status != sign_off). PR2 shows ⇤ SIGNOFF_IMPL (status==sign_off\
+      \ AND record set). PR3 shows nothing.\n  - TUI tech tree: same as `pm pr list`.\n\
+      \nExplicitly assert that dashboard and list/tree disagree on PR1 and PR2 — this\
+      \ is the intended division of responsibilities, not a bug.\n\nROLLBACK SCOPE\n\
+      \nThis effectively undoes the verdict-fallback piece of 769d009e while keeping\
+      \ the *intent* of 769d009e (the dashboard marker still works for the PR that\
+      \ actually has a sidecar). Plus a small pruning of the row constructor to also\
+      \ drop `title`/`status`/`merged` reads from the sidecar. Not a full revert of\
+      \ 769d009e.\n\nNON-GOAL\n\n`pm pr list` and the TUI tech tree are not touched.\
+      \ They continue to gate on `status==sign_off` and read `pr['signoff']` only.\
+      \ Do not change them in this PR."
+    created_at: '2026-05-26T13:39:58Z'
+    last_edited: '2026-05-26T13:39:58Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
