@@ -22892,7 +22892,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T13:39:58.272447+00:00'
+  updated_at: '2026-05-26T16:07:01.422424+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-05-26T13:00:09.140826+00:00'
   merged_at: null
@@ -23214,6 +23214,53 @@ prs:
       \ Do not change them in this PR."
     created_at: '2026-05-26T13:39:58Z'
     last_edited: '2026-05-26T13:39:58Z'
+  - id: note-d01545e
+    text: "Expansion to the inline-evidence policy in the sign-off report (extends\
+      \ the embed list at prompt_gen.py:569-575 — currently webm → `<video controls>`,\
+      \ png → `<img>`, small text → `<details><pre>`).\n\nNEW INLINE EMBEDS TO ADD\n\
+      \n1) Audio files (`.wav`, `.mp3`, audio-only `.webm`, `.ogg`, `.opus`) → `<audio\
+      \ controls src=\"…\">` inline. Becomes important once plan-ambient's TTS surface\
+      \ lands and sign-off has audio evidence.\n\n2) Asciinema cast files (`.cast`)\
+      \ → embed via the asciinema-player widget inline. Two acceptable shapes:\n \
+      \  - CDN: `<asciinema-player src=\"…\">` + `<link rel=\"stylesheet\" …>` + `<script\
+      \ src=\"…\">` from a stable asciinema-player CDN (file:// pages can load these\
+      \ as long as the host browser allows). Note this requires the reader to be online.\n\
+      \   - Vendored: drop a copy of asciinema-player (CSS + JS) under the captures\
+      \ session-tag dir (or under a shared static dir referenced by all per-PR reports)\
+      \ and reference it by RELATIVE path. Offline-safe, slightly larger footprint.\n\
+      \   Prefer the vendored copy when available; fall back to CDN if not. Asciinema\
+      \ casts ALREADY appear in captures (see s23: `recording.cast`), so this is not\
+      \ hypothetical.\n\nMARKDOWN: RENDER, DON'T LINK RAW\n\n3) For every `.md` file\
+      \ the report would otherwise link to, render it to a sibling `.html` file at\
+      \ sign-off time and link to the rendered HTML instead. Raw `.md` over `file://`\
+      \ displays as plaintext in most browsers — a bad reader experience.\n   - Pick\
+      \ a small, dependency-light Python markdown renderer (e.g. `markdown` or `mistune`\
+      \ — sign-off doesn't need pluggable extensions, just CommonMark + tables + fenced\
+      \ code).\n   - Generated path convention: alongside `foo.md`, write `foo.md.html`\
+      \ (or `foo.html` if no name conflict). Keep `.md.html` so the source `.md` is\
+      \ still discoverable.\n   - Wrap in a minimal styled shell (the same minimal\
+      \ style the per-PR report.html uses) so it looks consistent.\n   - The link\
+      \ in the report should point to the `.html`, not the `.md`. The raw `.md` stays\
+      \ on disk for grep / diff / archival.\n\nHTML STAYS LINKED\n\n4) `.html` files\
+      \ (existing) — keep linking as-is, no change. Already render natively in the\
+      \ browser.\n\nUPDATED INLINE-EVIDENCE TABLE FOR THE PROMPT\n\n| Type | Treatment\
+      \ |\n|---|---|\n| `.webm` (video) | `<video controls>` inline |\n| `.png`, `.jpg`,\
+      \ `.gif`, `.svg` | `<img>` inline |\n| `.wav`, `.mp3`, `.ogg`, `.opus`, audio-only\
+      \ `.webm` | `<audio controls>` inline |\n| `.cast` (asciinema) | asciinema-player\
+      \ widget inline (vendored CSS+JS preferred; CDN fallback) |\n| small `.txt`\
+      \ / log under N KB | `<details><pre>` inline |\n| `.md` | render to sibling\
+      \ `.html` at sign-off time; link to the rendered HTML |\n| `.html` | link as-is\
+      \ |\n| Large/other binary | link as-is |\n\nPOSITIVE FRAMING (per the prompt-hygiene\
+      \ discussion in plan-quality)\n\nPrefer \"embed when supported by the browser\
+      \ (video/audio/img/asciinema/small text); pre-render markdown to HTML before\
+      \ linking; link only for HTML or large/other files\" over a \"do NOT just link\"\
+      \ framing — the negative form is fine but a single positive rule is shorter\
+      \ and ages better.\n\nSCOPE\n\nThis is a small follow-on to the sidecar-only\
+      \ refactor (note-c3932ca). Land sidecar-only first, then this embed/render expansion\
+      \ either as the next commit on the same PR or — if the diff is getting heavy\
+      \ — split into a follow-up PR. Either is fine."
+    created_at: '2026-05-26T16:07:01Z'
+    last_edited: '2026-05-26T16:07:01Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
