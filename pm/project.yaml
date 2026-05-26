@@ -22624,7 +22624,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T01:06:15.666893+00:00'
+  updated_at: '2026-05-26T01:26:28.769678+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -23115,6 +23115,36 @@ prs:
       window, no relaunch) verified regardless.'
     created_at: '2026-05-26T01:06:15Z'
     last_edited: '2026-05-26T01:06:15Z'
+  - id: note-3055e3f
+    text: 'QA scenario 10 (concurrency on shared sign-off resources) NEEDS_WORK->fixed
+      (9dec639c). Triple 1 (concurrent provision+window-create) PASS as-is: exactly
+      one signoff-<id> window, logs split Opened(winner)/Switched(loser) under the
+      per-PR launch flock, both exit 0, no traceback, yaml valid, single workdir key,
+      status sign_off. Triple 2 (concurrent signoff-record diff verdicts) PASS as-is:
+      single well-formed {verdict,sha,ts,origin} under the project lock, one verdict
+      wins (sha==HEAD, origin manual, ISO ts), single icon renders on pm pr list AND
+      pm tui view tech-tree. Triple 3 (bounce routing vs out-of-band merge) found
+      a REAL leak: when auto-sequence apply_signoff_hop won the lock first it bounced
+      sign_off->qa and spawned pm pr qa-run-bg, then the concurrent pm pr edit --status
+      merged (local equiv of a github sync) overwrote status to merged; apply_signoff_hop
+      only guarded the STATUS transition, not the detached driver, so pr_qa_run_bg
+      (no merged/closed guard) opened a qa-<id> window and ran a full QA planner loop
+      against an already-merged PR (15/30 trials leaked). Status itself was ALWAYS
+      preserved (merged, never clobbered to the qa bounce target). Fixed with layered
+      out-of-band-merge guards: pr_qa_run_bg bails pre-run_qa_sync if merged/closed;
+      run_qa_sync re-checks status after live-PR load, immediately before window creation,
+      after window creation (tears the window down), and inside the planner poll loop
+      (late-merge teardown). Post-fix 40/40 trials clean (18/40 hit the race-winning
+      re-qa path; transient qa window always torn down, none left running). NUANCE
+      for reviewers: this is a fundamental TOCTOU between a blind status write and
+      the detached launch; a qa window can still appear transiently (~1-2s) before
+      a guard tears it down, but a full QA loop never executes against the merged
+      PR and the window is never LEFT running. The deeper fix (an out-of-band transition
+      itself sweeping in-flight qa/review/signoff windows) is arguably pr-ff9b728
+      territory (redirect/cleanup of old gates). Full suite 2768 pass (1 pre-existing
+      unrelated hook-installer failure).'
+    created_at: '2026-05-26T01:26:28Z'
+    last_edited: '2026-05-26T01:26:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
