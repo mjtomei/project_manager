@@ -167,7 +167,11 @@ def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
         f" && {{ echo {shell_quote(header)}"
         f" && echo ''"
         f" && echo '--- Cross-stage evidence (captures) ---'"
-        f" && CAP=\"$(pm qa captures-path {shell_quote(pr_id)} 2>/dev/null)\""
+        # `|| true` keeps a non-zero `pm qa captures-path` (e.g. the project
+        # isn't resolvable from the workdir clone) from aborting the whole
+        # `&&` chain — without it the pane would blank after this header
+        # instead of degrading to "(no captures found)" + the QA/diff sections.
+        f" && CAP=\"$(pm qa captures-path {shell_quote(pr_id)} 2>/dev/null || true)\""
         f" && if [ -n \"$CAP\" ] && [ -d \"$CAP\" ] &&"
         f"        [ -n \"$(find \"$CAP\" -mindepth 1 -maxdepth 3 -print -quit)\" ]; then"
         f"      find \"$CAP\" -mindepth 1 -maxdepth 3 -print | sort;"
@@ -179,10 +183,10 @@ def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
         f" && if [ -n \"$QS\" ]; then cat \"$QS\"; else echo '(no qa status)'; fi"
         f" && echo ''"
         f" && echo '--- Change summary ---'"
-        f" && git --no-pager diff --stat {diff_ref}...HEAD"
+        f" && {{ git --no-pager diff --stat {diff_ref}...HEAD || true; }}"
         f" && echo ''"
         f" && echo '--- Full diff ---'"
-        f" && git --no-pager diff {diff_ref}...HEAD"
+        f" && {{ git --no-pager diff {diff_ref}...HEAD || true; }}"
         f"; }} | if command -v less >/dev/null 2>&1; then less -R; else cat; fi"
         f"; exec {shell}"
     )
