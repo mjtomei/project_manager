@@ -22647,7 +22647,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T01:26:28.769678+00:00'
+  updated_at: '2026-05-26T02:03:18.812480+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -23179,6 +23179,35 @@ prs:
       PASS (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-ad009382b7b0e6d6)'
     created_at: '2026-05-25T23:42:58Z'
     last_edited: '2026-05-25T23:42:58Z'
+  - id: note-b4d81df
+    text: 'QA scenario 10 (verdict-router fan-out + adoption + stale + no-re-bounce
+      + no-verdict) PASS on real local-backend surface, no in-scope bugs found. Verified
+      all 5 verdict routing lines (ready_to_merge / sign_off: re-qa / sign_off: returning
+      to review (iteration N) / sign_off: returning to impl / paused: sign_off_blocked)
+      with the expected window/transcript retirement (REQA/REVIEW/IMPL retire, MERGE/BLOCKED
+      persist) and status flips. Adoption: manual-origin record at fresh HEAD adopted
+      by auto-sequence tick without re-record or new window/transcript; origin stays
+      manual. Stale: empty commit moves HEAD past recorded sha -> advanced: sign_off_relaunched
+      + window id changes + transcript symlink target changes + pr.signoff cleared.
+      Bounce-then-reenter: SIGNOFF_REQA pops pr.signoff during apply_signoff_hop,
+      so re-entering sign_off prints advanced: sign_off_relaunched (or running: sign_off
+      if window already up) and never re-routes on the consumed verdict. No-verdict
+      mock (fake-claude signoff.verdicts=[]): window-present tick = running: sign_off,
+      kill-window tick = advanced: sign_off_relaunched with fresh window+transcript.
+      Setup gotchas worth surfacing for next runs: (a) auto-sequence command needs
+      a tmux env to launch the signoff window (in_tmux() gate at signoff.py:216) so
+      drive ticks from inside a pm-session window (send-keys to a driver window) rather
+      than from a bare shell, otherwise the launch path bails with Sign-off window
+      requires tmux. (b) fake-claude session types are constrained: use qa_planning/qa_concretize/qa_scenario
+      (not qa_planner/qa_concretizer/qa_worker), and qa_planning''s only valid verdict
+      is QA_PLAN. (c) For the no-verdict signoff mock you have to add an explicit
+      signoff: {verdicts: []} entry; _all: {} resolves to default SIGNOFF_MERGE and
+      the fake emits it, defeating the no-verdict test. (d) pm pr show <id> does not
+      exist; use pm pr list. (e) Driving auto-sequence from /workspace without PYTHONPATH=/workspace
+      silently picks up /opt/pm-src and shows the wrong project status; always source
+      the venv and export PYTHONPATH before pm pr list.'
+    created_at: '2026-05-26T02:03:18Z'
+    last_edited: '2026-05-26T02:03:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
