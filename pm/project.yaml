@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-71e9ec7
+  active_pr: pr-c77561b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -10742,11 +10742,31 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-04-24T20:54:20.188876+00:00'
+  updated_at: '2026-05-25T22:43:55.409584+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5ea6dd5
+    text: 'KEYRING-EXHAUSTION diagnosis (from #225 QA; absorbs the closed duplicate
+      pr-4265093). The leak''s concrete failure mode: the rootless-podman subuid (uid
+      100000) keyring fills at maxkeys=200 (each container holds ~2-3 keys). Once
+      full, ''podman exec'' fails — ''unable to start container process: unable to
+      join session keyring: unable to create session key: disk quota exceeded'' —
+      so QA scenario workers can''t launch and silently degrade to spurious INPUT_REQUIRED
+      (see pr-7ab0a99). KEY FACT: pruning STOPPED containers does NOT free the keyring;
+      the keys are held by RUNNING containers, so only reaping running orphans frees
+      them (verified: 128->79 stopped-prune left keyring at 200/200; reaping 15 merged-PR
+      running containers dropped it to 157/200 and unblocked exec). Add to scope:
+      (1) reap own containers at QA completion on ALL exit paths (PASS / NEEDS_WORK
+      / INPUT_REQUIRED / cancel), plus periodic reaping of running orphans (merged/closed
+      PRs, dead sessions); (2) bound max concurrent containers; (3) optionally raise
+      the keyring quota (kernel.keys.maxkeys/maxbytes) as headroom — but that only
+      masks the leak (shifts the next failure to RAM/disk/PIDs), so reaping is the
+      real fix. Adjacent surfaces: pr-cb2a29d (kill merged-PR windows/containers on
+      TUI startup, in_progress), pr-ac12b47 (session stale-container cleanup).'
+    created_at: '2026-05-25T22:43:55Z'
+    last_edited: '2026-05-25T22:43:55Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -12531,7 +12551,8 @@ prs:
   title: 'Claude-based regression test: CLI output rendering at varied terminal widths'
   branch: pm/pr-2c060b2-claude-based-regression-test-cli-output-rendering-
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-c77561b
   description: "## Goal\n\nAdd a Claude-driven regression scenario that exercises\
     \ pm's CLI listing commands at randomly-chosen terminal widths and inspects the\
     \ rendered output for layout bugs.\n\n## Motivation\n\nThis kind of bug is hard\
@@ -12582,7 +12603,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T12:32:08.900344+00:00'
-  updated_at: '2026-05-14T14:49:48.502061+00:00'
+  updated_at: '2026-05-26T00:28:07.624026+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -20517,6 +20538,7 @@ prs:
   status: pending
   depends_on:
   - pr-ff9b728
+  - pr-c77561b
   description: 'Claude-driven regression-test markdowns covering the watcher / observation
     surfaces, REFRAMED for Phase 11: the surfaces are now the single PLAN AUTO-START
     WATCHER (pr-ff9b728) + the sign-off step (pr-2d5f712), not the two old impl watchers.
@@ -20552,7 +20574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:12.969486+00:00'
-  updated_at: '2026-05-25T15:41:40.689954+00:00'
+  updated_at: '2026-05-26T00:28:09.173957+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -20564,6 +20586,7 @@ prs:
   status: pending
   depends_on:
   - pr-ff9b728
+  - pr-c77561b
   description: 'Claude-driven regression-test markdown covering the auto-sequence
     chain (pr-e58459b) — now start -> review -> QA -> SIGN_OFF -> merge after Phase
     11. Exercises every pause/transition on both entry points (TUI O keypress + pm
@@ -20597,7 +20620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:39.950664+00:00'
-  updated_at: '2026-05-25T15:41:42.173225+00:00'
+  updated_at: '2026-05-26T00:28:11.367123+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23145,6 +23168,17 @@ prs:
       unrelated hook-installer failure).'
     created_at: '2026-05-26T01:26:28Z'
     last_edited: '2026-05-26T01:26:28Z'
+  - id: note-094efa5
+    text: 'QA NEEDS_WORK: sign_off becomes a recognized status with its own icon across
+      every surface, and a: NEEDS_WORK; pm pr signoff transitions a QA PR, opens the
+      two-pane window, dedups on re-run,: NEEDS_WORK; auto-sequence advances a QA
+      PASS into sign_off and routes on the verdict, always: NEEDS_WORK; a manual verdict
+      is adopted by a later auto-sequence run, manual never mutates: PASS; concurrent
+      access to the shared sign-off state (project.yaml record, the window,: NEEDS_WORK;
+      GitHub sync preserves a local sign_off refinement while still detecting a real:
+      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-ad009382b7b0e6d6)'
+    created_at: '2026-05-25T23:42:58Z'
+    last_edited: '2026-05-25T23:42:58Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
@@ -23417,6 +23451,128 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-7ab0a99
+  plan: bugs
+  title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
+    fails to launch (masks a dead run as a verdict)'
+  branch: pm/pr-7ab0a99-bug-qa-records-spurious-input-required-when-a-scen
+  status: pending
+  depends_on:
+  - pr-4265093
+  description: '## Symptom
+
+    When a QA scenario''s worker cannot be launched (e.g. `podman exec` fails on keyring/quota
+    exhaustion — see the container-leak bug), the orchestrator records the scenario
+    as INPUT_REQUIRED and the pane closes — indistinguishable from a genuine human-judgment
+    INPUT_REQUIRED. A dead run masquerades as a real verdict.
+
+
+    ## Observed (#225 QA)
+
+    s2–s6 recorded INPUT_REQUIRED with EMPTY verdict_reason, panes gone, no captures,
+    transcript_path=None — because the workers never started (keyring exhaustion).
+    s1/s7 stuck "running" forever; overall never settled. There was no way to tell
+    from qa_status that the scenarios hadn''t actually run.
+
+
+    ## Fix
+
+    - Distinguish LAUNCH/EXEC FAILURE from a real verdict: if container create/exec
+    fails, record an explicit error state (or INPUT_REQUIRED with reason "container
+    exec failed: <stderr>"), not a silent fallback.
+
+    - Record the launch error as the verdict reason (ties to pr-b59f0c7 — capture
+    reason strings).
+
+    - Persist each scenario''s transcript to the per-PR host captures dir so post-hoc
+    triage works even after panes/containers churn (today only some scenarios write
+    captures; failed ones write nothing).
+
+    - A scenario stuck "running" with a dead pane/container should time out to an
+    error, not hang the overall verdict indefinitely.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T21:41:47.459945+00:00'
+  updated_at: '2026-05-25T22:43:57.109042+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-a2edde7
+    text: 'ERROR MESSAGE must include the remediation. When this PR surfaces a container
+      launch/exec failure (instead of a spurious INPUT_REQUIRED), the message must
+      be ACTIONABLE — capture the exec stderr AND name the likely fix. Specifically
+      detect the keyring case (''unable to create session key: disk quota exceeded'')
+      and emit e.g.: ''QA scenario could not launch — podman exec failed: keyring
+      quota exhausted (rootless subuid at kernel.keys.maxkeys=200). Fix: reap orphaned
+      containers (pm session cleanup / pr-1139060) and/or raise kernel.keys.maxkeys
+      & kernel.keys.maxbytes via sysctl.'' Generally: surface stderr + most-likely
+      remediation in the error/verdict-reason so a human (or watcher) can act without
+      archaeology.'
+    created_at: '2026-05-25T22:43:57Z'
+    last_edited: '2026-05-25T22:43:57Z'
+- id: pr-fa9f172
+  plan: improvements
+  title: 'Self-documenting + consistent pm commands: complete --help, actionable errors,
+    unified flags'
+  branch: pm/pr-fa9f172-self-documenting-consistent-pm-commands-complete-h
+  status: pending
+  depends_on: []
+  description: 'Make pm''s command surface self-documenting so an operator — human
+    OR a driving Claude session — can go from "I know the task" to "I know the exact
+    command" without reading source. Motivating failure: restarting QA needed `pr
+    qa fresh <id>`, but `pm pr qa --help` didn''t list the `fresh` mode, and `--fresh`
+    is a flag on `pr start`/`pr review` yet a positional mode on `qa` — so the restart
+    path was undiscoverable and led to a workaround (rm + TUI-restart). The absence
+    in help is the bug.
+
+
+    THREE CHANGES:
+
+    1. Complete + accurate --help for every command/subcommand. Each command lists
+    ALL its real subcommands/modes/options (e.g. `pr qa` must show the `fresh` mode),
+    and shows the CLI <-> command-bar <-> TUI-keybinding equivalents where they exist
+    (e.g. "fresh restart = `pr qa fresh <id>` = TUI `z t`"). The command-bar help
+    should match.
+
+
+    2. Self-documenting error messages. Every "wrong state / already running / must
+    use the TUI / not found / needs --flag" error names the EXACT corrective command
+    (and TUI/keybinding equivalent). E.g. "QA already running for <id> — restart with
+    `pr qa fresh <id>` (TUI: select the PR, press z t)." Generalizes pr-7ab0a99''s
+    principle (surface remediation in the error) to all user-facing errors.
+
+
+    3. Consistent flags/verbs across `pr start` / `pr review` / `pr qa` / `pr merge`.
+    Same concept -> same flag: accept `--fresh` everywhere (so `pr qa <id> --fresh`
+    ≡ `pr qa fresh <id>`); align verb/option naming. Reduces wrong guesses.
+
+
+    ALSO: sweep the whole command surface (CLI + command-bar) for additional inconsistencies
+    and out-of-date / inaccurate help text and fix them. (Ongoing detection of this
+    drift is the job of the regression test in [SIBLING]: plan-regression help-consistency
+    regression.)
+
+
+    Known inconsistency to fix as part of this: the plan is named `improvements` but
+    docs/prompts/plans refer to `plan=ux` (e.g. the watchers plan, the improvement-fix
+    watcher) — reconcile to one name.
+
+
+    Files: pm_core/cli/* (help strings + error messages), pm_core/tui/pr_view.py (command-bar
+    parsing + errors), keeping CLI / command-bar / TUI in sync. Tests: help lists
+    each command''s modes/flags; key error paths include a corrective command; --fresh
+    accepted on start/review/qa/merge.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T23:07:46.493552+00:00'
+  updated_at: '2026-05-25T23:07:46.493552+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-71e9ec7
   plan: bugs
   title: 'Bug: review-window diff pane pipes through `less -R` with no fallback —
@@ -23439,6 +23595,105 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-26T00:28:00.384462+00:00'
   updated_at: '2026-05-26T00:28:00.384462+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3ca6b36
+  plan: plan-regression
+  title: 'Regression test: CLI/command-bar help completeness, flag consistency, and
+    stale-help detection'
+  branch: pm/pr-3ca6b36-regression-test-cli-command-bar-help-completeness-
+  status: pending
+  depends_on:
+  - pr-c77561b
+  description: 'A Claude-driven regression test that audits pm''s command surface
+    and flags drift, so help/flag/error inconsistencies don''t recur after pr-fa9f172
+    fixes them. Authored as a durable regression test under pm/qa/regression/ and
+    scheduled by the discovery supervisor (pr-271cb3a); files improvement/bug PRs
+    when it finds drift.
+
+
+    CHECKS:
+
+    1. --help completeness: each command''s --help lists all its real subcommands/modes/options
+    (would have caught "pr qa"''s missing "fresh" mode). Compare the declared CLI
+    surface (click commands/params) against what --help renders, and against the command-bar
+    grammar.
+
+    2. Flag consistency across sibling commands: the same concept uses the same flag/verb
+    (e.g. --fresh on start/review/qa/merge; no positional-vs-flag divergence for the
+    same idea).
+
+    3. Error-message actionability: common wrong-state errors (already running, wrong
+    status, needs-TUI, not-found) name a corrective command — spot-checked by driving
+    the error and asserting the message includes a runnable command.
+
+    4. Stale help: help text doesn''t reference removed/renamed commands, flags, or
+    plans (e.g. "plan=ux" when the plan is "improvements").
+
+
+    Depends on pr-06a96fa (the regression rewrite — scenarios bind to regression tests
+    as their flow driver); authored as an existing-regression bind or NEW_REGRESSION
+    (pr-2680fbf) per the Phase 10 model. Implements the ongoing audit for pr-fa9f172.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T23:07:48.012538+00:00'
+  updated_at: '2026-05-25T23:10:19.960257+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c77561b
+  plan: plan-regression
+  title: Port the regression-test corpus to the instruction + artifact recipe format
+    under pm/qa
+  branch: pm/pr-c77561b-port-the-existing-regression-test-corpus-to-the-ne
+  status: pending
+  depends_on:
+  - pr-7d5d036
+  description: 'Port the existing regression-test corpus in pm/qa/regression/*.md
+    to the structured format that uses INSTRUCTION + ARTIFACT files under pm/qa, instead
+    of each test inlining its own setup/tools/capture.
+
+
+    Today: each regression test (e.g. pm/qa/regression/command-dedup.md) is monolithic
+    — it inlines its background, "Available Tools", setup, and capture/steps. The
+    reusable building blocks already exist but aren''t used by the regression corpus:
+    pm/qa/instructions/ (setup recipes, e.g. tui-manual-test.md) and pm/qa/artifacts/
+    (capture recipes, e.g. cli-recording.md, tmux-screen-recording.md, web-ui-recording.md).
+
+
+    Scope:
+
+    - Decompose each existing regression test to REFERENCE shared instruction (setup)
+    and artifact (capture) files rather than inlining them.
+
+    - Factor recurring setup/tool/capture blocks into new pm/qa/instructions/ and
+    pm/qa/artifacts/ entries where they don''t exist yet.
+
+    - Establish the canonical "instruction + artifact" regression-test template that
+    newly-authored regression tests are written against (pr-3ca6b36 help-consistency,
+    pr-2c060b2 CLI widths, pr-70d02ed watcher behavior, pr-a1f267a auto-sequence pauses)
+    — they depend on this PR.
+
+
+    The instruction/artifact recipe format already exists (shipped earlier), so this
+    is a corpus refactor, not a new mechanism — no hard dependency on the Phase 10
+    binding chain.
+
+
+    Reconciliation with Phase 10: this is the regression test''s INTERNAL structure
+    (built from instruction+artifact recipes); Phase 10''s "scenarios bind to a regression
+    test (INSTRUCTION+ARTIFACT is a scenario-level fallback)" is the SCENARIO layer
+    above it. They compose — scenarios bind to regression tests, regression tests
+    are built from instruction+artifact recipes. (Confirm this is the intended relationship.)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T23:10:18.419956+00:00'
+  updated_at: '2026-05-26T00:28:05.814378+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
