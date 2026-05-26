@@ -374,9 +374,13 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
     if data.get("error"):
         lines.append(f"QA error: {data['error']}")
     scenarios = data.get("scenarios") or []
+    if isinstance(scenarios, dict):
+        scenarios = list(scenarios.values())
     if scenarios:
         lines.append("")
         for s in scenarios:
+            if not isinstance(s, dict):
+                continue
             idx = s.get("index", "?")
             title = s.get("title", "")
             verdict = s.get("verdict", "?")

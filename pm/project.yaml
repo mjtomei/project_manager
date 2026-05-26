@@ -23208,6 +23208,23 @@ prs:
       the venv and export PYTHONPATH before pm pr list.'
     created_at: '2026-05-26T02:03:18Z'
     last_edited: '2026-05-26T02:03:18Z'
+  - id: note-bdce532
+    text: 'QA scenario 14 (concurrent sign-off resources) PASS on real local-backend
+      surface across all 3 triples. Triple 1: two concurrent `pm pr signoff` -> exactly
+      one signoff-<id> window (Opened/Switched split under per-PR launch flock), single
+      workdir key, valid yaml, flock file present, both exit 0. Triple 2: two concurrent
+      `pm pr signoff-record` with different verdicts -> single well-formed {verdict,sha,ts,origin}
+      mapping, exactly one verdict icon on pm pr list, both exit 0. Triple 3: 8 trials
+      racing `pm pr auto-sequence` (apply SIGNOFF_IMPL bounce) vs out-of-band `pm
+      pr edit --status merged` -> every trial status=merged (never clobbered to in_progress),
+      zero leaked qa windows, zero leaked pm pr (qa-run-bg|review|signoff) processes,
+      valid yaml, no tracebacks. Acknowledged TOCTOU per note-3055e3f: in trials where
+      apply_signoff_hop won the race, a transient impl pane can persist (pr_start
+      fresh=True relaunch on a now-merged PR) — not a "loop" process and not in the
+      THEN pgrep pattern; deeper fix (out-of-band-merge sweeps in-flight signoff/impl
+      windows too) belongs to pr-ff9b728. Captures: /pm-captures/scenarios/14/.'
+    created_at: '2026-05-26T01:59:02Z'
+    last_edited: '2026-05-26T01:59:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
