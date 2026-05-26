@@ -22624,7 +22624,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T01:02:33.677023+00:00'
+  updated_at: '2026-05-26T01:03:52.530906+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -23049,6 +23049,48 @@ prs:
       bug PRs are pr-3f85ad7/pr-71e9ec7.'
     created_at: '2026-05-26T01:02:33Z'
     last_edited: '2026-05-26T01:02:33Z'
+  - id: note-da24b19
+    text: 'QA scenario-7 (sign_off ready_to_merge gate) refiner findings: (1) auto-sequence
+      qa->sign_off gate only reads ~/.pm/workdirs/qa/<id>-*/qa_status.json overall==PASS
+      (latest_qa_status_path, tag-independent), so the QA-passed precondition is bootstrappable;
+      full upstream review+QA loop is out of scope here. (2) FAKE-claude signoff pane
+      emits SIGNOFF_MERGE into the transcript but does NOT run the prompt step `pm
+      pr signoff-record` (it is not a real agent) -> pr["signoff"] stays empty after
+      launch, so the TUI node shows the SPINNER until the NEXT auto-sequence tick
+      adopts the transcript verdict and records it (origin=auto-sequence, sha=HEAD).
+      This makes the spinner(triple2)->ready_to_merge(triple3) ordering natural. (3)
+      captures_dir is session-tag scoped by GIT ROOT; the evidence pane runs `pm qa
+      captures-path` from the PR WORKDIR (a worktree = different git root/tag than
+      the main test repo) so seed impl/ + scenarios/ captures from inside the workdir,
+      not the main repo. (4) impl/ captures are produced only by the bug-fix impl
+      phase (bug_fix_prompts $CAP/impl/pre-fix,post-fix), never by the QA loop, so
+      they must be seeded. (5) static graph `pm pr graph` and `pm status` show only
+      the sign_off STATUS icon (sunicode), NOT the verdict icon; verdict icon (SIGNOFF_MERGE=triangle)
+      appears only in `pm pr list` [sign_off <icon>] and the TUI tech-tree node. (6)
+      evidence pane pipes through `less -R` if present.'
+    created_at: '2026-05-26T00:51:05Z'
+    last_edited: '2026-05-26T00:51:05Z'
+  - id: note-4e29587
+    text: 'QA scenario-7 (sign_off ready_to_merge gate) NEEDS_WORK->fixed: the sign-off
+      ROUTER (Claude) pane started in the wrong cwd. launch_signoff_window created
+      the evidence pane in the workdir (new_window_get_pane -c workdir) but split
+      the router pane with split_pane_at(...) WITHOUT cwd; tmux starts a -c-less split
+      in the server start dir (the main repo on the base branch), not the source pane
+      cwd. Observed: router pane cwd = main repo (master), so its prompt-instructed
+      `git diff {base}...HEAD` returned EMPTY and `pm qa captures-path` resolved to
+      the wrong git-root/tag -> router would review nothing. Fix: pass cwd=workdir
+      to split_pane_at in signoff.py (now both panes in workdir). Side benefit: the
+      fake/real transcript now lands at the symlink target dir (fake cwd==workdir==_claude_project_dir(cwd)
+      used for the symlink), so the dangling-symlink + verdict_transcript glob-fallback
+      (pr-488b748 band-aid) is no longer exercised for the normal path. Verified real
+      tmux surface: pre-fix router cwd=mainrepo/empty-diff -> post-fix router cwd=workdir/diff
+      shows change; full flow advanced:sign_off -> ready_to_merge unchanged. Added
+      regression test_signoff.py::TestWindowLaunchWorkdir (fails pre-fix). NOTE: _launch_review_window
+      (pr.py:1281) review-loop split has the same -c-less split pattern (pr-3f85ad7/companion
+      cds explicitly; review claude pane may have the same latent wrong-cwd) - out
+      of scope here.'
+    created_at: '2026-05-26T01:03:52Z'
+    last_edited: '2026-05-26T01:03:52Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
