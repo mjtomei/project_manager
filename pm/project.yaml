@@ -22618,7 +22618,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T02:54:23.263954+00:00'
+  updated_at: '2026-05-26T17:06:25.050331+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22846,6 +22846,71 @@ prs:
       and fake-claude scriptability of router verdicts: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-85a527f2b04265f3)'
     created_at: '2026-05-26T03:41:03Z'
     last_edited: '2026-05-26T03:41:03Z'
+  - id: note-738679f
+    text: 'Scope completion for THIS PR (#225) — missing TUI keybinding for the sign-off
+      action.
+
+
+      GAP
+
+
+      `pm_core/tui/app.py` declares `Binding(...)` entries for every other lifecycle
+      action — `s` start, `d` review, `t` QA, `g` merge, `O` auto-sequence — but no
+      key for sign-off. As a result the `?` help modal (sourced from `show=True` bindings)
+      does not list sign-off, even though the rest of #225''s surface (status icon,
+      sign_off in valid_statuses, `pm pr list` glyph, TUI tech tree, verdict icons,
+      recorded record / adoption rule, sign-off window launcher) IS in place.
+
+
+      This is the same type-hygiene shape as the missed `signoff` session type registration
+      (note-358c351): when adding a new INSTANCE of an existing concept (here: a lifecycle
+      action key), the surrounding siblings have to be checked for consistency. The
+      siblings here are the other lifecycle keys; the consistent move is one more
+      `Binding(...)` line + a corresponding `action_<name>` handler + a help entry.
+
+
+      FIX (small, single-commit on this PR)
+
+
+      1) `pm_core/tui/app.py`: add a `Binding(...)` for the sign-off action. Suggested
+      letter `i` (the only obvious unused lowercase, mnemonic "sign-off **i**t"; alternatives
+      `Y` or `K` if you want a capital). `show=True` so it appears in `?` help.
+
+
+      2) Add the matching `action_<name>` handler on the App that launches `pm pr
+      signoff <selected_pr_id>` through the existing pane-launch / command path used
+      by `start_qa_on_pr` and the other lifecycle actions. Re-use `_launch_pane` /
+      the role-based dedup so a stale sign-off window for the same PR is reaped first
+      (consistent with `pr-3a8111d`-class concerns and the `signoff-<id>` prefix cleanup
+      from `f0cd8cff`).
+
+
+      3) Update the `?` help modal label (the binding''s third arg) — something concise
+      like "Sign-off" so the help row reads like the others.
+
+
+      4) Acceptance: the existing #225 QA scenarios already cover the sign-off window
+      launch; one small scenario or unit test should additionally assert (a) the keybinding
+      is present in the `BINDINGS` tuple with `show=True`, and (b) the help-modal
+      output (the existing `show_help` action''s output / its rendered widget) includes
+      the new row. No new prompt changes.
+
+
+      NON-GOAL
+
+
+      The command bar already accepts `pr signoff <id>`; that''s not changing. This
+      is only about adding the direct key + making it discoverable through `?`.
+
+
+      ROLLBACK / RISK
+
+
+      Trivial: 1 line in the BINDINGS tuple + 1 method + a help-row assertion. No
+      other lifecycle action''s behavior changes. If the chosen letter conflicts with
+      an existing local mode somewhere I missed, swap it.'
+    created_at: '2026-05-26T17:06:24Z'
+    last_edited: '2026-05-26T17:06:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
