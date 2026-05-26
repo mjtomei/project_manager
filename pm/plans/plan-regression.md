@@ -218,12 +218,12 @@ Injects a dep-merge preamble into the **implementation session's** start prompt 
 Three Claude-driven regression-corpus expansion PRs, filed together. Same pattern (markdown in `pm/qa/regression/`, run via `launch_qa_item`, scheduled by the discovery supervisor `pr-271cb3a`), split for tight QA scope per PR. All three are independent of Phase 10 code-wise but land more usefully after `pr-06a96fa` (downstream QA scenarios exercising these surfaces bind to these regression tests via `REGRESSION: <id>` rather than INSTRUCTION+ARTIFACT).
 
 #### PR: Claude-based regression test — CLI output rendering at varied terminal widths
-`pr-2c060b2` (pending)
+`pr-2c060b2` (depends on: pr-c77561b)
 
 `pm/qa/regression/cli-output-widths.md` — resizes a tmux pane to randomly-chosen widths (60–180, seeded RNG, plus edge values), captures `pm pr list` / `pm pr ready` / `pm plan list` output, asks Claude to flag layout bugs (overflow, mid-word breaks, miscounted wide-char icons) and improvements (technically-correct-but-ugly). Motivated by two real bugs from a single manual session that unit tests cannot enumerate.
 
 #### PR: Regression coverage — watcher behavior and review session
-`pr-70d02ed` (depends on: pr-ff9b728)
+`pr-70d02ed` (depends on: pr-ff9b728, pr-c77561b)
 
 Reframed for Phase 11: the surfaces are now the single **plan auto-start watcher** + the **sign-off step**, not the two old impl watchers. Four markdowns:
 - `discovery-supervisor-tick.md` — discovery supervisor (`pr-271cb3a`, unchanged): work-log read, regression-test launch in watcher window (`pr-97ddabf`), dedup + reconcile, READY emit; variants for cold start / rolling context / in-flight continuation
@@ -234,7 +234,7 @@ Reframed for Phase 11: the surfaces are now the single **plan auto-start watcher
 Folds in the opportunistic audit: as scenarios run, Claude flags *other* uncovered surfaces and files improvement PRs, complementing `pr-f4dc8a2`'s static auditor.
 
 #### PR: Regression coverage — auto-sequence chain pause conditions
-`pr-a1f267a` (depends on: pr-ff9b728)
+`pr-a1f267a` (depends on: pr-ff9b728, pr-c77561b)
 
 `pm/qa/regression/auto-sequence-halt-conditions.md` — exercises every pause/transition of the chain (`pr-e58459b`, now `start → review → QA → sign_off → merge`) on both entry points (TUI `O` keypress + `pm pr auto-sequence <id>` CLI): impl idle-no-spec, review INPUT_REQUIRED, QA INPUT_REQUIRED, the **sign_off stage** (qa-finalize enters sign_off, router runs, bounce routes back through review+qa), **always-gate-at-merge** (a verified PASS yields `ready_to_merge` and the chain stops — sign-off never merges; the plan watcher decides merge vs hold per its per-plan config, replacing the old auto-merge=false), review NEEDS_WORK loop, QA NEEDS_WORK loop, max-iterations / no-progress stop (`pr-ed10ac4`). Verifies each halts correctly and resumes from the right state.
 
@@ -361,11 +361,11 @@ Let the planner add scenarios beyond the initial plan and let users re-run NEEDS
 Manual testing: drive the keypress flow against a real run with at least one NEEDS_WORK and one INPUT_REQUIRED scenario; also exercise an add-scenario that triggers NEW_REGRESSION and verify the regression file lands on the branch before the scenario runs; INPUT_REQUIRED is appropriate for the human-judged "load this plan block" moments.
 
 ### PR: Port the regression-test corpus to the instruction + artifact recipe format under pm/qa
-`pr-c77561b` (no hard deps — the instruction/artifact recipe format already exists)
+`pr-c77561b` (depends on: pr-7d5d036)
 
 Today each regression test in `pm/qa/regression/*.md` is **monolithic** — it inlines its own background, "Available Tools", setup, and capture/steps (e.g. `command-dedup.md`). The reusable building blocks already exist but the corpus doesn't use them: `pm/qa/instructions/` (setup recipes, e.g. `tui-manual-test.md`) and `pm/qa/artifacts/` (capture recipes — `cli-recording.md`, `tmux-screen-recording.md`, `web-ui-recording.md`). This PR ports the corpus to that structured format: decompose each test to **reference** shared instruction (setup) + artifact (capture) files, factoring recurring blocks into new `instructions/`/`artifacts/` entries where missing. It establishes the canonical instruction+artifact regression-test template that newly-authored regression tests are written against and **depend on** (`pr-3ca6b36`, `pr-2c060b2`, `pr-70d02ed`, `pr-a1f267a`).
 
-This is a corpus refactor, not a new mechanism (the recipe format shipped earlier), so it has no hard dependency on the Phase 10 binding chain. **Reconciliation with Phase 10:** instruction+artifact recipes are the regression test's *internal* structure; Phase 10's "scenarios bind to a regression test (scenario-level INSTRUCTION+ARTIFACT is the fallback)" is the *scenario layer* above it — they compose (scenarios bind to regression tests; regression tests are built from instruction+artifact recipes).
+This is a corpus refactor, not a new mechanism (the recipe format shipped earlier). It depends on the **runner cleanup** (`pr-7d5d036`) — that PR is what lets a test resolve its setup via an `INSTRUCTION:` reference and runs it isolated — but **not** on the Phase 10 binding chain. Kept separate from `pr-7d5d036`: that fixes the runner/harness; this restyles the corpus content. **Reconciliation with Phase 10:** instruction+artifact recipes are the regression test's *internal* structure; Phase 10's "scenarios bind to a regression test (scenario-level INSTRUCTION+ARTIFACT is the fallback)" is the *scenario layer* above it — they compose (scenarios bind to regression tests; regression tests are built from instruction+artifact recipes).
 
 ### PR: QA library auditor — propose regression-test fills (with attached mocks)
 `pr-f4dc8a2` (pending)
