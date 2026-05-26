@@ -102,8 +102,8 @@ def _load_sidecar(path: Path) -> Optional[dict]:
         return None
     try:
         data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        _log.warning("Unreadable sidecar at %s", path, exc_info=True)
+    except (OSError, ValueError) as exc:
+        _log.warning("Unreadable sidecar at %s: %s", path, exc)
         return None
     return data if isinstance(data, dict) else None
 
