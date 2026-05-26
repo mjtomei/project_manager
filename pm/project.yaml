@@ -22624,7 +22624,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T01:03:52.530906+00:00'
+  updated_at: '2026-05-26T01:06:15.666893+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -23091,6 +23091,30 @@ prs:
       of scope here.'
     created_at: '2026-05-26T01:03:52Z'
     last_edited: '2026-05-26T01:03:52Z'
+  - id: note-e411a86
+    text: 'QA s9 (manual sign-off) PASS after fixing evidence-pane graceful-degradation
+      (commit 5686bc21->rebased). BUG: _evidence_pane_cmd chained sections with &&
+      and did CAP="$(pm qa captures-path <id> 2>/dev/null)"; from the signoff workdir
+      clone (which lacks pm/project.yaml when project state was never committed) captures-path
+      exits 1 -> the && chain aborts -> pane blanks after the captures header (no
+      "(no captures found)"/qa-status/diff). Fixed: || true on CAP + both git diff
+      calls so each section degrades independently (test_signoff 36/36). TESTABILITY
+      GOTCHA (not a product bug, NOT fixed): the MANUAL `pm pr signoff` claude pane
+      self-EXITS under fake-claude `{"_all":{}}` — manual path passes transcript=None
+      so build_claude_shell_cmd generates NO session_id, and run_fake_claude only
+      _hold_open()s `if no_verdict or session_id` (fake_claude.py:550); _all:{} resolves
+      signoff (a verdict type) to default SIGNOFF_MERGE, so the fake emits the verdict
+      and exits, collapsing the 2-pane window to 1. Real claude (interactive) persists,
+      so production is fine. To observe the live 2-pane window via the fake, use remain-on-exit
+      (capture aid) OR give signoff an explicit empty-verdicts entry to force a true
+      no-verdict mock that holds open. Verified window structure (2 panes evidence-LEFT
+      %18 / claude-RIGHT %19, registry roles signoff-evidence/signoff-claude) this
+      way. Also: triple 7 impl-relaunch + "sign_off: returning to impl" needs project
+      state committed on master (pr_start gate) — scenario setup omits pm push/commit;
+      adoption CORE (adopt fresh record, sign_off->in_progress, consume record, retire
+      window, no relaunch) verified regardless.'
+    created_at: '2026-05-26T01:06:15Z'
+    last_edited: '2026-05-26T01:06:15Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
