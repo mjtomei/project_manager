@@ -61,6 +61,16 @@ class TestResolveModel:
     def test_unknown_session_type(self):
         assert resolve_model("unknown-type") is None
 
+    def test_signoff_falls_back_to_review(self):
+        # signoff inherits review's model when only review is configured.
+        data = {"project": {"model_config": {"session_models": {"review": "sonnet"}}}}
+        assert resolve_model("signoff", project_data=data) == "sonnet"
+
+    def test_signoff_explicit_overrides_fallback(self):
+        data = {"project": {"model_config": {
+            "session_models": {"review": "sonnet", "signoff": "opus"}}}}
+        assert resolve_model("signoff", project_data=data) == "opus"
+
 
 class TestEffortResolution:
     def test_defaults_are_none(self):
