@@ -18904,7 +18904,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T12:59:18.511929+00:00'
-  updated_at: '2026-05-13T13:02:50.142839+00:00'
+  updated_at: '2026-05-26T01:03:22.311363+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -18917,6 +18917,23 @@ prs:
       under this PR.'
     created_at: '2026-05-13T13:02:49Z'
     last_edited: '2026-05-13T13:02:49Z'
+  - id: note-abc9a5e
+    text: 'Root-cause insight from pr-2d5f712 QA (scenario 8): the "transcript symlink
+      slug differs from Claude runtime cwd" stall is caused by panes being SPLIT off
+      an evidence/diff pane WITHOUT passing cwd= to tmux split_pane_at. The split
+      runs immediately after new_window_get_pane creates the first pane with -c <workdir>,
+      before tmux pane_current_path settles, so the split races and the Claude pane
+      inherits the SESSION DEFAULT dir (umbrella project) instead of the workdir →
+      real Claude runs in the wrong repo AND the transcript symlink (computed from
+      workdir cwd) is broken, which is what forces the _read_transcript_text session-id
+      glob band-aid. Source fix is one line: pass cwd=workdir to split_pane_at. Done
+      for sign-off in pr-2d5f712 (signoff.py launch_signoff_window, commit ed62bd43,
+      pre/post-fix captures). The SAME unfixed race exists in _launch_review_window
+      (pr.py:1281: split_pane_at(diff_pane,"h",claude_cmd,background=True) with no
+      cwd) — applying cwd=workdir there too would resolve the review-window instance
+      of this bug at the source (complements/may obsolete the band-aid).'
+    created_at: '2026-05-26T01:03:22Z'
+    last_edited: '2026-05-26T01:03:22Z'
 - id: pr-8efa789
   plan: bugs
   title: QA verdict detection misses verdict when /loop wakeup adds a no-verdict turn
