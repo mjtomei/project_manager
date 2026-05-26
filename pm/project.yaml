@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8015c1d
+  active_pr: pr-71e9ec7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22607,7 +22607,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-25T23:34:50.750112+00:00'
+  updated_at: '2026-05-26T00:28:15.976684+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
   merged_at: null
@@ -22955,6 +22955,30 @@ prs:
       MERGED→"Updated 1 PR(s)."/"Merged: <id>"+status merged+merged_at.'
     created_at: '2026-05-25T23:00:36Z'
     last_edited: '2026-05-25T23:00:36Z'
+  - id: note-2070fa2
+    text: 'review-loop i1: fixed tree_layout._activity_sort_key omitting sign_off
+      (QA refiner had flagged it) — within-layer node sort gave sign_off default priority
+      5, so a sign_off PR sorted AFTER a pending peer (priority 2), inconsistent with
+      _component_sort_key + spec R1 "sorts as active". Now priority 1 (same as in_review/qa).
+      Added test_sign_off_sorts_as_active + extended test_status_priority_order. Reviewed
+      rest of PR — solid: decide/apply decouple, adoption/stale-relaunch, retire-window
+      bounce guard, display gates all correct and well-tested (174 layout/tree/signoff/auto-seq
+      tests pass). Two out-of-scope items remain noted only (not fixed here): _launch_review_window
+      (pr.py:1256) has the same | less -R dependency AND the unlocked find/create
+      window race that signoff now guards against.'
+    created_at: '2026-05-26T00:23:56Z'
+    last_edited: '2026-05-26T00:23:56Z'
+  - id: note-5757682
+    text: 'review-loop c4e0 i2: PR is solid (174 targeted tests pass; sign_off across
+      all surfaces, decide/apply decouple + auto-sequence-only invariant, adoption/stale,
+      concurrency locks, display gates all correct). Converted the two prior out-of-scope
+      review-window notes into tracked bug PRs: pr-3f85ad7 (_launch_review_window
+      unlocked find/create dup-window race — same race signoff fixed with a per-PR
+      flock) and pr-71e9ec7 (review diff pane | less -R has no fallback, blank pane
+      where less absent — same fix signoff applied with command -v less). No in-scope
+      changes needed.'
+    created_at: '2026-05-26T00:28:15Z'
+    last_edited: '2026-05-26T00:28:15Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
@@ -23196,6 +23220,59 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-25T17:08:54.875615+00:00'
   updated_at: '2026-05-25T17:08:54.875615+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3f85ad7
+  plan: bugs
+  title: 'Bug: _launch_review_window has unlocked find/create window race (duplicate
+    review windows under concurrency)'
+  branch: pm/pr-3f85ad7-bug-launch-review-window-has-unlocked-find-create-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py:_launch_review_window (~line 1139) does find_window_by_name
+    -> new_window_get_pane with NO lock around the check-then-act, so two concurrent
+    `pm pr review --fresh` subprocesses (or auto-sequence + manual) can each find
+    no window and each create one -> two review-<id> windows, select-window ambiguity,
+    spinner never settles. This is the SAME race pr-2d5f712 fixed for the sign-off
+    window with a per-PR fcntl flock (.signoff-launch-<session>-<pr>.lock in signoff.launch_signoff_window)
+    and that _ensure_workdir now guards with .workdir-<pr>.lock. Memory claims pr-8409c64
+    added a _review_window_launch_lock but it is NOT present on master. Fix: mirror
+    signoff.launch_signoff_window — wrap the existing-window check + new_window_get_pane
+    in an exclusive per-PR launch lock so the loser takes the existing-window fast
+    path. Repro: launch two `pm pr review <id> --fresh` near-simultaneously.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-26T00:27:53.724681+00:00'
+  updated_at: '2026-05-26T00:27:53.724681+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-71e9ec7
+  plan: bugs
+  title: 'Bug: review-window diff pane pipes through `less -R` with no fallback —
+    blank pane where less is absent'
+  branch: pm/pr-71e9ec7-bug-review-window-diff-pane-pipes-through-less-r-w
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py:_launch_review_window line ~1256 ends the diff-pane
+    command with `; }} | less -R`. On any host/container without `less` on PATH the
+    whole left review pane renders blank (just a shell prompt) — the diff/status data
+    resolve fine but are swallowed by the failed pager. pr-2d5f712 fixed the IDENTICAL
+    pattern for the sign-off evidence pane (signoff._evidence_pane_cmd) with `| if
+    command -v less >/dev/null 2>&1; then less -R; else cat; fi`. Apply the same guard
+    to the review diff pane. Distinct from pr-c3762f7 (which installs less in containers)
+    — this is a code-level robustness fix that also covers non-container hosts lacking
+    less. Repro: drop less from PATH, run `pm pr review <id>`, observe blank diff
+    pane.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-26T00:28:00.384462+00:00'
+  updated_at: '2026-05-26T00:28:00.384462+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
