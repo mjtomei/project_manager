@@ -2964,6 +2964,17 @@ def run_qa_sync(
         state.latest_output = f"PR {pr_id} not found in project data"
         return state
 
+    # Re-check status against freshly loaded data, as late as possible before
+    # any QA window is created: an out-of-band status change (e.g. a GitHub
+    # sync marking the PR merged) can land concurrently with the sign_off->qa
+    # bounce that spawned this driver.  Never open a qa-<id> window or run a QA
+    # loop against an already-merged/closed PR.
+    if (live_pr.get("status") or "") in ("merged", "closed"):
+        _log.info("QA aborted: %s is %s; not running QA against a "
+                  "merged/closed PR", pr_id, live_pr.get("status"))
+        state.running = False
+        return state
+
     workdir_path = live_pr.get("workdir")
     if not workdir_path or not Path(workdir_path).is_dir():
         from pm_core.cli.helpers import _ensure_workdir
@@ -3039,6 +3050,19 @@ def run_qa_sync(
             container_mod.cleanup_orphaned_qa_containers(
                 session, state.pr_id, session_tag=state.session_tag)
 
+        # Final out-of-band status guard, immediately before any QA window is
+        # created (scenario 0 / planner).  Re-load fresh: a concurrent merge
+        # may have landed during workdir/qa-workdir setup above.  This closes
+        # the residual race where the detached driver passed the earlier
+        # status checks but the merge landed before the window appeared —
+        # never leave a qa-<id> window/loop running against a merged PR.
+        _live = store.get_pr(store.load(pm_root), pr_id) or {}
+        if (_live.get("status") or "") in ("merged", "closed"):
+            _log.info("QA aborted before window creation: %s is %s",
+                      pr_id, _live.get("status"))
+            state.running = False
+            return state
+
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.
         repo_root_early = (Path(workdir_path)
@@ -3061,6 +3085,19 @@ def run_qa_sync(
         tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path,
                             switch=False)
         time.sleep(2)  # let tmux register the new window
+
+        # Post-creation guard: a concurrent out-of-band merge can land DURING
+        # window creation / the registration sleep above, after the pre-window
+        # status checks passed.  Re-check once more and, if the PR merged/
+        # closed in the meantime, tear the just-created window(s) back down so
+        # no QA window/loop is left running against the merged PR.
+        _live = store.get_pr(store.load(pm_root), pr_id) or {}
+        if (_live.get("status") or "") in ("merged", "closed"):
+            _log.info("QA aborted after window creation: %s is %s; tearing "
+                      "down qa window", pr_id, _live.get("status"))
+            _cleanup_stale_scenario_windows(session, pr_data)
+            state.running = False
+            return state
 
         # Switch sessions that were watching the old QA window to the new one
         if sessions_on_qa:
@@ -3101,6 +3138,18 @@ def run_qa_sync(
             if not tmux_mod.pane_exists(planner_pane):
                 _log.info("Planner pane exited")
                 break
+
+            # Late out-of-band merge guard: catch a merge that lands while the
+            # planner is still running (after the pre/post-creation checks) and
+            # tear the QA window down so it isn't left running against a now-
+            # merged PR.
+            _live = store.get_pr(store.load(pm_root), pr_id) or {}
+            if (_live.get("status") or "") in ("merged", "closed"):
+                _log.info("QA aborted mid-planning: %s is %s; tearing down "
+                          "qa window", pr_id, _live.get("status"))
+                _cleanup_stale_scenario_windows(session, pr_data)
+                state.running = False
+                return state
 
             _remaining = max(0.0, deadline - time.monotonic())
             ev = _hook_events.wait_for_event(

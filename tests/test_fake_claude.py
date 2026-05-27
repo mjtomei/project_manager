@@ -598,6 +598,16 @@ class TestSessionTypeVerdicts:
         assert "INPUT_REQUIRED" in allowed
         assert "PASS" not in allowed
 
+    def test_signoff_verdicts(self):
+        allowed = SESSION_TYPE_VERDICTS["signoff"]
+        assert "SIGNOFF_MERGE" in allowed
+        assert "SIGNOFF_REQA" in allowed
+        assert "SIGNOFF_REVIEW" in allowed
+        assert "SIGNOFF_IMPL" in allowed
+        assert "SIGNOFF_BLOCKED" in allowed
+        assert "PASS" not in allowed
+        assert "QA_PLAN" not in allowed
+
     def test_impl_has_no_verdicts(self):
         assert SESSION_TYPE_VERDICTS["impl"] == ()
 

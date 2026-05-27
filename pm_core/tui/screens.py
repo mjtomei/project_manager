@@ -244,6 +244,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
                 yield Label("  [bold]d[/]  Review (zz d: loop)", classes="help-row")
                 yield Label("  [bold]g[/]  Merge PR", classes="help-row")
+                yield Label("  [bold]i[/]  Sign-off (router)", classes="help-row")
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")

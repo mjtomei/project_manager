@@ -264,6 +264,7 @@ PR_STATUS_ICONS = {
     "in_progress": "🔨",
     "in_review": "👀",
     "qa": "🧪",
+    "sign_off": "✔️",
     "merged": "✅",
     "closed": "🚫",
     "blocked": "🚫",
@@ -278,6 +279,13 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     provider so both render PRs identically.
     """
     icon = PR_STATUS_ICONS.get(p.get("status", "pending"), "?")
+    # For a sign_off PR, append the latest recorded router verdict icon.
+    verdict_str = ""
+    if p.get("status") == "sign_off":
+        from pm_core.signoff import signoff_verdict_icon, latest_signoff_verdict
+        v_icon = signoff_verdict_icon(latest_signoff_verdict(p))
+        if v_icon:
+            verdict_str = f" {v_icon}"
     deps = p.get("depends_on") or []
     dep_str = f" <- [{', '.join(deps)}]" if deps else ""
     machine = p.get("agent_machine")
@@ -294,7 +302,7 @@ def format_pr_line(p: dict, active_pr: str | None = None,
                 ts_str = f" [{ts}]"
     return (
         f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
-        f"[{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}"
+        f"[{p.get('status', '?')}{verdict_str}]{dep_str}{machine_str}{active_str}{ts_str}"
     )
 
 
@@ -316,7 +324,7 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
     # caller isn't on the doomed window but another grouped session is.
     # No recreate follows here, so parked clients stay on home.
     for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}",
-                     f"qa-{display_id}"):
+                     f"qa-{display_id}", f"signoff-{display_id}"):
         win = tmux_mod.find_window_by_name(session, win_name)
         if win:
             home_window.park_if_on(session, win["id"])
@@ -443,6 +451,7 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
 
     * ``started_at`` — set once on the first transition to ``in_progress``.
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
+    * ``signed_off_at`` — updated each time the PR enters ``sign_off``.
     * ``merged_at`` — set when the PR is ``merged``.
     """
     now = datetime.now(timezone.utc).isoformat()
@@ -451,6 +460,8 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["started_at"] = now
     elif status == "in_review":
         pr_entry["reviewed_at"] = now
+    elif status == "sign_off":
+        pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
 
@@ -695,12 +706,53 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     Returns the workdir path (str) on success, or *None* on failure.
     Updates *pr_entry["workdir"]* and persists the change when a new
     clone is created.
+
+    Provisioning is serialized per-PR with an exclusive file lock: two
+    commands that both find the workdir missing (e.g. two ``pm pr signoff``
+    racing) would otherwise both clone into the fixed ``.tmp-{pr_id}`` path and
+    corrupt each other — one ``rmtree``/moves the dir out from under the other,
+    crashing its git ops with a traceback.  The lock makes the loser wait, then
+    adopt the winner's freshly-persisted workdir instead of re-cloning.
     """
-    import shutil
+    import fcntl
 
     workdir = pr_entry.get("workdir")
     if workdir and Path(workdir).exists():
         return workdir
+
+    pr_id = pr_entry.get("id")
+    project_dir = _workdirs_dir(data)
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    lock_path = project_dir / f".workdir-{pr_id}.lock"
+    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        # Double-checked: another caller may have created and persisted the
+        # workdir while we waited for the lock.  Re-read the authoritative
+        # on-disk record and adopt it if it now exists.
+        try:
+            fresh_pr = store.get_pr(store.load(root), pr_id)
+            fresh_wd = (fresh_pr or {}).get("workdir")
+        except Exception:
+            fresh_wd = None
+        if fresh_wd and Path(fresh_wd).exists():
+            pr_entry["workdir"] = fresh_wd
+            return fresh_wd
+        return _clone_workdir(data, pr_entry, root)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
+    """Clone + check out a PR's workdir.  Caller holds the per-PR lock.
+
+    Extracted from :func:`_ensure_workdir` so the actual clone/move/checkout
+    runs under the exclusive provisioning lock.  Do not call directly — go
+    through :func:`_ensure_workdir`, which serializes concurrent callers.
+    """
+    import shutil
 
     branch = pr_entry.get("branch")
     if not branch:

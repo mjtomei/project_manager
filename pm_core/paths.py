@@ -122,6 +122,23 @@ def captures_dir(pr_id: str,
 CONTAINER_CAPTURES_MOUNT = "/pm-captures"
 
 
+def latest_qa_status_path(pr_id: str) -> Path | None:
+    """Return the most-recent ``qa_status.json`` for *pr_id*, or None.
+
+    Single source of truth for locating a PR's latest QA status file under
+    ``~/.pm/workdirs/qa/<pr_id>-*/qa_status.json`` (a fresh QA run gets a new
+    ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins).
+    Shared by the auto-sequence QA gate and the sign-off prompt/evidence
+    surfaces so they never drift.
+    """
+    qa_dir = workdirs_base() / "qa"
+    if not qa_dir.is_dir():
+        return None
+    candidates = sorted(qa_dir.glob(f"{pr_id}-*/qa_status.json"),
+                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    return candidates[-1] if candidates else None
+
+
 def sessions_dir() -> Path:
     """Return the sessions directory (~/.pm/sessions/).
 
