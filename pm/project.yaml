@@ -21919,7 +21919,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/220
   gh_pr_number: 220
   created_at: '2026-05-21T15:56:33.458586+00:00'
-  updated_at: '2026-05-25T02:59:24.487825+00:00'
+  updated_at: '2026-05-25T03:53:15.201827+00:00'
   started_at: '2026-05-25T02:46:34.752207+00:00'
   reviewed_at: null
   merged_at: null
@@ -21945,6 +21945,109 @@ prs:
       user is on the review window).'
     created_at: '2026-05-25T02:59:24Z'
     last_edited: '2026-05-25T02:59:24Z'
+  - id: note-4944a26
+    text: 'QA scenario-1 (origin-session follow) concretization findings: (1) The
+      picker "qa loop" chord (z,z,t) is ONLY reachable through the fzf chord state-machine
+      — the non-fzf numbered/shortcut fallback (session.py:2024) has no loop variant.
+      fzf is NOT installed by default; `sudo apt-get update && sudo apt-get install
+      -y fzf` works (arm64, v0.29 → picker uses its older-fzf fallback branch, drives
+      fine). (2) Drive the picker as the literal popup body command in a control pane:
+      `pm _popup-picker <session> <pr-window>` + send-keys z/z/t (the prefix+P display-popup
+      just resolves S/W via display-message and runs this exact command). No display-popup
+      overlay or asciinema client needed — select-window (the switch) and `tmux list-windows
+      -t <sess>` (the observation) both work on detached/grouped sessions. (3) Originator
+      MUST be a GROUPED session (e.g. pm-<tag>~1) to distinguish the fix from the
+      pre-fix fallback: qa_loop first-time creation pre-fix did select_window(session=BASE,
+      qa) (qa_loop.py:3083 elif), so only the base would have followed; the fix adds
+      the captured-origin branch (3075) that switches the exact grouped originator.
+      (4) Originator must be ON a PR window so the picker resolves _picked_pr (started
+      PR impl window = display_id, e.g. local backend pr-xxxx). (5) spec-gate: run
+      `pm pr spec <pr> qa` before the loop or it halts INPUT_REQUIRED. (6) Dismiss
+      timing: first-time qa has empty initial_window_ids so the spinner exits as soon
+      as ANY qa-<id>* window appears — scenario_0 launches window `qa-<id>-s0` BEFORE
+      the main window, so press q after the spinner header `── starting fresh: qa
+      for <id> ──` and before s0 appears; suppress_switch is consumed at qa_loop.py:3080.'
+    created_at: '2026-05-25T03:38:31Z'
+    last_edited: '2026-05-25T03:38:31Z'
+  - id: note-d882eea
+    text: 'QA scenario-1 (origin-session follow) PASS on real surface (2026-05-25):
+      both triples confirmed via tmux list-windows AND runtime logs. Triple1 (no dismiss):
+      consume_origin_session ...~1 → switch_sessions_to_window sessions=[grouped originator]
+      window_name=qa-<id> → select-window/switch-client rc=0; originator follows onto
+      qa-<id>, base stays on home, loop overall=PASS. Triple2 (dismiss): consume_origin_session
+      fires + consume_suppress_switch consumed=True → NO switch_sessions_to_window;
+      originator stays on impl window through the whole loop (verified ~90s past qa_loop.py:3080),
+      base stays home, loop still overall=PASS. DISMISS-TIMING GOTCHA for future runs:
+      the q-dismiss window is very tight in a fast TUI — the spinner checks window_open
+      at the TOP of each tick (tick_s=0.15) and for action==qa exits reason=window_open
+      WITHOUT reading stdin once any qa-<id>* window exists, so q must be buffered
+      before scenario_0 (qa-<id>-s0) appears. Reliable recipe: pipe-pane the picker
+      pane to a file and tight-poll that FILE (not capture-pane / not tmux list-windows
+      — both add latency) for "starting fresh"; send q the instant it appears. capture-pane-based
+      polling was consistently too slow (s0 already up). Confirms spinner keypress
+      ch=q → spinner exit reason=keypress in the picker-process log.'
+    created_at: '2026-05-25T03:53:15Z'
+    last_edited: '2026-05-25T03:53:15Z'
+  - id: note-c5684df
+    text: 'QA scenario 2 PASS (2026-05-25, real tmux surface, all 3 triples). T1 popup
+      review-loop: fzf ABSENT in QA env so used the scenario-endorsed equivalent driver
+      pm _popup-cmd (prefix+M command popup, "review loop <pr>") -> same _run_picker_command
+      capture + spinner select_window path -> $SESS followed onto review-<id>. T2
+      in-TUI z z t -> active_client_session captures lone client -> switch_sessions_to_window
+      onto qa-<id> (client follows); z z d -> capture recorded but focus stays on
+      main (review no-switch on in-TUI dispatch, by design). T3 ambiguity: active_client_session
+      ambiguous(2)->None, NO capture, qa window still created, falls back to pre-existing
+      select_window (NEVER switch_sessions_to_window w/ a guess), no traceback. NUANCE
+      for next QA: do NOT use a "-b"-suffixed grouped peer for the ambiguity test
+      — list_grouped_sessions only matches pm-native base~N naming, so a -b peer is
+      invisible to active_client_session and you get a false single-client capture.
+      Use base~1 (or a 2nd client on $SESS). Also: in the grouped-peer variant the
+      select_window fallback targets the peer ~1 (not base) because select_window->current_or_base_session
+      resolves the SHARED tui pane via tmux display-message which returns the grouped
+      peer; this is pre-existing/identical-on-master (PR only added the captured_origin
+      branch above the fallback) and is NOT a force-switch. tests/test_origin_session_capture.py
+      = 29 passed.'
+    created_at: '2026-05-25T03:48:37Z'
+    last_edited: '2026-05-25T03:48:37Z'
+  - id: note-910b782
+    text: 'QA scenario 4 (R4 fallback + E5 no-stale-leak) refiner notes: Drive R4
+      via CLI `pm pr review <pr> --fresh --review-loop --review-iteration 2` from
+      a pane INSIDE the test tmux session (no popup => consume_origin_session returns
+      None => followers_for_window falls back to sessions_on_window). Local backend
+      => window name is `review-pr-xxxxxxx` (display id = pr-id, no #). sessions_on_window
+      matches a session whose ACTIVE window == the old window even with NO attached
+      client, so a single pm session selected onto the review window is a valid "watcher"
+      (observe via `tmux display -t <base> -p #{window_id}` before/after). For E5
+      the capture MUST come from a real surface (popup/in-TUI; CLI never captures):
+      use `zz d` (in-TUI review-loop) with exactly ONE attached client (active_client_session)
+      — but action_review_pr RE-CAPTURES on every zz d press, so never press it twice
+      to stop. Killing the existing review window makes a stalled loop EXIT via PaneKilledError
+      (no recreate race), so the manual --fresh iter2 both kills iter1 and recreates
+      cleanly; keep fake-claude review on a long delay (e.g. {"review":{"verdicts":[{"verdict":"PASS","delay":120}]}})
+      so iter1 sits while you drive the manual run. The QA window-recreate path is
+      messier than review-loop (new_window does NOT kill the old same-named main QA
+      window), so prefer review-loop for the kill+recreate observation.'
+    created_at: '2026-05-25T03:34:29Z'
+    last_edited: '2026-05-25T03:34:29Z'
+  - id: note-c72177e
+    text: 'QA scenario 5 ("Reproduction regression suite passes / malformed picker
+      commands inert") REFINER_REJECT (deferred). Reason: it is a unit-suite + parser-level
+      scenario, not a user-surface one. Triple 1 = run pytest tests/test_origin_session_capture.py
+      (29 pass on this branch as of 2026-05-25, incl. test_captured_session_wins_over_late_detection
+      / test_prefers_captured_without_detecting / test_survives_launching_running_transitions)
+      — a test-harness exercise, not a real surface. Triple 2 enumerated malformed
+      strings ("", garbage, "pr foo pr-x", "tui:garbage", "pr start") CANNOT reach
+      _run_picker_command from any real entry point: the pm> popup-cmd prompt only
+      routes "pr qa"/"review-loop" forms to the picker (session.py ~2109) and the
+      PR-actions popup builds cmd_to_run from a fixed _label_to_cmd/template map,
+      so a user cannot inject garbage; "no origin session recorded" is also internal
+      runtime_state, not user-observable. Per refiner rules, do not convert into a
+      code-reading/pytest exercise. The real fix behavior (race-free origin capture
+      during QA window-following) is explicitly NOT headless-reproducible (see test
+      docstring) and is exercised by the QA-loop window-following scenarios for this
+      PR instead. Suite passing can be left to CI.'
+    created_at: '2026-05-25T03:30:21Z'
+    last_edited: '2026-05-25T03:30:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
 - id: pr-5db0e85
   plan: plan-3119574
