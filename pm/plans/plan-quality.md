@@ -148,6 +148,39 @@ Depends on: the audit prompt PR.
 
 ---
 
+## Tooling reference: repowise (https://github.com/repowise-dev/repowise)
+
+[repowise](https://github.com/repowise-dev/repowise) is a "codebase intelligence layer for your AI coding agent" that indexes a repo into five intelligence layers and exposes them via MCP tools + CLI. Its feature set maps almost directly onto Track B's audit categories, and several of its metrics give us **quantifiable proxies for code quality** that the plan would otherwise have to define from scratch. Worth referencing both as a source of patterns and as a candidate to integrate (via its MCP tools) once Track B is ready to land.
+
+**Direct feature → audit-category mapping:**
+
+| repowise feature | Plan-quality use |
+|---|---|
+| **Hotspot detection** — files ranked by *high churn × high complexity* | Direct input to the "oversized files" and "conventions worth promoting to formal types" categories — these are the files most worth a structural pass. |
+| **Change-coupling analysis** — *files that change together in the same commit without an import link*, surfacing hidden dependencies | Direct input to the "conventions worth promoting to formal types" category (co-changing files likely share an unnamed concept that should be a typed seam) and to "sprawling or shallow directories" (co-changing files often belong in the same module). |
+| **Two-tier call graphs** (file-level + symbol-level), with 3-tier call resolver + confidence scoring + interactive graph visualization + community detection | Direct input to the "coupling smells" category — circular imports, deep parameter chains, isinstance ladders show up as call-graph density / community-boundary violations. |
+| **15 per-file health biomarkers** — McCabe complexity, deep nesting, "brain methods", Rabin-Karp duplication detection, untested hotspots | Lets a refactor PR's behavior-preservation gate add a quantitative "the health score moved the right direction" check alongside the existing "all tests pass + no API change" checks. |
+| **Dead code detection** with confidence tiers | A new audit category — *unused code is the cleanest possible refactor* — surfaced deterministically rather than by agent inspection. |
+| **Ownership / bus factor** | Useful for the discovery supervisor / health-check watcher to weight which audits to surface first (bus-factor-1 files near the top). |
+| **Auto-generated `CLAUDE.md`** with architecture summary, hotspot warnings, ownership maps, decision records | Complementary to the radar plan's session-transcript linker and to pm's existing PR-note / plan-note artifacts — both surface project-state-as-prose for agent consumption. Worth aligning shapes if both end up landing. |
+
+**Two adoption paths to consider (decide at audit-prompt-PR landing time):**
+
+1. **Integrate via MCP.** Repowise ships MCP tools; pm sessions can call them directly. Cheapest path; pm doesn't reimplement anything. The price is a dependency + adopting repowise's data shape for the metrics.
+2. **Borrow the patterns; implement what fits.** Reimplement the specific metrics we want against pm's existing git history and call-graph tooling. More work; produces metrics on pm's own terms; no external dependency.
+
+Likely a hybrid in practice — integrate the metrics that are *intrinsically external-tool-shaped* (call graphs, change coupling) via MCP, and reimplement the ones that fit pm's existing surfaces (hotspots, ownership) so the audit prompt can read them inline. Both options stay open until we actually land the audit-prompt PR; calling out the reference here keeps us from inventing the metric definitions from scratch.
+
+**Quantifiable success metrics this unlocks** (additive to "lines removed with feature parity" in the philosophy section):
+
+- **Call-graph complexity should trend down.** A refactor PR succeeds when (e.g.) the symbol-level call graph's average node degree, community-boundary violations, or McCabe sum drops — measured pre-PR and post-PR.
+- **Change density should trend up.** When a commit touches more than one file, those files should cluster tightly — same module / same directory / co-located in the call graph. Single-file commits don't contribute to the metric either way (no coupling to measure; a "fewer-coupling-pairs" metric would wrongly reward sprawl-by-trickle). Concretely: average a per-commit tightness score over multi-file commits in a rolling window — e.g. (1 − normalized average pairwise path distance between the touched files in the module/directory tree), or (fraction of pairwise touched-file pairs within the same module). A refactor that takes a chronic cross-module co-change pair and brings them into one module raises this metric; a sprawl refactor that lets the same files keep changing together across modules lowers it.
+- **Per-file health score should hold or improve.** A refactor PR that lowers the touched files' health scores is suspect — possibly trading complexity for "I made this shorter but harder to follow."
+
+These are the **measurable** version of "better class structures and types make code better" — they operationalize what otherwise has to be argued case-by-case.
+
+---
+
 ## Status counts
 
 - pending: 0 (none filed yet; `pm plan load plan-quality` after approval)
@@ -158,7 +191,7 @@ Depends on: the audit prompt PR.
 
 ## Notes / philosophy
 
-- The success metric for Track B is **lines REMOVED with feature parity**, not lines added. Every merged refactor PR should reduce or hold line count flat, never grow it without an offsetting consolidation.
+- The success metric for Track B is **lines REMOVED with feature parity** as the headline number, complemented by the quantitative metrics in the repowise reference above — **call-graph complexity trending down**, **change density trending up** (multi-file commits cluster tightly; single-file commits don't count against this either way), **per-file health scores holding or improving**. A refactor PR that reduces line count but worsens any of those should be reconsidered. Together these are the measurable operationalization of "better class structures and types make code better" — what otherwise has to be argued case by case becomes a small dashboard.
 - The **behavior-preservation gate** is what makes this safe to automate. Without plan-regression's loop, this track would be a liability.
 - Track A's prompt addenda are tiny (paragraph-scale changes) — high leverage per byte changed.
 - Track B is the first **automated process whose explicit goal is to make the code smaller**. That's the philosophical step-change once the safety net is in place.
