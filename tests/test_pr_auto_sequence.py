@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from click.testing import CliRunner
 
-from pm_core.cli.pr import pr_auto_sequence
+from pm_core.cli.pr import pr_auto_sequence, pr_qa_run_bg
 
 
 def _pr(status: str, **extra) -> dict:
@@ -351,6 +351,30 @@ class TestSignOff:
         # (re-qa never changes HEAD) can't re-adopt it and loop forever.
         assert "signoff" not in pr
 
+    def test_stale_record_retires_and_relaunches(self, runner, tmp_path):
+        """A stale record (sha != HEAD) is an outdated run: retire it + relaunch
+        a fresh router instead of replaying its verdict/transcript (R11)."""
+        pr = _pr("sign_off")
+        pr["signoff"] = {"verdict": "SIGNOFF_BLOCKED", "sha": "old",
+                         "origin": "auto-sequence"}
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.signoff.head_sha", return_value="new"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._retire_signoff_window") as mock_retire, \
+             patch("pm_core.cli.pr._check_signoff_verdict") as mock_tx, \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: sign_off_relaunched" in result.output
+        mock_retire.assert_called_once()
+        mock_tx.assert_not_called()        # stale run is not replayed
+        assert "signoff" not in pr         # stale record cleared
+
     def test_records_transcript_verdict_when_no_fresh_record(self, runner, tmp_path):
         pr = _pr("sign_off")
         data = _data_with(pr)
@@ -380,12 +404,36 @@ class TestSignOff:
                    return_value="SIGNOFF_REQA"), \
              patch("pm_core.cli.pr.store.locked_update",
                    side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._retire_signoff_window") as mock_retire, \
              patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
         assert "sign_off: re-qa" in result.output
         assert pr["status"] == "qa"
         mock_qa.assert_called_once()
+        # The stale sign-off window + transcript are retired so the next
+        # sign_off entry runs a fresh router (no stale-verdict replay loop).
+        mock_retire.assert_called_once()
+
+    def test_bounce_retires_window_but_recommendation_does_not(self, runner, tmp_path):
+        """A bounce retires the sign-off window; ready_to_merge/blocked don't
+        (the PR legitimately stays in sign_off, so its window/verdict persist)."""
+        for verdict, hop_echo in (("SIGNOFF_MERGE", "ready_to_merge"),
+                                  ("SIGNOFF_BLOCKED", "paused: sign_off_blocked")):
+            pr = _pr("sign_off")
+            data = _data_with(pr)
+            with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+                 patch("pm_core.cli.pr.store.load", return_value=data), \
+                 patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+                 patch("pm_core.cli.pr._check_signoff_verdict",
+                       return_value=verdict), \
+                 patch("pm_core.cli.pr.store.locked_update",
+                       side_effect=_locked_update_runs(data)), \
+                 patch("pm_core.cli.pr._retire_signoff_window") as mock_retire:
+                result = runner.invoke(pr_auto_sequence, ["pr-001"])
+            assert result.exit_code == 0, result.output
+            assert hop_echo in result.output
+            mock_retire.assert_not_called()
 
     def test_review_relaunches_review(self, runner, tmp_path):
         pr = _pr("sign_off")
@@ -406,6 +454,28 @@ class TestSignOff:
         assert "sign_off: returning to review (iteration 3)" in result.output
         assert pr["status"] == "in_review"
 
+    def test_retire_signoff_window_kills_and_unlinks(self, tmp_path):
+        from pm_core.cli.pr import _retire_signoff_window
+        pr = _pr("sign_off")
+        transcript = tmp_path / "signoff-pr-001.jsonl"
+        transcript.write_text("{}")
+        with patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@7", "index": 3, "name": "signoff-pr-001"}), \
+             patch("pm_core.home_window.park_if_on") as mock_park, \
+             patch("pm_core.tmux.kill_window") as mock_kill:
+            _retire_signoff_window("pm-test", pr, tmp_path)
+        mock_park.assert_called_once_with("pm-test", "@7")
+        mock_kill.assert_called_once_with("pm-test", "@7")
+        assert not transcript.exists()  # stale transcript removed
+
+    def test_retire_signoff_window_no_window_is_safe(self, tmp_path):
+        from pm_core.cli.pr import _retire_signoff_window
+        pr = _pr("sign_off")
+        with patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.kill_window") as mock_kill:
+            _retire_signoff_window("pm-test", pr, tmp_path)  # no transcript, no window
+        mock_kill.assert_not_called()
+
     def test_impl_relaunches_impl(self, runner, tmp_path):
         pr = _pr("sign_off")
         data = _data_with(pr)
@@ -422,3 +492,58 @@ class TestSignOff:
         assert result.exit_code == 0, result.output
         assert "sign_off: returning to impl" in result.output
         assert pr["status"] == "in_progress"
+        # A bounce must RELAUNCH the impl agent (fresh=True): with fresh=False
+        # an existing idle impl window short-circuits pr_start's background
+        # fast path and no rework ever runs.
+        mock_start.assert_called_once()
+        assert mock_start.call_args.kwargs["fresh"] is True
+
+
+class TestQaRunBgGuard:
+    """The detached QA driver must not run against an out-of-band merged PR.
+
+    A concurrent merge (e.g. a GitHub sync) can land between the
+    auto-sequence sign_off->qa bounce that spawns ``pr qa-run-bg`` and that
+    subprocess starting.  ``apply_signoff_hop``'s lock only guards the status
+    transition, so without a guard the detached driver opens a qa-<id> window
+    and runs a full QA loop against an already-merged PR.
+    """
+
+    def test_skips_qa_when_pr_merged(self, runner, tmp_path):
+        pr = _pr("merged")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.qa_loop.run_qa_sync") as mock_run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        # run_qa_sync creates the qa-<id> window; it must never be reached.
+        mock_run.assert_not_called()
+        assert pr["status"] == "merged"
+
+    def test_skips_qa_when_pr_closed(self, runner, tmp_path):
+        pr = _pr("closed")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.qa_loop.run_qa_sync") as mock_run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        mock_run.assert_not_called()
+
+    def test_runs_qa_when_pr_in_qa(self, runner, tmp_path):
+        pr = _pr("qa")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.qa_loop.run_qa_sync") as mock_run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        # A genuinely qa-eligible PR still drives the loop.
+        mock_run.assert_called_once()

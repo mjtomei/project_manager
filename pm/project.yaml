@@ -12287,11 +12287,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T22:06:47.034939+00:00'
-  updated_at: '2026-05-02T22:06:47.034939+00:00'
+  updated_at: '2026-05-25T23:13:42.589865+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-02f0cc8
+    text: 'Related code-level instance (found during pr-2d5f712 QA): two pm tmux panes
+      pipe their content through `| less -R` and render BLANK where `less` is absent
+      — pm_core/cli/pr.py:1256 (_launch_review_window diff pane) and pm_core/signoff.py:_evidence_pane_cmd
+      (sign-off evidence pane). The sign-off one was fixed in pr-2d5f712 with a `command
+      -v less >/dev/null 2>&1 && less -R || cat` fallback; the review diff pane (pr.py:1256)
+      still has the bare `| less -R`. Beyond installing less in containers, applying
+      the same `command -v less` pager fallback to pr.py:1256 makes the review diff
+      pane robust on any host lacking less (e.g. this QA container, where less has
+      no apt candidate).'
+    created_at: '2026-05-25T23:13:42Z'
+    last_edited: '2026-05-25T23:13:42Z'
 - id: pr-e43e4b0
   plan: bugs
   title: Push-proxy fetch into PR workdir leaves index/worktree desynced from HEAD
@@ -18913,7 +18925,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T12:59:18.511929+00:00'
-  updated_at: '2026-05-13T13:02:50.142839+00:00'
+  updated_at: '2026-05-26T01:03:22.311363+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -18926,6 +18938,23 @@ prs:
       under this PR.'
     created_at: '2026-05-13T13:02:49Z'
     last_edited: '2026-05-13T13:02:49Z'
+  - id: note-abc9a5e
+    text: 'Root-cause insight from pr-2d5f712 QA (scenario 8): the "transcript symlink
+      slug differs from Claude runtime cwd" stall is caused by panes being SPLIT off
+      an evidence/diff pane WITHOUT passing cwd= to tmux split_pane_at. The split
+      runs immediately after new_window_get_pane creates the first pane with -c <workdir>,
+      before tmux pane_current_path settles, so the split races and the Claude pane
+      inherits the SESSION DEFAULT dir (umbrella project) instead of the workdir →
+      real Claude runs in the wrong repo AND the transcript symlink (computed from
+      workdir cwd) is broken, which is what forces the _read_transcript_text session-id
+      glob band-aid. Source fix is one line: pass cwd=workdir to split_pane_at. Done
+      for sign-off in pr-2d5f712 (signoff.py launch_signoff_window, commit ed62bd43,
+      pre/post-fix captures). The SAME unfixed race exists in _launch_review_window
+      (pr.py:1281: split_pane_at(diff_pane,"h",claude_cmd,background=True) with no
+      cwd) — applying cwd=workdir there too would resolve the review-window instance
+      of this bug at the source (complements/may obsolete the band-aid).'
+    created_at: '2026-05-26T01:03:22Z'
+    last_edited: '2026-05-26T01:03:22Z'
 - id: pr-8efa789
   plan: bugs
   title: QA verdict detection misses verdict when /loop wakeup adds a no-verdict turn
@@ -22837,6 +22866,308 @@ prs:
       split + always-gates; fixed signoff-record command name (hyphen).'
     created_at: '2026-05-25T19:08:56Z'
     last_edited: '2026-05-25T19:08:56Z'
+  - id: note-2eead0c
+    text: 'QA scenario 1 observation (not fixed): the sign-off evidence pane pipes
+      its output through `less -R` (_evidence_pane_cmd in signoff.py); on a host without
+      `less` installed the whole left pane renders blank (just a shell prompt) — the
+      captures/qa_status/diff data sources themselves resolve fine. Consider falling
+      back to a no-pager/cat path (e.g. `${PAGER:-less}` or `command -v less`) so
+      the evidence is still visible where less is absent. less is standard so this
+      is low-priority/environmental.'
+    created_at: '2026-05-25T22:31:10Z'
+    last_edited: '2026-05-25T22:31:10Z'
+  - id: note-c4871af
+    text: 'QA s1 refiner: tech-tree "active sorting" of sign_off is only at COMPONENT
+      granularity. tree_layout._component_sort_key (line ~95) lists sign_off in has_active
+      so the sign_off PR''s component/plan sorts to the front; but the within-layer
+      node sort _activity_sort_key (line ~343) does NOT list sign_off (falls to default
+      priority 5, sorting AFTER pending=2). So a sign_off PR sharing a layer with
+      a pending PR would NOT sort among active nodes. The reliable observable "active"
+      signal for the spinner test is the animated ◐◓◑◒ spinner via _is_active_pr (tech_tree.py:1178,
+      sign_off+workdir), not within-layer node order. Consider adding sign_off to
+      _activity_sort_key.status_priority if true node-level active sorting is intended.'
+    created_at: '2026-05-25T22:59:28Z'
+    last_edited: '2026-05-25T22:59:28Z'
+  - id: note-03fd184
+    text: 'QA s1 (NEEDS_WORK, fixed db7e8e8d): tech-tree sign_off node did NOT reflect
+      a recorded verdict on LIVE reload. pm pr signoff-record fires trigger_tui_refresh
+      (TUI logs action: reload), but TechTree._signature() omitted the signoff verdict;
+      recording leaves status=sign_off and does NOT bump updated_at, so the signature
+      was unchanged -> _recompute skipped _rebuild -> PRNodes kept a stale self._pr
+      without the signoff record -> node kept spinning, never showed the verdict icon.
+      pm pr list (separate path) was correct, masking it. Fix: add (pr.get("signoff")
+      or {}).get("verdict") to _signature() pr_sig, beside the other display-only
+      markers spec_pending/agent_machine. Verified live on real surface: edit->sign_off
+      spins (workdir,no verdict); signoff-record -> node transitions LIVE to the static
+      verdict icon and stops spinning; distinct icons render together (⊘ BLOCKED /
+      ↻ REQA / ⇤ IMPL). Also confirmed: ◆ glyph bold-blue(themed) on #000033 bg; ⇤
+      bold-yellow; persistence across fresh processes; invalid verdict -> stderr +
+      exit 1 + no write. Suite green (273 tui/tree + 113 signoff/signature).'
+    created_at: '2026-05-25T23:13:30Z'
+    last_edited: '2026-05-25T23:13:30Z'
+  - id: note-aaac6f0
+    text: 'QA scenario 2 (sign-off) refiner finding: the evidence-pane "(no captures
+      found)" fallback is effectively DEAD for the empty-captures degradation case.
+      _evidence_pane_cmd runs CAP=$(pm qa captures-path <id>) then if [ -d "$CAP"
+      ]; find ...; else echo "(no captures found)". But qa captures-path -> paths.captures_dir()
+      mkdirs and returns the dir when missing, so CAP is always an existing dir and
+      the find branch always runs; an empty captures dir lists only the bare dir path,
+      never "(no captures found)". The "(no qa status)" fallback IS reachable (no
+      qa_status.json -> QS empty). Worker: verify triple-4 graceful degradation via
+      (a) pane does not crash/blank, (b) "(no qa status)" shows, (c) captures section
+      shows no impl/scenarios entries; and consider fixing the captures branch (test
+      for empty find output, or do not auto-create in captures-path) so "(no captures
+      found)" is reachable.'
+    created_at: '2026-05-25T23:01:08Z'
+    last_edited: '2026-05-25T23:01:08Z'
+  - id: note-0a62884
+    text: 'QA scenario 2 (pm pr signoff) PASS after fixing two sign-off evidence-pane
+      defects in signoff._evidence_pane_cmd (both verified on the real tmux surface;
+      test_signoff.py 36/36 green): (1) evidence pane hard-depended on `less` (note-2eead0c)
+      — `| less -R` rendered the whole left pane blank where less is absent (not installable
+      in the QA container); now `| if command -v less >/dev/null 2>&1; then less -R;
+      else cat; fi`. (2) `(no captures found)` fallback was unreachable (note-aaac6f0)
+      — captures-path auto-creates the dir so an empty captures dir printed only the
+      bare dir path; now lists with `-mindepth 1` gated on whether any entry exists,
+      else echoes `(no captures found)` (empty pr-D pane now shows it; populated pr-A
+      pane lists impl/+scenarios/ without the bare-dir noise). All 5 triples verified:
+      auto-select+qa->sign_off transition w/ signed_off_at, 2-pane window (evidence
+      LEFT via registry), switch-to-existing (no dup), --fresh kill+reopen (new @id),
+      pr-D graceful degradation, and non-qa rejection on stderr+exit1 (pending/in_progress/in_review/already-merged)
+      with no status/window change. NOTE for reviewers: pr.py:1256 (_launch_review_window
+      diff pane) has the IDENTICAL `| less -R` dependency — out of scope here, filing/noting
+      separately.'
+    created_at: '2026-05-25T23:13:26Z'
+    last_edited: '2026-05-25T23:13:26Z'
+  - id: note-e928d8e
+    text: 'QA s5 (concurrent sign-off state) NEEDS_WORK→fixed (commit on branch).
+      Triple 1 (two simultaneous `pm pr signoff` same PR) exposed TWO real races,
+      both fixed: (1) _ensure_workdir (helpers.py) cloned into a FIXED .tmp-{pr_id}
+      path with NO lock — two callers that both find the workdir missing collide,
+      the winner shutil.move()s the dir out from under the loser → loser dies with
+      an unhandled traceback (git checkout --orphan / git remote set-url exit 128,
+      failing cmd varies by interleaving). Fixed: per-PR exclusive flock .workdir-{pr_id}.lock
+      + double-checked adoption of the winners persisted workdir; clone work extracted
+      to _clone_workdir. (2) Fixing #1 UNMASKED the dup-window race the scenario flags:
+      launch_signoff_window had no lock around find_window_by_name→new_window_get_pane,
+      so once both survive provisioning both create a window → TWO signoff-<id> windows
+      (reliably reproduced). Fixed: per-PR launch flock .signoff-launch-{session}-{pr_id}.lock
+      so the loser takes the existing-window fast path and switches. Post-fix: 1 window,
+      loser prints "Switched to existing", 0 tracebacks, yaml valid (8 workdir-present
+      + 3 absent-workdir trials). NOTE: _launch_review_window (pr.py:1139) has the
+      SAME unlocked find/create pattern (memory said pr-8409c64 added _review_window_launch_lock
+      but it is NOT on this branch) — review window dup race likely still latent,
+      out of scope here. Triple 2 (concurrent signoff-record diff verdicts) PASS:
+      store.locked_update serializes → single well-formed {verdict,sha,ts,origin},
+      one verdict wins, single icon. Triple 3 (bounce guard) PASS: merge-first→auto-sequence
+      prints "merged", SIGNOFF_IMPL never acted on; simultaneous/staggered (8 trials)
+      always end single clean status=merged, never clobbered to bounce target, yaml
+      always valid. Full suite 2764 pass (1 pre-existing unrelated hook-installer
+      failure).'
+    created_at: '2026-05-25T23:24:43Z'
+    last_edited: '2026-05-25T23:24:43Z'
+  - id: note-c1799e2
+    text: 'QA scenario 3 (auto-sequence sign_off routing): all 5 stories PASS on real
+      local-backend surface. Found+fixed (commit c16f7015, now rebased): sign_off->impl
+      bounce invoked pr_start(fresh=False); since the impl window normally still exists
+      at sign_off time, the background fast path returned "already exists, no focus
+      change" and NEVER relaunched the impl agent — the bounce did zero rework and
+      the next tick re-advanced straight to in_review. Changed to fresh=True (mirrors
+      sign_off->review): keeps in_progress workdir, kills stale window, fresh impl
+      session. Verified live (@id @35->@59, new impl transcript). sign_off->review/qa/blocked/merge
+      all correct as-is. PREREQ for driving QA via auto-sequence (omitted from this
+      scenario GIVEN): must run `pm pr spec <pr> qa` after the PR is started — else
+      the QA spec-gate (qa_loop.py:3187) halts the loop at INPUT_REQUIRED before any
+      scenario runs.'
+    created_at: '2026-05-25T23:34:50Z'
+    last_edited: '2026-05-25T23:34:50Z'
+  - id: note-3c411e8
+    text: 'QA scenario 6 (sign_off sync) refined: the sign_off-preserve logic lives
+      ONLY in sync_from_github (pr_sync.py:327-330 — OPEN + old_status in ("qa","sign_off")
+      → continue/skip), reached via `pm pr sync-github` (NOT `pm pr sync`, which is
+      git-merge-detection needing a workdir). Drive with out-of-process fake-github:
+      `pm fake-github config set` seeds PRs (state OPEN|MERGED, numbers auto-start
+      at 1); sync only needs gh_pr_number per PR (cwd=None, resolves by number, no
+      workdir). Bootstrap fixture: pm init --backend github (gh import auto-skips
+      when no gh), pm pr add, then edit pm/project.yaml to set status: sign_off +
+      gh_pr_number to match fake. Session tag = git-root path hash, so fixture + sync
+      must run from same TEST_DIR. THEN: OPEN→"No status changes."+still sign_off;
+      MERGED→"Updated 1 PR(s)."/"Merged: <id>"+status merged+merged_at.'
+    created_at: '2026-05-25T23:00:36Z'
+    last_edited: '2026-05-25T23:00:36Z'
+  - id: note-2070fa2
+    text: 'review-loop i1: fixed tree_layout._activity_sort_key omitting sign_off
+      (QA refiner had flagged it) — within-layer node sort gave sign_off default priority
+      5, so a sign_off PR sorted AFTER a pending peer (priority 2), inconsistent with
+      _component_sort_key + spec R1 "sorts as active". Now priority 1 (same as in_review/qa).
+      Added test_sign_off_sorts_as_active + extended test_status_priority_order. Reviewed
+      rest of PR — solid: decide/apply decouple, adoption/stale-relaunch, retire-window
+      bounce guard, display gates all correct and well-tested (174 layout/tree/signoff/auto-seq
+      tests pass). Two out-of-scope items remain noted only (not fixed here): _launch_review_window
+      (pr.py:1256) has the same | less -R dependency AND the unlocked find/create
+      window race that signoff now guards against.'
+    created_at: '2026-05-26T00:23:56Z'
+    last_edited: '2026-05-26T00:23:56Z'
+  - id: note-5757682
+    text: 'review-loop c4e0 i2: PR is solid (174 targeted tests pass; sign_off across
+      all surfaces, decide/apply decouple + auto-sequence-only invariant, adoption/stale,
+      concurrency locks, display gates all correct). Converted the two prior out-of-scope
+      review-window notes into tracked bug PRs: pr-3f85ad7 (_launch_review_window
+      unlocked find/create dup-window race — same race signoff fixed with a per-PR
+      flock) and pr-71e9ec7 (review diff pane | less -R has no fallback, blank pane
+      where less absent — same fix signoff applied with command -v less). No in-scope
+      changes needed.'
+    created_at: '2026-05-26T00:28:15Z'
+    last_edited: '2026-05-26T00:28:15Z'
+  - id: note-710ff64
+    text: 'QA scenario-8 (verdict-router fan-out) refiner notes — verified surface
+      mechanics: (1) command is `pm pr auto-sequence <id>` (hyphen). (2) The fake-claude
+      does NOT run `pm pr signoff-record`; with fake, a signoff verdict lives ONLY
+      in the transcript, so auto-sequence reaches it via the transcript-read path
+      (pr.py:3117-3125), NOT the fresh-record adoption path. (3) Drive entirely via
+      auto-sequence: from sign_off with no record/window, tick #1 relaunches the router
+      itself at the correct path `<TEST_DIR>/pm/transcripts/auto-sequence/<id>/signoff-<id>.jsonl`
+      and prints "advanced: sign_off_relaunched"; the fake writes the scripted SIGNOFF_*
+      there; tick #2 reads + routes. (4) Exact echoes: IMPL->"sign_off: returning
+      to impl" (status->in_progress, pr_start fresh=True), REVIEW->"sign_off: returning
+      to review (iteration N)" (N=latest review iter+1, =1 for fresh; status->in_review),
+      REQA->"sign_off: re-qa" (status->qa), BLOCKED->"paused: sign_off_blocked" (stays
+      sign_off), no-verdict+window->"running: sign_off", stale/no-window->"advanced:
+      sign_off_relaunched". (5) Bounce hops (qa/review/impl) call _retire_signoff_window
+      (kills signoff-<id> window + unlinks the signoff transcript) and apply_signoff_hop
+      pops pr["signoff"]; BLOCKED/MERGE do NOT retire (window persists). (6) Stale
+      path: record carries sha; auto-sequence compares to head_sha(workdir); to make
+      stale, after a recorded verdict commit into the workdir (git commit --allow-empty)
+      so HEAD moves. (7) Setup: local backend; bootstrap PR status->sign_off via project.yaml
+      fixture edit (allowed); workdir is auto-provisioned by launch_signoff_window/_ensure_workdir
+      on first tick (real git worktree, commit-able). fake config: `pm fake-claude
+      config set ''{"signoff":{"verdicts":["SIGNOFF_IMPL"]}}''`; run triples sequentially,
+      reconfiguring fake per verdict (config is per-session-type, not per-PR). For
+      no-verdict triple use a long delay entry so transcript stays verdict-free while
+      window is open.'
+    created_at: '2026-05-26T00:47:27Z'
+    last_edited: '2026-05-26T00:47:27Z'
+  - id: note-7ca15a1
+    text: 'QA scenario 8 (verdict-router fan-out) PASS, all 6 triples on real local-backend
+      surface, after fixing ONE in-scope bug. Bug: signoff.launch_signoff_window split
+      the Claude ROUTER pane with split_pane_at(evidence_pane,"h",...) WITHOUT cwd.
+      The split runs immediately after new_window_get_pane created the evidence pane
+      with -c <workdir>, before tmux pane_current_path settles, so it races and inherits
+      the session default dir (the umbrella TEST_DIR project) — the router pane (and
+      real Claude) ran in the WRONG repo, and the transcript symlink (computed from
+      the workdir cwd) was left broken so verdict detection only worked via the _read_transcript_text
+      session-id glob band-aid (pr-488b748). Fixed by passing cwd=workdir to split_pane_at
+      (signoff.py ~337); now router pane + symlink both land on the workdir (pre/post-fix
+      captures under scenarios/8). 36/36 test_signoff green. Triples verified: SIGNOFF_IMPL->"sign_off:
+      returning to impl" (in_progress, fresh impl relaunch "Launched Claude", signoff
+      window+transcript retired, record consumed, ticks 3/4 "running: implementation"
+      no-replay); SIGNOFF_REVIEW->"sign_off: returning to review (iteration 1)" (in_review,
+      review-i1 transcript); SIGNOFF_REQA->"sign_off: re-qa" (qa, qa window); SIGNOFF_BLOCKED->"paused:
+      sign_off_blocked" (stays sign_off + window/transcript persist + record written);
+      no-verdict(delayed)->"running: sign_off" (window intact); stale-record (committed
+      --allow-empty in workdir to move HEAD)->"advanced: sign_off_relaunched" (stale
+      BLOCKED NOT replayed, window @id changed, record cleared, fresh run re-records
+      vs new HEAD). NOTE: the analogous review-window split (pr.py:1281) has the IDENTICAL
+      no-cwd race — out of scope here, but worth the same fix; already-tracked review-window
+      bug PRs are pr-3f85ad7/pr-71e9ec7.'
+    created_at: '2026-05-26T01:02:33Z'
+    last_edited: '2026-05-26T01:02:33Z'
+  - id: note-da24b19
+    text: 'QA scenario-7 (sign_off ready_to_merge gate) refiner findings: (1) auto-sequence
+      qa->sign_off gate only reads ~/.pm/workdirs/qa/<id>-*/qa_status.json overall==PASS
+      (latest_qa_status_path, tag-independent), so the QA-passed precondition is bootstrappable;
+      full upstream review+QA loop is out of scope here. (2) FAKE-claude signoff pane
+      emits SIGNOFF_MERGE into the transcript but does NOT run the prompt step `pm
+      pr signoff-record` (it is not a real agent) -> pr["signoff"] stays empty after
+      launch, so the TUI node shows the SPINNER until the NEXT auto-sequence tick
+      adopts the transcript verdict and records it (origin=auto-sequence, sha=HEAD).
+      This makes the spinner(triple2)->ready_to_merge(triple3) ordering natural. (3)
+      captures_dir is session-tag scoped by GIT ROOT; the evidence pane runs `pm qa
+      captures-path` from the PR WORKDIR (a worktree = different git root/tag than
+      the main test repo) so seed impl/ + scenarios/ captures from inside the workdir,
+      not the main repo. (4) impl/ captures are produced only by the bug-fix impl
+      phase (bug_fix_prompts $CAP/impl/pre-fix,post-fix), never by the QA loop, so
+      they must be seeded. (5) static graph `pm pr graph` and `pm status` show only
+      the sign_off STATUS icon (sunicode), NOT the verdict icon; verdict icon (SIGNOFF_MERGE=triangle)
+      appears only in `pm pr list` [sign_off <icon>] and the TUI tech-tree node. (6)
+      evidence pane pipes through `less -R` if present.'
+    created_at: '2026-05-26T00:51:05Z'
+    last_edited: '2026-05-26T00:51:05Z'
+  - id: note-4e29587
+    text: 'QA scenario-7 (sign_off ready_to_merge gate) NEEDS_WORK->fixed: the sign-off
+      ROUTER (Claude) pane started in the wrong cwd. launch_signoff_window created
+      the evidence pane in the workdir (new_window_get_pane -c workdir) but split
+      the router pane with split_pane_at(...) WITHOUT cwd; tmux starts a -c-less split
+      in the server start dir (the main repo on the base branch), not the source pane
+      cwd. Observed: router pane cwd = main repo (master), so its prompt-instructed
+      `git diff {base}...HEAD` returned EMPTY and `pm qa captures-path` resolved to
+      the wrong git-root/tag -> router would review nothing. Fix: pass cwd=workdir
+      to split_pane_at in signoff.py (now both panes in workdir). Side benefit: the
+      fake/real transcript now lands at the symlink target dir (fake cwd==workdir==_claude_project_dir(cwd)
+      used for the symlink), so the dangling-symlink + verdict_transcript glob-fallback
+      (pr-488b748 band-aid) is no longer exercised for the normal path. Verified real
+      tmux surface: pre-fix router cwd=mainrepo/empty-diff -> post-fix router cwd=workdir/diff
+      shows change; full flow advanced:sign_off -> ready_to_merge unchanged. Added
+      regression test_signoff.py::TestWindowLaunchWorkdir (fails pre-fix). NOTE: _launch_review_window
+      (pr.py:1281) review-loop split has the same -c-less split pattern (pr-3f85ad7/companion
+      cds explicitly; review claude pane may have the same latent wrong-cwd) - out
+      of scope here.'
+    created_at: '2026-05-26T01:03:52Z'
+    last_edited: '2026-05-26T01:03:52Z'
+  - id: note-e411a86
+    text: 'QA s9 (manual sign-off) PASS after fixing evidence-pane graceful-degradation
+      (commit 5686bc21->rebased). BUG: _evidence_pane_cmd chained sections with &&
+      and did CAP="$(pm qa captures-path <id> 2>/dev/null)"; from the signoff workdir
+      clone (which lacks pm/project.yaml when project state was never committed) captures-path
+      exits 1 -> the && chain aborts -> pane blanks after the captures header (no
+      "(no captures found)"/qa-status/diff). Fixed: || true on CAP + both git diff
+      calls so each section degrades independently (test_signoff 36/36). TESTABILITY
+      GOTCHA (not a product bug, NOT fixed): the MANUAL `pm pr signoff` claude pane
+      self-EXITS under fake-claude `{"_all":{}}` — manual path passes transcript=None
+      so build_claude_shell_cmd generates NO session_id, and run_fake_claude only
+      _hold_open()s `if no_verdict or session_id` (fake_claude.py:550); _all:{} resolves
+      signoff (a verdict type) to default SIGNOFF_MERGE, so the fake emits the verdict
+      and exits, collapsing the 2-pane window to 1. Real claude (interactive) persists,
+      so production is fine. To observe the live 2-pane window via the fake, use remain-on-exit
+      (capture aid) OR give signoff an explicit empty-verdicts entry to force a true
+      no-verdict mock that holds open. Verified window structure (2 panes evidence-LEFT
+      %18 / claude-RIGHT %19, registry roles signoff-evidence/signoff-claude) this
+      way. Also: triple 7 impl-relaunch + "sign_off: returning to impl" needs project
+      state committed on master (pr_start gate) — scenario setup omits pm push/commit;
+      adoption CORE (adopt fresh record, sign_off->in_progress, consume record, retire
+      window, no relaunch) verified regardless.'
+    created_at: '2026-05-26T01:06:15Z'
+    last_edited: '2026-05-26T01:06:15Z'
+  - id: note-3055e3f
+    text: 'QA scenario 10 (concurrency on shared sign-off resources) NEEDS_WORK->fixed
+      (9dec639c). Triple 1 (concurrent provision+window-create) PASS as-is: exactly
+      one signoff-<id> window, logs split Opened(winner)/Switched(loser) under the
+      per-PR launch flock, both exit 0, no traceback, yaml valid, single workdir key,
+      status sign_off. Triple 2 (concurrent signoff-record diff verdicts) PASS as-is:
+      single well-formed {verdict,sha,ts,origin} under the project lock, one verdict
+      wins (sha==HEAD, origin manual, ISO ts), single icon renders on pm pr list AND
+      pm tui view tech-tree. Triple 3 (bounce routing vs out-of-band merge) found
+      a REAL leak: when auto-sequence apply_signoff_hop won the lock first it bounced
+      sign_off->qa and spawned pm pr qa-run-bg, then the concurrent pm pr edit --status
+      merged (local equiv of a github sync) overwrote status to merged; apply_signoff_hop
+      only guarded the STATUS transition, not the detached driver, so pr_qa_run_bg
+      (no merged/closed guard) opened a qa-<id> window and ran a full QA planner loop
+      against an already-merged PR (15/30 trials leaked). Status itself was ALWAYS
+      preserved (merged, never clobbered to the qa bounce target). Fixed with layered
+      out-of-band-merge guards: pr_qa_run_bg bails pre-run_qa_sync if merged/closed;
+      run_qa_sync re-checks status after live-PR load, immediately before window creation,
+      after window creation (tears the window down), and inside the planner poll loop
+      (late-merge teardown). Post-fix 40/40 trials clean (18/40 hit the race-winning
+      re-qa path; transient qa window always torn down, none left running). NUANCE
+      for reviewers: this is a fundamental TOCTOU between a blind status write and
+      the detached launch; a qa window can still appear transiently (~1-2s) before
+      a guard tears it down, but a full QA loop never executes against the merged
+      PR and the window is never LEFT running. The deeper fix (an out-of-band transition
+      itself sweeping in-flight qa/review/signoff windows) is arguably pr-ff9b728
+      territory (redirect/cleanup of old gates). Full suite 2768 pass (1 pre-existing
+      unrelated hook-installer failure).'
+    created_at: '2026-05-26T01:26:28Z'
+    last_edited: '2026-05-26T01:26:28Z'
   - id: note-094efa5
     text: 'QA NEEDS_WORK: sign_off becomes a recognized status with its own icon across
       every surface, and a: NEEDS_WORK; pm pr signoff transitions a QA PR, opens the
@@ -23722,6 +24053,33 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-3f85ad7
+  plan: bugs
+  title: 'Bug: _launch_review_window has unlocked find/create window race (duplicate
+    review windows under concurrency)'
+  branch: pm/pr-3f85ad7-bug-launch-review-window-has-unlocked-find-create-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py:_launch_review_window (~line 1139) does find_window_by_name
+    -> new_window_get_pane with NO lock around the check-then-act, so two concurrent
+    `pm pr review --fresh` subprocesses (or auto-sequence + manual) can each find
+    no window and each create one -> two review-<id> windows, select-window ambiguity,
+    spinner never settles. This is the SAME race pr-2d5f712 fixed for the sign-off
+    window with a per-PR fcntl flock (.signoff-launch-<session>-<pr>.lock in signoff.launch_signoff_window)
+    and that _ensure_workdir now guards with .workdir-<pr>.lock. Memory claims pr-8409c64
+    added a _review_window_launch_lock but it is NOT present on master. Fix: mirror
+    signoff.launch_signoff_window — wrap the existing-window check + new_window_get_pane
+    in an exclusive per-PR launch lock so the loser takes the existing-window fast
+    path. Repro: launch two `pm pr review <id> --fresh` near-simultaneously.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-26T00:27:53.724681+00:00'
+  updated_at: '2026-05-26T00:27:53.724681+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-7ab0a99
   plan: bugs
   title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
@@ -23840,6 +24198,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
   updated_at: '2026-05-25T23:07:46.493552+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-71e9ec7
+  plan: bugs
+  title: 'Bug: review-window diff pane pipes through `less -R` with no fallback —
+    blank pane where less is absent'
+  branch: pm/pr-71e9ec7-bug-review-window-diff-pane-pipes-through-less-r-w
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py:_launch_review_window line ~1256 ends the diff-pane
+    command with `; }} | less -R`. On any host/container without `less` on PATH the
+    whole left review pane renders blank (just a shell prompt) — the diff/status data
+    resolve fine but are swallowed by the failed pager. pr-2d5f712 fixed the IDENTICAL
+    pattern for the sign-off evidence pane (signoff._evidence_pane_cmd) with `| if
+    command -v less >/dev/null 2>&1; then less -R; else cat; fi`. Apply the same guard
+    to the review diff pane. Distinct from pr-c3762f7 (which installs less in containers)
+    — this is a code-level robustness fix that also covers non-container hosts lacking
+    less. Repro: drop less from PATH, run `pm pr review <id>`, observe blank diff
+    pane.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-26T00:28:00.384462+00:00'
+  updated_at: '2026-05-26T00:28:00.384462+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

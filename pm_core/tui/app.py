@@ -141,6 +141,7 @@ class ProjectManagerApp(App):
         Binding("escape", "unfocus_command", "Back", show=False),
         Binding("p", "toggle_plans", "Plans", show=True),
         Binding("t", "start_qa_on_pr", "QA Run", show=True),
+        Binding("i", "signoff_pr", "Sign-off", show=True),
         Binding("x", "hide_plan", "Hide Plan", show=False),
         Binding("M", "move_to_plan", "Move Plan", show=False),
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
@@ -821,6 +822,9 @@ class ProjectManagerApp(App):
 
     def action_merge_pr(self) -> None:
         pr_view.merge_pr(self)
+
+    def action_signoff_pr(self) -> None:
+        pr_view.signoff_pr(self)
 
     def action_merge_pr_companion(self) -> None:
         pr_view.merge_pr(self, companion=True)

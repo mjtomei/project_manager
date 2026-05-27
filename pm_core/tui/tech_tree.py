@@ -874,6 +874,7 @@ class TechTree(Widget):
                 bool(pr.get("spec_pending")),
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
+                (pr.get("signoff") or {}).get("verdict"),
                 tuple(pr.get("depends_on") or []),
                 pr.get("updated_at"), pr.get("created_at"), pr.get("started_at"),
                 pr.get("reviewed_at"), pr.get("merged_at"),

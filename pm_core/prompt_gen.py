@@ -362,25 +362,25 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
     sign-off reviewer is told to fall back to the captures dir.
     """
     import json
-    from pathlib import Path
-    qa_dirs = Path.home() / ".pm" / "workdirs" / "qa"
-    if not qa_dirs.is_dir():
-        return "\n_No qa_status.json found — read the captures dir directly._\n"
-    candidates = sorted(qa_dirs.glob(f"{pr_id}-*/qa_status.json"),
-                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
-    if not candidates:
+    from pm_core.paths import latest_qa_status_path
+    latest = latest_qa_status_path(pr_id)
+    if latest is None:
         return "\n_No qa_status.json found — read the captures dir directly._\n"
     try:
-        data = json.loads(candidates[-1].read_text())
+        data = json.loads(latest.read_text())
     except (OSError, ValueError):
         return "\n_qa_status.json unreadable — read the captures dir directly._\n"
     lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         lines.append(f"QA error: {data['error']}")
     scenarios = data.get("scenarios") or []
+    if isinstance(scenarios, dict):
+        scenarios = list(scenarios.values())
     if scenarios:
         lines.append("")
         for s in scenarios:
+            if not isinstance(s, dict):
+                continue
             idx = s.get("index", "?")
             title = s.get("title", "")
             verdict = s.get("verdict", "?")

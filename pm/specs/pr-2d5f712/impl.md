@@ -155,8 +155,9 @@ on already-merged PRs (re-open merged work to roll out process updates). This wa
 PR, sign-off only covers the normal forward lifecycle (qa → sign_off → merge, or
 a bounce within a not-yet-merged PR). Process updates are handled by creating NEW
 PRs, not by re-opening merged ones. `pm pr signoff` therefore rejects `merged`
-PRs (entry from `qa`/`sign_off` only). The pre/post-fix capture gate (R8,
-note-0357619) still applies.
+PRs (entry from `qa`/`sign_off` only). The deterministic pre/post-fix capture
+*gate* was removed (R8); the router's LLM-judged review of repro/verify evidence
+for a bug PR (note-0357619) still applies.
 
 ### R10 — Routing refinements (orchestrator note-1a982f3, then note-942fa37)
 1. **Capture gate** was first clarified as presence-only and then **removed
@@ -211,11 +212,18 @@ Primary autonomous driver = the auto-sequence state machine (`pr_auto_sequence`,
 - New `status == "sign_off"` branch: read the sign-off verdict via a new
   `_check_signoff_verdict(tdir, pr_id)` (mirrors `_check_review_verdict` — scan the auto-seq
   transcript with `extract_verdict_from_transcript(..., SIGNOFF_VERDICTS)`):
-  - First ADOPT a fresh recorded verdict (R11: `fresh_recorded_verdict`, sha == HEAD);
-    else read the running window's transcript and, on a verdict, record it
-    (`origin auto-sequence`) before acting.
-  - no verdict (record stale/absent AND transcript empty) → relaunch window if its
-    tmux window is gone (echo `advanced: sign_off_relaunched`), else `running: sign_off`.
+  - First ADOPT a fresh recorded verdict (R11: `fresh_recorded_verdict`, sha == HEAD).
+  - Else, if a record exists but is STALE (sha != HEAD), the prior run is an
+    outdated *completed* run — neither its record nor its single transcript
+    reflect the current code, so replaying either would recommend on unreviewed
+    changes. `_retire_signoff_window` it, clear the record, and relaunch a fresh
+    router against current HEAD (echo `advanced: sign_off_relaunched`). The
+    record is cleared so this doesn't re-fire every tick until the fresh router
+    self-records. (R11: "stale → relaunch.")
+  - Else (no record) read the current run's transcript and, on a verdict, record
+    it (`origin auto-sequence`) before acting.
+  - no verdict (no record, transcript empty) → relaunch window if its tmux window
+    is gone (echo `advanced: sign_off_relaunched`), else `running: sign_off`.
   - `SIGNOFF_MERGE` → always a recommendation (autonomy removed, R5): echo
     `ready_to_merge`; the PR stays in `sign_off`. Auto-sequence never merges
     (documented "stop before merge" contract); the autonomous-merge-vs-hold decision
@@ -224,6 +232,18 @@ Primary autonomous driver = the auto-sequence state machine (`pr_auto_sequence`,
   - `SIGNOFF_REVIEW` → `sign_off → in_review`, launch fresh review-loop iteration, echo `sign_off: returning to review`.
   - `SIGNOFF_IMPL` → `sign_off → in_progress`, relaunch impl, echo `sign_off: returning to impl`.
   - `SIGNOFF_BLOCKED` → echo `paused: sign_off_blocked`.
+
+  Every **bounce** hop (qa / review / impl) also calls `_retire_signoff_window`
+  (kills the `signoff-<id>` window via `home_window.park_if_on` + `kill_window`
+  and unlinks the single `signoff-<id>.jsonl` transcript) *before* relaunching
+  the next step. Sign-off — unlike review's iteration-numbered transcripts —
+  reuses one transcript path, and the QA loop only sweeps `qa-*` windows, so a
+  surviving window would be hit by the existing-window fast path on re-entry and
+  `_check_signoff_verdict` would replay the *old* verdict, re-bouncing forever
+  (a re-qa never changes HEAD, so the consumed `pr["signoff"]` record can't guard
+  it). Retiring the window + transcript forces a genuine fresh router run on the
+  next `sign_off` entry. `ready_to_merge` / `blocked` keep the window (the PR
+  legitimately stays in `sign_off`).
 
 The TUI `_on_qa_complete` auto-merge path (`qa_loop_ui.py:494`) is **left unchanged** this PR
 (it is one of the "old paths" pr-ff9b728 redirects). Sign-off is reachable via `pm pr signoff`
@@ -254,10 +274,12 @@ and the auto-sequence. This keeps the large existing QA-flow test/QA surface sta
   behavioral risk.
 - **A2 — Agent vs pm executes the hop?** Resolved: agent emits one structured routing verdict +
   records audit notes (router-only, never edits/merges); pm polls the verdict and executes the
-  hop (status transition / relaunch / merge-in-autonomous). Mirrors qa-finalize exactly →
-  inspectable + unit-testable.
-- **A3 — Flag location/default.** Resolved: `project.sign_off_autonomous`, default False (gated),
-  matching `skip_qa`.
+  hop (status transition / relaunch). Mirrors qa-finalize exactly → inspectable + unit-testable.
+  Note: sign-off never merges (R5) — `SIGNOFF_MERGE` is always a `ready_to_merge` recommendation.
+- **A3 — Flag location/default.** OBSOLETE: autonomy was removed from this PR entirely (R5,
+  orchestrator note-942fa37). There is no `project.sign_off_autonomous` flag; sign-off always
+  gates at merge and the autonomous-vs-hold merge decision belongs to the plan watcher
+  (pr-ff9b728).
 - **A4 — Second pane content.** Resolved: a plain evidence-summary shell pane (captures listing +
   per-scenario verdicts + diff stat); the rich report surface is pr-8e693f6.
 - **A5 — Whether to redirect the TUI auto-merge path now.** Resolved: no — left to pr-ff9b728's

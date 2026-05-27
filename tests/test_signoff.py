@@ -261,6 +261,104 @@ def _patch_locked_update_fn(data: dict):
     return _side
 
 
+class TestWindowLaunchWorkdir:
+    """The router (Claude) pane must start in the PR workdir.
+
+    Regression for the QA finding: ``split_pane_at`` was called without
+    ``cwd``, so tmux started the split in the server's start dir (the main
+    repo on the base branch) instead of the workdir.  The sign-off prompt
+    tells the router to run ``git diff {base}...HEAD`` and
+    ``pm qa captures-path`` — both cwd-relative — so a wrong cwd makes the
+    router review an empty diff / the wrong captures.
+    """
+
+    def test_router_pane_split_uses_workdir_cwd(self, tmp_path):
+        from types import SimpleNamespace
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        workdir = tmp_path / "wd"
+        workdir.mkdir()
+        wdirs = tmp_path / "workdirs"
+        wdirs.mkdir()
+
+        data = {"project": {"base_branch": "master", "backend": "local"},
+                "prs": []}
+        pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
+                    "branch": "pm/pr-001", "workdir": str(workdir)}
+
+        split = MagicMock(return_value="cl_pane")
+        with ExitStack() as es:
+            p = es.enter_context
+            p(patch("pm_core.tmux.has_tmux", return_value=True))
+            p(patch("pm_core.tmux.in_tmux", return_value=True))
+            p(patch("pm_core.cli.helpers._get_pm_session", return_value="pm-x"))
+            p(patch("pm_core.tmux.session_exists", return_value=True))
+            p(patch("pm_core.tmux.find_window_by_name", return_value=None))
+            p(patch("pm_core.paths.workdirs_base", return_value=wdirs))
+            p(patch("pm_core.model_config.resolve_model_and_provider",
+                    return_value=SimpleNamespace(model=None, provider=None,
+                                                 effort=None)))
+            p(patch("pm_core.model_config.get_pr_model_override",
+                    return_value=None))
+            p(patch("pm_core.prompt_gen.generate_signoff_prompt",
+                    return_value="PROMPT"))
+            p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                    return_value="CLAUDE_CMD"))
+            p(patch("pm_core.tmux.new_window_get_pane", return_value="ev_pane"))
+            p(patch("pm_core.tmux.split_pane_at", split))
+            p(patch("pm_core.tmux.set_shared_window_size"))
+            p(patch("pm_core.tmux.switch_sessions_to_window"))
+            p(patch("pm_core.signoff.subprocess.run",
+                    return_value=SimpleNamespace(stdout="@9\n")))
+            p(patch("pm_core.pane_registry.register_pane"))
+            p(patch("pm_core.pane_registry.registry_path", return_value=tmp_path))
+            p(patch("pm_core.pane_registry.locked_read_modify_write"))
+            p(patch("pm_core.pane_layout.rebalance"))
+
+            signoff.launch_signoff_window(
+                data, pr_entry, background=True, transcript=None)
+
+        split.assert_called_once()
+        # the split that creates the router pane must pin cwd to the workdir
+        assert split.call_args.kwargs.get("cwd") == str(workdir)
+
+
+class TestLatestQaStatusPath:
+    """The shared QA-status locator used by both the auto-sequence gate and the
+    sign-off prompt (single source of truth for the glob)."""
+
+    def test_none_when_no_qa_dir(self, tmp_path):
+        from pm_core import paths
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") is None
+
+    def test_picks_newest_mtime(self, tmp_path):
+        import os
+        from pm_core import paths
+        qa = tmp_path / "qa"
+        old = qa / "pr-001-aaaa"
+        new = qa / "pr-001-bbbb"
+        old.mkdir(parents=True)
+        new.mkdir(parents=True)
+        (old / "qa_status.json").write_text("{}")
+        newp = new / "qa_status.json"
+        newp.write_text("{}")
+        # Make `new` strictly newer than `old`.
+        os.utime(old / "qa_status.json", (1000, 1000))
+        os.utime(newp, (2000, 2000))
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") == newp
+
+    def test_other_pr_ignored(self, tmp_path):
+        from pm_core import paths
+        qa = tmp_path / "qa"
+        (qa / "pr-999-aaaa").mkdir(parents=True)
+        (qa / "pr-999-aaaa" / "qa_status.json").write_text("{}")
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") is None
+
+
 class TestPrompt:
     def test_prompt_contains_router_contract_and_verdicts(self):
         from pm_core import prompt_gen
@@ -296,6 +394,27 @@ class TestPrompt:
             data, "pr-001", origin="auto-sequence")
         assert "--origin auto-sequence" in p
 
+class TestTuiKeybinding:
+    def test_signoff_binding_present_and_shown(self):
+        from pm_core.tui.app import ProjectManagerApp
+        b = next((x for x in ProjectManagerApp.BINDINGS
+                  if getattr(x, "action", None) == "signoff_pr"), None)
+        assert b is not None, "no signoff_pr Binding"
+        assert b.key == "i"
+        assert b.show is True
+        assert hasattr(ProjectManagerApp, "action_signoff_pr")
+
+    def test_help_modal_lists_signoff(self):
+        from pm_core.tui import screens
+        src = Path(screens.__file__).read_text()
+        assert "Sign-off" in src
+
+    def test_pr_view_exposes_signoff_pr(self):
+        from pm_core.tui import pr_view
+        assert callable(getattr(pr_view, "signoff_pr", None))
+
+
+class TestPromptCaptureLanguage:
     def test_no_capture_gate_language(self):
         """The deterministic capture gate was removed (display moved to #226)."""
         from pm_core import prompt_gen
