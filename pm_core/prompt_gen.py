@@ -589,12 +589,14 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
           available)
         - `<details><pre>` for small text / log files under ~50 KB
 
-      For **Markdown** evidence (`.md`), pre-render to a sibling `.html`
-      at sign-off time and link to the rendered HTML — raw `.md` over
-      `file://` shows as plaintext in most browsers. Use the
-      `pm_core.markdown_render.render_md_file(md_path)` helper, which writes
-      `<name>.md.html` next to the source and returns the path; keep the
-      original `.md` on disk so it stays grep-/diff-able.
+      For **Markdown** evidence (`.md`), pm has already pre-rendered every
+      `.md` file under `$CAP` to a sibling `<name>.md.html` at sign-off
+      window launch (see `pm_core.signoff._prerender_captures_markdown`).
+      **Always link the `<name>.md.html` sibling, never the raw `.md`** —
+      raw `.md` over `file://` displays as plaintext in most browsers, so
+      every link in `report.html` whose target is a `.md` evidence file
+      MUST be rewritten to point at the `.md.html` sibling. The original
+      `.md` stays on disk for grep / diff / archival.
 
       **Link as-is** for `.html` files (already render natively) and for
       any binary larger than ~10 MB.
