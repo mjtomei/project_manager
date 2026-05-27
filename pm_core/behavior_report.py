@@ -100,7 +100,7 @@ def _load_sidecar(path: Path) -> Optional[dict]:
     if not path.is_file():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         _log.warning("Unreadable sidecar at %s: %s", path, exc)
         return None
@@ -474,5 +474,5 @@ def generate_dashboard(root: Path, *, session_tag: str | None = None,
     croot.mkdir(parents=True, exist_ok=True)
     rows = gather_dashboard_rows(data, croot)
     out_path = croot / "index.html"
-    out_path.write_text(render_dashboard_html(data, rows))
+    out_path.write_text(render_dashboard_html(data, rows), encoding="utf-8")
     return out_path

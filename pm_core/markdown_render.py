@@ -97,5 +97,6 @@ def render_md_file(md_path: Path, *, out_path: Optional[Path] = None) -> Path:
         out_path = md_path.with_suffix(md_path.suffix + ".html")
     text = md_path.read_text(encoding="utf-8")
     html_doc = render_markdown_to_html(text, title=md_path.name)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html_doc, encoding="utf-8")
     return out_path
