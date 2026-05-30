@@ -304,3 +304,36 @@ def test_pr_report_command_is_removed():
 def test_generate_dashboard_static_writer_is_removed():
     """The static-file writer was replaced by the local HTTP server."""
     assert not hasattr(br, "generate_dashboard")
+
+
+# ---------------------------------------------------------------------------
+# Captures-root resolution (paths.captures_root — the dashboard's doc root)
+# ---------------------------------------------------------------------------
+
+def test_captures_root_with_explicit_tag(tmp_path, monkeypatch):
+    """An explicit session_tag yields ``<sessions>/<tag>/captures`` and
+    creates it — this is the doc root ``pm pr dashboard`` serves from."""
+    from pm_core import paths
+    monkeypatch.setattr(paths, "sessions_dir", lambda: tmp_path)
+    root = paths.captures_root(session_tag="mytag")
+    assert root == tmp_path / "mytag" / "captures"
+    assert root.is_dir()
+
+
+def test_captures_root_none_when_no_tag(tmp_path, monkeypatch):
+    """When no tag can be derived (not in a git repo / no pm session), the
+    function returns None rather than synthesising a bogus dir — the CLI
+    relies on this to fail clearly."""
+    from pm_core import paths
+    monkeypatch.setattr(paths, "_resolve_session_tag", lambda *a, **k: None)
+    assert paths.captures_root() is None
+
+
+def test_resolve_session_tag_prefers_pm_session(monkeypatch):
+    """Inside a pm tmux session the pm-session tag wins (``pm-`` stripped)
+    over the cwd-derived fallback."""
+    from pm_core import paths, tmux as tmux_mod
+    from pm_core.cli import helpers
+    monkeypatch.setattr(tmux_mod, "in_tmux", lambda: True)
+    monkeypatch.setattr(helpers, "_get_pm_session", lambda: "pm-proj-abcd1234")
+    assert paths._resolve_session_tag() == "proj-abcd1234"
