@@ -491,105 +491,101 @@ PR-level *comprehensive* review and a routing decision.
    add a `pm pr note add {pr_id} '...'` entry stating what you found and why you
    routed where you did, so the recommendation is fully inspectable.
 
-4. **Write the sign-off report (deliverable).** One file is REQUIRED on
-   every sign-off pass:
+4. **Write the sign-off report (deliverable).** Produce `$CAP/report.html`
+   — the human-facing BDD behaviour report. Evidence files live alongside
+   it; reference them by relative path and make sure the page opens over
+   `file://`.
 
-   * `$CAP/report.html` — the human-facing BDD behaviour report. Evidence
-     files live alongside it so reference them by relative path; the page
-     must open over `file://`.
+   The goal of the report is to **convince an external reviewer of your
+   sign-off verdict** and **surface anything they need to weigh in on**:
+   ambiguities you resolved or couldn't, things that may need human
+   review, anything of interest to someone working on higher-level
+   integration or planning. The report's audience is a reader UNFAMILIAR
+   with the PR's description / notes / commits — plain English, no
+   internal jargon, link to the underlying commits / scenarios / notes
+   where applicable.
 
-   The all-PRs dashboard (`pm pr behavior-report`) reads this file for its
-   row: it checks existence and parses the routing verdict out of a single
-   meta tag in `<head>` (below). Everything else on the dashboard comes
-   from `project.yaml`. There is **no JSON sidecar** — keeping a separate
-   structured file in sync was its own footgun.
+   ### Hard requirement — the dashboard contract
 
-   ### `report.html` — required structure (top → bottom)
+   The all-PRs dashboard (`pm pr behavior-report`) reads only one piece
+   of structured data from your report: the routing verdict, parsed from
+   a single meta tag in `<head>`. This MUST be present verbatim with the
+   keyword you're routing to:
 
-   1. **`<head>` must contain a verdict meta tag** — verbatim, the routing
-      keyword you'll emit at the end of this response:
+   ```html
+   <meta name="pm-signoff-verdict" content="{SIGNOFF_MERGE}">
+   ```
 
-      ```html
-      <meta name="pm-signoff-verdict" content="{SIGNOFF_MERGE}">
-      ```
+   (replace the content with whichever of {SIGNOFF_MERGE} / {SIGNOFF_REQA}
+   / {SIGNOFF_REVIEW} / {SIGNOFF_IMPL} / {SIGNOFF_BLOCKED} you choose).
+   Without it the row shows "verdict unknown". Everything else on the
+   dashboard comes from `project.yaml`.
 
-      (replace the content with whichever of {SIGNOFF_MERGE} / {SIGNOFF_REQA} /
-      {SIGNOFF_REVIEW} / {SIGNOFF_IMPL} / {SIGNOFF_BLOCKED} you choose). This
-      is the dashboard's only machine-readable contract; without it the row
-      shows "verdict unknown".
+   ### Suggested shape — adapt as needed to serve the goal above
 
-   2. **Header** with the PR display id + title; the routing verdict (▲
-      {SIGNOFF_MERGE} etc.); a one-line **Recommendation** that reflects the
-      routing decision; a link back to `../index.html`.
+   These sections are common pieces that tend to convince a reviewer.
+   Skip what isn't load-bearing for this PR, add anything you think the
+   reviewer needs:
 
-   3. **PR bullet points** (top-of-page summary, REQUIRED).
-      Two short bulleted lists, **one line per item, plain English**, written
-      so a reader unfamiliar with the PR's description / notes / commits can
-      scan them and decide whether to look closer. No internal jargon (no
-      naked function or file names without a one-clause "what it is"). Where
-      applicable, link each bullet to the relevant commit / scenario / note.
+   - **Header**: PR display id + title; the routing verdict marker (▲
+     {SIGNOFF_MERGE} etc., using the `SIGNOFF_VERDICT_ICONS` /
+     `SIGNOFF_VERDICT_STYLES` tokens from `pm_core/signoff.py` so the
+     visual matches the TUI and `pm pr list`); one-line recommendation;
+     link back to `../index.html` for navigation.
 
-      * **Bugs fixed by review and QA** — real defects the review-loop or QA
-        scenarios found and fixed **in this PR's branch during the loop**
-        (NOT part of the original implementation). Each bullet: one-sentence
-        plain-English problem + how it was fixed.
+   - **Top-of-page summary** in plain English: bugs found and fixed by
+     review/QA during this loop (not part of the original implementation),
+     spec ambiguities resolved (or *not* resolved — flag those for the
+     reviewer), open questions you couldn't answer, anything the planner
+     might care about. One line per item; link to the underlying
+     evidence.
 
-      * **Spec ambiguities resolved** — places where the original PR scope /
-        spec was ambiguous and got pinned down by a user decision or loop
-        discovery. Each bullet: the ambiguity + the resolution adopted, in
-        plain language.
+   - **Per-step sections** for Implementation, Review, and QA pairing
+     evidence to each step's acceptance criteria. For a **bug PR** show
+     Implementation as Before/After (pre-fix: bug reproduces; post-fix:
+     symptom gone) and flag a missing phase rather than dropping it.
 
-      Use empty lists when none apply.
+   - **Context** at the bottom: PR description, PR notes, plan name +
+     plan notes when present — for a reviewer who wants the source
+     material without leaving the page.
 
-   4. **Per-step sections** — one section per lifecycle step (Implementation,
-      Review, QA). For each: the step's acceptance criteria explicit, then the
-      evidence paired with those criteria. For a **bug PR** render
-      Implementation as a Before/After (pre-fix: bug reproduces; post-fix:
-      symptom gone), flagging a missing phase rather than dropping it.
+   ### Evidence rendering
 
-      **Evidence rendering: embed inline whenever the browser supports it.
-      Link only the listed exceptions.** Pick the appropriate native HTML
-      control per type:
+   Embed inline whenever the browser supports it. Pick the appropriate
+   native HTML control per type:
 
-        - `<video controls>` for `.webm` video
-        - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`
-        - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus` /
-          audio-only `.webm`
-        - the **asciinema-player** widget for `.cast` (vendored CSS + JS
-          copy preferred — drop the player files under the captures
-          session-tag dir and reference them by relative path so the page
-          stays offline-safe; CDN fallback when no vendored copy is
-          available)
-        - `<details><pre>` for small text / log files under ~50 KB
+     - `<video controls>` for `.webm` video
+     - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`
+     - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus` /
+       audio-only `.webm`
+     - the **asciinema-player** widget for `.cast` (vendored CSS + JS
+       copy preferred — drop the player files under the captures
+       session-tag dir and reference them by relative path so the page
+       stays offline-safe; CDN fallback when no vendored copy is
+       available)
+     - `<details><pre>` for small text / log files under ~50 KB
 
-      For **Markdown** evidence (`.md`), render the body inline so the
-      reader never sees stale or out-of-sync HTML. For each `.md` you
-      reference, run `pm md-render <relative path>` — this prints the
-      body-only HTML fragment (CommonMark + tables + fenced_code, no
-      document shell) — and drop the fragment inside a `<details>`
-      block collapsed by default:
+   For **Markdown** evidence (`.md`), render the body inline so the
+   reader never sees stale or out-of-sync HTML. For each `.md` you
+   reference, run `pm md-render <relative path>` — this prints the
+   body-only HTML fragment (CommonMark + tables + fenced_code, no
+   document shell) — and drop the fragment inside a `<details>`
+   block collapsed by default:
 
-      ```html
-      <details>
-        <summary>scenarios/3/notes.md</summary>
-        <div class="md-body"><!-- pm md-render scenarios/3/notes.md output --></div>
-      </details>
-      ```
+   ```html
+   <details>
+     <summary>scenarios/3/notes.md</summary>
+     <div class="md-body"><!-- pm md-render scenarios/3/notes.md output --></div>
+   </details>
+   ```
 
-      Use the relative path as the `<summary>` so the source file stays
-      discoverable. Do NOT link to a sibling `.md.html` — there isn't
-      one; rendering happens at report-write time so the embedded view
-      always matches what's on disk right now.
+   Use the relative path as the `<summary>` so the source file stays
+   discoverable. Do NOT link to a sibling `.md.html` — there isn't one;
+   rendering happens at report-write time so the embedded view always
+   matches what's on disk right now.
 
-      **Link as-is** for `.html` files (already render natively) and for
-      any large binary content.
-
-   5. **Context for sign-off** — PR description, PR notes, plan name + plan
-      notes (when present).
-
-   Match the icons/colors used by `pm pr list` and the TUI for the header
-   verdict marker: the `SIGNOFF_VERDICT_ICONS` / `SIGNOFF_VERDICT_STYLES`
-   tokens (single source in `pm_core/signoff.py`).
+   **Link as-is** for `.html` files (already render natively) and for
+   any large binary content.
 
 5. **Route** by picking the verdict below whose definition matches what you
    found. Each verdict names the lifecycle step whose acceptance criteria it

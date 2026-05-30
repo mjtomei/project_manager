@@ -157,15 +157,17 @@ def test_signoff_prompt_includes_report_deliverable():
     from pm_core import prompt_gen
     p = prompt_gen.generate_signoff_prompt(
         _data(), "pr-aaa", session_name="pm-test")
+    # report.html is the deliverable; no JSON sidecar.
     assert "report.html" in p
-    # No JSON sidecar anymore — dashboard reads the verdict from report.html.
     assert "report.json" not in p
     # The verdict meta tag is the dashboard's only machine-readable contract.
     assert "pm-signoff-verdict" in p
-    # PR bullet points still required in report.html
-    assert "Bugs fixed by review and QA" in p
-    assert "Spec ambiguities resolved" in p
+    # The goal of the report is framed for the agent — convincing an external
+    # reviewer of the verdict, written for a reader unfamiliar with the PR.
+    assert "external reviewer" in p.lower() or "convince" in p.lower()
     assert "unfamiliar" in p.lower()
+    # Icon/style single source still pointed at so the verdict marker matches
+    # the TUI / pm pr list.
     assert "SIGNOFF_VERDICT_ICONS" in p
 
 
