@@ -165,6 +165,20 @@ def test_dashboard_shows_gh_id_when_present(tmp_path):
     assert "#42" in h
 
 
+def test_dashboard_escapes_html_in_title(tmp_path):
+    """A PR title with HTML special chars must be escaped so a hostile or
+    accidental ``<script>`` in project.yaml can't inject into the page."""
+    data = {"prs": [
+        {"id": "pr-xss", "title": "<script>alert(1)</script> & <b>bold</b>",
+         "status": "pending"},
+    ]}
+    rows = br.gather_dashboard_rows(data, tmp_path)
+    h = br.render_dashboard_html(rows)
+    assert "<script>alert(1)</script>" not in h
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in h
+    assert "&amp;" in h
+
+
 # ---------------------------------------------------------------------------
 # Sign-off prompt extension
 # ---------------------------------------------------------------------------

@@ -554,7 +554,10 @@ PR-level *comprehensive* review and a routing decision.
      {SIGNOFF_MERGE} etc., using the `SIGNOFF_VERDICT_ICONS` /
      `SIGNOFF_VERDICT_STYLES` tokens from `pm_core/signoff.py` so the
      visual matches the TUI and `pm pr list`); one-line recommendation;
-     link back to `../index.html` for navigation.
+     link back to `../index.html` for navigation (the all-PRs dashboard
+     served by `pm pr dashboard` — that path resolves to the live index
+     when the report is viewed through the dashboard server; there is no
+     static `index.html` file on disk).
 
    - **Table of contents** near the top — anchor links into every
      section below. Add `id="..."` to each section heading and a small
