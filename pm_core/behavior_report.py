@@ -47,11 +47,14 @@ class _DashRow:
     verdict: str             # SIGNOFF_* keyword or "" when no report / no tag
 
 
-_VERDICT_META_RE = re.compile(
-    r'<meta\s+[^>]*name=["\']pm-signoff-verdict["\']\s+[^>]*'
-    r'content=["\']([A-Z_]+)["\']',
-    re.IGNORECASE,
-)
+# Match a single ``<meta ...>`` tag, then pull ``name`` and ``content`` out of
+# it independently — the agent writes this HTML, so we don't assume a fixed
+# attribute order (``content`` may precede ``name``).
+_META_TAG_RE = re.compile(r'<meta\b[^>]*>', re.IGNORECASE)
+_META_NAME_RE = re.compile(
+    r'name\s*=\s*["\']pm-signoff-verdict["\']', re.IGNORECASE)
+_META_CONTENT_RE = re.compile(
+    r'content\s*=\s*["\']([A-Z_]+)["\']', re.IGNORECASE)
 
 
 def _extract_verdict(report_path: Path) -> str:
@@ -69,8 +72,11 @@ def _extract_verdict(report_path: Path) -> str:
     # quote) would be a false match.
     head_end = text.lower().find("</head>")
     head = text if head_end < 0 else text[:head_end]
-    m = _VERDICT_META_RE.search(head)
-    return m.group(1).upper() if m else ""
+    for tag in _META_TAG_RE.findall(head):
+        if _META_NAME_RE.search(tag):
+            m = _META_CONTENT_RE.search(tag)
+            return m.group(1).upper() if m else ""
+    return ""
 
 
 def gather_dashboard_rows(data: dict,
@@ -187,7 +193,7 @@ def _regenerate_cell(pr_id: str) -> str:
         f'onclick="pmCopy(\'{_e(cmd)}\', this)">copy</button></span>')
 
 
-def render_dashboard_html(data: dict, rows: list[_DashRow]) -> str:
+def render_dashboard_html(rows: list[_DashRow]) -> str:
     parts: list[str] = []
     parts.append('<!DOCTYPE html><html lang="en"><head>')
     parts.append('<meta charset="utf-8">')
@@ -254,5 +260,5 @@ def generate_dashboard(root: Path, *, session_tag: str | None = None,
     croot.mkdir(parents=True, exist_ok=True)
     rows = gather_dashboard_rows(data, croot)
     out_path = croot / "index.html"
-    out_path.write_text(render_dashboard_html(data, rows), encoding="utf-8")
+    out_path.write_text(render_dashboard_html(rows), encoding="utf-8")
     return out_path

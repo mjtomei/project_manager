@@ -99,6 +99,21 @@ def test_meta_tag_in_body_ignored(tmp_path):
     assert aaa.verdict == ""
 
 
+def test_verdict_meta_attribute_order_independent(tmp_path):
+    """The agent writes report.html, so the verdict meta tag must parse
+    regardless of whether ``content`` precedes ``name``."""
+    pdir = tmp_path / "pr-aaa"
+    pdir.mkdir(parents=True)
+    (pdir / "report.html").write_text(
+        '<!DOCTYPE html><html><head>'
+        '<meta content="SIGNOFF_MERGE" name="pm-signoff-verdict">'
+        '<title>x</title></head><body>x</body></html>',
+        encoding="utf-8")
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.verdict == signoff.SIGNOFF_MERGE
+
+
 def test_pr_state_read_from_project_yaml(tmp_path):
     """Title comes from project.yaml — not from anything in the report."""
     _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
@@ -115,13 +130,13 @@ def test_pr_state_read_from_project_yaml(tmp_path):
 def test_dashboard_links_to_agent_written_report(tmp_path):
     _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
-    h = br.render_dashboard_html(_data(), rows)
+    h = br.render_dashboard_html(rows)
     assert 'href="pr-aaa/report.html"' in h
 
 
 def test_dashboard_missing_state_uses_pm_pr_signoff(tmp_path):
     rows = br.gather_dashboard_rows(_data(), tmp_path)
-    h = br.render_dashboard_html(_data(), rows)
+    h = br.render_dashboard_html(rows)
     assert "no report yet" in h
     assert "pm pr signoff pr-bbb" in h
 
@@ -129,7 +144,7 @@ def test_dashboard_missing_state_uses_pm_pr_signoff(tmp_path):
 def test_dashboard_renders_verdict_icon(tmp_path):
     _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
-    h = br.render_dashboard_html(_data(), rows)
+    h = br.render_dashboard_html(rows)
     assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in h
     assert "SIGNOFF_MERGE" in h
 
@@ -137,14 +152,14 @@ def test_dashboard_renders_verdict_icon(tmp_path):
 def test_dashboard_shows_verdict_unknown_when_no_meta(tmp_path):
     _write_report(tmp_path, "pr-aaa", verdict=None)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
-    h = br.render_dashboard_html(_data(), rows)
+    h = br.render_dashboard_html(rows)
     assert "verdict unknown" in h
 
 
 def test_dashboard_shows_gh_id_when_present(tmp_path):
     _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
-    h = br.render_dashboard_html(_data(), rows)
+    h = br.render_dashboard_html(rows)
     assert "pr-aaa" in h
     assert "#42" in h
 

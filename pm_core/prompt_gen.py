@@ -530,7 +530,7 @@ PR-level *comprehensive* review and a routing decision.
 
    ### Hard requirement — the dashboard contract
 
-   The all-PRs dashboard (`pm pr behavior-report`) reads only one piece
+   The all-PRs dashboard (`pm pr dashboard`) reads only one piece
    of structured data from your report: the routing verdict, parsed from
    a single meta tag in `<head>`. This MUST be present verbatim with the
    keyword you're routing to:
