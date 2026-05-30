@@ -22,10 +22,10 @@ def _pr(pr_id, status="in_progress", title="Test PR", gh_pr_number=None):
 class TestActionsForStatus:
     def test_all_actions_for_non_terminal(self):
         """Every non-terminal status returns the full action list."""
-        for status in ("pending", "in_progress", "in_review", "qa"):
+        for status in ("pending", "in_progress", "in_review", "qa", "sign_off"):
             actions = _actions_for_status(status)
             labels = [a[0] for a in actions]
-            assert labels == ["start", "edit", "review", "qa", "merge"]
+            assert labels == ["start", "edit", "review", "qa", "signoff", "merge"]
 
     def test_merged_has_no_actions(self):
         assert _actions_for_status("merged") == []
@@ -36,7 +36,7 @@ class TestActionsForStatus:
     def test_unknown_status_returns_all_actions(self):
         """Non-terminal unknown statuses still get all actions."""
         labels = [a[0] for a in _actions_for_status("bogus")]
-        assert labels == ["start", "edit", "review", "qa", "merge"]
+        assert labels == ["start", "edit", "review", "qa", "signoff", "merge"]
 
     def test_qa_command_routes_through_tui(self):
         actions = _actions_for_status("in_progress")
@@ -64,6 +64,9 @@ class TestStatusPhase:
     def test_qa_phase_is_qa(self):
         assert _status_phase("qa") == "qa"
 
+    def test_sign_off_phase_is_signoff(self):
+        assert _status_phase("sign_off") == "signoff"
+
     def test_pending_has_no_phase(self):
         assert _status_phase("pending") is None
 
@@ -86,6 +89,9 @@ class TestCurrentWindowPrId:
 
     def test_merge_window(self):
         assert _current_window_pr_id("merge-#158") == "#158"
+
+    def test_signoff_window(self):
+        assert _current_window_pr_id("signoff-#158") == "#158"
 
     def test_non_pr_window(self):
         assert _current_window_pr_id("tui") is None
@@ -125,16 +131,17 @@ class TestBuildPickerLines:
         assert _build_picker_lines(prs, "#158") == []
 
     def test_only_window_actions_get_rows(self):
-        # start / review / qa / merge each have their own window and
-        # should appear; edit and review-loop are shortcut-only.
+        # start / review / qa / signoff / merge each have their own window
+        # and should appear; edit and review-loop are shortcut-only.
         prs = [_pr("pr-001", "pending", "New PR", gh_pr_number=158)]
         lines = _build_picker_lines(prs, "#158")
         action_lines = [d for d, cmd, _ in lines if cmd]
-        assert len(action_lines) == 4
+        assert len(action_lines) == 5
         assert any("start" in d for d in action_lines)
         assert any("review" in d and "review-loop" not in d
                    for d in action_lines)
         assert any("qa" in d for d in action_lines)
+        assert any("signoff" in d for d in action_lines)
         assert any("merge" in d for d in action_lines)
         # edit and review-loop are not list rows
         assert not any(d.strip().startswith("edit") for d in action_lines)
@@ -250,6 +257,7 @@ class TestPerSessionWindowIndicator:
             # key each action row by its label
             ("qa" if "qa" in d and "review" not in d
              else "review" if "review" in d and "review-loop" not in d
+             else "signoff" if "signoff" in d
              else "merge" if "merge" in d
              else "start"): d
             for d, cmd, _ in lines if cmd
