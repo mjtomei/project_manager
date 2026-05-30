@@ -23367,9 +23367,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-26T16:58:56.187976+00:00'
+  updated_at: '2026-05-30T18:27:36.240115+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-05-26T13:00:09.140826+00:00'
+  reviewed_at: '2026-05-27T15:48:45.703233+00:00'
   merged_at: null
   notes:
   - id: note-a9626ec
@@ -23900,6 +23900,62 @@ prs:
       AND whose GIVEN enables fake-claude, with this note as the redirect.'
     created_at: '2026-05-26T16:58:56Z'
     last_edited: '2026-05-26T16:58:56Z'
+  - id: note-1f565ff
+    text: 'QA-planner (round): rewrote pm/specs/pr-8e693f6/qa.md to match the current
+      code — it had drifted badly. Reality now: (1) `pm pr dashboard` is a BLOCKING
+      localhost HTTP server (default 127.0.0.1:8765, --port/--bind/--open), NOT a
+      static index.html generator; it rebuilds the index per `/` request and serves
+      per-PR report.html + evidence from the captures root. (2) NO report.json sidecar
+      — dashboard reads the verdict from a single `<meta name=pm-signoff-verdict content=SIGNOFF_*>`
+      tag in report.html head only. (3) Dashboard table is MINIMAL: PR / Title / Verdict
+      / Report columns — no plan grouping, no status icons, no QA-tally/loop badges,
+      no client-side filtering. (4) No `pm pr report` command; per-PR report is agent-written
+      only. (5) New `pm md-render <path>` -> body-only HTML for md evidence. Scenarios
+      30-36 planned against this reality. Per note-ce0f6d1: dashboard/robustness scenarios
+      SYNTHESIZE report.html on disk (deterministic, no agent); only the end-to-end
+      report-authoring scenario (35) runs REAL Claude (no fake-claude config).'
+    created_at: '2026-05-30T18:27:36Z'
+    last_edited: '2026-05-30T18:27:36Z'
+  - id: note-17ee935
+    text: 'QA INPUT_REQUIRED: Dashboard server serves the all-PR index, links per-PR:
+      PASS; Dashboard tolerates malformed/missing reports and escapes: PASS; Dashboard
+      command fails clearly when it cannot resolve a: INPUT_REQUIRED; Concurrent dashboard
+      requests and racing sign-off launches: PASS; Sign-off status and verdict markers
+      are consistent across: PASS; A real sign-off pass produces a self-contained
+      report the: PASS; Report-feeding plumbing — qa_loop writes scenario.json,: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-c3ed44e830d89f4a)'
+    created_at: '2026-05-30T21:30:24Z'
+    last_edited: '2026-05-30T21:30:24Z'
+  - id: note-5ce9a11
+    text: 'QA s30-36 run — consolidates the per-scenario worktree notes (s-31/33/34/35)
+      so the individual ones need not be committed. Non-obvious findings: (1) VERDICT
+      EXTRACTION: the dashboard verdict comes from behavior_report._extract_verdict,
+      a head-only regex scan of <meta name=pm-signoff-verdict content=...> (case/quote/attr-order
+      independent, content [A-Z_]+). The report is read with errors=replace (NOT strict),
+      so garbage bytes decode to replacement chars and never raise; no match yields
+      a verdict-unknown cell, but has_report stays True whenever the file exists so
+      the open-report link still renders. A PR with no report file shows verdict dash
+      plus a no-report-yet state and a copyable `pm pr signoff <id>` cell. All dynamic
+      text passes through html.escape. (2) CAPTURES PATH: the per-PR report lives at
+      captures_root()/<pr_id>/report.html where captures_root = ~/.pm/sessions/<tag>/captures/
+      (tag = session name minus the pm- prefix); run dashboard AND signoff in the
+      SAME tmux session so the tag resolves identically. (3) report.html is purely
+      an AGENT deliverable — no python fallback writes it: dashboard/robustness scenarios
+      synthesize it on disk deterministically, and only end-to-end scenario 35 runs
+      real Claude (the QA env has a real claude binary + ANTHROPIC_API_KEY). (4) DRIVING
+      SIGNOFF: needs tmux + a workdir with a diff vs base + status in {qa,sign_off};
+      bootstrap via pm pr start then set status=sign_off in project.yaml; manual pm
+      pr signoff records NO pr[signoff] (only --background auto-sequence records it
+      via signoff.py record_signoff_verdict). (5) GLYPHS: the verdict marker (for
+      example the SIGNOFF_MERGE triangle) is single-sourced via SIGNOFF_VERDICT_ICONS
+      across pr list / TUI / dashboard, but the lifecycle STATUS icon differs by surface
+      by design (CLI vs TUI) so do NOT assert it identical across CLI+TUI. (6) OBSERVATION:
+      the dashboard is a blocking foreground server, so background it in a pane and
+      observe via curl http://127.0.0.1:<port>/ -- curl over the server is the real
+      browser surface; report.html and its evidence siblings resolve as HTTP 200 and
+      the index back-link is server-resolved.'
+    created_at: '2026-05-30T21:41:13Z'
+    last_edited: '2026-05-30T21:41:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
