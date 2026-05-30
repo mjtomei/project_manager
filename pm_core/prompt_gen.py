@@ -504,6 +504,15 @@ PR-level *comprehensive* review and a routing decision.
    Anything that would have been load-bearing for a reviewer staring at
    the diff should be in the report.
 
+   Design for **two depths in the same page**: a brief read of the
+   top-line content (header, recommendation, summary, per-step
+   conclusions) should be enough to trust the verdict and move on; the
+   *same* page should also carry the full depth — diff, scenario
+   evidence, captures — folded behind `<details>` blocks so a reviewer
+   who wants to audit can click through without leaving the page or
+   re-deriving anything. Default to collapsed for everything the
+   top-line reader doesn't need.
+
    Write so the reviewer can pick the report up cold and:
 
    - understand and trust your sign-off verdict without opening the diff;
@@ -547,10 +556,17 @@ PR-level *comprehensive* review and a routing decision.
      visual matches the TUI and `pm pr list`); one-line recommendation;
      link back to `../index.html` for navigation.
 
+   - **Table of contents** near the top — anchor links into every
+     section below. Add `id="..."` to each section heading and a small
+     `<nav>` (or `<ul>`) listing them so the reviewer can jump straight
+     to e.g. the diff, the QA evidence, or a specific scenario without
+     scrolling. A single PR's report can run long; the TOC is the
+     reviewer's index.
+
    - **Top-of-page summary** — the reviewer's entry points. For each
      item, one plain-English line + a link to the underlying evidence
-     (commit / scenario / note); when the item has consequences past
-     this PR, name them inline. Group by:
+     (commit / scenario / note / diff anchor); when the item has
+     consequences past this PR, name them inline. Group by:
 
      * **Bugs found and fixed by review/QA during this loop** (not part
        of the original implementation) — say which area of the code or
@@ -569,6 +585,19 @@ PR-level *comprehensive* review and a routing decision.
      evidence to each step's acceptance criteria. For a **bug PR** show
      Implementation as Before/After (pre-fix: bug reproduces; post-fix:
      symptom gone) and flag a missing phase rather than dropping it.
+
+   - **Code change (the diff)** — there is no web UI for the diff
+     elsewhere, so the report carries it. Run the same diff command
+     from step 1 (`{diff_cmd}`) and embed the output so the reviewer
+     can read or audit the actual change without leaving the page.
+     For navigability, split by file: get the changed file list with
+     `{diff_cmd} --name-only`, render it as an inline TOC for this
+     section, then for each file render a `<details>` block, collapsed
+     by default, containing `<pre><code class="diff">`-wrapped output
+     of `{diff_cmd} -- <path>` (HTML-escape `<`, `>`, `&` inside the
+     `<pre>`). The summary should be the file path so a reviewer can
+     scan paths and only expand what they want to read. For a small
+     single-file diff, one combined `<details>` is fine.
 
    - **Context** at the bottom: PR description, PR notes, plan name +
      plan notes when present — for a reviewer who wants the source
