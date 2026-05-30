@@ -4,11 +4,13 @@ PR: pr-8e693f6 (#226) · Plan: plan-regression
 Depends on: pr-2d5f712 (sign-off step / window / `signoff` session type — **MERGED**)
 Forward-compatible with: pr-06a96fa (evidence model), pr-ff9b728 (plan notes).
 
-## Architecture (post-clarification — note-537e1a0, note-a8bc547; sidecar dropped 2026-05-30)
+## Architecture (post-clarification — note-537e1a0, note-a8bc547; sidecar dropped 2026-05-30; dashboard moved from static file to local server 2026-05-30)
 
 The original description read like a deterministic Python renderer for both
 surfaces. Two scope-clarification notes mid-loop pinned the actual mechanism,
-and a later refactor (commit fca8c07d) dropped the JSON sidecar entirely:
+a later refactor (commit fca8c07d) dropped the JSON sidecar entirely, and a
+follow-up clarification replaced the static `index.html` with a local HTTP
+server so liveness is dynamic:
 
 * **Per-PR `report.html` is AGENT-WRITTEN.** Captures are heterogeneous enough
   that coherent per-behavior framing requires the same semantic pass that
@@ -28,13 +30,20 @@ and a later refactor (commit fca8c07d) dropped the JSON sidecar entirely:
   (The earlier `report.json` sidecar duplicated `project.yaml` / QA-status
   state and its only agent-derived fields — loop badge counts — were chrome,
   so it was removed.)
-* **The dashboard is the deterministic part.** A single top-level `index.html`
-  at the captures root lists one row per PR (pm id, GitHub #, title, verdict,
-  link to `report.html`). It **never interprets captures** beyond reading the
-  one verdict meta tag from each `report.html`. PR runtime state (title) is
-  read fresh from `project.yaml` at generation time so it can't go stale.
-* **Regenerate = plain `pm pr signoff <id>`.** No "write-only" mode. Outside
-  auto-sequence, manual sign-off is recommendation-only (the
+* **The dashboard is served, not written.** `pm pr dashboard` starts a small
+  localhost HTTP server (`pm_core/dashboard_server.py`, stdlib `http.server`)
+  bound to `127.0.0.1` only. Every `/` request rebuilds the index from
+  `project.yaml` + the captures dir at request time so liveness is implicit
+  — a new report shows up on the next page load with no regeneration step.
+  Per-PR `report.html` and its evidence siblings are served straight from
+  `<captures>/<pr_id>/...`. The page lists one row per PR (pm id, GitHub #,
+  title, verdict, link to `report.html`) and **never interprets captures**
+  beyond reading the one verdict meta tag from each `report.html`. PR
+  runtime state (title) is read fresh from `project.yaml` at request time
+  so it can't go stale. **No on-disk `index.html`** — there is nothing to
+  commit and nothing to keep in sync.
+* **Regenerate-the-report = plain `pm pr signoff <id>`.** No "write-only"
+  mode. Outside auto-sequence, manual sign-off is recommendation-only (the
   manual-never-acts invariant pr-2d5f712 established in note-1a982f3 /
   note-942fa37), so re-running is safe — the agent re-emits the report and
   may adopt an existing fresh verdict per the adoption rule (note-511d725)
@@ -93,37 +102,50 @@ specifies:
   pointing the agent at `signoff.SIGNOFF_VERDICT_ICONS` /
   `SIGNOFF_VERDICT_STYLES`.
 
-### R2 — All-PR dashboard (the only deterministic generator)
-`pm_core/behavior_report.py` produces a single top-level
-`~/.pm/sessions/<tag>/captures/index.html` — **intentionally minimal**:
+### R2 — All-PR dashboard (served locally)
+`pm_core/behavior_report.py` builds the dashboard HTML in-memory:
+`gather_dashboard_rows(data, captures_root_dir)` walks `project.yaml` + the
+captures dir and `render_dashboard_html(rows)` produces the HTML string. The
+dashboard is **intentionally minimal**:
 * One row per PR in `project.yaml`. Columns: PR id (+ GitHub #), title
   (from `project.yaml`), verdict, Report cell.
-* **Verdict** is read at generation time from the `pm-signoff-verdict` meta
-  tag in each PR's `$CAP/<pr_id>/report.html` (`_extract_verdict`). When the
+* **Verdict** is read at request time from the `pm-signoff-verdict` meta tag
+  in each PR's `$CAP/<pr_id>/report.html` (`_extract_verdict`). When the
   report is missing the row shows a "no report yet" empty state with the
-  **regenerate command** `pm pr signoff <pr_id>` (and a copy button); when the
-  report exists but carries no meta tag the verdict cell shows "verdict
+  **regenerate command** `pm pr signoff <pr_id>` (and a copy button); when
+  the report exists but carries no meta tag the verdict cell shows "verdict
   unknown".
 * The dashboard **never interprets captures** beyond that one meta tag. An
   unreadable / tag-less `report.html` degrades gracefully (empty verdict),
-  never crashes the index.
+  never breaks the index.
 * The verdict marker reuses `signoff.SIGNOFF_VERDICT_ICONS` /
   `SIGNOFF_VERDICT_STYLES` (mapped to CSS via `_RICH_COLOR_CSS`) so the
   dashboard matches the TUI and `pm pr list`.
 
-**Note — scope reduction vs the original description.** The description called
-for client-side filtering (by status, by merged/unmerged), plan grouping with
-plan-notes pass-through, QA-verdict tallies, and loop badges. The 2026-05-30
-refactor (commit fca8c07d) deliberately removed all of these along with the
-sidecar, leaving the flat 4-column table. This is an intentional
-simplification, recorded here so the divergence from the description is
-explicit.
+`pm_core/dashboard_server.py` exposes `serve(pm_root, captures_root_dir, *,
+host="127.0.0.1", port, open_browser)`. It runs a `ThreadingHTTPServer`
+bound to localhost; `/` rebuilds the dashboard fresh on every request,
+everything else falls through to `SimpleHTTPRequestHandler` rooted at
+`captures_root_dir` so `report.html` and its evidence siblings are served
+straight from disk.
+
+**Note — scope reduction vs the original description.** The description
+called for client-side filtering (by status, by merged/unmerged), plan
+grouping with plan-notes pass-through, QA-verdict tallies, and loop badges.
+The 2026-05-30 refactor (commit fca8c07d) deliberately removed all of these
+along with the sidecar, leaving the flat 4-column table. This is an
+intentional simplification, recorded here so the divergence from the
+description is explicit.
 
 ### R3 — CLI surface
 * **Remove** the retired `pm pr report` / `pm pr signoff-record` commands.
-* **Keep** `pm pr dashboard [--open]` — (re)generates `index.html`.
-* **Add** `pm md-render <path>` (hidden helper) — body-only HTML for the
-  sign-off agent to embed `.md` evidence inline.
+* **`pm pr dashboard [--port N] [--bind HOST] [--open]`** — starts the
+  local dashboard server. Default port `8765`, default bind `127.0.0.1`
+  (never `0.0.0.0` by default — security). `--open` launches the user's
+  browser at the served URL. Foreground / blocking; Ctrl-C shuts down
+  cleanly. No file is written.
+* **Add** `pm md-render <path>` — body-only HTML for the sign-off agent
+  to embed `.md` evidence inline.
 
 ### R4 — Forward-compat captures
 Keep the additive `scenarios/<n>/scenario.json` write in
@@ -141,9 +163,11 @@ work (the agent reads whatever's there).
   `name` / `content` attributes independently of their order.
 
 ## Implicit requirements
-* The dashboard opens with no web server and no network.
-* Generation is idempotent (re-running overwrites `index.html`).
-* Captures-root resolution mirrors `captures_dir` so the dashboard finds the
+* The server binds localhost-only by default; an explicit `--bind` flag is
+  required to expose it on a non-loopback interface.
+* Each `/` request is independent — no cached state between requests, so a
+  new `report.html` shows up on the next page load.
+* Captures-root resolution mirrors `captures_dir` so the server serves the
   same per-PR dirs the sign-off agent writes to (`paths.captures_root`).
 
 ## Ambiguities (resolved)

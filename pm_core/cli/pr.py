@@ -3228,38 +3228,38 @@ def pr_qa_run_bg(pr_id: str):
         raise SystemExit(1)
 
 
-def _maybe_open(path: Path, do_open: bool) -> None:
-    """Best-effort open of a generated HTML file in a browser."""
-    if not do_open or path is None:
-        return
-    import webbrowser
-    try:
-        webbrowser.open(path.as_uri())
-    except Exception:
-        click.echo(f"(could not open a browser; open {path} manually)",
-                   err=True)
-
-
 @pr.command("dashboard")
+@click.option("--port", default=None, type=int,
+              help="TCP port (default 8765; 0 picks a free port).")
+@click.option("--bind", default=None,
+              help="Bind address (default 127.0.0.1). Use with care — "
+                   "the server has no auth.")
 @click.option("--open", "do_open", is_flag=True,
-              help="Open the dashboard in a browser.")
-def pr_dashboard(do_open: bool):
-    """(Re)generate the all-PR behavior dashboard (``index.html``).
+              help="Open the dashboard in a browser once the server is up.")
+def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
+    """Serve the all-PR behavior dashboard at ``http://localhost:<port>/``.
 
-    Writes ``~/.pm/sessions/<tag>/captures/index.html`` — one row per PR
-    (pm id, GitHub #, title, verdict, link to ``report.html``). The verdict
-    is parsed from a ``pm-signoff-verdict`` meta tag in the report's
-    ``<head>``; PRs without a report surface a "no report yet" cell with
-    ``pm pr signoff <id>`` as the regenerate command.
+    Starts a localhost HTTP server that rebuilds the index from
+    ``project.yaml`` + the captures dir on every ``/`` request, so a new
+    sign-off report shows up on the next page load with no regeneration
+    step. Per-PR ``report.html`` and its evidence siblings are served
+    straight from ``~/.pm/sessions/<tag>/captures/<pr_id>/``.
+
+    Foreground / blocking. Ctrl-C shuts the server down.
     """
-    from pm_core import behavior_report
+    from pm_core import dashboard_server
+    from pm_core.paths import captures_root
 
     root = state_root()
-    out = behavior_report.generate_dashboard(root)
-    if out is None:
+    croot = captures_root()
+    if croot is None:
         click.echo(
             "Could not resolve the captures root (not inside a git repo / no "
             "session tag?).", err=True)
         raise SystemExit(1)
-    click.echo(f"Dashboard: {out}")
-    _maybe_open(out, do_open)
+    croot.mkdir(parents=True, exist_ok=True)
+    dashboard_server.serve(
+        pm_root=root, captures_root_dir=croot,
+        host=bind or dashboard_server.DEFAULT_BIND,
+        port=port if port is not None else dashboard_server.DEFAULT_PORT,
+        open_browser=do_open)

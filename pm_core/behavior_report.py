@@ -1,23 +1,24 @@
 """All-PR behavior dashboard (pr-8e693f6).
 
 Per-PR ``report.html`` is **agent-written** as a deliverable of the sign-off
-prompt (``generate_signoff_prompt``). This module owns the one deterministic
-surface: the **all-PR dashboard** ``index.html`` at the captures root
-(``~/.pm/sessions/<tag>/captures/index.html``), opened over ``file://``.
+prompt (``generate_signoff_prompt``). This module builds the all-PR index
+HTML in-memory; ``pm_core.dashboard_server`` serves it over a localhost
+HTTP server (`pm pr dashboard`), rebuilding on every ``/`` request so
+liveness is dynamic.
 
 The dashboard is intentionally minimal. One row per PR with:
 
   * pm canonical id + GitHub PR # (if any)
   * title (from ``project.yaml``)
   * link to the per-PR ``report.html`` (or a "no report yet" cell)
-  * the sign-off verdict, read at generation time from a single
+  * the sign-off verdict, read at request time from a single
     ``<meta name="pm-signoff-verdict" content="SIGNOFF_*">`` tag in
     ``report.html``'s ``<head>``
 
 No JSON sidecar — the report itself is the canonical artifact and the only
 piece of structured data the dashboard needs (the verdict keyword) is read
 directly from it. PR runtime state (title) comes fresh from ``project.yaml``
-at generation time so it can't go stale.
+at request time so it can't go stale.
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 from urllib.parse import quote
 
 _log = logging.getLogger("pm.behavior_report")
@@ -43,7 +43,7 @@ class _DashRow:
     gh_label: str            # "#42" or "" when no GitHub PR
     title: str
     has_report: bool
-    report_html_rel: Optional[str]   # relative to the dashboard index.html
+    report_html_rel: str | None      # path served by the dashboard server
     verdict: str             # SIGNOFF_* keyword or "" when no report / no tag
 
 
@@ -233,32 +233,3 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
     return "".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# Public generation API
-# ---------------------------------------------------------------------------
-
-def generate_dashboard(root: Path, *, session_tag: str | None = None,
-                       data: dict | None = None) -> Optional[Path]:
-    """(Re)generate the all-PR behavior dashboard ``index.html``.
-
-    Returns the written path, or ``None`` when the captures root can't be
-    resolved (no session tag — e.g. not inside a git repo). For each PR the
-    dashboard checks ``$CAP/<pr_id>/report.html``: if present, it links to
-    the report and parses the routing verdict out of a ``pm-signoff-verdict``
-    meta tag in ``<head>``; if absent, the row shows a "no report yet" cell
-    with ``pm pr signoff <pr_id>`` as the regenerate command.
-    """
-    from pm_core import store
-    from pm_core.paths import captures_root
-
-    if data is None:
-        data = store.load(root)
-    croot = captures_root(session_tag=session_tag)
-    if croot is None:
-        _log.warning("Cannot resolve captures root (no session tag)")
-        return None
-    croot.mkdir(parents=True, exist_ok=True)
-    rows = gather_dashboard_rows(data, croot)
-    out_path = croot / "index.html"
-    out_path.write_text(render_dashboard_html(rows), encoding="utf-8")
-    return out_path

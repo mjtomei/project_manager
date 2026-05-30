@@ -1,20 +1,21 @@
 """Tests for the all-PR behavior dashboard + the sign-off prompt extension
 (pr-8e693f6).
 
-Per-PR ``report.html`` is agent-written. The dashboard is the deterministic
-surface: one row per PR with the title (from ``project.yaml``), a link to
-``report.html``, and the sign-off verdict parsed straight out of a
-``pm-signoff-verdict`` meta tag in that file's ``<head>``.
+Per-PR ``report.html`` is agent-written. The dashboard is served by a small
+localhost HTTP server (``pm pr dashboard``) that rebuilds the index from
+``project.yaml`` + the captures dir on every ``/`` request, so liveness is
+dynamic and no on-disk index.html exists.
 """
 
+import http.server
+import socket
+import threading
+import time
+import urllib.request
 from pathlib import Path
-from unittest.mock import patch
-
-from click.testing import CliRunner
 
 import pm_core.behavior_report as br
-from pm_core.cli.pr import pr_dashboard
-from pm_core import signoff
+from pm_core import dashboard_server, signoff
 
 
 # ---------------------------------------------------------------------------
@@ -199,31 +200,107 @@ def test_signoff_prompt_keeps_route_step_numbered_last():
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Server
 # ---------------------------------------------------------------------------
 
-def test_cli_dashboard_generates_index(tmp_path, monkeypatch):
+def _free_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _spin_up(pm_root: Path, caps: Path):
+    """Start the dashboard server on a free port; return (httpd, base_url)."""
+    handler = dashboard_server._make_handler(pm_root, caps)
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    # Wait briefly until the listener is actually accepting.
+    for _ in range(50):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                break
+        except OSError:
+            time.sleep(0.02)
+    return httpd, f"http://127.0.0.1:{port}"
+
+
+def _seed_project(tmp_path: Path) -> tuple[Path, Path]:
     pm_root = tmp_path / "pm"
     pm_root.mkdir()
     caps = tmp_path / "captures"
     caps.mkdir()
-    _write_report(caps, "pr-aaa", signoff.SIGNOFF_MERGE)
-
     from pm_core import store
     store.save(_data(), pm_root)
+    return pm_root, caps
 
-    monkeypatch.setattr(
-        "pm_core.paths.captures_root",
-        lambda session_tag=None, start_path=None: caps)
 
-    with patch("pm_core.cli.pr.state_root", return_value=pm_root):
-        res = CliRunner().invoke(pr_dashboard, [])
-    assert res.exit_code == 0, res.output
-    out = (caps / "index.html").read_text()
-    assert 'href="pr-aaa/report.html"' in out
-    assert "pm pr signoff pr-bbb" in out
+def test_server_root_renders_dashboard_dynamically(tmp_path):
+    pm_root, caps = _seed_project(tmp_path)
+    _write_report(caps, "pr-aaa", signoff.SIGNOFF_MERGE)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        body = urllib.request.urlopen(f"{base}/").read().decode()
+        assert 'href="pr-aaa/report.html"' in body
+        assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in body
+        assert "pm pr signoff pr-bbb" in body  # empty-state cell for pr-bbb
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_server_serves_report_html_from_captures(tmp_path):
+    pm_root, caps = _seed_project(tmp_path)
+    _write_report(caps, "pr-aaa", signoff.SIGNOFF_MERGE)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        body = urllib.request.urlopen(
+            f"{base}/pr-aaa/report.html").read().decode()
+        assert "pm-signoff-verdict" in body
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_server_picks_up_new_report_without_restart(tmp_path):
+    """A report written after the server starts must show up on the next
+    request — liveness must be per-request, not cached at startup."""
+    pm_root, caps = _seed_project(tmp_path)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        body_before = urllib.request.urlopen(f"{base}/").read().decode()
+        assert "pm pr signoff pr-aaa" in body_before  # no report yet
+        _write_report(caps, "pr-aaa", signoff.SIGNOFF_MERGE)
+        body_after = urllib.request.urlopen(f"{base}/").read().decode()
+        assert 'href="pr-aaa/report.html"' in body_after
+        assert "pm pr signoff pr-aaa" not in body_after
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_server_404_on_unknown_path(tmp_path):
+    pm_root, caps = _seed_project(tmp_path)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        try:
+            urllib.request.urlopen(f"{base}/does-not-exist")
+            assert False, "expected HTTPError"
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_pr_report_command_is_removed():
     import pm_core.cli.pr as pr_cli
     assert not hasattr(pr_cli, "pr_report")
+
+
+def test_generate_dashboard_static_writer_is_removed():
+    """The static-file writer was replaced by the local HTTP server."""
+    assert not hasattr(br, "generate_dashboard")
