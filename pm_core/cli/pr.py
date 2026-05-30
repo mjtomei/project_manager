@@ -3247,13 +3247,14 @@ def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
     from pm_core.paths import captures_root
 
     root = state_root()
+    # captures_root() creates the dir when a tag resolves, so croot exists
+    # by the time we get a non-None path back.
     croot = captures_root()
     if croot is None:
         click.echo(
             "Could not resolve the captures root (not inside a git repo / no "
             "session tag?).", err=True)
         raise SystemExit(1)
-    croot.mkdir(parents=True, exist_ok=True)
     dashboard_server.serve(
         pm_root=root, captures_root_dir=croot,
         host=bind or dashboard_server.DEFAULT_BIND,
