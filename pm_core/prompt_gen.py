@@ -551,17 +551,24 @@ PR-level *comprehensive* review and a routing decision.
           available)
         - `<details><pre>` for small text / log files under ~50 KB
 
-      For **Markdown** evidence (`.md`), pm has already pre-rendered every
-      `.md` file under `$CAP` to a sibling `<name>.md.html`: just before
-      this signoff session is launched, pm walks `$CAP/**/*.md` and runs
-      each through Python's `markdown` (CommonMark + tables + fenced_code,
-      `html5` output) into a styled standalone document. Rendering is
-      idempotent so repeated sign-off launches are safe.
-      **Always link the `<name>.md.html` sibling, never the raw `.md`** —
-      raw `.md` over `file://` displays as plaintext in most browsers, so
-      every link in `report.html` whose target is a `.md` evidence file
-      MUST be rewritten to point at the `.md.html` sibling. The original
-      `.md` stays on disk for grep / diff / archival.
+      For **Markdown** evidence (`.md`), render the body inline so the
+      reader never sees stale or out-of-sync HTML. For each `.md` you
+      reference, run `pm md-render <relative path>` — this prints the
+      body-only HTML fragment (CommonMark + tables + fenced_code, no
+      document shell) — and drop the fragment inside a `<details>`
+      block collapsed by default:
+
+      ```html
+      <details>
+        <summary>scenarios/3/notes.md</summary>
+        <div class="md-body"><!-- pm md-render scenarios/3/notes.md output --></div>
+      </details>
+      ```
+
+      Use the relative path as the `<summary>` so the source file stays
+      discoverable. Do NOT link to a sibling `.md.html` — there isn't
+      one; rendering happens at report-write time so the embedded view
+      always matches what's on disk right now.
 
       **Link as-is** for `.html` files (already render natively) and for
       any large binary content.

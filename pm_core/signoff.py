@@ -192,32 +192,6 @@ def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
     )
 
 
-def _prerender_captures_markdown(pr_id: str, session_name: str | None) -> None:
-    """Pre-render every ``.md`` under the PR's captures dir to a sibling
-    ``.md.html`` so the sign-off agent can link the rendered HTML rather than
-    raw markdown (which browsers display as plaintext over ``file://``).
-
-    Deterministic: runs in-process before the agent starts and is idempotent.
-    Failures are logged and swallowed — the agent can still run without the
-    rendered siblings.
-    """
-    try:
-        from pm_core.paths import captures_dir
-        from pm_core.markdown_render import render_md_file
-
-        tag = session_name.removeprefix("pm-") if session_name else None
-        cap = captures_dir(pr_id, session_tag=tag)
-        if cap is None or not cap.is_dir():
-            return
-        for md in cap.rglob("*.md"):
-            try:
-                render_md_file(md)
-            except Exception as exc:  # noqa: BLE001
-                _log.warning("pre-render %s failed: %s", md, exc)
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("captures markdown pre-render skipped: %s", exc)
-
-
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                           background: bool = False,
                           transcript: str | None = None,
@@ -322,8 +296,6 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             provider=_resolution.provider,
             effort=_resolution.effort,
             session_type="signoff")
-
-        _prerender_captures_markdown(pr_id, pm_session)
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():

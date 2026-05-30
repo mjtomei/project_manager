@@ -1,21 +1,22 @@
-"""Tests for ``pm_core.markdown_render`` — the sign-off helper that pre-renders
-linked ``.md`` evidence to a sibling ``.html`` (note-d01545e / note-8cfdf73).
+"""Tests for ``pm_core.markdown_render.render_markdown_body`` — the body-only
+HTML fragment the sign-off agent embeds inline in ``report.html``.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from click.testing import CliRunner
 
 from pm_core import markdown_render
+from pm_core.cli import cli
 
 
 # ---------------------------------------------------------------------------
-# render_markdown_to_html
+# render_markdown_body
 # ---------------------------------------------------------------------------
 
 def test_commonmark_basics_preserved():
     src = "# Heading\n\nA paragraph with **bold** and *italic*.\n\n- one\n- two\n"
-    out = markdown_render.render_markdown_to_html(src)
+    out = markdown_render.render_markdown_body(src)
     assert "<h1>Heading</h1>" in out
     assert "<strong>bold</strong>" in out
     assert "<em>italic</em>" in out
@@ -30,7 +31,7 @@ def test_tables_extension_renders_table():
         "| 1 | 2 |\n"
         "| 3 | 4 |\n"
     )
-    out = markdown_render.render_markdown_to_html(src)
+    out = markdown_render.render_markdown_body(src)
     assert "<table>" in out and "</table>" in out
     assert "<th>A</th>" in out
     assert "<td>1</td>" in out and "<td>4</td>" in out
@@ -38,62 +39,38 @@ def test_tables_extension_renders_table():
 
 def test_fenced_code_extension_preserves_block():
     src = "```python\ndef f(x):\n    return x + 1\n```\n"
-    out = markdown_render.render_markdown_to_html(src)
+    out = markdown_render.render_markdown_body(src)
     assert "<pre>" in out and "</pre>" in out
     assert "<code" in out
-    # Indentation inside the fenced block should be preserved verbatim.
     assert "    return x + 1" in out
 
 
-def test_output_is_a_well_formed_html_document():
-    out = markdown_render.render_markdown_to_html("just text\n", title="hello")
-    assert out.startswith("<!DOCTYPE html>")
-    assert "<html" in out and "</html>" in out
-    assert "<head>" in out and "</head>" in out
-    assert "<body>" in out and "</body>" in out
-    assert "<title>hello</title>" in out
-    # Style shell is inlined so the page stays self-contained over file://.
-    assert "<style>" in out and "</style>" in out
-
-
-def test_title_is_html_escaped():
-    out = markdown_render.render_markdown_to_html(
-        "x", title="<script>alert(1)</script>")
-    assert "<script>alert(1)</script>" not in out
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out
+def test_output_is_body_only_no_shell():
+    # The fragment is embedded inside another HTML document (report.html),
+    # so it must NOT carry a top-level doctype/html/head/body/style wrapper.
+    out = markdown_render.render_markdown_body("# Hi\n\ntext\n")
+    assert "<!DOCTYPE" not in out
+    assert "<html" not in out
+    assert "<head" not in out
+    assert "<body" not in out
+    assert "<style" not in out
+    assert "<h1>Hi</h1>" in out
 
 
 # ---------------------------------------------------------------------------
-# render_md_file
+# `pm md-render` CLI
 # ---------------------------------------------------------------------------
 
-def test_render_md_file_writes_sibling_html(tmp_path: Path):
+def test_cli_md_render_emits_body_only_html(tmp_path):
     md = tmp_path / "notes.md"
-    md.write_text("# Hi\n\ntext\n")
-    out = markdown_render.render_md_file(md)
-    assert out == tmp_path / "notes.md.html"
-    assert out.exists()
-    # Source .md is kept so it stays grep-/diff-able alongside the rendered HTML.
-    assert md.exists()
-    text = out.read_text()
-    assert "<h1>Hi</h1>" in text
-    assert text.startswith("<!DOCTYPE html>")
+    md.write_text("# Hi\n\ntext with **bold**\n", encoding="utf-8")
+    result = CliRunner().invoke(cli, ["md-render", str(md)])
+    assert result.exit_code == 0, result.output
+    assert "<h1>Hi</h1>" in result.output
+    assert "<strong>bold</strong>" in result.output
+    assert "<!DOCTYPE" not in result.output
 
 
-def test_render_md_file_is_idempotent(tmp_path: Path):
-    md = tmp_path / "x.md"
-    md.write_text("# A\n")
-    a = markdown_render.render_md_file(md).read_text()
-    md.write_text("# A\n")
-    b = markdown_render.render_md_file(md).read_text()
-    assert a == b
-
-
-def test_render_md_file_honors_out_path(tmp_path: Path):
-    md = tmp_path / "x.md"
-    md.write_text("# A\n")
-    out = tmp_path / "rendered" / "x.html"
-    out.parent.mkdir()
-    result = markdown_render.render_md_file(md, out_path=out)
-    assert result == out
-    assert "<h1>A</h1>" in out.read_text()
+def test_cli_md_render_missing_file_errors(tmp_path):
+    result = CliRunner().invoke(cli, ["md-render", str(tmp_path / "nope.md")])
+    assert result.exit_code != 0
