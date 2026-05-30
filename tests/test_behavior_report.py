@@ -162,10 +162,14 @@ def test_signoff_prompt_includes_report_deliverable():
     assert "report.json" not in p
     # The verdict meta tag is the dashboard's only machine-readable contract.
     assert "pm-signoff-verdict" in p
-    # The goal of the report is framed for the agent — convincing an external
-    # reviewer of the verdict, written for a reader unfamiliar with the PR.
-    assert "external reviewer" in p.lower() or "convince" in p.lower()
-    assert "unfamiliar" in p.lower()
+    # The goal of the report is framed for the agent — external technical
+    # reviewer invested in the project but not necessarily familiar with the
+    # PR details / surrounding code. Bug + ambiguity sections are framed as
+    # entry points for that reviewer.
+    assert "external technical reviewer" in p.lower()
+    assert "not necessarily familiar" in p.lower()
+    assert "entry point" in p.lower()
+    assert "implications" in p.lower()
     # Icon/style single source still pointed at so the verdict marker matches
     # the TUI / pm pr list.
     assert "SIGNOFF_VERDICT_ICONS" in p

@@ -496,14 +496,22 @@ PR-level *comprehensive* review and a routing decision.
    it; reference them by relative path and make sure the page opens over
    `file://`.
 
-   The goal of the report is to **convince an external reviewer of your
-   sign-off verdict** and **surface anything they need to weigh in on**:
-   ambiguities you resolved or couldn't, things that may need human
-   review, anything of interest to someone working on higher-level
-   integration or planning. The report's audience is a reader UNFAMILIAR
-   with the PR's description / notes / commits — plain English, no
-   internal jargon, link to the underlying commits / scenarios / notes
-   where applicable.
+   The audience is an **external technical reviewer** who is invested in
+   the project but not necessarily familiar with this PR's details or the
+   surrounding code. Write so they can pick the report up cold and:
+
+   - understand and trust your sign-off verdict;
+   - find **entry points** into anything that came up during the loop
+     (bugs that surfaced, ambiguities you ran into) so they can audit or
+     extend that thread without re-deriving it; and
+   - see **possible implications for the rest of the project** — work
+     that should land in a sibling PR, decisions that constrain future
+     PRs, assumptions that other plan items now depend on.
+
+   Plain English; no internal jargon (don't drop a naked function or
+   file name without a one-clause "what it is"); link to the underlying
+   commit / scenario / note for every item so the entry point is one
+   click away.
 
    ### Hard requirement — the dashboard contract
 
@@ -533,12 +541,23 @@ PR-level *comprehensive* review and a routing decision.
      visual matches the TUI and `pm pr list`); one-line recommendation;
      link back to `../index.html` for navigation.
 
-   - **Top-of-page summary** in plain English: bugs found and fixed by
-     review/QA during this loop (not part of the original implementation),
-     spec ambiguities resolved (or *not* resolved — flag those for the
-     reviewer), open questions you couldn't answer, anything the planner
-     might care about. One line per item; link to the underlying
-     evidence.
+   - **Top-of-page summary** — the reviewer's entry points. For each
+     item, one plain-English line + a link to the underlying evidence
+     (commit / scenario / note); when the item has consequences past
+     this PR, name them inline. Group by:
+
+     * **Bugs found and fixed by review/QA during this loop** (not part
+       of the original implementation) — say which area of the code or
+       behaviour the bug hid in, so the reviewer can decide whether
+       similar code elsewhere is suspect.
+     * **Spec ambiguities** — both resolved (what was the question, what
+       was the answer, who decided) and *unresolved* (flag clearly for
+       the reviewer to weigh in). If the resolution changes the shape of
+       work in sibling PRs or future plan items, say so.
+     * **Open questions and possible project-level implications** —
+       anything you can't answer alone, anything that should land as a
+       follow-up PR, anything that changes assumptions other plan items
+       depend on.
 
    - **Per-step sections** for Implementation, Review, and QA pairing
      evidence to each step's acceptance criteria. For a **bug PR** show
