@@ -498,9 +498,15 @@ PR-level *comprehensive* review and a routing decision.
 
    The audience is an **external technical reviewer** who is invested in
    the project but not necessarily familiar with this PR's details or the
-   surrounding code. Write so they can pick the report up cold and:
+   surrounding code. **The report should stand on its own such that the
+   reviewer does not need to read the diff to trust the verdict** — it is
+   meant to *replace* human code review of this PR, not summarise it.
+   Anything that would have been load-bearing for a reviewer staring at
+   the diff should be in the report.
 
-   - understand and trust your sign-off verdict;
+   Write so the reviewer can pick the report up cold and:
+
+   - understand and trust your sign-off verdict without opening the diff;
    - find **entry points** into anything that came up during the loop
      (bugs that surfaced, ambiguities you ran into) so they can audit or
      extend that thread without re-deriving it; and
