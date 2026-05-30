@@ -1469,38 +1469,6 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
         transcript=transcript, origin=origin)
 
 
-@pr.command("signoff-record", hidden=True)
-@click.argument("pr_id")
-@click.argument("verdict")
-@click.option("--origin", default="manual",
-              type=click.Choice(["manual", "auto-sequence"]))
-def pr_signoff_record(pr_id: str, verdict: str, origin: str):
-    """Durably record a sign-off router verdict on the PR (does NOT act).
-
-    Invoked by the sign-off router pane to persist its recommendation as
-    ``pr['signoff'] = {verdict, sha, ts, origin}`` so a later auto-sequence
-    tick can ADOPT it without a wasted re-run.  Recording never changes status;
-    only the auto-sequence driver acts on a verdict.
-    """
-    from pm_core import signoff as signoff_mod
-
-    if verdict not in signoff_mod.SIGNOFF_VERDICTS:
-        click.echo(
-            f"Invalid sign-off verdict '{verdict}'. Must be one of: "
-            f"{', '.join(signoff_mod.SIGNOFF_VERDICTS)}", err=True)
-        raise SystemExit(1)
-
-    root = state_root()
-    data = store.load(root)
-    pr_entry = _require_pr(data, pr_id)
-    pr_id = pr_entry["id"]
-    sha = signoff_mod.head_sha(pr_entry.get("workdir"))
-    signoff_mod.record_signoff_verdict(root, pr_id, verdict, sha, origin)
-    click.echo(f"Recorded sign-off verdict {verdict} for {_pr_display_id(pr_entry)} "
-               f"(sha={sha or '?'}, origin={origin})")
-    trigger_tui_refresh()
-
-
 def _finalize_merge(root, pr_entry: dict, pr_id: str,
                     transcript: str | None = None) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""

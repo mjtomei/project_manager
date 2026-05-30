@@ -393,8 +393,7 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
 
 
 def generate_signoff_prompt(data: dict, pr_id: str,
-                            session_name: str | None = None,
-                            origin: str = "manual") -> str:
+                            session_name: str | None = None) -> str:
     """Generate a Claude Code prompt for the sign-off step of a PR.
 
     Sign-off is the PR-level comprehensive review that runs *after* QA passes
@@ -444,110 +443,73 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
     qa_block = _signoff_qa_scenarios_block(pr_id)
 
-    bug_note = ""
     if _is_bug_pr(pr):
-        bug_note = (
-            "\n## Bug-fix evidence\n"
-            "This is a **bug-fix PR** (reproduce → fix → verify). Its primary "
-            "evidence lives under `$CAP/impl/pre-fix/` (the failing repro on "
-            "pre-fix code) and `$CAP/impl/post-fix/` (the post-fix "
-            "verification). Read both and judge, as part of your per-step "
-            "review, whether they genuinely demonstrate the bug and its "
-            "absence — a fix with thin or missing repro/verify evidence has "
-            "not really been shown to work (route " + SIGNOFF_IMPL + ").\n")
+        impl_bullet = (
+            f"`$CAP/impl/` — implementation captures. This is a **bug-fix PR** "
+            f"(reproduce → fix → verify), so impl captures split into "
+            f"`pre-fix/` (the failing repro on pre-fix code) and `post-fix/` "
+            f"(the post-fix verification). Read both and judge whether they "
+            f"genuinely demonstrate the bug and its absence — a fix with thin "
+            f"or missing repro/verify evidence has not really been shown to "
+            f"work (route **{SIGNOFF_IMPL}**)."
+        )
+    else:
+        impl_bullet = (
+            "`$CAP/impl/` — implementation captures (primary evidence for the "
+            "PR's behavior)."
+        )
 
-    prompt = f"""You are the **sign-off reviewer** for PR {pr_id}: "{title}"
+    prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
 
-Sign-off is the dedicated lifecycle step between QA and merge. QA has passed and
-finalized; your job is a PR-level *comprehensive* review and a routing decision.
-You are a **router only** — you NEVER edit code. Any fix must happen back in
-implementation or QA so it re-passes review and QA.
+Sign-off is the dedicated lifecycle step between QA and merge. Your job is a 
+PR-level *comprehensive* review and a routing decision.
 
 ## Description
 {description}
 {pr_notes_block}{impl_spec_block}{plan_context}{tui_block}
 ## QA scenarios (from the QA run)
-{qa_block}{bug_note}
-## Per-step acceptance criteria — check EACH lifecycle step individually
-
-Do not run only generic checks. The PR passed through impl → review → qa; each
-step has a distinct *purpose* and *acceptance criteria*. Verify each one met its
-criteria, report a per-step verdict, and route on the FIRST step that fell short.
-
-- **Implementation (impl)** — purpose: deliver the PR's required behavior and an
-  implementation spec. Criteria: the diff implements every requirement in the
-  spec/description; an impl spec exists and the code matches it; for a bug PR,
-  the pre-fix + post-fix captures exist and demonstrate the bug and its fix.
-  Shortfall → **{SIGNOFF_IMPL}** (missing/incomplete behavior or missing
-  captures).
-- **Review** — purpose: confirm code quality, correctness, and architectural
-  fit. Criteria: the change was actually reviewed (a review verdict exists), and
-  no unaddressed quality/architecture/correctness issue remains. If code was
-  changed after the last review (e.g. during QA), it has NOT been re-reviewed.
-  Shortfall → **{SIGNOFF_REVIEW}** (must re-pass review AND qa).
-- **QA** — purpose: prove the behavior works against the *real* code path.
-  Criteria: every scenario has an accounted-for verdict; each exercised the real
-  path (not a mock) with captured evidence; obvious edge cases are covered; no
-  PASS is unverified (e.g. verifier-cwd). Shortfall → **{SIGNOFF_REQA}** (harness
-  / misframed / thin-evidence problems are a QA problem, not a code problem).
-
+{qa_block}
 ## What to do
 
-1. **Read the whole evidence record — every stage, every scenario, every step.**
-   - `CAP="$(pm qa captures-path {pr_id})"` then read EVERYTHING under it:
-     - `$CAP/impl/` — implementation captures (bug-fix repro/verify; primary evidence).
+1. **Read the diff**: run `{diff_cmd}`.
+
+2. **Review the evidence record. Make sure all features are included in artifacts
+     that are sufficient to demonstrate success of the PR without reviewing code.**
+   - `CAP="$(pm qa captures-path {pr_id})"`:
+     - {impl_bullet}
      - `$CAP/scenarios/<n>/` — per-scenario QA captures, prompts, and verdicts.
-   - Do NOT spot-check. Walk every scenario and every step listed above and
-     confirm each against its captured evidence.
-   - Provenance note: the harness also runs the regression at known shas
-     (fails at the pre-fix parent sha, passes at the fix sha). That provenance
-     comes from the harness, not from any session-written file — factor it in
-     but do not expect a captures file to assert it.
-
-2. **Read the diff**: run `{diff_cmd}`.
-
-3. **Two evaluations:**
    - **(a) BDD — does the captured behavior support the diff's claims?** For
      each scenario/step, does the evidence actually demonstrate the behavior the
      diff claims to deliver?
    - **(b) Meta-QA / anti-shortcut — was the QA itself rigorous?** Look for thin
-     evidence, a scenario that drove a *mock* instead of the real code path, or
+     evidence, a scenario that drove a *mock* instead of code the PR touched, or
      an obvious uncovered edge case. (Per-scenario false-PASS is already caught
      inline by the scenario quality supervisor; this is the PR-level pass over
      scenarios it already vetted.)
 
-4. **Record an audit trail.** For every classification and the hop you choose,
+3. **Record an audit trail.** For every classification and the hop you choose,
    add a `pm pr note add {pr_id} '...'` entry stating what you found and why you
    routed where you did, so the recommendation is fully inspectable.
 
-5. **Write the sign-off report (deliverable).** Two files are REQUIRED on
-   every sign-off pass — they are how a reviewer (and the all-PR dashboard)
-   reads what you concluded without running anything:
+4. **Write the sign-off report (deliverable).** Two files are REQUIRED on
+   every sign-off pass in order to generate a dashboard:
 
    * `$CAP/report.html` — the human-facing BDD behaviour report.
    * `$CAP/report.json` — a small structured sidecar (the dashboard's only
      contract).
 
-   Both live ALONGSIDE the captures (`$CAP = $(pm qa captures-path {pr_id})`)
-   and reference every evidence file by RELATIVE path so the page opens over
-   `file://`. Re-running `pm pr signoff {pr_id}` regenerates them — safe outside
-   auto-sequence because manual sign-off is recommendation-only.
+   Since they live alongside the captures, evidence files should be referenced
+   by relative path so the page opens over `file://`. 
 
    ### `report.html` — required structure (top → bottom)
 
    1. **Header** with the PR display id + title; the recorded sign-off
-      verdict (▲ {SIGNOFF_MERGE} etc.) and the scenario verdict tally
-      (e.g. "3 PASS / 1 NEEDS_WORK"); a one-line **Recommendation** that
-      reflects the routing decision (e.g. for {SIGNOFF_MERGE} say
-      "ready_to_merge — sign-off recommends merge; sign-off never merges; the
-      plan watcher makes the final call"); a link back to `../index.html`.
-      Do NOT render PR `status` or `merged` badges in this page — those are
-      project.yaml runtime state that goes stale relative to a frozen
-      sign-off pass. The dashboard surfaces current state instead.
+      verdict (▲ {SIGNOFF_MERGE} etc.); a one-line **Recommendation** that
+      reflects the routing decision; a link back to `../index.html`.
 
-   2. **What this loop found and decided** (top-of-page summary, REQUIRED).
+   2. **PR bullet points** (top-of-page summary, REQUIRED).
       Two short bulleted lists, **one line per item, plain English**, written
-      so a reader UNFAMILIAR with the PR's description / notes / commits can
+      so a reader unfamiliar with the PR's description / notes / commits can
       scan them and decide whether to look closer. No internal jargon (no
       naked function or file names without a one-clause "what it is"). Where
       applicable, link each bullet to the relevant commit / scenario / note.
@@ -590,8 +552,11 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
         - `<details><pre>` for small text / log files under ~50 KB
 
       For **Markdown** evidence (`.md`), pm has already pre-rendered every
-      `.md` file under `$CAP` to a sibling `<name>.md.html` at sign-off
-      window launch (see `pm_core.signoff._prerender_captures_markdown`).
+      `.md` file under `$CAP` to a sibling `<name>.md.html`: just before
+      this signoff session is launched, pm walks `$CAP/**/*.md` and runs
+      each through Python's `markdown` (CommonMark + tables + fenced_code,
+      `html5` output) into a styled standalone document. Rendering is
+      idempotent so repeated sign-off launches are safe.
       **Always link the `<name>.md.html` sibling, never the raw `.md`** —
       raw `.md` over `file://` displays as plaintext in most browsers, so
       every link in `report.html` whose target is a `.md` evidence file
@@ -599,7 +564,7 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
       `.md` stays on disk for grep / diff / archival.
 
       **Link as-is** for `.html` files (already render natively) and for
-      any binary larger than ~10 MB.
+      any large binary content.
 
    4. **Context for sign-off** — PR description, PR notes, plan name + plan
       notes (when present).
@@ -610,11 +575,16 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
 
    ### `report.json` — strict schema (dashboard's only contract)
 
-   The dashboard reads ONLY this sidecar, and the sidecar carries ONLY
-   sign-off-derived content. **Do NOT write** `title`, `status`, `merged`, or
-   `display_id` — those are project.yaml's responsibility and the dashboard
-   reads them fresh at generation time. Baking them into the sidecar would
-   make it stale the moment those values changed without a re-sign-off.
+   `pm pr behavior-report` builds an all-PRs HTML dashboard by reading one
+   `report.json` sidecar per PR — your sidecar is the row this PR contributes
+   (verdict badge, scenario tally, link to `report.html`). Missing or
+   unparseable sidecar → that PR shows up as an empty-state row.
+
+   The sidecar carries ONLY sign-off-derived content. **Do NOT write**
+   `title`, `status`, `merged`, or `display_id` — those are project.yaml's
+   responsibility and the dashboard reads them fresh at generation time.
+   Baking them into the sidecar would make it stale the moment those values
+   changed without a re-sign-off.
 
    Write stable sorted keys. UTF-8 encoded. Every additional fact you want
    surfaced on the dashboard goes here:
@@ -635,27 +605,37 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
    Write the files atomically (write to a temp file then rename) so a reader
    never sees a half-written sidecar.
 
-6. **Record your verdict** durably so it can be adopted without a re-run:
-   ```
-   pm pr signoff-record {pr_id} <VERDICT> --origin {origin}
-   ```
-   (replace `<VERDICT>` with the keyword you chose below). This only RECORDS a
-   recommendation — it does not act. Sign-off never merges; the actual next hop
-   is executed later, only under the auto-sequence driver.
+5. **Route** by picking the verdict below whose definition matches what you
+   found. Each verdict names the lifecycle step whose acceptance criteria it
+   covers; weigh those criteria against the evidence and choose the keyword
+   that fits — read every definition before deciding. End your response with
+   exactly ONE verdict keyword on its own line.
 
-7. **Route** by ending with exactly ONE verdict keyword on its own line:
-
-   - **{SIGNOFF_MERGE}** — PASS: the evidence supports the diff and the QA was
-     rigorous. This is a RECOMMENDATION to merge — sign-off never merges itself;
-     the PR is reported ready_to_merge and the merge decision is made later.
-   - **{SIGNOFF_REQA}** — PASS but *unverified* (e.g. a verifier-cwd / harness
-     problem made the PASS untrustworthy) OR a scenario was *misframed*. This is
-     a harness/QA problem, not a code problem → re-run QA. Do NOT bounce to impl.
-   - **{SIGNOFF_REVIEW}** — a code change happened during QA (a scenario fixed it
-     itself). Because code changed, it must go back through review AND qa to
-     validate the fix is real and shortcut-free.
-   - **{SIGNOFF_IMPL}** — a real gap in the implementation (an INPUT_REQUIRED that
-     reflects missing required behavior). Back to implementation.
+   - **{SIGNOFF_MERGE}** — all three steps met their criteria: the evidence
+     supports the diff and the QA was rigorous. This is a RECOMMENDATION to
+     merge — sign-off never merges itself; the PR is reported ready_to_merge and
+     the merge decision is made later.
+   - **{SIGNOFF_IMPL}** — covers the **Implementation** step. Purpose of impl:
+     deliver the PR's required behavior and an implementation spec. Criteria:
+     the diff implements every requirement in the spec/description; an impl
+     spec exists and the code matches it; for a bug PR, the pre-fix + post-fix
+     captures exist and demonstrate the bug and its fix. Use when there is a
+     real gap in the implementation (e.g. an INPUT_REQUIRED reflecting missing
+     required behavior, or missing captures). Back to implementation.
+   - **{SIGNOFF_REVIEW}** — covers the **Review** step. Purpose of review:
+     confirm code quality, correctness, and architectural fit. Criteria: the
+     change was actually reviewed (a review verdict exists) and no unaddressed
+     quality/architecture/correctness issue remains. If code changed after the
+     last review (e.g. a scenario fixed something during QA), it has NOT been
+     re-reviewed. Must re-pass review AND qa to validate the fix is real and
+     shortcut-free.
+   - **{SIGNOFF_REQA}** — covers the **QA** step. Purpose of QA: prove the
+     behavior works against the *real* code path. Criteria: every scenario has
+     an accounted-for verdict; each exercised the real path (not a mock) with
+     captured evidence; obvious edge cases are covered; no PASS is unverified
+     (e.g. verifier-cwd). Use when a PASS is *unverified* (harness problem made
+     it untrustworthy) OR a scenario was *misframed*. Harness/QA problem, not a
+     code problem → re-run QA. Do NOT bounce to impl.
    - **{SIGNOFF_BLOCKED}** — escalate / hold. Use this for genuine ambiguity
      (CONSERVATIVE BIAS: when truly unsure, BLOCK and escalate rather than
      merge), something impossible / out-of-scope (note the limitation), or an
@@ -664,9 +644,9 @@ criteria, report a per-step verdict, and route on the FIRST step that fell short
 ### Classifying an INPUT_REQUIRED before routing
 - **Misframed scenario** → note it → **{SIGNOFF_REQA}**.
 - **Real gap** → note it → **{SIGNOFF_IMPL}**.
-- **Assumed-missing feature** → file a new PR with a blocking `depends_on`
+- **PR description assumed-missing feature** → file a new PR with a blocking `depends_on`
   (`pm pr add ...`, then set the dependency), note it → **{SIGNOFF_BLOCKED}**;
-  or, if you judge it in-scope, expand scope and **{SIGNOFF_REQA}**.
+  or, if you judge it in-scope, expand scope and **{SIGNOFF_IMPL}**.
 - **Nice-to-have** → defer to a new PR (`pm pr add ...`) and **{SIGNOFF_MERGE}**,
   or include it via impl if trivial (**{SIGNOFF_IMPL}**).
 - **Impossible / out-of-scope** → note the limitation → **{SIGNOFF_MERGE}** (if
@@ -2140,7 +2120,11 @@ push captures — they're not part of the PR branch.
    - Push: `git push origin {branch}`
    - If push fails (another scenario pushed first), pull and retry:
      `git pull --rebase origin {branch} && git push origin {branch}`
-{n+2}. End with a verdict on its own line — one of:
+{n+2}. On the line immediately above the verdict, write a one-sentence
+   rationale in the form `Reason: <one sentence>` so the sign-off
+   reviewer has a summary alongside the verdict (e.g. `Reason: feature
+   worked end-to-end; ran command X and saw output Y.`).
+{n+3}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
    - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
@@ -2154,7 +2138,11 @@ push captures — they're not part of the PR branch.
    - Implement the fix in the PR workdir
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
-{n+2}. End with a verdict on its own line — one of:
+{n+2}. On the line immediately above the verdict, write a one-sentence
+   rationale in the form `Reason: <one sentence>` so the sign-off
+   reviewer has a summary alongside the verdict (e.g. `Reason: feature
+   worked end-to-end; ran command X and saw output Y.`).
+{n+3}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
    - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
@@ -2247,7 +2235,7 @@ couldn't finish, a flaky prerequisite, something to check next time — you
 cannot amend your verdict to carry it forward. Hand it off as a PR note
 instead (see the PR Notes — Handoff Channel section below).
 {pr_notes_handoff_block}
-IMPORTANT: Always end your response with the verdict keyword on its own line."""
+IMPORTANT: Always end your response with `Reason: <one sentence>` on the second-to-last line and the verdict keyword on the very last line."""
     return prompt.strip()
 
 

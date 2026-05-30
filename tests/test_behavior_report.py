@@ -260,7 +260,7 @@ def test_signoff_prompt_includes_report_deliverable(tmp_path):
     data = _data()
     # The prompt builder reads PR fields and the plan — minimal seed is fine.
     p = prompt_gen.generate_signoff_prompt(
-        data, "pr-aaa", session_name="pm-test", origin="manual")
+        data, "pr-aaa", session_name="pm-test")
     # Both deliverables explicitly required
     assert "report.html" in p and "report.json" in p
     # Top-of-page summary section
@@ -270,21 +270,20 @@ def test_signoff_prompt_includes_report_deliverable(tmp_path):
     for key in ("bugs_fixed_in_loop", "spec_clarifications",
                 "tally", "next_hop", "report_html", "generated_at"):
         assert key in p, f"sidecar key missing from prompt: {key}"
-    # Audience guidance for the bulleted summary
-    assert "UNFAMILIAR" in p
+    # Audience guidance for the bulleted summary (header bullet)
+    assert "unfamiliar" in p.lower()
     # Reuses #225's single sources for icons/styles
     assert "SIGNOFF_VERDICT_ICONS" in p
 
 
 def test_signoff_prompt_keeps_route_step_numbered_last():
-    """Adding the report step must not duplicate the routing step number."""
+    """The Route step is always the last numbered step in the prompt."""
     from pm_core import prompt_gen
     p = prompt_gen.generate_signoff_prompt(
-        _data(), "pr-aaa", session_name="pm-test", origin="manual")
-    # New ordering: 5. report, 6. record verdict, 7. route
-    assert "5. **Write the sign-off report" in p
-    assert "6. **Record your verdict" in p
-    assert "7. **Route" in p
+        _data(), "pr-aaa", session_name="pm-test")
+    # Current ordering: 4. report, 5. route
+    assert "4. **Write the sign-off report" in p
+    assert "5. **Route" in p
 
 
 # ---------------------------------------------------------------------------

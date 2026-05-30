@@ -297,7 +297,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         )
 
         signoff_prompt = prompt_gen.generate_signoff_prompt(
-            data, pr_id, session_name=pm_session, origin=origin)
+            data, pr_id, session_name=pm_session)
 
         # Container cwd quirk mirrors review: Claude's cwd is /workspace inside a
         # container, so the transcript symlink + prompt file must target the

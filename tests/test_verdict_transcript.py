@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from pm_core.verdict_transcript import extract_verdict_from_transcript
+from pm_core.verdict_transcript import (
+    extract_verdict_from_transcript,
+    extract_verdict_reason_from_transcript,
+)
 
 
 VERDICTS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
@@ -204,3 +207,49 @@ def test_longer_verdict_not_masked_by_shorter_prefix(tmp_path: Path) -> None:
         _assistant_line("PASS_AND_THEN_SOME\n"),
     ])
     assert extract_verdict_from_transcript(p, custom) == "PASS_AND_THEN_SOME"
+
+
+def test_reason_basic(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("did the steps\nReason: feature works end to end\nPASS"),
+    ])
+    assert extract_verdict_reason_from_transcript(p) == "feature works end to end"
+
+
+def test_reason_picks_last_in_turn(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: early thought\nmore work\nReason: final summary\nPASS"),
+    ])
+    assert extract_verdict_reason_from_transcript(p) == "final summary"
+
+
+def test_reason_ignores_prior_turn(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("first"),
+        _assistant_line("Reason: stale from earlier\nPASS"),
+        _user_line("re-evaluate"),
+        _assistant_line("did it again\nReason: fresh take\nNEEDS_WORK"),
+    ])
+    assert extract_verdict_reason_from_transcript(p) == "fresh take"
+
+
+def test_reason_tolerates_bold(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("**Reason:** bold form\nPASS"),
+    ])
+    assert extract_verdict_reason_from_transcript(p) == "bold form"
+
+
+def test_reason_missing_returns_empty(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("just a verdict\nPASS"),
+    ])
+    assert extract_verdict_reason_from_transcript(p) == ""
+
+
+def test_reason_missing_file() -> None:
+    assert extract_verdict_reason_from_transcript(None) == ""

@@ -34,7 +34,10 @@ from pm_core.loop_shared import (
     poll_for_verdict,
     VERDICT_TAIL_LINES,
 )
-from pm_core.verdict_transcript import extract_verdict_from_transcript
+from pm_core.verdict_transcript import (
+    extract_verdict_from_transcript,
+    extract_verdict_reason_from_transcript,
+)
 
 _log = configure_logger("pm.qa_loop")
 
@@ -2282,6 +2285,9 @@ def _poll_tmux_verdicts(
                     _log.warning("Scenario %d failed verification %d times — "
                                  "marking NEEDS_WORK", scenario_idx, fails)
                     state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                    state.scenario_verdict_reasons[scenario_idx] = (
+                        f"failed verification: {reason}"
+                    )
                     state.latest_output = (
                         f"Scenario {scenario_idx} ({scenario.title}): "
                         f"NEEDS_WORK (failed verification: {reason})"
@@ -2304,8 +2310,10 @@ def _poll_tmux_verdicts(
                             f"actually execute the test steps (run commands, "
                             f"create test files, verify runtime behavior). "
                             f"Do not just read code. "
-                            f"End with a new verdict on its own line "
-                            f"(PASS / NEEDS_WORK / INPUT_REQUIRED)."
+                            f"End with `Reason: <one sentence>` on the "
+                            f"second-to-last line and a new verdict "
+                            f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
+                            f"on the last line."
                         )
                         tmux_mod.send_keys(pane_id, followup_msg)
                         # Send extra Enters to ensure the message is
@@ -2443,6 +2451,11 @@ def _poll_tmux_verdicts(
 
             if verdict:
                 state.scenario_verdicts[scenario.index] = verdict
+                reason = extract_verdict_reason_from_transcript(
+                    scenario.transcript_path,
+                )
+                if reason:
+                    state.scenario_verdict_reasons[scenario.index] = reason
                 pending.discard(scenario.index)
                 verdicts_changed = True
                 _log.info("Scenario %d (%s) verdict: %s",
