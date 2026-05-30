@@ -1,12 +1,12 @@
 """Tests for the all-PR behavior dashboard + the sign-off prompt extension
 (pr-8e693f6).
 
-Per-PR ``report.html`` is agent-written (via the sign-off prompt's report
-deliverable), so we test the prompt content. The dashboard is the only
-deterministic surface, and we test that it reads the ``report.json`` sidecar.
+Per-PR ``report.html`` is agent-written. The dashboard is the deterministic
+surface: one row per PR with the title (from ``project.yaml``), a link to
+``report.html``, and the sign-off verdict parsed straight out of a
+``pm-signoff-verdict`` meta tag in that file's ``<head>``.
 """
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,151 +23,89 @@ from pm_core import signoff
 
 def _data():
     return {
-        "plans": [
-            {"id": "plan-x", "name": "Regression loop", "status": "active",
-             "notes": [{"text": "watcher continuity"}]},
-        ],
         "prs": [
             {"id": "pr-aaa", "title": "Add thing", "status": "sign_off",
-             "plan": "plan-x", "gh_pr_number": 42,
-             "description": "desc"},
-            {"id": "pr-bbb", "title": "No sidecar PR", "status": "pending",
-             "plan": "plan-x"},
+             "gh_pr_number": 42, "description": "desc"},
+            {"id": "pr-bbb", "title": "No report PR", "status": "pending"},
             {"id": "pr-ccc", "title": "Merged one", "status": "merged",
              "merged_at": "2026-01-01T00:00:00Z"},
         ],
     }
 
 
-def _write_sidecar(root: Path, pr_id: str, **overrides) -> Path:
-    """Write a report.json sidecar with only sign-off-derived keys; *overrides*
-    tweak keys (and may inject state-shaped fields to verify they're ignored)."""
-    payload = {
-        "pr_id": pr_id,
-        "verdict": signoff.SIGNOFF_MERGE,
-        "next_hop": "ready_to_merge",
-        "tally": {"PASS": 3, "NEEDS_WORK": 0, "INPUT_REQUIRED": 0,
-                  "pending": 0},
-        "bugs_fixed_in_loop": 2,
-        "spec_clarifications": 1,
-        "generated_at": "2026-05-26T12:00:00Z",
-        "report_html": "report.html",
-    }
-    payload.update(overrides)
+def _write_report(root: Path, pr_id: str, verdict: str | None) -> Path:
+    """Write a minimal report.html with optional verdict meta tag."""
+    head_meta = (f'<meta name="pm-signoff-verdict" content="{verdict}">'
+                 if verdict else "")
+    html = (
+        '<!DOCTYPE html><html><head>'
+        '<meta charset="utf-8">'
+        f'{head_meta}'
+        '<title>report</title>'
+        '</head><body><h1>report</h1></body></html>'
+    )
     pdir = root / pr_id
     pdir.mkdir(parents=True, exist_ok=True)
-    sidecar = pdir / "report.json"
-    sidecar.write_text(json.dumps(payload, indent=2))
-    return sidecar
+    out = pdir / "report.html"
+    out.write_text(html, encoding="utf-8")
+    return out
 
 
 # ---------------------------------------------------------------------------
-# Sidecar reading
+# Row gathering
 # ---------------------------------------------------------------------------
 
-def test_sidecar_drives_dashboard_row(tmp_path):
-    _write_sidecar(tmp_path, "pr-aaa")
+def test_report_drives_row_with_verdict_from_meta(tmp_path):
+    _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    assert aaa.has_sidecar
-    assert aaa.verdict == signoff.SIGNOFF_MERGE
-    assert aaa.next_hop == "ready_to_merge"
-    assert aaa.tally == {"PASS": 3, "NEEDS_WORK": 0,
-                         "INPUT_REQUIRED": 0, "pending": 0}
-    assert aaa.bugs_fixed_in_loop == 2
-    assert aaa.spec_clarifications == 1
+    assert aaa.has_report
     assert aaa.report_html_rel == "pr-aaa/report.html"
+    assert aaa.verdict == signoff.SIGNOFF_MERGE
+    assert aaa.title == "Add thing"
+    assert aaa.gh_label == "#42"
 
 
-def test_missing_sidecar_row_still_appears(tmp_path):
-    """A PR without a sidecar still shows up — with an empty state."""
+def test_missing_report_row_still_appears(tmp_path):
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     bbb = next(r for r in rows if r.pr_id == "pr-bbb")
-    assert bbb.has_sidecar is False
+    assert bbb.has_report is False
     assert bbb.report_html_rel is None
-    assert bbb.tally == {}
     assert bbb.verdict == ""
+    assert bbb.gh_label == ""  # no gh_pr_number
 
 
-def test_unreadable_sidecar_falls_back(tmp_path):
-    """Garbage in report.json falls back to the empty-state row."""
-    (tmp_path / "pr-aaa").mkdir()
-    (tmp_path / "pr-aaa" / "report.json").write_text("{not json")
+def test_report_without_meta_yields_empty_verdict(tmp_path):
+    _write_report(tmp_path, "pr-aaa", verdict=None)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    assert aaa.has_sidecar is False
-
-
-def test_partial_sidecar_renders(tmp_path):
-    """A sidecar missing optional keys still produces a row (no crash)."""
-    (tmp_path / "pr-aaa").mkdir()
-    (tmp_path / "pr-aaa" / "report.json").write_text(json.dumps({
-        "pr_id": "pr-aaa"}))
-    rows = br.gather_dashboard_rows(_data(), tmp_path)
-    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    assert aaa.has_sidecar
-    assert aaa.tally == {"PASS": 0, "NEEDS_WORK": 0,
-                         "INPUT_REQUIRED": 0, "pending": 0}
-    assert aaa.bugs_fixed_in_loop == 0
-
-
-# ---------------------------------------------------------------------------
-# Sidecar contract: sign-off-derived ONLY (note-c3932ca)
-# ---------------------------------------------------------------------------
-
-def test_sidecar_absent_row_has_no_verdict(tmp_path):
-    """pr['signoff'] is NOT a fallback for the dashboard verdict.
-
-    The dashboard renders sidecar-only — when no report.json is present, the
-    row's verdict stays empty even if the PR carries a recorded sign-off
-    verdict in project.yaml. (pm pr list / the TUI tree still surface it; the
-    dashboard intentionally diverges.)
-    """
-    data = _data()
-    for pr in data["prs"]:
-        if pr["id"] == "pr-aaa":
-            pr["signoff"] = {"verdict": signoff.SIGNOFF_IMPL,
-                             "sha": "deadbeef", "ts": "2026-05-26T00:00:00Z",
-                             "origin": "manual"}
-    rows = br.gather_dashboard_rows(data, tmp_path)
-    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    assert aaa.has_sidecar is False
+    assert aaa.has_report
     assert aaa.verdict == ""
 
 
-def test_pr_state_read_from_project_yaml_not_sidecar(tmp_path):
-    """State-shaped fields in the sidecar are ignored — project.yaml wins.
-
-    Locks in the rule that the sidecar carries only sign-off-derived content:
-    title / status / merged / display_id come from project.yaml every time
-    the dashboard is generated, so a stale sidecar can't lie about them.
-    """
-    _write_sidecar(tmp_path, "pr-aaa",
-                   title="STALE TITLE FROM SIDECAR",
-                   status="STALE_STATUS",
-                   merged=True,
-                   display_id="#999")
+def test_meta_tag_in_body_ignored(tmp_path):
+    """A verbatim verdict keyword (or even a meta) in <body> must NOT match —
+    only the <head> meta tag is canonical."""
+    pdir = tmp_path / "pr-aaa"
+    pdir.mkdir(parents=True)
+    (pdir / "report.html").write_text(
+        '<!DOCTYPE html><html><head><title>x</title></head>'
+        '<body>SIGNOFF_MERGE appears in body text\n'
+        '<meta name="pm-signoff-verdict" content="SIGNOFF_MERGE">'
+        '</body></html>',
+        encoding="utf-8")
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    # project.yaml values (from _data()) win:
-    assert aaa.title == "Add thing"
-    assert aaa.status == "sign_off"
-    assert aaa.merged is False           # no merged_at in _data()
-    assert aaa.display_id == "#42"       # from gh_pr_number
+    assert aaa.verdict == ""
 
 
-def test_sidecar_verdict_wins_over_pr_signoff(tmp_path):
-    """Sidecar verdict is authoritative; pr['signoff'] is never consulted."""
+def test_pr_state_read_from_project_yaml(tmp_path):
+    """Title comes from project.yaml — not from anything in the report."""
+    _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     data = _data()
-    for pr in data["prs"]:
-        if pr["id"] == "pr-aaa":
-            pr["signoff"] = {"verdict": signoff.SIGNOFF_IMPL,
-                             "sha": "deadbeef", "ts": "2026-05-26T00:00:00Z",
-                             "origin": "manual"}
-    _write_sidecar(tmp_path, "pr-aaa", verdict=signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(data, tmp_path)
     aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    assert aaa.verdict == signoff.SIGNOFF_MERGE
+    assert aaa.title == "Add thing"
 
 
 # ---------------------------------------------------------------------------
@@ -175,113 +113,66 @@ def test_sidecar_verdict_wins_over_pr_signoff(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_dashboard_links_to_agent_written_report(tmp_path):
-    _write_sidecar(tmp_path, "pr-aaa")
+    _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(_data(), rows)
-    # Live link to the agent's report.html for the PR with a sidecar
     assert 'href="pr-aaa/report.html"' in h
-    # And the next-hop framing from the sidecar
-    assert "next: ready_to_merge" in h
 
 
 def test_dashboard_missing_state_uses_pm_pr_signoff(tmp_path):
-    """Detect-missing rows surface `pm pr signoff <id>`, not the old report cmd."""
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(_data(), rows)
     assert "no report yet" in h
     assert "pm pr signoff pr-bbb" in h
-    # The retired `pm pr report` command must not be advertised anywhere.
-    assert "pm pr report" not in h
 
 
-def test_dashboard_reuses_signoff_icons_and_status_icons(tmp_path):
-    """Verdict + status markers match signoff.py and helpers.PR_STATUS_ICONS."""
-    from pm_core.cli.helpers import PR_STATUS_ICONS
-    _write_sidecar(tmp_path, "pr-aaa")
+def test_dashboard_renders_verdict_icon(tmp_path):
+    _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(_data(), rows)
-    assert PR_STATUS_ICONS["sign_off"] in h
     assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in h
+    assert "SIGNOFF_MERGE" in h
 
 
-def test_dashboard_loop_badges_from_sidecar(tmp_path):
-    """bugs_fixed_in_loop / spec_clarifications surface as badges."""
-    _write_sidecar(tmp_path, "pr-aaa", bugs_fixed_in_loop=3,
-                   spec_clarifications=2)
+def test_dashboard_shows_verdict_unknown_when_no_meta(tmp_path):
+    _write_report(tmp_path, "pr-aaa", verdict=None)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(_data(), rows)
-    assert "3 fixed" in h
-    assert "2 clarified" in h
+    assert "verdict unknown" in h
 
 
-def test_dashboard_loop_badges_hidden_when_zero(tmp_path):
-    _write_sidecar(tmp_path, "pr-aaa", bugs_fixed_in_loop=0,
-                   spec_clarifications=0)
+def test_dashboard_shows_gh_id_when_present(tmp_path):
+    _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(_data(), rows)
-    assert "fixed" not in h or "🐞" not in h
-    assert "clarified" not in h
-
-
-def test_dashboard_filters_and_groups_by_plan(tmp_path):
-    _write_sidecar(tmp_path, "pr-aaa")
-    rows = br.gather_dashboard_rows(_data(), tmp_path)
-    h = br.render_dashboard_html(_data(), rows)
-    assert 'id="f-status"' in h and 'id="f-merged"' in h
-    assert 'data-status="sign_off"' in h
-    assert 'data-merged="1"' in h and 'data-merged="0"' in h
-    # Plan grouping + plan notes pass-through
-    assert "Regression loop" in h
-    assert "watcher continuity" in h
-    assert "Unplanned" in h
-
-
-def test_dashboard_never_interprets_captures(tmp_path):
-    """Captures dir contents must NOT affect the dashboard — only the sidecar."""
-    pdir = tmp_path / "pr-aaa"
-    sc = pdir / "scenarios" / "1"
-    sc.mkdir(parents=True)
-    (sc / "verdict.md").write_text("# Scenario 1: x\n\nPASS\n")
-    (sc / "rec.webm").write_bytes(b"\x00")
-    rows = br.gather_dashboard_rows(_data(), tmp_path)
-    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
-    # No sidecar => empty state, even though captures exist
-    assert aaa.has_sidecar is False
-    assert aaa.tally == {}
+    assert "pr-aaa" in h
+    assert "#42" in h
 
 
 # ---------------------------------------------------------------------------
-# Sign-off prompt extension — the per-PR report's actual producer
+# Sign-off prompt extension
 # ---------------------------------------------------------------------------
 
-def test_signoff_prompt_includes_report_deliverable(tmp_path):
-    """The extended prompt instructs the agent to write report.html + json."""
+def test_signoff_prompt_includes_report_deliverable():
     from pm_core import prompt_gen
-    data = _data()
-    # The prompt builder reads PR fields and the plan — minimal seed is fine.
     p = prompt_gen.generate_signoff_prompt(
-        data, "pr-aaa", session_name="pm-test")
-    # Both deliverables explicitly required
-    assert "report.html" in p and "report.json" in p
-    # Top-of-page summary section
+        _data(), "pr-aaa", session_name="pm-test")
+    assert "report.html" in p
+    # No JSON sidecar anymore — dashboard reads the verdict from report.html.
+    assert "report.json" not in p
+    # The verdict meta tag is the dashboard's only machine-readable contract.
+    assert "pm-signoff-verdict" in p
+    # PR bullet points still required in report.html
     assert "Bugs fixed by review and QA" in p
     assert "Spec ambiguities resolved" in p
-    # Sidecar schema keys called out
-    for key in ("bugs_fixed_in_loop", "spec_clarifications",
-                "tally", "next_hop", "report_html", "generated_at"):
-        assert key in p, f"sidecar key missing from prompt: {key}"
-    # Audience guidance for the bulleted summary (header bullet)
     assert "unfamiliar" in p.lower()
-    # Reuses #225's single sources for icons/styles
     assert "SIGNOFF_VERDICT_ICONS" in p
 
 
 def test_signoff_prompt_keeps_route_step_numbered_last():
-    """The Route step is always the last numbered step in the prompt."""
     from pm_core import prompt_gen
     p = prompt_gen.generate_signoff_prompt(
         _data(), "pr-aaa", session_name="pm-test")
-    # Current ordering: 4. report, 5. route
     assert "4. **Write the sign-off report" in p
     assert "5. **Route" in p
 
@@ -295,7 +186,7 @@ def test_cli_dashboard_generates_index(tmp_path, monkeypatch):
     pm_root.mkdir()
     caps = tmp_path / "captures"
     caps.mkdir()
-    _write_sidecar(caps, "pr-aaa")
+    _write_report(caps, "pr-aaa", signoff.SIGNOFF_MERGE)
 
     from pm_core import store
     store.save(_data(), pm_root)
@@ -309,10 +200,9 @@ def test_cli_dashboard_generates_index(tmp_path, monkeypatch):
     assert res.exit_code == 0, res.output
     out = (caps / "index.html").read_text()
     assert 'href="pr-aaa/report.html"' in out
-    assert "pm pr signoff pr-bbb" in out  # missing-state regenerate cmd
+    assert "pm pr signoff pr-bbb" in out
 
 
 def test_pr_report_command_is_removed():
-    """The retired `pm pr report` command must not be registered anymore."""
     import pm_core.cli.pr as pr_cli
     assert not hasattr(pr_cli, "pr_report")

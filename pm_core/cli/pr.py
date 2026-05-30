@@ -3246,13 +3246,11 @@ def _maybe_open(path: Path, do_open: bool) -> None:
 def pr_dashboard(do_open: bool):
     """(Re)generate the all-PR behavior dashboard (``index.html``).
 
-    Writes ``~/.pm/sessions/<tag>/captures/index.html`` — one row per PR,
-    grouped by plan, with client-side filtering by status and
-    merged/unmerged. Each row reads its ``report.json`` sidecar (written by
-    the sign-off agent via ``pm pr signoff <id>``) for the verdict / tally /
-    loop-discovery badges; PRs without a sidecar surface an explicit
-    "no report yet" cell with ``pm pr signoff <id>`` as the regenerate
-    command.
+    Writes ``~/.pm/sessions/<tag>/captures/index.html`` — one row per PR
+    (pm id, GitHub #, title, verdict, link to ``report.html``). The verdict
+    is parsed from a ``pm-signoff-verdict`` meta tag in the report's
+    ``<head>``; PRs without a report surface a "no report yet" cell with
+    ``pm pr signoff <id>`` as the regenerate command.
     """
     from pm_core import behavior_report
 

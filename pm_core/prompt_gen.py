@@ -491,23 +491,38 @@ PR-level *comprehensive* review and a routing decision.
    add a `pm pr note add {pr_id} '...'` entry stating what you found and why you
    routed where you did, so the recommendation is fully inspectable.
 
-4. **Write the sign-off report (deliverable).** Two files are REQUIRED on
-   every sign-off pass in order to generate a dashboard:
+4. **Write the sign-off report (deliverable).** One file is REQUIRED on
+   every sign-off pass:
 
-   * `$CAP/report.html` — the human-facing BDD behaviour report.
-   * `$CAP/report.json` — a small structured sidecar (the dashboard's only
-     contract).
+   * `$CAP/report.html` — the human-facing BDD behaviour report. Evidence
+     files live alongside it so reference them by relative path; the page
+     must open over `file://`.
 
-   Since they live alongside the captures, evidence files should be referenced
-   by relative path so the page opens over `file://`. 
+   The all-PRs dashboard (`pm pr behavior-report`) reads this file for its
+   row: it checks existence and parses the routing verdict out of a single
+   meta tag in `<head>` (below). Everything else on the dashboard comes
+   from `project.yaml`. There is **no JSON sidecar** — keeping a separate
+   structured file in sync was its own footgun.
 
    ### `report.html` — required structure (top → bottom)
 
-   1. **Header** with the PR display id + title; the recorded sign-off
-      verdict (▲ {SIGNOFF_MERGE} etc.); a one-line **Recommendation** that
-      reflects the routing decision; a link back to `../index.html`.
+   1. **`<head>` must contain a verdict meta tag** — verbatim, the routing
+      keyword you'll emit at the end of this response:
 
-   2. **PR bullet points** (top-of-page summary, REQUIRED).
+      ```html
+      <meta name="pm-signoff-verdict" content="{SIGNOFF_MERGE}">
+      ```
+
+      (replace the content with whichever of {SIGNOFF_MERGE} / {SIGNOFF_REQA} /
+      {SIGNOFF_REVIEW} / {SIGNOFF_IMPL} / {SIGNOFF_BLOCKED} you choose). This
+      is the dashboard's only machine-readable contract; without it the row
+      shows "verdict unknown".
+
+   2. **Header** with the PR display id + title; the routing verdict (▲
+      {SIGNOFF_MERGE} etc.); a one-line **Recommendation** that reflects the
+      routing decision; a link back to `../index.html`.
+
+   3. **PR bullet points** (top-of-page summary, REQUIRED).
       Two short bulleted lists, **one line per item, plain English**, written
       so a reader unfamiliar with the PR's description / notes / commits can
       scan them and decide whether to look closer. No internal jargon (no
@@ -524,13 +539,9 @@ PR-level *comprehensive* review and a routing decision.
         discovery. Each bullet: the ambiguity + the resolution adopted, in
         plain language.
 
-      Source `bugs_fixed_in_loop` from the review-loop / QA commits since the
-      impl phase and from notes that record a finding. Source
-      `spec_clarifications` from notes that begin with DECISION / CORRECTION
-      / supersedes / "Scope addition", and any PR description rewrites in the
-      PR's history. Use empty lists when none apply.
+      Use empty lists when none apply.
 
-   3. **Per-step sections** — one section per lifecycle step (Implementation,
+   4. **Per-step sections** — one section per lifecycle step (Implementation,
       Review, QA). For each: the step's acceptance criteria explicit, then the
       evidence paired with those criteria. For a **bug PR** render
       Implementation as a Before/After (pre-fix: bug reproduces; post-fix:
@@ -573,44 +584,12 @@ PR-level *comprehensive* review and a routing decision.
       **Link as-is** for `.html` files (already render natively) and for
       any large binary content.
 
-   4. **Context for sign-off** — PR description, PR notes, plan name + plan
+   5. **Context for sign-off** — PR description, PR notes, plan name + plan
       notes (when present).
 
-   Match the icons/colors used by `pm pr list` and the TUI: the `sign_off`
-   status icon and the `SIGNOFF_VERDICT_ICONS` / `SIGNOFF_VERDICT_STYLES`
+   Match the icons/colors used by `pm pr list` and the TUI for the header
+   verdict marker: the `SIGNOFF_VERDICT_ICONS` / `SIGNOFF_VERDICT_STYLES`
    tokens (single source in `pm_core/signoff.py`).
-
-   ### `report.json` — strict schema (dashboard's only contract)
-
-   `pm pr behavior-report` builds an all-PRs HTML dashboard by reading one
-   `report.json` sidecar per PR — your sidecar is the row this PR contributes
-   (verdict badge, scenario tally, link to `report.html`). Missing or
-   unparseable sidecar → that PR shows up as an empty-state row.
-
-   The sidecar carries ONLY sign-off-derived content. **Do NOT write**
-   `title`, `status`, `merged`, or `display_id` — those are project.yaml's
-   responsibility and the dashboard reads them fresh at generation time.
-   Baking them into the sidecar would make it stale the moment those values
-   changed without a re-sign-off.
-
-   Write stable sorted keys. UTF-8 encoded. Every additional fact you want
-   surfaced on the dashboard goes here:
-
-   ```
-   {{
-     "pr_id":              "<pm canonical id, e.g. pr-8e693f6>",
-     "verdict":            "<one of {SIGNOFF_MERGE},{SIGNOFF_REQA},{SIGNOFF_REVIEW},{SIGNOFF_IMPL},{SIGNOFF_BLOCKED} | null>",
-     "next_hop":           "<ready_to_merge | qa | review | impl | blocked>",
-     "tally":              {{"PASS": <int>, "NEEDS_WORK": <int>, "INPUT_REQUIRED": <int>, "pending": <int>}},
-     "bugs_fixed_in_loop": <int>,
-     "spec_clarifications":<int>,
-     "generated_at":       "<UTC ISO 8601, e.g. 2026-05-26T12:34:56Z>",
-     "report_html":        "report.html"
-   }}
-   ```
-
-   Write the files atomically (write to a temp file then rename) so a reader
-   never sees a half-written sidecar.
 
 5. **Route** by picking the verdict below whose definition matches what you
    found. Each verdict names the lifecycle step whose acceptance criteria it
