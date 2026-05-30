@@ -607,6 +607,7 @@ COMMANDS
   pm pr import-github           Import existing GitHub PRs into project yaml
   pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
   pm pr cleanup [pr-id]         Remove workdir for merged PR
+  pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
   pm pr note list <pr-id>              List notes on a PR

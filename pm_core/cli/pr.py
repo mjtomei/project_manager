@@ -3062,8 +3062,8 @@ def pr_auto_sequence(pr_id: str):
         # its transcript reflect the current code, so replaying either would
         # recommend on unreviewed changes.  Retire that run and relaunch a
         # fresh router against current HEAD (R11: stale -> relaunch).  The
-        # record is cleared so this doesn't re-fire every tick until the fresh
-        # router self-records.
+        # record is cleared so this doesn't re-fire every tick until the
+        # driver records the fresh router's transcript verdict below.
         if verdict is None and (pr_entry.get("signoff") or {}).get("verdict"):
             _retire_signoff_window(pm_session, pr_entry, tdir)
 

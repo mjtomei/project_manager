@@ -43,12 +43,12 @@ def _make_handler(pm_root: Path, captures_root_dir: Path):
                 data = store.load(pm_root)
                 rows = behavior_report.gather_dashboard_rows(
                     data, captures_root_dir)
-                html = behavior_report.render_dashboard_html(rows)
+                page_html = behavior_report.render_dashboard_html(rows)
             except Exception as exc:  # noqa: BLE001
                 _log.exception("failed to build dashboard")
                 self.send_error(500, f"build dashboard: {exc}")
                 return
-            body = html.encode("utf-8")
+            body = page_html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
