@@ -25,7 +25,7 @@ class TestActionsForStatus:
         for status in ("pending", "in_progress", "in_review", "qa", "sign_off"):
             actions = _actions_for_status(status)
             labels = [a[0] for a in actions]
-            assert labels == ["start", "edit", "review", "qa", "signoff", "merge"]
+            assert labels == ["start", "edit", "review", "qa", "merge", "signoff"]
 
     def test_merged_has_no_actions(self):
         assert _actions_for_status("merged") == []
@@ -36,7 +36,7 @@ class TestActionsForStatus:
     def test_unknown_status_returns_all_actions(self):
         """Non-terminal unknown statuses still get all actions."""
         labels = [a[0] for a in _actions_for_status("bogus")]
-        assert labels == ["start", "edit", "review", "qa", "signoff", "merge"]
+        assert labels == ["start", "edit", "review", "qa", "merge", "signoff"]
 
     def test_qa_command_routes_through_tui(self):
         actions = _actions_for_status("in_progress")
