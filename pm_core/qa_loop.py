@@ -2150,6 +2150,9 @@ def _poll_tmux_verdicts(
             _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
                          scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons[scenario.index] = (
+                "worker window never created (launch failed); no verdict"
+            )
             has_failed_creation = True
     if has_failed_creation:
         _write_status_file(status_path, state.pr_id, state.scenarios,
@@ -2231,6 +2234,9 @@ def _poll_tmux_verdicts(
             _log.warning("Queued scenario %d window creation failed — "
                          "marking INPUT_REQUIRED", scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons[scenario.index] = (
+                "worker window creation failed on dequeue; no verdict"
+            )
 
     # Fill any open slots that were freed by initial workdir failures.
     # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
@@ -2351,6 +2357,10 @@ def _poll_tmux_verdicts(
                                      "window gone, marking INPUT_REQUIRED",
                                      scenario_idx)
                         state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                        state.scenario_verdict_reasons[scenario_idx] = (
+                            "window gone during PASS verification before a "
+                            "re-checked verdict could be recorded"
+                        )
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
                             f"INPUT_REQUIRED (window gone during verification)"
@@ -2391,6 +2401,10 @@ def _poll_tmux_verdicts(
                              "(retries exhausted)",
                              scenario.index)
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons[scenario.index] = (
+                    f"worker exited before any verdict; no recovery after "
+                    f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)"
+                )
                 pending.discard(scenario.index)
                 verdicts_changed = True
                 _launch_next_queued()
@@ -2407,6 +2421,9 @@ def _poll_tmux_verdicts(
                 _log.warning("Scenario %d has no session_id — marking INPUT_REQUIRED "
                              "(hook-driven polling requires one)", scenario.index)
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons[scenario.index] = (
+                    "no session id registered; verdict could not be polled"
+                )
                 pending.discard(scenario.index)
                 verdicts_changed = True
                 _launch_next_queued()

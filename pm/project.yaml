@@ -21583,7 +21583,7 @@ prs:
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
     at action-execution time'
   branch: pm/pr-c41f029-bug-capture-originating-tmux-session-when-the-pr-a
-  status: qa
+  status: in_review
   depends_on: []
   description: 'When a TUI action (pr start/review/qa/merge, review-loop, qa-loop)
     creates or replaces a window, pm tries to move the session that initiated the
@@ -21648,7 +21648,17 @@ prs:
   started_at: '2026-05-25T02:46:34.752207+00:00'
   reviewed_at: '2026-05-25T03:05:18.047602+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e268e4e
+    text: 'QA NEEDS_WORK: QA loop from the PR-actions popup moves the originating
+      session onto the new QA window: PASS; review-loop and in-TUI command/keybinding
+      dispatch follow the invoking session: PASS; Concurrent triggers from two grouped
+      sessions each follow their own originator: NEEDS_WORK; CLI / watcher invocations
+      with no captured session fall back to live detection: PASS; Reproduction regression
+      suite passes and malformed picker commands are inert: INPUT_REQUIRED (workdir:
+      /home/matt/.pm/workdirs/qa/pr-c41f029-ef8ddb6d7a59a2ee)'
+    created_at: '2026-05-27T12:12:41Z'
+    last_edited: '2026-05-27T12:12:41Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
 - id: pr-5db0e85
   plan: plan-3119574
@@ -22538,7 +22548,7 @@ prs:
   title: Sign-off step — dedicated window + lifecycle status + comprehensive verdict
     router
   branch: pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru
-  status: qa
+  status: merged
   depends_on: []
   description: 'Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle
     stage between qa and merge with its own window, not logic embedded in the QA loop.
@@ -22647,10 +22657,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-26T17:06:25.050331+00:00'
+  updated_at: '2026-05-27T13:42:02.191898+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
   reviewed_at: '2026-05-25T18:50:45.591385+00:00'
-  merged_at: null
+  merged_at: '2026-05-27T13:42:02.191898+00:00'
   notes:
   - id: note-49ace04
     text: 'Sign-off impl landed (1b9c11ef). Design decisions for QA/review: (1) sign_off
@@ -23326,7 +23336,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: qa
+  status: in_review
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -23367,9 +23377,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-30T18:27:36.240115+00:00'
+  updated_at: '2026-05-30T21:47:32.932375+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-05-27T15:48:45.703233+00:00'
+  reviewed_at: '2026-05-30T21:47:32.932375+00:00'
   merged_at: null
   notes:
   - id: note-a9626ec
@@ -23936,8 +23946,8 @@ prs:
       a verdict-unknown cell, but has_report stays True whenever the file exists so
       the open-report link still renders. A PR with no report file shows verdict dash
       plus a no-report-yet state and a copyable `pm pr signoff <id>` cell. All dynamic
-      text passes through html.escape. (2) CAPTURES PATH: the per-PR report lives at
-      captures_root()/<pr_id>/report.html where captures_root = ~/.pm/sessions/<tag>/captures/
+      text passes through html.escape. (2) CAPTURES PATH: the per-PR report lives
+      at captures_root()/<pr_id>/report.html where captures_root = ~/.pm/sessions/<tag>/captures/
       (tag = session name minus the pm- prefix); run dashboard AND signoff in the
       SAME tmux session so the tag resolves identically. (3) report.html is purely
       an AGENT deliverable — no python fallback writes it: dashboard/robustness scenarios
@@ -23956,6 +23966,23 @@ prs:
       the index back-link is server-resolved.'
     created_at: '2026-05-30T21:41:13Z'
     last_edited: '2026-05-30T21:41:13Z'
+  - id: note-517853c
+    text: 'Incidental QA-loop robustness fix (found while investigating why QA round
+      s32 came back as a bare INPUT_REQUIRED with no reason): the code-generated default
+      INPUT_REQUIRED verdicts in qa_loop._poll_tmux_verdicts previously set scenario_verdicts[idx]
+      without a matching scenario_verdict_reasons[idx], so qa_status.json carried
+      an empty verdict_reason and the failure looked indistinguishable from a deliberate
+      agent verdict. Added informative reasons (mirroring the concretizer refiner-reject
+      pattern) to all four reasonless sites: (1) worker window never created at startup;
+      (2) queued-scenario window creation failed on dequeue; (3) window gone during
+      PASS verification; (4) window exited before emitting a verdict after _SCENARIO_MAX_RETRIES
+      relaunches — this last is what hit s32 (the worker Claude process was killed/crashed
+      mid-artifact-capture; NOT an OOM — container OOMKilled=false, no mem limit set,
+      still Up; agent had already concluded "all three triples pass"). Reasons now
+      surface in qa_status.json verdict_reason and the sign-off prompt scenario block.
+      tests/: 126 qa-loop tests pass.'
+    created_at: '2026-05-30T21:45:37Z'
+    last_edited: '2026-05-30T21:45:37Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
