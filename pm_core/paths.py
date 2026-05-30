@@ -131,8 +131,9 @@ def captures_root(session_tag: str | None = None,
                   start_path: Path | None = None) -> Path | None:
     """Return the host captures *root* (``~/.pm/sessions/<tag>/captures/``).
 
-    This is the directory that holds every per-PR captures dir plus the
-    all-PR behavior dashboard (``index.html``). Tag resolution mirrors
+    This is the directory that holds every per-PR captures dir; it is also
+    the document root the ``pm pr dashboard`` HTTP server serves per-PR
+    ``report.html`` and evidence from. Tag resolution mirrors
     :func:`captures_dir`: *session_tag* if supplied, else the pm-session
     tag, else the cwd/tmux-derived tag. Returns ``None`` when no tag can
     be derived (e.g. not inside a git repo). The directory is created if
