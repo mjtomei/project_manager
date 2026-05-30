@@ -1417,11 +1417,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
               help="Create sign-off window without switching focus (auto-sequence)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-sequence)")
-@click.option("--origin", default="manual", hidden=True,
-              type=click.Choice(["manual", "auto-sequence"]),
-              help="Who launched this sign-off run (recorded with the verdict)")
 def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
-               transcript: str | None, origin: str):
+               transcript: str | None):
     """Move a PR into sign_off and launch its sign-off window.
 
     Sign-off is the comprehensive PR-level review + verdict router that runs
@@ -1466,7 +1463,7 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
 
     signoff_mod.launch_signoff_window(
         data, pr_entry, fresh=fresh, background=background,
-        transcript=transcript, origin=origin)
+        transcript=transcript)
 
 
 def _finalize_merge(root, pr_entry: dict, pr_id: str,
@@ -3000,7 +2997,7 @@ def pr_auto_sequence(pr_id: str):
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
-                       transcript=str(signoff_transcript), origin="auto-sequence")
+                       transcript=str(signoff_transcript))
             click.echo("advanced: sign_off")
             return
         if overall == "INPUT_REQUIRED":
@@ -3078,7 +3075,7 @@ def pr_auto_sequence(pr_id: str):
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
-                       transcript=str(signoff_transcript), origin="auto-sequence")
+                       transcript=str(signoff_transcript))
             click.echo("advanced: sign_off_relaunched")
             return
 
@@ -3099,8 +3096,7 @@ def pr_auto_sequence(pr_id: str):
                 signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
                 ctx = click.get_current_context()
                 ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False,
-                           background=True, transcript=str(signoff_transcript),
-                           origin="auto-sequence")
+                           background=True, transcript=str(signoff_transcript))
                 click.echo("advanced: sign_off_relaunched")
                 return
             click.echo("running: sign_off")
