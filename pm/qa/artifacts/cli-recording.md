@@ -18,6 +18,11 @@ Write into `<capture-dir>/<short-name>/` (the scenario prompt
 substitutes the actual captures directory for `<capture-dir>`):
 
 - `recording.cast` — asciinema replay (`asciinema play recording.cast`).
+- `recording.gif` — animated GIF rendered from the cast (**required**).
+  This is the embeddable view: it renders in any browser via a plain
+  `<img>` with no player, so the sign-off HTML report can show the
+  terminal session inline and offline. The `.cast` stays as the small,
+  exact-replay/grep source.
 - `transcript.log` — plain-text version of the same run (**required** —
   the load-bearing artifact for grep/diff and for consumers without
   asciinema; the cast is supplementary).
@@ -89,6 +94,21 @@ If `asciinema` isn't installed and can't be installed, fall back to
 appending `| tee transcript.log` to the command line — you lose
 animation but keep the output. Note the fallback in the manifest.
 
+## Render to GIF
+
+Once the cast exists, render an animated GIF sibling so the recording
+embeds in the sign-off HTML report with no browser-side player:
+
+```
+agg --idle-time-limit 2 \
+    <capture-dir>/<short-name>/recording.cast \
+    <capture-dir>/<short-name>/recording.gif
+```
+
+`--idle-time-limit 2` caps the long pauses a terminal session
+accumulates, keeping the GIF small without dropping anything worth
+watching.
+
 ## Manifest format
 
 ```
@@ -112,6 +132,7 @@ recipe: pm/qa/artifacts/cli-recording.md
 ## Files
 
 - `recording.cast` — <one-line description>
+- `recording.gif` — <one-line description>
 - `transcript.log` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```

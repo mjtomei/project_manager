@@ -615,11 +615,6 @@ PR-level *comprehensive* review and a routing decision.
      - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`
      - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus` /
        audio-only `.webm`
-     - the **asciinema-player** widget for `.cast` (vendored CSS + JS
-       copy preferred — drop the player files under the captures
-       session-tag dir and reference them by relative path so the page
-       stays offline-safe; CDN fallback when no vendored copy is
-       available)
      - `<details><pre>` for small text / log files under ~50 KB
 
    For **Markdown** evidence (`.md`), render the body inline so the

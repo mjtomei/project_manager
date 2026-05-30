@@ -22,6 +22,11 @@ names):
   asciinema).
 - `recording.cast` — asciinema replay (**required** when `asciinema`
   is available).
+- `recording.gif` — animated GIF rendered from the cast (**required**).
+  The embeddable view: it renders in any browser via a plain `<img>`
+  with no player, so the sign-off HTML report can show the TUI session
+  inline and offline. The `.cast` stays as the small, exact-replay/grep
+  source.
 - `manifest.md` — frontmatter + short prose: workdir path the capture
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.
@@ -80,6 +85,20 @@ tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
 tmux kill-session -t pm-recorder 2>/dev/null
 ```
 
+## Render to GIF
+
+Once the cast exists, render an animated GIF sibling so the recording
+embeds in the sign-off HTML report with no browser-side player:
+
+```
+agg --idle-time-limit 2 \
+    <capture-dir>/recording.cast \
+    <capture-dir>/recording.gif
+```
+
+`--idle-time-limit 2` caps the long pauses a TUI session accumulates,
+keeping the GIF small without dropping anything worth watching.
+
 ## Manifest format
 
 ```
@@ -103,6 +122,7 @@ captured_at: <ISO date>
 
 - `transcript.log` — <one-line description>
 - `recording.cast` — <one-line description>
+- `recording.gif` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```
 
