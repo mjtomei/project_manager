@@ -87,7 +87,16 @@ def serve(*, pm_root: Path, captures_root_dir: Path,
             once the server is listening.
     """
     handler_cls = _make_handler(pm_root, captures_root_dir)
-    httpd = http.server.ThreadingHTTPServer((host, port), handler_cls)
+    try:
+        httpd = http.server.ThreadingHTTPServer((host, port), handler_cls)
+    except OSError as exc:
+        # Most commonly "address already in use" when a dashboard is already
+        # running on this port — surface a one-line hint instead of a traceback.
+        raise SystemExit(
+            f"pm dashboard: cannot bind {host}:{port} "
+            f"({exc.strerror or exc}). Is a dashboard already running? "
+            f"Pass --port 0 to pick a free port, or --port N for another."
+        )
     actual_host, actual_port = httpd.server_address[:2]
     url = f"http://{actual_host}:{actual_port}/"
     print(f"pm dashboard: serving at {url}  (Ctrl-C to stop)")
