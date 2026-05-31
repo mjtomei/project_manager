@@ -33,9 +33,21 @@ def test_active_review_badge_renders():
         {"id": "plan-1", "name": "One", "status": "draft", "pr_count": 0,
          "intro": "", "active_review": True},
     ]
-    # render() returns a rich Text; its plain string should carry the badge
+    # render() returns a rich Text; its plain string should carry the badge.
+    # Assert on the badge-unique glyph — plain "review" also appears in the
+    # footer hints (=review / =lit-review), so it can't distinguish the badge.
     out = pane.render()
-    assert "review" in out.plain
+    assert "✿ review" in out.plain
+
+
+def test_active_review_badge_absent_without_flag():
+    pane = PlansPane()
+    pane._plans = [
+        {"id": "plan-1", "name": "One", "status": "draft", "pr_count": 0,
+         "intro": "", "active_review": False},
+    ]
+    out = pane.render()
+    assert "✿" not in out.plain
 
 
 def test_active_review_plan_ids_matches_target_and_stem():
