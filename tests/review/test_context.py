@@ -84,7 +84,8 @@ def test_parallel_workflows_clause_is_unconditional(tmp_path):
                       "response phase", "apply phase"):
             assert phase in out, f"{phase} missing for {target_type}"
         # the actual invariant: code concatenates, no coordinator-synthesis agent
-        assert "code does the concatenation" in out
+        normalized = " ".join(out.split())
+        assert "code does the concatenation, not an agent" in normalized
         assert "coordinator-synthesis" in out
 
 
