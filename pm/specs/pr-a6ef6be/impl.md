@@ -111,12 +111,15 @@ are noted.
 directing the session to fan each phase into independent sub-streams: audit
 (per citation per pass; convergence check stays serial), review (per prompt
 block — substance/structure/accessibility/prose), response (per proposed
-change), apply (per non-overlapping region group). Artifacts must be
-byte-equivalent to the sequential form — sub-streams write their own slices
-and the driver concatenates; no coordinator synthesis. The corresponding
-methodology-doc clauses (METHODOLOGY.md § Operational mechanics,
-CITATION_USE_AUDIT.md § The in-cycle audit loop) are explicitly carved out as
-a separate follow-up PR per the note.
+change), apply (per non-overlapping region group). The invariant the clause
+enforces is **no coordinator-synthesis agent** — sub-streams write their own
+slices, code mechanically concatenates, nothing reads-and-rewrites the slices
+into a unified narrative (which would inject the synthesizer's bias). The
+note's stronger "byte-equivalent" framing was deliberately not preserved: it
+overpromises a property that isn't achievable from prompts alone and isn't
+actually needed downstream. The companion methodology-doc clauses
+(METHODOLOGY.md, CITATION_USE_AUDIT.md) can land whenever those docs are
+authored — not blocking on this PR.
 
 ### 1.4 `pm_core/review/cli.py` — `pm review <target>` + `pm review ui` + shared launch
 

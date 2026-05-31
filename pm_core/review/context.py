@@ -19,12 +19,11 @@ _MAX_INLINE_BYTES = 80_000
 _PARALLEL_WORKFLOWS_CLAUSE = """\
 ## Parallel workflows
 
-Fan each phase out into independent sub-streams using your `Agent` tool. The
-artifacts produced must be **byte-equivalent to the sequential form** — every
-sub-stream writes its own slice of the canonical markdown file and the driver
-concatenates the slices in deterministic order. No coordinator agent
-synthesizes across sub-streams (that would introduce synthesis bias); code is
-the arbiter, the concatenation is mechanical.
+Fan each phase out into independent sub-streams using your `Agent` tool. Each
+sub-stream writes its own slice of the canonical markdown file; **code does
+the concatenation, not an agent.** No coordinator-synthesis step reads all the
+sub-streams and rewrites them into a unified narrative — that step would
+introduce the synthesizer's bias and defeat the point of fanning out.
 
 Phase-specific fan-out:
 
@@ -41,8 +40,7 @@ Phase-specific fan-out:
   sub-stream.
 
 Hand each sub-stream only the context it needs; do not pass a structured
-handoff between sub-streams. After every fan-out, the driver concatenates the
-slices and moves on.
+handoff between sub-streams.
 """
 
 

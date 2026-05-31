@@ -83,10 +83,9 @@ def test_parallel_workflows_clause_is_unconditional(tmp_path):
         for phase in ("audit phase", "review phase",
                       "response phase", "apply phase"):
             assert phase in out, f"{phase} missing for {target_type}"
-        # byte-equivalent / code-as-arbiter framing
-        assert "byte-equivalent" in out
-        # no coordinator synthesis bias
-        assert "No coordinator agent" in out or "no coordinator agent" in out.lower()
+        # the actual invariant: code concatenates, no coordinator-synthesis agent
+        assert "code does the concatenation" in out
+        assert "coordinator-synthesis" in out
 
 
 def test_parallel_workflows_clause_precedes_target(tmp_path):
