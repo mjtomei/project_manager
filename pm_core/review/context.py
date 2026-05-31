@@ -16,6 +16,36 @@ from pm_core.review import paths
 _MAX_INLINE_BYTES = 80_000
 
 
+_PARALLEL_WORKFLOWS_CLAUSE = """\
+## Parallel workflows
+
+Fan each phase out into independent sub-streams using your `Agent` tool. The
+artifacts produced must be **byte-equivalent to the sequential form** — every
+sub-stream writes its own slice of the canonical markdown file and the driver
+concatenates the slices in deterministic order. No coordinator agent
+synthesizes across sub-streams (that would introduce synthesis bias); code is
+the arbiter, the concatenation is mechanical.
+
+Phase-specific fan-out:
+
+- **audit phase** — one sub-stream per citation per pass. Sub-streams within a
+  pass are independent. The convergence check across passes (zero
+  newly-surfaced citations in the last round) stays serial.
+- **review phase** — one sub-stream per prompt block (substance / structure /
+  accessibility / prose). Each writes its block's findings into its slice of
+  `REVIEW_CYCLE_N.md`.
+- **response phase** — one sub-stream per proposed change. Each writes its own
+  response block into `REVIEW_RESPONSE_CYCLE_N.md`.
+- **apply phase** — parallel across non-overlapping region groups of the
+  target artifact. Group changes by region first; apply each group in its own
+  sub-stream.
+
+Hand each sub-stream only the context it needs; do not pass a structured
+handoff between sub-streams. After every fan-out, the driver concatenates the
+slices and moves on.
+"""
+
+
 def _framing(review_dir: Path) -> str:
     return (
         "You are running the augmented adversarial-review cycle on the target "
@@ -90,6 +120,10 @@ def build_context(root: Path, review_id: str, target: str,
             sections.append(f"## STATE.md (current cycle state)\n\n{state.read_text()}")
         except OSError:
             pass
+
+    # Workflows-aware parallelization (note-0970084). Unconditional — the
+    # phase fan-out directives apply to every review regardless of target type.
+    sections.append(_PARALLEL_WORKFLOWS_CLAUSE)
 
     sections.append(f"## Target\n\n{_target_preamble(root, target, target_type)}")
 

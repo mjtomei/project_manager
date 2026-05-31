@@ -69,3 +69,28 @@ def test_missing_file_target_is_noted(tmp_path):
     out = context.build_context(tmp_path, "gone-md", "gone.md", "file")
     assert "file not found" in out
     assert "Target (file): gone.md" in out
+
+
+def test_parallel_workflows_clause_is_unconditional(tmp_path):
+    """note-0970084: every build_context output carries the fan-out directives,
+    regardless of target type or which methodology files are present."""
+    for target_type, target in (("topic", "t"),
+                                ("file", "doc.md"),
+                                ("plan", "plans/plan-x.md")):
+        out = context.build_context(tmp_path, "rid", target, target_type)
+        assert "## Parallel workflows" in out, target_type
+        # all four phases named
+        for phase in ("audit phase", "review phase",
+                      "response phase", "apply phase"):
+            assert phase in out, f"{phase} missing for {target_type}"
+        # byte-equivalent / code-as-arbiter framing
+        assert "byte-equivalent" in out
+        # no coordinator synthesis bias
+        assert "No coordinator agent" in out or "no coordinator agent" in out.lower()
+
+
+def test_parallel_workflows_clause_precedes_target(tmp_path):
+    """Directives should appear before the target preamble so the session reads
+    them as instructions, not as an addendum to the artifact text."""
+    out = context.build_context(tmp_path, "rid", "t", "topic")
+    assert out.index("## Parallel workflows") < out.index("## Target")

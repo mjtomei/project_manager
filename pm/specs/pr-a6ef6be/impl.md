@@ -105,6 +105,19 @@ Factor the file list so the test can assert "concatenates expected files" by
 checking each present fixture's content appears in the output and missing ones
 are noted.
 
+**Per PR note (note-0970084, 2026-05-30): workflows-aware parallelization.**
+`build_context` unconditionally appends a `## Parallel workflows` clause
+(constant `_PARALLEL_WORKFLOWS_CLAUSE`) before the `## Target` section,
+directing the session to fan each phase into independent sub-streams: audit
+(per citation per pass; convergence check stays serial), review (per prompt
+block — substance/structure/accessibility/prose), response (per proposed
+change), apply (per non-overlapping region group). Artifacts must be
+byte-equivalent to the sequential form — sub-streams write their own slices
+and the driver concatenates; no coordinator synthesis. The corresponding
+methodology-doc clauses (METHODOLOGY.md § Operational mechanics,
+CITATION_USE_AUDIT.md § The in-cycle audit loop) are explicitly carved out as
+a separate follow-up PR per the note.
+
 ### 1.4 `pm_core/review/cli.py` — `pm review <target>` + `pm review ui` + shared launch
 
 Registered on the top-level `cli` group following the existing submodule
