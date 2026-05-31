@@ -18,10 +18,10 @@ Write into `<capture-dir>/<short-name>/` (the scenario prompt
 substitutes the actual captures directory for `<capture-dir>`):
 
 - `recording.cast` — asciinema replay (`asciinema play recording.cast`).
-- `recording.gif` — animated GIF rendered from the cast (**required**).
-  This is the embeddable view: it renders in any browser via a plain
-  `<img>` with no player, so the sign-off HTML report can show the
-  terminal session inline and offline. The `.cast` stays as the small,
+- `recording.webm` — VP9 video rendered from the cast (**required**).
+  This is the embeddable view: the sign-off HTML report shows it inline
+  via a plain `<video controls>` element — native pause / scrub, no
+  player library, works offline. The `.cast` stays as the small,
   exact-replay/grep source.
 - `transcript.log` — plain-text version of the same run (**required** —
   the load-bearing artifact for grep/diff and for consumers without
@@ -94,20 +94,31 @@ If `asciinema` isn't installed and can't be installed, fall back to
 appending `| tee transcript.log` to the command line — you lose
 animation but keep the output. Note the fallback in the manifest.
 
-## Render to GIF
+## Render to video
 
-Once the cast exists, render an animated GIF sibling so the recording
-embeds in the sign-off HTML report with no browser-side player:
+Once the cast exists, render a `.webm` sibling so the recording embeds
+in the sign-off HTML report as a `<video controls>` element. `agg`
+renders the cast to frames (GIF), then `ffmpeg` encodes VP9 — there is
+no single cast→video tool worth using (the dedicated ones are orders of
+magnitude slower and fragile). The intermediate GIF is discarded.
 
 ```
-agg --idle-time-limit 2 \
-    <capture-dir>/<short-name>/recording.cast \
-    <capture-dir>/<short-name>/recording.gif
+cast=<capture-dir>/<short-name>/recording.cast
+agg --idle-time-limit 2 "$cast" "$cast.gif"
+ffmpeg -y -i "$cast.gif" -c:v libvpx-vp9 -pix_fmt yuv444p \
+    -row-mt 1 -deadline good -cpu-used 2 -b:v 0 -crf 20 \
+    "${cast%.cast}.webm"
+rm -f "$cast.gif"
 ```
 
-`--idle-time-limit 2` caps the long pauses a terminal session
-accumulates, keeping the GIF small without dropping anything worth
-watching.
+Notes:
+- `--idle-time-limit 2` caps the long pauses a terminal session
+  accumulates, dropping dead air without losing anything worth watching.
+- `yuv444p` keeps colored terminal text crisp (full-resolution chroma);
+  `crf 20` is visually lossless for this content. File size is not a
+  concern — the report is served locally over loopback — so favor
+  quality. A long, busy session may take several minutes to encode;
+  that's expected and acceptable for a rare case.
 
 ## Manifest format
 
@@ -132,7 +143,7 @@ recipe: pm/qa/artifacts/cli-recording.md
 ## Files
 
 - `recording.cast` — <one-line description>
-- `recording.gif` — <one-line description>
+- `recording.webm` — <one-line description>
 - `transcript.log` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```

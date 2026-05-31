@@ -22,11 +22,11 @@ names):
   asciinema).
 - `recording.cast` — asciinema replay (**required** when `asciinema`
   is available).
-- `recording.gif` — animated GIF rendered from the cast (**required**).
-  The embeddable view: it renders in any browser via a plain `<img>`
-  with no player, so the sign-off HTML report can show the TUI session
-  inline and offline. The `.cast` stays as the small, exact-replay/grep
-  source.
+- `recording.webm` — VP9 video rendered from the cast (**required**).
+  The embeddable view: the sign-off HTML report shows it inline via a
+  plain `<video controls>` element — native pause / scrub, no player
+  library, works offline. The `.cast` stays as the small,
+  exact-replay/grep source.
 - `manifest.md` — frontmatter + short prose: workdir path the capture
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.
@@ -85,19 +85,31 @@ tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
 tmux kill-session -t pm-recorder 2>/dev/null
 ```
 
-## Render to GIF
+## Render to video
 
-Once the cast exists, render an animated GIF sibling so the recording
-embeds in the sign-off HTML report with no browser-side player:
+Once the cast exists, render a `.webm` sibling so the recording embeds
+in the sign-off HTML report as a `<video controls>` element. `agg`
+renders the cast to frames (GIF), then `ffmpeg` encodes VP9 — there is
+no single cast→video tool worth using (the dedicated ones are orders of
+magnitude slower and fragile). The intermediate GIF is discarded.
 
 ```
-agg --idle-time-limit 2 \
-    <capture-dir>/recording.cast \
-    <capture-dir>/recording.gif
+cast=<capture-dir>/recording.cast
+agg --idle-time-limit 2 "$cast" "$cast.gif"
+ffmpeg -y -i "$cast.gif" -c:v libvpx-vp9 -pix_fmt yuv444p \
+    -row-mt 1 -deadline good -cpu-used 2 -b:v 0 -crf 20 \
+    "${cast%.cast}.webm"
+rm -f "$cast.gif"
 ```
 
-`--idle-time-limit 2` caps the long pauses a TUI session accumulates,
-keeping the GIF small without dropping anything worth watching.
+Notes:
+- `--idle-time-limit 2` caps the long pauses a TUI session accumulates,
+  dropping dead air without losing anything worth watching.
+- `yuv444p` keeps colored terminal text crisp (full-resolution chroma);
+  `crf 20` is visually lossless for this content. File size is not a
+  concern — the report is served locally over loopback — so favor
+  quality. A long, busy session may take several minutes to encode;
+  that's expected and acceptable for a rare case.
 
 ## Manifest format
 
@@ -122,7 +134,7 @@ captured_at: <ISO date>
 
 - `transcript.log` — <one-line description>
 - `recording.cast` — <one-line description>
-- `recording.gif` — <one-line description>
+- `recording.webm` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```
 
