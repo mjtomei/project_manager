@@ -367,7 +367,7 @@ def ensure_animation_timer(app) -> None:
     the spinner animation runs for in_progress/in_review PRs.
     """
     has_active = any(
-        pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir")
+        pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
     qa_running = any(s.running for s in app._qa_loops.values())
@@ -450,7 +450,7 @@ def _poll_loop_state_inner(app) -> None:
     # Stop the timer if no loops are running AND no active PRs need animation
     # AND watcher is not running
     has_active_prs = any(
-        pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir")
+        pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
     qa_running = any(s.running for s in app._qa_loops.values())
@@ -462,12 +462,16 @@ def _poll_loop_state_inner(app) -> None:
 
 
 def _refresh_tech_tree(app) -> None:
-    """Refresh the tech tree so ⟳N markers and spinners update on PR nodes."""
+    """Refresh the tech tree so ⟳N markers and spinners update on PR nodes.
+
+    Only the active node widgets are repainted (not the whole tree), so the
+    1 s poll tick no longer pays for a full ~120-node grid render.
+    """
     try:
         from pm_core.tui.tech_tree import TechTree
         tree = app.query_one("#tech-tree", TechTree)
         tree.advance_animation()
-        tree.refresh()
+        tree.refresh_active_nodes()
     except Exception:
         pass
 

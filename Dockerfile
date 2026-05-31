@@ -2,9 +2,9 @@ FROM ubuntu:22.04
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
-# Ensure the pm user's ~/.local/bin (where the git push-proxy wrapper is
-# installed at container startup) is on PATH for non-login shells —
-# ``docker exec bash -c`` doesn't source profile files.
+# Ensure the pm user's ~/.local/bin (where the git push-proxy wrapper and the
+# fake-claude shim are installed at container startup) is on PATH for
+# non-login shells — ``docker exec bash -c`` doesn't source profile files.
 ENV PATH=/home/pm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Make pm's source tree (bind-mounted at /opt/pm-src by container.py)
 # importable without a per-container pip install.  The /usr/local/bin/pm
@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     sudo \
     asciinema \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Nested rootless podman: replace setuid bit on newuidmap/newgidmap with
@@ -77,7 +78,48 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Verify installations
 RUN git --version && python3 --version && pip3 --version \
     && node --version && npm --version && curl --version | head -1 \
-    && jq --version && gcc --version | head -1
+    && jq --version && gcc --version | head -1 \
+    && ffmpeg -version | head -1
+
+# --- Playwright + Chromium (browser QA recording) ---
+# Pre-install Playwright (Node) and its bundled Chromium so the walker-UI QA
+# PRs can record rendered browser video/traces.  Chromium only — Firefox and
+# WebKit are skipped to limit image size.  NOTE: this adds several hundred MB
+# to the image (Chromium ~300MB + Playwright deps); accepted to keep a single
+# base image with no per-project split.
+#
+# Browsers install to PLAYWRIGHT_BROWSERS_PATH (a fixed non-home path) rather
+# than ~/.cache/ms-playwright: this RUN executes as root (USER pm is set
+# below, and `--with-deps` apt installs need root), so a home-relative cache
+# would land in /root and be invisible to the runtime `pm` user.  The ENV
+# persists into the runtime layer and `chmod -R a+rX` (read everywhere,
+# traverse dirs + keep the browser binaries executable) lets `pm` launch the
+# browser.  NODE_PATH points at the global npm dir so `require('playwright')`
+# resolves from node scripts the `pm` user runs.
+#
+# Runtime contract for callers: launch Chromium with
+#   chromium.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'] })
+# inside the rootless container.  `--no-sandbox` disables Chromium's
+# user-namespace sandbox (unavailable rootless / when running as root) and
+# `--disable-dev-shm-usage` makes Chromium use /tmp instead of the small
+# default /dev/shm — together these mean no `podman run` flag/mount
+# (--shm-size, --cap-add, seccomp) is required, so pm_core/container.py is
+# unchanged.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+ENV NODE_PATH=/usr/lib/node_modules
+RUN npm install -g playwright \
+    && npx playwright install --with-deps chromium \
+    && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH" \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify Playwright + Chromium: CLI version, module require, and a headless
+# Chromium smoke launch with the container-safe flags (about:blank → dump
+# DOM).  Fails the build if Chromium can't start in the container.  (ffmpeg
+# is verified above with the other apt tools.)
+RUN npx playwright --version \
+    && node -e "require('playwright')" \
+    && node -e "const {chromium}=require('playwright');(async()=>{const b=await chromium.launch({args:['--no-sandbox','--disable-dev-shm-usage']});const p=await b.newPage();await p.goto('about:blank');console.log('chromium-smoke-dom:',await p.content());await b.close();})().catch(e=>{console.error(e);process.exit(1)})"
 
 # Pre-install pm's runtime Python deps system-wide so ``import pm_core``
 # (via the /usr/local/bin/pm shim below + PYTHONPATH=/opt/pm-src) works

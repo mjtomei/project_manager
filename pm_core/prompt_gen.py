@@ -30,6 +30,42 @@ If you don't, file a separate bug PR so it doesn't get lost:
 """
 
 
+def _pr_notes_handoff_block(pr_id: str | None = None) -> str:
+    """Ungated guidance: use pm PR notes for cross-session/cross-PR handoff.
+
+    Lives outside ``tui_section`` (which is gated on ``session_name``) so it
+    also reaches containerized / non-TUI sessions.
+    """
+    this_pr = pr_id or "<this-pr-id>"
+    return f"""
+## PR Notes — Handoff Channel
+
+`pm pr note add <pr-id> '<text>'` is the canonical way to hand off context
+between sessions. A note persists on the target PR (in project.yaml) and is
+injected into the prompt of every future session for that PR (the `## PR
+Notes` section). Prefer pm PR notes over GitHub PR comments or description
+edits for any handoff — GitHub comments are for external review
+communication, not internal handoff. When the user says "leave a note" /
+"add a note" / "notes" without qualification, they mean a pm PR note.
+
+- **Same-PR, next session** — to leave context for whoever resumes this PR,
+  run `pm pr note add {this_pr} '<text>'`.
+- **Cross-PR** — when leaving work or context for a *different* PR to pick
+  up, add the note to that PR's id: `pm pr note add <other-pr-id> '<text>'`.
+  It attaches to that PR and surfaces in its sessions. If incidental work
+  belongs to a PR that already exists, prefer a note on that PR over opening
+  a brand-new one (see the Incidental Bugs guidance for recording incidental
+  fixes).
+
+It is fine to run this from your own workdir, including a note targeting
+another PR. The note is written to the git-tracked `project.yaml`; it
+travels to master when your PR merges, and the target PR's sessions pick it
+up the next time they clone or pull master. So a cross-PR note may surface
+after your PR merges rather than instantly — that delay is expected, not a
+reason to use a GitHub comment instead.
+"""
+
+
 def tui_section(session_name: str) -> str:
     """Build a TUI interaction section for prompts running in a tmux session.
 
@@ -162,6 +198,8 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
 
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -172,7 +210,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}
+{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -308,11 +346,226 @@ Review the code changes in this PR for quality, correctness, and architectural f
     if _is_bug_pr(pr):
         base += _bug_fix_review_block(pr)
     base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
+    base += "\n" + _pr_notes_handoff_block(pr_id)
     base += review_specific_block
     base += _beginner_addendum()
     if review_loop:
         base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
                                       review_loop_id)
+    return base
+
+
+def _signoff_qa_scenarios_block(pr_id: str) -> str:
+    """Render every QA scenario's verdict + reason from the latest qa_status.json.
+
+    Best-effort: returns a "no QA status" note when nothing is found so the
+    sign-off reviewer is told to fall back to the captures dir.
+    """
+    import json
+    from pm_core.paths import latest_qa_status_path
+    latest = latest_qa_status_path(pr_id)
+    if latest is None:
+        return "\n_No qa_status.json found — read the captures dir directly._\n"
+    try:
+        data = json.loads(latest.read_text())
+    except (OSError, ValueError):
+        return "\n_qa_status.json unreadable — read the captures dir directly._\n"
+    lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
+    if data.get("error"):
+        lines.append(f"QA error: {data['error']}")
+    scenarios = data.get("scenarios") or []
+    if isinstance(scenarios, dict):
+        scenarios = list(scenarios.values())
+    if scenarios:
+        lines.append("")
+        for s in scenarios:
+            if not isinstance(s, dict):
+                continue
+            idx = s.get("index", "?")
+            title = s.get("title", "")
+            verdict = s.get("verdict", "?")
+            reason = (s.get("verdict_reason") or "").strip()
+            line = f"- Scenario {idx} — {title}: **{verdict}**"
+            if reason:
+                line += f" — {reason}"
+            lines.append(line)
+    return "\n" + "\n".join(lines) + "\n"
+
+
+def generate_signoff_prompt(data: dict, pr_id: str,
+                            session_name: str | None = None,
+                            origin: str = "manual") -> str:
+    """Generate a Claude Code prompt for the sign-off step of a PR.
+
+    Sign-off is the PR-level comprehensive review that runs *after* QA passes
+    and finalizes.  It walks every scenario + every step, aggregates evidence
+    across ALL stages (impl repro/verify captures + per-scenario captures),
+    weighs the diff vs master and the PR's scope, then emits a single routing
+    verdict that pm executes as the PR's next hop.
+
+    The reviewer is a **router only** — it never edits code; every fix happens
+    back in impl/qa so it re-passes review+qa.
+    """
+    from pm_core.signoff import (
+        SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
+    )
+
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    description = pr.get("description", "").strip()
+    base_branch = data.get("project", {}).get("base_branch", "master")
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        diff_cmd = f"git diff {base_branch}...HEAD"
+    else:
+        diff_cmd = f"git diff origin/{base_branch}...HEAD"
+
+    # Plan / sibling context (scope awareness for the router).
+    plan_ref = pr.get("plan")
+    plan = store.get_plan(data, plan_ref) if plan_ref else None
+    all_prs = data.get("prs") or []
+    plan_context = ""
+    if plan:
+        sibling_prs = [p for p in all_prs
+                       if p.get("plan") == plan_ref and p["id"] != pr_id]
+        if sibling_prs:
+            lines = [f"- {p['id']}: {p.get('title', '???')} "
+                     f"[{p.get('status', 'pending')}]" for p in sibling_prs]
+            plan_context = (
+                f"\n## Plan Context\nThis PR is part of plan "
+                f"\"{plan['name']}\" ({plan['id']}). Other PRs:\n"
+                + "\n".join(lines) + "\n")
+
+    tui_block = tui_section(session_name) if session_name else ""
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
+    qa_block = _signoff_qa_scenarios_block(pr_id)
+
+    bug_note = ""
+    if _is_bug_pr(pr):
+        bug_note = (
+            "\n## Bug-fix evidence\n"
+            "This is a **bug-fix PR** (reproduce → fix → verify). Its primary "
+            "evidence lives under `$CAP/impl/pre-fix/` (the failing repro on "
+            "pre-fix code) and `$CAP/impl/post-fix/` (the post-fix "
+            "verification). Read both and judge, as part of your per-step "
+            "review, whether they genuinely demonstrate the bug and its "
+            "absence — a fix with thin or missing repro/verify evidence has "
+            "not really been shown to work (route " + SIGNOFF_IMPL + ").\n")
+
+    prompt = f"""You are the **sign-off reviewer** for PR {pr_id}: "{title}"
+
+Sign-off is the dedicated lifecycle step between QA and merge. QA has passed and
+finalized; your job is a PR-level *comprehensive* review and a routing decision.
+You are a **router only** — you NEVER edit code. Any fix must happen back in
+implementation or QA so it re-passes review and QA.
+
+## Description
+{description}
+{pr_notes_block}{impl_spec_block}{plan_context}{tui_block}
+## QA scenarios (from the QA run)
+{qa_block}{bug_note}
+## Per-step acceptance criteria — check EACH lifecycle step individually
+
+Do not run only generic checks. The PR passed through impl → review → qa; each
+step has a distinct *purpose* and *acceptance criteria*. Verify each one met its
+criteria, report a per-step verdict, and route on the FIRST step that fell short.
+
+- **Implementation (impl)** — purpose: deliver the PR's required behavior and an
+  implementation spec. Criteria: the diff implements every requirement in the
+  spec/description; an impl spec exists and the code matches it; for a bug PR,
+  the pre-fix + post-fix captures exist and demonstrate the bug and its fix.
+  Shortfall → **{SIGNOFF_IMPL}** (missing/incomplete behavior or missing
+  captures).
+- **Review** — purpose: confirm code quality, correctness, and architectural
+  fit. Criteria: the change was actually reviewed (a review verdict exists), and
+  no unaddressed quality/architecture/correctness issue remains. If code was
+  changed after the last review (e.g. during QA), it has NOT been re-reviewed.
+  Shortfall → **{SIGNOFF_REVIEW}** (must re-pass review AND qa).
+- **QA** — purpose: prove the behavior works against the *real* code path.
+  Criteria: every scenario has an accounted-for verdict; each exercised the real
+  path (not a mock) with captured evidence; obvious edge cases are covered; no
+  PASS is unverified (e.g. verifier-cwd). Shortfall → **{SIGNOFF_REQA}** (harness
+  / misframed / thin-evidence problems are a QA problem, not a code problem).
+
+## What to do
+
+1. **Read the whole evidence record — every stage, every scenario, every step.**
+   - `CAP="$(pm qa captures-path {pr_id})"` then read EVERYTHING under it:
+     - `$CAP/impl/` — implementation captures (bug-fix repro/verify; primary evidence).
+     - `$CAP/scenarios/<n>/` — per-scenario QA captures, prompts, and verdicts.
+   - Do NOT spot-check. Walk every scenario and every step listed above and
+     confirm each against its captured evidence.
+   - Provenance note: the harness also runs the regression at known shas
+     (fails at the pre-fix parent sha, passes at the fix sha). That provenance
+     comes from the harness, not from any session-written file — factor it in
+     but do not expect a captures file to assert it.
+
+2. **Read the diff**: run `{diff_cmd}`.
+
+3. **Two evaluations:**
+   - **(a) BDD — does the captured behavior support the diff's claims?** For
+     each scenario/step, does the evidence actually demonstrate the behavior the
+     diff claims to deliver?
+   - **(b) Meta-QA / anti-shortcut — was the QA itself rigorous?** Look for thin
+     evidence, a scenario that drove a *mock* instead of the real code path, or
+     an obvious uncovered edge case. (Per-scenario false-PASS is already caught
+     inline by the scenario quality supervisor; this is the PR-level pass over
+     scenarios it already vetted.)
+
+4. **Record an audit trail.** For every classification and the hop you choose,
+   add a `pm pr note add {pr_id} '...'` entry stating what you found and why you
+   routed where you did, so the recommendation is fully inspectable.
+
+5. **Record your verdict** durably so it can be adopted without a re-run:
+   ```
+   pm pr signoff-record {pr_id} <VERDICT> --origin {origin}
+   ```
+   (replace `<VERDICT>` with the keyword you chose below). This only RECORDS a
+   recommendation — it does not act. Sign-off never merges; the actual next hop
+   is executed later, only under the auto-sequence driver.
+
+6. **Route** by ending with exactly ONE verdict keyword on its own line:
+
+   - **{SIGNOFF_MERGE}** — PASS: the evidence supports the diff and the QA was
+     rigorous. This is a RECOMMENDATION to merge — sign-off never merges itself;
+     the PR is reported ready_to_merge and the merge decision is made later.
+   - **{SIGNOFF_REQA}** — PASS but *unverified* (e.g. a verifier-cwd / harness
+     problem made the PASS untrustworthy) OR a scenario was *misframed*. This is
+     a harness/QA problem, not a code problem → re-run QA. Do NOT bounce to impl.
+   - **{SIGNOFF_REVIEW}** — a code change happened during QA (a scenario fixed it
+     itself). Because code changed, it must go back through review AND qa to
+     validate the fix is real and shortcut-free.
+   - **{SIGNOFF_IMPL}** — a real gap in the implementation (an INPUT_REQUIRED that
+     reflects missing required behavior). Back to implementation.
+   - **{SIGNOFF_BLOCKED}** — escalate / hold. Use this for genuine ambiguity
+     (CONSERVATIVE BIAS: when truly unsure, BLOCK and escalate rather than
+     merge), something impossible / out-of-scope (note the limitation), or an
+     assumed-missing feature for which you filed a follow-up PR.
+
+### Classifying an INPUT_REQUIRED before routing
+- **Misframed scenario** → note it → **{SIGNOFF_REQA}**.
+- **Real gap** → note it → **{SIGNOFF_IMPL}**.
+- **Assumed-missing feature** → file a new PR with a blocking `depends_on`
+  (`pm pr add ...`, then set the dependency), note it → **{SIGNOFF_BLOCKED}**;
+  or, if you judge it in-scope, expand scope and **{SIGNOFF_REQA}**.
+- **Nice-to-have** → defer to a new PR (`pm pr add ...`) and **{SIGNOFF_MERGE}**,
+  or include it via impl if trivial (**{SIGNOFF_IMPL}**).
+- **Impossible / out-of-scope** → note the limitation → **{SIGNOFF_MERGE}** (if
+  the PR still stands on its own) or **{SIGNOFF_BLOCKED}**.
+
+`pm pr add` creates a *pending* PR (no agent session) so you may run it. Do NOT
+run any command that spawns an agent session (e.g. `pm pr start`).
+
+IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA},
+{SIGNOFF_REVIEW}, {SIGNOFF_IMPL}, or {SIGNOFF_BLOCKED} on its own line."""
+
+    base = prompt.strip()
+    base += "\n" + _pr_notes_handoff_block(pr_id)
+    base += _beginner_addendum()
     return base
 
 
@@ -1355,6 +1608,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
     qa_spec_block = format_spec_for_prompt(pr, "qa")
@@ -1522,7 +1776,20 @@ QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
 
+## Changing or replacing a scenario that already ran
+
+Scenarios are locked once a QA run has started: they cannot be edited or
+replaced mid-run, and the support for changing/replacing scenarios within a
+plan is not yet implemented. If you find that an already-run scenario was
+wrong, undriveable, or contradicts the implementation (e.g. it assumed loop
+behavior the code does not actually have), do NOT silently rewrite or re-emit
+it here. Instead leave a note for the next QA run with
+`pm pr note add {pr_id} '<what was wrong + the corrected scenario>'`, and the
+next planning pass will pick it up. Only emit fresh scenarios (numbered from
+{scenario_start}) in this output.
+
 {_OUT_OF_SCOPE_BUGS_BLOCK}
+{pr_notes_handoff_block}
 {general_notes_block}{qa_specific_block}
 
 Don't forget that the goal of these scenarios should not be to exercise
@@ -1555,6 +1822,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
@@ -1632,7 +1900,7 @@ Help the user with whatever they need:
 
 You do NOT need to produce a verdict.  This session stays open until QA
 completes — take your time and be thorough.
-{tui_block}"""
+{tui_block}{pr_notes_handoff_block}"""
     return prompt.strip()
 
 
@@ -1733,6 +2001,7 @@ push captures — they're not part of the PR branch.
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Workdir description and execution instructions differ by mode
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -1849,6 +2118,20 @@ different methodology.
 
 {execution_block}
 {_OUT_OF_SCOPE_BUGS_BLOCK}
+## Your Verdict Is Final for This Run
+
+Once you output a verdict, the QA loop records it for this scenario and will
+not accept a later or replacement verdict from you — there is no re-poll.
+NEEDS_WORK and INPUT_REQUIRED are terminal. (The one exception is
+loop-initiated: if the loop's verification step flags your PASS, it messages
+this pane asking you to re-evaluate — answer that follow-up if it arrives.)
+
+So if you realize something after delivering your verdict, or you're leaving
+work or context for the **next QA run on this PR** to pick up — a fix you
+couldn't finish, a flaky prerequisite, something to check next time — you
+cannot amend your verdict to carry it forward. Hand it off as a PR note
+instead (see the PR Notes — Handoff Channel section below).
+{pr_notes_handoff_block}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
@@ -1906,6 +2189,7 @@ You are testing the current state of the codebase.
    - **NEEDS_WORK** — Issues found (describe them)
    - **INPUT_REQUIRED** — Need human input
 {_OUT_OF_SCOPE_BUGS_BLOCK}
+{_pr_notes_handoff_block()}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 

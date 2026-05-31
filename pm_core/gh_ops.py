@@ -4,11 +4,103 @@ import json
 import shutil
 import subprocess
 import sys
-from typing import Optional
+import threading
+from contextlib import contextmanager
+from typing import Callable, Optional
 
 from pm_core.paths import configure_logger, log_shell_command
 
 _log = configure_logger("pm.gh")
+
+
+# Pluggable `gh` transport. When set, run_gh() delegates to this callable
+# instead of spawning the real `gh` CLI. Used by FakeGitHubBackend
+# (pm_core/fake_github.py) so regression tests can drive the github backend
+# code paths without hitting the real GitHub API. The runner takes the gh
+# argv (without the leading "gh") plus an optional cwd and returns a
+# subprocess.CompletedProcess.
+GhRunner = Callable[[list[str], Optional[str]], subprocess.CompletedProcess]
+_GH_RUNNER: Optional[GhRunner] = None
+
+# Guards mutation of the global transport pointer so concurrent install/restore
+# cycles (e.g. several FakeGitHubBackend actors in a regression test) do not
+# corrupt it. ``_GH_RUNNER`` is a process-global by design — a runner installed
+# on one thread must be visible to ``run_gh`` calls on pm's worker threads — so
+# it cannot be made thread-local. The lock + depth counter instead guarantees
+# that once the last nested ``gh_runner`` context exits, the pointer returns to
+# the uninstalled baseline (None) rather than leaking some other thread's
+# stale runner via an interleaved save/restore.
+_GH_RUNNER_LOCK = threading.Lock()
+_GH_RUNNER_DEPTH = 0
+
+
+def set_gh_runner(runner: Optional[GhRunner]) -> Optional[GhRunner]:
+    """Install a `gh` transport runner. Returns the previously installed one."""
+    global _GH_RUNNER
+    with _GH_RUNNER_LOCK:
+        prev = _GH_RUNNER
+        _GH_RUNNER = runner
+    return prev
+
+
+@contextmanager
+def gh_runner(runner: Optional[GhRunner]):
+    """Context manager: install ``runner`` as the gh transport, restore on exit.
+
+    Restore is concurrency-safe: nested contexts on a single thread restore the
+    enclosing runner as before, but when the outermost context exits (depth back
+    to 0) the pointer is forced to the ``None`` baseline. This prevents the
+    save/restore-of-a-global race in which interleaved enter/exit across threads
+    would otherwise reinstate a stale runner and leak it past join.
+    """
+    global _GH_RUNNER, _GH_RUNNER_DEPTH
+    with _GH_RUNNER_LOCK:
+        prev = _GH_RUNNER
+        _GH_RUNNER = runner
+        _GH_RUNNER_DEPTH += 1
+    try:
+        yield runner
+    finally:
+        with _GH_RUNNER_LOCK:
+            _GH_RUNNER_DEPTH -= 1
+            _GH_RUNNER = None if _GH_RUNNER_DEPTH == 0 else prev
+
+
+def _finish_runner_result(
+    cmd: list[str],
+    result: subprocess.CompletedProcess,
+    check: bool,
+) -> subprocess.CompletedProcess:
+    """Log a non-zero result and raise on ``check``, shared by the fake paths."""
+    if result.returncode != 0:
+        log_shell_command(cmd, prefix="gh", returncode=result.returncode)
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, result.stdout, result.stderr
+        )
+    return result
+
+
+def _maybe_dispatch_session_fake(
+    args: tuple[str, ...],
+    cwd: Optional[str],
+) -> Optional[subprocess.CompletedProcess]:
+    """Dispatch to a session-installed out-of-process fake-github, or None.
+
+    Returns None (→ real `gh`) when no fake is installed for the session. When
+    one *is* installed, the dispatch result is returned; any error during
+    dispatch propagates rather than silently falling through to the real GitHub
+    API (a loud failure is safer than an unintended live call).
+    """
+    from pm_core import paths
+    try:
+        active = paths.fake_github_active()
+    except Exception:
+        return None
+    if not active:
+        return None
+    from pm_core import fake_github
+    return fake_github.dispatch_session(list(args), cwd)
 
 
 def _check_gh():
@@ -37,13 +129,37 @@ def _check_gh():
         raise SystemExit(1)
 
 
-def run_gh(*args: str, cwd: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
+def run_gh(
+    *args: str,
+    cwd: Optional[str] = None,
+    check: bool = True,
+    timeout: Optional[float] = None,
+) -> subprocess.CompletedProcess:
     """Run a gh CLI command.
 
-    Logs to TUI log file if running under TUI.
+    Logs to TUI log file if running under TUI. When a transport runner is
+    installed via set_gh_runner(), the command is dispatched to it instead of
+    the real `gh` CLI (and the gh-installed/authenticated check is skipped).
     """
-    _check_gh()
     cmd = ["gh", *args]
+
+    # Snapshot the global once: a concurrent restore must not turn a non-None
+    # check into a None call (TypeError) between the test and the dispatch.
+    runner = _GH_RUNNER
+    if runner is not None:
+        log_shell_command(cmd, prefix="gh")
+        return _finish_runner_result(cmd, runner(list(args), cwd), check)
+
+    # Out-of-process fake gate: a freshly-spawned `pm pr ...` subprocess has no
+    # in-process runner, so consult the per-session fake-github state (mirrors
+    # fake-claude's config gate). When installed, the command is served by the
+    # fake instead of the real `gh` CLI / GitHub API.
+    session_result = _maybe_dispatch_session_fake(args, cwd)
+    if session_result is not None:
+        log_shell_command(cmd, prefix="gh")
+        return _finish_runner_result(cmd, session_result, check)
+
+    _check_gh()
     log_shell_command(cmd, prefix="gh")
     result = subprocess.run(
         cmd,
@@ -51,6 +167,7 @@ def run_gh(*args: str, cwd: Optional[str] = None, check: bool = True) -> subproc
         capture_output=True,
         text=True,
         check=check,
+        timeout=timeout,
     )
     if result.returncode != 0:
         log_shell_command(cmd, prefix="gh", returncode=result.returncode)
@@ -149,6 +266,43 @@ def create_draft_pr(workdir: str, title: str, base: str, body: str = "") -> Opti
         pr_number = pr_info.get("number") if pr_info else None
 
     return {"url": pr_url, "number": pr_number}
+
+
+def get_pr_state(pr_ref: str | int, cwd: Optional[str] = None,
+                 timeout: Optional[float] = 30) -> Optional[dict]:
+    """Fetch state/isDraft/mergedAt for a PR. Returns None on failure.
+
+    Used by the github status-polling path (pr_sync.sync_from_github).
+    """
+    result = run_gh(
+        "pr", "view", str(pr_ref),
+        "--json", "state,isDraft,mergedAt",
+        cwd=cwd,
+        check=False,
+        timeout=timeout,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return json.loads(result.stdout)
+    return None
+
+
+def merge_pr(workdir: str, pr_ref: str | int,
+             method: str = "merge") -> subprocess.CompletedProcess:
+    """Merge a GitHub PR via gh CLI. Returns the completed process."""
+    return run_gh(
+        "pr", "merge", str(pr_ref), f"--{method}",
+        cwd=workdir,
+        check=False,
+    )
+
+
+def close_pr(pr_ref: str | int, delete_branch: bool = False,
+             cwd: Optional[str] = None) -> subprocess.CompletedProcess:
+    """Close a GitHub PR via gh CLI. Returns the completed process."""
+    args = ["pr", "close", str(pr_ref)]
+    if delete_branch:
+        args.append("--delete-branch")
+    return run_gh(*args, cwd=cwd, check=False)
 
 
 def mark_pr_ready(workdir: str, pr_ref: str | int) -> bool:

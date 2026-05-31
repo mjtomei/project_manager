@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pm_core import store, git_ops, graph
+from pm_core import store, git_ops, graph, gh_ops
 from pm_core.backend import get_backend
 from pm_core.cli.helpers import _record_status_timestamp
 from pm_core.paths import configure_logger
@@ -190,7 +190,7 @@ def sync_prs(
     # Local/vanilla backends rely on `pm pr merge` for explicit tracking.
     if backend_name == "github":
         for pr_entry in prs:
-            if pr_entry.get("status") not in ("in_review", "in_progress", "qa"):
+            if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
                 continue
 
             branch = pr_entry.get("branch", "")
@@ -283,8 +283,7 @@ def sync_from_github(
     Returns:
         SyncResult with sync outcome details
     """
-    import subprocess
-    import json
+    import subprocess  # for subprocess.TimeoutExpired in the except clause
 
     if data is None:
         data = store.load(root)
@@ -311,15 +310,11 @@ def sync_from_github(
         old_status = pr_entry.get("status", "pending")
 
         try:
-            result = subprocess.run(
-                ["gh", "pr", "view", str(gh_pr_number), "--json", "state,isDraft,mergedAt"],
-                capture_output=True, text=True, timeout=30
-            )
-            if result.returncode != 0:
+            info = gh_ops.get_pr_state(gh_pr_number)
+            if info is None:
                 _log.warning("Could not fetch GitHub PR #%s for %s", gh_pr_number, pr_id)
                 continue
 
-            info = json.loads(result.stdout)
             gh_state = info.get("state")
             is_draft = info.get("isDraft", False)
             merged_at = info.get("mergedAt")
@@ -330,8 +325,8 @@ def sync_from_github(
             elif gh_state == "CLOSED":
                 new_status = "closed"
             elif gh_state == "OPEN":
-                # Preserve "qa" status — it's a local refinement of in_review
-                if old_status == "qa":
+                # Preserve "qa"/"sign_off" — local refinements of in_review
+                if old_status in ("qa", "sign_off"):
                     continue
                 new_status = "in_progress" if is_draft else "in_review"
             else:

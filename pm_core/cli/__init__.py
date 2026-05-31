@@ -406,9 +406,9 @@ def status_cmd():
     click.echo(f"\nPRs: {len(prs)} total")
     status_icons = {
         "pending": "⏳", "in_progress": "🔨", "in_review": "👀",
-        "qa": "🧪", "merged": "✅", "closed": "🚫",
+        "qa": "🧪", "sign_off": "✔️", "merged": "✅", "closed": "🚫",
     }
-    for s in ("pending", "in_progress", "in_review", "qa", "merged", "closed"):
+    for s in ("pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"):
         if s in counts:
             click.echo(f"  {status_icons.get(s, '?')} {s}: {counts[s]}")
 
@@ -687,7 +687,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project, fake_claude, fake_github  # noqa: E402, F401
 from pm_core.review import cli as review_cli  # noqa: E402, F401
 
 

@@ -578,7 +578,9 @@ class TestPromptGenNotes:
     def test_no_notes(self, mock_root, mock_notes):
         data = self._data()
         prompt = generate_prompt(data, "pr-001")
-        assert "PR Notes" not in prompt
+        # The rendered-notes section is absent; the always-present handoff
+        # block ("## PR Notes — Handoff Channel") is not the notes section.
+        assert "\n## PR Notes\n" not in prompt
 
     @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
@@ -588,7 +590,7 @@ class TestPromptGenNotes:
             {"id": "note-def", "text": "Don't touch auth module", "created_at": "2026-01-16T14:00:00Z"},
         ])
         prompt = generate_prompt(data, "pr-001")
-        assert "## PR Notes" in prompt
+        assert "\n## PR Notes\n" in prompt
         assert "Use the new API" in prompt
         assert "Don't touch auth module" in prompt
 
@@ -614,14 +616,14 @@ class TestPromptGenNotes:
     def test_review_no_notes(self):
         data = self._data()
         prompt = generate_review_prompt(data, "pr-001")
-        assert "PR Notes" not in prompt
+        assert "\n## PR Notes\n" not in prompt
 
     def test_review_with_notes(self):
         data = self._data(notes=[
             {"id": "note-abc", "text": "Check edge cases", "created_at": "2026-01-15T10:30:00Z"},
         ])
         prompt = generate_review_prompt(data, "pr-001")
-        assert "## PR Notes" in prompt
+        assert "\n## PR Notes\n" in prompt
         assert "Check edge cases" in prompt
         assert "2026-01-15T10:30:00Z" in prompt
 
@@ -639,7 +641,7 @@ class TestPromptGenNotes:
     def test_qa_planner_no_notes(self, mock_root, mock_instr, mock_notes):
         data = self._data()
         prompt = generate_qa_planner_prompt(data, "pr-001")
-        assert "PR Notes" not in prompt
+        assert "\n## PR Notes\n" not in prompt
 
     @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.qa_instructions.instruction_summary_for_prompt", return_value="No instructions.")
@@ -650,7 +652,7 @@ class TestPromptGenNotes:
             {"id": "note-abc", "text": "QA NEEDS_WORK: Login: NEEDS_WORK", "created_at": "2026-01-15T10:30:00Z"},
         ])
         prompt = generate_qa_planner_prompt(data, "pr-001")
-        assert "## PR Notes" in prompt
+        assert "\n## PR Notes\n" in prompt
         assert "QA NEEDS_WORK: Login: NEEDS_WORK" in prompt
         assert "2026-01-15T10:30:00Z" in prompt
 
@@ -659,7 +661,7 @@ class TestPromptGenNotes:
         data = self._data()
         scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
         prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
-        assert "PR Notes" not in prompt
+        assert "\n## PR Notes\n" not in prompt
 
     def test_qa_child_with_notes(self):
         """QA child sessions should see prior QA results from PR notes."""
@@ -669,7 +671,136 @@ class TestPromptGenNotes:
         ])
         scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
         prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
-        assert "## PR Notes" in prompt
+        assert "\n## PR Notes\n" in prompt
         assert "QA PASS: All passed" in prompt
+
+
+class TestPrNotesHandoffGuidance:
+    """The ungated 'PR Notes — Handoff Channel' block must reach every work
+    session, including the container / non-TUI path (session_name=None).
+    """
+
+    def _data(self):
+        pr = {
+            "id": "pr-xyz",
+            "plan": None,
+            "title": "Handoff PR",
+            "branch": "pm/pr-xyz",
+            "status": "in_progress",
+            "depends_on": [],
+            "description": "Do the thing",
+            "agent_machine": None,
+            "gh_pr": None,
+            "gh_pr_number": None,
+        }
+        return {
+            "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "master", "backend": "local"},
+            "plans": [],
+            "prs": [pr],
+        }
+
+    def _assert_handoff(self, prompt, pr_id="pr-xyz"):
+        # Heading present
+        assert "## PR Notes — Handoff Channel" in prompt
+        # Both handoff directions
+        assert f"pm pr note add {pr_id} '<text>'" in prompt  # same-PR
+        assert "pm pr note add <other-pr-id> '<text>'" in prompt  # cross-PR
+        # Prefer pm notes over GitHub
+        assert "Prefer pm PR notes over GitHub" in prompt
+        # Workdir -> master -> target-PR propagation is spelled out
+        assert "travels to master when your PR merges" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_impl_prompt_has_handoff(self, mock_root, mock_notes):
+        self._assert_handoff(generate_prompt(self._data(), "pr-xyz"))
+
+    def test_review_prompt_has_handoff(self):
+        self._assert_handoff(generate_review_prompt(self._data(), "pr-xyz"))
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.qa_instructions.instruction_summary_for_prompt", return_value="No instructions.")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_qa_planner_prompt_has_handoff(self, mock_root, mock_instr, mock_notes):
+        self._assert_handoff(generate_qa_planner_prompt(self._data(), "pr-xyz"))
+
+    def test_qa_child_prompt_has_handoff(self):
+        from pm_core.qa_loop import QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        self._assert_handoff(
+            generate_qa_child_prompt(self._data(), "pr-xyz", scenario, "/tmp/workdir"))
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_handoff_not_gated_on_session_name(self, mock_root, mock_notes):
+        """Container / non-TUI sessions (session_name=None) still get the
+        guidance — it must not live inside the gated TUI block."""
+        impl = generate_prompt(self._data(), "pr-xyz", session_name=None)
+        review = generate_review_prompt(self._data(), "pr-xyz", session_name=None)
+        assert "## Interacting with the TUI" not in impl  # TUI block is gated off
+        assert "## Interacting with the TUI" not in review
+        self._assert_handoff(impl)
+        self._assert_handoff(review)
+
+
+class TestQAVerdictFinalityGuidance:
+    """A QA scenario worker cannot deliver a replacement verdict once one is
+    recorded (qa_loop pending-set guard), and a scenario refiner's decision is
+    one-shot — so cross-run handoff must go through a pm PR note. Review loops
+    re-run per iteration, so they get no such "verdict is final" guidance.
+    """
+
+    def _data(self):
+        pr = {
+            "id": "pr-fin",
+            "plan": None,
+            "title": "Finality PR",
+            "branch": "pm/pr-fin",
+            "status": "qa",
+            "depends_on": [],
+            "description": "Do the thing",
+            "agent_machine": None,
+            "gh_pr": None,
+            "gh_pr_number": None,
+        }
+        return {
+            "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "master", "backend": "local"},
+            "plans": [],
+            "prs": [pr],
+        }
+
+    def test_qa_child_states_verdict_is_final(self):
+        from pm_core.qa_loop import QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        with patch("pm_core.prompt_gen.store.find_project_root"):
+            prompt = generate_qa_child_prompt(self._data(), "pr-fin", scenario, "/tmp/workdir")
+        assert "Your Verdict Is Final for This Run" in prompt
+        assert "there is no re-poll" in prompt
+        assert "next QA run on this PR" in prompt
+        # Points to the handoff channel with the concrete PR id.
+        assert "pm pr note add pr-fin '<text>'" in prompt
+
+    def test_review_prompt_has_no_verdict_finality_block(self):
+        """Review loops accept successive verdicts, so they must NOT carry the
+        QA 'verdict is final' guidance."""
+        prompt = generate_review_prompt(self._data(), "pr-fin")
+        assert "Your Verdict Is Final for This Run" not in prompt
+
+    def test_refiner_prompt_one_shot_handoff(self):
+        from pm_core.qa_loop import _build_concretization_prompt, QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = _build_concretization_prompt(
+            scenario, "pm/pr-fin", "master", pr_id="pr-fin")
+        assert "This Decision Is Final" in prompt
+        assert "REFINER_REJECT defers the scenario" in prompt
+        assert "pm pr note add pr-fin '<text>'" in prompt
+        assert "Prefer pm PR notes over GitHub" in prompt
+        assert "travels to master when this PR merges" in prompt
+
+    def test_refiner_prompt_placeholder_without_pr_id(self):
+        from pm_core.qa_loop import _build_concretization_prompt, QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = _build_concretization_prompt(scenario, "pm/pr-fin", "master")
+        assert "pm pr note add <pr-id> '<text>'" in prompt
 
 

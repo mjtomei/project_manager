@@ -31,6 +31,7 @@ from pm_core.tmux import (
     list_grouped_sessions,
     find_unattached_grouped_session,
     sessions_on_window,
+    attached_active_window,
 )
 
 
@@ -559,3 +560,33 @@ class TestSessionsOnWindow:
     def test_display_error_skipped(self, mock_lg, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert sessions_on_window("proj", "@1") == []
+
+
+class TestAttachedActiveWindow:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_attached_returns_window_id(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="1 @5\n")
+        assert attached_active_window("proj~1") == "@5"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_unattached_returns_none(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="0 @5\n")
+        assert attached_active_window("proj") is None
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_error_returns_none(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert attached_active_window("proj") is None
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_malformed_output_returns_none(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
+        assert attached_active_window("proj") is None
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_queries_attached_and_window_id(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="2 @1\n")
+        attached_active_window("proj~3")
+        cmd = mock_run.call_args[0][0]
+        assert "#{session_attached} #{window_id}" in cmd
+        assert "proj~3" in cmd

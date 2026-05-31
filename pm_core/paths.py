@@ -122,6 +122,23 @@ def captures_dir(pr_id: str,
 CONTAINER_CAPTURES_MOUNT = "/pm-captures"
 
 
+def latest_qa_status_path(pr_id: str) -> Path | None:
+    """Return the most-recent ``qa_status.json`` for *pr_id*, or None.
+
+    Single source of truth for locating a PR's latest QA status file under
+    ``~/.pm/workdirs/qa/<pr_id>-*/qa_status.json`` (a fresh QA run gets a new
+    ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins).
+    Shared by the auto-sequence QA gate and the sign-off prompt/evidence
+    surfaces so they never drift.
+    """
+    qa_dir = workdirs_base() / "qa"
+    if not qa_dir.is_dir():
+        return None
+    candidates = sorted(qa_dir.glob(f"{pr_id}-*/qa_status.json"),
+                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    return candidates[-1] if candidates else None
+
+
 def sessions_dir() -> Path:
     """Return the sessions directory (~/.pm/sessions/).
 
@@ -129,6 +146,7 @@ def sessions_dir() -> Path:
     - {session-tag}/override  - Path to workdir for installation override
     - {session-tag}/debug     - If contains 'true', enable debug logging
     - {session-tag}/dangerously-skip-permissions - If contains 'true', skip Claude permissions
+    - {session-tag}/fake-claude - JSON config to replace Claude with bin/fake-claude
     """
     d = pm_home() / "sessions"
     d.mkdir(parents=True, exist_ok=True)
@@ -244,6 +262,201 @@ def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:
             skip_file.write_text("true\n")
         elif skip_file.exists():
             skip_file.unlink()
+
+
+def fake_claude_config(session_tag: str | None = None) -> dict | None:
+    """Return the raw fake-claude config dict for the current session, or None.
+
+    Looks for ``~/.pm/sessions/{session-tag}/fake-claude`` containing JSON in
+    the per-session-type format::
+
+        {
+          "_defaults": {"preamble": 3, "delay": 0.5},
+          "review":          {"verdicts": {"PASS": 70, "NEEDS_WORK": 20, "INPUT_REQUIRED": 10}},
+          "qa_scenario":     {"verdicts": {"PASS": 80, "NEEDS_WORK": 15, "INPUT_REQUIRED": 5}},
+          "qa_verification": {"verdicts": {"VERIFIED": 80, "FLAGGED": 20}},
+          "qa_planning":     {"verdicts": {"QA_PLAN": 100}}
+        }
+
+    Top-level keys are session types (``model_config.SESSION_TYPES``) plus the
+    special ``"_defaults"`` key for shared preamble/delay/body parameters.
+    Session types absent from the file are NOT faked — they use real Claude.
+
+    Returns the raw dict.  Use ``fake_claude_config_for_type()`` to get the
+    fully-merged config for a specific session type.
+    """
+    import json
+    sd = session_dir(session_tag)
+    if not sd:
+        return None
+    f = sd / "fake-claude"
+    if not f.exists():
+        return None
+    try:
+        return json.loads(f.read_text())
+    except (OSError, IOError, json.JSONDecodeError):
+        return None
+
+
+def fake_claude_config_for_type(
+    session_type: str | None,
+    session_tag: str | None = None,
+) -> dict | None:
+    """Return the merged fake-claude config for *session_type*, or None.
+
+    Merges ``_defaults`` with the per-type entry and returns a flat dict
+    suitable for ``_fake_claude_args()``.
+
+    The special ``_all`` key turns on "fake everything" mode: any session
+    type without its own entry — and any call with no *session_type* at all —
+    falls back to ``_all`` (its ``verdicts``, if any, are ignored).  Explicit
+    per-type entries still win over ``_all``.
+
+    ``_all`` is a no-verdict session by default, *except* for verdict-producing
+    session types (``review``, ``qa_finalize``, … — anything with a non-empty
+    entry in ``SESSION_TYPE_VERDICTS``).  Routing such a type through the
+    no-verdict catch-all would launch the no-verdict mock, which never emits a
+    verdict and hangs the verdict poller forever; so a catch-all'd
+    verdict-producing session is given its default (first/happy-path) verdict
+    instead.  To force a genuinely no-verdict session for such a type, give it
+    an explicit per-type entry with empty ``verdicts``.
+
+    Returns None when:
+
+    - no fake-claude config file exists, or
+    - *session_type* has no entry and there is no ``_all`` catch-all.
+    """
+    raw = fake_claude_config(session_tag)
+    if raw is None:
+        return None
+    type_config = raw.get(session_type) if session_type else None
+    if type_config is not None and not isinstance(type_config, dict):
+        # A hand-edited file may carry a malformed per-type entry; treat a
+        # non-dict as absent rather than crashing the launcher downstream.
+        type_config = None
+    if type_config is None:
+        all_config = raw.get("_all")
+        if all_config is None:
+            return None
+        # Tolerate a malformed (non-dict) ``_all`` from a hand-edited file —
+        # ``set_fake_claude_config`` rejects it, but a directly-written file
+        # should not crash the launcher on ``.items()``.
+        if not isinstance(all_config, dict):
+            all_config = {}
+        # Catch-all is a no-verdict session by default — strip any stray
+        # verdicts.
+        type_config = {k: v for k, v in all_config.items() if k != "verdicts"}
+        # ...but a verdict-producing session type routed through the catch-all
+        # with no verdict would launch the no-verdict mock and hang the verdict
+        # poller forever. Give it its default (happy-path) verdict instead.
+        from pm_core.fake_claude import SESSION_TYPE_VERDICTS
+        allowed = SESSION_TYPE_VERDICTS.get(session_type or "", ())
+        if allowed:
+            type_config["verdicts"] = {allowed[0]: 1}
+    defaults = raw.get("_defaults", {})
+    if not isinstance(defaults, dict):
+        defaults = {}
+    merged = {**defaults, **type_config}
+    return merged
+
+
+def set_fake_claude_config(session_tag: str, config: dict) -> None:
+    """Write fake-claude config JSON to ``~/.pm/sessions/{tag}/fake-claude``.
+
+    Validates that every session-type entry only contains verdicts that are
+    valid for that session type.  Raises ``ValueError`` listing all problems
+    so callers can surface them before writing.
+    """
+    import json
+    from pm_core.fake_claude import validate_session_verdicts
+
+    errors: list[str] = []
+    for key, value in config.items():
+        if key == "_all":
+            # Catch-all "fake everything" entry — a no-verdict session, so it
+            # must not carry verdicts (they would be silently ignored).
+            if not isinstance(value, dict):
+                errors.append(
+                    f"'_all' must be a dict, got {type(value).__name__}."
+                )
+            elif value.get("verdicts"):
+                errors.append(
+                    "'_all' is a no-verdict catch-all; remove its 'verdicts'."
+                )
+            continue
+        if key.startswith("_"):
+            # _defaults — shared preamble/delay/body params, merged into every
+            # resolved config, so it too must be a dict (a non-dict would crash
+            # the {**defaults, ...} merge in fake_claude_config_for_type).
+            if not isinstance(value, dict):
+                errors.append(
+                    f"{key!r} must be a dict, got {type(value).__name__}."
+                )
+            continue  # not a session-type entry — no verdict validation
+        if not isinstance(value, dict):
+            errors.append(f"Config entry {key!r} must be a dict, got {type(value).__name__}")
+            continue
+        verdicts = value.get("verdicts", {})
+        errors.extend(validate_session_verdicts(key, verdicts))
+
+    if errors:
+        raise ValueError(
+            "Invalid fake-claude config:\n" + "\n".join(f"  \u2022 {e}" for e in errors)
+        )
+
+    sd = session_dir(session_tag)
+    if sd:
+        (sd / "fake-claude").write_text(json.dumps(config, indent=2) + "\n")
+        # Re-declaring the config resets scripted-sequence cursors: the
+        # sidecar is stale state for the *previous* config, and a fresh
+        # config should start its sequences at slot 0 (otherwise a shorter
+        # new sequence resumes mid-stream, silently mis-modelling iteration
+        # order — the exact flakiness scripted sequences exist to avoid).
+        state = sd / "fake-claude.state"
+        if state.exists():
+            state.unlink()
+
+
+def clear_fake_claude(session_tag: str) -> None:
+    """Remove the fake-claude config file (and scripted-cursor sidecar) for a session."""
+    sd = session_dir(session_tag)
+    if sd:
+        for name in ("fake-claude", "fake-claude.state"):
+            f = sd / name
+            if f.exists():
+                f.unlink()
+
+
+def fake_github_dir(session_tag: str | None = None) -> "Path | None":
+    """Return ``~/.pm/sessions/{tag}/fake-github/`` for the session, or None.
+
+    Does NOT create the directory (so it is cheap to probe on every ``run_gh``
+    call). The out-of-process fake-github lives here — a ``state.json`` holding
+    the serialized PR registry / scripted responses plus a ``remote.git/``
+    backing repo. Mirrors the per-session ``fake-claude`` config gate.
+    """
+    tag = session_tag or get_session_tag()
+    if not tag:
+        return None
+    return sessions_dir() / tag / "fake-github"
+
+
+def fake_github_active(session_tag: str | None = None) -> bool:
+    """True if an out-of-process fake-github is installed for the session.
+
+    Consulted by ``gh_ops.run_gh`` (when no in-process transport is installed)
+    to route ``gh`` commands to the fake instead of the real GitHub API.
+    """
+    d = fake_github_dir(session_tag)
+    return bool(d and (d / "state.json").exists())
+
+
+def clear_fake_github(session_tag: str | None = None) -> None:
+    """Remove the out-of-process fake-github state for a session."""
+    import shutil
+    d = fake_github_dir(session_tag)
+    if d and d.exists():
+        shutil.rmtree(d)
 
 
 def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10_000_000) -> logging.Logger:

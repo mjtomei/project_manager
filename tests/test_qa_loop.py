@@ -1218,12 +1218,41 @@ class TestBuildVerificationPrompt:
         assert "FLAGGED_START" in prompt
         assert "FLAGGED_END" in prompt
 
+    def test_no_artifact_check_when_no_recipes(self):
+        # A scenario with no assigned artifact recipes must not get the
+        # artifact-completeness step; the judgment step stays at Step 3.
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="output")
+        assert "expected artifacts" not in prompt.lower()
+        assert "### Step 3: Make your judgment" in prompt
+
+    def test_artifact_check_present_when_recipes_assigned(self):
+        # When the scenario carries artifact recipes, the verifier is told to
+        # confirm the captures actually landed, the judgment step shifts to
+        # Step 4, and the recipe name + captures dir are named.
+        scenario = QAScenario(
+            index=2, title="Loop e2e", focus="loop", steps="steps",
+            artifact_paths=["/scratch/qa-artifacts/tmux-screen-recording.md"])
+        prompt = _build_verification_prompt(
+            scenario, "PASS", pane_output="output",
+            captures_scenario_dir="/caps/pr-x/scenarios/2")
+        assert "tmux-screen-recording.md" in prompt
+        assert "/caps/pr-x/scenarios/2" in prompt
+        # The judgment step is renumbered to Step 4 and the artifact rule
+        # is part of the FLAGGED criteria.
+        assert "### Step 4: Make your judgment" in prompt
+        assert ".cast" in prompt  # recording-vs-dump guidance present
+        # Missing/downgraded artifact without a valid reason -> FLAGGED.
+        assert "FLAGGED" in prompt
+
 
 class TestVerifySingleScenario:
     """Tests for _verify_single_scenario."""
 
     def _mock_verify(self, scenario, verdict, pane_output, poll_content,
-                     pr_data=None, project_data=None, qa_workdir="/tmp/qa"):
+                     pr_data=None, project_data=None, qa_workdir="/tmp/qa",
+                     pr_workdir="/tmp/prworkdir"):
         """Helper: run _verify_single_scenario with mocked tmux ops."""
         mock_wid = MagicMock()
         mock_wid.stdout = "@1"
@@ -1267,6 +1296,7 @@ class TestVerifySingleScenario:
                 pr_data or {}, project_data or {},
                 session="pm-session",
                 qa_workdir=qa_workdir,
+                pr_workdir=pr_workdir,
             )
 
     def test_verified_result(self):
@@ -1304,6 +1334,7 @@ class TestVerifySingleScenario:
             passed, reason, _ = _verify_single_scenario(
                 scenario, "PASS", "output", {}, {},
                 session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir="/tmp/prworkdir",
             )
         assert passed is False
         assert "split" in reason.lower()
@@ -1355,7 +1386,7 @@ class TestVerifySingleScenario:
              patch("pm_core.pane_layout.rebalance"):
             passed, _, _ = _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
-                session="pm-session")
+                session="pm-session", pr_workdir="/tmp/prworkdir")
         assert passed is True
         # The prompt passed to build_claude_shell_cmd should reference transcript
         call_kwargs = mock_cmd.call_args
@@ -1383,9 +1414,60 @@ class TestVerifySingleScenario:
              patch("pm_core.pane_layout.rebalance"):
             _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
-                session="pm-session", qa_workdir="/tmp/qa")
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir="/tmp/prworkdir")
         call_kwargs = mock_cmd.call_args
         assert "pane output" in (call_kwargs.kwargs.get("prompt", "") or "")
+
+    def test_verifier_runs_in_pr_workdir(self, tmp_path):
+        """The verifier launches in the PR's canonical workdir (already
+        trusted) rather than the per-run hashed QA dir — so it never stalls
+        on Claude's interactive workspace-trust dialog."""
+        transcript = tmp_path / "qa" / "pr-x-deadbeef" / "transcript-s1.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text('{"role":"assistant","content":"done"}\n')
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              transcript_path=str(transcript))
+        pr_workdir = str(tmp_path / "workdirs" / "pm-pr-x")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2") as mock_split, \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value={"windows": {}}), \
+             patch("pm_core.pane_registry.get_window_data", return_value={"user_modified": True}), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir=pr_workdir)
+        # Both the launch command and the tmux split use the PR workdir,
+        # not the hashed QA transcript dir.
+        assert mock_cmd.call_args.kwargs.get("cwd") == pr_workdir
+        assert mock_split.call_args.kwargs.get("cwd") == pr_workdir
+
+    def test_no_pr_workdir_marks_unverified(self):
+        """Without a PR workdir we fail loud rather than silently fall back
+        to the untrusted hashed QA dir (which would re-introduce the
+        trust-dialog stall)."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir=None)
+        assert passed is False
+        assert "cwd" in reason.lower()
 
 
 class TestVerificationSetting:

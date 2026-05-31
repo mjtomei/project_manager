@@ -45,15 +45,29 @@ def handle_pr_selected(app, pr_id: str) -> None:
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
 
-    # Persist selection so TUI restarts on this PR
+    # Persist selection so TUI restarts on this PR.  Update in-memory state
+    # immediately (source of truth for the running TUI), then enqueue the
+    # disk write so rapid navigation doesn't block the event loop on a full
+    # yaml read-modify-write per keypress.
     if app._data.get("project", {}).get("active_pr") != pr_id:
-        try:
-            app._data = store.locked_update(
-                app._root, lambda d: d["project"].__setitem__("active_pr", pr_id)
+        app._data.setdefault("project", {})["active_pr"] = pr_id
+        wq = getattr(app, "_write_queue", None)
+        if wq is not None:
+            wq.enqueue(
+                ("set", "active_pr"),
+                lambda d: d.setdefault("project", {}).__setitem__("active_pr", pr_id),
             )
-        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-            _log.warning("handle_pr_selected: %s", e)
-            app.log_message(f"Error: {e}")
+        else:
+            # No queue yet (e.g. early events or tests): fall back to a
+            # synchronous write.
+            try:
+                app._data = store.locked_update(
+                    app._root,
+                    lambda d: d.setdefault("project", {}).__setitem__("active_pr", pr_id),
+                )
+            except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+                _log.warning("handle_pr_selected: %s", e)
+                app.log_message(f"Error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +138,21 @@ def start_pr(app, companion: bool = False) -> None:
         cmd_parts.append("--fresh")
     if companion:
         cmd_parts.append("--companion")
+    # Pass --transcript so the resulting Claude session writes a hook
+    # transcript symlink that ``_poll_impl_idle`` can register in the
+    # PaneIdleTracker.  Without it a manually-started PR is never tracked,
+    # so its in_progress node shows a static ``◎`` with no live spinner /
+    # ⏸ marker.  Mirrors review_pr and auto_start._start_pr_quiet, which
+    # both use the canonical ``impl-{pr_id}.jsonl`` name.  (Auto-advance on
+    # idle stays gated on auto-start being enabled, so this only animates
+    # the marker — it does not force a manual start to auto-review.)
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        tdir = _auto_start.get_transcript_dir(app)
+    except Exception:
+        tdir = None
+    if tdir:
+        cmd_parts.append(f"--transcript {tdir}/impl-{pr_id}.jsonl")
     cmd_parts.append(pr_id)
     cmd = " ".join(cmd_parts)
     run_command(app, cmd, working_message=action_key, action_key=action_key)
@@ -181,6 +210,47 @@ def review_pr(app, fresh: bool = False) -> None:
         transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
     fresh_arg = " --fresh" if fresh else ""
     cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
+    run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+
+def signoff_pr(app, fresh: bool = False) -> None:
+    """Launch sign-off for the selected PR (transitions qa->sign_off if needed)."""
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: signoff_pr selected=%s fresh=%s", pr_id, fresh)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    if not fresh:
+        from pm_core.loop_shared import get_pm_session
+        from pm_core import tmux as tmux_mod, store
+        session = get_pm_session()
+        if session and app._root:
+            try:
+                data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                data = None
+            if data:
+                pr_entry = store.get_pr(data, pr_id)
+                if pr_entry:
+                    from pm_core.cli.pr import _pr_display_id
+                    display_id = _pr_display_id(pr_entry)
+                    window_name = f"signoff-{display_id}"
+                    existing = tmux_mod.find_window_by_name(session, window_name)
+                    if existing:
+                        tmux_mod.select_window(session, existing["id"])
+                        app.log_message(f"Switched to sign-off window '{window_name}'")
+                        return
+
+    action_key = f"Sign-off {pr_id}" + (" (fresh)" if fresh else "")
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    fresh_arg = " --fresh" if fresh else ""
+    cmd = f"pr signoff{fresh_arg} {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
@@ -251,15 +321,25 @@ def toggle_merged(app) -> None:
 
     tree = app.query_one("#tech-tree", TechTree)
     tree._hide_merged = not tree._hide_merged
-    # Persist to project.yaml (per-project, overrides global)
+    # Persist to project.yaml (per-project, overrides global).  Update memory
+    # immediately and route the disk write through the coalescing queue.
     hide = tree._hide_merged
-    try:
-        app._data = store.locked_update(
-            app._root, lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide)
+    app._data.setdefault("project", {})["hide_merged"] = hide
+    wq = getattr(app, "_write_queue", None)
+    if wq is not None:
+        wq.enqueue(
+            ("set", "hide_merged"),
+            lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide),
         )
-    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-        _log.warning("toggle_merged: %s", e)
-        app.log_message(f"Error: {e}")
+    else:
+        try:
+            app._data = store.locked_update(
+                app._root,
+                lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide),
+            )
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("toggle_merged: %s", e)
+            app.log_message(f"Error: {e}")
     tree._recompute()
     tree.refresh(layout=True)
     app._update_filter_status()
@@ -274,6 +354,7 @@ def cycle_sort(app) -> None:
     from pm_core.tui.tech_tree import TechTree, SORT_FIELDS, SORT_FIELD_KEYS
 
     tree = app.query_one("#tech-tree", TechTree)
+    prev_id = tree.selected_pr_id
     current = tree._sort_field
     try:
         idx = SORT_FIELD_KEYS.index(current)
@@ -283,6 +364,10 @@ def cycle_sort(app) -> None:
     tree._sort_field = SORT_FIELD_KEYS[next_idx]
     tree._recompute()
     tree.refresh(layout=True)
+    # Sorting only reorders the same PRs, so keep the cursor on the same PR
+    # instead of leaving selected_index pointing at whatever now occupies it.
+    if prev_id:
+        tree.select_pr(prev_id)
     app._update_filter_status()
     label = dict(SORT_FIELDS)[tree._sort_field]
     app.log_message(f"Sort: {label}")
@@ -611,6 +696,13 @@ def handle_command_submitted(app, cmd: str) -> None:
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(edit_pr_id)
         pane_ops.edit_plan(app)
+        # Return focus to the tree (or plans pane) so subsequent nav keys
+        # don't leak into the command bar's Input, mirroring the other
+        # command branches.
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
         return
 
     # Handle auto-start commands

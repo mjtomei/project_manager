@@ -638,6 +638,31 @@ def pane_window_id(pane_id: str) -> str | None:
     return result.stdout.strip() or None
 
 
+def attached_active_window(session: str, socket_path: str | None = None) -> str | None:
+    """Return *session*'s active window id, but only if a client is attached.
+
+    Used by the popup picker to show which windows a *collaborator* is
+    currently viewing.  An unattached session (e.g. the base session when
+    the TUI runs in grouped sessions) has an "active window" in tmux's
+    bookkeeping but no client focusing it, so we treat it as not-selected
+    and return ``None``.  Returns ``None`` on any tmux error.
+    """
+    result = _run(
+        _tmux_cmd("display-message", "-t", session, "-p",
+                   "#{session_attached} #{window_id}", socket_path=socket_path),
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    parts = result.stdout.strip().split(None, 1)
+    if len(parts) != 2:
+        return None
+    attached, wid = parts
+    if attached == "0":
+        return None
+    return wid or None
+
+
 def sessions_on_window(base: str, window_id: str) -> list[str]:
     """Return all sessions in the group (base + grouped) whose active window matches *window_id*.
 

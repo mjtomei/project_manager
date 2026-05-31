@@ -384,6 +384,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
                           session: str, window_name: str,
                           workdir_path: str | None,
                           stop_check: Callable[[], bool] | None = None,
+                          project_data: dict | None = None,
                           ) -> str | None:
     """Run the post-QA finalize pane synchronously.
 
@@ -442,9 +443,16 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
 
     import uuid as _uuid
     finalize_session_id = str(_uuid.uuid4())
+    _finalize_resolution = _resolve_qa_model(pr_data, project_data,
+                                             session_type="qa_finalize")
     finalize_cmd = build_claude_shell_cmd(
         prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
         session_id=finalize_session_id,
+        model=_finalize_resolution.model,
+        provider=_finalize_resolution.provider,
+        effort=_finalize_resolution.effort,
+        session_type="qa_finalize",
+        session_tag=state.session_tag,
     )
 
     try:
@@ -540,6 +548,162 @@ def _write_status_file(status_path: Path, pr_id: str,
     tmp_path = status_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(data, indent=2))
     tmp_path.rename(status_path)
+
+
+# ---------------------------------------------------------------------------
+# Resume snapshot (restart survival)
+# ---------------------------------------------------------------------------
+#
+# qa_status.json is the display contract (read by qa_status.py) and only
+# carries index/title/verdict/window_name.  The orchestration loop in
+# _poll_tmux_verdicts needs much more per-scenario runtime state to keep
+# collecting verdicts after a TUI restart kills the daemon thread:
+# session_id (hook-driven turn gate), transcript_path (verdict source of
+# truth), pane_id (reminders/follow-ups), worktree/container (relaunch +
+# verification).  We persist that to a sidecar qa_resume.json so the TUI
+# can reconstruct a QALoopState and re-spawn the loop (see resume_qa_sync
+# and qa_loop_ui._resume_incomplete_qa).
+
+_RESUME_FILENAME = "qa_resume.json"
+
+
+def _resume_file_path(qa_workdir: str | Path) -> Path:
+    return Path(qa_workdir) / _RESUME_FILENAME
+
+
+def _scenario_to_resume_dict(s: QAScenario) -> dict:
+    """Serialize the resumable fields of a QAScenario."""
+    return {
+        "index": s.index,
+        "title": s.title,
+        "focus": s.focus,
+        "instruction_path": s.instruction_path,
+        "artifact_paths": list(s.artifact_paths),
+        "mock_ids": list(s.mock_ids),
+        "steps": s.steps,
+        "window_name": s.window_name,
+        "pane_id": s.pane_id,
+        "worktree_path": s.worktree_path,
+        "container_name": s.container_name,
+        "transcript_path": s.transcript_path,
+        "session_id": s.session_id,
+        "concretize_session_id": s.concretize_session_id,
+        "verifier_pane_id": s.verifier_pane_id,
+        "verifier_session_id": s.verifier_session_id,
+        "verifier_transcript": s.verifier_transcript,
+        "verifier_cwd": s.verifier_cwd,
+    }
+
+
+def _scenario_from_resume_dict(d: dict) -> QAScenario:
+    """Reconstruct a QAScenario from its resume serialization."""
+    return QAScenario(
+        index=d["index"],
+        title=d.get("title", ""),
+        focus=d.get("focus", ""),
+        instruction_path=d.get("instruction_path"),
+        artifact_paths=list(d.get("artifact_paths") or []),
+        mock_ids=list(d.get("mock_ids") or []),
+        steps=d.get("steps", ""),
+        window_name=d.get("window_name"),
+        pane_id=d.get("pane_id"),
+        worktree_path=d.get("worktree_path"),
+        container_name=d.get("container_name"),
+        transcript_path=d.get("transcript_path"),
+        session_id=d.get("session_id"),
+        concretize_session_id=d.get("concretize_session_id"),
+        verifier_pane_id=d.get("verifier_pane_id"),
+        verifier_session_id=d.get("verifier_session_id"),
+        verifier_transcript=d.get("verifier_transcript"),
+        verifier_cwd=d.get("verifier_cwd"),
+    )
+
+
+def _write_resume_file(state: QALoopState, use_containers: bool,
+                       concurrency_cap: int,
+                       queued_indices: set[int] | None = None) -> None:
+    """Atomically snapshot the run state needed to resume after a restart.
+
+    Best-effort: failures are logged, never raised — a missing snapshot
+    just means the run cannot be resumed, not that it breaks.
+    """
+    if not state.qa_workdir:
+        return
+    data = {
+        "pr_id": state.pr_id,
+        "loop_id": state.loop_id,
+        "qa_workdir": state.qa_workdir,
+        "session_tag": state.session_tag,
+        "use_containers": bool(use_containers),
+        "concurrency_cap": int(concurrency_cap or 0),
+        "finalize_verdict": state.finalize_verdict,
+        "scenario_verdicts": {str(k): v for k, v in state.scenario_verdicts.items()},
+        "scenario_verdict_reasons": {
+            str(k): v for k, v in state.scenario_verdict_reasons.items()
+        },
+        "verified_scenarios": sorted(state.verified_scenarios),
+        "queued_indices": sorted(queued_indices or set()),
+        "scenarios": [_scenario_to_resume_dict(s) for s in state.scenarios],
+        "scenario_0": (
+            _scenario_to_resume_dict(state.scenario_0)
+            if state.scenario_0 else None
+        ),
+    }
+    path = _resume_file_path(state.qa_workdir)
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(path)
+    except OSError:
+        _log.warning("Failed to write QA resume snapshot for %s",
+                     state.pr_id, exc_info=True)
+
+
+def _load_resume_file(qa_workdir: str | Path) -> dict | None:
+    """Load qa_resume.json, returning None if missing or invalid."""
+    try:
+        return json.loads(_resume_file_path(qa_workdir).read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def clear_resume_file(qa_workdir: str | Path) -> None:
+    """Remove the resume snapshot once a completed run has been processed."""
+    try:
+        _resume_file_path(qa_workdir).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        _log.debug("Failed to remove QA resume snapshot in %s", qa_workdir,
+                   exc_info=True)
+
+
+def build_resume_state(resume_data: dict) -> QALoopState:
+    """Reconstruct a QALoopState from a qa_resume.json snapshot.
+
+    The returned state has ``planning_phase=False`` and the launched
+    scenarios restored, ready to be handed to :func:`resume_qa_sync`.
+    """
+    state = QALoopState(pr_id=resume_data["pr_id"])
+    state.loop_id = resume_data.get("loop_id", state.loop_id)
+    state.qa_workdir = resume_data.get("qa_workdir")
+    state.session_tag = resume_data.get("session_tag")
+    state.planning_phase = False
+    state.scenarios = [
+        _scenario_from_resume_dict(d) for d in resume_data.get("scenarios", [])
+    ]
+    sc0 = resume_data.get("scenario_0")
+    state.scenario_0 = _scenario_from_resume_dict(sc0) if sc0 else None
+    state.scenario_verdicts = {
+        int(k): v for k, v in (resume_data.get("scenario_verdicts") or {}).items()
+    }
+    state.scenario_verdict_reasons = {
+        int(k): v
+        for k, v in (resume_data.get("scenario_verdict_reasons") or {}).items()
+    }
+    state.verified_scenarios = set(resume_data.get("verified_scenarios") or [])
+    state.finalize_verdict = resume_data.get("finalize_verdict")
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -852,9 +1016,10 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
                       session_type: str = "qa"):
     """Resolve model/provider for a QA session type.
 
-    session_type should be "qa_planning" for the planner, "qa_scenario"
-    for scenario workers, or "qa_verification" for the verification step.
-    Falls back to "qa" config if the specific type is not configured.
+    session_type is one of "qa_planning" (planner), "qa_scenario" (scenario
+    workers), "qa_concretize" (step refiner), "qa_verification" (verification
+    step), or "qa_finalize" (post-QA finalize pane). Each falls back to "qa"
+    config when the specific type is not configured.
     """
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     return resolve_model_and_provider(
@@ -876,8 +1041,10 @@ _CONCRETIZE_GRACE = 15
 
 def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
                                   base_branch: str,
-                                  instruction_content: str | None = None) -> str:
+                                  instruction_content: str | None = None,
+                                  pr_id: str | None = None) -> str:
     """Build a prompt that verifies and refines scenario steps against code."""
+    this_pr = pr_id or "<pr-id>"
     instruction_section = ""
     if instruction_content:
         instruction_section = f"""
@@ -965,7 +1132,23 @@ REFINER_REJECT_END
 IMPORTANT: Your response must end with one of those END markers. Do not
 include any text after it. Pick exactly one — either refine or reject.
 Only include the REFINER_REJECT_START / REFINER_REJECT_END markers when
-actually rejecting; omit them entirely when refining."""
+actually rejecting; omit them entirely when refining.
+
+## This Decision Is Final — Hand Off via PR Notes
+
+This concretizer pane is one-shot: once you emit an END marker it is not
+re-polled, and a REFINER_REJECT defers the scenario so its worker never
+launches. You cannot follow a reject (or a refine) with a new decision in
+this run. If there is context the next QA or concretization run on this PR
+should have — why you rejected, a missing prerequisite, or a change that
+would unblock the scenario — record it with:
+  pm pr note add {this_pr} '<text>'
+The note persists on the PR and is injected into future sessions' prompts
+(the `## PR Notes` section). It is fine to add this from your workdir, even
+for another PR's id: the note is written to the git-tracked project.yaml,
+travels to master when this PR merges, and reaches the target PR's workers
+when they clone or pull master. Prefer pm PR notes over GitHub PR comments
+for this handoff."""
 
 
 def _build_concretize_cmd(
@@ -977,22 +1160,29 @@ def _build_concretize_cmd(
     instruction_content: str | None = None,
     write_dir: str | None = None,
     session_id: str | None = None,
+    session_tag: str | None = None,
 ) -> str:
     """Build the shell command for the concretization step."""
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
-                                   session_type="qa_scenario")
+                                   session_type="qa_concretize")
     base_branch = project_data.get("project", {}).get("base_branch", "master")
     pr_branch = pr_data.get("branch", "")
 
     prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
-                                          instruction_content=instruction_content)
+                                          instruction_content=instruction_content,
+                                          pr_id=pr_data.get("id"))
     claude_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
         effort=resolution.effort, cwd=cwd, write_dir=write_dir,
         session_id=session_id,
+        # The refiner emits REFINED_STEPS / REFINER_REJECT, not the worker's
+        # PASS/NEEDS_WORK — so it is its own fake-claude session type even
+        # though it shares model resolution with qa_scenario.
+        session_type="qa_concretize",
+        session_tag=session_tag,
     )
 
     if container_name:
@@ -1125,7 +1315,9 @@ def _launch_scenario_0(
     final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
         model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
-        cwd=scenario_cwd)
+        cwd=scenario_cwd,
+        session_type="qa_scenario",
+        session_tag=state.session_tag)
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
@@ -1359,7 +1551,8 @@ def _launch_scenarios_in_tmux(
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
             instruction_content=instruction_content,
-            session_id=scenario.concretize_session_id)
+            session_id=scenario.concretize_session_id,
+            session_tag=state.session_tag)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1599,7 +1792,8 @@ def _launch_scenarios_in_containers(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
             write_dir=str(clone_path),
-            session_id=scenario.concretize_session_id)
+            session_id=scenario.concretize_session_id,
+            session_tag=state.session_tag)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1789,6 +1983,8 @@ def _build_scenario_run_cmd(
         model=qa_resolution.model, provider=qa_resolution.provider,
         effort=qa_resolution.effort,
         transcript=transcript, cwd=wd_in, write_dir=host_clone,
+        session_type="qa_scenario",
+        session_tag=state.session_tag,
     )
 
     if use_containers:
@@ -1960,6 +2156,8 @@ def _poll_tmux_verdicts(
                 scenario, verdict, content, pr_data, data,
                 session=session, stop_check=_stop,
                 qa_workdir=state.qa_workdir,
+                session_tag=state.session_tag,
+                pr_workdir=workdir_path,
             )
         except Exception:
             _log.warning("Verification thread crashed for scenario %d — "
@@ -2021,6 +2219,12 @@ def _poll_tmux_verdicts(
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
+
+        # Refresh the resume snapshot each iteration so a TUI restart can
+        # re-enter this loop with up-to-date scenario pane/session state
+        # (queued launches and verdicts both mutate it).
+        _write_resume_file(state, use_containers, concurrency_cap,
+                           _queued_indices)
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
         verdicts_changed = False
@@ -2227,7 +2431,13 @@ def _poll_tmux_verdicts(
 
                 # Only PASS verdicts need verification — NEEDS_WORK and
                 # INPUT_REQUIRED already indicate problems were found.
-                if verdict == VERDICT_PASS and verify_enabled:
+                # Skip re-verification for a PASS that was already verified
+                # before a restart: ``verified_scenarios`` is persisted in
+                # the resume snapshot precisely so a resumed run trusts
+                # prior verification instead of re-spawning a verifier
+                # Claude session for every completed scenario each restart.
+                if (verdict == VERDICT_PASS and verify_enabled
+                        and scenario.index not in state.verified_scenarios):
                     state.latest_output = (
                         f"Scenario {scenario.index} ({scenario.title}): "
                         f"{verdict} — verifying..."
@@ -2284,7 +2494,8 @@ _VERIFICATION_MAX_PANE_LINES = 500
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
                                 pane_output: str | None = None,
-                                pane_output_path: str | None = None) -> str:
+                                pane_output_path: str | None = None,
+                                captures_scenario_dir: str | None = None) -> str:
     """Build a prompt for Claude to verify a single scenario's verdict.
 
     The prompt asks Claude to determine whether the scenario genuinely
@@ -2293,6 +2504,12 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
     If *pane_output_path* is provided the prompt tells the verifier to
     read the file (keeps the prompt small).  Otherwise *pane_output* is
     inlined (truncated to ``_VERIFICATION_MAX_PANE_LINES``).
+
+    If the scenario was assigned artifact recipes (``scenario.artifact_paths``)
+    the prompt also tells the verifier to confirm the expected captures
+    actually landed in *captures_scenario_dir* — a recording recipe that
+    only produced a static text dump, or no capture at all, is flagged
+    unless the transcript states a valid reason it could not be produced.
     """
     if pane_output_path:
         is_jsonl = pane_output_path.endswith(".jsonl")
@@ -2326,6 +2543,55 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
             f"Here is the full output from the scenario session:\n\n"
             f"<scenario_output>\n{text}\n</scenario_output>"
         )
+
+    # Artifact-completeness check — only when the scenario was assigned one
+    # or more capture recipes. A recipe declares the artifacts it must
+    # produce; the verifier confirms they actually landed in the captures
+    # dir (and are the real thing, not a downgraded substitute) before it
+    # can VERIFIED. This catches scenarios that drove the surface correctly
+    # but silently skipped or weakened the prescribed capture.
+    artifact_names = [Path(p).name for p in (scenario.artifact_paths or [])]
+    artifact_check_block = ""
+    artifact_judgment_bullet = ""
+    if artifact_names:
+        recipe_bullets = "\n".join(f"- {n}" for n in artifact_names)
+        where = captures_scenario_dir or (
+            "the per-scenario captures directory the scenario worker was given")
+        artifact_check_block = f"""
+### Step 3: Confirm the expected artifacts were produced
+
+This scenario was assigned the following capture recipe(s):
+
+{recipe_bullets}
+
+Each recipe documents, under its "What this recipe produces" section, the
+artifact(s) the scenario was supposed to save. They should have landed in:
+
+  {where}
+
+List that directory and confirm, for every assigned recipe, that the
+artifact(s) it requires are actually present **and are the real thing the
+recipe calls for** — not a weaker substitute. In particular, a recipe that
+calls for a replayable recording (e.g. an asciinema `.cast`) is **not**
+satisfied by a plain-text scrollback dump alone; a static `.log` or
+`.txt` capture does not stand in for the required recording.
+
+A missing or downgraded artifact is acceptable **only** if the transcript
+states a specific, valid reason it could not be produced — for example the
+required tool (asciinema, a display, etc.) was genuinely unavailable in the
+environment, or the exercised surface produced nothing observable to
+capture. "I used `capture-pane` instead", "I forgot", or simple absence of
+the artifact with no explanation are **not** valid reasons.
+
+"""
+        artifact_judgment_bullet = (
+            "\n- If any required artifact (Step 3) is missing or downgraded to a "
+            "weaker substitute without a stated, valid reason in the transcript, "
+            "the verdict is **FLAGGED**.")
+
+    # When an artifact-check step is present it takes the "Step 3" slot, so
+    # the judgment step shifts to Step 4.
+    judgment_step_no = 4 if artifact_names else 3
 
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 
@@ -2367,12 +2633,12 @@ Mark each part as:
 - **SKIPPED** — no evidence it was attempted
 - **SUBSTITUTED** — the scenario verified it a different way (unit test, code reading, string-grep against generated output instead of running it)
 - **FAILED** — it was attempted but produced errors or wrong results
-
-### Step 3: Make your judgment
+{artifact_check_block}
+### Step {judgment_step_no}: Make your judgment
 
 - If any Given, When, or Then in any triple is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that worked around missing tools by substituting methodology (unit tests, code review, harnessed source dumps) has not exercised the behavior — it should have reported INPUT_REQUIRED instead of PASS.
-- If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.
-- Only if every part of every triple is DONE and matched is the verdict **VERIFIED**.
+- If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.{artifact_judgment_bullet}
+- Only if every part of every triple is DONE and matched (and every required artifact is present or validly excused) is the verdict **VERIFIED**.
 
 ### Common false-pass patterns to watch for
 
@@ -2424,6 +2690,8 @@ def _verify_single_scenario(
     session: str | None = None,
     stop_check: Callable[[], bool] | None = None,
     qa_workdir: str | None = None,
+    session_tag: str | None = None,
+    pr_workdir: str | None = None,
 ) -> tuple[bool, str, str | None]:
     """Verify a single scenario's verdict in its dedicated verifier pane.
 
@@ -2471,10 +2739,27 @@ def _verify_single_scenario(
                          "falling back to pane output",
                          scenario.index, scenario.transcript_path)
 
+    # Resolve the host captures dir for this scenario so the verifier can
+    # confirm the scenario's assigned artifact recipes actually produced
+    # their captures there.
+    captures_scenario_dir: str | None = None
+    if scenario.artifact_paths:
+        try:
+            from pm_core.paths import captures_dir
+            _pr_id = pr_data.get("id") if pr_data else None
+            base = captures_dir(_pr_id, session_tag=session_tag) if _pr_id else None
+            if base:
+                captures_scenario_dir = str(
+                    Path(base) / "scenarios" / str(scenario.index))
+        except Exception:
+            _log.debug("Verification: could not resolve captures dir for "
+                       "scenario %d", scenario.index, exc_info=True)
+
     prompt = _build_verification_prompt(
         scenario, verdict,
         pane_output_path=transcript_path,
         pane_output=pane_output if not transcript_path else None,
+        captures_scenario_dir=captures_scenario_dir,
     )
 
     pane_alive = bool(scenario.verifier_pane_id) and tmux_mod.pane_exists(
@@ -2491,16 +2776,18 @@ def _verify_single_scenario(
             _log.warning("Verification: cannot find scenario %d pane, "
                          "marking unverified", scenario.index)
             return False, "scenario pane not found", None
-        verify_cwd: str | None = None
-        if scenario.transcript_path:
-            verify_cwd = str(Path(scenario.transcript_path).parent)
-        elif scenario.worktree_path:
-            verify_cwd = str(Path(scenario.worktree_path).parent.parent)
-        elif qa_workdir:
-            verify_cwd = qa_workdir
+        # Run the verifier in the PR's canonical workdir.  That directory
+        # is already trusted (the planner/impl/review sessions live there),
+        # so the verifier inherits its trust and never stalls on Claude's
+        # interactive workspace-trust dialog.  The verifier reads the
+        # scenario transcript by absolute path and does no repo work in its
+        # cwd, so this directory is otherwise functionally arbitrary.  We do
+        # NOT fall back to the per-run hashed QA dir: that path is never
+        # trusted and would silently re-introduce the trust-dialog stall.
+        verify_cwd = pr_workdir
         if not verify_cwd:
-            _log.warning("Verification: no cwd available for scenario %d, "
-                         "marking unverified", scenario.index)
+            _log.warning("Verification: no PR workdir available for scenario "
+                         "%d, marking unverified", scenario.index)
             return False, "no verification cwd", None
         import uuid as _uuid
         verify_session_id = str(_uuid.uuid4())
@@ -2509,6 +2796,8 @@ def _verify_single_scenario(
             model=resolution.model, provider=resolution.provider,
             effort=resolution.effort,
             cwd=verify_cwd, session_id=verify_session_id,
+            session_type="qa_verification",
+            session_tag=session_tag,
         )
         try:
             verify_pane = tmux_mod.split_pane_at(
@@ -2675,6 +2964,17 @@ def run_qa_sync(
         state.latest_output = f"PR {pr_id} not found in project data"
         return state
 
+    # Re-check status against freshly loaded data, as late as possible before
+    # any QA window is created: an out-of-band status change (e.g. a GitHub
+    # sync marking the PR merged) can land concurrently with the sign_off->qa
+    # bounce that spawned this driver.  Never open a qa-<id> window or run a QA
+    # loop against an already-merged/closed PR.
+    if (live_pr.get("status") or "") in ("merged", "closed"):
+        _log.info("QA aborted: %s is %s; not running QA against a "
+                  "merged/closed PR", pr_id, live_pr.get("status"))
+        state.running = False
+        return state
+
     workdir_path = live_pr.get("workdir")
     if not workdir_path or not Path(workdir_path).is_dir():
         from pm_core.cli.helpers import _ensure_workdir
@@ -2728,7 +3028,9 @@ def run_qa_sync(
             prompt=planner_prompt,
             model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
             cwd=workdir_path,
-            session_id=planner_session_id)
+            session_id=planner_session_id,
+            session_type="qa_planning",
+            session_tag=state.session_tag)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -2747,6 +3049,19 @@ def run_qa_sync(
             from pm_core import container as container_mod
             container_mod.cleanup_orphaned_qa_containers(
                 session, state.pr_id, session_tag=state.session_tag)
+
+        # Final out-of-band status guard, immediately before any QA window is
+        # created (scenario 0 / planner).  Re-load fresh: a concurrent merge
+        # may have landed during workdir/qa-workdir setup above.  This closes
+        # the residual race where the detached driver passed the earlier
+        # status checks but the merge landed before the window appeared —
+        # never leave a qa-<id> window/loop running against a merged PR.
+        _live = store.get_pr(store.load(pm_root), pr_id) or {}
+        if (_live.get("status") or "") in ("merged", "closed"):
+            _log.info("QA aborted before window creation: %s is %s",
+                      pr_id, _live.get("status"))
+            state.running = False
+            return state
 
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.
@@ -2770,6 +3085,19 @@ def run_qa_sync(
         tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path,
                             switch=False)
         time.sleep(2)  # let tmux register the new window
+
+        # Post-creation guard: a concurrent out-of-band merge can land DURING
+        # window creation / the registration sleep above, after the pre-window
+        # status checks passed.  Re-check once more and, if the PR merged/
+        # closed in the meantime, tear the just-created window(s) back down so
+        # no QA window/loop is left running against the merged PR.
+        _live = store.get_pr(store.load(pm_root), pr_id) or {}
+        if (_live.get("status") or "") in ("merged", "closed"):
+            _log.info("QA aborted after window creation: %s is %s; tearing "
+                      "down qa window", pr_id, _live.get("status"))
+            _cleanup_stale_scenario_windows(session, pr_data)
+            state.running = False
+            return state
 
         # Switch sessions that were watching the old QA window to the new one
         if sessions_on_qa:
@@ -2810,6 +3138,18 @@ def run_qa_sync(
             if not tmux_mod.pane_exists(planner_pane):
                 _log.info("Planner pane exited")
                 break
+
+            # Late out-of-band merge guard: catch a merge that lands while the
+            # planner is still running (after the pre/post-creation checks) and
+            # tear the QA window down so it isn't left running against a now-
+            # merged PR.
+            _live = store.get_pr(store.load(pm_root), pr_id) or {}
+            if (_live.get("status") or "") in ("merged", "closed"):
+                _log.info("QA aborted mid-planning: %s is %s; tearing down "
+                          "qa window", pr_id, _live.get("status"))
+                _cleanup_stale_scenario_windows(session, pr_data)
+                state.running = False
+                return state
 
             _remaining = max(0.0, deadline - time.monotonic())
             ev = _hook_events.wait_for_event(
@@ -3015,25 +3355,62 @@ def run_qa_sync(
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
-    # --- Poll for verdicts (always via tmux — containers also use tmux windows) ---
+    # --- Poll for verdicts, aggregate, and finalize ---
+    # Shared with resume_qa_sync so a TUI restart can re-enter this phase.
+    return _execute_and_finalize(
+        state, pm_root, pr_data, data, session, window_name,
+        workdir_path, status_path, repo_root,
+        use_containers=use_containers,
+        concurrency_cap=concurrency_cap,
+        queued_scenarios=queued_scenarios,
+        notify=_notify,
+    )
+
+
+def _execute_and_finalize(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    data: dict,
+    session: str,
+    window_name: str,
+    workdir_path: str,
+    status_path: Path,
+    repo_root: Path | None,
+    use_containers: bool,
+    concurrency_cap: int,
+    queued_scenarios: list[QAScenario],
+    notify: Callable[[], None],
+) -> QALoopState:
+    """Poll scenarios for verdicts, aggregate, persist, and finalize.
+
+    This is the shared tail of :func:`run_qa_sync` and
+    :func:`resume_qa_sync`.  A ``qa_resume.json`` snapshot is written
+    before the (blocking) poll so a TUI restart can re-enter this phase;
+    the snapshot is refreshed each poll iteration inside
+    :func:`_poll_tmux_verdicts` and is cleared by the TUI once the
+    completed run has been processed (see qa_loop_ui).
+
+    Scenario windows AND containers are intentionally left alive after the
+    verdict so users can inspect results; orphaned containers are cleaned
+    up at the start of the next QA run.
+    """
+    queued_indices = {s.index for s in queued_scenarios}
+
+    # Snapshot resumable state before the blocking poll so an early
+    # restart can pick the run back up.
+    _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
+
     _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
-                        status_path, _notify,
+                        status_path, notify,
                         queued_scenarios=queued_scenarios,
                         concurrency_cap=concurrency_cap,
                         use_containers=use_containers,
                         repo_root=repo_root,
                         pm_root=pm_root)
 
-    # --- Cleanup ---
-    # Keep scenario windows AND containers alive so users can inspect
-    # results, review logs, and debug issues after the verdict.
-    # Orphaned containers (whose windows have been closed) are cleaned
-    # up at the start of the next QA run instead.
-
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
-
-    # Determine overall verdict
     if VERDICT_NEEDS_WORK in verdicts:
         state.latest_verdict = VERDICT_NEEDS_WORK
     elif VERDICT_INPUT_REQUIRED in verdicts or state._error:
@@ -3062,9 +3439,14 @@ def run_qa_sync(
         state.finalize_verdict = _run_qa_finalize_pane(
             state, pr_data, session, window_name, workdir_path,
             stop_check=lambda: state.stop_requested,
+            project_data=data,
         )
     except Exception:
         _log.exception("Failed to run QA finalize pane")
+
+    # Refresh the snapshot with the overall + finalize verdict so a
+    # restart between completion and TUI processing still carries them.
+    _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
     state.running = False
     summary_parts = []
@@ -3081,8 +3463,82 @@ def run_qa_sync(
 
     _log.info("QA complete for %s: %s (finalize=%s)",
               state.pr_id, state.latest_verdict, state.finalize_verdict)
-    _notify()
+    notify()
     return state
+
+
+def resume_qa_sync(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    on_update: Callable[[QALoopState], None] | None = None,
+) -> QALoopState:
+    """Resume an interrupted QA run after a TUI restart (blocking).
+
+    ``state`` must already carry the launched scenarios (reconstructed
+    from ``qa_resume.json`` via :func:`build_resume_state`).  Planning and
+    scenario launch are skipped — the scenario tmux windows / containers
+    are still alive from before the restart.  We rebuild the execution
+    context and re-enter the verdict-collection + finalize phase.
+    """
+    from pm_core import store
+
+    state.running = True
+    session = get_pm_session()
+    if not session:
+        _log.error("QA resume aborted: no pm session for %s", state.pr_id)
+        state.running = False
+        state.latest_verdict = "ERROR"
+        state.latest_output = "No pm session found"
+        return state
+    if not state.session_tag:
+        state.session_tag = session.removeprefix("pm-")
+
+    window_name = _compute_qa_window_name(pr_data)
+    data = store.load(pm_root)
+
+    pr_id = pr_data.get("id", state.pr_id)
+    live_pr = next((p for p in data.get("prs", []) if p.get("id") == pr_id), None)
+    workdir_path = (live_pr or {}).get("workdir")
+    if not workdir_path or not Path(workdir_path).is_dir():
+        _log.error("QA resume aborted: workdir for %s missing", state.pr_id)
+        state.running = False
+        state.latest_verdict = "ERROR"
+        state.latest_output = f"Workdir for {state.pr_id} missing — cannot resume QA"
+        return state
+
+    if not state.qa_workdir:
+        _log.error("QA resume aborted: no qa_workdir for %s", state.pr_id)
+        state.running = False
+        state.latest_verdict = "ERROR"
+        return state
+
+    status_path = Path(state.qa_workdir) / "qa_status.json"
+    repo_root = Path(workdir_path) if Path(workdir_path).is_dir() else None
+
+    resume_data = _load_resume_file(state.qa_workdir) or {}
+    use_containers = bool(resume_data.get("use_containers", False))
+    concurrency_cap = int(resume_data.get("concurrency_cap", 0) or 0)
+    queued_idx = set(resume_data.get("queued_indices") or [])
+    queued_scenarios = [s for s in state.scenarios if s.index in queued_idx]
+
+    def _notify():
+        if on_update:
+            on_update(state)
+
+    _log.info("Resuming QA for %s: %d scenario(s), %d queued",
+              state.pr_id, len(state.scenarios), len(queued_scenarios))
+    state.latest_output = "Resuming QA after restart..."
+    _notify()
+
+    return _execute_and_finalize(
+        state, pm_root, pr_data, data, session, window_name,
+        workdir_path, status_path, repo_root,
+        use_containers=use_containers,
+        concurrency_cap=concurrency_cap,
+        queued_scenarios=queued_scenarios,
+        notify=_notify,
+    )
 
 
 def start_qa_background(
@@ -3105,5 +3561,28 @@ def start_qa_background(
                 on_update(state)
 
     t = threading.Thread(target=_run, daemon=True, name=f"qa-{state.pr_id}")
+    t.start()
+    return t
+
+
+def resume_qa_background(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    on_update: Callable[[QALoopState], None] | None = None,
+) -> threading.Thread:
+    """Resume an interrupted QA run in a background thread. Returns the thread."""
+    def _run():
+        try:
+            resume_qa_sync(state, pm_root, pr_data, on_update)
+        except Exception:
+            _log.exception("QA resume thread crashed for %s", state.pr_id)
+            state.running = False
+            state.latest_verdict = "ERROR"
+            state.latest_output = "QA resume thread crashed"
+            if on_update:
+                on_update(state)
+
+    t = threading.Thread(target=_run, daemon=True, name=f"qa-resume-{state.pr_id}")
     t.start()
     return t

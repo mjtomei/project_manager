@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Standalone fake-claude executable for integration tests.
+
+Accepts the same flags as ``pm fake-claude emit`` and can be placed on PATH
+so that any code calling ``find_claude()`` or ``shutil.which("claude")``
+can be redirected to this script.
+
+Usage:
+  fake-claude --verdict PASS
+  fake-claude --verdict NEEDS_WORK --preamble 5 --delay 2
+  fake-claude --verdict FLAGGED --body "Step 1: FAILED"
+  fake-claude --verdict QA_PLAN --preamble 0
+  fake-claude --verdict PASS --stream
+  fake-claude --verdict NONE              # no-verdict session, stays open
+"""
+
+import argparse
+import sys
+
+# Allow running from the repo root without installing the package.  The on-PATH
+# ``fake-claude`` shim (written by install.sh / container setup) execs this file
+# by its real path, so __file__ already points here; resolve() additionally
+# follows any symlink so sys.path lands on the repo root, not a link dir.
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from pm_core.fake_claude import ALL_VERDICT_CHOICES, run_fake_claude
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Emit a verdict for integration testing without real Claude API calls.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument(
+        "--verdict",
+        required=False,
+        default="PASS",
+        choices=ALL_VERDICT_CHOICES,
+        metavar="VERDICT",
+        help=f"Verdict to emit (default: PASS); NONE runs a no-verdict "
+             f"session. One of: {', '.join(ALL_VERDICT_CHOICES)}",
+    )
+    p.add_argument(
+        "--preamble",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Number of filler prose lines before the generated body (default: 3).",
+    )
+    p.add_argument(
+        "--preamble-delay",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Seconds to sleep between each preamble line (default: 0).",
+    )
+    p.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Seconds to sleep immediately before writing the verdict (default: 0).",
+    )
+    p.add_argument(
+        "--body",
+        default=None,
+        metavar="TEXT",
+        help="Custom text between START/END markers (block verdicts only).",
+    )
+    p.add_argument(
+        "--body-lines",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Number of extra generated lines to emit before the verdict (default: 0).",
+    )
+    p.add_argument(
+        "--body-batch",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Lines per emission batch, used with --body-delay (default: 1).",
+    )
+    p.add_argument(
+        "--body-delay",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Seconds to sleep between each --body-batch chunk (default: 0).",
+    )
+    p.add_argument(
+        "--stream",
+        action="store_true",
+        default=False,
+        help="Write output character-by-character to simulate streaming.",
+    )
+    p.add_argument(
+        "--char-delay",
+        type=float,
+        default=0.015,
+        metavar="SECONDS",
+        help="Per-character sleep when --stream is active (default: 0.015).",
+    )
+    p.add_argument(
+        "--hold",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Seconds to stay open after output (no-verdict sessions, and "
+             "verdict sessions when --session-id is set). Omitted blocks "
+             "until stdin closes (the pane is killed); 0 exits immediately.",
+    )
+    p.add_argument(
+        "--session-id",
+        default=None,
+        metavar="UUID",
+        help="Claude session id. When set, the fake also writes a "
+             "Claude-format JSONL transcript and emits the idle_prompt hook "
+             "event (what production verdict detection reads), and stays "
+             "open afterwards. The launcher passes this for polled panes.",
+    )
+    return p
+
+
+def main() -> None:
+    # parse_known_args so that Claude-specific flags (--resume, --model,
+    # --dangerously-skip-permissions, -p, …) are silently ignored when
+    # fake-claude is invoked as a drop-in replacement via the session
+    # override.  --session-id is a recognised flag (see _build_parser): the
+    # fake uses it to write the transcript / emit the hook event.
+    args, _ = _build_parser().parse_known_args()
+    run_fake_claude(
+        verdict=args.verdict,
+        preamble=args.preamble,
+        preamble_delay=args.preamble_delay,
+        delay=args.delay,
+        body=args.body,
+        body_lines=args.body_lines,
+        body_batch=args.body_batch,
+        body_delay=args.body_delay,
+        stream=args.stream,
+        char_delay=args.char_delay,
+        hold=args.hold,
+        session_id=args.session_id,
+    )
+
+
+if __name__ == "__main__":
+    main()

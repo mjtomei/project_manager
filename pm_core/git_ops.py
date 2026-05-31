@@ -118,6 +118,33 @@ def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
         run_git("clone", repo_url, str(dest))
 
 
+def configure_dual_remote(workdir: str | Path, local_source: str,
+                          upstream_url: str) -> None:
+    """Point a local clone's ``origin`` at the real upstream for fetch and
+    at both the local source and the upstream for push.
+
+    A ``git clone --local`` leaves ``origin`` resolving to the local source
+    directory for *both* fetch and push.  That breaks containerised sessions:
+    the host-side push proxy inspects ``origin``'s fetch URL and rejects
+    local-path origins outright (it dropped the old fetch-into-target
+    fallback because it silently desynced the target's worktree).  Pointing
+    fetch at *upstream_url* also lets pm find PR branches pushed from other
+    machines.
+
+    Push fans out to both ``local_source`` (keeps the base repo's branch ref
+    current — PR branches aren't checked out there, so the push succeeds) and
+    *upstream_url* (GitHub).  Mirrors the setup in
+    :func:`pm_core.qa_loop.create_scenario_workdir` (which uses upstream only)
+    and the inline config that ``pr start`` / ``ensure_workdir`` previously
+    duplicated.
+    """
+    run_git("remote", "set-url", "origin", upstream_url, cwd=workdir)
+    run_git("remote", "set-url", "--push", "origin", local_source,
+            cwd=workdir)
+    run_git("remote", "set-url", "--add", "--push", "origin", upstream_url,
+            cwd=workdir)
+
+
 def checkout_branch(workdir: Path, branch: str, create: bool = False) -> None:
     """Checkout or create a branch.
 
@@ -240,18 +267,27 @@ def push_pm_branch(pm_root: Path, backend: str = "vanilla") -> dict:
             _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
             return result_info
 
-        import subprocess as sp
-        pr_result = sp.run(
-            ["gh", "pr", "create",
-             "--title", "pm: update project state",
-             "--body", "Automated pm state sync.",
-             "--head", branch_name],
-            cwd=repo_root, capture_output=True, text=True,
-        )
-        if pr_result.returncode == 0:
-            result_info["pr_url"] = pr_result.stdout.strip()
-        else:
-            result_info["pr_error"] = pr_result.stderr.strip()
+        # Routed through gh_ops.run_gh so it shares the one `gh` chokepoint
+        # (and is intercepted by FakeGitHubBackend in regression tests).
+        from pm_core import gh_ops
+        try:
+            pr_result = gh_ops.run_gh(
+                "pr", "create",
+                "--title", "pm: update project state",
+                "--body", "Automated pm state sync.",
+                "--head", branch_name,
+                cwd=repo_root, check=False,
+            )
+            if pr_result.returncode == 0:
+                result_info["pr_url"] = pr_result.stdout.strip()
+            else:
+                result_info["pr_error"] = pr_result.stderr.strip()
+        except SystemExit:
+            # run_gh -> _check_gh() exits when gh is missing/unauthenticated.
+            # Degrade gracefully (the push already succeeded): record the error
+            # and still restore the original branch below, rather than aborting
+            # and leaving the repo stranded on the sync branch.
+            result_info["pr_error"] = "gh CLI unavailable or unauthenticated"
 
         _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
         pull_rebase(repo_root)

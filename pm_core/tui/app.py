@@ -84,8 +84,6 @@ class ProjectManagerApp(App):
         margin-bottom: 1;
     }
     TechTree {
-        height: auto;
-        width: auto;
         padding: 1 2;
     }
     GuideProgress {
@@ -143,6 +141,7 @@ class ProjectManagerApp(App):
         Binding("escape", "unfocus_command", "Back", show=False),
         Binding("p", "toggle_plans", "Plans", show=True),
         Binding("t", "start_qa_on_pr", "QA Run", show=True),
+        Binding("i", "signoff_pr", "Sign-off", show=True),
         Binding("x", "hide_plan", "Hide Plan", show=False),
         Binding("M", "move_to_plan", "Move Plan", show=False),
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
@@ -301,6 +300,10 @@ class ProjectManagerApp(App):
         super().__init__()
         self._data: dict = {}
         self._root: Path | None = None
+        # Coalescing write queue: decouples in-memory state from disk so
+        # per-keypress mutations (e.g. active_pr) don't block the event loop.
+        # Created on mount once the project root is known.
+        self._write_queue: store.WriteQueue | None = None
         self._sync_timer: Timer | None = None
         self._current_guide_step: str | None = None
         self._guide_auto_launched = False
@@ -372,7 +375,29 @@ class ProjectManagerApp(App):
     # --- Frame capture forwarder (called from ~15 sites) ---
 
     def _capture_frame(self, trigger: str = "unknown") -> None:
-        frame_capture.capture_frame(self, trigger)
+        # Frame capture shells out to ``tmux capture-pane`` (subprocess, up to a
+        # 5s timeout).  Run it off the event-loop thread so a momentarily busy
+        # tmux server can't stall navigation — this was an intermittent
+        # multi-second freeze on a single PR move.  A single-flight guard drops
+        # overlapping captures (a move triggers two: the log_message and the
+        # explicit pr_selected capture), which also throttles bursts.
+        if not tmux_mod.in_tmux():
+            return
+        if getattr(self, "_capture_in_flight", False):
+            return
+        self._capture_in_flight = True
+
+        def _work() -> None:
+            try:
+                frame_capture.capture_frame(self, trigger)
+            finally:
+                self._capture_in_flight = False
+
+        try:
+            self.run_worker(_work, thread=True, exclusive=False, group="frame-capture")
+        except Exception:
+            self._capture_in_flight = False
+            frame_capture.capture_frame(self, trigger)
 
     # --- Command execution forwarder (called from pane_ops.py) ---
 
@@ -419,6 +444,9 @@ class ProjectManagerApp(App):
                 self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
+        # Opt-in keystroke-latency instrumentation (PM_PERF_DEBUG=1).
+        from pm_core.tui import perf
+        perf.setup_event_loop(self._session_name)
         # External-reload IPC: write a pidfile and install a SIGUSR1 handler
         # so CLI commands can ask us to reload state without depending on
         # tmux send-keys (which gets eaten by whichever widget has focus).
@@ -443,6 +471,22 @@ class ProjectManagerApp(App):
         # sync) to after the first frame.
         self._load_state()
         self._update_orientation()
+        # Start the coalescing write queue now that the project root is known.
+        # TUI mutations enqueue here instead of writing to disk inline.
+        #
+        # Debounce is set well above human navigation cadence so a nav burst
+        # collapses to a single write.  The only enqueued mutations are
+        # low-stakes UI state (selected PR, hide_merged toggle) already applied
+        # to ``self._data`` in memory immediately, so disk only needs to catch
+        # up once navigation settles.  At the default 0.1s, scrolling through a
+        # large project.yaml fires a full read+dump of the whole file after
+        # nearly every keystroke — wasteful disk/CPU churn (the dump itself runs
+        # on a worker thread, so it does not block the UI).  ``flush_sync`` on
+        # exit/restart still persists the final state, so a longer window only
+        # risks losing the last selection on an unclean crash.
+        if self._root is not None:
+            self._write_queue = store.WriteQueue(self._root, debounce=1.5)
+            self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
@@ -494,6 +538,11 @@ class ProjectManagerApp(App):
             if tree._prs:
                 tree._recompute()
                 tree.refresh(layout=True)
+                # A reflow at the new width can push the selected node off-screen
+                # (a dependency chain's depth fixes its column, so narrowing scrolls
+                # deep nodes out horizontally). Re-scroll the selection into view so
+                # it stays visible after the resize, matching the nav/selection paths.
+                tree.call_after_refresh(tree._scroll_selected_into_view)
         except Exception:
             pass
 
@@ -515,6 +564,18 @@ class ProjectManagerApp(App):
 
     def _load_state(self) -> None:
         """Load project state from disk."""
+        # Persist any pending in-memory mutations (e.g. a still-debouncing
+        # active_pr from a nav burst) BEFORE re-reading disk.  Otherwise a
+        # reload — including the SIGUSR1 state-only reload that an external
+        # ``pm pr edit`` triggers — would replace ``self._data`` with stale
+        # on-disk state, clobbering the user's un-flushed navigation, while
+        # the write queue later flushes the navigated value to disk and leaves
+        # the display and ``project.yaml`` permanently out of sync.  Flushing
+        # first means the reload re-reads (and re-applies) what the user
+        # actually navigated to.  No-op when nothing is pending.
+        wq = getattr(self, "_write_queue", None)
+        if wq is not None:
+            wq.flush_sync()
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
@@ -761,6 +822,9 @@ class ProjectManagerApp(App):
 
     def action_merge_pr(self) -> None:
         pr_view.merge_pr(self)
+
+    def action_signoff_pr(self) -> None:
+        pr_view.signoff_pr(self)
 
     def action_merge_pr_companion(self) -> None:
         pr_view.merge_pr(self, companion=True)
@@ -1069,6 +1133,9 @@ class ProjectManagerApp(App):
     def on_unmount(self) -> None:
         """Clean up the reload pidfile and command queue on shutdown."""
         _log.info("TUI unmount: session=%s", self._session_name)
+        # Flush any pending writes before the process goes away.
+        if self._write_queue is not None:
+            self._write_queue.flush_sync()
         for path in (self._reload_pidfile(), self._command_queue_file()):
             if path is not None:
                 try:

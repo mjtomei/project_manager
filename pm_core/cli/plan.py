@@ -142,7 +142,8 @@ Let them know it is safe to close this pane — load and review will run in new 
         if fresh:
             clear_session(root, session_key)
         click.echo("Launching Claude...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-add"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -244,7 +245,8 @@ Let them know it is safe to close this pane — load and review will run in new 
         if fresh:
             clear_session(root, session_key)
         click.echo(f"Launching Claude to break down plan {plan_id}...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-breakdown"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -461,7 +463,8 @@ Let them know it is safe to close this pane — loading runs instantly without a
         if fresh or plan_prs:
             clear_session(root, session_key)
         click.echo(f"Launching Claude to review plan {plan_id}...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh and not plan_prs)
+        launch_claude(prompt, session_key=session_key, pm_root=root,
+                      resume=not fresh and not plan_prs, session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-review"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -582,7 +585,8 @@ dependency tree.
     claude = find_claude()
     if claude:
         click.echo("Launching Claude to review dependencies...")
-        launch_claude(prompt, session_key="plan:deps", pm_root=root)
+        launch_claude(prompt, session_key="plan:deps", pm_root=root,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-deps"]
         click.echo("Reviewing results... (background)")
@@ -750,7 +754,8 @@ def _run_fix_command(step_name: str, review_path_str: str):
         review_key = review_path.stem  # e.g. "plan-add-20240101-120000"
         session_key = f"fix:{step_name.replace(' ', '-')}:{review_key}"
         click.echo(f"Launching Claude to fix issues from review...")
-        launch_claude(prompt, session_key=session_key, pm_root=root)
+        launch_claude(prompt, session_key=session_key, pm_root=root,
+                      session_type="plan")
     else:
         click.echo("Claude CLI not found. Copy-paste this prompt:")
         click.echo(f"---\n{prompt}\n---")
@@ -907,7 +912,8 @@ Once verified, the next step is `pm plan load {plan_id}` to create the PRs.
     if claude:
         session_key = f"plan:import:{plan_id}"
         click.echo("Launching Claude...")
-        launch_claude(prompt, session_key=session_key, pm_root=root)
+        launch_claude(prompt, session_key=session_key, pm_root=root,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-import"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
