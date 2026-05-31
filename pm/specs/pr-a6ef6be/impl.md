@@ -107,19 +107,14 @@ are noted.
 
 **Per PR note (note-0970084, 2026-05-30): workflows-aware parallelization.**
 `build_context` unconditionally appends a `## Parallel workflows` clause
-(constant `_PARALLEL_WORKFLOWS_CLAUSE`) before the `## Target` section,
-directing the session to fan each phase into independent sub-streams: audit
-(per citation per pass; convergence check stays serial), review (per prompt
+(constant `_PARALLEL_WORKFLOWS_CLAUSE`) before the `## Target` section. The
+clause tells the session to use the workflow skill on four phases and names
+the per-phase unit of work: audit (per citation per pass), review (per prompt
 block — substance/structure/accessibility/prose), response (per proposed
-change), apply (per non-overlapping region group). The invariant the clause
-enforces is **no coordinator-synthesis agent** — sub-streams write their own
-slices, code mechanically concatenates, nothing reads-and-rewrites the slices
-into a unified narrative (which would inject the synthesizer's bias). The
-note's stronger "byte-equivalent" framing was deliberately not preserved: it
-overpromises a property that isn't achievable from prompts alone and isn't
-actually needed downstream. The companion methodology-doc clauses
-(METHODOLOGY.md, CITATION_USE_AUDIT.md) can land whenever those docs are
-authored — not blocking on this PR.
+change), apply (per non-overlapping region group). The skill handles fan-out
+and reduction; the clause doesn't re-specify its mechanics. Companion
+methodology-doc edits (METHODOLOGY.md, CITATION_USE_AUDIT.md) land whenever
+those docs are authored — not blocking on this PR.
 
 ### 1.4 `pm_core/review/cli.py` — `pm review <target>` + `pm review ui` + shared launch
 

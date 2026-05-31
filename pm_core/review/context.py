@@ -19,28 +19,14 @@ _MAX_INLINE_BYTES = 80_000
 _PARALLEL_WORKFLOWS_CLAUSE = """\
 ## Parallel workflows
 
-Fan each phase out into independent sub-streams using your `Agent` tool. Each
-sub-stream writes its own slice of the canonical markdown file; **code does
-the concatenation, not an agent.** No coordinator-synthesis step reads all the
-sub-streams and rewrites them into a unified narrative — that step would
-introduce the synthesizer's bias and defeat the point of fanning out.
+Use the workflow skill to parallelize these phases. The skill handles
+fan-out and reduction; just give it the per-phase unit of work:
 
-Phase-specific fan-out:
-
-- **audit phase** — one sub-stream per citation per pass. Sub-streams within a
-  pass are independent. The convergence check across passes (zero
-  newly-surfaced citations in the last round) stays serial.
+- **audit phase** — one sub-stream per citation per pass.
 - **review phase** — one sub-stream per prompt block (substance / structure /
-  accessibility / prose). Each writes its block's findings into its slice of
-  `REVIEW_CYCLE_N.md`.
-- **response phase** — one sub-stream per proposed change. Each writes its own
-  response block into `REVIEW_RESPONSE_CYCLE_N.md`.
-- **apply phase** — parallel across non-overlapping region groups of the
-  target artifact. Group changes by region first; apply each group in its own
-  sub-stream.
-
-Hand each sub-stream only the context it needs; do not pass a structured
-handoff between sub-streams.
+  accessibility / prose).
+- **response phase** — one sub-stream per proposed change.
+- **apply phase** — one sub-stream per non-overlapping region group.
 """
 
 

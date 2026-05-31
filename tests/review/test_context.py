@@ -72,21 +72,17 @@ def test_missing_file_target_is_noted(tmp_path):
 
 
 def test_parallel_workflows_clause_is_unconditional(tmp_path):
-    """note-0970084: every build_context output carries the fan-out directives,
-    regardless of target type or which methodology files are present."""
+    """note-0970084: every build_context output asks the session to use the
+    workflow skill on the four phases, regardless of target type."""
     for target_type, target in (("topic", "t"),
                                 ("file", "doc.md"),
                                 ("plan", "plans/plan-x.md")):
         out = context.build_context(tmp_path, "rid", target, target_type)
         assert "## Parallel workflows" in out, target_type
-        # all four phases named
+        assert "workflow skill" in out, target_type
         for phase in ("audit phase", "review phase",
                       "response phase", "apply phase"):
             assert phase in out, f"{phase} missing for {target_type}"
-        # the actual invariant: code concatenates, no coordinator-synthesis agent
-        normalized = " ".join(out.split())
-        assert "code does the concatenation, not an agent" in normalized
-        assert "coordinator-synthesis" in out
 
 
 def test_parallel_workflows_clause_precedes_target(tmp_path):
