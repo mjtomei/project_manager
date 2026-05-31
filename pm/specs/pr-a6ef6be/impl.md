@@ -87,19 +87,26 @@ concatenates, in order:
 2. `METHODOLOGY.md`, `CITATION_USE_AUDIT.md`, `CITATION_CRAWL.md` — each read
    from `methodology_paths(root)` **if present**, each under a labeled header
    (e.g. `## METHODOLOGY.md`). Missing files are skipped with a one-line note
-   rather than erroring (these three files do not all exist in the repo yet —
-   only `CITATION_CRAWL.md` is present today; the others are authored
-   elsewhere). This keeps the command usable before the docs land and lets the
-   "concatenates expected files" test drive it with fixtures.
+   rather than erroring. (As of review-loop 59d6 all three already exist under
+   `pm/docs/adversarial-review/` — METHODOLOGY.md ~38 KB, CITATION_USE_AUDIT.md
+   ~18 KB, CITATION_CRAWL.md ~8 KB — so the skip path is now mostly exercised by
+   fixtures; the earlier "only CITATION_CRAWL.md present" note is stale.) The
+   skip-with-note behavior still keeps the command usable if a doc is removed
+   and lets the "concatenates expected files" test drive it with fixtures.
 3. The review's `STATE.md` if it exists (resume case), under its own header.
 4. A target preamble: the resolved `target` plus `target-type`, and for
    file/plan targets the file contents (or a pointer to read it) so the session
    knows what artifact it reviews. Per PR note (2026-05-21): `_target_preamble`
-   stats the file first and only inlines when under `_MAX_INLINE_BYTES`
-   (80 KB) — larger targets get a "read it yourself" pointer so the assembled
-   prompt stays under the argv/shell limit. `UnicodeDecodeError`/`OSError` on
-   read (e.g. a PDF/binary target) degrades to a pointer rather than crashing
-   `run_review`.
+   stats the file first and only inlines when under the *effective* inline cap
+   — `min(_MAX_INLINE_BYTES (80 KB), _PROMPT_BYTE_LIMIT (120 KB) − bytes already
+   assembled)`. The methodology docs (~65 KB) are prepended ahead of the target,
+   so the fixed 80 KB cap alone would not keep the foreground launch under the
+   ~128 KB argv per-arg limit (`launch_claude` passes the prompt as one argv
+   string); the budget subtraction does. Larger targets get a "read it yourself"
+   pointer. `UnicodeDecodeError`/`OSError` on read (e.g. a PDF/binary target)
+   degrades to a pointer rather than crashing `run_review`. (Fixed in review-loop
+   59d6 i1 — the original 80 KB-only cap could overflow once the methodology docs
+   landed.)
 
 Factor the file list so the test can assert "concatenates expected files" by
 checking each present fixture's content appears in the output and missing ones

@@ -55,6 +55,23 @@ def test_large_file_target_is_not_inlined(tmp_path):
     assert "Target (file): big.md" in out
 
 
+def test_target_not_inlined_when_methodology_eats_the_budget(tmp_path):
+    # A modest target that would normally inline (< _MAX_INLINE_BYTES) must be
+    # pointed at instead when the methodology docs already consume the argv
+    # budget — otherwise the foreground launch path hits MAX_ARG_STRLEN.
+    root = tmp_path
+    big = "M" * (context._PROMPT_BYTE_LIMIT - 2_000)
+    _write_methodology(root, ["METHODOLOGY.md"])
+    (root / "docs/adversarial-review/METHODOLOGY.md").write_text(big)
+    marker = "SMALL_TARGET_MARKER"
+    (root / "art.md").write_text(marker + "x" * 5_000)  # well under 80 KB
+    out = context.build_context(root, "art-md", "art.md", "file")
+    assert marker not in out          # not inlined despite being small
+    assert "is large" in out          # pointer note instead
+    # the whole prompt stays under the argv per-arg limit
+    assert len(out.encode()) < 128 * 1024
+
+
 def test_binary_file_target_degrades_gracefully(tmp_path):
     # A non-UTF-8 file target (e.g. `pm review paper.pdf`) must not crash the
     # context build — it points the session at the file instead.
