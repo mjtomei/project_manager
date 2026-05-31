@@ -111,7 +111,7 @@ are noted.
 clause tells the session to use the workflow skill on four phases and names
 the per-phase unit of work: audit (per citation per pass), review (per prompt
 block — substance/structure/accessibility/prose), response (per proposed
-change), apply (per non-overlapping region group). The skill handles fan-out
+change). The apply phase runs sequentially. The skill handles fan-out
 and reduction; the clause doesn't re-specify its mechanics. Companion
 methodology-doc edits (METHODOLOGY.md, CITATION_USE_AUDIT.md) land whenever
 those docs are authored — not blocking on this PR.

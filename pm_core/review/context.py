@@ -26,7 +26,8 @@ fan-out and reduction; just give it the per-phase unit of work:
 - **review phase** — one sub-stream per prompt block (substance / structure /
   accessibility / prose).
 - **response phase** — one sub-stream per proposed change.
-- **apply phase** — one sub-stream per non-overlapping region group.
+
+Run the apply phase sequentially — don't parallelize it.
 """
 
 

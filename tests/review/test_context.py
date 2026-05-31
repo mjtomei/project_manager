@@ -80,9 +80,10 @@ def test_parallel_workflows_clause_is_unconditional(tmp_path):
         out = context.build_context(tmp_path, "rid", target, target_type)
         assert "## Parallel workflows" in out, target_type
         assert "workflow skill" in out, target_type
-        for phase in ("audit phase", "review phase",
-                      "response phase", "apply phase"):
+        for phase in ("audit phase", "review phase", "response phase"):
             assert phase in out, f"{phase} missing for {target_type}"
+        # apply phase is explicitly sequential
+        assert "apply phase sequentially" in out, target_type
 
 
 def test_parallel_workflows_clause_precedes_target(tmp_path):
