@@ -60,3 +60,21 @@ Each target has a champion — the variant currently used for production work ag
 - Adding a new target is a configuration change plus a harness wrapper.
 - The tournament prompt is evolvable through the loop, bounded by anchors and held-out corpora.
 - The operator can ask "for target T, which variant is the current champion, why, and what is it working on" and get a coherent answer.
+
+## Appendix: Workflow A/B candidates (deferred)
+
+Multi-agent orchestration (Claude Code's Workflow tool, or an equivalent built in pm Python) is a candidate axis for variants once the tournament substrate exists. We are not adopting it now because we cannot yet measure whether it meaningfully improves output quality vs. the current single-prompt approach, and adopting it has real costs: reduced portability to non-Claude-Code backends (including local LLMs behind Claude) and reduced visibility (you cannot attach to a workflow mid-run the way you can attach to a tmux pane in the QA flow).
+
+Once regression-test infrastructure (plan-regression Phase 7 + plan-002 benchmarks) gives us a stable quantitative metric, the following sites are worth running as A/B variants — single-prompt champion vs. multi-agent challenger — and promoting only if the challenger wins by margin:
+
+- **`adversarial_review`** — current single-prompt review vs. parallel skeptic finders + independent voter quorum. Quality hypothesis: independent skeptics catch false positives a single review prompt rationalizes past. Measure: review precision/recall against curated bug fixtures.
+- **`review_qa_benchmark` harness** — sequential per-case scoring vs. fan-out per case with deterministic aggregation. Hypothesis: pure throughput win, not quality; promote only if dev-time to build the harness in pm Python is meaningfully higher than wiring it through Workflow.
+- **`adversary-runner` / `plan-gen-integration` / `spec-gen-integration`** — single plan/spec gen prompt vs. three-lens fan-out (internal-consistency / external-skeptic / cross-reference) with loop-until-quiescence. Hypothesis: lens diversity catches gaps a single prompt misses. Measure: human-graded plan/spec quality on a held-out corpus, and downstream rework rate.
+- **`external-fitness` + `anchor-variants`** — this tournament's own scheduler. Whether the variant grid runs as Workflow vs. pm-Python orchestration is itself an A/B once the metric exists. Hypothesis: Workflow's built-in journaling/resume/concurrency-cap is a dev-time win; quality should be identical.
+- **`prior-work-survey` (plan-living-artifacts)** — single deep-research prompt (or the existing `deep-research` skill) vs. fan-out per-area + adversarial citation verifier. Hypothesis: citation hallucination rate drops with an independent verifier pass. Measure: cite-check precision against the produced bibliography.
+- **Citation audit loop (plan-litreview augmented cycle).** Per-citation fan-out vs. the current single sequential session walking the citation list. The audit already writes one entry per citation to disk as it runs, so visibility cost is low. Hypothesis: independent per-citation judgment is better calibrated than a single pass, especially for `over-characterizes` / `under-characterizes` verdicts. Measure: agreement with held-out human-graded verdicts on a fixture artifact; false-faithful rate on seeded mischaracterizations. See [[plan-quality#appendix-same-question-across-many-pieces-of-text]] for the per-citation framing.
+- **`signoff` two-evaluation router** — current single sign-off prompt vs. parallel (evidence-supports-diff) + (anti-shortcut/meta-QA) subagents gated by a deterministic Python router. Hypothesis: independent evaluations catch shortcuts the merged prompt rationalizes. Measure: false-PASS rate on injected shortcut fixtures.
+
+For each candidate, the A/B must control for token spend — a workflow that wins only because it spent 5× the tokens isn't a real win unless the cost ceiling explicitly allows it. The tournament's existing per-target cost ceiling is the right place to enforce this.
+
+Visibility cost is part of the cost side of the ledger: workflows that hide debuggable session state should clear a higher quality bar than ones (like batch eval harnesses) that nobody attaches to mid-run anyway.
