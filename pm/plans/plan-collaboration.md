@@ -26,7 +26,7 @@ The end state, if the substrate matures: contribution becomes a real meritocracy
 
 ## Depends on
 
-- **`[[plan-radar]]`** — external-overlap detection is a direct extension of the radar's source-and-triage machinery; the navigation primitive and editable-artifacts primitive are reused wholesale. This plan's MVP cannot ship until radar's MVP does.
+- **`[[plan-radar]]`** — external-overlap detection is a direct extension of the radar's source-and-triage machinery; the navigation primitive and Artifact primitive are reused wholesale. This plan's MVP cannot ship until radar's MVP does.
 - **`[[plan-quality]]`** — the bug-finding-as-demo machinery (Track E) is what makes the on-ramp moment concrete for non-pm parties.
 - **`[[plan-regression]]`** — the regression + auto-fix machinery is the other "ready-to-pick-up artifact" the on-ramp demonstrates.
 - **`plan-cb4ef69`** (hierarchical plans) — useful when cross-project collaboration happens at the plan level rather than the PR level (shared dependencies across projects).
@@ -64,7 +64,7 @@ For a project to be reachable by other intelligences, some part of it must be pu
 
 ### PR: Visibility-tier field on every pm artifact
 
-Plans, PRs, threads, notes, captures all gain a `visibility` field: `private` (default) / `share-on-request` / `public`. Editable by the user or via the editable-artifacts chat. Schema-validated, audit-logged on change.
+Plans, PRs, threads, notes, captures all gain a `visibility` field: `private` (default) / `share-on-request` / `public`. Editable by the user or via the preferences-chat surface. Schema-validated, audit-logged on change.
 
 ### PR: Public-facing surface generator
 
@@ -78,7 +78,7 @@ Initially read-only: anyone with the URL can read public artifacts. Commenting a
 
 ## Track C — Cross-pm-project collaboration protocol (both parties use pm)
 
-When both parties run pm, a richer collaboration protocol becomes possible: artifact sync across projects, proposal flow via the editable-artifacts primitive, conflict resolution when parallel work diverges.
+When both parties run pm, a richer collaboration protocol becomes possible: artifact sync across projects, proposal flow via the Artifact primitive, conflict resolution when parallel work diverges.
 
 ### PR: Project-to-project artifact-sync protocol
 
@@ -86,7 +86,7 @@ Define the wire format and trust model. Shared threads land in both projects' ra
 
 ### PR: Cross-project proposal flow
 
-When the triage agent on project A surfaces a `collaboration-candidate` feature targeting project B, it can prepare a proposal that lands on project B's preferences-chat surface as a candidate edit. Project B's user reviews and accepts / rejects via the same editable-artifacts mechanism they use for their own preferences.
+When the triage agent on project A surfaces a `collaboration-candidate` feature targeting project B, it can prepare a proposal that lands on project B's preferences-chat surface as a candidate edit. Project B's user reviews and accepts / rejects via the same preferences-chat / Artifact mechanism they use for their own preferences.
 
 ### PR: Conflict resolution
 
@@ -149,6 +149,214 @@ Every cross-project action is logged with full context (who, when, what, why, on
 ### PR: Anti-spam
 
 Proposals from a party whose past proposals have been rejected at a high rate get rate-limited automatically. Obvious low-effort proposals (e.g. content that fails the radar's own relevance threshold) are filtered before reaching the user. The maintainer-overwhelm failure mode of conventional open-source is what this PR specifically tries to prevent recurring at agent scale.
+
+---
+
+## Cross-mind substrate primitives (added during agent-wrapper refactor)
+
+This section captures the typed primitives that make the rest of this plan implementable. They are what controls the layer through which different minds interact, and they compose with [[plan-mind]] (the mind) and [[plan-sensorium]] (the shared environment pm interacts with). The 4-PR migration sequence in the wrapper refactor lands this substrate in PR4 (or pre-PR1 if collaboration work starts during the refactor — decision deferred until then).
+
+### Framing
+
+Every individual user runs a **mind** — the collection of streams of consciousness operating on their project, defined in plan-mind. This plan's substrate is about how two minds interact when **they are separate entities with their own goals** — where the relationship is not "shared filesystem, collaborate freely" but "distinct projects with distinct priorities that may converge, diverge, or disagree."
+
+Two reasons cross-mind interaction matters beyond what the ambient sensorium already supplies:
+
+1. **Disagreements that can't be immediately resolved.** Two minds may have different priorities, different model of what's worth doing, or different interpretations of a shared artifact. They need a protocol for surfacing the disagreement, negotiating, and either reaching alignment or recording the split. Filesystem-mediated sharing has no semantics for this — git is a great substrate for "I edited X" but a poor one for "I think your X is wrong and here's why." The federation primitives below are what give minds language for that conversation.
+
+2. **Scaling beyond what one project can manage.** When a task's complexity exceeds the coordination capacity of a single pm project, splitting into multiple projects becomes necessary. Compression between the components then takes shapes like public documentation, product releases, advertised stable interfaces, versioned dependencies, changelogs — the forms cross-project interaction has always taken. The federation primitives below are the typed substrate for that compression: minds publish stable channels other minds depend on; identity attestation lets the dependents know who is making the promises; visibility tiers govern what stays internal vs. exported.
+
+A single pm project is sufficient when neither of these applies — when one team and one mind cover the work. This plan kicks in when the project either splits or interacts with parties whose goals are not aligned by default.
+
+The cross-mind substrate primitives below are the typed layer for those cases. Plan-collaboration as a whole (the tracks above) describes the policies, on-ramps, trust model, and demos built on top of that substrate.
+
+**Inherited primitives from [[plan-mind]] and [[plan-sensorium]]** — used below with no re-definition: `Artifact` (the on-disk shared mutable thing), `Payload`, `VisibilityTier` (with `Party(project_id)` parameterized variant), `CallbackRegistry`, `Mind`, `Stream`.
+
+### Core principle: cross-mind interaction is sensorium-mediated, not message-passed
+
+`Emission` is mind-internal. It does not cross mind boundaries. Two minds with separate goals **interact through the sensorium** — which mostly means the broader public sensorium (git, GitHub, the open web, published releases, public APIs, peripherals) that pm doesn't control. A mind publishes to the public substrate (commits to a public repo, ships a release, posts a paper, writes a blog post); the other mind reads from that substrate via its runtime's normal tools. This works today without any pm-specific transport, and it's what most cross-mind interaction will continue to be.
+
+This plan's typed primitives cover the **narrow case** where two minds want **pm-specific guarantees** (typed schema, change-notify, ACL) on their shared Artifacts without relying on the public substrate. That's a small slice of cross-mind interaction. For everything else, the answer is: use the broader sensorium directly via the runtime's normal tools — no plan-collaboration primitives required.
+
+The framing drops two primitives I'd have added under a message-passing model:
+
+- **No `FederatedMailbox`.** There is no cross-mind Mailbox. Mailboxes route Emissions; Emissions stay inside a mind.
+- **No `SignedEmission`.** Authentication is the transport's job (git commit signing, HTTPS TLS, or signed Artifact versions where stronger guarantees are needed). The wrapper does not introduce a cross-mind message envelope.
+
+When this section's primitives ARE needed: when two pm projects want shared typed Artifacts with schema validation and change-notify across mind boundaries without committing every change to a public repo. When they AREN'T needed: when minds share via GitHub, the open web, or any other public sensorium piece — that already works without anything in this plan. The MVP of plan-collaboration (Tracks A–E) mostly uses the public sensorium; the typed primitives below are for Track C onward and for cases where the public substrate's looseness is a liability.
+
+Cross-mind primitives (for the narrow typed case):
+
+### 1. `ProjectIdentity` (Payload + service)
+
+The local mind's identity in cross-project contexts. Used to attribute Artifact authorship, declare relationships, and (when needed) sign Artifact versions for transport.
+
+```python
+@dataclass
+class ProjectIdentity(Payload):
+    project_id: str                                 # globally unique, human-readable: 'matt/pm', 'org/repo'
+    display_name: str
+    signing_pubkey: PublicKey                       # half others use to verify Artifact versions we authored
+    party_relationships: dict[str, PartyRelationship]   # project_id -> trust/visibility/transport config
+
+@dataclass
+class PartyRelationship:
+    visibility: VisibilityTier                      # tier we publish to this party at
+    redaction_rules: list[RedactionRule]            # per-party redaction overlays at the publish seam
+    transport: 'TransportConfig'                    # how Artifact state syncs (git, https, tmux-socket)
+    inbound_write_policy: Literal['accept', 'review', 'reject']    # what we do when this party writes to a shared Artifact
+
+class IdentityService:
+    def attribute(self, artifact: Artifact, version: int) -> ProjectIdentity  # who wrote this version (from transport metadata)
+    def sign_version(self, artifact: Artifact, edit: Edit) -> bytes | None    # optional; default uses transport-level signing
+    def verify_version(self, artifact: Artifact, version: int) -> bool        # checks transport-level + optional explicit sig
+```
+
+### 2. `PublishedArtifact` (decorator / mixin on `Artifact`)
+
+An `Artifact` is published cross-mind when it has one or more parties in its publication set. Most Artifacts are local; published ones explicitly opt in.
+
+```python
+class Artifact:                                     # extends the base in plan-sensorium
+    published_to: set[str] = field(default_factory=set)    # project_ids this artifact is published to
+    publish_visibility: dict[str, VisibilityTier] = field(default_factory=dict)   # per-party tier override
+
+    def publish_to_project(self, project_id: str, tier: VisibilityTier) -> None
+    def unpublish(self, project_id: str) -> None
+```
+
+**Publication = readable by named project.** Setting `published_to = {'org/repo'}` with `publish_visibility['org/repo'] = VisibilityTier.public` means org/repo gets read access; org/repo's mind can mirror this Artifact via the transport. Writes from org/repo back to this Artifact are subject to the local `write_acl` PLUS the relationship's `inbound_write_policy`.
+
+`apply()` on a published Artifact triggers transport sync to all `published_to` projects in addition to the local `artifact.<name>.changed` emission. The transport batches and delivers the new version to the receiving mind, which materializes it into its local sensorium as if a local edit had landed.
+
+### 3. Cross-mind transport — Artifact synchronization, not message passing
+
+The transport layer synchronizes Artifact state between minds whose sensoriums are not directly shared. It does NOT carry Emissions.
+
+```python
+class Transport(Protocol):
+    """Synchronizes Artifact versions between two minds with separate sensoriums."""
+    def publish(self, artifact: Artifact, edit: Edit, to: ProjectIdentity) -> PublishReceipt
+    def fetch(self, from_project: str, artifact_name: str, since_version: int) -> list[Edit]
+    def subscribe(self, from_project: str, artifact_glob: str, handler: Callable[[Edit], None]) -> SubId
+    def authenticated_as(self) -> ProjectIdentity   # what identity the transport is operating under
+```
+
+Concrete transports (each implements the same Protocol; the cross-mind layer doesn't care which):
+
+- **`pm_core/collaboration/transport/git.py`** — git-backed. Publication = commit + push to a configured remote; fetch = pull. Transport-level auth via commit signatures + push permissions. No infrastructure dependency. Async by nature. The default.
+- **`pm_core/collaboration/transport/https.py`** — HTTPS push/pull against a small relay or peer-to-peer endpoint. Lower-latency for live channels. Auth via mutual TLS or signed bearer tokens.
+- **`pm_core/collaboration/transport/tmux_socket.py`** — same-host multi-user shared tmux socket (pm already has `SHARED_SOCKET_DIR` + Unix-group permissions). Useful for pair-style local collaboration where two minds run on one machine.
+
+A `Mind` subscribes to remote Artifact changes via:
+
+```python
+mind.callbacks.on(
+    'artifact.<name>.changed',
+    from_project='org/repo',                        # NEW: filter by remote project_id; absent = local only
+    handler=on_remote_spec_update,
+)
+```
+
+Under the hood the transport delivers the remote `Edit` to the local sensorium, which `apply()`s it into a mirrored local Artifact. The Stream that subscribed sees the change as if it were a local edit — the artifact-change abstraction is uniform across "local edit," "remote edit synced via git pull," and "remote edit pushed via HTTPS." Transport choice is policy, not semantics.
+
+### 4. Cross-boundary visibility enforcement
+
+Uses the `VisibilityTier` field defined on Artifacts (plan-sensorium) and Emissions (plan-mind). For Artifacts:
+
+- `visibility=private` — never published; cannot be cross-mind even if `publish_to_project()` is called.
+- `visibility=user_internal` — same as private for cross-mind purposes (user-internal is "private but shareable across this user's own projects").
+- `visibility=Party(project_id)` — published only to that party.
+- `visibility=public` — publishable to any party in `published_to`.
+
+The transport refuses to publish an Artifact whose visibility is below the recipient party's authorized tier. This is the structural backing for the quiet-defaults invariant — an Artifact emitting at the wrong tier cannot exfiltrate by accident.
+
+For Emissions, the within-mind enforcement (defined in plan-mind) is sufficient — Emissions don't cross mind boundaries at all.
+
+### 5. Cross-boundary redaction at the publish seam
+
+`RedactionPolicy` (defined in plan-sensorium as a write-time filter) gets per-party overlays at the publish seam. When `apply()` syncs an Artifact version to project B, the transport applies:
+
+- The local mind's base `RedactionPolicy`.
+- The per-party rules in `PartyRelationship.redaction_rules`.
+- (Optionally) the recipient's declared red-flag patterns, applied as a courtesy.
+
+Redaction is at the **transmit seam**: the durable local record is unredacted; the wire payload is redacted; the recipient's mirror is also redacted.
+
+### 6. Authority on cross-mind Artifact mutation
+
+When party B writes to an Artifact that party A authored (via the transport delivering an inbound Edit), authority is checked at the inbound seam:
+
+- The Artifact's local `write_acl` is checked — does it permit the remote identity at all?
+- The `PartyRelationship.inbound_write_policy` for B is checked — `accept` (apply directly), `review` (queue as a proposed edit for human review), or `reject` (refuse).
+- The transport's signature verification confirms the edit actually came from B.
+
+There is no separate cross-mind authority primitive for Mailboxes (Mailboxes don't cross minds) or for AttentionRequests (those don't cross minds either — see below).
+
+### How cross-mind notification works (without cross-mind Emissions)
+
+When mind A wants mind B's attention on something — a disagreement, a proposal, a request for input — the mechanism is:
+
+1. Mind A writes an Artifact whose schema models the notification (e.g. `ProposalArtifact`, `DisagreementArtifact`, `AttentionRequestArtifact`).
+2. The Artifact is published to mind B with appropriate visibility.
+3. The transport syncs the new Artifact version into mind B's sensorium.
+4. Mind B's local `artifact.<name>.changed` emission fires (in mind B's mind, from B's perspective).
+5. B's relevant Stream / Supervisor reacts as if a local artifact change had landed.
+
+Mind A does not "send" anything to mind B's Mind directly. The Artifact-state exchange handles it.
+
+This unifies cross-mind notification with the rest of the sensorium-based interaction model. The cost: mind A's notification arrives at mind B's speed (transport latency + B's subscription cadence), not synchronously. For the cases plan-collaboration cares about — disagreements that can't be immediately resolved, scaling across project boundaries — that latency is appropriate.
+
+### Disagreement / negotiation: composing with [[plan-984dfeb]]
+
+The disagreement case (two minds with separate goals that don't immediately agree) is naturally an Artifact lifecycle:
+
+- Mind A publishes a proposal (`ProposalArtifact`) at `visibility=Party(B)`.
+- Mind B reads it, may publish a counter-proposal or amendment (linking back to A's proposal via `[[...]]`).
+- Either side may invoke a mediation pattern (a third-party Artifact, an agreed-upon resolution protocol).
+- Eventually one of: convergence (a shared Artifact version both endorse), recorded split (each side keeps its version, the disagreement is logged), or abandonment.
+
+This is what [[plan-984dfeb]] (living artifacts) operationalizes. Plan-collaboration provides the substrate (Artifact publishing + transport + identity); plan-984dfeb adds the negotiation primitives.
+
+## Implementation PR
+
+One PR lands the cross-mind substrate after plan-sensorium's Artifact substrate PR is in. The substrate is small (six files) but has subtle transport-layer questions; one focused PR keeps them coherent.
+
+### PR: Cross-mind substrate
+
+**Purpose.** Land the narrow typed cross-mind substrate that enables Artifact-mediated interaction between two pm minds without relying on the broader public sensorium.
+
+**Scope.**
+- In: `pm_core/collaboration/identity.py` (ProjectIdentity + PartyRelationship + IdentityService — attribution via transport metadata + optional version signing, NO Emission signing); `pm_core/collaboration/published_artifact.py` (PublishedArtifact extension to Artifact — `published_to: set[str]`, `publish_visibility: dict[str, VisibilityTier]`, `publish_to_project(project_id, tier)`, `unpublish(project_id)`); `pm_core/collaboration/transport/protocol.py` (Transport Protocol — `publish`, `fetch`, `subscribe`, `authenticated_as`); concrete transports `transport/git.py` (commit + push), `transport/https.py` (push/pull against a relay or peer endpoint), `transport/tmux_socket.py` (same-host shared tmux socket).
+- Out: Tracks A-F of this plan (existing radar / shadow / demo / trust scope — those use the substrate this PR lands but are independent plan work).
+
+**Public API.** `ProjectIdentity` (Payload): `project_id, display_name, signing_pubkey, party_relationships: dict[str, PartyRelationship]`. `PartyRelationship`: `visibility, redaction_rules, transport: TransportConfig, inbound_write_policy: 'accept'|'review'|'reject'`. `IdentityService.attribute(artifact, version) -> ProjectIdentity` (who authored from transport metadata), `.sign_version(artifact, edit)` (optional explicit Artifact-version signing on top of transport-level signing), `.verify_version(artifact, version)`. `Artifact.publish_to_project(project_id: str, tier: VisibilityTier)` extends the Artifact base. `Transport` Protocol with `publish(artifact, edit, to: ProjectIdentity) -> PublishReceipt`, `fetch(from_project, artifact_name, since_version) -> list[Edit]`, `subscribe(from_project, artifact_glob, handler) -> SubId`, `authenticated_as() -> ProjectIdentity`.
+
+**Invariants.**
+- Cross-mind interaction transports **Artifacts**, not Emissions. There is no FederatedMailbox; there is no SignedEmission. Emissions stay inside a mind.
+- Transport-level authentication (git commit signatures, HTTPS TLS) is the default. Explicit Artifact-version signing is optional, used when stronger authorship guarantees matter than the transport provides.
+- `Artifact.apply()` on a published Artifact triggers transport sync to all `published_to` projects after the local commit lands.
+- Inbound edits from a remote party are subject to BOTH the local Artifact's `write_acl` AND the relationship's `inbound_write_policy`. An edit accepted by the policy still goes through schema validation.
+- `Transport` does NOT publish an Artifact whose visibility tier is below the recipient party's authorized tier. Visibility violations raise on outbound, not just at receive.
+
+**Dependencies.** `pm_core/sensorium/artifact/` (Artifact base — extended by PublishedArtifact). `pm_core/payloads/` (Payload Protocol for ProjectIdentity). `pm_core/mind/` (VisibilityTier with Party variant; RedactionPolicy for redaction overlays at the transmit seam — RedactionPolicy is defined in plan-sensorium PR3).
+
+**Test plan.** PublishedArtifact end-to-end with `git.py` transport: ProjectA publishes → ProjectB pulls + reads via standard Artifact API. Visibility violation on outbound: an Artifact with `visibility=private` cannot be published to a party. Inbound write policy: a remote edit lands as `accept` / queues for review / refuses based on `PartyRelationship.inbound_write_policy`. Cross-relationship redaction overlay: the same Artifact published to two parties at different tiers gets different redacted views. Transport substitutability: ProjectA + git ↔ ProjectB + https interop (both implement the same Protocol).
+
+**Migration plan.** No existing pm code maps to this PR. The substrate is net-new; existing plan-collaboration Tracks (A-F) will consume it as it lands, then themselves migrate from "envisioned" to "implementable." `pm/identity/` directory convention (for commit-signed public keys) is established as part of this PR; the manual `pm collab trust <project>` command lands here as a PmCommand subclass.
+
+**Open questions.**
+- Transport for MVP: `git.py` first (no infrastructure, OSS-native, naturally async); `https.py` and `tmux_socket.py` follow as additive leaf changes.
+- Identity / key distribution: `ProjectIdentity.signing_pubkey` exchanges piggyback on git (commit-signed public keys in `pm/identity/`) with a manual `pm collab trust <project>` to authorize a relationship.
+- Per-project vs. per-relationship `PartyRelationship`: per-relationship — one identity can advertise different transports / tiers to different parties.
+- Inbound-edit batching: when a remote party publishes 50 edits in rapid succession, fire 50 `artifact.<name>.changed` emissions by default; transport may coalesce when delivery batches; callers opt into coalescing via `CallbackRegistry.on(...)` parameters.
+- Disagreement protocol details (proposal, counter-proposal, mediation): deferred to plan-984dfeb (living artifacts); this PR provides the substrate, not the negotiation semantics.
+
+## Migration placement
+
+This PR lands after **plan-sensorium PR1 (Artifact substrate)** and ideally after **plan-sensorium PR3 (RedactionPolicy)** so that PublishedArtifact extends a complete Artifact base and per-relationship redaction overlays compose cleanly with the local RedactionPolicy.
+
+Pre-substrate: the existing radar / shadow / demo Tracks (A-F) use within-one-mind primitives. Cross-mind transport becomes load-bearing at Track C (cross-pm protocol) and beyond; everything before that runs against the public sensorium (git + GitHub) without this substrate.
 
 ---
 
