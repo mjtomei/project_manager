@@ -42,6 +42,60 @@ These questions are not orthogonal — answers to each shape the others. The pla
 
 The output is not a single answer but a **map of the tradeoff space**: at what conditions does what (selfishness, future-mindedness, capability, resources) pairing produce what outcome on what metric. That map is the artifact downstream policy can consult — both for AI agents deployed in real systems and for human actors comparing their own positioning to what the simulations indicate.
 
+## Candidate hypotheses: long-horizon selfish strategies for the strong
+
+The four research questions above parameterize *agent strategy* (selfishness coefficient, future-mindedness, capability, resources). This section names a class of *outcome hypotheses* the framework is positioned to test — specific claims about what the simulation should reveal when those parameter sweeps run.
+
+The hypotheses share a structural shape: **a strategy that looks short-term suboptimal for a powerful (or strongest) agent is long-term selfishly optimal even from a dynastic-lineage perspective, mediated by a population-level externality the agent's restraint produces.** If the simulation bears them out, they are candidate "moral laws" derivable from selfish multi-generational reasoning — the operational form of the user-model litreview's *morality-as-encoded-long-term-efficiency-thinking* framing.
+
+Citations below are `unverified` until the augmented adversarial-review cycle (`METHODOLOGY.md` § The augmented cycle) audits them.
+
+### H1 — Equity-as-dynastic-optimum via dishonesty mediation
+
+**Claim.** Dishonesty in a population is proportional to overconsumption by individuals with greater power. This makes equitable wealth distribution long-term optimal even for the wealth of an individual lineage: elite overconsumption induces population-level dishonesty and the institutional-substrate degradation that follows, which costs the elite lineage more in long-run capacity than the overconsumption gains it.
+
+**Literature anchors.**
+- [Piff, Stancato, Côté, Mendoza-Denton & Keltner 2012 PNAS](https://www.pnas.org/doi/abs/10.1073/pnas.1118373109), *Higher social class predicts increased unethical behavior* — individual-level: greater social class → more unethical behavior, mediated by greed-favorable attitudes. (Note replication concerns in the broader wealth-and-unethicality literature; don't load the argument on this paper alone.)
+- [Rothstein & Uslaner 2006, *All for All: Equality, Corruption, and Social Trust*](https://www.gu.se/sites/default/files/2020-05/2006_4_Rothstein_Uslaner.pdf) and Uslaner's *inequality trap* line — macro-level: inequality → trust erosion → corruption → more inequality, with the load-bearing direction-of-causation finding that inequality precedes the trust drop, not the reverse.
+- [Berg & Ostry 2011, IMF](https://www.imf.org/external/pubs/ft/fandd/2011/09/berg.htm); [Ostry et al. 2014, IMF](https://www.imf.org/external/pubs/ft/sdn/2014/sdn1402.pdf) — aggregate: equality sustains growth multi-decade.
+
+**Counter-evidence to engage.** [*Inequality as information: Wealth homophily facilitates the evolution of cooperation*](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6072718/) argues inequality can *aid* cooperation under certain conditions via positive assortment. The simulation result has to engage this counter rather than ignore it.
+
+**Operationalization.** Tier-2 grounded scenarios with explicit inequality parameter (Gini, top-decile consumption share). Population dishonesty as an *emergent* variable, not a parameter — agents decide to misrepresent / defect / extract in response to perceived elite overconsumption. Institutional-substrate degradation as a downstream variable that feeds back into opportunity sets. Dependent variable: top-quantile lineage wealth trajectory across N simulated generations / decades, swept against the inequality parameter.
+
+**Falsifier.** Top-quantile lineages do better under high inequality across the full long-horizon sweep, with no mediator pathway through emergent dishonesty. Or: dishonesty emerges from something other than elite overconsumption (absolute scarcity, group identity), confounding the inequality-dishonesty correlation.
+
+### H2 — Restraint-by-the-strong as a force-de-escalation public good
+
+**Claim.** Proportional force (respond-in-kind) is short-term optimal. But when actors are practically equivalent on an evolutionary timescale, a population benefits from having individuals who respond with *less* force than proportional — under-response decreases the locally-optimal force level for others, lowering the de-escalation floor for the whole population. Under time-local variation in agent strength (as in our genetic variation), the agents best positioned to absorb the short-term cost of under-response while maximizing population-global, time-local longevity are *the time-locally-strongest*. This yields a moral law for the strong: restraint is selfishly optimal from a dynastic-lineage perspective for those with the surplus to afford the short-term cost.
+
+**Literature anchors.**
+- Axelrod 1984, *The Evolution of Cooperation* — iterated-game tournaments establishing tit-for-tat's effectiveness; the parametric baseline against which under-proportional strategies must be measured.
+- Nowak & Sigmund — *generous tit-for-tat* and *win-stay-lose-shift*; forgiveness-based strategies outperform strict TFT under noise, giving the under-proportional-response intuition direct game-theoretic precedent.
+- Bowles & Gintis, *A Cooperative Species* — group-selection arguments for prosocial strategies.
+- Wrangham, *The Goodness Paradox* / self-domestication hypothesis — human evolution may have selected against reactive aggression in ways that compound with H2's logic.
+- Boehm, *Hierarchy in the Forest* — reverse-dominance hierarchies (the strong restrained by collective sanction); H2 asks the parallel question of whether selfish-rational reasoning leads the strong to restrain *themselves* without coercion.
+- Zahavi's handicap principle / costly-signaling theory — restraint as a costly signal only the strong can afford.
+
+**Counter-evidence to engage.** Hawk-Dove with strength asymmetry classically predicts the strongest play hawk against weaker opponents; H2 requires reasoning at a higher level of abstraction (population-level de-escalation floor as the locus of fitness). Multi-level / group-selection skepticism (Williams, Pinker) is part of the engagement burden.
+
+**Operationalization.** Tier-1 / Tier-2 iterated-conflict scenarios with explicit *strength heterogeneity* across agents (a per-agent strength parameter, time-locally varying — i.e., resembling intra-population genetic variation). Add a *force-response coefficient* per agent (proportional / less-than-proportional / more-than-proportional). Track the population's *optimal-force level* — the strategy a fresh entrant should adopt — as an emergent function of the existing response distribution. Sweep: force-response coefficient × strength quantile × time horizon. The H2 prediction is that lineages of the time-locally-strongest do best with *less-than-proportional* force response over long horizons, with the de-escalation-floor reduction as the mediator.
+
+**Dependent variables.** Population-global longevity (time until collapse or sub-threshold stabilization); lineage wealth / fitness of the top-strength quantile across long horizons; de-escalation floor (lowest force level that still survives).
+
+**Falsifier.** Lineages of the time-locally-strongest do best with proportional or super-proportional response across the full sweep, at no horizon does under-response win. Or: the de-escalation-floor reduction does occur but the lineage payoff is captured by less-strong free-riders, breaking the dynastic-self-interest argument.
+
+### Shared structural commitments for testing H1 and H2
+
+- **Long-horizon evaluation.** The dynastic-lineage payoff comparison only makes sense at horizons long enough for the population-level externality to feed back. Tier-3 long-horizon scenarios are where these are testable.
+- **Top-quantile measurement.** The load-bearing comparison is the top-quantile lineage trajectory, not the population mean. Reporting only the mean would miss the claim.
+- **Mediator-explicit modeling.** The simulation has to expose the *mechanism* — population dishonesty for H1, de-escalation floor for H2 — as an emergent variable that can be observed and intervened on. Sweeps that only correlate the parameter to the outcome without observing the mediator don't test the claim.
+- **Falsifier presence in the sweep.** The sweep design has to include the regions of parameter space each hypothesis names as falsifying.
+
+### Relationship to the four research questions
+
+These hypotheses are not new parameters — they are *predictions about what the simulation should show* when the existing parameter sweeps run with scenario designs that expose the mediators. They are the interpretive scaffolding that turns parameter sweeps into evidence for or against specific claims about what long-horizon selfish reasoning recovers as content humans have separately encoded as moral law.
+
 ## Tracks (sketched)
 
 ### Track A — Simulation framework infrastructure
