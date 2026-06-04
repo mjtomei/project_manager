@@ -44,11 +44,34 @@ The output is not a single answer but a **map of the tradeoff space**: at what c
 
 ## Candidate hypotheses: long-horizon selfish strategies for the strong
 
-The four research questions above parameterize *agent strategy* (selfishness coefficient, future-mindedness, capability, resources). This section names a class of *outcome hypotheses* the framework is positioned to test — specific claims about what the simulation should reveal when those parameter sweeps run.
+The four research questions above parameterize *agent strategy* (selfishness coefficient, future-mindedness, capability, resources). This section names *outcome hypotheses* the framework is positioned to test — specific claims about what the simulation should reveal when those parameter sweeps run, plus one additional population-structure dimension (H0) without which the others are not testable as the user-model litreview frames them.
 
-The hypotheses share a structural shape: **a strategy that looks short-term suboptimal for a powerful (or strongest) agent is long-term selfishly optimal even from a dynastic-lineage perspective, mediated by a population-level externality the agent's restraint produces.** If the simulation bears them out, they are candidate "moral laws" derivable from selfish multi-generational reasoning — the operational form of the user-model litreview's *morality-as-encoded-long-term-efficiency-thinking* framing.
+The section opens with a meta-hypothesis (H0) and then two specific instances (H1, H2). H1 and H2 are concrete enough to falsify on their own; H0 is the broader frame they jointly serve, and the frame any additional moral-content hypotheses would also extend.
 
 Citations below are `unverified` until the augmented adversarial-review cycle (`METHODOLOGY.md` § The augmented cycle) audits them.
+
+### H0 — Morality as long-horizon strategy operationalized by space-time correlation under sufficient intelligence
+
+**Claim.** Morality, treated as a generalization of the different forms of long-term thinking arrived at separately in religious traditions and in scientific / philosophical / economic pursuits, is the **operationalization** of long-horizon selfish reasoning in populations whose interactions exhibit sufficient **space-time correlation** — actions propagate back to the actor through spatial structure and temporal persistence — and whose actors have sufficient **intelligence** to perceive those propagations. Under those conditions, the strategies humans have separately encoded as moral content become *locally* optimal (individually, not only population-level optimal), which is what makes them adopted rather than merely admired. Below the correlation threshold or the intelligence threshold, short-term selfishness wins and the moral strategies are dominated.
+
+H1 and H2 below are *specific instances* — concrete moral-content predictions that H0 expects to hold above the threshold and fail below it.
+
+**Source-of-content evidence.** That multiple independent epistemic pathways — evolved moral intuition, religious traditions developed across separated cultures, philosophical ethics, economic and game-theoretic modeling, behavioral-science findings — converge on overlapping content on the questions H1 and H2 name is itself a signal that an underlying optimization is being detected by each pathway. H0 makes that signal precise: the convergent content is the strategy-space attractor under the space-time-correlation-and-intelligence conditions humans have lived under, derivable by simulation from those conditions without reference to any of the source pathways.
+
+**Operationalization in the testbed.** H0 requires extending the existing parameter sweep with population-structure parameters that the four research questions above do not currently name:
+
+- **Spatial correlation.** The interaction-graph's clustering coefficient, neighborhood locality, the rate at which an agent's actions return to it through the spatial structure (graph-distance × diffusion-rate of consequence). Operationalized as a sweepable structural parameter on the agent network.
+- **Temporal correlation.** Memory length, reputation persistence, the degree to which past actions remain observable and consequential in future interactions. Multi-generational tracking persists actions across the dynastic-lineage timescale H1 and H2 require.
+- **Intelligence.** Already parameterized as the capability axis of research question 2, but H0 makes the joint dependence explicit — intelligence is necessary but not sufficient; intelligence at low correlation does nothing.
+
+The H0 sweep is (spatial correlation × temporal correlation × intelligence) → measure the fraction of long-horizon / moral-content strategies that are individually optimal. The prediction is a **phase transition** in strategy space: below threshold along any of the three axes, short-term selfishness dominates; above threshold along all three, long-horizon strategies become individually optimal and the moral content is recovered as an emergent equilibrium.
+
+**Falsifiers for H0.**
+- No region of (spatial × temporal × intelligence) parameter space exists in which long-horizon strategies are individually optimal — i.e., the moral strategies are *never* selfishly recovered regardless of population structure or cognition.
+- The alignment exists but is independent of the named parameters (so the recovery is real but the population-structure-and-intelligence mechanism is wrong).
+- The phase transition exists but in a region of parameter space so different from observed human conditions that the source-of-content claim — that religions and scientific pursuits converged on it because they were detecting the same optimization — does not hold. (The simulation's threshold being far from human-condition values would be a strong negative result.)
+
+**Why this matters for the testbed.** Without H0's population-structure parameters, the existing four research questions can sweep agent strategy but cannot test *whether the structure that makes long-horizon strategies individually rational matches the structure humans actually live in*. H0 is the operational shape of the user-model litreview's *self-interested-mining-of-religious-thought* claim, with the added precision that the mining is conditional on a population-structure regime that is itself a testable variable.
 
 ### H1 — Equity-as-dynastic-optimum via dishonesty mediation
 
