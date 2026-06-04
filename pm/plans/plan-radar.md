@@ -77,6 +77,16 @@ v1 metric set (starting point — fully editable):
 
 `architectural-fit`, `adoption-cost`, `plan-alignment`, and `direction-influence` are the pm-flavored ones — they drive most of the `pm` topic's score and are weighted near zero on other topics by default. The full set is emitted on every item regardless, so the data is there if a user re-weights later. `direction-influence` is **grounded in the feature-ideation step** the triage agent performs (see the triage-agent PR below) rather than free-form intuition; it is the metric most closely tied to "how important is it for us to be aware of this work."
 
+### Temporal handling: recency default, with impact-and-engagement overrides
+
+The radar's display defaults to recency — newer items rank higher; older items fade in displayed relevance via a configurable age penalty applied on top of the composite. But pure recency bias is the failure mode the radar specifically tries to avoid (it's part of what makes mainstream feeds shallow). Two structural mechanisms keep old, relevant, insightful work reachable:
+
+- **Impact-and-engagement overrides decay.** Older items with high cumulative relevance scores, sustained discussion in their thread, or persistent links from newer items resist the age penalty. The age-penalty slider is itself tunable per topic (a topic where the field genuinely changes quickly should age content faster; a slower-moving topic should not), and any item can be manually pinned through the preferences-chat surface.
+
+- **Underdiscussed-cluster detection.** The triage agent (when processing a new item) and the summary agent (when producing periodic digests) both check whether recent activity in a topic appears uninformed by older work in the same topic. When a cluster of older items would naturally inform the current discussion but isn't being engaged with — old bursts of related work the new contributor seems unaware of, foundational work being relitigated unknowingly, an underdiscussed adjacent line — the radar surfaces them: as part of the triage agent's opening comment ("this work appears unaware of `[older-thread]`'s cluster, which addresses the same question from a different angle"), or as a dedicated *"underdiscussed older work"* section in the summary alongside the recent-activity sections.
+
+The intent is to make the radar a tool for both *what's new* and *what should be re-engaged with*, with the second mode neither hidden behind recency nor surfaced randomly. The two mechanisms above are how that balance gets struck.
+
 ## Data model — Threads, Items, Comments, Tags, Relevances
 
 Threads are a **new top-level pm entity** alongside Notes and Plans — not bound to any PR or plan. Each Thread is a markdown file at `pm/radar/threads/<slug>.md`. Items are entries within a thread; comments are sub-entries on items. Tags are a free namespace; an item carries zero-or-more tags including the built-in `pm` tag. Relevance scores are emitted per (item, tag) by the triage agent — including the (item, `pm`) score that drives project-relevance filtering.
@@ -92,36 +102,32 @@ Four PRs land the smallest version that produces value:
 3. Triage and evaluation agent — takes a candidate, finds the right thread, writes the opening comment, assigns tags + relevance scores.
 4. News-aggregator HTML page — single feed, topic chips, two relevance sliders, summary panel (Today only for v1).
 
-Everything below is post-MVP richness. MVP doesn't require the navigation primitive or the editable-artifacts primitive to be *generalized* — v1 can hand-roll those bits and the foundational PRs come along to lift them into pm-wide primitives once the radar has exercised them.
+Everything below is post-MVP richness. The navigation and editable-artifacts primitives the radar depends on are now first-class in [[plan-sensorium]] (as `PmCliCall` / `[[...]]` link convention and `Artifact` respectively); they land in PR3-4 of the agent-wrapper refactor's 4-PR sequence. The radar consumes them rather than defining them.
 
 ---
 
 ## Track A — Foundational agent patterns (reusable beyond the radar)
 
-### PR: Agent-as-user navigation primitive
+> **Update during agent-wrapper refactor:** Track A's editable-artifacts primitive moves to [[plan-sensorium]] as the `Artifact` base + typed subclasses (which subsumes pr-ff9b728's dynamic-mutation pattern and is reusable across pm). The radar's information organization — threads, items, comments, tags with frontmatter — becomes its own family of typed Artifact subclasses (`RadarThreadArtifact`, `RadarItemArtifact`, `RadarCommentArtifact`, `RadarTagArtifact`) registered with the sensorium. The "agent-as-user navigation" pattern stays as a radar-introduced concept because pm doesn't have an analogous information structure today — the radar IS the new news-aggregator-style interface. Navigation falls out of (a) the Artifact reads on those typed subclasses, plus (b) the `[[...]]` link-resolution convention (a thin helper on `Artifact` — `Artifact.resolve_link(ref) -> Artifact | None`), plus (c) a per-task path logger that records what each agent opened. None of those need a separate primitive; they're convenience methods + a logging hook. The text below describes how the radar uses them.
 
-Generalize the radar's "agent follows links" mechanism into a pm-wide primitive every agent can use:
+### Reference: Agent-as-user navigation (now in [[plan-sensorium]])
 
-- A canonical reference syntax for cross-artifact links — `[[pr-XXX]]`, `[[plan-quality]]`, `[[thread:agent-frameworks]]`, `[[note-XYZ]]`, `[[capture:<pr_id>/scenarios/3/recording.cast]]`. Mirrors the wikilink syntax pm's own MEMORY frontmatter already uses.
-- A small `pm_core/links.py` resolver that turns those references into paths an agent can `Read`. Cheap, no special infrastructure.
-- A path logger that records what each agent opened during a task — per-task `~/.pm/agent-walks/<task-id>.json`. Two payoffs: (a) inspectable "why did the agent decide this?" trails, (b) frequently-walked paths become signal for what to surface in UIs.
+The radar's "agent follows links" mechanism is the `PmCliCall` + `[[...]]` link convention in plan-sensorium. The radar consumes it:
+
+- Canonical reference syntax for cross-artifact links — `[[pr-XXX]]`, `[[plan-quality]]`, `[[thread:agent-frameworks]]`, `[[note-XYZ]]`, `[[capture:<pr_id>/scenarios/3/recording.cast]]`. Mirrors the wikilink syntax pm's own MEMORY frontmatter already uses.
+- Resolver that turns those references into paths an agent can `Read`.
+- Path logger recording what each agent opened during a task — per-task `~/.pm/agent-walks/<task-id>.json`. Inspectable "why did the agent decide this?" trails + frequently-walked paths become signal for what to surface in UIs.
 - A **navigation hygiene** check (lands as an addendum in `plan-quality` Track A's review-prompt addendum, not a new PR): when an agent writes any artifact mentioning another, the mention SHOULD be a `[[...]]` link, not free text.
 
-No new entity, no new storage — just a reference convention + a resolver + a logger. Reusable across sign-off agents, review agents, QA workers, watchers — anywhere an agent currently reads a stuffed-context blob, it can navigate selectively instead.
+### Reference: Editable artifacts + chat-translates-to-edits (now in [[plan-sensorium]])
 
-Plan: this plan. Lands early so subsequent PRs use it.
+The dynamic-mutation pattern from `pr-ff9b728` (plan auto-start watcher mutating plan files) lives as `Artifact` in plan-sensorium. The radar consumes it:
 
-### PR: Editable artifacts + chat-translates-to-edits primitive
-
-Generalize the dynamic-mutation pattern from `pr-ff9b728` (plan auto-start watcher mutating plan files) into a reusable surface for *any* user-and-agent-editable configuration in pm:
-
-- A small framework where any directory of artifacts (`pm/radar/`, `pm/plans/`, `pm/watchers/`, etc.) can be declared **editable by both the user and a designated agent**.
-- A **chat surface helper** an agent can host: takes a plain-English instruction from the user, identifies which file(s) the instruction is about, proposes an edit, logs the conversation alongside the edit. The user reviews and accepts (or the agent commits directly when the surface is configured for that — same gated/autonomous distinction as `plan-regression`).
+- Any directory of artifacts (`pm/radar/`, `pm/plans/`, `pm/watchers/`, etc.) is a registered `Artifact` set, with per-artifact `schema` and `write_acl`.
+- A **chat surface helper** an agent can host: takes a plain-English instruction from the user, identifies which file(s) the instruction is about, proposes an edit via `Artifact.propose_edit`, logs the conversation alongside the edit. The user reviews and accepts (or the agent commits directly via `apply()` when the surface is configured for that — same gated/autonomous distinction as `plan-regression`).
 - All edits commit with structured commit messages naming the source instruction. Fully audit-trailed.
 
-The radar's preferences chat is the first user; later plans (e.g. watcher rules, future agent-configurable surfaces) pick it up as a primitive. Same shape, no per-surface reinvention.
-
-Plan: this plan. Lands early; the radar's preferences-chat PR builds on it.
+The radar's preferences chat is one user of `Artifact`; later plans (watcher rules, future agent-configurable surfaces) pick it up the same way.
 
 ---
 
@@ -134,7 +140,7 @@ Plan: this plan. Lands early; the radar's preferences-chat PR builds on it.
 - `relevances` is a mapping of tag → `{metrics: {<metric>: 1..10, ...}, composite: 0..1}` where `metrics` carries every metric from the active `metrics.yaml` set and `composite` is the weighted result (weighting is per-topic, defined in `metrics.yaml`). `pm` is always present as a built-in tag with its own weighting. Items can carry an arbitrary number of tags; each tag's composite is independent.
 - `proposed_features` is a list of `{name, target, approach, goal_alignment_score: 1..10}` records produced by the triage agent's feature-ideation step (see triage PR). The aggregate (count × per-feature alignment) is the structured input grounding the `direction-influence` metric on the item's relevances.
 - `pm/radar/metrics.yaml` defines the metric set and per-topic weights. Editable by both the user and the preferences-chat agent. Schema validated.
-- Comment shape: appended as `### YYYY-MM-DD HH:MM — <agent|matt>` subsections under an item. The triage agent's structured mutation block is itself a recognized comment subtype (`agent-mutation-proposal`) so the editable-artifacts primitive can route proposals (topic-create, tag-rename, tag-merge, **retroactive-retag**, metric-edit, feature-handoff) to the right edit surface.
+- Comment shape: appended as `### YYYY-MM-DD HH:MM — <agent|matt>` subsections under an item. The triage agent's structured mutation block is itself a recognized comment subtype (`agent-mutation-proposal`) so the Artifact primitive can route proposals (topic-create, tag-rename, tag-merge, **retroactive-retag**, metric-edit, feature-handoff) to the right edit surface.
 - Tag namespace: free-form, the union of all tags ever used across items. A small `pm/radar/tags.yaml` tracks active tags + a history of renames / merges / splits / retroactive-retags for permalink stability and audit. Retroactive re-tagging is a first-class operation — when a new tag is created later, a triage agent (or the user) can apply it to existing items where it applies.
 
 Tests: round-trip read/write of a thread file; tag rename preserves permalinks; relevance-score parsing + range validation.
@@ -170,9 +176,9 @@ Add `pm/radar/strategies/exploratory-probe.md`: agent hypothesizes a source wher
 
 Different shape than the other strategies: input isn't a query, it's a topic; output is items plus *a discovered source* to consider adding to `sources.yaml` (proposed, not auto-added).
 
-Tests: a probe run logs its hypothesized source + its findings; a found-source candidate becomes a suggested edit to `sources.yaml` via the editable-artifacts primitive.
+Tests: a probe run logs its hypothesized source + its findings; a found-source candidate becomes a suggested edit to `sources.yaml` via the Artifact primitive.
 
-Depends on: sources/schedule/strategies framework PR; editable-artifacts primitive PR.
+Depends on: sources/schedule/strategies framework PR; `Artifact` from [[plan-sensorium]].
 
 ### PR: Triage + evaluation agent
 
@@ -180,7 +186,7 @@ The agent that processes raw candidates into thread items. **Fixed output order:
 
 For each candidate, the agent runs the following steps in order:
 
-1. **Build context.** Navigate (via the navigation primitive) the existing threads + relevant project state — open plans, in-flight PRs, recent merged work, the project's stated goals (`pm/plans/plan-66d430f.md` or its descendants) — to assemble selective context. Path-log per the navigation primitive.
+1. **Build context.** Navigate (via the navigation primitive) the existing threads + relevant project state — open plans, in-flight PRs, recent merged work, the project's stated goals (`pm/plans/plan-66d430f.md` or its descendants) — to assemble selective context. Path-log per the navigation primitive. Specifically include **older items in the same and adjacent threads** in the navigation, not just recent ones: check whether the candidate appears uninformed by relevant older work — earlier bursts in this topic, foundational work the new contributor seems unaware of, adjacent lines underdiscussed in recent items. When that pattern is present, mark the older work for surfacing in the opening comment.
 
 2. **Feature ideation (new — performed BEFORE relevance scoring).** For each issue, opportunity, or insight the candidate surfaces, ask three questions: *what could pm target to address this? how could pm address it? how close are those solutions to pm's currently stated goals?* The candidates the agent generates are **not limited to brand-new features** — explicitly in scope: small **changes to existing features**, new **use cases for existing surfaces** ("we already have X; this article shows X could also be used for Y"), and **scope simplifications** of in-flight work. The output is a list of candidate proposals, each tagged with kind (`new-feature` / `existing-feature-change` / `new-use-case` / `scope-simplification`) and carrying a one-line **target** (what pm would change or apply), a one-line **approach** (how), and a 1–10 **alignment-with-stated-goals** score. Persisted to the item's `proposed_features` field. This step is what grounds the `direction-influence` metric in the next step — instead of intuiting "does this inspire ideas?" the agent has actually done the ideation and can count the yield × alignment across all four kinds of proposals.
 
@@ -193,13 +199,13 @@ For each candidate, the agent runs the following steps in order:
    - **Tag mutations** — rename / split / merge of existing tags when the agent notices the namespace getting sloppy.
    - **Retroactive re-tagging** — scan existing items via the navigation primitive; propose adding a newly-relevant tag (often one just created by this triage pass) to historical items where it applies. Later triage passes can also surface retroactive-retag candidates for tags introduced earlier.
    - **Metric mutations** — proposed `metrics.yaml` edits when the agent notices a pattern the existing metrics can't capture.
-   - **Feature hand-off** — for each feature in `proposed_features` whose `goal_alignment_score` is high enough to warrant its own pm artifact, an explicit proposal to file a new PR / add a note to an existing PR / edit a plan, routed via the editable-artifacts primitive.
+   - **Feature hand-off** — for each feature in `proposed_features` whose `goal_alignment_score` is high enough to warrant its own pm artifact, an explicit proposal to file a new PR / add a note to an existing PR / edit a plan, routed via the Artifact primitive.
 
-The mutations are proposals — the editable-artifacts primitive applies them (gated or autonomous per the surface's configuration).
+The mutations are proposals — the Artifact primitive applies them (gated or autonomous per the surface's configuration).
 
 Tests: a fake candidate goes through triage end-to-end and produces a well-formed item with (a) a non-trivial opening comment containing a feature-ideation section, (b) a `proposed_features` array with at least one entry, (c) per-tag relevance scores with `direction-influence` consistent with the feature-ideation yield, and (d) a structured mutation block at the end with at least topic assignment and one feature hand-off.
 
-Depends on: data-model PR; navigation primitive PR; editable-artifacts primitive PR.
+Depends on: data-model PR; `PmCliCall` + `[[...]]` link convention from [[plan-sensorium]]; `Artifact` from [[plan-sensorium]].
 
 ### PR: Summary agent
 
@@ -207,19 +213,21 @@ Periodic and on-demand digests across all threads, at multiple time granularitie
 
 Each summary also includes a **feature-recommendation synthesis** section that aggregates the `proposed_features` across all items in the window, clusters near-duplicates (so the same feature surfaced by three different items isn't triple-counted), surfaces the candidates with highest cumulative `alignment-with-stated-goals` and highest mention frequency, and presents them as a project-resource-allocation candidate list. Together with the per-item analyses, the synthesis turns the summary into a regular input to *"what should pm work on next?"* — a feed that runs from "what's happening in the field" all the way to "what we should consider doing about it." This is the substrate the forward-trajectory section below builds on for a genuinely self-guided project.
 
+Each summary also includes an **"underdiscussed older work" section** when the temporal-handling check (per the temporal-handling subsection of the architecture overview) surfaces clusters of older items that the recent items in the window appear uninformed by — old bursts of related work in the same topic, foundational lines being relitigated unknowingly, adjacent threads the recent activity isn't engaging with. The section lists each surfaced older cluster with a short note on why the recent items in the window would benefit from engaging with it. When no such pattern is detected the section is omitted; the goal is to make resurfacing legible and earned, not noisy.
+
 The summary surface in the UI reads these files. Scheduled trigger via the same schedule.yaml; on-demand trigger via `pm radar summarize [granularity]`.
 
 Tests: round-trip generation; link integrity (every `[[...]]` resolves); feature-recommendation synthesis correctly aggregates and clusters `proposed_features` across a fixture set of items.
 
-Depends on: data-model PR; navigation primitive PR.
+Depends on: data-model PR; `PmCliCall` + `[[...]]` link convention from [[plan-sensorium]].
 
 ### PR: Preferences chat
 
-The top-of-page chat surface where the user steers the recommender in plain English. Translates instructions to edits via the editable-artifacts primitive — adjust a slider threshold, add a site to `sources.yaml`, change a strategy's prompt, raise a schedule frequency, add a tag to the watchlist. All edits are logged as a thread (`pm/radar/threads/preferences.md`) so the steering history is itself part of the radar.
+The top-of-page chat surface where the user steers the recommender in plain English. Translates instructions to edits via the Artifact primitive — adjust a slider threshold, add a site to `sources.yaml`, change a strategy's prompt, raise a schedule frequency, add a tag to the watchlist. All edits are logged as a thread (`pm/radar/threads/preferences.md`) so the steering history is itself part of the radar.
 
 Tests: a fixture instruction routes to the correct file edit; the edit commits with a structured message naming the source instruction.
 
-Depends on: editable-artifacts primitive PR.
+Depends on: `Artifact` from [[plan-sensorium]].
 
 ### PR: News-aggregator HTML page
 
@@ -236,7 +244,7 @@ Reads from `pm/radar/` files directly. Co-located static export — open the fil
 
 Tests: page renders; chips filter correctly; sliders threshold correctly; summary panel links resolve.
 
-Depends on: data-model PR; summary agent PR; preferences chat PR; navigation primitive PR.
+Depends on: data-model PR; summary agent PR; preferences chat PR; `PmCliCall` + `[[...]]` link convention from [[plan-sensorium]].
 
 ### PR: Session-transcript linker
 
@@ -250,7 +258,7 @@ How links get generated: the linker agent reads transcripts via the navigation p
 
 Tests: a fixture session transcript that mentions a fixture thread results in a `discussed_in:` entry on the right item; the link resolves back to the transcript anchor.
 
-Depends on: data-model PR; navigation primitive PR.
+Depends on: data-model PR; `PmCliCall` + `[[...]]` link convention from [[plan-sensorium]].
 
 ### PR: TUI surface (later)
 
@@ -265,7 +273,7 @@ Depends on: data-model PR; news-aggregator HTML page PR (data shape established 
 - **`plan-litreview` (`plan-3119574`)** — same shape (ingest + score against project state + surface), different content (academic papers vs. ecosystem chatter). Ingest infrastructure should be shared; ideally the strategies-framework PR here can be the version litreview also uses. Possibly merges with this plan's sourcing PR once both are fleshed out.
 - **`plan-quality` Track B's "external seeding"** — that's the *one-shot* version of this plan (when the health-check audit runs, search the web for similar projects + best practices to seed refactor proposals). The radar is the **always-on daemon version**; the audit reads from the radar's persisted ledger instead of doing its own ad-hoc searches. Less duplicated network IO, richer prior context for the audit.
 - **`plan-self-improve`** — improvement of pm by competing against itself; the radar feeds it the outside-the-self component (what's the rest of the field doing).
-- **`pr-ff9b728`** (plan auto-start watcher mutating plan files) — the editable-artifacts primitive in this plan is the generalized version of what that PR does for plans. Likely worth a follow-on note on `pr-ff9b728` to migrate it onto the generalized primitive once it lands here.
+- **`pr-ff9b728`** (plan auto-start watcher mutating plan files) — the Artifact primitive in this plan is the generalized version of what that PR does for plans. Likely worth a follow-on note on `pr-ff9b728` to migrate it onto the generalized primitive once it lands here.
 
 ## Depends on
 
@@ -296,4 +304,4 @@ Even within this plan's scope, the two within-project visions above (self-guided
 - **Two relevance dimensions matter.** Project-relevance for the "is this actionable for pm?" cut; topic-relevance for the "is this interesting for its own sake?" cut. The sliders let the user pick which mode they're in — focused or exploratory. Replacing social media's *exploratory* benefit means the exploratory mode has to work, not just the focused mode.
 - **The agent writes opening moves, not summaries.** Discussion-generation is the primary KPI; feature-seeding is secondary. Neutral surveys don't get replies; opinionated takes do. The evaluation prompt should orient the agent accordingly.
 - **Walking, not stuffing.** Every agent in the radar (triage, summary, preferences, session-linker) uses the navigation primitive to read selectively from threads / items / comments / linked PRs / linked plans / transcripts. The result is each agent staying focused on its task with a small working context, while the totality of pm's history remains reachable.
-- **The two patterns are the lasting contribution.** If the radar itself ends up being something we use lightly, the navigation primitive and the editable-artifacts primitive both still pay off across every other agent surface in pm — sign-off, review, QA, watchers, future plans. That's why they're Track A even though they're technically infrastructure for Track B's user-facing system.
+- **The two patterns are the lasting contribution.** If the radar itself ends up being something we use lightly, the navigation primitive and the Artifact primitive both still pay off across every other agent surface in pm — sign-off, review, QA, watchers, future plans. That's why they're Track A even though they're technically infrastructure for Track B's user-facing system.

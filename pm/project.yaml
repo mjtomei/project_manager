@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8e693f6
+  active_pr: pr-abcf70f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -19173,7 +19173,10 @@ prs:
     plan, and let users re-run NEEDS_WORK scenarios or replace INPUT_REQUIRED ones,
     so coverage gaps and earlier failures can be resolved without restarting QA from
     scratch. The overall QA verdict can transition from INPUT_REQUIRED or NEEDS_WORK
-    back to PASS as added/replaced scenarios settle.
+    back to PASS as added/replaced scenarios settle. Also exposes a manual "re-detect
+    verdict" action so a divergence between a scenario pane''s actual final verdict
+    and what `qa_status.json` recorded can be fixed in place with one key, without
+    re-running the scenario.
 
 
     ## Why
@@ -19201,6 +19204,15 @@ prs:
     - User-directed coverage. A human watching the run may want to request "also exercise
     X" without dropping current progress.
 
+    - Verdict-sync drift between the scenario pane and `qa_status.json`. Observed
+    in pr-2d5f712 QA round 5 / scenario s18 (workdir `pr-2d5f712-12125069f90ecd21`):
+    a worker emits a verdict, the verifier flags it, the worker re-runs in the same
+    pane and reaches a new verdict that the status writer never picks up (treats the
+    first emission as terminal). The collection pane / dashboard / external watchers
+    then disagree with the actual scenario pane and can cascade wrong (false bounces,
+    false merge-blocks). Today the only recourse is a fresh QA run; this PR adds a
+    manual one-key fix.
+
 
     ## UX
 
@@ -19210,7 +19222,7 @@ prs:
     they like is sitting at the bottom of the planner pane''s transcript.
 
 
-    Two actions in the scenarios pane:
+    Four actions in the scenarios pane:
 
 
     1. Add scenarios (e.g. + key) — pull in the latest plan block from the planner
@@ -19225,9 +19237,19 @@ prs:
     a better one.
 
 
-    Re-running an existing scenario (without replacement) — i.e. driving the same
-    scenario again against fresher code — is also exposed (e.g. R key) and routes
-    through the same concretize -> worker -> verify pipeline.
+    3. Re-run an existing scenario without replacement (e.g. R key) — drive the same
+    scenario again against fresher code; routes through the same concretize -> worker
+    -> verify pipeline.
+
+
+    4. Re-detect verdict on the selected scenario (e.g. v key) — re-scan the selected
+    scenario''s pane(s) for the most recent terminal verdict line (PASS / NEEDS_WORK
+    / INPUT_REQUIRED) and update qa_status.json + the scenarios pane in place. No
+    re-run, no new concretize/worker pass — just resync state to what''s already on
+    screen. The primary use case is the worker-self-flag + re-run gap above; secondary
+    use is any other path where the writer missed a late verdict emission. The action
+    logs the old -> new verdict + the line it was detected from for audit, and recomputes
+    the overall verdict.
 
 
     "Load latest" in all cases means "the most recent QA_PLAN_START / END block in
@@ -19272,11 +19294,12 @@ prs:
     ## Behind the scenes
 
 
-    - Orchestrator API for adding, replacing, and re-running scenarios in a live QALoopState.
+    - Orchestrator API for adding, replacing, re-running, and re-detecting-verdict
+    on scenarios in a live QALoopState.
 
-    - The scenarios pane keybindings trigger the splice/replace/re-run: read the planner
-    pane''s transcript, run the existing parse_qa_plan on the latest plan block, hand
-    the result to the orchestrator.
+    - The scenarios pane keybindings trigger the splice/replace/re-run/re-detect:
+    read the planner pane''s transcript, run the existing parse_qa_plan on the latest
+    plan block, hand the result to the orchestrator.
 
     - New/replacement/re-run scenarios go through the same concretizer + worker +
     verifier pipeline as the initial batch.
@@ -19286,24 +19309,33 @@ prs:
     on where pr-2680fbf hooks it). The scenario only enters the worker stage after
     the drafted regression file is on the branch.
 
+    - Verdict re-detection path: reuses the existing verdict-line parser (the same
+    one that consumes worker output today) against the scenario pane''s recent scrollback,
+    finds the most recent terminal verdict, and routes through the writer''s "replace
+    verdict" path. No worker re-launch, no captures change.
+
     - qa_status.json and the scenarios pane update in place, including the per-scenario
     sub-status for in-flight regression authoring.
 
-    - Overall verdict re-aggregation. When a replacement or re-run settles with a
-    different outcome than its predecessor, the aggregated overall verdict recomputes;
-    state.latest_verdict can transition INPUT_REQUIRED -> PASS or NEEDS_WORK -> PASS
-    as a result. The finalize pane gating updates accordingly: extends verified_scenarios
-    check to cover late additions and recomputes when scenarios are replaced.
+    - Overall verdict re-aggregation. When a replacement, re-run, or re-detect settles
+    with a different outcome than its predecessor, the aggregated overall verdict
+    recomputes; state.latest_verdict can transition INPUT_REQUIRED -> PASS or NEEDS_WORK
+    -> PASS as a result. The finalize pane gating updates accordingly: extends verified_scenarios
+    check to cover late additions and recomputes when scenarios are replaced or re-detected.
 
     - Replaced scenarios'' prior prompt.md / verdict.md captures are preserved (e.g.
     moved to a numbered subdir like scenarios/<n>/prior-1/) so the run history is
     not lost.
 
+    - Audit: every add / replace / re-run / re-detect logs to a small per-scenario
+    history file (or extends the existing transcript log) with old -> new verdict,
+    the source line (for re-detect), and a timestamp, so the run is fully inspectable.
+
 
     ## Scope
 
 
-    - Live-state add / replace / re-run in QALoopState + orchestrator.
+    - Live-state add / replace / re-run / re-detect-verdict in QALoopState + orchestrator.
 
     - Key bindings in the scenarios pane (qa_status.py) plus the scraping/parsing
     logic.
@@ -19314,6 +19346,10 @@ prs:
     - Finalize gate covers late additions and recomputed verdicts.
 
     - Capture preservation when a scenario is replaced.
+
+    - Verdict-replacement path on the writer side (treat per-scenario verdicts as
+    last-wins while the run is still live and not yet finalized) so re-detect — and
+    the underlying self-flag + re-run sequence — can update state in place.
 
 
     ## Out of scope
@@ -19326,6 +19362,9 @@ prs:
 
     - Auto-detecting new plan blocks the planner emits (the user decides when to pull
     them in).
+
+    - Auto-re-detecting verdicts on a schedule (the user presses v when they notice
+    a divergence; automating it is its own decision).
 
     - Persisting follow-up-addition provenance across runs.
 
@@ -19342,7 +19381,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T21:02:19.201672+00:00'
-  updated_at: '2026-05-23T03:45:18.213283+00:00'
+  updated_at: '2026-05-27T12:18:46.747991+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21249,11 +21288,29 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/211
   gh_pr_number: 211
   created_at: '2026-05-20T22:53:20.224284+00:00'
-  updated_at: '2026-05-21T04:43:53.080388+00:00'
+  updated_at: '2026-05-30T21:40:59.458044+00:00'
   started_at: '2026-05-21T04:08:35.118589+00:00'
   reviewed_at: '2026-05-21T04:43:53.080388+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0970084
+    text: "Workflows-aware parallelization for plan-3119574's augmented cycle.\n\n\
+      Unconditionally append a 'Parallel workflows' clause to the methodology prompt\
+      \ that the context loader assembles, directing the session to fan out:\n\n \
+      \ - audit phase: one sub-stream per citation per pass (independent within a\
+      \ pass; convergence check stays serial)\n  - review phase: one sub-stream per\
+      \ prompt block (substance / structure / accessibility / prose)\n  - response\
+      \ phase: one sub-stream per proposed change\n  - apply phase: parallel across\
+      \ non-overlapping region groups\n\nArtifacts produced must be byte-equivalent\
+      \ to the sequential form — preserves code-as-arbiter (no synthesis bias from\
+      \ a coordinator agent, no structured handoff between sub-streams; each writes\
+      \ its slice of the canonical markdown file and the driver concatenates).\n\n\
+      Companion edit (separate small PR, not this one): add the corresponding clauses\
+      \ to METHODOLOGY.md § Operational mechanics and CITATION_USE_AUDIT.md § The\
+      \ in-cycle audit loop so the prompt material the loader appends actually exists\
+      \ in the methodology docs."
+    created_at: '2026-05-30T21:40:59Z'
+    last_edited: '2026-05-30T21:40:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a6ef6be-session-launching-cli-commands-proje-a17683d9
 - id: pr-1160366
   plan: plan-3119574
@@ -21659,6 +21716,16 @@ prs:
       /home/matt/.pm/workdirs/qa/pr-c41f029-ef8ddb6d7a59a2ee)'
     created_at: '2026-05-27T12:12:41Z'
     last_edited: '2026-05-27T12:12:41Z'
+  - id: note-0a128b5
+    text: 'QA INPUT_REQUIRED: QA loop from the PR-actions popup moves the originating
+      session onto the new QA window: PASS; review-loop and in-TUI command/keybinding
+      dispatch follow the invoking session: PASS; Concurrent triggers from two grouped
+      sessions each follow their own originator: PASS; CLI / watcher invocations with
+      no captured session fall back to live detection: PASS; Reproduction regression
+      suite passes and malformed picker commands are inert: INPUT_REQUIRED (workdir:
+      /home/matt/.pm/workdirs/qa/pr-c41f029-ef8ddb6d7a59a2ee)'
+    created_at: '2026-05-27T12:17:17Z'
+    last_edited: '2026-05-27T12:17:17Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
 - id: pr-5db0e85
   plan: plan-3119574
@@ -22657,10 +22724,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/225
   gh_pr_number: 225
   created_at: '2026-05-25T13:58:59.541347+00:00'
-  updated_at: '2026-05-27T13:42:02.191898+00:00'
+  updated_at: '2026-05-27T13:38:25.849471+00:00'
   started_at: '2026-05-25T16:29:52.493729+00:00'
-  reviewed_at: '2026-05-25T18:50:45.591385+00:00'
-  merged_at: '2026-05-27T13:42:02.191898+00:00'
+  reviewed_at: '2026-05-27T12:08:04.185671+00:00'
+  merged_at: '2026-05-27T13:38:25.849471+00:00'
   notes:
   - id: note-49ace04
     text: 'Sign-off impl landed (1b9c11ef). Design decisions for QA/review: (1) sign_off
@@ -23331,6 +23398,11 @@ prs:
       an existing local mode somewhere I missed, swap it.'
     created_at: '2026-05-26T17:06:24Z'
     last_edited: '2026-05-26T17:06:24Z'
+  - id: note-15d22d2
+    text: 'QA PASS: TUI i keybinding drives sign-off from the tech tree: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-2d5f712-12125069f90ecd21)'
+    created_at: '2026-05-26T17:37:56Z'
+    last_edited: '2026-05-26T17:37:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d5f712-sign-off-acceptance-gate-qa-verdict--b8230fbc
 - id: pr-8e693f6
   plan: plan-regression
