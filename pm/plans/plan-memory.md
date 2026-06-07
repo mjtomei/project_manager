@@ -27,6 +27,8 @@ Per [[plan-mind]] / the mind-abstraction framing, **the mind is the collection o
 
 A system that is conscious, on-demand, addressable, and verbatim is a tool call. This is the opposite on all four axes. (RAG-style retrieval remains available to the conscious stream as a normal runtime tool — it is a *different* capability, not what this plan builds.)
 
+**Efficiency framing (cross-ref).** Involuntary recall is also an *off-critical-path prefetch*: the sifters work ahead of need, in parallel, so a fact is already in context when the conscious stream reaches it — it adds *work, not span*. That is the formal reason background recall beats on-demand retrieval on latency; see `pm/docs/literature-review-minimal-sufficient-inference.md` (C7, §2.2/§5).
+
 ## Thesis
 
 Continuous background relevance-sifting with occasional unbidden injection makes the externally-threaded *spray* of sessions behave like one mind with memory — realizing the philosophy companion's "internalize the thread" at the **orchestration layer**, without touching weights. It is simultaneously the operational form of the user-model litreview's exogenous-grounding direction: `literature-review-user-model-extension.md` §2.3 already names "*continuous background modelling, searching, and synthesizing*" as what re-anchors a model on the real target. This plan is that mechanism.
