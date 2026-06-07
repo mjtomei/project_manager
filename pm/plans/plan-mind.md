@@ -269,6 +269,38 @@ Replaces today's INPUT_REQUIRED-stalls-the-pane pattern. Watcher raises, hiberna
 
 **Compare with Takeover semantics** (see Stream section): `AttentionRequest` is the agent asking the human for input on a typed question, expecting a typed reply. Takeover is the human silently substituting as the speaker on a running stream — no typed question, no typed reply, the loop is paused for an indefinite period. Both exist; they don't replace each other.
 
+### 7b. `BranchRequest` (concrete) — first-class stream branching
+
+Reserved tag prefix `branch.request.*`. The structural sibling of `AttentionRequest`: where `AttentionRequest` escalates to a **human** and awaits a typed reply, `BranchRequest` spawns a **peer stream** and awaits its return emission. Both are stream-initiated typed requests that resolve through normal `Mailbox` + (here) `Mind.stream` machinery; neither lets a stream seize a resource directly — the Mind grants it.
+
+```python
+class BranchService:
+    def branch(self, task: 'BranchTask', *, role: type[Stream] | None = None,
+               reply_to: Channel | None = None, budget: BudgetPolicy | None = None,
+               correlation_id: str) -> BranchId
+    def await_join(self, b: BranchId) -> Emission         # parent joins on the child's return
+
+@dataclass
+class BranchTask(Payload):            # typed, but dynamically populated by the parent at runtime
+    goal: str                         # the parent generates this — not a static template
+    context_refs: list[Ref]           # the child's minimal context, as refs (side-effect-as-truth)
+    capabilities: CapabilitySpec      # which side effects the child may use (Mind grants)
+    return_tag: str                   # the tag under which the child emits its result
+```
+
+**Two spawn paths, both first-class.** This primitive adds the *second*:
+
+- **Static / programmed (unchanged).** A `Supervisor` catches a marker and calls `Mind.stream(role=PredefinedStream, inputs=StaticInputType(...))`. Role and prompt are programmer-chosen; this is today's tool-call-like spawning (see *Loop orchestration*). Keep it for the engineered pipeline (impl / review / QA).
+- **Generic / dynamic (new).** A stream writes `<<<EMISSION branch.request>>>{BranchTask}<<<END>>>` inline (source-3 marker extraction). The Mind's generic branch handler instantiates a child — a named `role` if given, else a generic `ReasoningStream` (a side-effect-light `Stream` subclass for dynamic branches) — populates its `InputType` from the `BranchTask`, and wires `reply_to` so the child's `return_tag` emissions route back to the parent. No bespoke `Supervisor` per use.
+
+`BranchTask` stays typed (design principle 3) even though its fields are runtime-generated; context passes as refs, not prose (principle 2). It is the runtime substrate for the branch-emit-join decomposition in `pm/docs/literature-review-minimal-sufficient-inference.md`: `context_refs` is the `S_i` (the child's minimal sufficient context), the child's return emission is the `c_i` (a certified-summary component — admissible because perplexity-bounded, the one refinement of the no-peer-summary rule).
+
+**Spawn is idempotent on `(parent_stream_id, 'branch.request', correlation_id)`** (principle 11), so log-replay regen never double-spawns — load-bearing under recursive branching.
+
+**Budget and depth are Mind-governed — the runaway-recursion rail.** Stream-initiated branching can explode (recursive decomposition). The Mind grants a branch subject to a branch budget (max depth, max fan-out, token/cost via `BudgetPolicy`; a default cap at Mind level, overridable per-request and by the owning `Supervisor`); on exceedance it emits `branch.denied` / `branch.deferred` back to the parent instead of spawning. This is both the safety rail against self-replication and the concrete home for the value-of-computation branch/backtrack budget the minimal-sufficient-inference selector needs.
+
+**Compare with the Supervisor-spawn pattern** (*Loop orchestration*): a `Supervisor` still owns multi-branch *loops* (fan-out + join-barrier, kill_restart cycles) and retains lifecycle/budget authority. `BranchRequest` does **not** reintroduce a `LoopStream` — it is a single atomic spawn-with-return, imposes no loop shape, and the parent either `await_join`s its children directly (simple decomposition) or a `Supervisor` orchestrates the DAG (complex shapes). The child is an addressable peer (contrast [[plan-memory]]'s subconscious, non-addressable sifters).
+
 ### 8. `RuntimePlugin` (Protocol)
 
 The only execution seam. Coordination never reaches past this boundary.
