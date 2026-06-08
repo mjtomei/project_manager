@@ -147,6 +147,7 @@ The perplexity-decomposition traces (§4.1) already cluster by sub-problem type,
 - **[[prompt-first-then-compile-to-tokens]]** — this review is the concrete profiler→compiler pipeline that staging law predicts: perplexity-decomposition is the profiler, the marker model is the compiled artifact.
 - **[[minimal-sufficient-inference-optimality]]** (memory) — the north-star statement this review develops.
 - **`plan-self-improve`** — the *model-internal* analog of pm's orchestration-level recursive self-improvement; the efficiency flywheel here mirrors the tournament there.
+- **Cognitive models are reproduction targets, not blueprints.** The operation set here and any borrowed model (ACT-R activation, CLS consolidation / reasoned→rote, SOAR impasse + chunking, Global-Workspace ignition) are *functionality the learned substrate must be able to arrive at* — baselines to reproduce and beat, not architectures to hard-code. They form a behavioral benchmark battery; the substrate's job is expressiveness (can it represent each, ideally via composition?), and coverage against that battery is audited separately rather than asserted here. Same move as reproducing the oracle's output without baking in the decomposition.
 
 ## 6. Open questions / falsifiers
 
