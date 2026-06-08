@@ -2,7 +2,7 @@
 
 (a memory system modeled on human involuntary recall: unconscious background streams continuously sift the mind's reachable data pools, score each candidate against what the conscious stream is doing *right now*, and occasionally inject a reconstructed, source-linked recall into its context **unbidden** — the conscious stream never addresses or perceives the sifters directly)
 
-> Built entirely on existing substrate: [[plan-mind]] primitives (unconscious `Stream`s, `Mailbox` preempt/next-checkpoint delivery, `Mind.schedule`, `BudgetPolicy`/`UsageEvent`, `VisibilityTier`, `EmissionLog`/`StreamTranscript`) and [[plan-radar]]'s composite explainable relevance scoring + walking-not-stuffing discipline + session-transcript linker. Conceptually grounded in the involuntary-memory account in `pm/docs/philosophy-coherence-and-machine-minds.md` §4. **This plan is Phase 1: pure orchestration — sub-agents + prompting on existing models, no training.** Token-level / trained-in retrieval is explicitly deferred (see *Forward trajectory*).
+> Built entirely on existing substrate: [[plan-mind]] primitives (unconscious `Stream`s, `Mailbox` preempt/next-checkpoint delivery, `Mind.schedule`, `BudgetPolicy`/`UsageEvent`, `VisibilityTier`, `EmissionLog`/`StreamTranscript`) and [[plan-radar]]'s composite explainable relevance scoring + walking-not-stuffing discipline + session-transcript linker. Conceptually grounded in the involuntary-memory account in `pm/docs/philosophy-coherence-and-machine-minds.md` §4. **This plan is Phase 1: pure orchestration — sub-agents + prompting on existing models, no training.** Token-level / trained-in retrieval **and the learned usefulness gate** are explicitly deferred (see *Deferred* and *Forward trajectory*) — Phase 1 needs no trained model, so the **mind + sensorium refactor can land first**.
 
 ## Framing
 
@@ -40,7 +40,7 @@ Continuous background relevance-sifting with occasional unbidden injection makes
 3. **Reconstructive and source-linked, never a verbatim dump.** A recall is a freshly synthesized "this seems relevant because…" carrying typed `Payload` refs (ArtifactRef, `EmissionLog`/`StreamTranscript` slices, URL+cache ref) the conscious stream can pull if it bites. This is faithful to the human analogy *and* to plan-mind's **side-effect-as-truth** invariant (peers get refs to canonical content, never paraphrase).
 4. **Budget is adaptive, not static-by-pool-size.** Seed compute ∝ pool, then a bandit reallocates by realized usefulness — which is what produces the user's "sources and sub-sources move back and forth" behavior. Extends plan-mind's `BudgetPolicy`; it does not invent a new budget substrate.
 5. **Surfacing is earned, not noisy.** Adopt radar's "*legible and earned, not noisy*" discipline. A two-stage gate (cheap recall → expensive utility judge) plus a dynamic threshold protects the conscious stream's coherence and context window. Noise is the dominant failure mode; the whole design is gates.
-6. **The usefulness loop is the spine.** Every injection is followed by a `RecallUsed` signal — did the conscious stream cite or act on it within N turns? That signal trains the relevance weights *and* feeds the bandit. It is the memory-reconsolidation analogue: used traces strengthen.
+6. **The usefulness loop is the spine — but usefulness is a *grounded outcome*, never attention.** Every injection is followed by a `RecallUsed` signal, and it must **not** be "did the conscious stream cite/attend to it." Attention rewards shallow/flashy over subtle-but-profound — the exact pathology [[plan-radar]] exists to fix, and sycophancy at the metric level. It must be a grounded-outcome measure (did the trace *with* the recall beat *without*; did it improve a verified outcome), **signed** so a distracting recall scores negative. **Phase 1 only *logs* this signal** (it is the training data); it fits no weights and trains no model — the learned, project-scoped grounded gate is **deferred** (see *Deferred*). "Used traces strengthen" is what that deferred gate realizes, not Phase 1.
 7. **No new lifecycle / scheduling / supervision substrate.** Sifters are scheduled by `Mind.schedule`, supervised by `Supervisor`, logged by `EmissionLog`. This plan adds *policy* and two small substrate primitives only.
 8. **Cross-boundary pools respect redaction.** Org-data and public-web sifters cross trust lines and obey [[plan-sensorium]]'s `RedactionPolicy` at the write seam and [[plan-collaboration]]'s cross-boundary visibility rules. The web pool additionally needs cost/rate governance and caching.
 
@@ -57,7 +57,7 @@ current context ──► CueService (rolling summary) ──► cue
    survivor ──► RecallGate ──► RecallEmission injected via Mailbox
                  (next-checkpoint by default; preempt only if highly salient
                   AND the conscious stream is receptive)
-   later ──► RecallUsed observed ──► feeds relevance weights + PoolBudgetGovernor bandit
+   later ──► RecallUsed (grounded-outcome, signed) logged ──► PoolBudgetGovernor bandit (Phase 1); learned relevance gate deferred
 ```
 
 ### Data pools and the budget hierarchy
@@ -72,7 +72,7 @@ Seed budget ∝ pool, then `PoolBudgetGovernor` reallocates by hit-rate (a multi
 
 ### Relevance is a composite of explainable metrics (reused from radar)
 
-Per radar's "*Relevance is a composite of explainable metrics*," the score is **not one opaque number**. Named 1–10 metrics with per-context weighting: cue-similarity, recency, prior-usefulness (from `RecallUsed`), source-tier, novelty/surprise (guards against rumination), retrieval cost. Reused wholesale from radar, not redefined here.
+Per radar's "*Relevance is a composite of explainable metrics*," the score is **not one opaque number**. Named 1–10 metrics with per-context weighting: cue-similarity, recency, prior-usefulness (from logged `RecallUsed`), source-tier, novelty/surprise (guards against rumination), retrieval cost. Reused wholesale from radar, not redefined here. **Phase 1 weights are hand-set (non-learned) — no model training;** learning them from the grounded signal is the deferred gate (below).
 
 ### The gate: cheap recall → utility judge → receptivity-aware injection
 
@@ -89,7 +89,7 @@ Two stages keep cost down: many cheap candidates, few expensive judgments, injec
 The reconstructed intrusion. Fields: `synthesis: str` (the short "feels relevant because…"), `refs: list[Ref]` (ArtifactRef / EmissionLog-slice / transcript-slice / cached-URL), `salience: float`, `cue_correlation_id`, `pool`, `visibility`. **No verbatim source payload beyond the synthesis** — refs point at canonical content. A domain `Payload`, so it lives here, not in plan-mind (same rule that keeps `RegressionSpec`/`QAScenarioRef` in their domain plans).
 
 ### 2. `RecallUsed` (Payload + signal)
-The feedback. Did the conscious stream cite/act on the recall within N turns? Graded (ignored / referenced / acted-on). Drives the relevance weights and the bandit. The reconsolidation analogue.
+The feedback — a **grounded-outcome** measure, *not* attention (attention rewards flashy over profound; principle 6). Graded and **signed**: did the recall improve the outcome (with-vs-without / verified-good), neutral, or *hurt* (distraction → negative). **Phase 1 logs it** (training data) and at most feeds the budget bandit; it does **not** fit relevance weights or train a model — that is the deferred gate.
 
 ### 3. `CueService` (service)
 Maintains the rolling cue (summary/embedding) for each conscious stream from its recent transcript; the sifters' input. Cheap, continuous.
@@ -124,8 +124,8 @@ The MVP sifter: schedule-woken, walks `EmissionLog`/`StreamTranscript` against t
 ### PR: `RecallGate` (reuse radar relevance) + utility judge + next-checkpoint injection
 Two-stage gate; inject one survivor per cue cycle; no preempt yet.
 
-### PR: `RecallUsed` feedback + relevance-weight update
-Close the loop; graded usage signal updates the composite weights.
+### PR: `RecallUsed` feedback (grounded-outcome, logged) — no weight-fitting
+Log the signed grounded-outcome signal as training data and feed it to the budget bandit only. **No relevance-weight learning and no model training here** — that is the deferred grounded gate, kept out of the mind + sensorium refactor's critical path.
 
 ### PR: `PoolBudgetGovernor` (bandit) + `OrgDataSifter`
 Second pool; adaptive reallocation across pools/sub-sources.
@@ -168,6 +168,17 @@ This plan and the reasoning-move taxonomy (`literature-review-user-model-extensi
 - pending: 0 (none filed; plan is draft)
 - in_progress: 0
 - merged: 0
+
+## Deferred — the grounded-usefulness gate (return to after the mind + sensorium refactor)
+
+**Deferred by design: this needs a trained model, and the mind + sensorium refactor must land without one.** Phase 1 is fully non-learned (hand-set relevance + logged, signed `RecallUsed`) — enough to demonstrate involuntary recall and to *collect* the grounded-outcome data. The learned gate is the planned successor, recorded here to return to:
+
+- **Signal — grounded outcome, never attention** (principle 6): a multi-factor, *signed* measure (counterfactual with-vs-without, outcome-gated attention, info-gain-toward-correctness, adversarial-survival, diversity/coverage, regret). These are the **judge's rubric (the label)**, not input features.
+- **Mechanism:** a prompt-aware adversarial **with/without judge** makes counterfactual labels on short traces (bootstrap; doesn't scale to many recalls — 2^N ablations) → trains a **reward model** → the **same existing LLM RL flows** over the whole stream collection (long-horizon, signed-regret automatic; no new global reward).
+- **Where the weights live — an external small model:** a **small LLM over the raw text context** (portable across any big model; no open weights, no feature-encoding), trained on the grounded labels. Discriminative-not-generative keeps it small. It can be **learned per-project** (affordable where base-model fine-tuning is not); cold-start falls back to a global/default gate. With the gate in front, Supervisors can be **liberal** (recall over precision).
+- **Broader pattern:** one instance of *small discriminative models as injectors* — same treatment for the monitor/impasse trigger, confidence gate, speculation/admissibility judges, Supervisor condition-classifiers. See `pm/docs/principle-coverage-audit.md` (addendum).
+
+**Nothing here lands in [[plan-mind]].** The substrate (`SubconsciousTier`, `PoolBudgetGovernor`, the `RecallGate` seam) is sufficient; only the *learned scorer* is added later, and it is **external to the mind** — so the refactor is unblocked.
 
 ## Forward trajectory: where this leads
 
