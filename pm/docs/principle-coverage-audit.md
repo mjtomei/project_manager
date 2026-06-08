@@ -102,7 +102,7 @@ This is **§4.7's specialized-models architecture instantiated on the discrimina
 
 ### 5. Carve-outs (C — correctly fixed)
 
-Human-facing decay (radar's age-penalty) stays hand-tuned for now (hard to learn well, low stakes). Typed contracts, invariants, safety rails, idempotency keys, and the held-`y`-fixed firewall stay fixed.
+Human-facing decay (radar's age-penalty) stays hand-tuned for now (hard to learn well, low stakes). **An engagement loop is also acceptable for radar's human-facing surfaces** (the feed/digest/ranking a human reads) for now — a real human is the weak-but-*exogenous* ground truth there, and it's low-stakes/correctable; the strict grounded requirement is for *agent-facing / trainable* loops (closed, no human ground truth). **This scopes fix #1:** radar's human-facing parts are interim-OK (grounded is radar's eventual aspiration, not a blocker); the grounded reframe applies to its agent-facing/learned components (path-logger, triage). Typed contracts, invariants, safety rails, idempotency keys, and the held-`y`-fixed firewall stay fixed.
 
 ### Net effect on the ranked fixes
 
