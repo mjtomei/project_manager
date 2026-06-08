@@ -301,6 +301,8 @@ class BranchTask(Payload):            # typed, but dynamically populated by the 
 
 **Compare with the Supervisor-spawn pattern** (*Loop orchestration*): a `Supervisor` still owns multi-branch *loops* (fan-out + join-barrier, kill_restart cycles) and retains lifecycle/budget authority. `BranchRequest` does **not** reintroduce a `LoopStream` — it is a single atomic spawn-with-return, imposes no loop shape, and the parent either `await_join`s its children directly (simple decomposition) or a `Supervisor` orchestrates the DAG (complex shapes). The child is an addressable peer (contrast [[plan-memory]]'s subconscious, non-addressable sifters).
 
+**Possible future extension — speculative branching (not specced).** A speculative mode — the parent proceeds on a *predicted* emission and the branch *verifies* it on return (accept and keep the downstream work, or squash and recompute) — would hide a branch's latency on sequential chains (`pm/docs/literature-review-minimal-sufficient-inference.md` C11 / §2.4). Deferred: it would need a provisional-emission state (quarantined until verified, to preserve side-effect-as-truth) and rollback semantics, and there's no concrete use yet.
+
 ### 8. `RuntimePlugin` (Protocol)
 
 The only execution seam. Coordination never reaches past this boundary.
