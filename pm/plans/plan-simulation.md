@@ -144,6 +144,29 @@ Citations below are `unverified` until the augmented adversarial-review cycle (`
 
 These hypotheses are not new parameters — they are *predictions about what the simulation should show* when the existing parameter sweeps run with scenario designs that expose the mediators. They are the interpretive scaffolding that turns parameter sweeps into evidence for or against specific claims about what long-horizon selfish reasoning recovers as content humans have separately encoded as moral law.
 
+### The generative program: scientific hypotheses for discarded traditions
+
+A standing purpose of this plan, beyond testing H0–H2: **provide scientific hypotheses about why we have the traditions we do — especially traditions that have been discarded as unscientific.**
+
+The argument from complexity: for many traditions, scientific explanations are possible but *complex* — multi-generational feedback loops, population-scale externalities, conditionality on population structure. That complexity fits the observation that the content had to be learned over very large time scales: a function simple enough for an individual to re-derive within a lifetime would not need tradition-encoding to persist. And the same complexity explains the discarding: an evaluator operating at individual-lifetime scale, with evidence spanning years rather than generations, cannot see a function whose effects live at scales their evidence does not span. "Unscientific," in these cases, often reduces to "function not measurable at the timescale the evaluation was run."
+
+Prior art (unverified until audited): Henrich's cultural-evolution program (*The Secret of Our Success*) — traditions encode causally-opaque adaptive solutions, with the manioc-detoxification case as the canonical example of rationally shortcutting a tradition and incurring delayed harm invisible to the shortcutter. Chesterton's fence is the folk-procedural version. Hayek's tradition-as-encoded-knowledge-exceeding-individual-reason and Boyd & Richerson's formal cultural-evolution models are the theoretical line. What this plan adds over that line:
+
+1. **Simulation as the instrument.** The existing literature argues functional explanations case-by-case, leaving them open to the just-so-story objection. The simulation converts a functional hypothesis into a mechanistic, falsifiable recovery: re-derive the tradition's content in silico from population structure + selection pressures, *without referencing the tradition*. Recovery is positive evidence; failure to recover under faithful conditions is evidence against the hypothesized function.
+2. **H0 as hypothesis generator.** The surplus / flatness / denial-cost theory predicts *which kinds* of traditions should exist: traditions that bind surplus-holders specifically (H1, H2); traditions that lower the denial cost of adopting the global frame (practices that quiet the local evaluator); traditions that transmit the global frame to heirs (stewardship norms, coming-of-age instruction); traditions that protect perceived flatness against artificial-gradient manufacture (sumptuary norms, status-competition limits, modesty rules). Each is a testable class, and a given tradition's membership in a class is a falsifiable claim.
+
+Method shape per tradition: hypothesize the encoded strategy → operationalize a scenario whose structure matches the tradition's historical conditions → run selection → check whether the tradition's content is recovered → check that the recovered strategy's *conditions of applicability* match the tradition's own. A tradition recovered under conditions where it never existed, or absent under conditions where it thrived, counts against the hypothesis — conditionality matching is the discipline that separates recovery from curve-fitting.
+
+#### Scenario sketch: the inheritance game
+
+A concrete first instance, targeting H0's generational-dissipation prediction — the effect worth reproducing in game form:
+
+- **Setup.** Multi-generational lineage game. Generation 1 accumulates under steep local gradients (scarcity; acquisition rewarded). Heirs inherit measured flatness.
+- **Per-agent denial cost**, heritable with variation. Per-lineage **transmission action**: a costly, optional investment by the older generation that lowers heirs' denial and discovery costs — the in-game analog of stewardship traditions and religious instruction.
+- **Treatment arm:** optional status-competition mechanics (artificial-gradient manufacture).
+- **Measurements.** Lineage wealth-persistence distribution versus transmission investment; whether the canonical three-generation dissipation curve reproduces; whether transmission investment rescues persistence; whether status mechanics degrade it.
+- **Falsifiers inside the game.** Persistence uncorrelated with transmission; or dissipation failing to occur even at zero transmission — which would mean the real-world pattern requires a mechanism this model lacks.
+
 ## Tracks (sketched)
 
 ### Track A — Simulation framework infrastructure
