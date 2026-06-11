@@ -24154,7 +24154,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-06-11T16:23:32.501577+00:00'
+  updated_at: '2026-06-11T16:31:03.347272+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -24188,6 +24188,41 @@ prs:
       post-sign-off merge decision.'
     created_at: '2026-06-11T16:23:32Z'
     last_edited: '2026-06-11T16:23:32Z'
+  - id: note-40412bf
+    text: 'Implementation hint for the LOOP SAFETY "re-loop invariant" requirement
+      already in this PR''s description (any code/content change routes back through
+      review AND qa before merge). Surfaced during pr-8e693f6 review of the existing
+      auto-sequence chain.
+
+
+      THE GAP TODAY: in `pm pr auto-sequence` (pr.py), only the SIGN-OFF step is sha-aware
+      — it stamps pr["signoff"]={verdict,sha,...} and re-runs if HEAD moved (signoff.fresh_recorded_verdict
+      / R11, pr.py:3058-3080). The earlier hops (in_review PASS -> qa, qa PASS ->
+      sign_off) advance purely on `status == ... and verdict == PASS` with NO sha
+      check. So an external commit landing on the workdir branch after review passed
+      (human push, dep-merge, a newly-filed feature, etc.) sails through to qa/sign_off
+      without ever being re-reviewed.
+
+
+      PROPOSED MECHANISM (one field, generalizes the sign-off staleness rule one phase
+      earlier): store a single `reviewed_sha` on the PR. Stamp `pr["reviewed_sha"]
+      = head_sha(workdir)` when advancing PAST review (in_review PASS -> qa). Then
+      at EVERY tick in `qa` or `sign_off`, if `head_sha(workdir) != reviewed_sha`,
+      bounce the PR to in_review and re-review (which then re-qa''s, per the invariant).
+      This catches external commits WHENEVER they land, not just on watcher restart,
+      and does not re-review when nothing changed. It is literally signoff.fresh_recorded_verdict
+      applied at the review boundary. Ties into the pr-ed10ac4 no-progress hashing
+      the description already references for the across-bounce loop guard. Note-only
+      actions must NOT move HEAD (they only touch project.yaml/plan files, not the
+      workdir branch), so they correctly do not re-trigger — consistent with the invariant''s
+      "note-only actions don''t re-trigger review" clause.
+
+
+      (Considered + rejected the simpler "always reset to review on flow restart":
+      misses commits that land while the watcher keeps running without a restart,
+      and re-reviews wastefully when nothing changed.)'
+    created_at: '2026-06-11T16:31:03Z'
+    last_edited: '2026-06-11T16:31:03Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)
