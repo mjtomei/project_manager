@@ -187,7 +187,7 @@ Tests pm conditions (C2, C3) with open models of varying sizes, in two configura
 - **All-open**: every pm stream runs on the same open model.
 - **Hybrid**: Opus runs the high-leverage decisions (planning streams, sign-off); cheaper open model runs impl/review/QA.
 
-Three open-model size tiers (~7B, ~30B, ~70B+) plus the Claude baseline. We restrict the arm to Python initially — cross-language coverage waits until Python results justify it.
+Three open-model size tiers (~7B, ~20–30B, ~70–120B+) plus a coding-specialist slot (Composer 2.5 and gpt-oss bracket the coding-specialist comparison), plus the Claude baseline. We restrict the arm to Python initially — cross-language coverage waits until Python results justify it.
 
 Model selection, condition matrix, hypotheses, budget: Appendix §J.
 
@@ -432,10 +432,19 @@ Stratum-defining qualities are visible via mechanical metrics (lint pass rate, t
 ## Appendix §J — Open-model arm details
 
 **Model selection** (subject to local-inference feasibility):
+
 - Small (~7B–8B): Llama-3.x 8B or Qwen 2.5/3 7B-class coder.
-- Medium (~30B): Qwen 2.5/3 Coder 30B or DeepSeek-Coder-V2 33B.
-- Large open (~70B+): Llama-3.x 70B or Qwen 2.5/3 72B Coder.
+- Medium (~20–30B): Qwen 2.5/3 Coder 30B, DeepSeek-Coder-V2 33B, or **gpt-oss-20b** (OpenAI's open weights release; coding-tuned).
+- Large open (~70B–120B): Llama-3.x 70B, Qwen 2.5/3 72B Coder, or **gpt-oss-120b** (the larger gpt-oss release; expected to be the strongest single-server open candidate).
+- Coding-specialist (separate from size tiers): **Composer 2.5** (Cursor's coding-tuned model; specifically targeted because it's optimized for the same agentic-coding-against-a-repo task the experiment measures, and because if a coding-specialist closes the gap to Claude that's a meaningful result for the rewrite story).
 - Frontier closed: Claude (Opus default) — baseline.
+
+The selection now includes both "general open models at varying sizes" (the original Llama/Qwen tiers) and "models targeted specifically at the coding agent task" (Composer 2.5, gpt-oss). Comparing these two slices answers an extra question: when an open model is purpose-built for our task shape, does it close more of the gap than a general open model of comparable size?
+
+**Test grid for the model dimension:**
+- The Small / Medium / Large tier choices are picked at A1 pilot time based on local-inference feasibility. Run at least one general-purpose and one coding-specialist at each tier where both exist.
+- Composer 2.5 runs at whatever size the model is delivered in; bucket it into the closest tier for reporting.
+- gpt-oss-20b → Medium tier; gpt-oss-120b → Large tier.
 
 **Conditions** (12 per cell, plus the Claude baseline in main matrix):
 - C2-allopen-{S,M,L}: pm autostart, all streams on small/medium/large open model.

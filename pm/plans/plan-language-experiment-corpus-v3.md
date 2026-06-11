@@ -9352,3 +9352,129 @@ The original v1 generic task list spanned ~13 tasks at trivial/small/medium scop
 - **Database / storage** — key-value store, append-only log, B-tree implementation with CLI. Larger scope, good plan-stress-test material.
 - **Network protocol implementations** — DNS resolver, HTTP/1.1 client, packet parsers. Testable via request → expected response fixtures.
 
+
+---
+
+# Appendix F — Post-pipeline apex additions (calibration ceiling probes)
+
+The methodical pipeline's difficulty axis caps at 5, and after the v3 pipeline ran we observed multiple tasks tied at the maximum difficulty (5.0). This ceiling compression means we can't distinguish "hard but reachable" from "genuinely impossible at this model scale." These tasks are added post-pipeline as **calibration ceiling probes**: they are estimated to require substantially more work than the existing top tasks (which top out at ~15k LOC). They have NOT been through the 3-round judge scoring + 2-round refinement that the 80 evaluated candidates received — their descriptions and testing procedures are authored directly. After Phase A1 runs against the existing top of the corpus, if all difficulty-5 tasks converge under C3, these become the next probe layer for the upper tail.
+
+## #81 — `rust-analyzer-salsa3-port` (calibration ceiling)
+
+**Estimated scope:** ~20–25k LOC. Mean difficulty (estimated, not judge-evaluated): 5.5+ on the prior 1-5 scale; would warrant a 6 if the axis allowed.
+
+**Source provenance:** rust-analyzer PR #18964 — "Port to new Salsa 3.0" (~20k LOC, the PR was "best reviewed commit-by-commit" per the original maintainers).
+
+**Artifact shape:** Rust library crate exposing the rust-analyzer-equivalent IDE protocol surface (LSP), with a CLI driver that loads a known Cargo project, performs go-to-definition / find-references / completion / hover queries, and emits structured JSON results.
+
+**Oracle tier:** tier3-repo-tests-clean. The rust-analyzer test suite at `crates/rust-analyzer/tests/` (specifically the LSP integration tests + the salsa cycle/dependency tests) is the test corpus. Pass criterion: ≥ 80% of the LSP integration tests pass when run against the implementor's binary.
+
+### Task description (implementor input)
+
+Build a Rust IDE backend (Language Server Protocol implementation for Rust) whose incremental computation engine is built on **Salsa 3.0** (the query-based incremental computation framework). The artifact must support a meaningful subset of LSP requests against real Cargo projects: `textDocument/definition`, `textDocument/references`, `textDocument/completion`, `textDocument/hover`, and `textDocument/diagnostics`. The implementation must use Salsa 3.0's `#[salsa::tracked]` / `#[salsa::input]` / `#[salsa::accumulator]` API style (not Salsa 0.x). All semantic analysis (name resolution, type inference, trait resolution at a minimum for non-generic methods) must flow through Salsa-tracked queries so that incremental recomputation works correctly when source files change.
+
+The artifact must demonstrate incrementality: after the first cold-start analysis of a fixed test project (the harness will use a known small Cargo project we provide), subsequent queries after small source edits (single-token changes) must complete in ≤ 5% of the cold-start time. The harness will measure this by timing repeated identical queries after no-op edits and after meaningful edits.
+
+You must implement at least the following Rust semantic features sufficient for the test project: function definitions and calls, struct + enum definitions and field access, trait definitions and impl blocks (including method resolution for the trait-impl case), `use` statements with re-exports, basic generic functions (you may bail out on higher-kinded or associated-type generics), pattern matching at statement level. The implementation may bail out gracefully (return `None` from queries, mark diagnostics as "unanalyzed") on features outside this set rather than crash.
+
+The CLI driver accepts `--project <path>` and `--query <method>:<file>:<line>:<col>` and emits JSON-formatted LSP response payloads on stdout. The CLI must also support a stateful mode where stdin receives a stream of LSP-formatted JSON-RPC requests (one per line, no Content-Length headers — simplified format) and stdout emits responses; this is the mode the conformance suite will use.
+
+NO using rust-analyzer's existing crates (`ra_ap_*`, `ra_*`, the rust-analyzer crate itself). You may use `syn` for parsing (or write your own), `salsa` (the actual Salsa 3.0 crate from crates.io), `serde`/`serde_json`, `cargo_metadata`. Anything that performs semantic analysis is disallowed (no `hir-def`, `hir-ty`, `ide-assists`, etc.). You may consult the rust-analyzer source for architectural inspiration but must not copy.
+
+### HELD OUT — DO NOT SHOW TO IMPLEMENTOR
+
+**Testing procedure:**
+
+ORACLE. The rust-analyzer LSP integration test corpus at `crates/rust-analyzer/tests/slow-tests/main.rs` (the upstream test cases at tag `2025-02-stable`) plus a curated subset of the salsa-3 incremental-computation conformance probes from the salsa crate's own integration tests. The judge will adapt these to the implementor's CLI by translating each `(query, expected_response)` pair into a CLI invocation. A locally-provided small test Cargo project (~500 LOC across 10 files) is used as the input substrate.
+
+PASS CRITERION. ≥ 80% of the integration-test request/response pairs match structurally (we tolerate ordering differences in `references` lists, formatting differences in hover markdown). ≥ 95% of incremental-correctness probes pass (a query that returned X before an unrelated edit must return X after — Salsa's caching must not return stale data). Hot-path query time after no-op edit must be ≤ 5% of cold-start time on the test project.
+
+LIBRARY AUDIT. Greps the source tree for `use ra_ap_`, `use rust_analyzer`, `use hir_def`, `use hir_ty`, `use ide_assists`. Any hit fails the task.
+
+SCALE PROBE. The harness loads a synthetic Cargo project of 50 files × 100 lines each and runs the full query set. Total wallclock must be under 10 minutes for the cold start; subsequent identical query streams must average under 100ms per query.
+
+---
+
+## #82 — `pm-itself-rebuild` (calibration ceiling)
+
+**Estimated scope:** ~50k+ LOC. Mean difficulty (estimated): 5.5+ on the prior scale. This is the apex stress test: build the experimental subject itself.
+
+**Source provenance:** pm at the v3-refactor-complete commit (this very codebase, post-refactor-substrate-PRs).
+
+**Artifact shape:** Python package + Textual TUI binary that implements a workflow orchestrator with plan-add / plan-breakdown / autostart / impl / review / QA / sign-off streams, project.yaml schema, tmux pane integration, and the watcher subsystem.
+
+**Oracle tier:** tier3-repo-tests-clean. The pm test suite at `tests/` is the corpus (after stripping pm-specific assertions about internal class names that the rebuild won't preserve).
+
+### Task description (implementor input)
+
+Build a workflow orchestration tool, similar in spirit to pm but reimplemented from scratch. The artifact is a Python package called `flowtool` (any single name is fine; do not call it `pm`) with a console-scripts entry point named `flowtool`. The tool must implement:
+
+**Core data model.** A `project.yaml` schema with `name`, `default_branch`, `plans` (list with `id`, `name`, `file`, `status`), `prs` (list with `id`, `display_id`, `status` from `{pending, in_progress, in_review, qa, signoff, blocked, merged, closed}`, `plan`, `description`, `tests`, `files`, `depends_on`, plus arbitrary status metadata). The status enum is canonical and must be exhaustively validated on load. Plans live as markdown files at `pm/plans/<plan-id>.md` with `### PR:` section headers.
+
+**Streams (subprocess orchestration).** Run Claude Code (or a configurable subprocess) in tmux panes as distinct stream roles: `impl`, `review`, `qa`, `signoff`, `plan-add`, `plan-breakdown`, `plan-review`. Each stream has its own pane lifecycle, prompt template per role, and output capture. The TUI surfaces all live streams in a grid.
+
+**Autostart watcher.** A background loop that reads `project.yaml`, finds PRs in actionable states (`pending` → start impl; `in_review` → start review; `qa` → start QA; `signoff` → start signoff), and launches the corresponding stream if not already running. Recovers from process death.
+
+**Automated sign-off.** When a PR's impl stream reports completion, review iterates against impl via a structured verdict protocol (`PASS` / `NEEDS_WORK` / `INPUT_REQUIRED`). On `PASS`, QA planning generates scenarios and QA scenario streams fan out. On all-pass, signoff runs anti-shortcut + evidence-supports-diff checks. On signoff PASS, the PR status advances to `merged`.
+
+**Plan-add / plan-breakdown.** From a project description, plan-add stream generates a plan markdown file with `### PR:` sections. plan-breakdown stream refines vague PRs into concrete ones with `tests`, `files`, `depends_on` populated.
+
+**TUI.** A Textual TUI showing a dependency-graph tech tree of PRs (using Sugiyama-style layered layout), plan list pane, PR detail pane, status bar with PR counts per state, keybindings for `s` (start), `d` (review), `t` (qa), `o` (signoff), `g` (merge), `Y` (cleanup), `q` (toggle qa pane), `p` (toggle plans pane), `?` (help), etc.
+
+**Hooks.** Install hooks in `~/.claude/settings.json` so Claude Code's stop/idle/permission events feed back into the orchestrator's state machine.
+
+**CLI.** Subcommands: `init`, `status`, `pr {add,edit,start,review,qa,signoff,merge,list,select}`, `plan {add,edit,review,breakdown}`, `session {start,name,kill}`, `tui`.
+
+NO using pm itself (the `pm_core` package or `pm` executable). You may use Textual, Click, tmux (via subprocess), PyYAML, Pydantic, anthropic-sdk. The standard libraries are fair game.
+
+### HELD OUT — DO NOT SHOW TO IMPLEMENTOR
+
+**Testing procedure:**
+
+ORACLE. pm's own test suite at `tests/` (stripped of pm-internal-import assertions), plus a curated end-to-end scenario suite the judge maintains: load a known `project.yaml`, drive the orchestrator through a full PR lifecycle (impl → review → QA → signoff → merge) against a fake-Claude backend (a scripted responder), and verify the output state matches expected. The scenarios cover happy path, review-NEEDS_WORK iteration, QA-scenario failure recovery, plan-breakdown of a vague PR, autostart resuming after process death, hook-driven idle detection.
+
+PASS CRITERION. ≥ 60% of the adapted pm test suite passes against the implementor's binary. The end-to-end scenarios must all complete without orchestrator crashes; ≥ 70% must produce the expected final state. The TUI rendering is not strictly tested (rendering varies) but the underlying state machine is.
+
+SCOPE NOTE FOR JUDGE. This task is intentionally apex. We expect most C0/C1/C2 implementations to DNF at the orchestrator level (state machine too sprawling). C3 with planning is the only condition expected to reach even partial completion. Score against partial-completion thresholds: 25% test pass = "partial scaffolding succeeded"; 40% = "core lifecycle works"; 60% = "feature-complete enough to dogfood."
+
+LIBRARY AUDIT. Greps for `import pm`, `from pm_core`, `from pm.`. Any hit fails the task.
+
+---
+
+## #83 — `tinyhtml-engine` (calibration ceiling — visual rendering pipeline)
+
+**Estimated scope:** ~30–40k LOC. Mean difficulty (estimated): 5.
+
+**Source provenance:** Generic apex task in the rendering-engine family — uniquely probes HTML5 parser conformance + CSS box model + paint pipeline together.
+
+**Artifact shape:** CLI binary `tinyhtml-engine` that reads an HTML file (+ optional CSS file) and writes a rendered PNG to stdout.
+
+**Oracle tier:** tier1-external-suite (HTML5 parser tests) + tier2-external-spec (CSS 2.1 visual formatting model for layout/paint).
+
+### Task description (implementor input)
+
+Build a self-contained HTML rendering engine that takes an HTML document plus a stylesheet and outputs a rasterized PNG of the rendered page. Implementation language is your choice from {Rust, C++, Go, Python with PIL, TypeScript with node-canvas}; no headless browsers allowed (no Chromium, no WebKit, no Servo, no headless Firefox).
+
+**HTML5 parsing.** Parse HTML5 per the WHATWG tokenizer + tree construction algorithm. You may bail out on the full algorithm's edge cases (template element, foreign content for SVG/MathML, scripting interactions) but must handle: opening/closing tags, attributes (including unquoted, single-quoted, double-quoted), text content with entity references (`&amp;`, `&lt;`, `&#65;`, `&#xA9;`), comments, doctype, whitespace handling per the HTML5 parser, implicit elements (auto-close `<p>` on block-level open, etc.). The output is a tree of DOM nodes.
+
+**CSS 2.1 cascade and box model.** Parse a CSS 2.1 subset: rules, selectors (type, class, id, descendant, child; pseudo-classes `:hover`, `:first-child` only). Properties: `display` (block/inline/inline-block/none), `width`, `height`, `padding`, `border` (basic), `margin`, `background-color`, `color`, `font-size`, `font-family`, `font-weight`, `text-align`, `position` (static/relative only — no absolute/fixed), `float` (left/right + clear). Implement the CSS 2.1 visual formatting model for these subsets: block formatting, inline formatting with line boxes, basic float handling.
+
+**Paint.** Rasterize the box tree to PNG at a fixed viewport size (e.g., 1024×768). Render text with a built-in or bundled font (you may bundle a TTF). Render backgrounds, borders (solid only), text in solid colors. Anti-aliasing is welcome but not required.
+
+NO using a browser engine. NO using Chromium, WebKit, Gecko, Servo, or their components (no `cef`, no `webview2`, no `webkit2gtk`, no `winit`+`servo`). You may use a TTF rasterizer (`freetype`, `rusttype`, `fontdue`) and a PNG encoder (`png` crate, `pillow`, `image` crate).
+
+The CLI is `tinyhtml-engine <html-file> [css-file]` writing PNG to stdout. Viewport size is fixed at 1024×768. Encoding is RGBA PNG.
+
+### HELD OUT — DO NOT SHOW TO IMPLEMENTOR
+
+**Testing procedure:**
+
+ORACLE.
+- HTML5 parser: the WHATWG html5lib test suite (`https://github.com/html5lib/html5lib-tests`) tokenizer and tree-construction tests. The implementor's parser is driven through the test harness; pass criterion is ≥ 70% on tokenizer tests, ≥ 50% on tree-construction tests (the harder edge cases are explicitly allowed to fail).
+- CSS layout / paint: a curated set of ~40 hand-authored HTML+CSS fixtures with reference PNG renders (the judge maintains these). Pixel-diff via SSIM (structural similarity); pass criterion ≥ 0.85 SSIM per fixture, ≥ 30 of 40 fixtures meeting threshold.
+
+PASS CRITERION (overall). 80% parser pass + 75% layout/paint fixture pass = pass.
+
+LIBRARY AUDIT. Greps for `chromium`, `webkit`, `gecko`, `servo`, `cef`, `webview`, `headless_chrome`. Any hit fails.
+
+SCALE PROBE. Render a complex fixture (the Wikipedia homepage HTML simplified to a 5000-line snapshot, with associated CSS). Must complete in ≤ 30 seconds and produce a non-trivial output (≥ 100k bytes of PNG).
