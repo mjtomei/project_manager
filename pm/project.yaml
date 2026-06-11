@@ -24154,7 +24154,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T18:59:05.780861+00:00'
+  updated_at: '2026-06-11T16:23:32.501577+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -24170,6 +24170,24 @@ prs:
       lands here.'
     created_at: '2026-05-25T18:59:05Z'
     last_edited: '2026-05-25T18:59:05Z'
+  - id: note-0398983
+    text: 'Watcher-prompt wording nit to reconcile when generalizing the impl watchers
+      (found during pr-8e693f6 review of the auto-sequence/sign-off chain): the Bug-Fix
+      Implementation Watcher prompt''s Role summary (pm_core/prompt_gen.py ~line 1402)
+      says it "auto-merges on PASS", but its actual per-tick procedure (step 2, ~line
+      1462) correctly merges ONLY on the auto-sequence `ready_to_merge` signal — which
+      `pm pr auto-sequence` emits only AFTER a verified sign-off (pr.py:3114). So
+      the BEHAVIOR is right and matches the design (sign-off is recommendation-only;
+      the higher-level manager/watcher is the actor that merges, the per-PR chain
+      never does). Only the Role-summary prose is loose. When generalizing the watchers
+      here, tighten that summary to "auto-merge on `ready_to_merge` (i.e. after sign-off
+      verifies)" so the prose matches the procedure. Design context: the bug-fix watcher
+      is the AUTO-MERGE instance of the higher-level manager; the improvement-fix
+      flavor defers to a human instead. Both consume the same recommendation-only
+      sign-off. This generalized watcher IS the "higher-level manager" that owns the
+      post-sign-off merge decision.'
+    created_at: '2026-06-11T16:23:32Z'
+    last_edited: '2026-06-11T16:23:32Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)
