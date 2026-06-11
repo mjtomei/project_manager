@@ -104,9 +104,13 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
                            sha: str | None, origin: str) -> None:
     """Durably record a sign-off *verdict* on the PR (``pr['signoff']``).
 
-    *origin* is ``"manual"`` (a hand-triggered ``pm pr signoff`` whose router
-    self-recorded) or ``"auto-sequence"`` (the driver recorded a transcript
-    verdict).  Recording is NOT acting — it never changes status; only
+    *origin* records who recorded the verdict — currently only the
+    ``"auto-sequence"`` driver does (it reads the router pane's transcript
+    verdict and records it so a later tick can adopt it without a re-run).
+    A manual ``pm pr signoff`` never records: its report carries the verdict
+    (in the ``report.html`` meta tag the dashboard reads), but the
+    manual-never-acts invariant means nothing is written to ``pr['signoff']``.
+    Recording is NOT acting — it never changes status; only
     :func:`apply_signoff_hop` (auto-sequence only) mutates state.
     """
     from datetime import datetime, timezone
@@ -195,8 +199,7 @@ def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                           background: bool = False,
                           transcript: str | None = None,
-                          session_name: str | None = None,
-                          origin: str = "manual") -> None:
+                          session_name: str | None = None) -> None:
     """Launch a tmux sign-off window: evidence pane + Claude review pane.
 
     Mirrors ``pm_core.cli.pr._launch_review_window``: existing-window fast
@@ -271,7 +274,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         )
 
         signoff_prompt = prompt_gen.generate_signoff_prompt(
-            data, pr_id, session_name=pm_session, origin=origin)
+            data, pr_id, session_name=pm_session)
 
         # Container cwd quirk mirrors review: Claude's cwd is /workspace inside a
         # container, so the transcript symlink + prompt file must target the

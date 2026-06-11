@@ -35,6 +35,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# Install agg (asciinema gif generator). The cast-recording recipes render a
+# terminal .cast to frames with agg, then encode VP9 .webm with ffmpeg (already
+# installed above); the .webm embeds in the sign-off HTML report via a plain
+# <video controls> element — native pause/scrub, no player library, works
+# offline. agg is the frame renderer; the intermediate GIF is discarded. Not
+# apt-installable; fetch the static release binary for the build arch
+# (asciinema/agg publishes both x86_64 and aarch64 linux-gnu).
+ARG AGG_VERSION=v1.9.0
+RUN set -eux; \
+    case "$(uname -m)" in \
+      x86_64)  agg_arch=x86_64-unknown-linux-gnu ;; \
+      aarch64) agg_arch=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported arch $(uname -m) for agg" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/asciinema/agg/releases/download/${AGG_VERSION}/agg-${agg_arch}" \
+      -o /usr/local/bin/agg; \
+    chmod +x /usr/local/bin/agg; \
+    agg --version
+
 # Nested rootless podman: replace setuid bit on newuidmap/newgidmap with
 # file capabilities. Setuid in a nested user namespace gets bounded by the
 # namespace owner; file caps are evaluated within the namespace and grant
@@ -79,7 +98,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN git --version && python3 --version && pip3 --version \
     && node --version && npm --version && curl --version | head -1 \
     && jq --version && gcc --version | head -1 \
-    && ffmpeg -version | head -1
+    && ffmpeg -version | head -1 \
+    && agg --version
 
 # --- Playwright + Chromium (browser QA recording) ---
 # Pre-install Playwright (Node) and its bundled Chromium so the walker-UI QA

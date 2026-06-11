@@ -34,7 +34,10 @@ from pm_core.loop_shared import (
     poll_for_verdict,
     VERDICT_TAIL_LINES,
 )
-from pm_core.verdict_transcript import extract_verdict_from_transcript
+from pm_core.verdict_transcript import (
+    extract_verdict_from_transcript,
+    extract_verdict_reason_from_transcript,
+)
 
 _log = configure_logger("pm.qa_loop")
 
@@ -1438,6 +1441,25 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
             state.pr_id, s.index, "verdict.md", body,
             session_tag=state.session_tag,
         )
+        # Also persist a structured per-scenario record so the sign-off
+        # agent (pr-2d5f712 + pr-8e693f6) can synthesize the BDD framing
+        # (steps / focus / verdict / reason) into report.html without
+        # re-parsing the markdown verdict.md, and the live qa_status.json
+        # lives in an ephemeral workdir. JSON is additive; older captures
+        # without it fall back to verdict.md.
+        record = {
+            "index": s.index,
+            "title": s.title,
+            "focus": s.focus,
+            "steps": s.steps,
+            "verdict": verdict,
+            "reason": reason,
+        }
+        _write_scenario_capture_file(
+            state.pr_id, s.index, "scenario.json",
+            json.dumps(record, indent=2),
+            session_tag=state.session_tag,
+        )
 
 
 def _install_artifact_files(pm_root: Path, scenario: QAScenario,
@@ -2128,6 +2150,9 @@ def _poll_tmux_verdicts(
             _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
                          scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons[scenario.index] = (
+                "worker window never created (launch failed); no verdict"
+            )
             has_failed_creation = True
     if has_failed_creation:
         _write_status_file(status_path, state.pr_id, state.scenarios,
@@ -2209,6 +2234,9 @@ def _poll_tmux_verdicts(
             _log.warning("Queued scenario %d window creation failed — "
                          "marking INPUT_REQUIRED", scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons[scenario.index] = (
+                "worker window creation failed on dequeue; no verdict"
+            )
 
     # Fill any open slots that were freed by initial workdir failures.
     # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
@@ -2263,6 +2291,9 @@ def _poll_tmux_verdicts(
                     _log.warning("Scenario %d failed verification %d times — "
                                  "marking NEEDS_WORK", scenario_idx, fails)
                     state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                    state.scenario_verdict_reasons[scenario_idx] = (
+                        f"failed verification: {reason}"
+                    )
                     state.latest_output = (
                         f"Scenario {scenario_idx} ({scenario.title}): "
                         f"NEEDS_WORK (failed verification: {reason})"
@@ -2285,8 +2316,10 @@ def _poll_tmux_verdicts(
                             f"actually execute the test steps (run commands, "
                             f"create test files, verify runtime behavior). "
                             f"Do not just read code. "
-                            f"End with a new verdict on its own line "
-                            f"(PASS / NEEDS_WORK / INPUT_REQUIRED)."
+                            f"End with `Reason: <one sentence>` on the "
+                            f"second-to-last line and a new verdict "
+                            f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
+                            f"on the last line."
                         )
                         tmux_mod.send_keys(pane_id, followup_msg)
                         # Send extra Enters to ensure the message is
@@ -2324,6 +2357,10 @@ def _poll_tmux_verdicts(
                                      "window gone, marking INPUT_REQUIRED",
                                      scenario_idx)
                         state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                        state.scenario_verdict_reasons[scenario_idx] = (
+                            "window gone during PASS verification before a "
+                            "re-checked verdict could be recorded"
+                        )
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
                             f"INPUT_REQUIRED (window gone during verification)"
@@ -2364,6 +2401,10 @@ def _poll_tmux_verdicts(
                              "(retries exhausted)",
                              scenario.index)
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons[scenario.index] = (
+                    f"worker exited before any verdict; no recovery after "
+                    f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)"
+                )
                 pending.discard(scenario.index)
                 verdicts_changed = True
                 _launch_next_queued()
@@ -2380,6 +2421,9 @@ def _poll_tmux_verdicts(
                 _log.warning("Scenario %d has no session_id — marking INPUT_REQUIRED "
                              "(hook-driven polling requires one)", scenario.index)
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons[scenario.index] = (
+                    "no session id registered; verdict could not be polled"
+                )
                 pending.discard(scenario.index)
                 verdicts_changed = True
                 _launch_next_queued()
@@ -2424,6 +2468,11 @@ def _poll_tmux_verdicts(
 
             if verdict:
                 state.scenario_verdicts[scenario.index] = verdict
+                reason = extract_verdict_reason_from_transcript(
+                    scenario.transcript_path,
+                )
+                if reason:
+                    state.scenario_verdict_reasons[scenario.index] = reason
                 pending.discard(scenario.index)
                 verdicts_changed = True
                 _log.info("Scenario %d (%s) verdict: %s",

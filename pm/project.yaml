@@ -21640,7 +21640,7 @@ prs:
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
     at action-execution time'
   branch: pm/pr-c41f029-bug-capture-originating-tmux-session-when-the-pr-a
-  status: qa
+  status: in_review
   depends_on: []
   description: 'When a TUI action (pr start/review/qa/merge, review-loop, qa-loop)
     creates or replaces a window, pm tries to move the session that initiated the
@@ -21706,6 +21706,16 @@ prs:
   reviewed_at: '2026-05-25T03:05:18.047602+00:00'
   merged_at: null
   notes:
+  - id: note-e268e4e
+    text: 'QA NEEDS_WORK: QA loop from the PR-actions popup moves the originating
+      session onto the new QA window: PASS; review-loop and in-TUI command/keybinding
+      dispatch follow the invoking session: PASS; Concurrent triggers from two grouped
+      sessions each follow their own originator: NEEDS_WORK; CLI / watcher invocations
+      with no captured session fall back to live detection: PASS; Reproduction regression
+      suite passes and malformed picker commands are inert: INPUT_REQUIRED (workdir:
+      /home/matt/.pm/workdirs/qa/pr-c41f029-ef8ddb6d7a59a2ee)'
+    created_at: '2026-05-27T12:12:41Z'
+    last_edited: '2026-05-27T12:12:41Z'
   - id: note-0a128b5
     text: 'QA INPUT_REQUIRED: QA loop from the PR-actions popup moves the originating
       session onto the new QA window: PASS; review-loop and in-TUI command/keybinding
@@ -23439,11 +23449,26 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-27T12:09:00.414265+00:00'
+  updated_at: '2026-05-30T21:47:32.932375+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-05-27T12:09:00.414265+00:00'
+  reviewed_at: '2026-05-30T21:47:32.932375+00:00'
   merged_at: null
   notes:
+  - id: note-a9626ec
+    text: 'Behavior report/dashboard shipped standalone since deps (pr-2d5f712 sign-off
+      step, pr-ff9b728 plan notes) are NOT merged. Module: pm_core/behavior_report.py.
+      CLI: `pm pr report PR_ID [--all] [--open]` + `pm pr dashboard`. API for sign-off
+      step: generate_pr_report(root, pr_id) / generate_dashboard(root). SEAM for pr-2d5f712
+      verdict router: drop captures/<pr_id>/signoff.json {verdict,recommendation,next_hop,summary}
+      and the report renders it; absent it, we derive a heuristic recommendation.
+      Durable regen source: qa_loop._persist_scenario_verdicts now also writes scenarios/<n>/scenario.json
+      (index,title,focus,steps,verdict,reason) so reports rebuild from captures after
+      the workdir is gone (verdict.md fallback for old captures). Dashboard index.html
+      at captures root; per-PR report.html co-located with evidence (relative links,
+      file://). Detect-missing rows surface `pm pr report <id>` (static = no server,
+      so regenerate = copy the command).'
+    created_at: '2026-05-25T16:40:45Z'
+    last_edited: '2026-05-25T16:40:45Z'
   - id: note-22f1fb3
     text: 'From sign-off (pr-2d5f712, note-0357619 requirement): the HTML report/dashboard
       (#226) must SURFACE the bug-PR pre-fix AND post-fix captures. Sign-off provides
@@ -23465,6 +23490,20 @@ prs:
       captures for bugs.'
     created_at: '2026-05-25T16:59:08Z'
     last_edited: '2026-05-25T16:59:08Z'
+  - id: note-b5f42a9
+    text: 'Incorporated note-e1ff391 (orchestrator add-on): report is now step-oriented,
+      evidence paired with acceptance criteria. (1) Implementation step renders bug
+      before/after — impl/pre-fix (acceptance: bug reproduces) + impl/post-fix (acceptance:
+      symptom gone), missing phase flagged not dropped; bug detection via bug_fix_prompts._is_bug_pr
+      (plan==bugs or type==bug); phase via pre-fix/post-fix DIR component. (2) QA
+      behaviors show explicit Acceptance criteria parsed from THEN/AND/sub-bullets.
+      Coordinated w/ #225 (pr-2d5f712): its sign-off window keeps a plain evidence
+      shell pane and links to THIS report as the rich surface; router reads same impl/+scenarios/<n>/
+      captures. NOTE: pr-2d5f712 does NOT write signoff.json (it records via pm pr
+      notes + emits SIGNOFF_* verdict polled by auto-sequence), so my signoff.json
+      seam stays optional/forward-only; recommendation stays derived for now.'
+    created_at: '2026-05-25T17:03:16Z'
+    last_edited: '2026-05-25T17:03:16Z'
   - id: note-f9f9525
     text: "ADOPT #225's sign-off seams (now that #225 has passed review and its branch\
       \ is current). Steps:\n1) git fetch origin && git merge origin/master (picks\
@@ -23485,6 +23524,21 @@ prs:
       \ + push."
     created_at: '2026-05-25T19:20:16Z'
     last_edited: '2026-05-25T19:20:16Z'
+  - id: note-aa05c58
+    text: 'Adopted #225 (pr-2d5f712) sign-off seams (merged). behavior_report.py now
+      reads pr[signoff]={verdict,sha,ts,origin} as authoritative recommendation source
+      via signoff.latest_signoff_verdict + decide_signoff_hop; derived heuristic is
+      fallback only (no verdict recorded). SIGNOFF_MERGE=ready_to_merge RECOMMENDATION
+      (text states sign-off never merges; plan watcher pr-ff9b728 decides). Verdict/status
+      icons reuse signoff.SIGNOFF_VERDICT_ICONS/STYLES + helpers.PR_STATUS_ICONS (sign_off
+      ✔️) so HTML matches TUI + pm pr list; Rich styles mapped to CSS via _RICH_COLOR_CSS.
+      Staleness: compare pr[signoff].sha to head_sha(workdir), annotate if stale.
+      REMOVED my speculative captures/<pr>/signoff.json seam (router records on the
+      PR, not JSON). Addresses note-f9f9525 + note-22f1fb3. Bug before/after (impl/pre-fix,post-fix)
+      already adopted earlier; sign-off hard-bounces a bug PR to impl if either capture
+      missing (note-22f1fb3) so both should exist by sign-off.'
+    created_at: '2026-05-25T19:26:54Z'
+    last_edited: '2026-05-25T19:26:54Z'
   - id: note-537e1a0
     text: 'Clarifying the description (which currently reads as if #226 builds a deterministic
       HTML renderer):
@@ -23928,6 +23982,79 @@ prs:
       AND whose GIVEN enables fake-claude, with this note as the redirect.'
     created_at: '2026-05-26T16:58:56Z'
     last_edited: '2026-05-26T16:58:56Z'
+  - id: note-1f565ff
+    text: 'QA-planner (round): rewrote pm/specs/pr-8e693f6/qa.md to match the current
+      code — it had drifted badly. Reality now: (1) `pm pr dashboard` is a BLOCKING
+      localhost HTTP server (default 127.0.0.1:8765, --port/--bind/--open), NOT a
+      static index.html generator; it rebuilds the index per `/` request and serves
+      per-PR report.html + evidence from the captures root. (2) NO report.json sidecar
+      — dashboard reads the verdict from a single `<meta name=pm-signoff-verdict content=SIGNOFF_*>`
+      tag in report.html head only. (3) Dashboard table is MINIMAL: PR / Title / Verdict
+      / Report columns — no plan grouping, no status icons, no QA-tally/loop badges,
+      no client-side filtering. (4) No `pm pr report` command; per-PR report is agent-written
+      only. (5) New `pm md-render <path>` -> body-only HTML for md evidence. Scenarios
+      30-36 planned against this reality. Per note-ce0f6d1: dashboard/robustness scenarios
+      SYNTHESIZE report.html on disk (deterministic, no agent); only the end-to-end
+      report-authoring scenario (35) runs REAL Claude (no fake-claude config).'
+    created_at: '2026-05-30T18:27:36Z'
+    last_edited: '2026-05-30T18:27:36Z'
+  - id: note-17ee935
+    text: 'QA INPUT_REQUIRED: Dashboard server serves the all-PR index, links per-PR:
+      PASS; Dashboard tolerates malformed/missing reports and escapes: PASS; Dashboard
+      command fails clearly when it cannot resolve a: INPUT_REQUIRED; Concurrent dashboard
+      requests and racing sign-off launches: PASS; Sign-off status and verdict markers
+      are consistent across: PASS; A real sign-off pass produces a self-contained
+      report the: PASS; Report-feeding plumbing — qa_loop writes scenario.json,: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-c3ed44e830d89f4a)'
+    created_at: '2026-05-30T21:30:24Z'
+    last_edited: '2026-05-30T21:30:24Z'
+  - id: note-5ce9a11
+    text: 'QA s30-36 run — consolidates the per-scenario worktree notes (s-31/33/34/35)
+      so the individual ones need not be committed. Non-obvious findings: (1) VERDICT
+      EXTRACTION: the dashboard verdict comes from behavior_report._extract_verdict,
+      a head-only regex scan of <meta name=pm-signoff-verdict content=...> (case/quote/attr-order
+      independent, content [A-Z_]+). The report is read with errors=replace (NOT strict),
+      so garbage bytes decode to replacement chars and never raise; no match yields
+      a verdict-unknown cell, but has_report stays True whenever the file exists so
+      the open-report link still renders. A PR with no report file shows verdict dash
+      plus a no-report-yet state and a copyable `pm pr signoff <id>` cell. All dynamic
+      text passes through html.escape. (2) CAPTURES PATH: the per-PR report lives
+      at captures_root()/<pr_id>/report.html where captures_root = ~/.pm/sessions/<tag>/captures/
+      (tag = session name minus the pm- prefix); run dashboard AND signoff in the
+      SAME tmux session so the tag resolves identically. (3) report.html is purely
+      an AGENT deliverable — no python fallback writes it: dashboard/robustness scenarios
+      synthesize it on disk deterministically, and only end-to-end scenario 35 runs
+      real Claude (the QA env has a real claude binary + ANTHROPIC_API_KEY). (4) DRIVING
+      SIGNOFF: needs tmux + a workdir with a diff vs base + status in {qa,sign_off};
+      bootstrap via pm pr start then set status=sign_off in project.yaml; manual pm
+      pr signoff records NO pr[signoff] (only --background auto-sequence records it
+      via signoff.py record_signoff_verdict). (5) GLYPHS: the verdict marker (for
+      example the SIGNOFF_MERGE triangle) is single-sourced via SIGNOFF_VERDICT_ICONS
+      across pr list / TUI / dashboard, but the lifecycle STATUS icon differs by surface
+      by design (CLI vs TUI) so do NOT assert it identical across CLI+TUI. (6) OBSERVATION:
+      the dashboard is a blocking foreground server, so background it in a pane and
+      observe via curl http://127.0.0.1:<port>/ -- curl over the server is the real
+      browser surface; report.html and its evidence siblings resolve as HTTP 200 and
+      the index back-link is server-resolved.'
+    created_at: '2026-05-30T21:41:13Z'
+    last_edited: '2026-05-30T21:41:13Z'
+  - id: note-517853c
+    text: 'Incidental QA-loop robustness fix (found while investigating why QA round
+      s32 came back as a bare INPUT_REQUIRED with no reason): the code-generated default
+      INPUT_REQUIRED verdicts in qa_loop._poll_tmux_verdicts previously set scenario_verdicts[idx]
+      without a matching scenario_verdict_reasons[idx], so qa_status.json carried
+      an empty verdict_reason and the failure looked indistinguishable from a deliberate
+      agent verdict. Added informative reasons (mirroring the concretizer refiner-reject
+      pattern) to all four reasonless sites: (1) worker window never created at startup;
+      (2) queued-scenario window creation failed on dequeue; (3) window gone during
+      PASS verification; (4) window exited before emitting a verdict after _SCENARIO_MAX_RETRIES
+      relaunches — this last is what hit s32 (the worker Claude process was killed/crashed
+      mid-artifact-capture; NOT an OOM — container OOMKilled=false, no mem limit set,
+      still Up; agent had already concluded "all three triples pass"). Reasons now
+      surface in qa_status.json verdict_reason and the sign-off prompt scenario block.
+      tests/: 126 qa-loop tests pass.'
+    created_at: '2026-05-30T21:45:37Z'
+    last_edited: '2026-05-30T21:45:37Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
@@ -24027,7 +24154,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T18:59:05.780861+00:00'
+  updated_at: '2026-06-11T16:31:03.347272+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -24043,6 +24170,59 @@ prs:
       lands here.'
     created_at: '2026-05-25T18:59:05Z'
     last_edited: '2026-05-25T18:59:05Z'
+  - id: note-0398983
+    text: 'Watcher-prompt wording nit to reconcile when generalizing the impl watchers
+      (found during pr-8e693f6 review of the auto-sequence/sign-off chain): the Bug-Fix
+      Implementation Watcher prompt''s Role summary (pm_core/prompt_gen.py ~line 1402)
+      says it "auto-merges on PASS", but its actual per-tick procedure (step 2, ~line
+      1462) correctly merges ONLY on the auto-sequence `ready_to_merge` signal — which
+      `pm pr auto-sequence` emits only AFTER a verified sign-off (pr.py:3114). So
+      the BEHAVIOR is right and matches the design (sign-off is recommendation-only;
+      the higher-level manager/watcher is the actor that merges, the per-PR chain
+      never does). Only the Role-summary prose is loose. When generalizing the watchers
+      here, tighten that summary to "auto-merge on `ready_to_merge` (i.e. after sign-off
+      verifies)" so the prose matches the procedure. Design context: the bug-fix watcher
+      is the AUTO-MERGE instance of the higher-level manager; the improvement-fix
+      flavor defers to a human instead. Both consume the same recommendation-only
+      sign-off. This generalized watcher IS the "higher-level manager" that owns the
+      post-sign-off merge decision.'
+    created_at: '2026-06-11T16:23:32Z'
+    last_edited: '2026-06-11T16:23:32Z'
+  - id: note-40412bf
+    text: 'Implementation hint for the LOOP SAFETY "re-loop invariant" requirement
+      already in this PR''s description (any code/content change routes back through
+      review AND qa before merge). Surfaced during pr-8e693f6 review of the existing
+      auto-sequence chain.
+
+
+      THE GAP TODAY: in `pm pr auto-sequence` (pr.py), only the SIGN-OFF step is sha-aware
+      — it stamps pr["signoff"]={verdict,sha,...} and re-runs if HEAD moved (signoff.fresh_recorded_verdict
+      / R11, pr.py:3058-3080). The earlier hops (in_review PASS -> qa, qa PASS ->
+      sign_off) advance purely on `status == ... and verdict == PASS` with NO sha
+      check. So an external commit landing on the workdir branch after review passed
+      (human push, dep-merge, a newly-filed feature, etc.) sails through to qa/sign_off
+      without ever being re-reviewed.
+
+
+      PROPOSED MECHANISM (one field, generalizes the sign-off staleness rule one phase
+      earlier): store a single `reviewed_sha` on the PR. Stamp `pr["reviewed_sha"]
+      = head_sha(workdir)` when advancing PAST review (in_review PASS -> qa). Then
+      at EVERY tick in `qa` or `sign_off`, if `head_sha(workdir) != reviewed_sha`,
+      bounce the PR to in_review and re-review (which then re-qa''s, per the invariant).
+      This catches external commits WHENEVER they land, not just on watcher restart,
+      and does not re-review when nothing changed. It is literally signoff.fresh_recorded_verdict
+      applied at the review boundary. Ties into the pr-ed10ac4 no-progress hashing
+      the description already references for the across-bounce loop guard. Note-only
+      actions must NOT move HEAD (they only touch project.yaml/plan files, not the
+      workdir branch), so they correctly do not re-trigger — consistent with the invariant''s
+      "note-only actions don''t re-trigger review" clause.
+
+
+      (Considered + rejected the simpler "always reset to review on flow restart":
+      misses commits that land while the watcher keeps running without a restart,
+      and re-reviews wastefully when nothing changed.)'
+    created_at: '2026-06-11T16:31:03Z'
+    last_edited: '2026-06-11T16:31:03Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)

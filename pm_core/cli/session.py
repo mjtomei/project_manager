@@ -907,18 +907,20 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("review", "pr review {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
     ("merge", "pr merge --resolve-window {pr_id}"),
+    ("signoff", "pr signoff {pr_id}"),
 ]
 
 # Modifier-key (z / zz) variants for actions that support fresh / loop.
 # Mirrors the TUI's z/zz chord behavior: ``z s`` = fresh start,
 # ``z d`` = fresh review, ``zz d`` = review loop,
-# ``z t`` = fresh qa, ``zz t`` = qa loop.
+# ``z t`` = fresh qa, ``zz t`` = qa loop, ``z i`` = fresh sign-off.
 _MODIFIED_ACTION_CMDS: dict[tuple[str, str], str] = {
-    ("z",  "start"):  "pr start --fresh {pr_id}",
-    ("z",  "review"): "pr review --fresh {pr_id}",
-    ("zz", "review"): "tui:review-loop start {pr_id}",
-    ("z",  "qa"):     "tui:pr qa fresh {pr_id}",
-    ("zz", "qa"):     "tui:pr qa loop {pr_id}",
+    ("z",  "start"):   "pr start --fresh {pr_id}",
+    ("z",  "review"):  "pr review --fresh {pr_id}",
+    ("zz", "review"):  "tui:review-loop start {pr_id}",
+    ("z",  "qa"):      "tui:pr qa fresh {pr_id}",
+    ("zz", "qa"):      "tui:pr qa loop {pr_id}",
+    ("z",  "signoff"): "pr signoff --fresh {pr_id}",
 }
 
 # Map action labels to tmux window name patterns.
@@ -932,13 +934,14 @@ _ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
     "review": "review-{display_id}",
     "review-loop": "review-{display_id}",  # used only via z d/zz d chord
     "qa": "qa-{display_id}",
+    "signoff": "signoff-{display_id}",
     "merge": "merge-{display_id}",
 }
 
 # Actions that get their own row in the picker.  Shortcut-only actions
 # (edit, review-loop) are reachable via their `--expect` keys but don't
 # clutter the list with an extra row.
-_LIST_ACTIONS: set[str] = {"start", "review", "qa", "merge"}
+_LIST_ACTIONS: set[str] = {"start", "review", "qa", "signoff", "merge"}
 
 # Shortcut-only actions whose runtime status should be displayed on a
 # list row alongside another action.  ``review-loop`` shares the
@@ -957,6 +960,7 @@ _STATUS_PHASE: dict[str, str] = {
     "in_progress": "start",
     "in_review": "review",
     "qa": "qa",
+    "sign_off": "signoff",
 }
 
 
@@ -979,7 +983,7 @@ def _current_window_pr_id(window_name: str) -> str | None:
     """Extract PR display ID from a window name."""
     import re
     m = re.match(
-        r'^(?:review-|merge-|qa-)?(#\d+|pr-[a-zA-Z0-9]+)(?:-s\d+)?$',
+        r'^(?:review-|merge-|qa-|signoff-)?(#\d+|pr-[a-zA-Z0-9]+)(?:-s\d+)?$',
         window_name,
     )
     return m.group(1) if m else None
@@ -991,8 +995,8 @@ def _current_window_phase(window_name: str) -> str | None:
     Drives the ●-marker in the picker so it reflects the user's current
     context rather than the PR's status.  Returns 'start' for an
     unprefixed PR window (the implementation pane), 'review' for
-    ``review-…``, 'qa' for ``qa-…``, 'merge' for ``merge-…``, or None
-    if the window isn't a PR window.
+    ``review-…``, 'qa' for ``qa-…``, 'signoff' for ``signoff-…``,
+    'merge' for ``merge-…``, or None if the window isn't a PR window.
     """
     if _current_window_pr_id(window_name) is None:
         return None
@@ -1000,6 +1004,8 @@ def _current_window_phase(window_name: str) -> str | None:
         return "review"
     if window_name.startswith("qa-"):
         return "qa"
+    if window_name.startswith("signoff-"):
+        return "signoff"
     if window_name.startswith("merge-"):
         return "merge"
     return "start"
@@ -1802,6 +1808,7 @@ def popup_picker_cmd(session: str, window_name: str):
         "d": "review",
         "t": "qa",
         "g": "merge",
+        "i": "signoff",
     }
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
@@ -1809,7 +1816,7 @@ def popup_picker_cmd(session: str, window_name: str):
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
-        chord_hint = "z s/d/t: fresh   zz d/t: loop"
+        chord_hint = "z s/d/t/i: fresh   zz d/t: loop"
         multi_pr = len(nav_pr_ids) > 1
         if multi_pr:
             nav_hint = ("h/l: prev/next PR   0: home" if home_pr

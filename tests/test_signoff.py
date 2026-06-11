@@ -364,9 +364,6 @@ class TestPrompt:
         from pm_core import prompt_gen
         data = _data("sign_off")
         p = prompt_gen.generate_signoff_prompt(data, "pr-001")
-        # router-only contract
-        assert "router only" in p.lower()
-        assert "NEVER edit code" in p or "never edit code" in p.lower()
         # all five routing verdicts are documented
         for v in SIGNOFF_VERDICTS:
             assert v in p
@@ -376,23 +373,13 @@ class TestPrompt:
         assert "scenarios/" in p
         # audit-trail note instruction
         assert "pm pr note add pr-001" in p
-        # per-step acceptance criteria (R7): each lifecycle step named
-        assert "Per-step acceptance criteria" in p
-        for token in ("Implementation (impl)", "Review", "QA"):
+        # per-step acceptance criteria (R7): folded into the routing
+        # section — each lifecycle step is named alongside its routing verdict.
+        for token in ("Implementation", "Review", "QA"):
             assert token in p
-        # verdict self-record instruction (adoption seam) — must name the real
-        # CLI command (`pm pr signoff-record`); `pm pr signoff record` would be
-        # parsed by click as `signoff` with pr_id="record" and fail.
-        assert "pm pr signoff-record pr-001" in p
+        assert "acceptance criteria" in p
         # merge is always a recommendation now (no autonomy/hardcoded gate)
         assert "never merges" in p.lower()
-
-    def test_record_instruction_carries_origin(self):
-        from pm_core import prompt_gen
-        data = _data("sign_off")
-        p = prompt_gen.generate_signoff_prompt(
-            data, "pr-001", origin="auto-sequence")
-        assert "--origin auto-sequence" in p
 
 class TestTuiKeybinding:
     def test_signoff_binding_present_and_shown(self):
