@@ -173,6 +173,19 @@ A concrete first instance, targeting H0's generational-dissipation prediction �
 
 The substrate that hosts the scenarios: configurable scenario definitions, agent harness (each agent gets the navigation primitive + editable artifacts + its own context), observable-outcome instrumentation, replay / audit, and the rendering layer that turns runs into legible artifacts for third-party inspection.
 
+**Prior-art substrates for realistic group dynamics** (all `unverified` pending audit; candidates to build on or learn from rather than reinvent):
+
+- **Generative Agents** (Park et al. 2023) — [arXiv:2304.03442](https://arxiv.org/abs/2304.03442) — the foundational believable-agents sandbox (memory / reflection / planning stack); the believability layer most later systems build on.
+- **Project Sid** (Altera, 2024) — [arXiv:2411.00114](https://arxiv.org/abs/2411.00114) — many-agent (1000+) Minecraft civilizations, PIANO architecture; the strongest existing demonstration of emergent group dynamics (role specialization, governance, norm/meme spread) at the scale this plan's Tier-1 scenarios need.
+- **OASIS** — [arXiv:2411.11581](https://arxiv.org/abs/2411.11581) — social-interaction simulation to one million agents; evidence that group-behavior realism is scale-dependent, which constrains how small our scenario populations can be while staying meaningful.
+- **AgentSociety** — [arXiv:2502.08691](https://arxiv.org/abs/2502.08691) — large-scale LLM-driven generative agents plus realistic societal environment plus a dedicated large-scale simulation engine.
+- **YuLan-OneSim** — [arXiv:2505.07581](https://arxiv.org/abs/2505.07581) — code-free scenario specification for social simulation; relevant to making Track B/C scenario authoring cheap.
+- **DynamiX** — [arXiv:2507.19929](https://arxiv.org/abs/2507.19929) — large-scale *dynamic* social networks: switching core-agent roles, continuously evolving relationships — directly relevant to modeling the spatial-correlation substrate H0 requires as an evolving graph rather than a fixed one.
+- **Sentipolis** — [arXiv:2601.18027](https://arxiv.org/abs/2601.18027) — emotion-aware agents for social simulation; a candidate implementation layer for the *denial cost* (the local evaluative machinery as modeled affect rather than a scalar parameter).
+- *TODO: resolve "odysym"* — user-named candidate substrate for realistic group dynamics; not located under that spelling (or odysim / ody-sym) as of 2026-06-11; pending link or corrected name.
+
+What Track A takes from this ecosystem: the believability stack (Generative Agents), scale engines (OASIS, AgentSociety), evolving-network dynamics (DynamiX), cheap scenario authoring (YuLan-OneSim), and the existence proof for emergent civilizational dynamics (Project Sid). What none of them provide — and what Track A must add as first-class observables — is the H0 instrumentation: per-agent measured utility flatness, two-level cost accounting (outcome difference vs. denial cost), dynastic-lineage tracking across generations, and the space-time correlation substrate as a *controlled, sweepable* variable rather than an incidental property of the environment.
+
 ### Track B — Diplomacy-style scenario library
 
 Implement the tier-1 testbeds. Start from the published research (Cicero etc.) and extend toward the litreview's predictions — does peer-treatment of negotiation partners by AI agents outperform purely instrumental treatment? Does the gap grow with horizon length?
