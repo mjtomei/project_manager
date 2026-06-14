@@ -437,14 +437,16 @@ Stratum-defining qualities are visible via mechanical metrics (lint pass rate, t
 - Medium (~20–30B): Qwen 2.5/3 Coder 30B, DeepSeek-Coder-V2 33B, or **gpt-oss-20b** (OpenAI's open weights release; coding-tuned).
 - Large open (~70B–120B): Llama-3.x 70B, Qwen 2.5/3 72B Coder, or **gpt-oss-120b** (the larger gpt-oss release; expected to be the strongest single-server open candidate).
 - Coding-specialist (separate from size tiers): **Composer 2.5** (Cursor's coding-tuned model; specifically targeted because it's optimized for the same agentic-coding-against-a-repo task the experiment measures, and because if a coding-specialist closes the gap to Claude that's a meaningful result for the rewrite story).
+- Automated router (separate from size tiers): **OpenRouter fusion model** (whichever current routing/fusion offering OpenRouter exposes at experiment time — they have shipped multiple approaches). Tests whether automated per-query routing across underlying models beats fixed single-model or our hybrid configuration. This is the closest external analog to our hybrid mode but with routing decisions made by OpenRouter rather than by pm's stream-role assignments.
 - Frontier closed: Claude (Opus default) — baseline.
 
-The selection now includes both "general open models at varying sizes" (the original Llama/Qwen tiers) and "models targeted specifically at the coding agent task" (Composer 2.5, gpt-oss). Comparing these two slices answers an extra question: when an open model is purpose-built for our task shape, does it close more of the gap than a general open model of comparable size?
+The selection now includes "general open models at varying sizes" (the original Llama/Qwen tiers), "models targeted specifically at the coding agent task" (Composer 2.5, gpt-oss), and "automated routing of queries across multiple models" (OpenRouter fusion). Three orthogonal axes — comparing these slices answers separate questions: (a) does scale matter on this task, (b) does task-specific tuning close more of the gap than general scale, and (c) does automated cross-model routing match or beat our hand-tuned hybrid configuration.
 
 **Test grid for the model dimension:**
 - The Small / Medium / Large tier choices are picked at A1 pilot time based on local-inference feasibility. Run at least one general-purpose and one coding-specialist at each tier where both exist.
 - Composer 2.5 runs at whatever size the model is delivered in; bucket it into the closest tier for reporting.
 - gpt-oss-20b → Medium tier; gpt-oss-120b → Large tier.
+- OpenRouter fusion runs in the all-open configuration only (C2-allopen, C3-allopen). The hybrid configuration doesn't apply because the fusion model already does its own routing; running it under our hybrid wrapping would double-route. Result is compared against both our hybrid (which uses Opus + open) and our all-open results to isolate "automated routing" as the variable.
 
 **Conditions** (12 per cell, plus the Claude baseline in main matrix):
 - C2-allopen-{S,M,L}: pm autostart, all streams on small/medium/large open model.
