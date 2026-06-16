@@ -12429,11 +12429,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T00:16:07.755219+00:00'
-  updated_at: '2026-05-03T00:16:07.755219+00:00'
+  updated_at: '2026-05-25T03:08:24.088691+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6fe286e
+    text: 'Interaction with pr-8d8b360 (github merge-conflict prompt fix): that PR
+      now has the merge-resolution agent fast-forward the MAIN REPO checkout itself
+      (git -C <repo_dir> merge --ff-only origin/<base>) inside the resolution window,
+      so the github *conflict-resolution* flow no longer depends on the post-MERGED
+      propagation re-attempt surviving sync. This does NOT supersede pr-6bf587b —
+      still needed to protect the variant-1/2 (pull-from-origin / pull-from-workdir)
+      propagation windows and other backends from _kill_merged_pr_windows. The two
+      are complementary; if both run, the agent ff makes the re-attempt ff-only a
+      no-op.'
+    created_at: '2026-05-25T03:08:23Z'
+    last_edited: '2026-05-25T03:08:23Z'
 - id: pr-b77702b
   plan: plan-regression
   title: Dep-merge preamble in PR start/impl prompt for unmerged deps
