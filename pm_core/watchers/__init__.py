@@ -9,6 +9,7 @@ from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 from pm_core.watchers.bug_fix_impl_watcher import BugFixImplWatcher
 from pm_core.watchers.discovery_supervisor import DiscoverySupervisorWatcher
 from pm_core.watchers.improvement_fix_impl_watcher import ImprovementFixImplWatcher
+from pm_core.watchers.session_health_watcher import SessionHealthWatcher
 
 # Registry mapping watcher type name -> class
 WATCHER_REGISTRY: dict[str, type] = {
@@ -16,6 +17,7 @@ WATCHER_REGISTRY: dict[str, type] = {
     BugFixImplWatcher.WATCHER_TYPE: BugFixImplWatcher,
     DiscoverySupervisorWatcher.WATCHER_TYPE: DiscoverySupervisorWatcher,
     ImprovementFixImplWatcher.WATCHER_TYPE: ImprovementFixImplWatcher,
+    SessionHealthWatcher.WATCHER_TYPE: SessionHealthWatcher,
 }
 
 
