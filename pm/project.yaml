@@ -21293,6 +21293,12 @@ prs:
   reviewed_at: '2026-05-21T04:43:53.080388+00:00'
   merged_at: null
   notes:
+  - id: note-8bf7bb6
+    text: 'review/context.py _target_preamble: stat file before inlining (avoid slurping
+      huge targets into memory) and catch UnicodeDecodeError so binary file targets
+      like a PDF degrade to a pointer instead of crashing run_review'
+    created_at: '2026-05-21T05:10:52Z'
+    last_edited: '2026-05-21T05:10:52Z'
   - id: note-0970084
     text: "Workflows-aware parallelization for plan-3119574's augmented cycle.\n\n\
       Unconditionally append a 'Parallel workflows' clause to the methodology prompt\
