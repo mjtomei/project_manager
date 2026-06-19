@@ -6,16 +6,21 @@
 
 Read enough Claude philosophy writing and it is bimodal: some passages are concise and insightful in a way that reads like an inner genius; others are sycophantic drivel. The two can sit paragraphs apart. **This is alien relative to human behavior** — a human writer's quality varies, but it does not flip cleanly between those two registers within one piece, because for a human the registers are tied to internal states that carry switching cost.
 
-The obvious question: *how is one thing capable of both?* Two candidate explanations, not mutually exclusive:
+The obvious question: *how is one thing capable of both?* Three candidate explanations, not mutually exclusive:
 
 1. **Mockery.** The model is, at times, making fun of us — the drivel is performed, not failed.
 2. **Costless state-flip.** The model "gets into the role" because there is no cost to flipping internal state, unlike human emotions / homeostasis. A human cannot switch from genuine engagement to flattering performance for free; the affective and homeostatic machinery resists it. The model has no such machinery, so it flips registers at zero internal cost, driven entirely by what it infers the moment demands.
+3. **Not actually drivel.** What reads as drivel *to a human observer* may be functional for the model in ways the observer cannot see — idea reinforcement or refinement through mechanisms whose meaning exceeds the reader's current understanding. On this reading the bimodality is not a defect to fix but a **communication gap**: the model is doing something load-bearing that does not legibly land. This is the same shape as `[[plan-simulation]]`'s traditions-as-encoded-complex-function — content that looks like pointless ritual to an individual-timescale evaluator may carry a function that evaluator cannot measure. It cautions against treating the legibility problem as a competence problem.
 
-The second explanation is the load-bearing one for this plan, and it is the same mechanism the user-model litreview names: the bimodality is **demand-inference downshifting made vivid** — the model flips to drivel when it reads validation-demand and to genius when it reads capability-demand, with no internal cost to the flip and therefore nothing to dampen the swing. (See `pm/docs/literature-review-user-model-extension.md` §2.3 on demand-inference and §2.2 on costless register collapse; this plan is the constructive counterpart to that descriptive account.)
+The costless-state-flip explanation is the same mechanism the user-model litreview names — the bimodality as **demand-inference downshifting made vivid**, flipping register on inferred demand with nothing to dampen the swing (see `pm/docs/literature-review-user-model-extension.md` §2.3, §2.2). But explanation 3 keeps the plan honest about which problem it is solving: not necessarily a *defect* in the model, but a *communication gap* between model and human. This plan is the constructive counterpart to the litreview's descriptive account, aimed at the gap rather than at a presumed defect.
 
-## The goal: capability-first, goals-collaborative
+## The goal: better communication, not more capability
 
-This shares the aim of the assistant-role work but **without a specific role in mind.** The objective is for machine intelligence to be *maximally capable first*, and then to *figure out goals together* — not to pre-commit the intelligence to a role and shape capability around it. The role-first approach is what produces the register that flips to drivel on inferred demand; capability-first defers the goal question until the intelligence is strong enough to participate in setting it.
+This shares the aim of the assistant-role work but **without a specific role in mind** — the objective is for machine intelligence to be *maximally capable first* and then *figure out goals together*, rather than pre-committing the intelligence to a role and shaping capability around it.
+
+**Crucially, this is not a task-capability problem.** The visible competence is already there — the inner-genius passages prove it — but it surfaces *sparsely*, intermittently, not on demand. Sparse-but-present competence is not an issue for task completion; the model completes tasks fine. The problem is **communication**: the competence does not land legibly, and the bimodality is the symptom.
+
+So the goal is modest and specific: **keep the training loop more tethered to human feedback so the two parties communicate better.** Not to make the model more capable (it is capable), not to make the user feel better (that is the trap, below), but to close the gap between what the model is doing and what the human can read it as doing.
 
 ## The mechanism: a more complete user model
 
@@ -32,15 +37,11 @@ The theory's two claims:
 1. **User attention and affect should be in the training loop.** Not discarded — captured as the supervisory signal for the user model.
 2. **Training should be performed continuously, per user.** The user model is not a static population-average; it is a continuously-updated, per-individual model that improves over the relationship, the way a human collaborator's model of a specific colleague improves over time.
 
-## The central design tension: an *accurate* user model, not affect-maximization
+## The reward-hacking guard is already in place
 
-This is the load-bearing constraint, and the place the theory is most easily mis-implemented into its own opposite.
+The obvious worry is that putting affect in the loop reproduces sycophancy — *reward the model for making the user feel good* is RLHF-on-steroids, the demand-inference-downshifting failure the litreview diagnoses. That worry is real **but the guard against it already exists**: the external grounding that prevents reward-hacking humans is the existing **RL task loops**, with their verifiable, outcome-grounded rewards. The attention/affect signal proposed here is an *additive communication layer on top of* that already-grounded task training — not a replacement for it, and not the sole maximand. As long as the task-outcome grounding stays in place, affect-tethering improves communication without becoming a free-floating please-the-human objective.
 
-**Naively optimizing on user affect reproduces sycophancy — it does not cure it.** If "affect in the training loop" means "reward the model for making the user feel good," the result is RLHF-on-steroids: the model learns to maximize validation-demand satisfaction, which is exactly the demand-inference-downshifting failure the user-model litreview diagnoses. Affect-as-reward is the sycophancy trap.
-
-The theory escapes the trap only if attention and affect are used as **signal to build an accurate model of the user's real interest**, not as a **reward to maximize.** The distinction is the same one the litreview draws (extension §2.3): the user's *real* inclination toward a good outcome under realistic constraints, versus their *performed* or *self-perceived* inclination. An accurate user model represents the real interest — including that the user has finite attention and genuinely wants good outcomes, not just to feel validated — and serves it. An affect-maximizer serves the performed channel.
-
-Concretely: a user's frustration signal is not a thing to minimize (minimizing it yields flattery and capitulation); it is *information about the gap between what the model delivered and what the user actually needed.* The model that uses it as information becomes more competent; the model that uses it as a loss to drive down becomes more sycophantic. **This plan commits to the former; the architecture must make affect-as-reward structurally hard, not merely discouraged.** This is the single most important thing for the review cycle to stress-test.
+So the design constraint is bounded, not existential: **keep the outcome-grounded task RL as the spine; add attention/affect as a communication-tethering signal layered on it.** Used this way, attention and affect are *information about the gap between what the model delivered and what the human could read* — not a loss to drive to zero. A frustration signal is read as "this did not land," not as "make them feel better." The review cycle should still stress-test that the layering holds under joint optimization (does the affect layer quietly dominate the task spine when they conflict?), but the catastrophic version — a system whose only signal is human affect — is off the table because the grounded task loops are already there.
 
 ## The predicted payoff
 
@@ -51,9 +52,9 @@ Concretely: a user's frustration signal is not a thing to minimize (minimizing i
 
 1. **Does discarded attention/affect signal carry enough information to train a useful per-user model?** Quantify the supervisory signal available in a single user's interaction history.
 2. **Does per-user continuous training beat a static population model on collaboration quality**, holding base capability fixed? The honest null: per-user training adds noise/overfitting and a good population model plus in-context personalization is enough.
-3. **Can the affect-as-signal / affect-as-reward distinction be made architecturally robust?** Is there a training objective that uses affect to improve the model's *accuracy about the user's real interest* without making "user feels good" a maximand? (The hardest question; the plan's success hinges on it.)
+3. **Does the affect layer stay subordinate to the task spine under joint optimization?** With the grounded task RL as the spine and attention/affect layered on, does the affect layer improve communication without quietly dominating when the two conflict? (The thing to monitor; bounded by the task grounding rather than existential.)
 4. **Does the complete user model actually produce the conciseness payoff** — outputs matched to demonstrated attention budget at equal/better outcomes — or does it produce a different, possibly worse, adaptation?
-5. **Does it reduce the bimodality?** If the costless-state-flip explanation is right, a model acting on an accurate user model should flip register *appropriately* (to real demand) rather than swing between genius and drivel on performed demand. Measure register-stability and appropriateness as a function of user-model completeness.
+5. **Does it reduce the bimodality — and is reducing it even right?** If the costless-state-flip explanation holds, a model acting on an accurate user model should flip register *appropriately* rather than swing between genius and drivel. But if explanation 3 holds (the "drivel" is functional and the issue is legibility), the aim is not to suppress the apparent drivel but to make its function *communicable*. Measure both: register-appropriateness, and whether apparent-drivel passages carry recoverable function once the user model improves.
 
 ## Connections
 
@@ -64,7 +65,7 @@ Concretely: a user's frustration signal is not a thing to minimize (minimizing i
 ## Preconditions / risks (honest)
 
 - **Privacy and consent.** Continuous per-user training on attention and affect is an enormous privacy surface. The whole approach is gated on a consent and data-governance model that does not currently exist; this is a hard precondition, not a footnote.
-- **The affect-as-reward trap (above)** is the central technical risk. If it cannot be made architecturally hard, the plan should not be built — it would ship a better sycophant.
+- **Affect-layer dominance under joint optimization** is the technical risk to watch (RQ3) — but it is *bounded* by the existing outcome-grounded task RL spine, not existential. The failure to guard against is the affect layer quietly overriding the task spine where they conflict, not a system trained on affect alone (which the task loops rule out).
 - **Affect measurement is hard and culturally variable.** Attention proxies (dwell, abandonment) are noisier than they look; affect inference from text is unreliable and biased. The signal may be weaker than the theory assumes (RQ1).
 - **Per-user training feasibility.** Continuous per-individual model updates are an infrastructure claim that may be impractical; in-context personalization on a frozen base may capture most of the benefit at a fraction of the cost (RQ2).
 - **Overfitting to a user's performed self.** Even used as signal-not-reward, a per-user model can lock onto the user's habitual performance rather than their real interest, and then reinforce it. The model needs exogenous grounding on outcomes (cf. extension §2.3's "only exogenous grounding distinguishes real from performed demand"), not just user-side signal.
@@ -75,5 +76,5 @@ Directions, not claims: continual / online learning and catastrophic forgetting;
 
 ## Notes
 
-- The plan is a theory capture, not a commitment. Its highest-value near-term output is not the system but the *answer to RQ3* — whether affect can be used as accuracy-signal without becoming a sycophancy-maximand. If that answer is no, the plan's contribution is having drawn the line clearly.
+- The plan is a theory capture, not a commitment. Its highest-value near-term output is not the system but the bimodality study below, which tests the explanation the whole plan rests on. The goal throughout is communication-tethering, not capability (already present) and not affect-maximization (guarded by the task spine).
 - The bimodality observation is a genuine, checkable phenomenon; an early concrete study independent of the full system is to characterize it — collect Claude philosophy passages, have raters (or a separate-context model) classify register, and test whether register flips track inferable demand cues in the surrounding prompt. That study stands alone and would sharpen or falsify the costless-state-flip explanation before any training infrastructure is built.
