@@ -57,6 +57,13 @@ _META_CONTENT_RE = re.compile(
     r'content\s*=\s*["\']([A-Z_]+)["\']', re.IGNORECASE)
 
 
+# Read only enough of the file to cover any plausible <head>. Reports embed
+# the full diff inline, so they can run to many MB — but the verdict meta tag
+# lives in <head>, near the top. Cap the read so the dashboard doesn't slurp a
+# multi-MB body per PR on every request just to read one tag.
+_HEAD_READ_CAP = 256 * 1024
+
+
 def _extract_verdict(report_path: Path) -> str:
     """Read the sign-off verdict from a ``report.html``'s `<head>` meta tag.
 
@@ -64,7 +71,8 @@ def _extract_verdict(report_path: Path) -> str:
     missing, unreadable, or has no ``pm-signoff-verdict`` meta tag.
     """
     try:
-        text = report_path.read_text(encoding="utf-8", errors="replace")
+        with report_path.open("r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read(_HEAD_READ_CAP)
     except (OSError, ValueError):
         return ""
     # Only scan the <head> region — a verbatim verdict keyword in <body>

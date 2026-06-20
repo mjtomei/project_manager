@@ -115,6 +115,23 @@ def test_verdict_meta_attribute_order_independent(tmp_path):
     assert aaa.verdict == signoff.SIGNOFF_MERGE
 
 
+def test_verdict_found_with_large_inline_body(tmp_path):
+    """Reports embed the full diff inline and can run to many MB; the verdict
+    tag still lives in <head>. The bounded head read must find it without
+    depending on the (huge) body."""
+    pdir = tmp_path / "pr-aaa"
+    pdir.mkdir(parents=True)
+    big_body = "x" * (2 * 1024 * 1024)  # 2 MB, larger than the head read cap
+    (pdir / "report.html").write_text(
+        '<!DOCTYPE html><html><head>'
+        '<meta name="pm-signoff-verdict" content="SIGNOFF_MERGE">'
+        f'<title>x</title></head><body>{big_body}</body></html>',
+        encoding="utf-8")
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.verdict == signoff.SIGNOFF_MERGE
+
+
 def test_pr_state_read_from_project_yaml(tmp_path):
     """Title comes from project.yaml — not from anything in the report."""
     _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
