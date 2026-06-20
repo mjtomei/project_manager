@@ -14,7 +14,16 @@ _log = configure_logger("pm.loop_shared")
 
 
 def get_pm_session() -> str | None:
-    """Get the pm tmux session name."""
+    """Get the pm tmux session name.
+
+    Honors ``PM_SESSION`` first so daemons (which may run outside any
+    tmux env) can still target the right session — see
+    :mod:`pm_core.loop_daemon` and ``pm pr qa --session``.
+    """
+    import os as _os
+    override = _os.environ.get("PM_SESSION")
+    if override:
+        return override
     from pm_core.cli.helpers import _get_current_pm_session
     return _get_current_pm_session()
 
