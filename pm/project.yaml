@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-30T21:47:32.932375+00:00'
+  updated_at: '2026-06-21T03:29:37.157838+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-05-30T21:47:32.932375+00:00'
   merged_at: null
@@ -24078,6 +24078,35 @@ prs:
       = <root>/transcripts/auto-sequence/<pr_id>/signoff-<pr_id>.jsonl.'
     created_at: '2026-06-20T20:52:00Z'
     last_edited: '2026-06-20T20:52:00Z'
+  - id: note-1111404
+    text: 'QA s39 (dashboard browser surface) refined & verified drivable. Playwright
+      IS available: chromium pre-installed at /opt/ms-playwright (PLAYWRIGHT_BROWSERS_PATH
+      set); just `pip install playwright` into the test venv (no `playwright install`
+      needed). Smoke-tested the real render_dashboard_html via chromium: 6 cols, mtime-desc
+      default sort, <script> title renders literal (no alert), filter+sort JS all
+      work. NOTE: filter matches row textContent, so a "MERGE" query ALSO matches
+      status="merged" rows — use a verdict-only token like "REQA" to demonstrate verdict-narrowing
+      cleanly. Report fixtures (report.html under ~/.pm/sessions/<tag>/captures/<pr_id>/)
+      are hand-created GIVEN setup (signoff agent normally writes them); set distinct
+      mtimes with os.utime/touch -d.'
+    created_at: '2026-06-21T03:21:50Z'
+    last_edited: '2026-06-21T03:21:50Z'
+  - id: note-8c613be
+    text: 'QA s39 (dashboard browser surface) PASS on real Chromium/Playwright: 6
+      columns [PR,Title,Status,Last modified,Verdict,Report], default mtime-desc sort
+      (no-report rows sink by pr_id), relative time + UTC tooltip, SIGNOFF_MERGE/REQA
+      colored markers + open-report links (200), garbage report -> "verdict unknown"
+      with working link, no-report amber "no report yet" (no signoff cmd, no copy
+      btn), XSS title escaped + no alert, live #q filter (title + REQA verdict token
+      + clear), click-to-sort Title-asc / Status-lifecycle-rank desc-then-asc / Last-modified-chronological
+      with single active indicator. SCENARIO-PREMISE QUIRK (not a defect): the muted-dash
+      empty-status degrade is unreachable via the real surface — store.load (store.py:138-140)
+      normalizes missing/invalid status to "pending" project-wide, so the status-less
+      PR renders the same ⏳ pending on the dashboard as on pm pr list / pm status.
+      Dashboard still 200, no crash; the muted-dash code is sound but only reachable
+      with validate=False.'
+    created_at: '2026-06-21T03:29:37Z'
+    last_edited: '2026-06-21T03:29:37Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
