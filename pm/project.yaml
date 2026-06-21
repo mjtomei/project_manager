@@ -14,7 +14,7 @@ project:
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
-  skip_qa: true
+  skip_qa: false
   nested_podman: true
   libyaml: false
 plans:
