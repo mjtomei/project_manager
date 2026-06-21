@@ -42,6 +42,7 @@ class _DashRow:
     pr_id: str               # pm canonical id (pr-XXXXXXX)
     gh_label: str            # "#42" or "" when no GitHub PR
     title: str
+    status: str              # PR lifecycle status from project.yaml
     has_report: bool
     report_html_rel: str | None      # path served by the dashboard server
     verdict: str             # SIGNOFF_* keyword or "" when no report / no tag
@@ -97,6 +98,7 @@ def gather_dashboard_rows(data: dict,
         gh = pr.get("gh_pr_number")
         gh_label = f"#{gh}" if gh else ""
         title = pr.get("title", pr_id)
+        status = pr.get("status", "")
         report_path = captures_root_dir / pr_id / "report.html"
         if report_path.is_file():
             verdict = _extract_verdict(report_path)
@@ -105,13 +107,13 @@ def gather_dashboard_rows(data: dict,
             except OSError:
                 mtime = None
             rows.append(_DashRow(
-                pr_id=pr_id, gh_label=gh_label, title=title,
+                pr_id=pr_id, gh_label=gh_label, title=title, status=status,
                 has_report=True, report_html_rel=f"{pr_id}/report.html",
                 verdict=verdict, mtime=mtime,
             ))
         else:
             rows.append(_DashRow(
-                pr_id=pr_id, gh_label=gh_label, title=title,
+                pr_id=pr_id, gh_label=gh_label, title=title, status=status,
                 has_report=False, report_html_rel=None, verdict="",
                 mtime=None,
             ))
@@ -174,6 +176,17 @@ def _format_mtime(mtime: float | None) -> tuple[str, str]:
     return (rel, abs_iso)
 
 
+def _status_cell_html(status: str) -> str:
+    """Render the PR-status badge using the same icon source as `pm pr list`."""
+    if not status:
+        return '<span class="muted">—</span>'
+    from pm_core.cli.helpers import PR_STATUS_ICONS
+    icon = PR_STATUS_ICONS.get(status, "")
+    label = status
+    return (f'<span class="status" data-status="{_e(status)}">'
+            f'{_e(icon)} {_e(label)}</span>')
+
+
 def _verdict_marker_html(verdict: str) -> str:
     if not verdict:
         return '<span class="muted">verdict unknown</span>'
@@ -207,6 +220,7 @@ th, td { text-align: left; padding: .5rem .6rem; vertical-align: top;
 th { background: #f6f8fa; font-size: .85rem; }
 .signoff-marker { font-weight: 600; white-space: nowrap; }
 .missing { color: #9a6700; font-weight: 600; white-space: nowrap; }
+.status { white-space: nowrap; font-size: .9rem; }
 .pr-id { white-space: nowrap; font-family: ui-monospace, SFMono-Regular,
   Menlo, monospace; font-size: .85rem; }
 .gh-id { color: #6a737d; margin-left: .35rem; }
@@ -283,14 +297,18 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
         '<thead><tr>'
         '<th data-col="0" onclick="pmSort(0)">PR</th>'
         '<th data-col="1" onclick="pmSort(1)">Title</th>'
-        '<th data-col="2" class="sort-desc" onclick="pmSort(2)">Last modified</th>'
-        '<th data-col="3" onclick="pmSort(3)">Verdict</th>'
-        '<th data-col="4" onclick="pmSort(4)">Report</th>'
-        '</tr></thead><tbody data-sort="2-desc">')
+        '<th data-col="2" onclick="pmSort(2)">Status</th>'
+        '<th data-col="3" class="sort-desc" onclick="pmSort(3)">Last modified</th>'
+        '<th data-col="4" onclick="pmSort(4)">Verdict</th>'
+        '<th data-col="5" onclick="pmSort(5)">Report</th>'
+        '</tr></thead><tbody data-sort="3-desc">')
     for r in rows:
         pr_cell = f'<span class="pr-id">{_e(r.pr_id)}</span>'
         if r.gh_label:
             pr_cell += f'<span class="gh-id">{_e(r.gh_label)}</span>'
+
+        status_cell = _status_cell_html(r.status)
+        status_sort = r.status or "~"  # empty statuses sort last in ASC
 
         rel, abs_ts = _format_mtime(r.mtime)
         mtime_sort = f'{r.mtime:.0f}' if r.mtime is not None else "0"
@@ -310,6 +328,7 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
             '<tr>'
             f'<td>{pr_cell}</td>'
             f'<td>{_e(r.title)}</td>'
+            f'<td data-sort="{_e(status_sort)}">{status_cell}</td>'
             f'<td data-sort="{mtime_sort}">{mtime_cell}</td>'
             f'<td data-sort="{_e(verdict_sort)}">{verdict_cell}</td>'
             f'<td>{report_cell}</td></tr>')

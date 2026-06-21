@@ -239,9 +239,23 @@ def test_dashboard_sortable_headers_present(tmp_path):
     # Every header is click-to-sort and the Last modified column starts
     # marked as descending (the default sort).
     assert 'onclick="pmSort(0)"' in h
-    assert 'onclick="pmSort(2)"' in h
-    assert 'class="sort-desc" onclick="pmSort(2)"' in h
-    assert 'data-sort="2-desc"' in h
+    assert 'onclick="pmSort(3)"' in h
+    assert 'class="sort-desc" onclick="pmSort(3)"' in h
+    assert 'data-sort="3-desc"' in h
+
+
+def test_dashboard_has_status_column(tmp_path):
+    """The Status column reuses PR_STATUS_ICONS (single source) and shows the
+    raw status string as the sort key so each lifecycle phase groups together."""
+    from pm_core.cli.helpers import PR_STATUS_ICONS
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(rows)
+    assert ">Status</th>" in h
+    # _data() seeds a sign_off, a pending, and a merged PR — the icons
+    # for each appear.
+    for status in ("sign_off", "pending", "merged"):
+        assert PR_STATUS_ICONS[status] in h
+        assert f'data-sort="{status}"' in h
 
 
 def test_dashboard_escapes_html_in_title(tmp_path):
