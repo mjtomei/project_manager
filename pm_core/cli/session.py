@@ -906,8 +906,8 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("edit", "tui:edit {pr_id}"),
     ("review", "pr review {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
-    ("merge", "pr merge --resolve-window {pr_id}"),
     ("signoff", "pr signoff {pr_id}"),
+    ("merge", "pr merge --resolve-window {pr_id}"),
 ]
 
 # Modifier-key (z / zz) variants for actions that support fresh / loop.
@@ -1807,8 +1807,8 @@ def popup_picker_cmd(session: str, window_name: str):
         "e": "edit",
         "d": "review",
         "t": "qa",
-        "g": "merge",
         "i": "signoff",
+        "g": "merge",
     }
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]

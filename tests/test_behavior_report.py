@@ -226,8 +226,8 @@ def test_signoff_prompt_keeps_route_step_numbered_last():
     from pm_core import prompt_gen
     p = prompt_gen.generate_signoff_prompt(
         _data(), "pr-aaa", session_name="pm-test")
-    assert "4. **Write the sign-off report" in p
-    assert "5. **Route" in p
+    assert "3. **Write the sign-off report" in p
+    assert "4. **Route" in p
 
 
 # ---------------------------------------------------------------------------

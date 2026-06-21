@@ -487,11 +487,7 @@ PR-level *comprehensive* review and a routing decision.
      inline by the scenario quality supervisor; this is the PR-level pass over
      scenarios it already vetted.)
 
-3. **Record an audit trail.** For every classification and the hop you choose,
-   add a `pm pr note add {pr_id} '...'` entry stating what you found and why you
-   routed where you did, so the recommendation is fully inspectable.
-
-4. **Write the sign-off report (deliverable).** Produce `$CAP/report.html`
+3. **Write the sign-off report (deliverable).** Produce `$CAP/report.html`
    — the human-facing BDD behaviour report. Evidence files live alongside
    it; reference them by relative path and make sure the page opens over
    `file://`.
@@ -639,7 +635,7 @@ PR-level *comprehensive* review and a routing decision.
    **Link as-is** for `.html` files (already render natively) and for
    any large binary content.
 
-5. **Route** by picking the verdict below whose definition matches what you
+4. **Route** by picking the verdict below whose definition matches what you
    found. Each verdict names the lifecycle step whose acceptance criteria it
    covers; weigh those criteria against the evidence and choose the keyword
    that fits — read every definition before deciding. End your response with
