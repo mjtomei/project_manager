@@ -1878,6 +1878,39 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
         raise SystemExit(1)
 
+    # Serialize concurrent `pm pr merge` of the SAME PR. Two invocations
+    # racing in the shared workdir would each run `git merge` / `git merge
+    # --abort` against the same index — the loser observes the winner's
+    # in-flight merge ("MERGE_HEAD exists"), aborts it (clobbering the
+    # winner), and spews a misleading "conflict" error. An exclusive per-PR
+    # lock makes the loser wait; once the winner finishes (status persisted
+    # by _finalize_merge before the lock releases) the loser re-loads state
+    # and exits cleanly with "already merged" — before the sign-off gate, so
+    # it never trips on the now-advanced HEAD. The lock is held for the whole
+    # command and released deterministically when the click context tears down
+    # (fires on every exit path — return, SystemExit, exception). Relying on fd
+    # GC instead would deadlock a second in-process merge of the same PR: an
+    # exception traceback keeps the fd alive, and a same-process second flock
+    # on the same file blocks.
+    import fcntl as _fcntl
+    from pm_core.paths import workdirs_base as _workdirs_base
+    _repo_id = data["project"].get("repo_id", "")
+    _merge_lock_path = _workdirs_base() / f".merge-{_repo_id}-{pr_id}.lock"
+    _merge_lock_f = open(_merge_lock_path, "w")
+    _fcntl.flock(_merge_lock_f.fileno(), _fcntl.LOCK_EX)
+    try:
+        click.get_current_context().call_on_close(_merge_lock_f.close)
+    except RuntimeError:
+        # No active click context (e.g. direct call) — fall back to GC release.
+        pass
+    # Re-load under the lock: a concurrent invocation may have just merged.
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    if pr_entry.get("status") == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+
     # Sign-off gate: only PRs whose recorded sign-off verdict is SIGNOFF_MERGE
     # *and* matches current HEAD may merge. Stale verdicts (recorded against an
     # earlier HEAD) don't count — a code change after sign-off invalidates it.
