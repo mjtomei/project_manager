@@ -8,11 +8,12 @@ per-scenario captures under ``scenarios/<n>/``), reading the diff vs master, and
 weighing the PR's scope.  It then emits a single **routing verdict** that pm
 executes as the PR's next hop.
 
-The router is *advisory + executor*: the Claude pane decides and records an audit
-trail of ``pm pr note`` entries (so an autonomous merge is inspectable), but it
-**never edits code** — every fix happens in impl/qa so it re-passes review+qa.
-pm reads the emitted verdict (same transcript-polling mechanic as qa-finalize)
-and performs the routed transition.
+The router is *advisory + executor*: the Claude pane decides and writes a
+self-contained ``report.html`` (the BDD behaviour report — the inspectable
+audit surface; the dashboard reads its verdict meta tag), but it **never edits
+code** — every fix happens in impl/qa so it re-passes review+qa.  pm reads the
+emitted verdict (same transcript-polling mechanic as qa-finalize) and performs
+the routed transition.
 
 Sign-off **always gates at merge**: ``SIGNOFF_MERGE`` is a *recommendation*
 (``ready_to_merge``) — sign-off never merges, and the autonomous-vs-gated merge

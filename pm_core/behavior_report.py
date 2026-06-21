@@ -291,7 +291,7 @@ function pmSort(col) {
 """
 
 
-def _regenerate_cell(pr_id: str) -> str:
+def _no_report_cell() -> str:
     return '<span class="missing">no report yet</span>'
 
 
@@ -342,7 +342,7 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
             report_cell = f'<a href="{_href(r.report_html_rel)}">open report</a>'
             verdict_cell = _verdict_marker_html(r.verdict)
         else:
-            report_cell = _regenerate_cell(r.pr_id)
+            report_cell = _no_report_cell()
             verdict_cell = '<span class="muted">—</span>'
         verdict_sort = r.verdict or "~"  # empty verdicts sort last in ASC
 
