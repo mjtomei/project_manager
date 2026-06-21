@@ -511,13 +511,17 @@ PR-level *comprehensive* review and a routing decision.
 
    Write so the reviewer can pick the report up cold and:
 
+   - see **what this PR delivers** — a short, plain-English list of every
+     behaviour or change it ships — and the **inline evidence each piece
+     works**, side by side. This is the headline; the reviewer should be
+     able to read it and watch the demos in a couple of minutes and trust
+     the result;
    - understand and trust your sign-off verdict without opening the diff;
-   - find **entry points** into anything that came up during the loop
-     (bugs that surfaced, ambiguities you ran into) so they can audit or
-     extend that thread without re-deriving it; and
-   - see **possible implications for the rest of the project** — work
-     that should land in a sibling PR, decisions that constrain future
-     PRs, assumptions that other plan items now depend on.
+   - find **entry points** into loop findings (bugs that surfaced,
+     ambiguities you ran into) and the **project-level implications**
+     they imply — sibling PRs to file, decisions that constrain future
+     PRs, assumptions other plan items now depend on. These are secondary
+     to "what shipped", not the headline.
 
    Plain English; no internal jargon (don't drop a naked function or
    file name without a one-clause "what it is"); link to the underlying
@@ -562,23 +566,45 @@ PR-level *comprehensive* review and a routing decision.
      scrolling. A single PR's report can run long; the TOC is the
      reviewer's index.
 
-   - **Top-of-page summary** — the reviewer's entry points. For each
-     item, one plain-English line + a link to the underlying evidence
-     (commit / scenario / note / diff anchor); when the item has
-     consequences past this PR, name them inline. Group by:
+   - **What this PR delivers** (the headline; this is what the reviewer
+     reads first). A short plain-English list of every user-visible
+     behaviour, interface, or code area this PR ships. Treat it like
+     release notes: if the reviewer reads only this list, they should
+     know what shipped. One line per item. Link each bullet to the
+     diff anchor / commit it lives in.
 
-     * **Bugs found and fixed by review/QA during this loop** (not part
-       of the original implementation) — say which area of the code or
-       behaviour the bug hid in, so the reviewer can decide whether
-       similar code elsewhere is suspect.
-     * **Spec ambiguities** — both resolved (what was the question, what
-       was the answer, who decided) and *unresolved* (flag clearly for
-       the reviewer to weigh in). If the resolution changes the shape of
-       work in sibling PRs or future plan items, say so.
-     * **Open questions and possible project-level implications** —
-       anything you can't answer alone, anything that should land as a
-       follow-up PR, anything that changes assumptions other plan items
-       depend on.
+   - **Demonstrations — proof each delivered behaviour works.** For
+     every bullet in "What this PR delivers" above, **embed the
+     evidence inline right there** — pair the description with the
+     proof. Prefer demonstrations the reviewer can *watch* over text
+     they have to read: screen captures (`.webm`) before logs; logs
+     only when a screen capture isn't meaningful (e.g. a pure
+     data-transformation result). If a bullet has no demonstration,
+     say so explicitly and explain why (e.g. "schema-only change,
+     verified via the type-check evidence below") — silent omission
+     reads as incomplete verification.
+
+     **If you cannot assemble this headline — you can't enumerate what
+     the PR delivered, or a delivered behaviour has no watchable
+     evidence and isn't a justifiable text-only exception — route to
+     {SIGNOFF_REQA} and leave a `pm pr note add {pr_id} '...'` entry
+     naming exactly what's missing** (which behaviour, what kind of
+     evidence you'd expect). QA owns producing demonstration evidence;
+     sign-off won't paper over an undemonstrated feature.
+
+   - **Loop findings & project-level implications** (secondary, not
+     the headline). Context the *planner* needs but the immediate
+     reviewer doesn't have to read first:
+
+     * **Bugs found and fixed during review/QA in this loop** (not
+       part of the original implementation) — with the area of code or
+       behaviour the bug hid in, so similar code elsewhere can be
+       audited.
+     * **Spec ambiguities** — resolved (question, answer, who decided)
+       and *unresolved* (flagged for human input). Call out anywhere
+       the resolution changes sibling PRs or future plan items.
+     * **Open questions, follow-up PRs to file, changed assumptions**
+       other plan items now depend on.
 
    - **Per-step sections** for Implementation, Review, and QA pairing
      evidence to each step's acceptance criteria. For a **bug PR** show
@@ -662,10 +688,14 @@ PR-level *comprehensive* review and a routing decision.
    - **{SIGNOFF_REQA}** — covers the **QA** step. Purpose of QA: prove the
      behavior works against the *real* code path. Criteria: every scenario has
      an accounted-for verdict; each exercised the real path (not a mock) with
-     captured evidence; obvious edge cases are covered; no PASS is unverified
-     (e.g. verifier-cwd). Use when a PASS is *unverified* (harness problem made
-     it untrustworthy) OR a scenario was *misframed*. Harness/QA problem, not a
-     code problem → re-run QA. Do NOT bounce to impl.
+     captured evidence; **every behaviour this PR delivers has a watchable
+     demonstration recorded**; obvious edge cases are covered; no PASS is unverified (e.g. verifier-cwd). Use when a PASS
+     is *unverified* (harness problem made it untrustworthy), a scenario was
+     *misframed*, OR you can't assemble the report's "What this PR delivers"
+     headline because demonstration evidence is missing for one or more
+     delivered behaviours. Harness/QA problem, not a code problem → re-run
+     QA. Do NOT bounce to impl. **Leave a `pm pr note add {pr_id} '...'`
+     entry naming what's missing** so QA knows exactly what to record.
    - **{SIGNOFF_BLOCKED}** — escalate / hold. Use this for genuine ambiguity
      (CONSERVATIVE BIAS: when truly unsure, BLOCK and escalate rather than
      merge), something impossible / out-of-scope (note the limitation), or an
