@@ -245,17 +245,34 @@ def test_dashboard_sortable_headers_present(tmp_path):
 
 
 def test_dashboard_has_status_column(tmp_path):
-    """The Status column reuses PR_STATUS_ICONS (single source) and shows the
-    raw status string as the sort key so each lifecycle phase groups together."""
+    """The Status column reuses PR_STATUS_ICONS (single source) and uses a
+    lifecycle rank as the sort key so the column sorts in phase order; the
+    header carries data-default-dir='desc' so the first click puts sign_off
+    at the top."""
     from pm_core.cli.helpers import PR_STATUS_ICONS
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(rows)
     assert ">Status</th>" in h
-    # _data() seeds a sign_off, a pending, and a merged PR — the icons
-    # for each appear.
+    # The header opts into a DESC-default so first click surfaces sign_off
+    # at the top of the column.
+    assert 'data-default-dir="desc" onclick="pmSort(2)">Status' in h
+    # _data() seeds sign_off, pending, merged — the icons appear.
     for status in ("sign_off", "pending", "merged"):
         assert PR_STATUS_ICONS[status] in h
-        assert f'data-sort="{status}"' in h
+    # The cell's data-sort is the rank, not the raw string. sign_off is
+    # the highest rank (6) so it lands first under DESC.
+    assert f'data-sort="{br._STATUS_RANK["sign_off"]}"' in h
+    assert f'data-sort="{br._STATUS_RANK["pending"]}"' in h
+    assert f'data-sort="{br._STATUS_RANK["merged"]}"' in h
+
+
+def test_status_rank_orders_lifecycle():
+    """Lifecycle order from terminal to active. First click sorts DESC so
+    sign_off is at the top; subsequent click goes ASC for the standard
+    closed→merged→…→sign_off reading order."""
+    r = br._STATUS_RANK
+    assert (r["closed"] < r["merged"] < r["pending"] < r["in_progress"]
+            < r["in_review"] < r["qa"] < r["sign_off"])
 
 
 def test_dashboard_escapes_html_in_title(tmp_path):

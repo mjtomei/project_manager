@@ -254,6 +254,81 @@ class TestSignoffCommand:
         mock_launch.assert_not_called()
 
 
+class TestMergeSignoffGate:
+    """`pm pr merge` refuses to merge a PR that hasn't received a fresh
+    SIGNOFF_MERGE verdict, unless --no-signoff-check is passed."""
+
+    def _invoke(self, tmp_path, pr, *, extra_args=()):
+        from click.testing import CliRunner
+        from pm_core.cli.pr import pr_merge
+        from pm_core import signoff as signoff_mod
+        data = {"project": {"active_pr": pr["id"], "base_branch": "master",
+                            "backend": "local"}, "prs": [pr]}
+        # Pretend the workdir HEAD is at a known sha so fresh_recorded_verdict
+        # can compare against the recorded one.
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch.object(signoff_mod, "head_sha", return_value="HEAD-SHA"):
+            result = CliRunner().invoke(
+                pr_merge, [pr["id"], *extra_args])
+        return result, data
+
+    def test_no_verdict_blocks_merge(self, tmp_path):
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+        result, _ = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert "no sign-off verdict recorded" in result.output
+
+    def test_non_merge_verdict_blocks_merge(self, tmp_path):
+        from pm_core.signoff import SIGNOFF_IMPL
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "signoff": {"verdict": SIGNOFF_IMPL, "sha": "HEAD-SHA",
+                          "ts": "now", "origin": "auto-sequence"}}
+        result, _ = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert SIGNOFF_IMPL in result.output
+        assert "not SIGNOFF_MERGE" in result.output
+
+    def test_stale_merge_verdict_blocks_merge(self, tmp_path):
+        """A recorded SIGNOFF_MERGE whose sha doesn't match current HEAD is
+        stale — code changed since sign-off ran — so the gate still blocks."""
+        from pm_core.signoff import SIGNOFF_MERGE
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "OLD-SHA",
+                          "ts": "earlier", "origin": "auto-sequence"}}
+        result, _ = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert "stale" in result.output
+
+    def test_fresh_merge_verdict_passes_gate(self, tmp_path):
+        """A fresh SIGNOFF_MERGE verdict gets past the gate. We don't drive
+        the actual merge here — just confirm the gate isn't what stops us."""
+        from pm_core.signoff import SIGNOFF_MERGE
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+                          "ts": "now", "origin": "auto-sequence"}}
+        result, _ = self._invoke(tmp_path, pr)
+        # Gate-specific text must NOT appear — anything else is fine
+        # (the merge will fail downstream because we haven't mocked git).
+        assert "sign-off verdict" not in result.output
+        assert "no sign-off verdict recorded" not in result.output
+
+    def test_no_signoff_check_overrides_gate(self, tmp_path):
+        """--no-signoff-check bypasses the gate entirely."""
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+        result, _ = self._invoke(tmp_path, pr, extra_args=["--no-signoff-check"])
+        # Gate text must NOT appear (the merge itself isn't mocked, so
+        # the command will exit non-zero downstream, but the gate is
+        # what we're testing).
+        assert "no sign-off verdict recorded" not in result.output
+        assert "sign-off verdict" not in result.output
+
+
 def _patch_locked_update_fn(data: dict):
     def _side(root, fn):
         fn(data)

@@ -1843,8 +1843,12 @@ def _resolve_window_default() -> bool:
               help="Open a companion shell pane alongside the merge resolution window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
               help="Skip workdir merge, go straight to pull into repo dir (step 2)")
+@click.option("--no-signoff-check", is_flag=True, default=False,
+              help="Skip the sign-off MERGE verdict gate (use only when "
+                   "merging without a sign-off pass — e.g. propagation, recovery).")
 def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
-             transcript: str | None, companion: bool, propagation_only: bool):
+             transcript: str | None, companion: bool, propagation_only: bool,
+             no_signoff_check: bool):
     """Merge a PR's branch into the base branch.
 
     For local/vanilla backends, performs a local git merge.
@@ -1873,6 +1877,39 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
         raise SystemExit(1)
+
+    # Sign-off gate: only PRs whose recorded sign-off verdict is SIGNOFF_MERGE
+    # *and* matches current HEAD may merge. Stale verdicts (recorded against an
+    # earlier HEAD) don't count — a code change after sign-off invalidates it.
+    # --no-signoff-check overrides for propagation / recovery flows.
+    if not no_signoff_check and not propagation_only:
+        from pm_core.signoff import (
+            SIGNOFF_MERGE, head_sha, fresh_recorded_verdict,
+            latest_signoff_verdict,
+        )
+        workdir = pr_entry.get("workdir")
+        current_sha = head_sha(workdir) if workdir else None
+        fresh = fresh_recorded_verdict(pr_entry, current_sha)
+        if fresh != SIGNOFF_MERGE:
+            recorded = latest_signoff_verdict(pr_entry)
+            if recorded == SIGNOFF_MERGE and fresh is None:
+                click.echo(
+                    f"PR {pr_id}: recorded sign-off verdict {recorded} is "
+                    f"stale (HEAD moved since). Re-run `pm pr signoff "
+                    f"{pr_id}` against current HEAD, or pass "
+                    f"--no-signoff-check to override.", err=True)
+            elif recorded:
+                click.echo(
+                    f"PR {pr_id}: sign-off verdict is {recorded}, not "
+                    f"{SIGNOFF_MERGE}. Run `pm pr signoff {pr_id}` to "
+                    f"re-route, or pass --no-signoff-check to override.",
+                    err=True)
+            else:
+                click.echo(
+                    f"PR {pr_id}: no sign-off verdict recorded yet. Run "
+                    f"`pm pr signoff {pr_id}` first, or pass "
+                    f"--no-signoff-check to override.", err=True)
+            raise SystemExit(1)
 
     backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")

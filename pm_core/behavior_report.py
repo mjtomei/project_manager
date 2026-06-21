@@ -176,6 +176,21 @@ def _format_mtime(mtime: float | None) -> tuple[str, str]:
     return (rel, abs_iso)
 
 
+# PR-status sort rank — lifecycle order, ascending. Status column sorts
+# descending by default so a click on the header surfaces sign_off at the
+# top (then qa, in_review, ...). The terminal statuses sit at the bottom
+# of an ascending sort because they're inert.
+_STATUS_RANK = {
+    "closed": 0,
+    "merged": 1,
+    "pending": 2,
+    "in_progress": 3,
+    "in_review": 4,
+    "qa": 5,
+    "sign_off": 6,
+}
+
+
 def _status_cell_html(status: str) -> str:
     """Render the PR-status badge using the same icon source as `pm pr list`."""
     if not status:
@@ -246,7 +261,12 @@ function pmSort(col) {
   var tbody = document.querySelector('tbody');
   var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
   var cur = tbody.dataset.sort || '';
-  var asc = cur !== col + '-asc';
+  var th = document.querySelector('th[data-col="' + col + '"]');
+  var defaultDir = (th && th.dataset.defaultDir) || 'asc';
+  var asc;
+  if (cur === col + '-asc') asc = false;
+  else if (cur === col + '-desc') asc = true;
+  else asc = (defaultDir === 'asc');  // first click uses the column's default
   function keyFor(r) {
     var c = r.children[col];
     var v = c.dataset.sort;
@@ -297,7 +317,7 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
         '<thead><tr>'
         '<th data-col="0" onclick="pmSort(0)">PR</th>'
         '<th data-col="1" onclick="pmSort(1)">Title</th>'
-        '<th data-col="2" onclick="pmSort(2)">Status</th>'
+        '<th data-col="2" data-default-dir="desc" onclick="pmSort(2)">Status</th>'
         '<th data-col="3" class="sort-desc" onclick="pmSort(3)">Last modified</th>'
         '<th data-col="4" onclick="pmSort(4)">Verdict</th>'
         '<th data-col="5" onclick="pmSort(5)">Report</th>'
@@ -308,7 +328,9 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
             pr_cell += f'<span class="gh-id">{_e(r.gh_label)}</span>'
 
         status_cell = _status_cell_html(r.status)
-        status_sort = r.status or "~"  # empty statuses sort last in ASC
+        # Numeric rank so the column sorts in lifecycle order. Unknown /
+        # empty statuses fall to -1 (off the end of the lifecycle).
+        status_sort = str(_STATUS_RANK.get(r.status, -1))
 
         rel, abs_ts = _format_mtime(r.mtime)
         mtime_sort = f'{r.mtime:.0f}' if r.mtime is not None else "0"
