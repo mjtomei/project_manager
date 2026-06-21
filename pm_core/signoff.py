@@ -22,14 +22,12 @@ ambiguity the router emits ``SIGNOFF_BLOCKED`` and escalates rather than merging
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
 from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core import prompt_gen
-from pm_core.shell import shell_quote
 from pm_core.cli.helpers import (
     _log,
     _pr_display_id,
@@ -150,68 +148,23 @@ def latest_signoff_verdict(pr: dict) -> str | None:
     return ((pr or {}).get("signoff") or {}).get("verdict") or None
 
 
-def _evidence_pane_cmd(pr_id: str, display_id: str, title: str,
-                       workdir: str, diff_ref: str) -> str:
-    """Build the left ("evidence") pane shell command.
-
-    Prints the cross-stage evidence surface the sign-off reviewer reads:
-    the per-PR captures tree (impl/ + scenarios/), the QA status, and the
-    full diff vs the base branch.  This is the plain shell stand-in for the
-    richer behavior-report surface (pr-8e693f6); the rich surface links from
-    here once it lands.
-
-    All user-controlled values (title) are ``shell_quote``'d — an apostrophe
-    in a PR title would otherwise break the surrounding shell quoting and
-    kill the pane before tmux registers the window.
-    """
-    shell = os.environ.get("SHELL", "/bin/bash")
-    header = f"=== Sign-off: {display_id} — {title} ==="
-    return (
-        f"cd {shell_quote(workdir)}"
-        f" && {{ echo {shell_quote(header)}"
-        f" && echo ''"
-        f" && echo '--- Cross-stage evidence (captures) ---'"
-        # `|| true` keeps a non-zero `pm qa captures-path` (e.g. the project
-        # isn't resolvable from the workdir clone) from aborting the whole
-        # `&&` chain — without it the pane would blank after this header
-        # instead of degrading to "(no captures found)" + the QA/diff sections.
-        f" && CAP=\"$(pm qa captures-path {shell_quote(pr_id)} 2>/dev/null || true)\""
-        f" && if [ -n \"$CAP\" ] && [ -d \"$CAP\" ] &&"
-        f"        [ -n \"$(find \"$CAP\" -mindepth 1 -maxdepth 3 -print -quit)\" ]; then"
-        f"      find \"$CAP\" -mindepth 1 -maxdepth 3 -print | sort;"
-        f"    else echo '(no captures found)'; fi"
-        f" && echo ''"
-        f" && echo '--- QA status (latest qa_status.json) ---'"
-        f" && QS=$(ls -t \"$HOME\"/.pm/workdirs/qa/{shell_quote(pr_id)}-*/qa_status.json"
-        f"        2>/dev/null | head -1)"
-        f" && if [ -n \"$QS\" ]; then cat \"$QS\"; else echo '(no qa status)'; fi"
-        f" && echo ''"
-        f" && echo '--- Change summary ---'"
-        f" && {{ git --no-pager diff --stat {diff_ref}...HEAD || true; }}"
-        f" && echo ''"
-        f" && echo '--- Full diff ---'"
-        f" && {{ git --no-pager diff {diff_ref}...HEAD || true; }}"
-        f"; }} | if command -v less >/dev/null 2>&1; then less -R; else cat; fi"
-        f"; exec {shell}"
-    )
-
-
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                           background: bool = False,
                           transcript: str | None = None,
                           session_name: str | None = None) -> None:
-    """Launch a tmux sign-off window: evidence pane + Claude review pane.
+    """Launch a tmux sign-off window with a single Claude router pane.
 
     Mirrors ``pm_core.cli.pr._launch_review_window``: existing-window fast
     path (switch unless ``fresh``), capture watching sessions on a fresh
-    rebuild, two panes registered in the pane registry with roles
-    ``signoff-evidence`` / ``signoff-claude``, switch watching sessions onto
-    the new window, then rebalance.
+    rebuild, register the pane in the pane registry with role
+    ``signoff-claude``, then switch watching sessions onto the new window.
+    The sign-off agent reads captures and writes ``report.html`` itself —
+    no separate shell evidence pane is needed.
     """
     # Imported lazily to avoid a heavy import cycle at module import time.
     from pm_core.cli.helpers import _get_pm_session, _ensure_workdir, state_root
     from pm_core.claude_launcher import build_claude_shell_cmd
-    from pm_core import pane_layout, pane_registry, home_window
+    from pm_core import pane_registry, home_window
     from pm_core.model_config import (
         resolve_model_and_provider, get_pr_model_override,
     )
@@ -235,9 +188,6 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             return
 
     pr_id = pr_entry["id"]
-    display_id = _pr_display_id(pr_entry)
-    title = pr_entry.get("title", "")
-    base_branch = data.get("project", {}).get("base_branch", "master")
     window_name = signoff_window_name(pr_entry)
 
     # Serialize concurrent launches of THIS PR's sign-off window.  There is
@@ -318,54 +268,27 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # moves exactly the sessions that were watching the old window.
         switch = not background
 
-        backend_name = data.get("project", {}).get("backend", "vanilla")
-        diff_ref = base_branch if backend_name == "local" else f"origin/{base_branch}"
-
         try:
-            evidence_cmd = _evidence_pane_cmd(
-                pr_id, display_id, title, workdir, diff_ref)
-            evidence_pane = tmux_mod.new_window_get_pane(
-                pm_session, window_name, evidence_cmd, workdir, switch=switch)
-            if not evidence_pane:
+            # Single pane — the sign-off agent reads captures and writes
+            # report.html directly; the report carries the diff inline and
+            # the dashboard surfaces it. No separate evidence pane needed.
+            claude_pane = tmux_mod.new_window_get_pane(
+                pm_session, window_name, claude_cmd, workdir, switch=switch)
+            if not claude_pane:
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
                 return
 
-            # Pin the router pane's cwd to the workdir explicitly.  Without
-            # ``cwd`` the split inherits the evidence pane's *current* cwd, but
-            # that pane was created moments earlier and tmux's
-            # ``pane_current_path`` has not yet settled to the ``-c`` workdir —
-            # so the split races and lands the router in the session's default
-            # dir (the umbrella project) instead of the PR workdir.  That makes
-            # Claude review the wrong repo and breaks the transcript symlink
-            # (which is computed from the workdir cwd), forcing the
-            # verdict-detection band-aid to recover by session-id glob.  The
-            # host workdir always exists (container mode bind-mounts it), so it
-            # is the correct cwd for the host pane in both modes.
-            claude_pane = tmux_mod.split_pane_at(
-                evidence_pane, "h", claude_cmd, background=True, cwd=workdir)
-
             wid_result = subprocess.run(
-                tmux_mod._tmux_cmd("display", "-t", evidence_pane, "-p",
+                tmux_mod._tmux_cmd("display", "-t", claude_pane, "-p",
                                    "#{window_id}"),
                 capture_output=True, text=True,
             )
             signoff_win_id = wid_result.stdout.strip()
             if signoff_win_id:
                 tmux_mod.set_shared_window_size(pm_session, signoff_win_id)
-                # Register the evidence pane FIRST so it keeps order 0: the
-                # pane registry's order drives pane_layout.rebalance, which
-                # reorders the tmux panes left-to-right by registry order.
-                # Registering claude first would put it at order 0 and rebalance
-                # would swap it to the LEFT, inverting the intended layout
-                # (evidence LEFT, Claude router RIGHT — see impl spec + the
-                # split_pane_at(evidence_pane, "h", ...) above).
-                panes = []
-                if evidence_pane:
-                    panes.append((evidence_pane, "signoff-evidence", "evidence-shell"))
-                panes.append((claude_pane, "signoff-claude", claude_cmd))
-                for pane_id, role, cmd in panes:
-                    pane_registry.register_pane(
-                        pm_session, signoff_win_id, pane_id, role, cmd)
+                pane_registry.register_pane(
+                    pm_session, signoff_win_id, claude_pane,
+                    "signoff-claude", claude_cmd)
 
                 def _reset_user_modified(raw):
                     d = pane_registry._prepare_registry_data(raw, pm_session)
@@ -379,9 +302,6 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             if sessions_on_signoff:
                 tmux_mod.switch_sessions_to_window(
                     sessions_on_signoff, pm_session, window_name)
-
-            if signoff_win_id:
-                pane_layout.rebalance(pm_session, signoff_win_id)
 
             print(f"Opened sign-off window '{window_name}'")
         except Exception as e:

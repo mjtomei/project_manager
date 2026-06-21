@@ -264,15 +264,15 @@ def _patch_locked_update_fn(data: dict):
 class TestWindowLaunchWorkdir:
     """The router (Claude) pane must start in the PR workdir.
 
-    Regression for the QA finding: ``split_pane_at`` was called without
-    ``cwd``, so tmux started the split in the server's start dir (the main
-    repo on the base branch) instead of the workdir.  The sign-off prompt
-    tells the router to run ``git diff {base}...HEAD`` and
-    ``pm qa captures-path`` — both cwd-relative — so a wrong cwd makes the
-    router review an empty diff / the wrong captures.
+    Regression for the original QA finding: the router pane was created
+    in the wrong cwd (the server's start dir, not the workdir clone), so
+    ``git diff {base}...HEAD`` and ``pm qa captures-path`` — both
+    cwd-relative — saw the wrong repo. The sign-off window is now a
+    single pane, so we assert ``new_window_get_pane`` is called with the
+    workdir directly.
     """
 
-    def test_router_pane_split_uses_workdir_cwd(self, tmp_path):
+    def test_window_creation_uses_workdir_cwd(self, tmp_path):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -287,7 +287,7 @@ class TestWindowLaunchWorkdir:
         pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
                     "branch": "pm/pr-001", "workdir": str(workdir)}
 
-        split = MagicMock(return_value="cl_pane")
+        new_window = MagicMock(return_value="cl_pane")
         with ExitStack() as es:
             p = es.enter_context
             p(patch("pm_core.tmux.has_tmux", return_value=True))
@@ -305,8 +305,9 @@ class TestWindowLaunchWorkdir:
                     return_value="PROMPT"))
             p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
                     return_value="CLAUDE_CMD"))
-            p(patch("pm_core.tmux.new_window_get_pane", return_value="ev_pane"))
-            p(patch("pm_core.tmux.split_pane_at", split))
+            p(patch("pm_core.container.is_container_mode_enabled",
+                    return_value=False))
+            p(patch("pm_core.tmux.new_window_get_pane", new_window))
             p(patch("pm_core.tmux.set_shared_window_size"))
             p(patch("pm_core.tmux.switch_sessions_to_window"))
             p(patch("pm_core.signoff.subprocess.run",
@@ -314,14 +315,15 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.pane_registry.register_pane"))
             p(patch("pm_core.pane_registry.registry_path", return_value=tmp_path))
             p(patch("pm_core.pane_registry.locked_read_modify_write"))
-            p(patch("pm_core.pane_layout.rebalance"))
 
             signoff.launch_signoff_window(
                 data, pr_entry, background=True, transcript=None)
 
-        split.assert_called_once()
-        # the split that creates the router pane must pin cwd to the workdir
-        assert split.call_args.kwargs.get("cwd") == str(workdir)
+        new_window.assert_called_once()
+        # new_window_get_pane(session, name, cmd, workdir, switch=...): workdir is 4th positional arg.
+        args = new_window.call_args
+        # workdir lands as the 4th positional argument.
+        assert args.args[3] == str(workdir)
 
 
 class TestLatestQaStatusPath:
