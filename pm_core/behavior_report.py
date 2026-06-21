@@ -206,7 +206,7 @@ th, td { text-align: left; padding: .5rem .6rem; vertical-align: top;
   border-bottom: 1px solid rgba(127,127,127,.25); }
 th { background: #f6f8fa; font-size: .85rem; }
 .signoff-marker { font-weight: 600; white-space: nowrap; }
-.missing { color: #9a6700; font-weight: 600; }
+.missing { color: #9a6700; font-weight: 600; white-space: nowrap; }
 .pr-id { white-space: nowrap; font-family: ui-monospace, SFMono-Regular,
   Menlo, monospace; font-size: .85rem; }
 .gh-id { color: #6a737d; margin-left: .35rem; }
