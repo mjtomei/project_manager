@@ -1887,8 +1887,9 @@ def popup_picker_cmd(session: str, window_name: str):
             elif chord_state == "z":
                 header = (f"z — fresh start for {current_pr}\n"
                           f"s=fresh impl   d=fresh review   t=fresh qa   "
-                          f"z again for loop   q/Esc cancels")
-                expect = ["z", "s", "d", "t"]
+                          f"i=fresh signoff   z again for loop   "
+                          f"q/Esc cancels")
+                expect = ["z", "s", "d", "t", "i"]
             else:  # 'zz'
                 header = (f"zz — loop for {current_pr}\n"
                           f"d=review-loop   t=qa-loop   "
@@ -1955,7 +1956,7 @@ def popup_picker_cmd(session: str, window_name: str):
             if chord_state == "z" and pressed_key == "z":
                 chord_state = "zz"
                 continue
-            if pressed_key in ("s", "d", "t"):
+            if pressed_key in ("s", "d", "t", "i"):
                 action_label = _SHORTCUT_KEYS.get(pressed_key)
                 if action_label and _picked_pr is not None:
                     template = _MODIFIED_ACTION_CMDS.get(

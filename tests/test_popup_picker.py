@@ -48,6 +48,33 @@ class TestActionsForStatus:
         rl_cmd = _MODIFIED_ACTION_CMDS[("zz", "review")]
         assert rl_cmd.startswith("tui:review-loop")
 
+    def test_z_i_chord_routes_fresh_signoff(self):
+        """`z i` in the popup picker must launch a fresh sign-off run."""
+        from pm_core.cli.session import _MODIFIED_ACTION_CMDS
+        signoff_cmd = _MODIFIED_ACTION_CMDS[("z", "signoff")]
+        assert signoff_cmd == "pr signoff --fresh {pr_id}"
+
+    def test_z_chord_expect_list_includes_signoff_key(self):
+        """Regression: the inline ``expect`` list for the z chord state must
+        include the single-key shortcut for every z-keyed action — otherwise
+        fzf swallows the keypress and the chord silently no-ops (the bug that
+        existed when sign-off was added to _MODIFIED_ACTION_CMDS but not to
+        the chord's expect list)."""
+        import inspect
+        from pm_core.cli import session
+        # Grab the picker function's source and assert the z chord block
+        # accepts 'i' (the single-key shortcut for 'signoff').
+        src = inspect.getsource(session)
+        # The z chord state block lists its accepted keys inline.
+        marker = 'elif chord_state == "z":'
+        idx = src.find(marker)
+        assert idx >= 0, "z chord state block not found"
+        # Look in the next ~600 chars for the expect-list assignment.
+        block = src[idx:idx + 600]
+        assert '"i"' in block, (
+            "z chord state must include 'i' in its expect list; without it "
+            "`z i` (fresh sign-off) is silently swallowed by fzf")
+
     def test_start_is_direct_cli(self):
         actions = _actions_for_status("in_progress")
         start_cmd = next(cmd for label, cmd in actions if label == "start")
