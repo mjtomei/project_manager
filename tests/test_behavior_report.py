@@ -179,11 +179,14 @@ def test_dashboard_links_to_agent_written_report(tmp_path):
     assert 'href="pr-aaa/report.html"' in h
 
 
-def test_dashboard_missing_state_uses_pm_pr_signoff(tmp_path):
+def test_dashboard_missing_state_shows_no_report_yet(tmp_path):
     rows = br.gather_dashboard_rows(_data(), tmp_path)
     h = br.render_dashboard_html(rows)
     assert "no report yet" in h
-    assert "pm pr signoff pr-bbb" in h
+    # The cell intentionally carries no regenerate command / copy button —
+    # the dashboard is read-only chrome, not a launcher.
+    assert "pm pr signoff" not in h
+    assert "pmCopy" not in h
 
 
 def test_dashboard_renders_verdict_icon(tmp_path):
@@ -336,7 +339,7 @@ def test_server_root_renders_dashboard_dynamically(tmp_path):
         body = urllib.request.urlopen(f"{base}/").read().decode()
         assert 'href="pr-aaa/report.html"' in body
         assert signoff.SIGNOFF_VERDICT_ICONS[signoff.SIGNOFF_MERGE] in body
-        assert "pm pr signoff pr-bbb" in body  # empty-state cell for pr-bbb
+        assert "no report yet" in body  # empty-state cell for pr-bbb
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -362,11 +365,11 @@ def test_server_picks_up_new_report_without_restart(tmp_path):
     httpd, base = _spin_up(pm_root, caps)
     try:
         body_before = urllib.request.urlopen(f"{base}/").read().decode()
-        assert "pm pr signoff pr-aaa" in body_before  # no report yet
+        assert "no report yet" in body_before
+        assert 'href="pr-aaa/report.html"' not in body_before
         _write_report(caps, "pr-aaa", signoff.SIGNOFF_MERGE)
         body_after = urllib.request.urlopen(f"{base}/").read().decode()
         assert 'href="pr-aaa/report.html"' in body_after
-        assert "pm pr signoff pr-aaa" not in body_after
     finally:
         httpd.shutdown()
         httpd.server_close()

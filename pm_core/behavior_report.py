@@ -207,11 +207,6 @@ th, td { text-align: left; padding: .5rem .6rem; vertical-align: top;
 th { background: #f6f8fa; font-size: .85rem; }
 .signoff-marker { font-weight: 600; white-space: nowrap; }
 .missing { color: #9a6700; font-weight: 600; }
-.regen code { background: rgba(127,127,127,.18); padding: .1rem .4rem;
-  border-radius: 4px; font-size: .85rem; }
-button.copy { font-size: .78rem; padding: .15rem .5rem; cursor: pointer;
-  border: 1px solid rgba(127,127,127,.5); border-radius: 5px;
-  background: transparent; color: inherit; }
 .pr-id { white-space: nowrap; font-family: ui-monospace, SFMono-Regular,
   Menlo, monospace; font-size: .85rem; }
 .gh-id { color: #6a737d; margin-left: .35rem; }
@@ -227,11 +222,6 @@ th.sort-desc::after { content: " ▼"; font-size: .75em; color: #6a737d; }
 """
 
 _DASH_JS = """
-function pmCopy(cmd, btn) {
-  if (navigator.clipboard) navigator.clipboard.writeText(cmd);
-  var old = btn.textContent; btn.textContent = 'copied';
-  setTimeout(function(){ btn.textContent = old; }, 1200);
-}
 function pmFilter() {
   var q = (document.getElementById('q').value || '').toLowerCase();
   document.querySelectorAll('tbody tr').forEach(function(r) {
@@ -268,12 +258,7 @@ function pmSort(col) {
 
 
 def _regenerate_cell(pr_id: str) -> str:
-    cmd = f"pm pr signoff {pr_id}"
-    return (
-        f'<span class="missing">no report yet</span> &middot; '
-        f'<span class="regen"><code>{_e(cmd)}</code> '
-        f'<button class="copy" type="button" '
-        f'onclick="pmCopy(\'{_e(cmd)}\', this)">copy</button></span>')
+    return '<span class="missing">no report yet</span>'
 
 
 def render_dashboard_html(rows: list[_DashRow]) -> str:
