@@ -24702,3 +24702,200 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-8e60aa9
+  plan: bugs
+  title: 'Bug: auto-sequence does not advance PRs whose review/qa loop already emitted
+    a terminal verdict'
+  branch: pm/pr-8e60aa9-bug-auto-sequence-does-not-advance-prs-whose-revie
+  status: pending
+  depends_on: []
+  description: '## Repro
+
+
+    1. Run a review loop for a PR (e.g. `pm pr review` / TUI `d`). The loop completes
+    and emits **PASS** in the Claude pane.
+
+    2. The PR status stays `in_review` (no auto-start was armed at the time the verdict
+    fired, so the live `_on_loop_complete` PASS handler took the gated-out branch).
+
+    3. Arm auto-sequence on the PR via the TUI (`O`) or restart the TUI so the loop
+    state is restored from the breadcrumb.
+
+    4. **Expected**: auto-sequence observes the terminal verdict and advances the
+    PR (in_review → qa, kicking off QA).
+
+    5. **Actual**: auto-sequence does nothing. The PR sits in `in_review` forever
+    even though the review already PASSed.
+
+
+    ## Diagnosis
+
+
+    `pm_core/tui/auto_start.check_and_start` only knows how to **start missing phases**
+    — it has no pass that observes terminal verdicts on loops that are already registered.
+    Specifically:
+
+
+    * `_auto_start_review_loops` walks PRs in `in_review` and, for each, **skips**
+    when `app._review_loops[pr_id]` is truthy. The finished loop is registered (with
+    `running=False, latest_verdict="PASS"`), so it gets skipped — but nothing else
+    looks at `.latest_verdict` to drive the transition.
+
+    * `_auto_start_qa_loops` has the symmetric gap for `qa`-status PRs.
+
+
+    The live PR-transition handler exists (`pm_core/tui/review_loop_ui.py:447`, `_maybe_start_qa(app,
+    pr_id)` on PASS) but only fires from the `_on_loop_complete` event. Once that
+    event has fired (or, after a restart, was never re-fired), there''s no second
+    observer.
+
+
+    So:
+
+
+    * **Live**: arming auto-sequence on a PR whose review/qa loop **already finished**
+    never advances.
+
+    * **Restart**: TUI restart restores `_review_loops`/`_qa_loops` from the breadcrumb
+    (`auto_start.consume_breadcrumb`, ~line 189–229) but never re-triggers the per-verdict
+    transition.
+
+
+    Both manifestations come from the same missing observer.
+
+
+    ## Fix
+
+
+    Add an **"observe terminal verdicts"** pass to `check_and_start`, run **before**
+    the existing "start missing phases" passes:
+
+
+    * New helper `_advance_observed_terminal_verdicts(app)` in `pm_core/tui/auto_start.py`
+    (~30–50 lines).
+
+    * For each entry in `app._review_loops` where the PR''s current status still matches
+    the loop''s phase and `state.latest_verdict` is terminal, call the existing handler:
+    PASS → `_maybe_start_qa`, NEEDS_WORK → relaunch a fresh review iteration (mirror
+    the live handler''s path), INPUT_REQUIRED → flag/pause.
+
+    * Symmetric pass over `app._qa_loops` driving the existing qa_loop_ui completion
+    path.
+
+    * Idempotency is free if we gate on PR status: once a handler flips status, a
+    re-observe is a no-op.
+
+
+    Then both manifestations are fixed by the same path.
+
+
+    ## Acceptance criteria
+
+
+    * Live-arm-after-pass: review loop emits PASS → status flips to `in_review` →
+    user arms auto-sequence later → PR advances to `qa` and QA starts.
+
+    * Same for `qa` → `sign_off` advancement when qa loop has already emitted PASS.
+
+    * NEEDS_WORK on a registered-but-finished loop relaunches a fresh review iteration.
+
+    * TUI restart with a breadcrumb that carries a PASS-terminated loop advances the
+    PR on restore.
+
+    * No double-fire: if the live handler already advanced the PR (status no longer
+    matches the loop''s phase), the observer no-ops.
+
+
+    ## Tests
+
+
+    Cover the matrix: { PASS, NEEDS_WORK, INPUT_REQUIRED } × { review, qa } × { live-arm-after-pass,
+    breadcrumb-restore }. ~6–10 tests, ~100–150 lines.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-06-20T19:14:31.312840+00:00'
+  updated_at: '2026-06-20T19:14:31.312840+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dd4f07b
+  plan: bugs
+  title: 'Bug: skip_qa=true bypasses sign-off entirely, not just QA'
+  branch: pm/pr-dd4f07b-bug-skip-qa-true-bypasses-sign-off-entirely-not-ju
+  status: pending
+  depends_on: []
+  description: "## Repro\n\n1. Project has `skip_qa: true` set in `project.yaml`.\n\
+    2. A PR's review loop emits **PASS**.\n3. The live `_on_loop_complete` handler\
+    \ fires `_maybe_start_qa` (`pm_core/tui/review_loop_ui.py:447`).\n4. `_maybe_start_qa`\
+    \ hits the skip_qa branch (`pm_core/tui/review_loop_ui.py:521`):\n   ```python\n\
+    \   if project.get(\"skip_qa\"):\n       _log.info(\"auto_qa: skip_qa enabled,\
+    \ skipping QA for %s\", pr_id)\n       app.log_message(...)\n       _maybe_auto_merge(app,\
+    \ pr_id)\n       return\n   ```\n5. **Expected**: PR transitions to `sign_off`,\
+    \ sign-off router runs, emits `SIGNOFF_MERGE`/etc., and that drives the merge\
+    \ decision (respecting `stop_before_merge` when auto-sequence is armed).\n6. **Actual**:\
+    \ PR transitions straight to merge consideration with no sign-off. The entire\
+    \ `sign_off` lifecycle step is bypassed.\n\n## Why this is wrong\n\n`skip_qa`\
+    \ means \"this project doesn't have testable runtime behavior to verify in QA\"\
+    \ — it should NOT mean \"skip the sign-off code-review router too.\" Sign-off\
+    \ is independent of QA evidence: it's a PR-level code-quality + scope + routing\
+    \ decision. For projects with `skip_qa=true`, sign-off is *more* valuable because\
+    \ it's the only formal gate before merge.\n\nThe current behavior also breaks\
+    \ auto-sequence on such projects: `stop_before_merge` works (the chain halts at\
+    \ \"ready to merge\"), but the sign-off report — which is supposed to be the artifact\
+    \ a reviewer reads to trust the merge — is never produced.\n\n## Fix\n\nIn `pm_core/tui/review_loop_ui.py:_maybe_start_qa`,\
+    \ when `skip_qa` is true after a review PASS, **transition to `sign_off` instead\
+    \ of going straight to `_maybe_auto_merge`**. The sign-off path already handles\
+    \ its own verdict-driven merge gate; once the sign-off router emits `SIGNOFF_MERGE`,\
+    \ the existing auto-sequence sign-off-→ready_to_merge handler picks up (and still\
+    \ respects `stop_before_merge`).\n\nRoughly:\n\n```python\nproject = (app._data\
+    \ or {}).get(\"project\") or {}\nif project.get(\"skip_qa\"):\n    _log.info(\"\
+    auto_qa: skip_qa enabled, skipping straight to sign_off for %s\", pr_id)\n   \
+    \ app.log_message(f\"Auto-start: {pr_id} review passed, skipping QA → sign_off\
+    \ (skip_qa enabled)\")\n    _maybe_start_signoff(app, pr_id)  # new helper, mirrors\
+    \ _maybe_start_qa\n    return\n```\n\nThe sign-off report can note that QA was\
+    \ skipped per project setting (the agent has access to `data.get(\"project\",\
+    \ {}).get(\"skip_qa\")`).\n\n## Acceptance criteria\n\n* `skip_qa=true` + review\
+    \ PASS → PR status flips to `sign_off`, sign-off window launches.\n* Sign-off\
+    \ router emits `SIGNOFF_MERGE` → existing auto-sequence path advances to \"ready\
+    \ to merge\" (respecting `stop_before_merge` if armed).\n* Sign-off router emits\
+    \ any other verdict (e.g. `SIGNOFF_REVIEW`, `SIGNOFF_IMPL`) → existing routing\
+    \ applies (back to review/impl), QA is still skipped on the way back through.\n\
+    * `skip_qa=false` (or unset) — unchanged behavior.\n\n## Tests\n\n* `skip_qa=true`\
+    \ + review PASS routes through sign_off, not auto-merge.\n* `skip_qa=true` + sign-off\
+    \ `SIGNOFF_MERGE` + auto-sequence armed → \"ready to merge\" (no merge).\n* `skip_qa=true`\
+    \ + sign-off `SIGNOFF_IMPL` → returns to impl (no QA on the loop)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-06-20T20:26:14.099710+00:00'
+  updated_at: '2026-06-21T01:45:28.863711+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-6ad079a
+    text: 'Scope extension — second variant of the same bug: `_on_qa_complete` in
+      pm_core/tui/qa_loop_ui.py:524-534 (non-self-driving path) and the self-driving
+      path at lines 504-509 both go straight to `_trigger_auto_merge` on QA PASS when
+      auto-start is enabled. Sign-off is bypassed in the QA-PASS-then-merge path too,
+      not just the skip_qa path.
+
+
+      So the fix should cover both code sites:
+
+      1. `_maybe_start_qa` (skip_qa branch) → route to sign_off, not merge.
+
+      2. `_on_qa_complete` (QA PASS branch, self-driving and legacy paths) → flip
+      status to sign_off and launch sign-off, not auto-merge.
+
+
+      The merge gate then lives downstream of sign_off, driven by SIGNOFF_MERGE verdict
+      + stop_before_merge respect.
+
+
+      Affects pr-8e693f6 directly — observed: PR''s QA passed under auto-sequence,
+      but sign_off never auto-launched; had to launch it manually.'
+    created_at: '2026-06-21T01:45:28Z'
+    last_edited: '2026-06-21T01:45:28Z'
