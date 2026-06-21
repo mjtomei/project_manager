@@ -141,6 +141,33 @@ def test_pr_state_read_from_project_yaml(tmp_path):
     assert aaa.title == "Add thing"
 
 
+def test_row_carries_report_mtime(tmp_path):
+    """The dashboard row picks up the report.html mtime for the last-modified
+    column and for default sorting."""
+    p = _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
+    expected = p.stat().st_mtime
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    aaa = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert aaa.mtime is not None
+    assert abs(aaa.mtime - expected) < 0.001
+    # PRs without a report have no mtime.
+    bbb = next(r for r in rows if r.pr_id == "pr-bbb")
+    assert bbb.mtime is None
+
+
+def test_rows_default_sort_by_mtime_desc(tmp_path):
+    """Default sort: most-recently-modified report first, then by pr_id for
+    stable ordering of empty-state rows."""
+    import os
+    older = _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
+    newer = _write_report(tmp_path, "pr-ccc", signoff.SIGNOFF_REQA)
+    # Force a measurable mtime gap so we don't depend on filesystem granularity.
+    os.utime(older, (older.stat().st_atime, newer.stat().st_mtime - 10))
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    # Newer report comes first; then older; then empty-state pr-bbb at the end.
+    assert [r.pr_id for r in rows] == ["pr-ccc", "pr-aaa", "pr-bbb"]
+
+
 # ---------------------------------------------------------------------------
 # Dashboard rendering
 # ---------------------------------------------------------------------------
@@ -180,6 +207,38 @@ def test_dashboard_shows_gh_id_when_present(tmp_path):
     h = br.render_dashboard_html(rows)
     assert "pr-aaa" in h
     assert "#42" in h
+
+
+def test_dashboard_has_last_modified_column(tmp_path):
+    """The Last modified column shows a relative time and carries the unix
+    mtime as the sort key."""
+    p = _write_report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE)
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(rows)
+    assert "Last modified" in h
+    # Relative-time renderings ("Xs/m/h/d ago") for a just-written file.
+    assert " ago" in h
+    # The cell carries the raw mtime as data-sort so the JS sorter has a
+    # numeric key independent of the displayed relative text.
+    assert f'data-sort="{round(p.stat().st_mtime)}"' in h
+
+
+def test_dashboard_filter_input_present(tmp_path):
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(rows)
+    assert 'id="q"' in h
+    assert "pmFilter()" in h
+
+
+def test_dashboard_sortable_headers_present(tmp_path):
+    rows = br.gather_dashboard_rows(_data(), tmp_path)
+    h = br.render_dashboard_html(rows)
+    # Every header is click-to-sort and the Last modified column starts
+    # marked as descending (the default sort).
+    assert 'onclick="pmSort(0)"' in h
+    assert 'onclick="pmSort(2)"' in h
+    assert 'class="sort-desc" onclick="pmSort(2)"' in h
+    assert 'data-sort="2-desc"' in h
 
 
 def test_dashboard_escapes_html_in_title(tmp_path):
