@@ -45,6 +45,26 @@ def test_fenced_code_extension_preserves_block():
     assert "    return x + 1" in out
 
 
+def test_raw_html_in_source_is_escaped_not_passed_through():
+    # Evidence ``.md`` is untrusted data; a raw ``<script>`` written as inline
+    # prose must be escaped (shown as literal text), never embedded as live
+    # markup that would execute once the fragment lands in ``report.html``.
+    src = "A line with <script>alert(1)</script> in prose.\n"
+    out = markdown_render.render_markdown_body(src)
+    assert "<script>" not in out
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out
+
+
+def test_raw_html_escaped_while_extension_markup_preserved():
+    # Escaping raw source HTML must not double-escape extension-generated
+    # markup: the fenced block keeps its real <pre><code> tags while the
+    # ``<script>`` inside it stays escaped content.
+    src = "```html\n<script>alert(1)</script>\n```\n"
+    out = markdown_render.render_markdown_body(src)
+    assert '<pre><code class="language-html">' in out
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out
+
+
 def test_output_is_body_only_no_shell():
     # The fragment is embedded inside another HTML document (report.html),
     # so it must NOT carry a top-level doctype/html/head/body/style wrapper.

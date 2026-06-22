@@ -21,11 +21,23 @@ def render_markdown_body(md_text: str) -> str:
     inside another document (e.g. ``report.html``), so it carries no
     ``<html>``/``<head>``/``<style>`` wrapper — styling is inherited from
     the embedding page.
+
+    Evidence ``.md`` files are untrusted data (QA scenario notes, captured
+    logs), so raw HTML the source happens to contain is escaped rather than
+    passed through: an evidence file with a literal ``<script>`` tag must show
+    that tag as visible text, never execute it once the fragment is embedded
+    in ``report.html``. We do this surgically — deregistering python-markdown's
+    raw-HTML preprocessor (``html_block``) and inline pattern (``html``) so the
+    serializer escapes any ``<``/``>`` it would otherwise have stashed verbatim
+    — which leaves the extension-generated markup (tables, fenced code) intact.
     """
     import markdown
 
-    return markdown.markdown(
-        md_text,
+    md = markdown.Markdown(
         extensions=["tables", "fenced_code"],
         output_format="html5",
     )
+    # Treat raw HTML in the source as literal text (escaped), not markup.
+    md.preprocessors.deregister("html_block")
+    md.inlinePatterns.deregister("html")
+    return md.convert(md_text)
