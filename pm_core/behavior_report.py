@@ -318,7 +318,7 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
         '<th data-col="0" onclick="pmSort(0)">PR</th>'
         '<th data-col="1" onclick="pmSort(1)">Title</th>'
         '<th data-col="2" data-default-dir="desc" onclick="pmSort(2)">Status</th>'
-        '<th data-col="3" class="sort-desc" onclick="pmSort(3)">Last modified</th>'
+        '<th data-col="3" data-default-dir="desc" class="sort-desc" onclick="pmSort(3)">Last modified</th>'
         '<th data-col="4" onclick="pmSort(4)">Verdict</th>'
         '<th data-col="5" onclick="pmSort(5)">Report</th>'
         '</tr></thead><tbody data-sort="3-desc">')

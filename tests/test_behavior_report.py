@@ -242,6 +242,10 @@ def test_dashboard_sortable_headers_present(tmp_path):
     assert 'onclick="pmSort(3)"' in h
     assert 'class="sort-desc" onclick="pmSort(3)"' in h
     assert 'data-sort="3-desc"' in h
+    # Last modified opts into a DESC default too, so returning to this column
+    # after sorting another one still puts the most-recent report first
+    # (matches the initial load) rather than oldest-first.
+    assert 'data-col="3" data-default-dir="desc"' in h
 
 
 def test_dashboard_has_status_column(tmp_path):
