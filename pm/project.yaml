@@ -23408,7 +23408,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: in_review
+  status: qa
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -24168,6 +24168,24 @@ prs:
       QA env so no recording.webm produced (cast+transcript only); see /pm-captures/scenarios/45/.'
     created_at: '2026-06-22T20:37:56Z'
     last_edited: '2026-06-22T20:37:56Z'
+  - id: note-f194718
+    text: 'QA pr-8e693f6 FINALIZE: overall verdict PASS. Final pass ran s47 (pm md-render
+      neutralizes dangerous URI schemes — javascript:/data:/vbscript: plus whitespace/control-char
+      obfuscation — in markdown link/image syntax while safe relative/https/mailto
+      links stay live; raw inline-prose HTML escaped to literal text; nonexistent
+      path->exit2, empty file->exit0): PASS, and s48 (dashboard click-to-sort: Title
+      first-click ASC, Status/Last-modified default DESC via data-default-dir; single
+      sort-indicator invariant holds; re-clicking Last modified returns most-recent-first
+      per the re-sort fix; pure-JS filter, no reload): PASS. The earlier router NEEDS_WORK
+      on md-render XSS was resolved during the review loop (5ca00c32 raw-HTML escape,
+      37d8de22 javascript:/data: URI sanitization). Spec qa.md rewritten to match the
+      shipped six-column dashboard (PR/Title/Status/Last modified/Verdict/Report,
+      client-side filter + click-to-sort, no report.json sidecar, no pm pr report
+      command). SETUP GOTCHA (s48 env): Playwright/Chromium not pre-installed — pip
+      install playwright && playwright install chromium works; headless chromium in
+      this nested container needs launch args=["--no-sandbox"].'
+    created_at: '2026-06-22T21:26:02Z'
+    last_edited: '2026-06-22T21:26:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression

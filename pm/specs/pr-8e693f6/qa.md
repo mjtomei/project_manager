@@ -5,12 +5,22 @@
 > dashboard is now a **localhost HTTP server**, not a static `index.html`
 > generator; there is **no `report.json` sidecar** (the dashboard reads the
 > sign-off verdict from a single `<meta name="pm-signoff-verdict">` tag in each
-> agent-written `report.html`); the dashboard table is **minimal** (one flat
-> table, columns PR / Title / Verdict / Report — no plan grouping, no status
-> icons, no QA-tally / loop badges, no client-side filtering); and there is **no
+> agent-written `report.html`); and there is **no
 > `pm pr report` command** (the per-PR report is purely agent-written). A new
 > `pm md-render` CLI renders `.md` evidence to body-only HTML for the agent to
 > embed. This spec has been brought in line with that code.
+>
+> **2026-06-22 update.** The dashboard table grew during the review loop and is
+> no longer the bare PR/Title/Verdict/Report list. It is now one flat table with
+> **six columns — PR / Title / Status / Last modified / Verdict / Report** —
+> where Status carries the `pm pr list` lifecycle icon read fresh from
+> `project.yaml` per request, Last modified shows the report's mtime as a
+> relative string (with a UTC tooltip) and is the **default sort key
+> (descending)**. The page also has a **client-side text filter** (matches PR
+> id / title / verdict / status over row text) and **click-to-sort headers**
+> (each column has a default direction; Status sorts by lifecycle rank, Last
+> modified sorts chronologically, re-clicking toggles direction). All dynamic
+> text is HTML-escaped. No plan grouping, no QA-tally / loop badges, no sidecar.
 
 ## Scope under test (user-visible surfaces this PR owns)
 
@@ -19,13 +29,20 @@
    index HTML on every `/` request from `project.yaml` + the captures dir, and
    serves each PR's agent-written `report.html` and its evidence siblings
    straight from `~/.pm/sessions/<tag>/captures/<pr_id>/`.
-2. The dashboard index page itself: one row per PR with the pm id (+ GitHub
-   `#N` when present), the title (read fresh from `project.yaml`), the sign-off
-   verdict marker (icon + keyword, extracted from `report.html`'s head meta
-   tag), and either an "open report" link (when `report.html` exists) or a
-   "no report yet" empty state with a copyable `pm pr signoff <id>` command.
-3. Liveness: a `report.html` that appears (or changes) after the server starts
-   shows up on the next page load with no restart and no regeneration step.
+2. The dashboard index page itself: one row per PR (six columns — PR / Title /
+   Status / Last modified / Verdict / Report) showing the pm id (+ GitHub `#N`
+   when present), the title and lifecycle status icon (read fresh from
+   `project.yaml`), the report's last-modified time, the sign-off verdict marker
+   (icon + keyword, extracted from `report.html`'s head meta tag), and either an
+   "open report" link (when `report.html` exists) or a "no report yet" empty
+   state. A client-side filter box and click-to-sort headers operate on the
+   rendered rows. (The earlier empty-state copyable `pm pr signoff <id>` command
+   was dropped during the review loop — the empty cell now just reads
+   "no report yet".)
+3. Liveness: a `report.html` (or a `project.yaml` state change) that appears
+   after the server starts shows up on the next page load with no restart and
+   no regeneration step — both the captures dir and `project.yaml` are re-read
+   per `/` request.
 4. The sign-off prompt extension (the prompt `pm pr signoff` shows the agent) —
    it directs the agent to write `$CAP/report.html` as a deliverable, names the
    `<meta name="pm-signoff-verdict" content="SIGNOFF_*">` dashboard contract,
@@ -57,8 +74,9 @@ window's internal layout and the actual agent authoring the report.
   port) and fetches `/` over HTTP.
 * THEN the server prints the served URL and stays in the foreground; the page
   is a complete HTML document with one row per PR from `project.yaml`, each row
-  showing the pm id, the title, a "verdict unknown / —" cell, and a "no report
-  yet" empty state containing a copyable `pm pr signoff <pr_id>` command.
+  showing the pm id, the title, the lifecycle status icon, a "—" last-modified
+  cell, a "verdict unknown / —" cell, and a "no report yet" empty state in the
+  Report column.
 
 ### R2 — Dashboard surfaces an agent-written report
 * GIVEN a PR whose captures dir contains a `report.html` with a
@@ -110,11 +128,20 @@ window's internal layout and the actual agent authoring the report.
   review; `SIGNOFF_REQA` re-runs QA; `SIGNOFF_BLOCKED` pauses. A bounce retires
   the stale sign-off window + transcript so re-entry runs a fresh router.
 
-### R7 — `pm md-render` renders markdown evidence
+### R7 — `pm md-render` renders markdown evidence (and neutralizes untrusted content)
 * GIVEN a `.md` file with a heading, a table, and a fenced code block.
 * WHEN the user runs `pm md-render <path>`.
 * THEN stdout is a body-only HTML fragment (no `<html>`/`<head>`/`<style>`
   shell) with the table and fenced code rendered as HTML.
+* Evidence `.md` is untrusted, so the fragment is safe to embed in
+  `report.html`: raw HTML in the source is escaped to literal text (a
+  `<script>` shows, never runs — fixed at commit `5ca00c32`), and
+  markdown-native links/images with a dangerous URI scheme
+  (`[x](javascript:…)` / `![](javascript:…)` / `data:` / `vbscript:`,
+  including whitespace/control-char obfuscation like `java\tscript:`) are
+  neutralized — an unsafe `a@href` is blanked to `#` and an unsafe `img@src`
+  is dropped, while safe schemes (`http`/`https`/`mailto`/`file`/relative
+  paths/fragments) are preserved (fixed at commit `37d8de22`).
 
 ### R8 — qa_loop persists `scenario.json` alongside `verdict.md`
 * GIVEN a PR run through a QA loop (driven by fake-Claude) producing scenario
@@ -157,6 +184,18 @@ window's internal layout and the actual agent authoring the report.
 * THEN the second exits with a friendly one-line message (cannot bind, is a
   dashboard already running, suggests `--port 0` / another port) — no
   traceback. Re-running with `--port 0` succeeds on a free port.
+
+### E5 — Dashboard click-to-sort directions and re-sort default
+* GIVEN a dashboard page with several report-bearing rows (distinct mtimes,
+  mixed lifecycle statuses) loaded in a browser.
+* WHEN the user clicks the sort headers in sequence — Title, then Status, then
+  back to Last modified.
+* THEN each column's first click uses its declared default direction (Title
+  asc, Status desc by lifecycle rank, Last modified desc); re-clicking a column
+  toggles direction; only one column shows the active ▲/▼ indicator at a time;
+  and returning to the Last-modified column re-sorts most-recent-report-first
+  (its `data-default-dir="desc"` default), NOT oldest-first — the regression
+  fixed at commit `40585195`.
 
 ## Concurrency (shared resources the diff touches)
 
