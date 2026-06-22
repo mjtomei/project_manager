@@ -65,6 +65,55 @@ def test_raw_html_escaped_while_extension_markup_preserved():
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out
 
 
+def test_markdown_link_with_javascript_scheme_is_neutralized():
+    # python-markdown does not sanitize URI schemes, so a markdown-native link
+    # (distinct from raw <a> HTML, which is escaped) with a ``javascript:``
+    # target would otherwise emit a live, clickable XSS vector once the
+    # fragment is embedded in ``report.html``.
+    src = "[click me](javascript:alert(1))\n"
+    out = markdown_render.render_markdown_body(src)
+    assert "javascript:" not in out
+    assert 'href="#"' in out
+    assert ">click me</a>" in out
+
+
+def test_markdown_image_with_dangerous_scheme_drops_src():
+    src = "![x](javascript:alert(1))\n"
+    out = markdown_render.render_markdown_body(src)
+    assert "javascript:" not in out
+    assert "src=" not in out  # the dangerous src is dropped entirely
+
+
+def test_dangerous_schemes_with_whitespace_obfuscation_neutralized():
+    # Browsers ignore embedded control chars / case when parsing the scheme,
+    # so the sanitizer must too.
+    for src in (
+        "[a](JavaScript:alert(1))\n",
+        "[b](java\tscript:alert(1))\n",
+        "[c](vbscript:msgbox(1))\n",
+        "[d](data:text/html,<script>alert(1)</script>)\n",
+    ):
+        out = markdown_render.render_markdown_body(src)
+        assert "alert" not in out or 'href="#"' in out
+        assert "javascript:" not in out.lower()
+        assert "vbscript:" not in out.lower()
+        assert "data:text/html" not in out.lower()
+
+
+def test_safe_links_and_relative_paths_preserved():
+    # The sanitizer must not break legitimate evidence links: relative paths,
+    # fragments, and allowlisted schemes pass through unchanged.
+    cases = {
+        "[ok](https://example.com)\n": 'href="https://example.com"',
+        "[rel](../scenarios/3/notes.md)\n": 'href="../scenarios/3/notes.md"',
+        "[frag](#section)\n": 'href="#section"',
+        "[mail](mailto:x@y.com)\n": 'href="mailto:x@y.com"',
+        "![shot](images/shot.png)\n": 'src="images/shot.png"',
+    }
+    for src, expected in cases.items():
+        assert expected in markdown_render.render_markdown_body(src)
+
+
 def test_output_is_body_only_no_shell():
     # The fragment is embedded inside another HTML document (report.html),
     # so it must NOT carry a top-level doctype/html/head/body/style wrapper.
