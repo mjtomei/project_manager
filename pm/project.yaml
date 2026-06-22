@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-06-21T04:05:27.430328+00:00'
+  updated_at: '2026-06-22T20:37:56.969669+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-05-30T21:47:32.932375+00:00'
   merged_at: null
@@ -24139,6 +24139,35 @@ prs:
       not the gate) by adding --no-signoff-check; full file 60/60 green.'
     created_at: '2026-06-21T04:05:27Z'
     last_edited: '2026-06-21T04:05:27Z'
+  - id: note-13590c8
+    text: 'QA scenario 45 (pm md-render) refiner finding: render_markdown_body uses
+      python-markdown with NO HTML sanitization/safe_mode. A raw <script>alert(1)</script>
+      written as INLINE PROSE passes through UNESCAPED (verified: output contains
+      literal <script>alert(1)</script>), so it WILL execute when the fragment is
+      embedded in report.html — an XSS vector for evidence embedding. Only the fenced-code-block
+      and inline-code forms get escaped (&lt;script&gt;). The scenario''s security
+      triple is expected to surface this as NEEDS_WORK unless a sanitizer (e.g. bleach/nh3
+      or markdown safe handling) is added. Empty-file -> '''' exit 0; nonexistent
+      path -> click.Path(exists=True) gives "Error: Invalid value for ''MD_PATH''..."
+      exit 2, no traceback.'
+    created_at: '2026-06-22T20:29:34Z'
+    last_edited: '2026-06-22T20:29:34Z'
+  - id: note-9e0e240
+    text: 'QA s45 (pm md-render) NEEDS_WORK->fixed (commit 5ca00c32). Triple1 (body-only
+      fragment: table/thead/tbody, <pre><code class=language-python>, <h1>, <a href>,
+      NO html/head/style/body wrapper) PASS; Triple3 (nonexistent->exit2 click "File
+      ... does not exist" no traceback; empty file->exit0 empty stdout) PASS. Triple2
+      XSS: pre-fix the renderer passed raw source HTML through verbatim, so <script>alert(1)</script>
+      written as INLINE PROSE executed when embedded (verified headless Chromium:
+      ALERTS FIRED:[1]) per note-13590c8 — fenced/inline-code and stray &<> were already
+      escaped. FIX: render_markdown_body now deregisters python-markdown html_block
+      preprocessor + html inline pattern so raw source HTML is escaped to literal
+      text while extension markup (tables/fenced) stays intact; post-fix ALERTS FIRED:[]
+      and evidence.md still renders. Dependency-light (no bleach/nh3 added). 8/8 tests
+      in test_markdown_render.py green (added 2). CAPTURE GAP: agg not installed in
+      QA env so no recording.webm produced (cast+transcript only); see /pm-captures/scenarios/45/.'
+    created_at: '2026-06-22T20:37:56Z'
+    last_edited: '2026-06-22T20:37:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
