@@ -184,6 +184,17 @@ This plan and the reasoning-move taxonomy (`literature-review-user-model-extensi
 
 **Phase 2 (deferred — small note, per the prompt-first-then-compile staging law).** Once the orchestration version demonstrates lift, the proven recall operator can be *compiled* into the substrate: a learned `<recall>` cue token + attention over a memory store (the RETRO / kNN-LM / memorizing-transformers line), with the utility judge distilled into a cheap learned salience function. The `RecallEmission` + `RecallUsed` traces this plan produces **are** that training signal — pm is both the Phase-1 harness and the Phase-2 data flywheel. The endpoint converges on the philosophy companion's claim that memory already *is* context-biased regeneration from weights. Gated on Phase 1 results: coarse gates fine. Not in scope here.
 
+## Related work / prior art (to evaluate)
+
+**FERNme** — an open-source "brain-like memory layer for AI agents" (surfaced via a Reddit post; repo + license to confirm). A **fuzzy Hebbian graph** where memories strengthen, decay, and spread activation; claims zero-LLM memory writes, persistent user/project memory, forgetting + preference drift, mood/communication-style memory, outcome-based learning, and user-owned editable memory. *Not yet evaluated for use.*
+
+- **What it is, in our terms:** a concrete, runnable implementation of the **ACT-R-style activation model** the cognitive-primitives research flagged as the near-exact match for this plan's salience/recall (base-level decay + spreading activation ≈ our composite's recency/frequency/spreading factors). Useful as a **baseline to reproduce/beat** per [[learn-dont-hardcode-borrowed-models]] — *a reference target, not a blueprint to adopt*: it hard-codes the salience mechanism where we want ours learned and grounded.
+- **What might transfer:** cheap **zero-LLM writes** (a Hebbian graph update is mechanical) as an efficiency idea for the write side; the per-user/project, editable, decaying alignments (which we already want).
+- **Cautions / where it conflicts with our framing:**
+  - **Hebbian usage-strengthening is the attention-as-usefulness trap in mechanism form** — "strengthen what gets used" rewards the frequently-accessed over the subtle-but-profound, the exact pathology [[usefulness-is-grounded-outcome-not-attention]] forbids. We would need **grounded-outcome** strengthening, not raw usage (their "outcome-based learning" *might* address this — to check).
+  - It is a **store/fetch substrate**; this plan is **reconstructive arrival + involuntary injection** ("memory is reconstructive, not fetch-from-store"). FERNme could at most be a candidate *backend* for activation-scoring over a pool — not a replacement for the sifting / gating / injection this plan owns.
+- **To do if we pursue it:** confirm the repo + license; check whether "outcome-based learning" is grounded or usage-based; benchmark its activation against our composite as the ACT-R baseline.
+
 ## Notes / philosophy
 
 - **Noise is the adversary; the design is gates.** A memory system that injects too much destroys the conscious stream's coherence and burns its context. Every primitive here is in service of *earned, legible* surfacing.
