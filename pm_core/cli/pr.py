@@ -1417,11 +1417,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
               help="Create sign-off window without switching focus (auto-sequence)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-sequence)")
-@click.option("--origin", default="manual", hidden=True,
-              type=click.Choice(["manual", "auto-sequence"]),
-              help="Who launched this sign-off run (recorded with the verdict)")
 def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
-               transcript: str | None, origin: str):
+               transcript: str | None):
     """Move a PR into sign_off and launch its sign-off window.
 
     Sign-off is the comprehensive PR-level review + verdict router that runs
@@ -1466,39 +1463,7 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
 
     signoff_mod.launch_signoff_window(
         data, pr_entry, fresh=fresh, background=background,
-        transcript=transcript, origin=origin)
-
-
-@pr.command("signoff-record", hidden=True)
-@click.argument("pr_id")
-@click.argument("verdict")
-@click.option("--origin", default="manual",
-              type=click.Choice(["manual", "auto-sequence"]))
-def pr_signoff_record(pr_id: str, verdict: str, origin: str):
-    """Durably record a sign-off router verdict on the PR (does NOT act).
-
-    Invoked by the sign-off router pane to persist its recommendation as
-    ``pr['signoff'] = {verdict, sha, ts, origin}`` so a later auto-sequence
-    tick can ADOPT it without a wasted re-run.  Recording never changes status;
-    only the auto-sequence driver acts on a verdict.
-    """
-    from pm_core import signoff as signoff_mod
-
-    if verdict not in signoff_mod.SIGNOFF_VERDICTS:
-        click.echo(
-            f"Invalid sign-off verdict '{verdict}'. Must be one of: "
-            f"{', '.join(signoff_mod.SIGNOFF_VERDICTS)}", err=True)
-        raise SystemExit(1)
-
-    root = state_root()
-    data = store.load(root)
-    pr_entry = _require_pr(data, pr_id)
-    pr_id = pr_entry["id"]
-    sha = signoff_mod.head_sha(pr_entry.get("workdir"))
-    signoff_mod.record_signoff_verdict(root, pr_id, verdict, sha, origin)
-    click.echo(f"Recorded sign-off verdict {verdict} for {_pr_display_id(pr_entry)} "
-               f"(sha={sha or '?'}, origin={origin})")
-    trigger_tui_refresh()
+        transcript=transcript)
 
 
 def _finalize_merge(root, pr_entry: dict, pr_id: str,
@@ -1878,8 +1843,12 @@ def _resolve_window_default() -> bool:
               help="Open a companion shell pane alongside the merge resolution window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
               help="Skip workdir merge, go straight to pull into repo dir (step 2)")
+@click.option("--no-signoff-check", is_flag=True, default=False,
+              help="Skip the sign-off MERGE verdict gate (use only when "
+                   "merging without a sign-off pass — e.g. propagation, recovery).")
 def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
-             transcript: str | None, companion: bool, propagation_only: bool):
+             transcript: str | None, companion: bool, propagation_only: bool,
+             no_signoff_check: bool):
     """Merge a PR's branch into the base branch.
 
     For local/vanilla backends, performs a local git merge.
@@ -1908,6 +1877,72 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
         raise SystemExit(1)
+
+    # Serialize concurrent `pm pr merge` of the SAME PR. Two invocations
+    # racing in the shared workdir would each run `git merge` / `git merge
+    # --abort` against the same index — the loser observes the winner's
+    # in-flight merge ("MERGE_HEAD exists"), aborts it (clobbering the
+    # winner), and spews a misleading "conflict" error. An exclusive per-PR
+    # lock makes the loser wait; once the winner finishes (status persisted
+    # by _finalize_merge before the lock releases) the loser re-loads state
+    # and exits cleanly with "already merged" — before the sign-off gate, so
+    # it never trips on the now-advanced HEAD. The lock is held for the whole
+    # command and released deterministically when the click context tears down
+    # (fires on every exit path — return, SystemExit, exception). Relying on fd
+    # GC instead would deadlock a second in-process merge of the same PR: an
+    # exception traceback keeps the fd alive, and a same-process second flock
+    # on the same file blocks.
+    import fcntl as _fcntl
+    from pm_core.paths import workdirs_base as _workdirs_base
+    _repo_id = data["project"].get("repo_id", "")
+    _merge_lock_path = _workdirs_base() / f".merge-{_repo_id}-{pr_id}.lock"
+    _merge_lock_f = open(_merge_lock_path, "w")
+    _fcntl.flock(_merge_lock_f.fileno(), _fcntl.LOCK_EX)
+    try:
+        click.get_current_context().call_on_close(_merge_lock_f.close)
+    except RuntimeError:
+        # No active click context (e.g. direct call) — fall back to GC release.
+        pass
+    # Re-load under the lock: a concurrent invocation may have just merged.
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    if pr_entry.get("status") == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+
+    # Sign-off gate: only PRs whose recorded sign-off verdict is SIGNOFF_MERGE
+    # *and* matches current HEAD may merge. Stale verdicts (recorded against an
+    # earlier HEAD) don't count — a code change after sign-off invalidates it.
+    # --no-signoff-check overrides for propagation / recovery flows.
+    if not no_signoff_check and not propagation_only:
+        from pm_core.signoff import (
+            SIGNOFF_MERGE, head_sha, fresh_recorded_verdict,
+            latest_signoff_verdict,
+        )
+        workdir = pr_entry.get("workdir")
+        current_sha = head_sha(workdir) if workdir else None
+        fresh = fresh_recorded_verdict(pr_entry, current_sha)
+        if fresh != SIGNOFF_MERGE:
+            recorded = latest_signoff_verdict(pr_entry)
+            if recorded == SIGNOFF_MERGE and fresh is None:
+                click.echo(
+                    f"PR {pr_id}: recorded sign-off verdict {recorded} is "
+                    f"stale (HEAD moved since). Re-run `pm pr signoff "
+                    f"{pr_id}` against current HEAD, or pass "
+                    f"--no-signoff-check to override.", err=True)
+            elif recorded:
+                click.echo(
+                    f"PR {pr_id}: sign-off verdict is {recorded}, not "
+                    f"{SIGNOFF_MERGE}. Run `pm pr signoff {pr_id}` to "
+                    f"re-route, or pass --no-signoff-check to override.",
+                    err=True)
+            else:
+                click.echo(
+                    f"PR {pr_id}: no sign-off verdict recorded yet. Run "
+                    f"`pm pr signoff {pr_id}` first, or pass "
+                    f"--no-signoff-check to override.", err=True)
+            raise SystemExit(1)
 
     backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")
@@ -3032,7 +3067,7 @@ def pr_auto_sequence(pr_id: str):
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
-                       transcript=str(signoff_transcript), origin="auto-sequence")
+                       transcript=str(signoff_transcript))
             click.echo("advanced: sign_off")
             return
         if overall == "INPUT_REQUIRED":
@@ -3097,8 +3132,8 @@ def pr_auto_sequence(pr_id: str):
         # its transcript reflect the current code, so replaying either would
         # recommend on unreviewed changes.  Retire that run and relaunch a
         # fresh router against current HEAD (R11: stale -> relaunch).  The
-        # record is cleared so this doesn't re-fire every tick until the fresh
-        # router self-records.
+        # record is cleared so this doesn't re-fire every tick until the
+        # driver records the fresh router's transcript verdict below.
         if verdict is None and (pr_entry.get("signoff") or {}).get("verdict"):
             _retire_signoff_window(pm_session, pr_entry, tdir)
 
@@ -3110,7 +3145,7 @@ def pr_auto_sequence(pr_id: str):
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
-                       transcript=str(signoff_transcript), origin="auto-sequence")
+                       transcript=str(signoff_transcript))
             click.echo("advanced: sign_off_relaunched")
             return
 
@@ -3131,8 +3166,7 @@ def pr_auto_sequence(pr_id: str):
                 signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
                 ctx = click.get_current_context()
                 ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False,
-                           background=True, transcript=str(signoff_transcript),
-                           origin="auto-sequence")
+                           background=True, transcript=str(signoff_transcript))
                 click.echo("advanced: sign_off_relaunched")
                 return
             click.echo("running: sign_off")
@@ -3258,3 +3292,41 @@ def pr_qa_run_bg(pr_id: str):
     except Exception as e:
         _log.exception("pr_qa_run_bg: QA crashed for %s: %s", pr_id, e)
         raise SystemExit(1)
+
+
+@pr.command("dashboard")
+@click.option("--port", default=None, type=int,
+              help="TCP port (default 8765; 0 picks a free port).")
+@click.option("--bind", default=None,
+              help="Bind address (default 127.0.0.1). Use with care — "
+                   "the server has no auth.")
+@click.option("--open", "do_open", is_flag=True,
+              help="Open the dashboard in a browser once the server is up.")
+def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
+    """Serve the all-PR behavior dashboard at ``http://localhost:<port>/``.
+
+    Starts a localhost HTTP server that rebuilds the index from
+    ``project.yaml`` + the captures dir on every ``/`` request, so a new
+    sign-off report shows up on the next page load with no regeneration
+    step. Per-PR ``report.html`` and its evidence siblings are served
+    straight from ``~/.pm/sessions/<tag>/captures/<pr_id>/``.
+
+    Foreground / blocking. Ctrl-C shuts the server down.
+    """
+    from pm_core import dashboard_server
+    from pm_core.paths import captures_root
+
+    root = state_root()
+    # captures_root() creates the dir when a tag resolves, so croot exists
+    # by the time we get a non-None path back.
+    croot = captures_root()
+    if croot is None:
+        click.echo(
+            "Could not resolve the captures root (not inside a git repo / no "
+            "session tag?).", err=True)
+        raise SystemExit(1)
+    dashboard_server.serve(
+        pm_root=root, captures_root_dir=croot,
+        host=bind or dashboard_server.DEFAULT_BIND,
+        port=port if port is not None else dashboard_server.DEFAULT_PORT,
+        open_browser=do_open)

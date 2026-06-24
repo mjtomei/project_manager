@@ -14,7 +14,7 @@ project:
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
-  skip_qa: true
+  skip_qa: false
   nested_podman: true
   libyaml: false
 plans:
@@ -21640,7 +21640,7 @@ prs:
   title: 'Bug: capture originating tmux session when the PR actions pane opens, not
     at action-execution time'
   branch: pm/pr-c41f029-bug-capture-originating-tmux-session-when-the-pr-a
-  status: qa
+  status: in_review
   depends_on: []
   description: 'When a TUI action (pr start/review/qa/merge, review-loop, qa-loop)
     creates or replaces a window, pm tries to move the session that initiated the
@@ -21706,6 +21706,16 @@ prs:
   reviewed_at: '2026-05-25T03:05:18.047602+00:00'
   merged_at: null
   notes:
+  - id: note-e268e4e
+    text: 'QA NEEDS_WORK: QA loop from the PR-actions popup moves the originating
+      session onto the new QA window: PASS; review-loop and in-TUI command/keybinding
+      dispatch follow the invoking session: PASS; Concurrent triggers from two grouped
+      sessions each follow their own originator: NEEDS_WORK; CLI / watcher invocations
+      with no captured session fall back to live detection: PASS; Reproduction regression
+      suite passes and malformed picker commands are inert: INPUT_REQUIRED (workdir:
+      /home/matt/.pm/workdirs/qa/pr-c41f029-ef8ddb6d7a59a2ee)'
+    created_at: '2026-05-27T12:12:41Z'
+    last_edited: '2026-05-27T12:12:41Z'
   - id: note-0a128b5
     text: 'QA INPUT_REQUIRED: QA loop from the PR-actions popup moves the originating
       session onto the new QA window: PASS; review-loop and in-TUI command/keybinding
@@ -23398,7 +23408,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: in_review
+  status: qa
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -23439,11 +23449,26 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-05-27T12:09:00.414265+00:00'
+  updated_at: '2026-06-22T20:37:56.969669+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-05-27T12:09:00.414265+00:00'
+  reviewed_at: '2026-05-30T21:47:32.932375+00:00'
   merged_at: null
   notes:
+  - id: note-a9626ec
+    text: 'Behavior report/dashboard shipped standalone since deps (pr-2d5f712 sign-off
+      step, pr-ff9b728 plan notes) are NOT merged. Module: pm_core/behavior_report.py.
+      CLI: `pm pr report PR_ID [--all] [--open]` + `pm pr dashboard`. API for sign-off
+      step: generate_pr_report(root, pr_id) / generate_dashboard(root). SEAM for pr-2d5f712
+      verdict router: drop captures/<pr_id>/signoff.json {verdict,recommendation,next_hop,summary}
+      and the report renders it; absent it, we derive a heuristic recommendation.
+      Durable regen source: qa_loop._persist_scenario_verdicts now also writes scenarios/<n>/scenario.json
+      (index,title,focus,steps,verdict,reason) so reports rebuild from captures after
+      the workdir is gone (verdict.md fallback for old captures). Dashboard index.html
+      at captures root; per-PR report.html co-located with evidence (relative links,
+      file://). Detect-missing rows surface `pm pr report <id>` (static = no server,
+      so regenerate = copy the command).'
+    created_at: '2026-05-25T16:40:45Z'
+    last_edited: '2026-05-25T16:40:45Z'
   - id: note-22f1fb3
     text: 'From sign-off (pr-2d5f712, note-0357619 requirement): the HTML report/dashboard
       (#226) must SURFACE the bug-PR pre-fix AND post-fix captures. Sign-off provides
@@ -23465,6 +23490,20 @@ prs:
       captures for bugs.'
     created_at: '2026-05-25T16:59:08Z'
     last_edited: '2026-05-25T16:59:08Z'
+  - id: note-b5f42a9
+    text: 'Incorporated note-e1ff391 (orchestrator add-on): report is now step-oriented,
+      evidence paired with acceptance criteria. (1) Implementation step renders bug
+      before/after — impl/pre-fix (acceptance: bug reproduces) + impl/post-fix (acceptance:
+      symptom gone), missing phase flagged not dropped; bug detection via bug_fix_prompts._is_bug_pr
+      (plan==bugs or type==bug); phase via pre-fix/post-fix DIR component. (2) QA
+      behaviors show explicit Acceptance criteria parsed from THEN/AND/sub-bullets.
+      Coordinated w/ #225 (pr-2d5f712): its sign-off window keeps a plain evidence
+      shell pane and links to THIS report as the rich surface; router reads same impl/+scenarios/<n>/
+      captures. NOTE: pr-2d5f712 does NOT write signoff.json (it records via pm pr
+      notes + emits SIGNOFF_* verdict polled by auto-sequence), so my signoff.json
+      seam stays optional/forward-only; recommendation stays derived for now.'
+    created_at: '2026-05-25T17:03:16Z'
+    last_edited: '2026-05-25T17:03:16Z'
   - id: note-f9f9525
     text: "ADOPT #225's sign-off seams (now that #225 has passed review and its branch\
       \ is current). Steps:\n1) git fetch origin && git merge origin/master (picks\
@@ -23485,6 +23524,21 @@ prs:
       \ + push."
     created_at: '2026-05-25T19:20:16Z'
     last_edited: '2026-05-25T19:20:16Z'
+  - id: note-aa05c58
+    text: 'Adopted #225 (pr-2d5f712) sign-off seams (merged). behavior_report.py now
+      reads pr[signoff]={verdict,sha,ts,origin} as authoritative recommendation source
+      via signoff.latest_signoff_verdict + decide_signoff_hop; derived heuristic is
+      fallback only (no verdict recorded). SIGNOFF_MERGE=ready_to_merge RECOMMENDATION
+      (text states sign-off never merges; plan watcher pr-ff9b728 decides). Verdict/status
+      icons reuse signoff.SIGNOFF_VERDICT_ICONS/STYLES + helpers.PR_STATUS_ICONS (sign_off
+      ✔️) so HTML matches TUI + pm pr list; Rich styles mapped to CSS via _RICH_COLOR_CSS.
+      Staleness: compare pr[signoff].sha to head_sha(workdir), annotate if stale.
+      REMOVED my speculative captures/<pr>/signoff.json seam (router records on the
+      PR, not JSON). Addresses note-f9f9525 + note-22f1fb3. Bug before/after (impl/pre-fix,post-fix)
+      already adopted earlier; sign-off hard-bounces a bug PR to impl if either capture
+      missing (note-22f1fb3) so both should exist by sign-off.'
+    created_at: '2026-05-25T19:26:54Z'
+    last_edited: '2026-05-25T19:26:54Z'
   - id: note-537e1a0
     text: 'Clarifying the description (which currently reads as if #226 builds a deterministic
       HTML renderer):
@@ -23928,6 +23982,210 @@ prs:
       AND whose GIVEN enables fake-claude, with this note as the redirect.'
     created_at: '2026-05-26T16:58:56Z'
     last_edited: '2026-05-26T16:58:56Z'
+  - id: note-1f565ff
+    text: 'QA-planner (round): rewrote pm/specs/pr-8e693f6/qa.md to match the current
+      code — it had drifted badly. Reality now: (1) `pm pr dashboard` is a BLOCKING
+      localhost HTTP server (default 127.0.0.1:8765, --port/--bind/--open), NOT a
+      static index.html generator; it rebuilds the index per `/` request and serves
+      per-PR report.html + evidence from the captures root. (2) NO report.json sidecar
+      — dashboard reads the verdict from a single `<meta name=pm-signoff-verdict content=SIGNOFF_*>`
+      tag in report.html head only. (3) Dashboard table is MINIMAL: PR / Title / Verdict
+      / Report columns — no plan grouping, no status icons, no QA-tally/loop badges,
+      no client-side filtering. (4) No `pm pr report` command; per-PR report is agent-written
+      only. (5) New `pm md-render <path>` -> body-only HTML for md evidence. Scenarios
+      30-36 planned against this reality. Per note-ce0f6d1: dashboard/robustness scenarios
+      SYNTHESIZE report.html on disk (deterministic, no agent); only the end-to-end
+      report-authoring scenario (35) runs REAL Claude (no fake-claude config).'
+    created_at: '2026-05-30T18:27:36Z'
+    last_edited: '2026-05-30T18:27:36Z'
+  - id: note-17ee935
+    text: 'QA INPUT_REQUIRED: Dashboard server serves the all-PR index, links per-PR:
+      PASS; Dashboard tolerates malformed/missing reports and escapes: PASS; Dashboard
+      command fails clearly when it cannot resolve a: INPUT_REQUIRED; Concurrent dashboard
+      requests and racing sign-off launches: PASS; Sign-off status and verdict markers
+      are consistent across: PASS; A real sign-off pass produces a self-contained
+      report the: PASS; Report-feeding plumbing — qa_loop writes scenario.json,: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-c3ed44e830d89f4a)'
+    created_at: '2026-05-30T21:30:24Z'
+    last_edited: '2026-05-30T21:30:24Z'
+  - id: note-5ce9a11
+    text: 'QA s30-36 run — consolidates the per-scenario worktree notes (s-31/33/34/35)
+      so the individual ones need not be committed. Non-obvious findings: (1) VERDICT
+      EXTRACTION: the dashboard verdict comes from behavior_report._extract_verdict,
+      a head-only regex scan of <meta name=pm-signoff-verdict content=...> (case/quote/attr-order
+      independent, content [A-Z_]+). The report is read with errors=replace (NOT strict),
+      so garbage bytes decode to replacement chars and never raise; no match yields
+      a verdict-unknown cell, but has_report stays True whenever the file exists so
+      the open-report link still renders. A PR with no report file shows verdict dash
+      plus a no-report-yet state and a copyable `pm pr signoff <id>` cell. All dynamic
+      text passes through html.escape. (2) CAPTURES PATH: the per-PR report lives
+      at captures_root()/<pr_id>/report.html where captures_root = ~/.pm/sessions/<tag>/captures/
+      (tag = session name minus the pm- prefix); run dashboard AND signoff in the
+      SAME tmux session so the tag resolves identically. (3) report.html is purely
+      an AGENT deliverable — no python fallback writes it: dashboard/robustness scenarios
+      synthesize it on disk deterministically, and only end-to-end scenario 35 runs
+      real Claude (the QA env has a real claude binary + ANTHROPIC_API_KEY). (4) DRIVING
+      SIGNOFF: needs tmux + a workdir with a diff vs base + status in {qa,sign_off};
+      bootstrap via pm pr start then set status=sign_off in project.yaml; manual pm
+      pr signoff records NO pr[signoff] (only --background auto-sequence records it
+      via signoff.py record_signoff_verdict). (5) GLYPHS: the verdict marker (for
+      example the SIGNOFF_MERGE triangle) is single-sourced via SIGNOFF_VERDICT_ICONS
+      across pr list / TUI / dashboard, but the lifecycle STATUS icon differs by surface
+      by design (CLI vs TUI) so do NOT assert it identical across CLI+TUI. (6) OBSERVATION:
+      the dashboard is a blocking foreground server, so background it in a pane and
+      observe via curl http://127.0.0.1:<port>/ -- curl over the server is the real
+      browser surface; report.html and its evidence siblings resolve as HTTP 200 and
+      the index back-link is server-resolved.'
+    created_at: '2026-05-30T21:41:13Z'
+    last_edited: '2026-05-30T21:41:13Z'
+  - id: note-517853c
+    text: 'Incidental QA-loop robustness fix (found while investigating why QA round
+      s32 came back as a bare INPUT_REQUIRED with no reason): the code-generated default
+      INPUT_REQUIRED verdicts in qa_loop._poll_tmux_verdicts previously set scenario_verdicts[idx]
+      without a matching scenario_verdict_reasons[idx], so qa_status.json carried
+      an empty verdict_reason and the failure looked indistinguishable from a deliberate
+      agent verdict. Added informative reasons (mirroring the concretizer refiner-reject
+      pattern) to all four reasonless sites: (1) worker window never created at startup;
+      (2) queued-scenario window creation failed on dequeue; (3) window gone during
+      PASS verification; (4) window exited before emitting a verdict after _SCENARIO_MAX_RETRIES
+      relaunches — this last is what hit s32 (the worker Claude process was killed/crashed
+      mid-artifact-capture; NOT an OOM — container OOMKilled=false, no mem limit set,
+      still Up; agent had already concluded "all three triples pass"). Reasons now
+      surface in qa_status.json verdict_reason and the sign-off prompt scenario block.
+      tests/: 126 qa-loop tests pass.'
+    created_at: '2026-05-30T21:45:37Z'
+    last_edited: '2026-05-30T21:45:37Z'
+  - id: note-de121f5
+    text: 'QA finalize (s37+s38) consolidated surface-driving notes. DASHBOARD ERROR
+      BRANCHES (s37): pr_dashboard calls state_root() BEFORE captures_root() (pm_core/cli/pr.py:3249-3257),
+      so running `pm pr dashboard` from a non-project/non-git cwd hits the state_root
+      FileNotFoundError path ("Error: No project.yaml found...") caught by main(),
+      NOT the captures-root E3 message. To drive the real E3 branch ("Could not resolve
+      the captures root (not inside a git repo / no session tag?)") state_root must
+      SUCCEED while tag derivation FAILS: run from a non-git cwd (TMUX unset) with
+      PM_PROJECT=TEST_DIR/pm. E4 second-bind error is SystemExit(str) from dashboard_server.serve()
+      (uncaught by main) -> one-line stderr, exit 1, no traceback. SIGN-OFF ROUTING
+      (s38): real surface is `pm pr auto-sequence <id>` ticked repeatedly. Bounce
+      verdicts (SIGNOFF_REQA/REVIEW/IMPL) are recorded on pr["signoff"] then IMMEDIATELY
+      popped by apply_signoff_hop (signoff.py:464) in the SAME tick — so after a bounce
+      tick the durable observable is the STATUS HOP (sign_off->qa/in_review/in_progress)
+      + retired window/transcript, NOT a persistent pr["signoff"] record. Only SIGNOFF_MERGE
+      (ready_to_merge) and SIGNOFF_BLOCKED keep the record AND stay in sign_off, so
+      only those show the verdict icon (pm pr list / tech tree: triangle=merge, circle-slash=blocked).
+      origin="auto-sequence" is only set when the driver reads the router transcript
+      (no prior record), so do NOT pre-seed pr["signoff"] manually (that yields origin="manual").
+      Fake config: {"_all":{},"signoff":{"verdicts":["SIGNOFF_MERGE"]}}; transcript
+      = <root>/transcripts/auto-sequence/<pr_id>/signoff-<pr_id>.jsonl.'
+    created_at: '2026-06-20T20:52:00Z'
+    last_edited: '2026-06-20T20:52:00Z'
+  - id: note-1111404
+    text: 'QA s39 (dashboard browser surface) refined & verified drivable. Playwright
+      IS available: chromium pre-installed at /opt/ms-playwright (PLAYWRIGHT_BROWSERS_PATH
+      set); just `pip install playwright` into the test venv (no `playwright install`
+      needed). Smoke-tested the real render_dashboard_html via chromium: 6 cols, mtime-desc
+      default sort, <script> title renders literal (no alert), filter+sort JS all
+      work. NOTE: filter matches row textContent, so a "MERGE" query ALSO matches
+      status="merged" rows — use a verdict-only token like "REQA" to demonstrate verdict-narrowing
+      cleanly. Report fixtures (report.html under ~/.pm/sessions/<tag>/captures/<pr_id>/)
+      are hand-created GIVEN setup (signoff agent normally writes them); set distinct
+      mtimes with os.utime/touch -d.'
+    created_at: '2026-06-21T03:21:50Z'
+    last_edited: '2026-06-21T03:21:50Z'
+  - id: note-8c613be
+    text: 'QA s39 (dashboard browser surface) PASS on real Chromium/Playwright: 6
+      columns [PR,Title,Status,Last modified,Verdict,Report], default mtime-desc sort
+      (no-report rows sink by pr_id), relative time + UTC tooltip, SIGNOFF_MERGE/REQA
+      colored markers + open-report links (200), garbage report -> "verdict unknown"
+      with working link, no-report amber "no report yet" (no signoff cmd, no copy
+      btn), XSS title escaped + no alert, live #q filter (title + REQA verdict token
+      + clear), click-to-sort Title-asc / Status-lifecycle-rank desc-then-asc / Last-modified-chronological
+      with single active indicator. SCENARIO-PREMISE QUIRK (not a defect): the muted-dash
+      empty-status degrade is unreachable via the real surface — store.load (store.py:138-140)
+      normalizes missing/invalid status to "pending" project-wide, so the status-less
+      PR renders the same ⏳ pending on the dashboard as on pm pr list / pm status.
+      Dashboard still 200, no crash; the muted-dash code is sound but only reachable
+      with validate=False.'
+    created_at: '2026-06-21T03:29:37Z'
+    last_edited: '2026-06-21T03:29:37Z'
+  - id: note-d94562f
+    text: 'QA s41 (merge gate) refiner note: the merge gate reads pr["signoff"] which
+      is written ONLY by `pm pr auto-sequence` (the recorder); manual `pm pr signoff`
+      never records (manual-never-acts invariant, signoff.py:101-124). Bounce verdicts
+      (SIGNOFF_IMPL/REQA/REVIEW) are POPPED by apply_signoff_hop in the SAME auto-sequence
+      tick that records them (signoff.py:384), so they are NOT observable as a persisted
+      record — merge would then say "no sign-off verdict recorded yet", not name the
+      verdict. The only non-merge verdict that PERSISTS in pr["signoff"] is SIGNOFF_BLOCKED
+      (hop=blocked => no state change, no pop). So the "non-merge verdict recorded"
+      sub-story must use SIGNOFF_BLOCKED, not SIGNOFF_IMPL/REQA as the draft suggested.
+      SIGNOFF_MERGE also persists (ready_to_merge, no pop).'
+    created_at: '2026-06-21T03:20:51Z'
+    last_edited: '2026-06-21T03:20:51Z'
+  - id: note-678b134
+    text: 'QA s41 (merge gate) NEEDS_WORK→fixed. Gate triples PASS at CLI surface:
+      no-verdict / SIGNOFF_BLOCKED / stale-SIGNOFF_MERGE all refuse with exit 1 +
+      exact messages; fresh SIGNOFF_MERGE merges; --no-signoff-check bypasses. BUG
+      FOUND in triple5 (concurrent merge): two `pm pr merge <same-pr>` raced in the
+      shared workdir git index (no serialization) — the loser ran `git merge`/`git
+      merge --abort` against the winners in-flight merge, hit "MERGE_HEAD exists",
+      and spewed a misleading conflict error (clobber risk). FIX (pr.py pr_merge):
+      exclusive per-PR flock (workdirs_base/.merge-<repoid>-<prid>.lock) acquired
+      BEFORE the sign-off gate; loser re-loads under the lock and exits cleanly "PR
+      <id> is already merged." Lock released via click ctx.call_on_close (NOT fd GC)
+      — relying on GC deadlocks a second in-process merge because an exception traceback
+      keeps the fd alive and a same-process second flock blocks. Verified at surface:
+      P8 concurrent → exactly one merges, other clean, no MERGE_HEAD/locks, project.yaml
+      valid. ALSO fixed 19 pre-existing merge-mechanics tests in test_pr_enhancements.py
+      that the earlier gate commit 2c86e21f broke (they test pull/stash/push/finalize,
+      not the gate) by adding --no-signoff-check; full file 60/60 green.'
+    created_at: '2026-06-21T04:05:27Z'
+    last_edited: '2026-06-21T04:05:27Z'
+  - id: note-13590c8
+    text: 'QA scenario 45 (pm md-render) refiner finding: render_markdown_body uses
+      python-markdown with NO HTML sanitization/safe_mode. A raw <script>alert(1)</script>
+      written as INLINE PROSE passes through UNESCAPED (verified: output contains
+      literal <script>alert(1)</script>), so it WILL execute when the fragment is
+      embedded in report.html — an XSS vector for evidence embedding. Only the fenced-code-block
+      and inline-code forms get escaped (&lt;script&gt;). The scenario''s security
+      triple is expected to surface this as NEEDS_WORK unless a sanitizer (e.g. bleach/nh3
+      or markdown safe handling) is added. Empty-file -> '''' exit 0; nonexistent
+      path -> click.Path(exists=True) gives "Error: Invalid value for ''MD_PATH''..."
+      exit 2, no traceback.'
+    created_at: '2026-06-22T20:29:34Z'
+    last_edited: '2026-06-22T20:29:34Z'
+  - id: note-9e0e240
+    text: 'QA s45 (pm md-render) NEEDS_WORK->fixed (commit 5ca00c32). Triple1 (body-only
+      fragment: table/thead/tbody, <pre><code class=language-python>, <h1>, <a href>,
+      NO html/head/style/body wrapper) PASS; Triple3 (nonexistent->exit2 click "File
+      ... does not exist" no traceback; empty file->exit0 empty stdout) PASS. Triple2
+      XSS: pre-fix the renderer passed raw source HTML through verbatim, so <script>alert(1)</script>
+      written as INLINE PROSE executed when embedded (verified headless Chromium:
+      ALERTS FIRED:[1]) per note-13590c8 — fenced/inline-code and stray &<> were already
+      escaped. FIX: render_markdown_body now deregisters python-markdown html_block
+      preprocessor + html inline pattern so raw source HTML is escaped to literal
+      text while extension markup (tables/fenced) stays intact; post-fix ALERTS FIRED:[]
+      and evidence.md still renders. Dependency-light (no bleach/nh3 added). 8/8 tests
+      in test_markdown_render.py green (added 2). CAPTURE GAP: agg not installed in
+      QA env so no recording.webm produced (cast+transcript only); see /pm-captures/scenarios/45/.'
+    created_at: '2026-06-22T20:37:56Z'
+    last_edited: '2026-06-22T20:37:56Z'
+  - id: note-f194718
+    text: 'QA pr-8e693f6 FINALIZE: overall verdict PASS. Final pass ran s47 (pm md-render
+      neutralizes dangerous URI schemes — javascript:/data:/vbscript: plus whitespace/control-char
+      obfuscation — in markdown link/image syntax while safe relative/https/mailto
+      links stay live; raw inline-prose HTML escaped to literal text; nonexistent
+      path->exit2, empty file->exit0): PASS, and s48 (dashboard click-to-sort: Title
+      first-click ASC, Status/Last-modified default DESC via data-default-dir; single
+      sort-indicator invariant holds; re-clicking Last modified returns most-recent-first
+      per the re-sort fix; pure-JS filter, no reload): PASS. The earlier router NEEDS_WORK
+      on md-render XSS was resolved during the review loop (5ca00c32 raw-HTML escape,
+      37d8de22 javascript:/data: URI sanitization). Spec qa.md rewritten to match the
+      shipped six-column dashboard (PR/Title/Status/Last modified/Verdict/Report,
+      client-side filter + click-to-sort, no report.json sidecar, no pm pr report
+      command). SETUP GOTCHA (s48 env): Playwright/Chromium not pre-installed — pip
+      install playwright && playwright install chromium works; headless chromium in
+      this nested container needs launch args=["--no-sandbox"].'
+    created_at: '2026-06-22T21:26:02Z'
+    last_edited: '2026-06-22T21:26:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
 - id: pr-ff9b728
   plan: plan-regression
@@ -24027,7 +24285,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-05-25T18:59:05.780861+00:00'
+  updated_at: '2026-06-11T16:31:03.347272+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -24043,6 +24301,59 @@ prs:
       lands here.'
     created_at: '2026-05-25T18:59:05Z'
     last_edited: '2026-05-25T18:59:05Z'
+  - id: note-0398983
+    text: 'Watcher-prompt wording nit to reconcile when generalizing the impl watchers
+      (found during pr-8e693f6 review of the auto-sequence/sign-off chain): the Bug-Fix
+      Implementation Watcher prompt''s Role summary (pm_core/prompt_gen.py ~line 1402)
+      says it "auto-merges on PASS", but its actual per-tick procedure (step 2, ~line
+      1462) correctly merges ONLY on the auto-sequence `ready_to_merge` signal — which
+      `pm pr auto-sequence` emits only AFTER a verified sign-off (pr.py:3114). So
+      the BEHAVIOR is right and matches the design (sign-off is recommendation-only;
+      the higher-level manager/watcher is the actor that merges, the per-PR chain
+      never does). Only the Role-summary prose is loose. When generalizing the watchers
+      here, tighten that summary to "auto-merge on `ready_to_merge` (i.e. after sign-off
+      verifies)" so the prose matches the procedure. Design context: the bug-fix watcher
+      is the AUTO-MERGE instance of the higher-level manager; the improvement-fix
+      flavor defers to a human instead. Both consume the same recommendation-only
+      sign-off. This generalized watcher IS the "higher-level manager" that owns the
+      post-sign-off merge decision.'
+    created_at: '2026-06-11T16:23:32Z'
+    last_edited: '2026-06-11T16:23:32Z'
+  - id: note-40412bf
+    text: 'Implementation hint for the LOOP SAFETY "re-loop invariant" requirement
+      already in this PR''s description (any code/content change routes back through
+      review AND qa before merge). Surfaced during pr-8e693f6 review of the existing
+      auto-sequence chain.
+
+
+      THE GAP TODAY: in `pm pr auto-sequence` (pr.py), only the SIGN-OFF step is sha-aware
+      — it stamps pr["signoff"]={verdict,sha,...} and re-runs if HEAD moved (signoff.fresh_recorded_verdict
+      / R11, pr.py:3058-3080). The earlier hops (in_review PASS -> qa, qa PASS ->
+      sign_off) advance purely on `status == ... and verdict == PASS` with NO sha
+      check. So an external commit landing on the workdir branch after review passed
+      (human push, dep-merge, a newly-filed feature, etc.) sails through to qa/sign_off
+      without ever being re-reviewed.
+
+
+      PROPOSED MECHANISM (one field, generalizes the sign-off staleness rule one phase
+      earlier): store a single `reviewed_sha` on the PR. Stamp `pr["reviewed_sha"]
+      = head_sha(workdir)` when advancing PAST review (in_review PASS -> qa). Then
+      at EVERY tick in `qa` or `sign_off`, if `head_sha(workdir) != reviewed_sha`,
+      bounce the PR to in_review and re-review (which then re-qa''s, per the invariant).
+      This catches external commits WHENEVER they land, not just on watcher restart,
+      and does not re-review when nothing changed. It is literally signoff.fresh_recorded_verdict
+      applied at the review boundary. Ties into the pr-ed10ac4 no-progress hashing
+      the description already references for the across-bounce loop guard. Note-only
+      actions must NOT move HEAD (they only touch project.yaml/plan files, not the
+      workdir branch), so they correctly do not re-trigger — consistent with the invariant''s
+      "note-only actions don''t re-trigger review" clause.
+
+
+      (Considered + rejected the simpler "always reset to review on flow restart":
+      misses commits that land while the watcher keeps running without a restart,
+      and re-reviews wastefully when nothing changed.)'
+    created_at: '2026-06-11T16:31:03Z'
+    last_edited: '2026-06-11T16:31:03Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)
@@ -24499,3 +24810,200 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-8e60aa9
+  plan: bugs
+  title: 'Bug: auto-sequence does not advance PRs whose review/qa loop already emitted
+    a terminal verdict'
+  branch: pm/pr-8e60aa9-bug-auto-sequence-does-not-advance-prs-whose-revie
+  status: pending
+  depends_on: []
+  description: '## Repro
+
+
+    1. Run a review loop for a PR (e.g. `pm pr review` / TUI `d`). The loop completes
+    and emits **PASS** in the Claude pane.
+
+    2. The PR status stays `in_review` (no auto-start was armed at the time the verdict
+    fired, so the live `_on_loop_complete` PASS handler took the gated-out branch).
+
+    3. Arm auto-sequence on the PR via the TUI (`O`) or restart the TUI so the loop
+    state is restored from the breadcrumb.
+
+    4. **Expected**: auto-sequence observes the terminal verdict and advances the
+    PR (in_review → qa, kicking off QA).
+
+    5. **Actual**: auto-sequence does nothing. The PR sits in `in_review` forever
+    even though the review already PASSed.
+
+
+    ## Diagnosis
+
+
+    `pm_core/tui/auto_start.check_and_start` only knows how to **start missing phases**
+    — it has no pass that observes terminal verdicts on loops that are already registered.
+    Specifically:
+
+
+    * `_auto_start_review_loops` walks PRs in `in_review` and, for each, **skips**
+    when `app._review_loops[pr_id]` is truthy. The finished loop is registered (with
+    `running=False, latest_verdict="PASS"`), so it gets skipped — but nothing else
+    looks at `.latest_verdict` to drive the transition.
+
+    * `_auto_start_qa_loops` has the symmetric gap for `qa`-status PRs.
+
+
+    The live PR-transition handler exists (`pm_core/tui/review_loop_ui.py:447`, `_maybe_start_qa(app,
+    pr_id)` on PASS) but only fires from the `_on_loop_complete` event. Once that
+    event has fired (or, after a restart, was never re-fired), there''s no second
+    observer.
+
+
+    So:
+
+
+    * **Live**: arming auto-sequence on a PR whose review/qa loop **already finished**
+    never advances.
+
+    * **Restart**: TUI restart restores `_review_loops`/`_qa_loops` from the breadcrumb
+    (`auto_start.consume_breadcrumb`, ~line 189–229) but never re-triggers the per-verdict
+    transition.
+
+
+    Both manifestations come from the same missing observer.
+
+
+    ## Fix
+
+
+    Add an **"observe terminal verdicts"** pass to `check_and_start`, run **before**
+    the existing "start missing phases" passes:
+
+
+    * New helper `_advance_observed_terminal_verdicts(app)` in `pm_core/tui/auto_start.py`
+    (~30–50 lines).
+
+    * For each entry in `app._review_loops` where the PR''s current status still matches
+    the loop''s phase and `state.latest_verdict` is terminal, call the existing handler:
+    PASS → `_maybe_start_qa`, NEEDS_WORK → relaunch a fresh review iteration (mirror
+    the live handler''s path), INPUT_REQUIRED → flag/pause.
+
+    * Symmetric pass over `app._qa_loops` driving the existing qa_loop_ui completion
+    path.
+
+    * Idempotency is free if we gate on PR status: once a handler flips status, a
+    re-observe is a no-op.
+
+
+    Then both manifestations are fixed by the same path.
+
+
+    ## Acceptance criteria
+
+
+    * Live-arm-after-pass: review loop emits PASS → status flips to `in_review` →
+    user arms auto-sequence later → PR advances to `qa` and QA starts.
+
+    * Same for `qa` → `sign_off` advancement when qa loop has already emitted PASS.
+
+    * NEEDS_WORK on a registered-but-finished loop relaunches a fresh review iteration.
+
+    * TUI restart with a breadcrumb that carries a PASS-terminated loop advances the
+    PR on restore.
+
+    * No double-fire: if the live handler already advanced the PR (status no longer
+    matches the loop''s phase), the observer no-ops.
+
+
+    ## Tests
+
+
+    Cover the matrix: { PASS, NEEDS_WORK, INPUT_REQUIRED } × { review, qa } × { live-arm-after-pass,
+    breadcrumb-restore }. ~6–10 tests, ~100–150 lines.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-06-20T19:14:31.312840+00:00'
+  updated_at: '2026-06-20T19:14:31.312840+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dd4f07b
+  plan: bugs
+  title: 'Bug: skip_qa=true bypasses sign-off entirely, not just QA'
+  branch: pm/pr-dd4f07b-bug-skip-qa-true-bypasses-sign-off-entirely-not-ju
+  status: pending
+  depends_on: []
+  description: "## Repro\n\n1. Project has `skip_qa: true` set in `project.yaml`.\n\
+    2. A PR's review loop emits **PASS**.\n3. The live `_on_loop_complete` handler\
+    \ fires `_maybe_start_qa` (`pm_core/tui/review_loop_ui.py:447`).\n4. `_maybe_start_qa`\
+    \ hits the skip_qa branch (`pm_core/tui/review_loop_ui.py:521`):\n   ```python\n\
+    \   if project.get(\"skip_qa\"):\n       _log.info(\"auto_qa: skip_qa enabled,\
+    \ skipping QA for %s\", pr_id)\n       app.log_message(...)\n       _maybe_auto_merge(app,\
+    \ pr_id)\n       return\n   ```\n5. **Expected**: PR transitions to `sign_off`,\
+    \ sign-off router runs, emits `SIGNOFF_MERGE`/etc., and that drives the merge\
+    \ decision (respecting `stop_before_merge` when auto-sequence is armed).\n6. **Actual**:\
+    \ PR transitions straight to merge consideration with no sign-off. The entire\
+    \ `sign_off` lifecycle step is bypassed.\n\n## Why this is wrong\n\n`skip_qa`\
+    \ means \"this project doesn't have testable runtime behavior to verify in QA\"\
+    \ — it should NOT mean \"skip the sign-off code-review router too.\" Sign-off\
+    \ is independent of QA evidence: it's a PR-level code-quality + scope + routing\
+    \ decision. For projects with `skip_qa=true`, sign-off is *more* valuable because\
+    \ it's the only formal gate before merge.\n\nThe current behavior also breaks\
+    \ auto-sequence on such projects: `stop_before_merge` works (the chain halts at\
+    \ \"ready to merge\"), but the sign-off report — which is supposed to be the artifact\
+    \ a reviewer reads to trust the merge — is never produced.\n\n## Fix\n\nIn `pm_core/tui/review_loop_ui.py:_maybe_start_qa`,\
+    \ when `skip_qa` is true after a review PASS, **transition to `sign_off` instead\
+    \ of going straight to `_maybe_auto_merge`**. The sign-off path already handles\
+    \ its own verdict-driven merge gate; once the sign-off router emits `SIGNOFF_MERGE`,\
+    \ the existing auto-sequence sign-off-→ready_to_merge handler picks up (and still\
+    \ respects `stop_before_merge`).\n\nRoughly:\n\n```python\nproject = (app._data\
+    \ or {}).get(\"project\") or {}\nif project.get(\"skip_qa\"):\n    _log.info(\"\
+    auto_qa: skip_qa enabled, skipping straight to sign_off for %s\", pr_id)\n   \
+    \ app.log_message(f\"Auto-start: {pr_id} review passed, skipping QA → sign_off\
+    \ (skip_qa enabled)\")\n    _maybe_start_signoff(app, pr_id)  # new helper, mirrors\
+    \ _maybe_start_qa\n    return\n```\n\nThe sign-off report can note that QA was\
+    \ skipped per project setting (the agent has access to `data.get(\"project\",\
+    \ {}).get(\"skip_qa\")`).\n\n## Acceptance criteria\n\n* `skip_qa=true` + review\
+    \ PASS → PR status flips to `sign_off`, sign-off window launches.\n* Sign-off\
+    \ router emits `SIGNOFF_MERGE` → existing auto-sequence path advances to \"ready\
+    \ to merge\" (respecting `stop_before_merge` if armed).\n* Sign-off router emits\
+    \ any other verdict (e.g. `SIGNOFF_REVIEW`, `SIGNOFF_IMPL`) → existing routing\
+    \ applies (back to review/impl), QA is still skipped on the way back through.\n\
+    * `skip_qa=false` (or unset) — unchanged behavior.\n\n## Tests\n\n* `skip_qa=true`\
+    \ + review PASS routes through sign_off, not auto-merge.\n* `skip_qa=true` + sign-off\
+    \ `SIGNOFF_MERGE` + auto-sequence armed → \"ready to merge\" (no merge).\n* `skip_qa=true`\
+    \ + sign-off `SIGNOFF_IMPL` → returns to impl (no QA on the loop)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-06-20T20:26:14.099710+00:00'
+  updated_at: '2026-06-21T01:45:28.863711+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-6ad079a
+    text: 'Scope extension — second variant of the same bug: `_on_qa_complete` in
+      pm_core/tui/qa_loop_ui.py:524-534 (non-self-driving path) and the self-driving
+      path at lines 504-509 both go straight to `_trigger_auto_merge` on QA PASS when
+      auto-start is enabled. Sign-off is bypassed in the QA-PASS-then-merge path too,
+      not just the skip_qa path.
+
+
+      So the fix should cover both code sites:
+
+      1. `_maybe_start_qa` (skip_qa branch) → route to sign_off, not merge.
+
+      2. `_on_qa_complete` (QA PASS branch, self-driving and legacy paths) → flip
+      status to sign_off and launch sign-off, not auto-merge.
+
+
+      The merge gate then lives downstream of sign_off, driven by SIGNOFF_MERGE verdict
+      + stop_before_merge respect.
+
+
+      Affects pr-8e693f6 directly — observed: PR''s QA passed under auto-sequence,
+      but sign_off never auto-launched; had to launch it manually.'
+    created_at: '2026-06-21T01:45:28Z'
+    last_edited: '2026-06-21T01:45:28Z'

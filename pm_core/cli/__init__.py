@@ -450,6 +450,23 @@ def prompt(pr_id: str | None):
     click.echo(prompt_gen.generate_prompt(data, pr_entry["id"]))
 
 
+@cli.command("md-render")
+@click.argument("md_path", type=click.Path(exists=True, dir_okay=False,
+                                           readable=True))
+def md_render(md_path: str):
+    """Render a ``.md`` file to body-only HTML on stdout.
+
+    Used by the sign-off agent to inline-embed `.md` evidence into
+    ``report.html`` inside a collapsed ``<details>`` block. Body-only output
+    inherits the embedding page's styling and stays in sync with the source
+    `.md` because rendering happens at report-write time.
+    """
+    from pathlib import Path
+    from pm_core.markdown_render import render_markdown_body
+    text = Path(md_path).read_text(encoding="utf-8")
+    click.echo(render_markdown_body(text), nl=False)
+
+
 @cli.command("_check", hidden=True)
 def check_cmd():
     """Check if a PM repo is reachable (used by the bash entrypoint)."""
@@ -590,6 +607,7 @@ COMMANDS
   pm pr import-github           Import existing GitHub PRs into project yaml
   pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
   pm pr cleanup [pr-id]         Remove workdir for merged PR
+  pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
   pm pr note list <pr-id>              List notes on a PR
