@@ -44,6 +44,19 @@ The tournament is a pm prompt. Variants can propose changes to it. The variant e
 
 Each target has a champion — the variant currently used for production work against it. Promotion is gated: a challenger must beat the champion by some margin for some duration before replacing it, with a human confirm step. The exact gate parameters are a design choice for later.
 
+## Prior art: open-ended search and the controlled-aberration mechanism
+
+The tournament is a search over intelligences; its hardest open question (novelty vs. fitness, diversity preservation) is the **open-endedness** problem, which has direct prior art to draw on (all `unverified` until audited):
+
+- **Open-endedness / objective deception** — Stanley & Lehman, *Why Greatness Cannot Be Planned*: objective-directed search cannot reach what isn't on the gradient toward the stated objective; reaching the genuinely new *requires* non-goal-directed exploration. The load-bearing reason the tournament needs more than fitness-maximization.
+- **Quality-diversity / novelty search** — Lehman & Stanley (novelty search); MAP-Elites (Mouret & Clune); POET (Wang et al.). Illuminate the *space* of variants by behavioral niche rather than collapsing to one scalar optimum — the concrete algorithms for "diversity preservation."
+- **Cultural evolution** — Henrich, *The Secret of Our Success* (adaptive practices no individual understands; the Naskapi divination example *randomizes* hunting to avoid over-exploitation — variation → capability beyond individual comprehension); Boyd & Richerson (transmission biases); Tomasello's **cultural ratchet** (retain + propagate winners so capability compounds — the third piece beyond variation + selection).
+- **Schizotypy ↔ creativity / bet-hedging** — populations apparently tolerate a *rate* of aberrant cognition because the rare innovation payoff justifies the common cost; the biological analogue of a controlled mutation/aberration rate.
+
+**The high-level mechanism (a candidate for the novelty axis).** To reach methods you can't conceive, allow individuals to operate **without justification at a controlled rate** — non-goal-directed variation. Most aberrations are useless and selected out; the rare useful ones are kept by the **external fitness itself** — no special "is-this-better" judge is required (the task fitness *is* the selection; a self-recognition judge is only a *large accelerant*, verify ≫ generate). The one hard requirement is that the fitness be **grounded and long-horizon** — a myopic fitness kills slow-burn innovations that look worse at first. A safe, focused form applies the aberration only to an **"aspirational simulation" line of thinking** (periodically simulate a higher intelligence; vary only there), gated by fitness before it acts.
+
+**Relation to the far-term framing.** This is the near-term, single-target version of the *search over minds / stream-compositions* sketched as the parked `mind-search` capstone. The aberration mechanism and these references apply to both; the in-reasoning version is the "aspirational simulation" branch-type in `literature-review-user-model-extension.md` §4.1 / [[plan-consult]].
+
 ## Open questions to work through before phase breakdown
 
 - Selection and population dynamics: tournament size, replacement strategy, diversity preservation, novelty vs. fitness tradeoff. The previous evolutionary-algorithms work should inform this directly.
