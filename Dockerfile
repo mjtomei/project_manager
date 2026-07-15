@@ -36,10 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install agg (asciinema gif generator). The cast-recording recipes render a
-# terminal .cast to frames with agg, then encode VP9 .webm with ffmpeg (already
-# installed above); the .webm embeds in the sign-off HTML report via a plain
-# <video controls> element — native pause/scrub, no player library, works
-# offline. agg is the frame renderer; the intermediate GIF is discarded. Not
+# terminal .cast to frames with agg, then encode H.264 yuv420p .mp4 with ffmpeg
+# (already installed above); the .mp4 embeds in the sign-off HTML report via a
+# plain <video controls> element — native pause/scrub, no player library, works
+# offline, plays everywhere including iOS Safari (VP8/VP9 webm does not).
+# agg is the frame renderer; the intermediate GIF is discarded. Not
 # apt-installable; fetch the static release binary for the build arch
 # (asciinema/agg publishes both x86_64 and aarch64 linux-gnu).
 ARG AGG_VERSION=v1.9.0
