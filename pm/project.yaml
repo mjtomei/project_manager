@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-15T15:30:20.567277+00:00'
+  updated_at: '2026-07-15T15:37:20.306349+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-15T15:30:20.567277+00:00'
   merged_at: null
@@ -24208,6 +24208,25 @@ prs:
       unaffected, which is why this was not caught locally.'
     created_at: '2026-07-15T15:10:00Z'
     last_edited: '2026-07-15T15:10:00Z'
+  - id: note-8d882ca
+    text: 'iOS Safari video fix landed (f98a4c5c + 987aa288): (1) dashboard_server
+      serves single byte-range requests (206 + Content-Range + Accept-Ranges; 416
+      unsatisfiable; multipart/unparsable ranges fall back to full 200) — Safari refuses
+      to stream <video> without it; client-disconnect (BrokenPipe/ConnReset) logs
+      at debug, no traceback. (2) Recording recipes switched VP8/VP9 webm -> H.264
+      yuv420p mp4 (crf 18, +faststart): cast-derived recordings upscale 2x nearest-neighbor
+      so 4:2:0 chroma keeps terminal text crisp (and dims stay even); web-ui recipe
+      gained a finalize step transcoding Playwright native webm -> mp4 then deleting
+      the webm. Sign-off prompt + spec now say .mp4 only (legacy webm wording removed).
+      (3) EXISTING CAPTURES CONVERTED IN PLACE (not in git): all 20 .webm under the
+      pr-8e693f6 captures dir transcoded to h264 mp4 (verified ffprobe h264/yuv420p/even
+      dims), webm deleted, and report.html video src + manifest.md file listings rewritten
+      to .mp4 (all 10 report embeds resolve on disk). Historical evidence (prompt.md/verdict.md,
+      s42 fixture dom.html/report.html with an already-dead scenarios/1 link) intentionally
+      untouched. Also in-loop: pm md-render reads evidence with errors=replace so
+      stray binary bytes cannot traceback report generation.'
+    created_at: '2026-07-15T15:37:20Z'
+    last_edited: '2026-07-15T15:37:20Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-06-22T22:13:39.663270+00:00'
 - id: pr-ff9b728
