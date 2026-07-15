@@ -518,6 +518,35 @@ def test_server_404_on_unknown_path(tmp_path):
         httpd.server_close()
 
 
+def test_quiet_server_suppresses_client_disconnect_errors(tmp_path, capsys):
+    """A client aborting mid-stream (Safari scrubbing video drops Range
+    requests constantly) must not print a traceback per aborted request."""
+    pm_root, caps = _seed_project(tmp_path)
+    handler = dashboard_server._make_handler(pm_root, caps)
+    httpd = dashboard_server._QuietDisconnectServer(("127.0.0.1", 0), handler)
+    try:
+        try:
+            raise BrokenPipeError("client went away")
+        except BrokenPipeError:
+            httpd.handle_error(None, ("127.0.0.1", 12345))
+        try:
+            raise ConnectionResetError("client reset")
+        except ConnectionResetError:
+            httpd.handle_error(None, ("127.0.0.1", 12345))
+    finally:
+        httpd.server_close()
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+
+
+def test_serve_uses_quiet_disconnect_server():
+    # serve() must instantiate the quiet subclass, not the raw
+    # ThreadingHTTPServer, so real dashboards get the suppression.
+    import inspect
+    src = inspect.getsource(dashboard_server.serve)
+    assert "_QuietDisconnectServer" in src
+
+
 def test_pr_report_command_is_removed():
     import pm_core.cli.pr as pr_cli
     assert not hasattr(pr_cli, "pr_report")

@@ -15,6 +15,7 @@ import http.server
 import logging
 import os
 import re
+import sys
 import threading
 from pathlib import Path
 
@@ -148,6 +149,24 @@ def _make_handler(pm_root: Path, captures_root_dir: Path):
     return _Handler
 
 
+class _QuietDisconnectServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer that doesn't traceback on client disconnects.
+
+    Video players abort in-flight responses as a matter of course — Safari
+    issues a burst of Range requests while scrubbing and drops the ones it
+    no longer needs — so a mid-write ``BrokenPipeError`` /
+    ``ConnectionResetError`` is normal operation, not an error worth a
+    console traceback per request.
+    """
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            _log.debug("client %s disconnected mid-response", client_address)
+            return
+        super().handle_error(request, client_address)
+
+
 def serve(*, pm_root: Path, captures_root_dir: Path,
           host: str = DEFAULT_BIND, port: int = DEFAULT_PORT,
           open_browser: bool = False) -> None:
@@ -165,7 +184,7 @@ def serve(*, pm_root: Path, captures_root_dir: Path,
     """
     handler_cls = _make_handler(pm_root, captures_root_dir)
     try:
-        httpd = http.server.ThreadingHTTPServer((host, port), handler_cls)
+        httpd = _QuietDisconnectServer((host, port), handler_cls)
     except OSError as exc:
         # Most commonly "address already in use" when a dashboard is already
         # running on this port — surface a one-line hint instead of a traceback.

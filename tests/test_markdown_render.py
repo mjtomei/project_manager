@@ -143,3 +143,14 @@ def test_cli_md_render_emits_body_only_html(tmp_path):
 def test_cli_md_render_missing_file_errors(tmp_path):
     result = CliRunner().invoke(cli, ["md-render", str(tmp_path / "nope.md")])
     assert result.exit_code != 0
+
+
+def test_cli_md_render_tolerates_invalid_utf8(tmp_path):
+    """Evidence logs can carry stray binary bytes (e.g. NULs piped into a
+    capture); md-render must render with replacement chars, not traceback."""
+    md = tmp_path / "log.md"
+    md.write_bytes(b"# Header\n\nbefore \xff\xfe after\n")
+    result = CliRunner().invoke(cli, ["md-render", str(md)])
+    assert result.exit_code == 0, result.output
+    assert "<h1>Header</h1>" in result.output
+    assert "before" in result.output and "after" in result.output

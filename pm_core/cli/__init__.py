@@ -463,7 +463,9 @@ def md_render(md_path: str):
     """
     from pathlib import Path
     from pm_core.markdown_render import render_markdown_body
-    text = Path(md_path).read_text(encoding="utf-8")
+    # Evidence files can carry stray binary bytes (e.g. NULs piped into a
+    # log) — decode with replacement rather than tracebacking mid-report.
+    text = Path(md_path).read_text(encoding="utf-8", errors="replace")
     click.echo(render_markdown_body(text), nl=False)
 
 

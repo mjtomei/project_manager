@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-abcf70f
+  active_pr: pr-8e693f6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -23408,7 +23408,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: qa
+  status: in_review
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -23449,9 +23449,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-06-22T20:37:56.969669+00:00'
+  updated_at: '2026-07-15T15:30:20.567277+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-05-30T21:47:32.932375+00:00'
+  reviewed_at: '2026-07-15T15:30:20.567277+00:00'
   merged_at: null
   notes:
   - id: note-a9626ec
@@ -24178,15 +24178,38 @@ prs:
       sort-indicator invariant holds; re-clicking Last modified returns most-recent-first
       per the re-sort fix; pure-JS filter, no reload): PASS. The earlier router NEEDS_WORK
       on md-render XSS was resolved during the review loop (5ca00c32 raw-HTML escape,
-      37d8de22 javascript:/data: URI sanitization). Spec qa.md rewritten to match the
-      shipped six-column dashboard (PR/Title/Status/Last modified/Verdict/Report,
+      37d8de22 javascript:/data: URI sanitization). Spec qa.md rewritten to match
+      the shipped six-column dashboard (PR/Title/Status/Last modified/Verdict/Report,
       client-side filter + click-to-sort, no report.json sidecar, no pm pr report
       command). SETUP GOTCHA (s48 env): Playwright/Chromium not pre-installed — pip
       install playwright && playwright install chromium works; headless chromium in
       this nested container needs launch args=["--no-sandbox"].'
     created_at: '2026-06-22T21:26:02Z'
     last_edited: '2026-06-22T21:26:02Z'
+  - id: note-244e2e8
+    text: 'QA PASS: pm md-render neutralizes dangerous URI schemes in markdown evidence
+      while keeping safe links live: PASS; Dashboard click-to-sort directions, single
+      active indicator, and most-recent-first on return to Last modified: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-8e693f6-f1947182207d8db4)'
+    created_at: '2026-06-22T21:44:18Z'
+    last_edited: '2026-06-22T21:44:18Z'
+  - id: note-4847155
+    text: 'iOS Safari cannot play the embedded QA videos (slashed play button or frozen
+      first frame). Two root causes, both need fixing: (1) pm_core/dashboard_server.py
+      uses SimpleHTTPRequestHandler which ignores Range headers (verified: Range request
+      returns 200 full-body, no Accept-Ranges) — Safari requires 206 partial-content
+      to stream <video>; add byte-range support to the handler. (2) Recordings are
+      WebM VP8 (Playwright native) and VP9 yuv444p (cli-recording.md / tmux-screen-recording.md
+      ffmpeg line) — neither decodes on iOS. Switch to H.264: ffmpeg -c:v libx264
+      -profile:v high -pix_fmt yuv420p -crf 18 -movflags +faststart -> .mp4, rendered
+      at 2x scale so 4:2:0 chroma does not blur colored terminal text (even dimensions
+      required); transcode Playwright webm to mp4 in the recipe finalize step, and
+      update prompt_gen.py evidence-rendering guidance (.webm -> .mp4). Desktop Firefox/Chrome
+      unaffected, which is why this was not caught locally.'
+    created_at: '2026-07-15T15:10:00Z'
+    last_edited: '2026-07-15T15:10:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
+  signed_off_at: '2026-06-22T22:13:39.663270+00:00'
 - id: pr-ff9b728
   plan: plan-regression
   title: Plan auto-start watcher — generalize impl watchers + become the auto-start
@@ -25007,3 +25030,76 @@ prs:
       but sign_off never auto-launched; had to launch it manually.'
     created_at: '2026-06-21T01:45:28Z'
     last_edited: '2026-06-21T01:45:28Z'
+- id: pr-e0b4515
+  plan: bugs
+  title: QA finalizer can route back to implementation when an oversight requires
+    spec/impl revision
+  branch: pm/pr-e0b4515-qa-finalizer-can-route-back-to-implementation-when
+  status: pending
+  depends_on: []
+  description: "## Problem\n\nToday the QA loop has two output destinations besides\
+    \ PASS:\n\n* **NEEDS_WORK** → back to **in_review** for a fresh review iteration\
+    \ (the\n  agent expects code-level fixes).\n* **INPUT_REQUIRED** → paused.\n\n\
+    But there's a real third case: QA surfaces something big enough that the\nissue\
+    \ isn't fixable as a code patch in review — the implementation **spec\nitself**\
+    \ (and therefore the design) needs to be revised. Examples:\n\n- A scenario reveals\
+    \ the spec is internally contradictory.\n- The implementation approach matches\
+    \ the spec but the spec doesn't match\n  the PR's actual intent (e.g. the agent\
+    \ built the wrong feature because\n  the spec was ambiguous).\n- Multiple scenarios\
+    \ fail in ways that point at a single design-level\n  mistake, not isolated code\
+    \ bugs.\n\nRouting all of those back through review/QA wastes a loop iteration\
+    \ before\nsomeone notices the spec is the problem. Sign-off already has the parallel\n\
+    verdict (`SIGNOFF_IMPL`) for the same situation discovered later in the\nlifecycle;\
+    \ QA should be able to short-circuit to it directly.\n\n## Fix\n\nAdd a QA finalizer\
+    \ verdict that throws the PR back to **in_progress** with\nguidance for the impl\
+    \ agent that the spec needs revision. Shape:\n\n1. **New finalizer verdict** —\
+    \ e.g. `QA_NEEDS_IMPL` (or extend the\n   `qa_loop._on_qa_complete` routing with\
+    \ a \"impl-rework\" branch). Lives\n   alongside today's PASS / NEEDS_WORK / INPUT_REQUIRED.\n\
+    \n2. **Decision lives in the QA finalizer pane** (or a small post-QA\n   supervisor\
+    \ pass that reads the per-scenario verdicts + reasons + the\n   QA summary). The\
+    \ finalize prompt is the natural place — it already\n   sees all scenarios and\
+    \ their reasons; it just needs new criteria:\n   *\"Is the failure pattern a code-level\
+    \ bug or a spec/design-level\n   oversight? If the latter, route QA_NEEDS_IMPL\
+    \ with a note explaining\n   what the spec needs to change.\"*\n\n3. **Routing\
+    \ in `qa_loop_ui._on_qa_complete`** (and the matching\n   `pm pr auto-sequence`\
+    \ `qa` branch in `cli/pr.py`):\n   - On `QA_NEEDS_IMPL`: flip status to `in_progress`,\
+    \ clear the QA loop\n     state, retire the QA window, optionally clear the impl\
+    \ spec so the\n     impl agent regenerates it (or leave the spec and let the impl\
+    \ prompt\n     pick up the finalizer's note), launch impl.\n   - Auto-sequence\
+    \ then continues forward (and `pr-ff9b728`'s\n     `reviewed_sha` mechanism, once\
+    \ it lands, naturally ensures the\n     re-routed branch re-passes review + qa).\n\
+    \n4. **Note propagation**: the finalizer's reasoning needs to reach the\n   impl\
+    \ agent. Two options:\n   - `pm pr note add <pr_id>` with the spec-revision rationale\
+    \ (visible\n     to impl via `_pr_notes_handoff_block`).\n   - A dedicated `pm\
+    \ pr spec invalidate` flag that prompts impl to\n     regenerate the implementation\
+    \ spec from scratch with the\n     QA-supplied context.\n\n5. **Auto-sequence\
+    \ guard**: a PR keeps falling QA → impl → QA could spin\n   forever. Add a small\
+    \ counter or per-PR cap: after N QA→impl bounces\n   the chain pauses with INPUT_REQUIRED\
+    \ instead of looping again, so a\n   human takes a look.\n\n## Acceptance criteria\n\
+    \n- QA finalizer can emit a `QA_NEEDS_IMPL` (or equivalent) verdict.\n- That verdict\
+    \ transitions the PR to `in_progress` and launches a fresh\n  impl pane, not `in_review`.\n\
+    - The impl agent sees the finalizer's spec-revision rationale (via PR\n  notes\
+    \ or an invalidated impl spec).\n- Auto-sequence picks the chain back up from\
+    \ `in_progress` forward.\n- A QA→impl→QA loop is capped so a degenerate spec doesn't\
+    \ ping-pong.\n- Prompt guidance for the finalizer specifies *when* to use the\
+    \ new\n  verdict vs the existing NEEDS_WORK (code-level fix).\n- Existing PASS\
+    \ / NEEDS_WORK / INPUT_REQUIRED behaviour unchanged.\n\n## Tests\n\n- `_on_qa_complete`\
+    \ routes `QA_NEEDS_IMPL` to `in_progress` and starts\n  impl; doesn't touch the\
+    \ review loop.\n- Auto-sequence `qa` branch handles the new verdict the same way.\n\
+    - Loop cap fires after the configured number of bounces.\n- Finalizer prompt covers\
+    \ the criteria (snapshot test for the new\n  guidance, like the existing finalize-prompt\
+    \ tests).\n\n## Related\n\n- Mirrors `SIGNOFF_IMPL` from `pr-2d5f712` (sign-off\
+    \ step's existing\n  route back to impl).\n- Pairs with `pr-ff9b728`'s `reviewed_sha`\
+    \ re-loop invariant (the\n  note-40412bf proposal) — once that lands, the chain\
+    \ self-routes\n  forward through review + qa after the re-impl.\n- Independent\
+    \ of `pr-8e60aa9` (terminal-verdict observer) and\n  `pr-dd4f07b` (skip_qa bypasses\
+    \ sign-off)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-06-24T15:07:29.141695+00:00'
+  updated_at: '2026-06-24T15:07:29.141695+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
