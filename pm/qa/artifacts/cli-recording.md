@@ -18,11 +18,12 @@ Write into `<capture-dir>/<short-name>/` (the scenario prompt
 substitutes the actual captures directory for `<capture-dir>`):
 
 - `recording.cast` — asciinema replay (`asciinema play recording.cast`).
-- `recording.webm` — VP9 video rendered from the cast (**required**).
+- `recording.mp4` — H.264 video rendered from the cast (**required**).
   This is the embeddable view: the sign-off HTML report shows it inline
   via a plain `<video controls>` element — native pause / scrub, no
-  player library, works offline. The `.cast` stays as the small,
-  exact-replay/grep source.
+  player library, works offline. H.264/mp4 plays everywhere including
+  iOS Safari (VP8/VP9 webm does not decode on iOS). The `.cast` stays
+  as the small, exact-replay/grep source.
 - `transcript.log` — plain-text version of the same run (**required** —
   the load-bearing artifact for grep/diff and for consumers without
   asciinema; the cast is supplementary).
@@ -96,29 +97,34 @@ animation but keep the output. Note the fallback in the manifest.
 
 ## Render to video
 
-Once the cast exists, render a `.webm` sibling so the recording embeds
+Once the cast exists, render a `.mp4` sibling so the recording embeds
 in the sign-off HTML report as a `<video controls>` element. `agg`
-renders the cast to frames (GIF), then `ffmpeg` encodes VP9 — there is
+renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
 magnitude slower and fragile). The intermediate GIF is discarded.
 
 ```
 cast=<capture-dir>/<short-name>/recording.cast
 agg --idle-time-limit 2 "$cast" "$cast.gif"
-ffmpeg -y -i "$cast.gif" -c:v libvpx-vp9 -pix_fmt yuv444p \
-    -row-mt 1 -deadline good -cpu-used 2 -b:v 0 -crf 20 \
-    "${cast%.cast}.webm"
+ffmpeg -y -i "$cast.gif" -vf "scale=iw*2:ih*2:flags=neighbor" \
+    -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 18 \
+    -movflags +faststart "${cast%.cast}.mp4"
 rm -f "$cast.gif"
 ```
 
 Notes:
 - `--idle-time-limit 2` caps the long pauses a terminal session
   accumulates, dropping dead air without losing anything worth watching.
-- `yuv444p` keeps colored terminal text crisp (full-resolution chroma);
-  `crf 20` is visually lossless for this content. File size is not a
-  concern — the report is served locally over loopback — so favor
-  quality. A long, busy session may take several minutes to encode;
-  that's expected and acceptable for a rare case.
+- H.264 + `yuv420p` is the only combination that decodes everywhere,
+  including iOS Safari (VP8/VP9 webm and 4:4:4 chroma do not). 4:2:0
+  chroma subsampling would blur colored terminal text at native size,
+  so the `scale=iw*2:ih*2` nearest-neighbor upscale renders at 2x —
+  crisp text, and the doubling guarantees the even dimensions H.264
+  requires. `crf 18` is visually lossless for this content; favor
+  quality — file size is not a concern. `-movflags +faststart` puts the
+  moov atom up front so playback starts before the full download.
+  A long, busy session may take several minutes to encode; that's
+  expected and acceptable for a rare case.
 
 ## Manifest format
 
@@ -143,7 +149,7 @@ recipe: pm/qa/artifacts/cli-recording.md
 ## Files
 
 - `recording.cast` — <one-line description>
-- `recording.webm` — <one-line description>
+- `recording.mp4` — <one-line description>
 - `transcript.log` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```

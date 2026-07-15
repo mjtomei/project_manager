@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import http.server
 import logging
+import os
+import re
 import threading
 from pathlib import Path
 
@@ -20,6 +22,10 @@ _log = logging.getLogger("pm.dashboard_server")
 
 DEFAULT_PORT = 8765
 DEFAULT_BIND = "127.0.0.1"
+
+# Single byte range: "bytes=start-end", "bytes=start-", or "bytes=-suffix".
+_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+_COPY_CHUNK = 64 * 1024
 
 
 def _make_handler(pm_root: Path, captures_root_dir: Path):
@@ -63,7 +69,78 @@ def _make_handler(pm_root: Path, captures_root_dir: Path):
             if path in ("", "/", "/index.html"):
                 self._serve_dashboard()
                 return
+            if self.headers.get("Range") and self._serve_range():
+                return
             super().do_GET()
+
+        def end_headers(self):
+            # Advertise range support on static-file responses so players
+            # (Safari <video> in particular) know they can seek/stream.
+            if getattr(self, "_ranges_ok", False):
+                self.send_header("Accept-Ranges", "bytes")
+            super().end_headers()
+
+        def send_head(self):
+            self._ranges_ok = True
+            try:
+                return super().send_head()
+            finally:
+                self._ranges_ok = False
+
+        def _serve_range(self) -> bool:
+            """Serve a single-byte-range request (RFC 9110 §14).
+
+            Safari refuses to stream ``<video>`` from a server that answers
+            Range requests with a 200 full body. Returns True when the
+            request was handled (206 or 416); False falls through to the
+            base full-file handler (which is a valid way to ignore an
+            unsupported/multi-part Range).
+            """
+            m = _RANGE_RE.match(self.headers.get("Range", "").strip())
+            if not m:
+                return False
+            fs_path = self.translate_path(self.path.split("?", 1)[0])
+            if not os.path.isfile(fs_path):
+                return False
+            try:
+                f = open(fs_path, "rb")
+            except OSError:
+                return False
+            with f:
+                size = os.fstat(f.fileno()).st_size
+                start_s, end_s = m.groups()
+                if start_s:
+                    start = int(start_s)
+                    end = int(end_s) if end_s else size - 1
+                elif end_s:  # suffix range: last N bytes
+                    start = max(0, size - int(end_s))
+                    end = size - 1
+                else:
+                    return False
+                if start >= size or start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return True
+                end = min(end, size - 1)
+                length = end - start + 1
+                self.send_response(206)
+                self.send_header("Content-Type", self.guess_type(fs_path))
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header(
+                    "Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Content-Length", str(length))
+                self.end_headers()
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(_COPY_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            return True
 
         def log_message(self, format, *args):  # noqa: A002 — stdlib hook name
             _log.info("%s %s", self.address_string(), format % args)

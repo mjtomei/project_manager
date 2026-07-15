@@ -410,6 +410,100 @@ def test_server_picks_up_new_report_without_restart(tmp_path):
         httpd.server_close()
 
 
+def test_server_range_request_returns_206_partial(tmp_path):
+    """Safari streams <video> only from servers honoring Range requests."""
+    pm_root, caps = _seed_project(tmp_path)
+    vid = caps / "pr-aaa"
+    vid.mkdir(parents=True)
+    payload = bytes(range(256)) * 4
+    (vid / "recording.mp4").write_bytes(payload)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        req = urllib.request.Request(
+            f"{base}/pr-aaa/recording.mp4",
+            headers={"Range": "bytes=10-19"})
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 206
+            assert resp.headers["Content-Range"] == \
+                f"bytes 10-19/{len(payload)}"
+            assert resp.headers["Accept-Ranges"] == "bytes"
+            body = resp.read()
+        assert body == payload[10:20]
+
+        # Open-ended range: bytes=N-
+        req = urllib.request.Request(
+            f"{base}/pr-aaa/recording.mp4",
+            headers={"Range": f"bytes={len(payload) - 8}-"})
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 206
+            assert resp.read() == payload[-8:]
+
+        # Suffix range: bytes=-N
+        req = urllib.request.Request(
+            f"{base}/pr-aaa/recording.mp4",
+            headers={"Range": "bytes=-16"})
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 206
+            assert resp.read() == payload[-16:]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_server_range_unsatisfiable_returns_416(tmp_path):
+    pm_root, caps = _seed_project(tmp_path)
+    vid = caps / "pr-aaa"
+    vid.mkdir(parents=True)
+    (vid / "recording.mp4").write_bytes(b"x" * 100)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        req = urllib.request.Request(
+            f"{base}/pr-aaa/recording.mp4",
+            headers={"Range": "bytes=100-"})
+        try:
+            urllib.request.urlopen(req)
+            assert False, "expected HTTPError 416"
+        except urllib.error.HTTPError as e:
+            assert e.code == 416
+            assert e.headers["Content-Range"] == "bytes */100"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_server_full_get_advertises_accept_ranges(tmp_path):
+    pm_root, caps = _seed_project(tmp_path)
+    _write_report(caps, "pr-aaa", signoff.SIGNOFF_MERGE)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        with urllib.request.urlopen(f"{base}/pr-aaa/report.html") as resp:
+            assert resp.status == 200
+            assert resp.headers["Accept-Ranges"] == "bytes"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_server_unparsable_range_falls_back_to_200(tmp_path):
+    """Ignoring a Range the server can't handle (e.g. multipart) is valid;
+    the response must be the full 200 body, not an error."""
+    pm_root, caps = _seed_project(tmp_path)
+    vid = caps / "pr-aaa"
+    vid.mkdir(parents=True)
+    (vid / "recording.mp4").write_bytes(b"y" * 50)
+    httpd, base = _spin_up(pm_root, caps)
+    try:
+        req = urllib.request.Request(
+            f"{base}/pr-aaa/recording.mp4",
+            headers={"Range": "bytes=0-9,20-29"})
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 200
+            assert resp.read() == b"y" * 50
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def test_server_404_on_unknown_path(tmp_path):
     pm_root, caps = _seed_project(tmp_path)
     httpd, base = _spin_up(pm_root, caps)

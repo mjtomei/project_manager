@@ -77,7 +77,7 @@ specifies:
        or code area shipped. Treated as the PR's release notes; one line per
        item, linked to its diff anchor / commit.
      * **Demonstrations** — for every "delivers" bullet above, embed the
-       inline evidence right there (prefer `.webm` screen captures over
+       inline evidence right there (prefer `.mp4` screen captures over
        text logs). A bullet with no demonstration must say so explicitly
        and explain why (e.g. "schema-only change, verified via type-check
        evidence below"); silent omission reads as incomplete verification.
@@ -110,10 +110,12 @@ specifies:
   conclusions) is enough for a brief read to trust the verdict; full
   depth (diff, scenario evidence, captures) is folded behind `<details>`
   collapsed by default for the auditing reviewer.
-* **Evidence rendering** — embed-first: `<video>` for `.webm`, `<img>`
-  for images, `<audio>` for audio, `<details><pre>` for small text/log;
-  for `.md`, run `pm md-render <path>` and embed the body-only fragment
-  inline; link as-is for `.html` and large binaries.
+* **Evidence rendering** — embed-first: `<video>` for `.mp4` (H.264 —
+  the only codec that plays everywhere including iOS Safari; recipes no
+  longer produce webm), `<img>` for images, `<audio>` for audio,
+  `<details><pre>` for small text/log; for `.md`, run `pm md-render
+  <path>` and embed the body-only fragment inline; link as-is for
+  `.html` and large binaries.
 * **No audit-trail step** — the report itself is the audit surface
   (per-step sections + linked evidence). Earlier iterations of the prompt
   asked the agent to also create one `pm pr note add` entry per routing
@@ -182,7 +184,10 @@ host="127.0.0.1", port, open_browser)`. It runs a `ThreadingHTTPServer`
 bound to localhost; `/` rebuilds the dashboard fresh on every request,
 everything else falls through to `SimpleHTTPRequestHandler` rooted at
 `captures_root_dir` so `report.html` and its evidence siblings are served
-straight from disk. An `Address already in use` failure surfaces as a
+straight from disk. Static-file responses support single byte-range
+requests (206 partial content + `Accept-Ranges: bytes`) — Safari refuses
+to stream `<video>` from a server that answers Range requests with a
+full-body 200. An `Address already in use` failure surfaces as a
 one-line hint instead of a traceback.
 
 **Note — scope evolution vs the original description.** The description

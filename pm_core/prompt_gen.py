@@ -577,7 +577,7 @@ PR-level *comprehensive* review and a routing decision.
      every bullet in "What this PR delivers" above, **embed the
      evidence inline right there** — pair the description with the
      proof. Prefer demonstrations the reviewer can *watch* over text
-     they have to read: screen captures (`.webm`) before logs; logs
+     they have to read: screen captures (`.mp4`) before logs; logs
      only when a screen capture isn't meaningful (e.g. a pure
      data-transformation result). If a bullet has no demonstration,
      say so explicitly and explain why (e.g. "schema-only change,
@@ -633,10 +633,9 @@ PR-level *comprehensive* review and a routing decision.
    Embed inline whenever the browser supports it. Pick the appropriate
    native HTML control per type:
 
-     - `<video controls>` for `.webm` video
+     - `<video controls>` for `.mp4` video
      - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`
-     - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus` /
-       audio-only `.webm`
+     - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus`
      - `<details><pre>` for small text / log files under ~50 KB
 
    For **Markdown** evidence (`.md`), render the body inline so the
