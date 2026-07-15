@@ -91,6 +91,16 @@ tmux -L scaffold send-keys -t rec:0.0 \
 tmux -L scaffold kill-server   # cleanup
 ```
 
+`asciinema cat` (the transcript step) also opens `/dev/tty`, so in a
+no-TTY environment run it inside a tmux pane the same way:
+
+```
+tmux -L scaffold new-session -d -s cat -x 100 -y 30
+tmux -L scaffold send-keys -t cat:0.0 \
+    "asciinema cat <capture-dir>/recording.cast \
+        > <capture-dir>/transcript.log; tmux -L scaffold kill-server" Enter
+```
+
 If `asciinema` isn't installed and can't be installed, fall back to
 appending `| tee transcript.log` to the command line — you lose
 animation but keep the output. Note the fallback in the manifest.
