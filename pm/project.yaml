@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T20:07:14.559946+00:00'
+  updated_at: '2026-07-18T20:27:17.026556+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-15T15:30:20.567277+00:00'
   merged_at: null
@@ -24352,6 +24352,23 @@ prs:
       is down; a background retry loop will push when it returns.'
     created_at: '2026-07-18T20:07:14Z'
     last_edited: '2026-07-18T20:07:14Z'
+  - id: note-a9e3738
+    text: 'QA s60: recipe size-guard was broken as written — the ffprobe line -of
+      csv=p=0:s=SPACE fails to parse on ffmpeg 4.4.x, gw/gh read empty, guard never
+      fired, and an oversized (300x80) pane still got the 2x upscale (5818x3628, past
+      iOS limits). Fixed bacb55a5 in both cast recipes: parse with csv=p=0 + IFS=comma,
+      and inverted the default so upscale only runs when dims were positively read
+      AND 2x fits 4096x2304 (probe failure now degrades to safe native-size path).
+      Verified post-fix: oversized -> 2908x1814 native even-trunc; normal 100x30 ->
+      exact 2x 1966x1388, moov-before-mdat, no gif/webm leftovers. Browser triple
+      PASS: recipe mp4 via pm pr dashboard --port 0 played+scrubbed in Playwright
+      Firefox (4 seeks, readyState>=2), browser fetch 206 w/ correct Content-Range,
+      5 concurrent clients ~3476 reqs incl 706 mid-body aborts, zero errors, server
+      log stayed at the single serving line. Env: agg aarch64 release binary into
+      ~/.local/bin; Firefox needs sudo apt-get update && apt-get install libgtk-3-0
+      libasound2; PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright.'
+    created_at: '2026-07-18T20:27:16Z'
+    last_edited: '2026-07-18T20:27:16Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
