@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T23:06:24.375835+00:00'
+  updated_at: '2026-07-18T23:36:53.327025+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-18T21:42:22.377584+00:00'
   merged_at: null
@@ -24502,6 +24502,19 @@ prs:
       in Firefox getBoundingClientRect is measurement noise, not CLS.'
     created_at: '2026-07-18T23:06:24Z'
     last_edited: '2026-07-18T23:06:24Z'
+  - id: note-785ba9d
+    text: 'QA s66 addendum (verdict-review follow-up): the initial PASS was flagged
+      for silently skipping the tmux-screen-recording recipe (and trace.zip). Re-drove
+      the sign-off surface under an asciinema recorder (separate pm-recorder session
+      attaching to the target session) and re-ran the traced Playwright walk; scenarios/66/
+      now has tmux/ (cast + H.264 mp4 + transcript) and web-ui/ (incl. trace.zip).
+      Render gotcha on this image: agg runs ~4.7 fps on a 200x50 cast, so a 160s cast
+      takes ~4 min to gif + ~5 min ffmpeg — run the render in background with a generous
+      timeout or the shell timeout kills ffmpeg mid-write leaving a truncated mp4
+      (zombie ffmpeg, no faststart). Also: recreating pm session for an already-started
+      PR relaunches an impl Claude window — kill it before driving panes by name.'
+    created_at: '2026-07-18T23:36:53Z'
+    last_edited: '2026-07-18T23:36:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
