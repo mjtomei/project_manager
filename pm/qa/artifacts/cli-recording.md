@@ -8,7 +8,7 @@ description: Capture an asciinema replay of one or more CLI commands
 A scenario demonstrates a command-line interaction — argument
 handling, stdout/stderr, multi-step CLI sequences — and you want
 unambiguous evidence of what happened, consumable by humans (replay)
-and downstream agents (parse the cast or transcript). Use this recipe
+and downstream agents (parse the cast). Use this recipe
 when there's no TUI involved; for tmux-hosted TUIs, use
 `tmux-screen-recording.md`.
 
@@ -24,9 +24,6 @@ substitutes the actual captures directory for `<capture-dir>`):
   player library, works offline. H.264/mp4 plays everywhere including
   iOS Safari (VP8/VP9 webm does not decode on iOS). The `.cast` stays
   as the small, exact-replay/grep source.
-- `transcript.log` — plain-text version of the same run (**required** —
-  the load-bearing artifact for grep/diff and for consumers without
-  asciinema; the cast is supplementary).
 - `manifest.md` — frontmatter + prose: workdir, the exact command(s)
   recorded, what the recording demonstrates, pre/post-fix state if
   relevant. Include a `## Files` section listing every non-default
@@ -91,16 +88,6 @@ tmux -L scaffold send-keys -t rec:0.0 \
 tmux -L scaffold kill-server   # cleanup
 ```
 
-`asciinema cat` (the transcript step) also opens `/dev/tty`, so in a
-no-TTY environment run it inside a tmux pane the same way:
-
-```
-tmux -L scaffold new-session -d -s cat -x 100 -y 30
-tmux -L scaffold send-keys -t cat:0.0 \
-    "asciinema cat <capture-dir>/recording.cast \
-        > <capture-dir>/transcript.log; tmux -L scaffold kill-server" Enter
-```
-
 If `asciinema` isn't installed and can't be installed, fall back to
 appending `| tee transcript.log` to the command line — you lose
 animation but keep the output. Note the fallback in the manifest.
@@ -160,7 +147,6 @@ recipe: pm/qa/artifacts/cli-recording.md
 
 - `recording.cast` — <one-line description>
 - `recording.mp4` — <one-line description>
-- `transcript.log` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```
 

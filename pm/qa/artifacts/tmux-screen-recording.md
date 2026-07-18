@@ -8,20 +8,18 @@ description: Capture a tmux pane transcript and an asciinema replay of a pm TUI 
 A scenario produces behavior worth confirming end-to-end through the
 pm TUI — a keybinding, a pane render, a flow you'd normally drive by
 hand — and you want unambiguous evidence of what happened, consumable
-by humans (replay) and downstream agents (parse the transcript or
-cast).
+by humans (replay) and downstream agents (parse the cast or the
+pane scrollback).
 
 ## What this recipe produces
 
-Three files per capture, written into `<capture-dir>/` (a
+Written per capture into `<capture-dir>/` (a
 subdirectory under the captures directory the scenario prompt
 names):
 
-- `transcript.log` — plain-text scrollback of the pane (**required** —
-  the load-bearing artifact for grep/diff and for consumers without
-  asciinema).
-- `recording.cast` — asciinema replay (**required** when `asciinema`
-  is available).
+- `transcript.log` — plain-text scrollback of the pane (comes free
+  from the `pipe-pane` in the capture flow; handy for grep/diff).
+- `recording.cast` — asciinema replay.
 - `recording.mp4` — H.264 video rendered from the cast (**required**;
   plays everywhere including iOS Safari, unlike VP8/VP9 webm).
   The embeddable view: the sign-off HTML report shows it inline via a

@@ -29,7 +29,7 @@ Write into `<capture-dir>/<short-name>/` (the scenario prompt
 substitutes the per-PR captures directory — `$(pm qa captures-path
 <pr-id>)/...` — for `<capture-dir>`):
 
-- `recording.mp4` — the rendered walk-through (**load-bearing**).
+- `recording.mp4` — the rendered walk-through (the primary artifact).
   Playwright records VP8 webm natively; the finalize step transcodes it
   to H.264 mp4 so it plays everywhere including iOS Safari (VP8/VP9
   webm does not decode on iOS).
@@ -224,7 +224,7 @@ fencing deep:
     ## Files
 
     - `recording.mp4` — the rendered walk-through, transcoded to H.264
-      from Playwright's native webm (load-bearing).
+      from Playwright's native webm.
     - `trace.zip` — Playwright trace; `npx playwright show-trace trace.zip`.
     - `01-loaded.png` … `NN-*.png` — key-state screenshots.
     - `dom.html` — DOM dump at a representative state.
