@@ -142,6 +142,36 @@ window's internal layout and the actual agent authoring the report.
   neutralized — an unsafe `a@href` is blanked to `#` and an unsafe `img@src`
   is dropped, while safe schemes (`http`/`https`/`mailto`/`file`/relative
   paths/fragments) are preserved (fixed at commit `37d8de22`).
+* Evidence files can carry stray binary bytes (e.g. NULs piped into a log):
+  `pm md-render` decodes with `errors=replace`, so an `.md` containing
+  invalid UTF-8 renders (exit 0, replacement characters) instead of
+  tracebacking mid-report (fixed at commit `987aa288`).
+
+### R9 — Dashboard server streams video via byte ranges (iOS Safari fix)
+* GIVEN a running dashboard server whose captures root holds a PR
+  `report.html` embedding an H.264 `.mp4` evidence video.
+* WHEN a client requests the video with a `Range: bytes=…` header (as
+  Safari's `<video>` player does), and also without one.
+* THEN a plain GET returns 200 with `Accept-Ranges: bytes`; a single-range
+  request (`bytes=N-M`, open-ended `bytes=N-`, suffix `bytes=-N`) returns
+  206 with a correct `Content-Range: bytes N-M/size`, `Content-Length`, and
+  exactly those bytes; a start beyond EOF returns 416 with
+  `Content-Range: bytes */size`; a multipart or unparsable Range header
+  falls back to a full 200 response (valid per RFC 9110). The video plays
+  in a real browser served this way. (Fixed at commit `f98a4c5c` —
+  `SimpleHTTPRequestHandler` previously ignored Range, which iOS Safari
+  refuses to stream from.)
+
+### R10 — Recording recipes produce iOS-playable H.264 mp4
+* GIVEN the QA artifact recipes (`cli-recording.md`,
+  `tmux-screen-recording.md`, `web-ui-recording.md`) followed as written by
+  a scenario worker.
+* WHEN a capture is produced and finalized per the recipe.
+* THEN the load-bearing video is `recording.mp4` encoded H.264 yuv420p with
+  even dimensions (`+faststart`), no leftover `.webm` after the web-ui
+  finalize transcode, cast-derived renders upscale 2x so terminal text
+  stays crisp, and the sign-off prompt's evidence policy embeds `.mp4`
+  (no `.webm` mention).
 
 ### R8 — qa_loop persists `scenario.json` alongside `verdict.md`
 * GIVEN a PR run through a QA loop (driven by fake-Claude) producing scenario
@@ -168,8 +198,9 @@ window's internal layout and the actual agent authoring the report.
   characters.
 * WHEN the dashboard page is rendered/loaded in a browser.
 * THEN the title appears as literal text (no script execution, no layout
-  break) and the page source shows the angle brackets escaped. The copyable
-  `pm pr signoff <id>` command is likewise escaped.
+  break) and the page source shows the angle brackets escaped. (The earlier
+  copyable `pm pr signoff <id>` empty-state command was dropped during the
+  review loop; the empty cell just reads "no report yet".)
 
 ### E3 — No session tag / captures root unresolvable
 * GIVEN a shell not inside a pm tmux session and a cwd that yields no derivable
@@ -213,6 +244,16 @@ evidence siblings; the per-PR sign-off tmux window + its single
 * THEN every response is a complete, well-formed HTML document with a row for
   every PR; no truncated/half-built page; no server crash.
 
+### C3 — Client disconnects mid-response are quiet, server keeps serving
+* GIVEN a running dashboard server streaming a large `.mp4` via Range
+  requests (Safari scrubbing issues a burst of ranges and aborts the ones it
+  no longer needs).
+* WHEN several clients abort their connections mid-transfer while other
+  clients keep fetching `/` and the report.
+* THEN no `BrokenPipeError`/`ConnectionResetError` traceback appears on the
+  server console (disconnects log at debug), and subsequent requests are
+  served complete and well-formed (fixed at commit `987aa288`).
+
 ### C2 — Concurrent sign-off launches don't duplicate windows or corrupt the workdir
 * GIVEN a PR eligible for sign-off whose workdir does not yet exist.
 * WHEN two `pm pr signoff <id>` invocations race (e.g. from two shells).
@@ -230,7 +271,10 @@ evidence siblings; the per-PR sign-off tmux window + its single
   marker consistently, without regressing other statuses.
 * Sign-off routing records and acts on the verdict correctly under
   auto-sequence; a manual `pm pr signoff` never mutates state.
-* `pm md-render` emits a body-only fragment with tables + fenced code rendered.
+* `pm md-render` emits a body-only fragment with tables + fenced code
+  rendered, and never tracebacks on binary-laced evidence.
+* Range requests against served evidence get correct 206/416 semantics;
+  client aborts never traceback the server.
 * Each QA scenario capture dir gains a `scenario.json` alongside `verdict.md`.
 
 ## Ambiguities (resolved)
