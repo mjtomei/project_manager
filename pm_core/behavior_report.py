@@ -271,8 +271,11 @@ function pmSort(col) {
     var c = r.children[col];
     var v = c.dataset.sort;
     if (v === undefined || v === null || v === '') v = c.textContent.trim();
-    var n = parseFloat(v);
-    return isNaN(n) ? v.toLowerCase() : n;
+    // Numeric key only when the WHOLE value is a number — parseFloat would
+    // turn a numeric-prefix title ("2x upscale...") into 2, and a
+    // number-vs-string comparison is inconsistent (both a>b and b>a false).
+    var n = Number(v);
+    return (v === '' || isNaN(n)) ? v.toLowerCase() : n;
   }
   rows.sort(function(a, b) {
     var ka = keyFor(a), kb = keyFor(b);
