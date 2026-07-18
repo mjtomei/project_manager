@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T22:59:12.578505+00:00'
+  updated_at: '2026-07-18T23:06:24.375835+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-18T21:42:22.377584+00:00'
   merged_at: null
@@ -24491,6 +24491,17 @@ prs:
       + checks.json. 38/38 test_behavior_report.py green.'
     created_at: '2026-07-18T22:59:12Z'
     last_edited: '2026-07-18T22:59:12Z'
+  - id: note-b3a9fc5
+    text: 'QA s66 (layout stability, fresh real sign-off): PASS. Gotcha for future
+      rounds that seed synthetic evidence (ffmpeg testsrc2 mp4/png) for a real-Claude
+      sign-off: the agent detects the fabricated captures and votes SIGNOFF_REQA —
+      still fine for layout/report-structure assertions (report.html is fully authored,
+      media embedded with dims), but do not expect SIGNOFF_MERGE. Layout harness mechanic
+      worth reusing: hold media routes via a holding-flag inside the route handler
+      (unroute+continue races and cancels pending routes); sub-pixel 0.1px y-jitter
+      in Firefox getBoundingClientRect is measurement noise, not CLS.'
+    created_at: '2026-07-18T23:06:24Z'
+    last_edited: '2026-07-18T23:06:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
