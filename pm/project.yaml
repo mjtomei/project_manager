@@ -23449,9 +23449,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T20:30:52.391909+00:00'
+  updated_at: '2026-07-18T20:51:51.235717+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-07-15T15:30:20.567277+00:00'
+  reviewed_at: '2026-07-18T20:08:48.203818+00:00'
   merged_at: null
   notes:
   - id: note-a9626ec
@@ -24386,6 +24386,34 @@ prs:
       of PATH instead of dropping it.'
     created_at: '2026-07-18T20:30:52Z'
     last_edited: '2026-07-18T20:30:52Z'
+  - id: note-9c41e2d
+    text: 'QA PASS (final round, s61-s63, 2026-07-18): all three scenarios green —
+      recipe size-guard + evidence pipeline e2e (s61), signoff record / merge gate
+      (s62), concurrent actors (s63); supersedes the earlier NEEDS_WORK round (the
+      recipe-video scenario now passes after 365bbbd6 decode-limit cap + bacb55a5
+      ffprobe-parse fix). Gotchas from s61 for future rounds: short recipe recordings
+      compress tiny (3-command 100x30 cast -> 29KB mp4), making a literal Range:
+      bytes=100000-200000 check 416-unsatisfiable — drive livelier sessions (~20 TUI
+      keys got mp4s to ~400KB) before asserting that range; localhost is too fast
+      for curl --max-time 0.2 to abort a 400KB fetch mid-body — use --limit-rate 100k
+      --max-time 0.3 for genuine mid-transfer aborts. Guard verified both ways on
+      real runs: 100x30 -> gif 983x694 -> exact 2x 1966x1388; 300x80 -> 2x over budget
+      -> native even-trunc 2908x1814; both h264 High level 51 yuv420p, faststart,
+      no gif/webm leftovers. Playwright Firefox (libgtk-3-0 via apt + PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright)
+      played+scrubbed both embeds (readyState 4, 10/10 exact seeks) under 5 concurrent
+      curl clients (~4800 reqs all 200/206, range bodies byte-identical).'
+    created_at: '2026-07-18T21:22:29Z'
+    last_edited: '2026-07-18T21:22:29Z'
+  - id: note-d735ac2
+    text: 'Review pass (2026-07-18): incidental fix ca2d9250 — added pm pr signoff
+      / pm pr signoff record / pm md-render lines to the hand-maintained COMMANDS
+      help block in cli/__init__.py (the PR had added the dashboard line but not its
+      other new commands). Full test suite green (2851 passed); tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      fails identically on origin/master in this env (pre-existing, unrelated). Note:
+      the pm venv needs `pip install markdown` (new pyproject dep) or test_markdown_render
+      fails with ModuleNotFoundError.'
+    created_at: '2026-07-18T20:51:51Z'
+    last_edited: '2026-07-18T20:51:51Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728

@@ -169,9 +169,15 @@ window's internal layout and the actual agent authoring the report.
 * WHEN a capture is produced and finalized per the recipe.
 * THEN the load-bearing video is `recording.mp4` encoded H.264 yuv420p with
   even dimensions (`+faststart`), no leftover `.webm` after the web-ui
-  finalize transcode, cast-derived renders upscale 2x so terminal text
-  stays crisp, and the sign-off prompt's evidence policy embeds `.mp4`
+  finalize transcode, and the sign-off prompt's evidence policy embeds `.mp4`
   (no `.webm` mention).
+* Cast-derived renders upscale 2x so terminal text stays crisp — but ONLY
+  when the doubled dimensions fit the iOS hardware-decode budget
+  (≤ 4096x2304); an oversized pane (or an ffprobe probe failure) degrades to
+  the safe native-size path (even-truncated), and the encode pins
+  `-level:v 5.1` either way. (Fixed at commits `365bbbd6` — decode-limit cap
+  — and `bacb55a5` — the guard's ffprobe parse was broken on ffmpeg 4.4.x,
+  so the guard silently never fired and oversized panes still got 2x.)
 
 ### R11 — Merge gate + explicit reviewer approval (`pm pr signoff record`)
 * GIVEN a PR in `sign_off` whose captures dir holds a `report.html` with a
