@@ -99,11 +99,12 @@ agg --idle-time-limit 2 "$cast" "$cast.gif"
 # stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
 # A pane large enough to blow that budget is already crisp at native
 # size; then just round dimensions down to even (H.264 requires even).
-vf="scale=iw*2:ih*2:flags=neighbor"
-read -r gw gh < <(ffprobe -v error -select_streams v:0 \
-    -show_entries stream=width,height -of 'csv=p=0:s= ' "$cast.gif")
-if [ "$((gw * 2))" -gt 4096 ] || [ "$((gh * 2))" -gt 2304 ]; then
-    vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
+    -show_entries stream=width,height -of csv=p=0 "$cast.gif")
+if [ -n "$gw" ] && [ -n "$gh" ] && \
+   [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
+    vf="scale=iw*2:ih*2:flags=neighbor"
 fi
 ffmpeg -y -i "$cast.gif" -vf "$vf" \
     -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
