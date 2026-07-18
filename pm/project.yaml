@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T19:17:48.870782+00:00'
+  updated_at: '2026-07-18T19:57:41.535300+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-15T15:30:20.567277+00:00'
   merged_at: null
@@ -24285,6 +24285,48 @@ prs:
       report.html card 5.'
     created_at: '2026-07-18T19:17:48Z'
     last_edited: '2026-07-18T19:17:48Z'
+  - id: note-0fca74e
+    text: 'SCOPE ADDITION (from sign-off; user decision — the merge gate is blocking
+      manual merges, fix it HERE not in pr-ff9b728; the earlier cross-PR note note-2bdfec2
+      on pr-ff9b728 is deleted, this supersedes it): implement the explicit sign-off
+      record step so a manually-reviewed PR can pass the merge gate without --no-signoff-check.
+
+
+      1) NEW COMMAND `pm pr signoff record <pr_id>` (explicit act, the reviewer approval
+      after reading report.html). Behavior: resolve $CAP/report.html via captures_root;
+      REQUIRE it exists and carries a pm-signoff-verdict meta tag (reuse behavior_report._extract_verdict);
+      write pr["signoff"] = {verdict: <from meta tag>, sha: head_sha(workdir), ts,
+      origin: "manual", report_hash: sha256(report.html bytes)}. Refuse (exit 1, one-line
+      message) when: no report, no meta verdict, or no workdir/HEAD. This makes record-only
+      state impossible via this path — recording requires the report being approved.
+
+
+      2) MERGE GATE (pm pr merge, pr.py ~1918): unchanged freshness check (fresh_recorded_verdict,
+      sha == HEAD), PLUS when the record carries report_hash, re-hash the on-disk
+      report.html and require a match — distinct error message when the report changed
+      since approval ("report.html changed since the recorded approval; re-run pm
+      pr signoff record"). Records without report_hash (auto-sequence legacy) keep
+      current behavior so the auto path is untouched.
+
+
+      3) INVARIANT REFRAMED: manual-never-acts narrows to "recording must be an explicit
+      command, never a side effect of report (re)generation" — `pm pr signoff` (the
+      agent pass / regen) still records NOTHING. Auto-sequence recording via the router
+      transcript is unchanged.
+
+
+      4) SEAM for pr-ff9b728: the watcher reuses this same record path with origin:
+      "watcher" after its own report review; the per-plan auto-merge decision still
+      lives there. Keep record_signoff_verdict as the single writer, extended with
+      optional report_hash + origin values.
+
+
+      5) Tests: record happy path (record then merge passes gate w/o --no-signoff-check);
+      refusals (no report / no meta / stale sha); hash-mismatch blocks merge with
+      the new message; auto-sequence records without report_hash still merge. Update
+      qa.md merge-gate section (s41-derived triples) accordingly.'
+    created_at: '2026-07-18T19:57:41Z'
+    last_edited: '2026-07-18T19:57:41Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
@@ -24385,7 +24427,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-07-18T19:54:52.201477+00:00'
+  updated_at: '2026-07-18T19:57:39.770138+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -24454,28 +24496,6 @@ prs:
       and re-reviews wastefully when nothing changed.)'
     created_at: '2026-06-11T16:31:03Z'
     last_edited: '2026-06-11T16:31:03Z'
-  - id: note-2bdfec2
-    text: 'DECISION from pr-8e693f6 sign-off discussion (merge-authorization chain,
-      supersedes the "agent HTML never authorizes a merge" framing): the per-PR report.html
-      is part of merge authorization — via a reviewer, not via parsing HTML. Mechanism
-      to implement in this PR: (1) Reintroduce an EXPLICIT record step (a pm pr signoff-record-style
-      command existed in pr-8e693f6 and was retired; bring it back, e.g. `pm pr signoff
-      record <id>`) — after reviewing report.html, a human or this watcher (after
-      its own review pass) records pr[signoff] with origin (manual|watcher) PLUS A
-      HASH OF THE report.html IT APPROVED. (2) The pm pr merge gate (pr.py, --no-signoff-check)
-      and this watcher then require: fresh sha AND on-disk report hash == approved
-      hash — record and report structurally cannot drift at the merge-authorization
-      point, without the gate ever trusting raw HTML. (3) Report REGENERATION stays
-      side-effect-free (manual-never-acts narrows to: recording must be explicit,
-      never a side effect of rebuilding a report — otherwise a dashboard-driven regen
-      could silently arm an auto-merge once this watcher acts on recorded state).
-      Consequences: report-only PRs = "awaiting review/record"; record-only PRs become
-      impossible (recording requires the report being approved); the current wart
-      where purely-manual workflows must use --no-signoff-check (only auto-sequence
-      records today) goes away. Context: signoff.py:330-333 already defers the autonomous-merge
-      decision to this PR; record schema already models origin=manual.'
-    created_at: '2026-07-18T19:54:52Z'
-    last_edited: '2026-07-18T19:54:52Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)
