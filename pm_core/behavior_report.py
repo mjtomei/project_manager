@@ -233,6 +233,12 @@ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; }
 th, td { text-align: left; padding: .5rem .6rem; vertical-align: top;
   border-bottom: 1px solid rgba(127,127,127,.25); }
 th { background: #f6f8fa; font-size: .85rem; }
+td { overflow-wrap: anywhere; }
+/* Keep the Title column wide enough to wrap at word boundaries instead
+   of shattering into characters on narrow viewports; the wrapper below
+   scrolls if the resulting table exceeds the viewport. */
+th:nth-child(2), td:nth-child(2) { min-width: 12rem; }
+.table-wrap { overflow-x: auto; }
 .signoff-marker { font-weight: 600; white-space: nowrap; }
 .missing { color: #9a6700; font-weight: 600; white-space: nowrap; }
 .status { white-space: nowrap; font-size: .9rem; }
@@ -319,7 +325,9 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
         'oninput="pmFilter()" autocomplete="off">'
         '</div>')
 
-    parts.append('<table>')
+    # Wrapper so a table wider than a narrow (phone) viewport scrolls in
+    # its own container instead of forcing whole-page horizontal scroll.
+    parts.append('<div class="table-wrap"><table>')
     parts.append(
         '<thead><tr>'
         '<th data-col="0" onclick="pmSort(0)">PR</th>'
@@ -361,7 +369,7 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
             f'<td data-sort="{mtime_sort}">{mtime_cell}</td>'
             f'<td data-sort="{_e(verdict_sort)}">{verdict_cell}</td>'
             f'<td>{report_cell}</td></tr>')
-    parts.append('</tbody></table>')
+    parts.append('</tbody></table></div>')
 
     parts.append(f'<script>{_DASH_JS}</script>')
     parts.append('</body></html>')
