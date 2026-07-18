@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8e693f6
+  active_pr: pr-4bd660b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -24385,7 +24385,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-06-11T16:31:03.347272+00:00'
+  updated_at: '2026-07-18T19:54:52.201477+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -24454,6 +24454,28 @@ prs:
       and re-reviews wastefully when nothing changed.)'
     created_at: '2026-06-11T16:31:03Z'
     last_edited: '2026-06-11T16:31:03Z'
+  - id: note-2bdfec2
+    text: 'DECISION from pr-8e693f6 sign-off discussion (merge-authorization chain,
+      supersedes the "agent HTML never authorizes a merge" framing): the per-PR report.html
+      is part of merge authorization — via a reviewer, not via parsing HTML. Mechanism
+      to implement in this PR: (1) Reintroduce an EXPLICIT record step (a pm pr signoff-record-style
+      command existed in pr-8e693f6 and was retired; bring it back, e.g. `pm pr signoff
+      record <id>`) — after reviewing report.html, a human or this watcher (after
+      its own review pass) records pr[signoff] with origin (manual|watcher) PLUS A
+      HASH OF THE report.html IT APPROVED. (2) The pm pr merge gate (pr.py, --no-signoff-check)
+      and this watcher then require: fresh sha AND on-disk report hash == approved
+      hash — record and report structurally cannot drift at the merge-authorization
+      point, without the gate ever trusting raw HTML. (3) Report REGENERATION stays
+      side-effect-free (manual-never-acts narrows to: recording must be explicit,
+      never a side effect of rebuilding a report — otherwise a dashboard-driven regen
+      could silently arm an auto-merge once this watcher acts on recorded state).
+      Consequences: report-only PRs = "awaiting review/record"; record-only PRs become
+      impossible (recording requires the report being approved); the current wart
+      where purely-manual workflows must use --no-signoff-check (only auto-sequence
+      records today) goes away. Context: signoff.py:330-333 already defers the autonomous-merge
+      decision to this PR; record schema already models origin=manual.'
+    created_at: '2026-07-18T19:54:52Z'
+    last_edited: '2026-07-18T19:54:52Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)
@@ -25176,6 +25198,28 @@ prs:
   gh_pr_number: null
   created_at: '2026-06-24T15:07:29.141695+00:00'
   updated_at: '2026-06-24T15:07:29.141695+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4bd660b
+  plan: null
+  title: 'Improvement: enable tmux focus-events on pm-managed servers'
+  branch: pm/pr-4bd660b-improvement-enable-tmux-focus-events-on-pm-managed
+  status: pending
+  depends_on: []
+  description: Claude Code panes show a hint that tmux focus-events is off; without
+    it, focus-in/out escape sequences never reach apps in panes, so Claude Code cannot
+    repaint on pane switch or suppress notifications while the pane is focused. Set
+    the server-level option (set-option -s focus-events on) during session bootstrap,
+    next to the existing window-size smallest call in pm_core/cli/session.py, passing
+    socket_path so container/isolated tmux servers get it too. Keeps the config in
+    pm instead of requiring ~/.tmux.conf edits on every machine.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-07-18T19:28:54.184220+00:00'
+  updated_at: '2026-07-18T19:28:54.184220+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
