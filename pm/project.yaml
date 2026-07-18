@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T20:27:17.026556+00:00'
+  updated_at: '2026-07-18T20:30:52.391909+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-15T15:30:20.567277+00:00'
   merged_at: null
@@ -24369,6 +24369,23 @@ prs:
       libasound2; PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright.'
     created_at: '2026-07-18T20:27:16Z'
     last_edited: '2026-07-18T20:27:16Z'
+  - id: note-47be061
+    text: 'QA s58 (signoff record + merge-gate report hash) PASS on all 6 triples:
+      happy path (record msg + yaml record + ▲ on pm pr list AND tui tech tree + gate
+      pass + merged), 3 refusals exact-wording/no-record, report-rewrite -> distinct
+      report-changed refusal then re-record+merge OK, stale-sha fires before hash
+      check (verified with both stale AND rewritten report), hash-less auto-sequence
+      record merges with no report on disk, SIGNOFF_BLOCKED adoption (⊘ marker, merge
+      names verdict) + bare pm pr signoff <id> routes to hidden run (window signoff-<id>,
+      fake pane, record untouched) + record-no-arg usage error + --help lists record.
+      ENV GOTCHAS for next run: (1) ~/.local/bin git proxy breaks pm pr merge local
+      fetch ("does not appear to be a git repository") — put /usr/bin before .local/bin
+      in the DRIVE PANE PATH; (2) tmux propagates the invoking pane env to new windows,
+      so stripping .local/bin entirely from the pane PATH makes signoff/fake-claude
+      windows die 127 ("failed to create tmux window") — keep .local/bin at the END
+      of PATH instead of dropping it.'
+    created_at: '2026-07-18T20:30:52Z'
+    last_edited: '2026-07-18T20:30:52Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
