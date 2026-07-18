@@ -330,6 +330,12 @@ def test_signoff_prompt_requires_media_dimensions():
     assert "`width` and `height` attributes" in p
     assert "video,img{max-width:100%;height:auto}" in p
     assert "ffprobe" in p
+    # Page-level rule: wide non-media content (tables, code blocks) scrolls
+    # inside its own container so the page never scrolls horizontally on
+    # narrow viewports.
+    assert "never scrolls horizontally" in p
+    assert "pre{overflow-x:auto}" in p
+    assert "overflow-x:auto" in p
 
 
 def test_signoff_prompt_keeps_route_step_numbered_last():
