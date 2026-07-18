@@ -24236,6 +24236,26 @@ prs:
       behavior: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-699a7f80b871788e)'
     created_at: '2026-07-15T16:31:38Z'
     last_edited: '2026-07-15T16:31:38Z'
+  - id: note-ae74125
+    text: 'QA round 2026-07-18 (s53 PASS, s54 NEEDS_WORK, s55 PASS; overall NEEDS_WORK)
+      — consolidated environment findings. Browser video (s54): Playwright bundled
+      Chromium on the arm64 QA image cannot decode H.264 (no licensed codecs; canPlayType
+      returns "") and Google Chrome/Edge ship no linux/arm64 builds — use Playwright
+      FIREFOX for real-browser mp4 playback tests (decodes H.264 via system libavcodec;
+      play+seek verified). Working setup: pip install playwright; export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
+      (default /opt/ms-playwright is read-only and ships mismatched chromium-1223);
+      python3 -m playwright install firefox; sudo apt-get install -y libgtk-3-0 libasound2.
+      agg is not preinstalled but the aarch64 release binary from github asciinema/agg
+      works. Sign-off run (s55): pm qa captures-path for a NEW test project resolves
+      to the /pm-captures bind-mount (captures_dir rule 2) unless ~/.pm/sessions/<tag>/captures/<pr-id>
+      is pre-created so the host path wins — otherwise the sign-off report lands in
+      the QA artifact dir; the real-claude signoff pane blocks on the folder-trust
+      prompt in a fresh container — send-keys Enter once to proceed. s55 verified
+      end-to-end: report.html with meta SIGNOFF_MERGE, relative <video controls>
+      mp4 embed, zero webm, md evidence inline in <details>; dashboard served verdict
+      marker, report 200, mp4 200 + Range->206.'
+    created_at: '2026-07-18T16:17:38Z'
+    last_edited: '2026-07-18T16:17:38Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-06-22T22:13:39.663270+00:00'
 - id: pr-ff9b728

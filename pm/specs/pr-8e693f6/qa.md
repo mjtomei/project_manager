@@ -284,5 +284,7 @@ evidence siblings; the per-PR sign-off tmux window + its single
   in the agent-written `report.html`; the `report.json` sidecar was removed.
 * Per-PR report — RESOLVED as agent-written only (no deterministic renderer, no
   `pm pr report` command). Regenerate = plain `pm pr signoff <id>`.
-* Dashboard scope — RESOLVED as a minimal flat table (no plan grouping, no
-  status icons, no tally/loop badges, no client-side filtering).
+* Dashboard scope — RESOLVED as one flat table (no plan grouping, no
+  tally/loop badges, no sidecar); it grew status icons, a client-side text
+  filter, and click-to-sort headers during the review loop (see the
+  2026-06-22 update at the top of this spec).
