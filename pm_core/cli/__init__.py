@@ -609,6 +609,8 @@ COMMANDS
   pm pr import-github           Import existing GitHub PRs into project yaml
   pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
   pm pr cleanup [pr-id]         Remove workdir for merged PR
+  pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html)
+  pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
   pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
@@ -653,6 +655,7 @@ COMMANDS
   pm guide                      Guided workflow (init → plan → PRs → start)
   pm notes                      Open session notes in editor
   pm prompt [pr-id]             Print Claude prompt for a PR
+  pm md-render <path>           Render a .md file to body-only HTML (report embedding)
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)
   pm watcher                    Run autonomous watcher loop (blocking)
