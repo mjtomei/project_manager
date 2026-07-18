@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T18:44:00.909874+00:00'
+  updated_at: '2026-07-18T19:17:48.870782+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-15T15:30:20.567277+00:00'
   merged_at: null
@@ -24271,6 +24271,20 @@ prs:
       PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-cb96dc47704b6254)'
     created_at: '2026-07-18T18:40:31Z'
     last_edited: '2026-07-18T18:40:31Z'
+  - id: note-4745853
+    text: 'Sign-off follow-up (real iPad report): 4 cast-derived captures (s33 x2,
+      s35, s43) were unplayable on iPad Safari — the recipes'' unconditional 2x upscale
+      produced 4276x2284 / H.264 level 6.0, past iOS hardware-decode limits (~4096x2304,
+      level 5.1). Desktop browsers decode them fine, which is why every QA round passed.
+      Fixed 365bbbd6: both cast recipes now skip the 2x upscale when it would exceed
+      4096x2304 and pin -level:v 5.1; the four oversized captures re-rendered in place
+      at native size (all captures now sweep clean: width<=4096, height<=2304, level<=5.1).
+      Sweep command: ffprobe width,height,level over all mp4s under captures. Also:
+      s38 (auto-sequence routing) predates the mp4 recipes, so its evidence was cast+stdout
+      only; its cast is now rendered to mp4 and the tick outputs embedded inline in
+      report.html card 5.'
+    created_at: '2026-07-18T19:17:48Z'
+    last_edited: '2026-07-18T19:17:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
