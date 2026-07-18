@@ -23408,7 +23408,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: sign_off
+  status: qa
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -23449,9 +23449,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T20:51:51.235717+00:00'
+  updated_at: '2026-07-18T21:42:22.377584+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-07-18T20:08:48.203818+00:00'
+  reviewed_at: '2026-07-18T21:42:22.377584+00:00'
   merged_at: null
   notes:
   - id: note-a9626ec
@@ -24392,14 +24392,14 @@ prs:
       (s62), concurrent actors (s63); supersedes the earlier NEEDS_WORK round (the
       recipe-video scenario now passes after 365bbbd6 decode-limit cap + bacb55a5
       ffprobe-parse fix). Gotchas from s61 for future rounds: short recipe recordings
-      compress tiny (3-command 100x30 cast -> 29KB mp4), making a literal Range:
-      bytes=100000-200000 check 416-unsatisfiable — drive livelier sessions (~20 TUI
-      keys got mp4s to ~400KB) before asserting that range; localhost is too fast
-      for curl --max-time 0.2 to abort a 400KB fetch mid-body — use --limit-rate 100k
-      --max-time 0.3 for genuine mid-transfer aborts. Guard verified both ways on
-      real runs: 100x30 -> gif 983x694 -> exact 2x 1966x1388; 300x80 -> 2x over budget
-      -> native even-trunc 2908x1814; both h264 High level 51 yuv420p, faststart,
-      no gif/webm leftovers. Playwright Firefox (libgtk-3-0 via apt + PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright)
+      compress tiny (3-command 100x30 cast -> 29KB mp4), making a literal Range: bytes=100000-200000
+      check 416-unsatisfiable — drive livelier sessions (~20 TUI keys got mp4s to
+      ~400KB) before asserting that range; localhost is too fast for curl --max-time
+      0.2 to abort a 400KB fetch mid-body — use --limit-rate 100k --max-time 0.3 for
+      genuine mid-transfer aborts. Guard verified both ways on real runs: 100x30 ->
+      gif 983x694 -> exact 2x 1966x1388; 300x80 -> 2x over budget -> native even-trunc
+      2908x1814; both h264 High level 51 yuv420p, faststart, no gif/webm leftovers.
+      Playwright Firefox (libgtk-3-0 via apt + PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright)
       played+scrubbed both embeds (readyState 4, 10/10 exact seeks) under 5 concurrent
       curl clients (~4800 reqs all 200/206, range bodies byte-identical).'
     created_at: '2026-07-18T21:22:29Z'
@@ -24414,6 +24414,47 @@ prs:
       fails with ModuleNotFoundError.'
     created_at: '2026-07-18T20:51:51Z'
     last_edited: '2026-07-18T20:51:51Z'
+  - id: note-fef9eb4
+    text: 'QA PASS: Recipe-produced videos respect iOS decode limits end-to-end, from
+      capture to browser scrubbing: PASS; A newcomer discovers and drives the PR''s
+      commands from pm''s own help: PASS; Dashboard stays coherent while captures
+      are rewritten underneath it by concurrent actors: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-9f301b4f8833fe85)'
+    created_at: '2026-07-18T21:24:21Z'
+    last_edited: '2026-07-18T21:24:21Z'
+  - id: note-e57ec53
+    text: 'SIGNOFF_IMPL (from sign-off, user report): opening report.html, every embedded
+      video resized individually as it loaded and shifted the surrounding text (cumulative
+      layout shift) — the sign-off prompt evidence-rendering policy has the agent
+      emit <video>/<img> with no dimensions, so the browser reserves no space until
+      media metadata arrives. IMPL WORK (prompt_gen.py, the sign-off prompt evidence-rendering
+      section): add a layout-stability rule — every <video> and <img> MUST carry explicit
+      width/height attributes (probe with: ffprobe -v error -select_streams v:0 -show_entries
+      stream=width,height -of csv=p=0 <file>; works for png too) AND the report CSS
+      must include video,img{max-width:100%;height:auto} so the attributes define
+      the reserved aspect-ratio box while display stays responsive. State it as a
+      positive default in the embed table intro (one rule, not per-type bullets).
+      ALREADY DONE: the current /pm-captures report.html for this PR was patched in
+      place at sign-off (all 28 media elements got width/height + the CSS rule) —
+      only the prompt fix remains so future agent-written reports do not regress.
+      Consider a qa.md triple asserting an authored report has no dimensionless media
+      elements.'
+    created_at: '2026-07-18T21:37:55Z'
+    last_edited: '2026-07-18T21:37:55Z'
+  - id: note-bca4c61
+    text: 'Implemented the SIGNOFF_IMPL layout-stability follow-up (commit e8f214c2):
+      the sign-off prompt evidence-rendering section now carries a positive-default
+      Layout stability rule — every <video>/<img> must have explicit width/height
+      attributes (ffprobe -show_entries stream=width,height named as the probe; works
+      for images too) AND the report CSS must include video,img{max-width:100%;height:auto},
+      so the browser reserves the aspect-ratio box before media metadata arrives (no
+      cumulative layout shift) while display stays responsive. Locked in by test_signoff_prompt_requires_media_dimensions
+      (tests/test_behavior_report.py); qa.md R4 gained a triple asserting the prompt
+      rule + that an agent-authored report has no dimensionless media elements (real-Claude
+      scenario per note-ce0f6d1); impl.md R1 evidence bullet updated. The existing
+      /pm-captures report.html was already patched in place at sign-off, so only the
+      prompt needed fixing.'
+    created_at: '2026-07-18T21:41:01Z'
+    last_edited: '2026-07-18T21:41:01Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
