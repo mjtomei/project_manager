@@ -228,6 +228,25 @@ window's internal layout and the actual agent authoring the report.
   (its `data-default-dir="desc"` default), NOT oldest-first — the regression
   fixed at commit `40585195`.
 
+### E6 — Sort comparator is consistent for numeric-looking titles
+* GIVEN rows whose titles mix a numeric prefix ("2x upscale …"), a purely
+  numeric title ("42"), and ordinary text titles.
+* WHEN the user click-sorts the Title column (and re-sorts other columns).
+* THEN the ordering is total and stable — a numeric-prefix title is compared
+  as its whole string (not truncated to its leading number), and a column
+  yielding mixed numeric/string keys compares consistently as strings, so
+  repeated clicks never shuffle rows unpredictably. (Fixed at commits
+  `a5336876` + `a3a210aa` — `parseFloat` previously keyed "2x upscale…" as
+  the number 2, and number-vs-string comparison was inconsistent.)
+
+### E7 — "serving at" line survives output redirection
+* GIVEN a script launching `pm pr dashboard --port 0` with stdout redirected
+  to a file/pipe (no TTY).
+* WHEN the server starts.
+* THEN the `serving at http://…` line (the only way to learn the OS-assigned
+  port) appears in the redirected output promptly — not held in a stdio
+  buffer until exit (fixed at commit `73f85ad1`).
+
 ## Concurrency (shared resources the diff touches)
 
 Shared resources: the dashboard TCP socket (single default port `8765`); the
