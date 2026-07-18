@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T22:18:59.392259+00:00'
+  updated_at: '2026-07-18T22:59:12.578505+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-18T21:42:22.377584+00:00'
   merged_at: null
@@ -24474,6 +24474,23 @@ prs:
       Captures: /pm-captures/scenarios/64/ pre-fix+post-fix.'
     created_at: '2026-07-18T22:18:59Z'
     last_edited: '2026-07-18T22:18:59Z'
+  - id: note-7ef581a
+    text: 'QA s67 (narrow-viewport dashboard): NEEDS_WORK->fixed 40759cbb. Bug: the
+      dashboard index scrolled horizontally as a whole page at EVERY viewport width
+      (scrollWidth 1678 vs 390 phone viewport) when a title held a long unbroken token
+      — the table had no word-breaking and no scrolling sub-container. Fix in behavior_report.py
+      _CSS/render: td{overflow-wrap:anywhere}, Title column min-width:12rem (so normal
+      titles wrap at word boundaries instead of shattering per-character — first fix
+      attempt without it produced 4-char-wide title cells), and the table wrapped
+      in <div class=table-wrap style overflow-x:auto>, mirroring the a43a523d layout-stability
+      rule for reports. Post-fix Playwright Chromium (390x844 + 1280->390 stepping):
+      scrollWidth==clientWidth at all 8 widths, all rows/status icons/relative mtimes/verdict
+      markers present, hostile <script> title literal with no dialog, live filter
+      + Status-tap sort (single indicator, desc-first) + report nav/back all work
+      at 390px. Captures: /pm-captures/scenarios/67/{pre-fix,post-fix}/ with recordings
+      + checks.json. 38/38 test_behavior_report.py green.'
+    created_at: '2026-07-18T22:59:12Z'
+    last_edited: '2026-07-18T22:59:12Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
