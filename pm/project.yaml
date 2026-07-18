@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T21:42:22.377584+00:00'
+  updated_at: '2026-07-18T22:18:59.392259+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-18T21:42:22.377584+00:00'
   merged_at: null
@@ -24455,6 +24455,25 @@ prs:
       prompt needed fixing.'
     created_at: '2026-07-18T21:41:01Z'
     last_edited: '2026-07-18T21:41:01Z'
+  - id: note-140a9c6
+    text: 'QA s64 (layout stability, real sign-off): NEEDS_WORK->fixed a43a523d. Both
+      real-Claude sign-off passes authored report.html with correct media dimensions
+      (matching ffprobe), the video,img{max-width:100%;height:auto} rule, meta verdict
+      tag, md rendered inline — and Playwright Firefox hold-the-media-requests testing
+      proved ZERO layout shift (boxes reserved at 640x360/800x500 while video readyState=0,
+      all ~35 text positions byte-identical pre/post load; mp4 plays). BUG FOUND at
+      the 390px viewport: the agent''s per-step <table> had no overflow container
+      so the PAGE scrolled horizontally (scrollWidth 413>390) though media scaled
+      fine. Fix: layout-stability rule in prompt_gen.py now also requires the page
+      never scroll horizontally — pre{overflow-x:auto} and tables wrapped in overflow-x:auto
+      divs; test extended. Post-fix real sign-off pass verified: agent emitted the
+      wrapped tables, scrollWidth==390 at 390px. TEST MECHANIC worth reusing: Playwright
+      route handlers that HOLD media requests (append route to a list, snapshot layout,
+      then continue_()) give a true pre-load layout snapshot; aborting instead is
+      wrong (broken <img> collapses to alt text by design). Firefox not Chromium (H.264).
+      Captures: /pm-captures/scenarios/64/ pre-fix+post-fix.'
+    created_at: '2026-07-18T22:18:59Z'
+    last_edited: '2026-07-18T22:18:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728

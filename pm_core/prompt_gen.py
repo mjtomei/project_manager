@@ -644,7 +644,13 @@ PR-level *comprehensive* review and a routing decision.
    <file>` — works for images too), and the report's CSS includes
    `video,img{{max-width:100%;height:auto}}`. The attributes reserve the
    correct aspect-ratio box before media loads (no layout shift as the
-   page loads) while the CSS keeps display responsive.
+   page loads) while the CSS keeps display responsive. The page itself
+   never scrolls horizontally at any viewport width: wide content
+   (tables, code blocks, long unbroken strings) scrolls inside its own
+   container instead — include
+   `pre{{overflow-x:auto}}` and wrap each `<table>` in a
+   `<div style="overflow-x:auto">` (or give tables
+   `display:block;overflow-x:auto;max-width:100%`).
 
    For **Markdown** evidence (`.md`), render the body inline so the
    reader never sees stale or out-of-sync HTML. For each `.md` you
