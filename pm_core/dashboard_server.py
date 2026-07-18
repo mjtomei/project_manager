@@ -195,7 +195,9 @@ def serve(*, pm_root: Path, captures_root_dir: Path,
         )
     actual_host, actual_port = httpd.server_address[:2]
     url = f"http://{actual_host}:{actual_port}/"
-    print(f"pm dashboard: serving at {url}  (Ctrl-C to stop)")
+    # flush: with --port 0 this line is the only way to learn the bound
+    # port, and a backgrounded/redirected stdout is block-buffered.
+    print(f"pm dashboard: serving at {url}  (Ctrl-C to stop)", flush=True)
     if open_browser:
         threading.Thread(
             target=_open_url_after_listen, args=(url,), daemon=True).start()
