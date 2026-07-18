@@ -202,6 +202,19 @@ chrome and never interprets captures beyond the verdict meta tag.
 
 ### R3 — CLI surface
 * **Remove** the retired `pm pr report` / `pm pr signoff-record` commands.
+* **Add** `pm pr signoff record <pr_id>` (note-0fca74e, 2026-07-18) — the
+  reviewer's explicit approval after reading `report.html`. `pm pr signoff`
+  became a group whose unrecognized first token routes to the (hidden)
+  `run` subcommand, so the pre-existing surface
+  (`pm pr signoff <id> [--fresh]`) is unchanged. `record` resolves
+  `$CAP/report.html` via `paths.captures_root`, REQUIRES it to exist and
+  carry a valid `pm-signoff-verdict` meta tag (reuses
+  `behavior_report._extract_verdict`), requires a workdir HEAD, then
+  writes `pr["signoff"] = {verdict, sha, ts, origin: "manual",
+  report_hash: sha256(report bytes)}`. Refusals (no report / no valid
+  meta verdict / no HEAD) are one-line, exit 1, and record nothing — so a
+  record-only state is impossible via this path. Recording never changes
+  PR status.
 * **`pm pr dashboard [--port N] [--bind HOST] [--open]`** — starts the
   local dashboard server. Default port `8765`, default bind `127.0.0.1`
   (never `0.0.0.0` by default — security). `--open` launches the user's
@@ -234,11 +247,27 @@ exactly why the gate fired:
   `SIGNOFF_BLOCKED`) → "sign-off verdict is `<VERDICT>`, not
   SIGNOFF_MERGE. Run `pm pr signoff <pr_id>` to re-route, or pass
   --no-signoff-check to override."
+* **Changed report** (note-0fca74e) — when the record carries a
+  `report_hash` (manual `pm pr signoff record` approvals), the gate
+  re-hashes the on-disk `report.html` and refuses on mismatch (or a
+  now-missing report): "report.html changed since the recorded approval;
+  re-run `pm pr signoff record <pr_id>`". Records without `report_hash`
+  (the auto-sequence transcript path) skip this check, so the auto path
+  is untouched.
 
 The gate is a CLI-level enforcement; the auto-sequence merge path goes
 through the same `pm pr merge` code, so it inherits the gate
 automatically (auto-sequence flips status only after a SIGNOFF_MERGE
 verdict adoption, so the gate is a no-op in the happy auto path).
+
+**Invariant reframed** (note-0fca74e): "manual-never-acts" narrows to
+"recording must be an explicit command, never a side effect of report
+(re)generation". `pm pr signoff` (the agent pass / report regen) still
+records nothing; `pm pr signoff record` is the explicit act; auto-sequence
+recording via the router transcript is unchanged.
+`signoff.record_signoff_verdict` stays the single writer (extended with
+optional `report_hash`); pr-ff9b728's watcher reuses it with
+`origin: "watcher"`.
 
 ### R4 — Forward-compat captures
 Keep the additive `scenarios/<n>/scenario.json` write in

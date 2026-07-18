@@ -1409,7 +1409,29 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                           transcript=transcript)
 
 
-@pr.command("signoff")
+class _SignoffGroup(click.Group):
+    """Group whose unrecognized first token routes to the ``run`` subcommand.
+
+    Keeps the pre-existing surface (``pm pr signoff <pr_id> [--fresh]``)
+    working verbatim while explicit subcommands (``record``) stay reachable.
+    """
+
+    def parse_args(self, ctx, args):
+        if args and args[0] not in self.commands \
+                and args[0] not in ctx.help_option_names:
+            args = ["run", *args]
+        return super().parse_args(ctx, args)
+
+
+@pr.group("signoff", cls=_SignoffGroup, invoke_without_command=True)
+@click.pass_context
+def pr_signoff_group(ctx):
+    """Sign-off: PR-level review + verdict router; `record` approves a report."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(pr_signoff)
+
+
+@pr_signoff_group.command("run", hidden=True)
 @click.argument("pr_id", default=None, required=False)
 @click.option("--fresh", is_flag=True, default=False,
               help="Kill existing sign-off window and create a new one")
@@ -1464,6 +1486,58 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     signoff_mod.launch_signoff_window(
         data, pr_entry, fresh=fresh, background=background,
         transcript=transcript)
+
+
+@pr_signoff_group.command("record")
+@click.argument("pr_id")
+def pr_signoff_record(pr_id: str):
+    """Record reviewer approval of a PR's sign-off report.
+
+    The explicit act after reading ``report.html``: reads the verdict from
+    the report's ``pm-signoff-verdict`` meta tag and records it on
+    ``pr['signoff']`` (origin=manual) together with the report's content
+    hash, so the merge gate passes without ``--no-signoff-check`` — and
+    re-blocks if the report or HEAD changes afterwards. Recording never
+    changes PR status.
+    """
+    import hashlib
+
+    from pm_core import signoff as signoff_mod
+    from pm_core.behavior_report import _extract_verdict
+    from pm_core.paths import captures_root
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    croot = captures_root()
+    report = croot / pr_id / "report.html" if croot else None
+    if report is None or not report.is_file():
+        click.echo(
+            f"PR {pr_id}: no report.html to approve — run "
+            f"`pm pr signoff {pr_id}` to generate one.", err=True)
+        raise SystemExit(1)
+    verdict = _extract_verdict(report)
+    if verdict not in signoff_mod.SIGNOFF_VERDICTS:
+        click.echo(
+            f"PR {pr_id}: report.html carries no valid pm-signoff-verdict "
+            f"meta tag — regenerate with `pm pr signoff {pr_id}`.", err=True)
+        raise SystemExit(1)
+    sha = signoff_mod.head_sha(pr_entry.get("workdir"))
+    if not sha:
+        click.echo(
+            f"PR {pr_id}: no workdir/HEAD to record the verdict against.",
+            err=True)
+        raise SystemExit(1)
+
+    report_hash = hashlib.sha256(report.read_bytes()).hexdigest()
+    signoff_mod.record_signoff_verdict(
+        root, pr_id, verdict, sha, "manual", report_hash=report_hash)
+    click.echo(
+        f"Recorded sign-off verdict {verdict} for {pr_id} "
+        f"(origin=manual, report approved at sha {sha[:12]}).")
+    trigger_tui_refresh()
 
 
 def _finalize_merge(root, pr_entry: dict, pr_id: str,
@@ -1943,6 +2017,26 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                     f"`pm pr signoff {pr_id}` first, or pass "
                     f"--no-signoff-check to override.", err=True)
             raise SystemExit(1)
+        # Manual approvals (pm pr signoff record) carry the approved
+        # report.html's content hash; refuse when the on-disk report changed
+        # since the reviewer read it. Auto-sequence records carry no hash
+        # (the transcript verdict is the approval) and skip this check.
+        recorded_hash = (pr_entry.get("signoff") or {}).get("report_hash")
+        if recorded_hash:
+            import hashlib
+            from pm_core.paths import captures_root
+            croot = captures_root()
+            report = croot / pr_id / "report.html" if croot else None
+            current_hash = (
+                hashlib.sha256(report.read_bytes()).hexdigest()
+                if report is not None and report.is_file() else None)
+            if current_hash != recorded_hash:
+                click.echo(
+                    f"PR {pr_id}: report.html changed since the recorded "
+                    f"approval; re-run `pm pr signoff record {pr_id}` "
+                    f"after reviewing it, or pass --no-signoff-check to "
+                    f"override.", err=True)
+                raise SystemExit(1)
 
     backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")

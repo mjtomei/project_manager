@@ -147,6 +147,19 @@ class TestVerdictRecordAdoption:
         assert rec["origin"] == "manual"
         assert rec["ts"]
 
+    def test_record_includes_report_hash_only_when_given(self):
+        data = _data("sign_off")
+        with _patch_locked_update(data):
+            record_signoff_verdict(
+                Path("/x"), "pr-001", SIGNOFF_MERGE, "abc123", "manual",
+                report_hash="cafe01")
+        assert data["prs"][0]["signoff"]["report_hash"] == "cafe01"
+        with _patch_locked_update(data):
+            record_signoff_verdict(
+                Path("/x"), "pr-001", SIGNOFF_MERGE, "abc123",
+                "auto-sequence")
+        assert "report_hash" not in data["prs"][0]["signoff"]
+
     def test_fresh_when_sha_matches(self):
         pr = {"signoff": {"verdict": SIGNOFF_REQA, "sha": "abc"}}
         assert fresh_recorded_verdict(pr, "abc") == SIGNOFF_REQA
@@ -327,6 +340,191 @@ class TestMergeSignoffGate:
         # what we're testing).
         assert "no sign-off verdict recorded" not in result.output
         assert "sign-off verdict" not in result.output
+
+
+def _report_html(verdict: str = SIGNOFF_MERGE) -> str:
+    return ('<!DOCTYPE html><html><head>'
+            f'<meta name="pm-signoff-verdict" content="{verdict}">'
+            '<title>r</title></head><body>report</body></html>')
+
+
+def _write_captures_report(tmp_path, pr_id="pr-001",
+                           verdict: str = SIGNOFF_MERGE):
+    croot = tmp_path / "caps"
+    (croot / pr_id).mkdir(parents=True, exist_ok=True)
+    report = croot / pr_id / "report.html"
+    report.write_text(_report_html(verdict), encoding="utf-8")
+    return croot, report
+
+
+class TestSignoffRecordCommand:
+    """`pm pr signoff record <id>` — the reviewer's explicit approval after
+    reading report.html. Recording requires the report + its meta verdict;
+    it writes pr['signoff'] with origin=manual and the report's sha256."""
+
+    def _invoke(self, tmp_path, pr, croot, *, head="HEAD-SHA"):
+        from click.testing import CliRunner
+        from pm_core.cli.pr import pr_signoff_record
+        data = {"project": {"active_pr": pr["id"], "base_branch": "master",
+                            "backend": "local"}, "prs": [pr]}
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.paths.captures_root", return_value=croot), \
+             patch("pm_core.signoff.head_sha", return_value=head), \
+             patch("pm_core.signoff.store.locked_update",
+                   side_effect=_patch_locked_update_fn(data)), \
+             patch("pm_core.cli.pr.trigger_tui_refresh"):
+            result = CliRunner().invoke(pr_signoff_record, [pr["id"]])
+        return result, data
+
+    def test_record_happy_path(self, tmp_path):
+        import hashlib
+        croot, report = _write_captures_report(tmp_path)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code == 0, result.output
+        rec = data["prs"][0]["signoff"]
+        assert rec["verdict"] == SIGNOFF_MERGE
+        assert rec["sha"] == "HEAD-SHA"
+        assert rec["origin"] == "manual"
+        assert rec["report_hash"] == \
+            hashlib.sha256(report.read_bytes()).hexdigest()
+        # Recording never changes status.
+        assert data["prs"][0]["status"] == "sign_off"
+
+    def test_refuses_without_report(self, tmp_path):
+        croot = tmp_path / "caps"
+        croot.mkdir()
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code != 0
+        assert "no report.html" in result.output
+        assert "signoff" not in data["prs"][0]
+
+    def test_refuses_without_meta_verdict(self, tmp_path):
+        croot = tmp_path / "caps"
+        (croot / "pr-001").mkdir(parents=True)
+        (croot / "pr-001" / "report.html").write_text(
+            "<html><head><title>r</title></head><body>x</body></html>",
+            encoding="utf-8")
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code != 0
+        assert "no valid pm-signoff-verdict" in result.output
+        assert "signoff" not in data["prs"][0]
+
+    def test_refuses_without_head(self, tmp_path):
+        croot, _ = _write_captures_report(tmp_path)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001"}
+        result, data = self._invoke(tmp_path, pr, croot, head=None)
+        assert result.exit_code != 0
+        assert "no workdir/HEAD" in result.output
+        assert "signoff" not in data["prs"][0]
+
+    def test_records_non_merge_verdict_from_report(self, tmp_path):
+        """record adopts whatever verdict the approved report carries — the
+        merge gate is where SIGNOFF_MERGE-ness is enforced."""
+        croot, _ = _write_captures_report(tmp_path, verdict=SIGNOFF_BLOCKED)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code == 0, result.output
+        assert data["prs"][0]["signoff"]["verdict"] == SIGNOFF_BLOCKED
+
+    def test_signoff_group_routes_default_and_record(self):
+        """`pm pr signoff <id>` still hits the run command; `record` resolves
+        as a subcommand rather than being parsed as a PR id."""
+        import click
+        from pm_core.cli.pr import pr_signoff_group, pr_signoff, \
+            pr_signoff_record
+        ctx = click.Context(pr_signoff_group)
+        name, cmd, args = pr_signoff_group.resolve_command(
+            ctx, ["record", "pr-001"])
+        assert cmd.callback is pr_signoff_record.callback
+        # An arbitrary first token routes to run via parse_args prefixing.
+        assert "run" in pr_signoff_group.commands
+        assert pr_signoff_group.commands["run"].callback is \
+            pr_signoff.callback
+
+
+class TestMergeGateReportHash:
+    """Manual approvals carry the approved report.html's sha256; the merge
+    gate re-hashes the on-disk report and refuses when it changed."""
+
+    def _invoke(self, tmp_path, pr, croot, *, extra_args=()):
+        from click.testing import CliRunner
+        from pm_core.cli.pr import pr_merge
+        from pm_core import signoff as signoff_mod
+        data = {"project": {"active_pr": pr["id"], "base_branch": "master",
+                            "backend": "local"}, "prs": [pr]}
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.paths.captures_root", return_value=croot), \
+             patch.object(signoff_mod, "head_sha", return_value="HEAD-SHA"):
+            result = CliRunner().invoke(pr_merge, [pr["id"], *extra_args])
+        return result, data
+
+    def _pr_with_record(self, tmp_path, report_hash=None):
+        rec = {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+               "ts": "now", "origin": "manual"}
+        if report_hash:
+            rec["report_hash"] = report_hash
+        return {"id": "pr-001", "title": "T", "status": "sign_off",
+                "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+                "signoff": rec}
+
+    def test_matching_hash_passes_gate(self, tmp_path):
+        import hashlib
+        croot, report = _write_captures_report(tmp_path)
+        pr = self._pr_with_record(
+            tmp_path,
+            report_hash=hashlib.sha256(report.read_bytes()).hexdigest())
+        result, _ = self._invoke(tmp_path, pr, croot)
+        assert "changed since the recorded approval" not in result.output
+        assert "no sign-off verdict recorded" not in result.output
+
+    def test_changed_report_blocks_merge(self, tmp_path):
+        import hashlib
+        croot, report = _write_captures_report(tmp_path)
+        stale_hash = hashlib.sha256(report.read_bytes()).hexdigest()
+        report.write_text(
+            _report_html() + "<!-- regenerated -->", encoding="utf-8")
+        pr = self._pr_with_record(tmp_path, report_hash=stale_hash)
+        result, _ = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code != 0
+        assert "changed since the recorded approval" in result.output
+        assert "pm pr signoff record" in result.output
+
+    def test_missing_report_with_recorded_hash_blocks_merge(self, tmp_path):
+        croot = tmp_path / "caps"
+        croot.mkdir()
+        pr = self._pr_with_record(tmp_path, report_hash="deadbeef")
+        result, _ = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code != 0
+        assert "changed since the recorded approval" in result.output
+
+    def test_record_without_hash_skips_check(self, tmp_path):
+        """Auto-sequence records carry no report_hash — the gate must not
+        require a report on disk for them (legacy/auto path unchanged)."""
+        croot = tmp_path / "caps"
+        croot.mkdir()
+        pr = self._pr_with_record(tmp_path)  # no report_hash
+        pr["signoff"]["origin"] = "auto-sequence"
+        result, _ = self._invoke(tmp_path, pr, croot)
+        assert "changed since the recorded approval" not in result.output
+        assert "no sign-off verdict recorded" not in result.output
+
+    def test_no_signoff_check_bypasses_hash_check(self, tmp_path):
+        pr = self._pr_with_record(tmp_path, report_hash="deadbeef")
+        croot = tmp_path / "caps"
+        croot.mkdir()
+        result, _ = self._invoke(tmp_path, pr, croot,
+                                 extra_args=["--no-signoff-check"])
+        assert "changed since the recorded approval" not in result.output
 
 
 def _patch_locked_update_fn(data: dict):

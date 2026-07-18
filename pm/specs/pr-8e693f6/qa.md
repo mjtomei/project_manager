@@ -173,6 +173,24 @@ window's internal layout and the actual agent authoring the report.
   stays crisp, and the sign-off prompt's evidence policy embeds `.mp4`
   (no `.webm` mention).
 
+### R11 — Merge gate + explicit reviewer approval (`pm pr signoff record`)
+* GIVEN a PR in `sign_off` whose captures dir holds a `report.html` with a
+  `SIGNOFF_MERGE` meta verdict, and a workdir at some HEAD.
+* WHEN the reviewer runs `pm pr signoff record <id>` and then `pm pr merge
+  <id>` (no `--no-signoff-check`).
+* THEN record writes `pr['signoff']` = {verdict from the meta tag, sha =
+  workdir HEAD, origin `manual`, `report_hash` = sha256 of the report} and
+  changes no status; the subsequent merge passes the gate. Refusal triples
+  (each exit 1, one line, nothing recorded): no `report.html`; a report with
+  no valid `pm-signoff-verdict` meta tag; no workdir/HEAD. Freshness triples:
+  a HEAD moved after record → stale-verdict block (unchanged wording); a
+  `report.html` rewritten after record → "report.html changed since the
+  recorded approval; re-run `pm pr signoff record <id>`" block; a record
+  WITHOUT `report_hash` (auto-sequence transcript path) merges without any
+  report on disk — legacy/auto behavior unchanged. `pm pr signoff <id>`
+  (the agent pass) still records nothing; `pm pr signoff record` resolves as
+  a subcommand, not as a PR id (s41-derived; note-0fca74e).
+
 ### R8 — qa_loop persists `scenario.json` alongside `verdict.md`
 * GIVEN a PR run through a QA loop (driven by fake-Claude) producing scenario
   verdicts.
@@ -289,7 +307,12 @@ evidence siblings; the per-PR sign-off tmux window + its single
 * `pm status`, `pm pr list`, and the TUI all expose `sign_off` and its verdict
   marker consistently, without regressing other statuses.
 * Sign-off routing records and acts on the verdict correctly under
-  auto-sequence; a manual `pm pr signoff` never mutates state.
+  auto-sequence; a manual `pm pr signoff` (the agent pass) never records or
+  mutates state — recording is only the explicit `pm pr signoff record`,
+  which writes the record but never changes status.
+* The merge gate passes a fresh recorded approval without
+  `--no-signoff-check`, and blocks with distinct messages for no verdict /
+  stale sha / non-merge verdict / report changed since approval.
 * `pm md-render` emits a body-only fragment with tables + fenced code
   rendered, and never tracebacks on binary-laced evidence.
 * Range requests against served evidence get correct 206/416 semantics;

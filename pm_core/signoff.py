@@ -100,17 +100,26 @@ def head_sha(workdir: str | None) -> str | None:
 
 
 def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
-                           sha: str | None, origin: str) -> None:
+                           sha: str | None, origin: str,
+                           report_hash: str | None = None) -> None:
     """Durably record a sign-off *verdict* on the PR (``pr['signoff']``).
 
-    *origin* records who recorded the verdict — currently only the
-    ``"auto-sequence"`` driver does (it reads the router pane's transcript
-    verdict and records it so a later tick can adopt it without a re-run).
-    A manual ``pm pr signoff`` never records: its report carries the verdict
-    (in the ``report.html`` meta tag the dashboard reads), but the
-    manual-never-acts invariant means nothing is written to ``pr['signoff']``.
+    Single writer for the record. *origin* says who recorded it:
+    ``"auto-sequence"`` (the driver reads the router pane's transcript
+    verdict so a later tick can adopt it without a re-run), ``"manual"``
+    (``pm pr signoff record`` — the reviewer's explicit approval after
+    reading ``report.html``), or a future ``"watcher"`` (pr-ff9b728).
+
+    Recording must be an explicit act, never a side effect of report
+    (re)generation: ``pm pr signoff`` (the agent pass) records nothing —
+    its report carries the verdict in the ``report.html`` meta tag.
     Recording is NOT acting — it never changes status; only
     :func:`apply_signoff_hop` (auto-sequence only) mutates state.
+
+    *report_hash*, when given, is the sha256 of the approved
+    ``report.html`` bytes; the merge gate re-hashes the on-disk report and
+    refuses when it changed since approval. Records without it (the
+    auto-sequence transcript path) skip that check.
     """
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).isoformat()
@@ -118,9 +127,12 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
     def _apply(data):
         pr = store.get_pr(data, pr_id)
         if pr is not None:
-            pr["signoff"] = {
+            record = {
                 "verdict": verdict, "sha": sha, "ts": ts, "origin": origin,
             }
+            if report_hash:
+                record["report_hash"] = report_hash
+            pr["signoff"] = record
 
     store.locked_update(root, _apply)
 
