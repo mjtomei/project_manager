@@ -115,7 +115,12 @@ specifies:
   longer produce webm), `<img>` for images, `<audio>` for audio,
   `<details><pre>` for small text/log; for `.md`, run `pm md-render
   <path>` and embed the body-only fragment inline; link as-is for
-  `.html` and large binaries.
+  `.html` and large binaries. **Layout stability** (2026-07-18 sign-off
+  follow-up): every `<video>`/`<img>` carries explicit `width`/`height`
+  attributes (probed via ffprobe) and the report CSS includes
+  `video,img{max-width:100%;height:auto}` — the attributes reserve the
+  aspect-ratio box before media loads (no cumulative layout shift) while
+  display stays responsive.
 * **No audit-trail step** — the report itself is the audit surface
   (per-step sections + linked evidence). Earlier iterations of the prompt
   asked the agent to also create one `pm pr note add` entry per routing

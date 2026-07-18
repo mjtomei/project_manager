@@ -106,6 +106,15 @@ window's internal layout and the actual agent authoring the report.
   routing verdicts, and gives the evidence-rendering policy (inline embeds for
   media; `pm md-render` for markdown; link `.html`/large binaries). It does
   NOT mention a `report.json` sidecar.
+* GIVEN the same prompt.
+* WHEN reading its evidence-rendering policy.
+* THEN it carries the layout-stability rule: every `<video>`/`<img>` must have
+  explicit `width`/`height` attributes (ffprobe named as the probe) and the
+  report CSS must include `video,img{max-width:100%;height:auto}` — so an
+  authored report has no dimensionless media elements (no layout shift while
+  media loads). An agent-authored `report.html` produced under this prompt
+  (real-Claude scenario, per note-ce0f6d1) has `width` and `height` on every
+  `<video>` and `<img>` element.
 
 ### R5 — `sign_off` status across status surfaces
 * GIVEN a project with a PR in `sign_off` and a recorded sign-off verdict on

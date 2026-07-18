@@ -638,6 +638,14 @@ PR-level *comprehensive* review and a routing decision.
      - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus`
      - `<details><pre>` for small text / log files under ~50 KB
 
+   **Layout stability:** every `<video>` and `<img>` carries explicit
+   `width` and `height` attributes (probe with `ffprobe -v error
+   -select_streams v:0 -show_entries stream=width,height -of csv=p=0
+   <file>` — works for images too), and the report's CSS includes
+   `video,img{{max-width:100%;height:auto}}`. The attributes reserve the
+   correct aspect-ratio box before media loads (no layout shift as the
+   page loads) while the CSS keeps display responsive.
+
    For **Markdown** evidence (`.md`), render the body inline so the
    reader never sees stale or out-of-sync HTML. For each `.md` you
    reference, run `pm md-render <relative path>` — this prints the

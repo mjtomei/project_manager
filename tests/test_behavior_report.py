@@ -319,6 +319,19 @@ def test_signoff_prompt_includes_report_deliverable():
     assert "SIGNOFF_VERDICT_ICONS" in p
 
 
+def test_signoff_prompt_requires_media_dimensions():
+    from pm_core import prompt_gen
+    p = prompt_gen.generate_signoff_prompt(
+        _data(), "pr-aaa", session_name="pm-test")
+    # Layout-stability rule: media elements carry explicit dimensions so the
+    # browser reserves space before metadata arrives (no cumulative layout
+    # shift), with responsive-display CSS keeping the box fluid.
+    assert "Layout stability" in p
+    assert "`width` and `height` attributes" in p
+    assert "video,img{max-width:100%;height:auto}" in p
+    assert "ffprobe" in p
+
+
 def test_signoff_prompt_keeps_route_step_numbered_last():
     from pm_core import prompt_gen
     p = prompt_gen.generate_signoff_prompt(
