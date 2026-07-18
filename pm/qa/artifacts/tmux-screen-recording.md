@@ -95,8 +95,18 @@ magnitude slower and fragile). The intermediate GIF is discarded.
 ```
 cast=<capture-dir>/recording.cast
 agg --idle-time-limit 2 "$cast" "$cast.gif"
-ffmpeg -y -i "$cast.gif" -vf "scale=iw*2:ih*2:flags=neighbor" \
-    -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 18 \
+# 2x nearest-neighbor upscale for crisp text — but only while the result
+# stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
+# A pane large enough to blow that budget is already crisp at native
+# size; then just round dimensions down to even (H.264 requires even).
+vf="scale=iw*2:ih*2:flags=neighbor"
+read -r gw gh < <(ffprobe -v error -select_streams v:0 \
+    -show_entries stream=width,height -of 'csv=p=0:s= ' "$cast.gif")
+if [ "$((gw * 2))" -gt 4096 ] || [ "$((gh * 2))" -gt 2304 ]; then
+    vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+fi
+ffmpeg -y -i "$cast.gif" -vf "$vf" \
+    -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
     -movflags +faststart "${cast%.cast}.mp4"
 rm -f "$cast.gif"
 ```
@@ -107,9 +117,12 @@ Notes:
 - H.264 + `yuv420p` is the only combination that decodes everywhere,
   including iOS Safari (VP8/VP9 webm and 4:4:4 chroma do not). 4:2:0
   chroma subsampling would blur colored terminal text at native size,
-  so the `scale=iw*2:ih*2` nearest-neighbor upscale renders at 2x —
-  crisp text, and the doubling guarantees the even dimensions H.264
-  requires. `crf 18` is visually lossless for this content; favor
+  so the nearest-neighbor upscale renders at 2x — crisp text, and the
+  doubling guarantees the even dimensions H.264 requires. The
+  size guard matters: an unconditional 2x on a large pane produces a
+  video past level 5.1 (e.g. 4276x2284), which desktop browsers play
+  but iPhone/iPad hardware decoders silently refuse. `crf 18` is
+  visually lossless for this content; favor
   quality — file size is not a concern. `-movflags +faststart` puts the
   moov atom up front so playback starts before the full download.
   A long, busy session may take several minutes to encode; that's
