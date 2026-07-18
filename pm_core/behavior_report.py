@@ -279,6 +279,10 @@ function pmSort(col) {
   }
   rows.sort(function(a, b) {
     var ka = keyFor(a), kb = keyFor(b);
+    // A column can still yield mixed key types (one cell's whole text is
+    // numeric, its neighbours' aren't) — compare as strings then, since a
+    // number-vs-string comparison is inconsistent (both a>b and b>a false).
+    if (typeof ka !== typeof kb) { ka = String(ka); kb = String(kb); }
     if (ka === kb) return 0;
     return (asc ? 1 : -1) * (ka > kb ? 1 : -1);
   });
