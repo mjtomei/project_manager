@@ -461,7 +461,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
 
     prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
 
-Sign-off is the dedicated lifecycle step between QA and merge. Your job is a 
+Sign-off is the dedicated lifecycle step between QA and merge. Your job is a
 PR-level *comprehensive* review and a routing decision.
 
 ## Description
