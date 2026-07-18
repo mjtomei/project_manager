@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T19:57:41.535300+00:00'
+  updated_at: '2026-07-18T20:07:14.559946+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-15T15:30:20.567277+00:00'
   merged_at: null
@@ -24327,6 +24327,31 @@ prs:
       qa.md merge-gate section (s41-derived triples) accordingly.'
     created_at: '2026-07-18T19:57:41Z'
     last_edited: '2026-07-18T19:57:41Z'
+  - id: note-9c8922f
+    text: 'Implemented note-0fca74e (commit 2e3b2b0f): explicit sign-off record step.
+      (1) `pm pr signoff` is now a click group — a custom parse_args routes any unrecognized
+      first token to the hidden `run` subcommand, so the existing surface (`pm pr
+      signoff <id> [--fresh]`, bare auto-infer, and the auto-sequence ctx.invoke(pr_signoff,...)
+      sites) is byte-compatible; `record` resolves as a subcommand, not a PR id. (2)
+      `pm pr signoff record <id>`: requires captures_root()/<id>/report.html to exist
+      AND carry a valid SIGNOFF_* meta verdict (behavior_report._extract_verdict)
+      AND a workdir HEAD; writes pr[signoff]={verdict-from-meta, sha=HEAD, ts, origin:manual,
+      report_hash:sha256(report bytes)}; refusals are one-line exit-1 and record nothing;
+      never changes status. (3) Merge gate (pr.py): unchanged freshness check, plus
+      when the record carries report_hash it re-hashes the on-disk report and refuses
+      on mismatch/missing with "report.html changed since the recorded approval; re-run
+      pm pr signoff record"; hash-less records (auto-sequence) unchanged. (4) record_signoff_verdict
+      stays the single writer, extended with optional report_hash; docstring reframes
+      the invariant to "recording must be an explicit command, never a side effect
+      of report (re)generation" and names the future origin:watcher seam for pr-ff9b728.
+      (5) Tests: 12 new in test_signoff.py (record happy path incl. non-merge verdict
+      adoption, 3 refusals, group routing, hash match/mismatch/missing-report/hash-less/--no-signoff-check)
+      — 200 tests green across signoff/auto-sequence/enhancements/behavior-report/md-render.
+      qa.md gained R11 (merge gate + record triples); impl.md R3/R3.5 updated. NOTE:
+      commit 2e3b2b0f is LOCAL-ONLY right now — the push proxy socket (/run/pm-push-proxy/push.sock)
+      is down; a background retry loop will push when it returns.'
+    created_at: '2026-07-18T20:07:14Z'
+    last_edited: '2026-07-18T20:07:14Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
