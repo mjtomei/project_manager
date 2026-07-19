@@ -155,8 +155,8 @@ def _format_mtime(mtime: float | None) -> tuple[str, str]:
     """Return (display, tooltip) for a unix mtime.
 
     Display is a short relative string ("3m ago", "2h ago", "5d ago");
-    tooltip is the absolute UTC timestamp. Both are empty when *mtime*
-    is None (e.g. no report on disk).
+    tooltip is the absolute UTC timestamp. When *mtime* is None (e.g. no
+    report on disk) display is an em dash and the tooltip is empty.
     """
     if mtime is None:
         return ("—", "")

@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4bd660b
+  active_pr: pr-8e693f6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -24474,6 +24474,12 @@ prs:
       Captures: /pm-captures/scenarios/64/ pre-fix+post-fix.'
     created_at: '2026-07-18T22:18:59Z'
     last_edited: '2026-07-18T22:18:59Z'
+  - id: note-92ba3c0
+    text: 'QA NEEDS_WORK: A freshly authored sign-off report stays visually stable
+      while its media loads: NEEDS_WORK; Reviewer approval stays coherent when the
+      report is rewritten or approved concurrently: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-480f115292d5d5be)'
+    created_at: '2026-07-18T22:40:12Z'
+    last_edited: '2026-07-18T22:40:12Z'
   - id: note-7ef581a
     text: 'QA s67 (narrow-viewport dashboard): NEEDS_WORK->fixed 40759cbb. Bug: the
       dashboard index scrolled horizontally as a whole page at EVERY viewport width
