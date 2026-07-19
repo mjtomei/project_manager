@@ -23449,7 +23449,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-18T23:36:53.327025+00:00'
+  updated_at: '2026-07-19T01:43:44.299072+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-18T21:42:22.377584+00:00'
   merged_at: null
@@ -24521,6 +24521,18 @@ prs:
       PR relaunches an impl Claude window — kill it before driving panes by name.'
     created_at: '2026-07-18T23:36:53Z'
     last_edited: '2026-07-18T23:36:53Z'
+  - id: note-5779c04
+    text: 'QA s68 (narrow-viewport fix 40759cbb full verification): PASS on all 3
+      triples — Playwright Firefox has_touch context: zero page h-scroll at 390/768/1280
+      (table 790px scrolls only inside .table-wrap), 12rem title wrap + overflow-wrap:anywhere
+      on 200-char token, hostile <script> title literal/no dialog, full row content
+      + mtime-desc default + single indicator; phone tap() filter/sort/report-nav
+      and desktop Title-asc/Status-desc/Lastmod-one-click-desc all correct, report+evidence
+      200. Gotcha: page.tap() works fine in Firefox with has_touch=True; libgtk-3-0
+      needs apt-get update first on this image. Captures: /pm-captures/scenarios/68/web-ui/
+      (38/38 checks.json).'
+    created_at: '2026-07-19T01:43:44Z'
+    last_edited: '2026-07-19T01:43:44Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
   signed_off_at: '2026-07-18T18:44:00.909874+00:00'
 - id: pr-ff9b728
