@@ -56,6 +56,20 @@ _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
 _DEFAULT_VERIFICATION_MAX_RETRIES = 3
 
 
+def get_qa_pass_count() -> int:
+    """Read qa-pass-count from global settings, default 1.
+
+    Used by the self-driving QA loop to decide how many consecutive
+    PASS verdicts are required before promoting the PR.
+    """
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-pass-count", "")
+    try:
+        return max(1, int(val))
+    except ValueError:
+        return 1
+
+
 def _get_max_scenarios() -> int:
     """Read qa-max-scenarios from global settings, or _DEFAULT_MAX_SCENARIOS."""
     from pm_core.paths import get_global_setting_value

@@ -38,15 +38,23 @@ class TestActionsForStatus:
         labels = [a[0] for a in _actions_for_status("bogus")]
         assert labels == ["start", "edit", "review", "qa", "merge"]
 
-    def test_qa_command_routes_through_tui(self):
+    def test_qa_command_is_direct_cli(self):
+        """Post-pr-438028c: qa goes through the daemon-spawning CLI
+        handler, not the TUI command bar."""
         actions = _actions_for_status("in_progress")
         qa_cmd = next(cmd for label, cmd in actions if label == "qa")
-        assert qa_cmd.startswith("tui:")
+        assert not qa_cmd.startswith("tui:")
+        assert qa_cmd.startswith("pr qa ")
 
-    def test_zz_d_chord_routes_review_loop_through_tui(self):
+    def test_zz_d_chord_is_direct_cli(self):
+        """Post-pr-438028c: zz d / zz t / z t modifiers route through
+        the CLI surface (`pr review-loop start`, `pr qa fresh|loop`)."""
         from pm_core.cli.session import _MODIFIED_ACTION_CMDS
         rl_cmd = _MODIFIED_ACTION_CMDS[("zz", "review")]
-        assert rl_cmd.startswith("tui:review-loop")
+        assert not rl_cmd.startswith("tui:")
+        assert rl_cmd.startswith("pr review-loop start ")
+        assert _MODIFIED_ACTION_CMDS[("z", "qa")].startswith("pr qa fresh ")
+        assert _MODIFIED_ACTION_CMDS[("zz", "qa")].startswith("pr qa loop ")
 
     def test_start_is_direct_cli(self):
         actions = _actions_for_status("in_progress")
