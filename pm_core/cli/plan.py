@@ -476,6 +476,49 @@ Let them know it is safe to close this pane — loading runs instantly without a
         click.echo(f"---\n{prompt}\n---")
 
 
+@plan.command("literature-review")
+@click.argument("plan_id", default=None, required=False)
+def plan_literature_review(plan_id: str | None):
+    """Launch a literature-review session inside the plan's tmux window.
+
+    Resolves the review id from the plan's filename stem, resumes the review if
+    one is already registered and active (warns if archived), or creates a new
+    one.  The Claude session runs in a new pane within the plan's existing tmux
+    window with role ``literature-review``.
+    """
+    from pm_core.review import cli as review_cli
+
+    root = state_root()
+    data = store.load(root)
+
+    plan_id = _auto_select_plan(data, plan_id)
+    plan_entry = _require_plan(data, plan_id)
+
+    plan_path = root / plan_entry["file"]
+    if not plan_path.exists():
+        click.echo(f"Plan file {plan_path} not found.", err=True)
+        raise SystemExit(1)
+
+    # Resolve the plan's existing tmux window (named after the plan id), so the
+    # review pane lands alongside the plan's other panes.
+    target_window = None
+    try:
+        from pm_core import tmux
+        if tmux.in_tmux():
+            session = tmux.get_session_name()
+            if session:
+                win = tmux.find_window_by_name(session, plan_id)
+                if win:
+                    target_window = win["id"]
+    except Exception:
+        target_window = None
+
+    review_cli.run_review(
+        plan_entry["file"], root=root,
+        target_type="plan", target_window=target_window,
+    )
+
+
 @plan.command("deps")
 def plan_deps():
     """Launch Claude to review or fix PR dependencies."""

@@ -149,6 +149,7 @@ class TestPlansPane:
             "l": "load",
             "e": "edit",
             "c": "review",
+            "r": "literature-review",
         }
         assert pane._KEY_ACTIONS == expected
 

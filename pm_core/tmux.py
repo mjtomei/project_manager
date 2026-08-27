@@ -352,6 +352,27 @@ def get_pane_geometries(session: str, window: str = "0") -> list[tuple[str, int,
     return geoms
 
 
+def current_window_id() -> str | None:
+    """Window id of the pane this process is running in, or None.
+
+    Uses ``$TMUX_PANE`` so it reports the *actual* pane (reliable even from a
+    background process), not the client's notion of the active window. Returns
+    None when not in tmux or on any tmux error.
+    """
+    pane = os.environ.get("TMUX_PANE")
+    if not pane:
+        return None
+    try:
+        result = _run(
+            _tmux_cmd("display-message", "-p", "-t", pane, "#{window_id}"),
+            text=True,
+        )
+    except Exception:
+        return None
+    wid = result.stdout.strip()
+    return wid or None
+
+
 def get_window_id(session: str) -> str:
     """Get the active window ID for a session.
 
