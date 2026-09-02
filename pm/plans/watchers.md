@@ -11,6 +11,8 @@ The existing watcher/auto-start loop is a monolithic piece that handles too many
 > 2. **`pr-18ac983`** (session-health watcher — detects stalled sessions) — decide whether it should own trust-prompt clearing (a stalled session sitting on a trust prompt is exactly its domain), or whether that overlaps the `plan-regression` plan auto-start watcher (`pr-ff9b728`) enough that one should be dropped/merged. (The plan auto-start watcher generalizes the old impl watchers + `AutoStartWatcher`; check for overlap before building both.)
 > 3. Whether the headless/benchmark mode (`plan-regression` `pr-6f9301e`) needs the same context-aware trust handling rather than a blanket skip.
 
+> **Cross-plan note (2026-08-31, [[plan-jurisdiction]]):** the trust-prompt handling (`pr-b53bfe2`, per the decided context-aware-agent approach above) is relocated to plan-jurisdiction Set A as a session-health recovery playbook — build it there, not here. `pr-18ac983` (#184, in review) and `pr-871dbf5` (#144, qa) are landing dependencies of that plan's always-on MVP. Review item 2's overlap question resolves via plan-regression Phase 11: the plan auto-start watcher (`pr-ff9b728`) is the auto-start engine; the session-health watcher stays separate and owns stall recovery (including trust prompts).
+
 ## Phases
 
 ### Phase 1: Foundation

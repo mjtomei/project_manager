@@ -80,6 +80,8 @@ Initially read-only: anyone with the URL can read public artifacts. Commenting a
 
 When both parties run pm, a richer collaboration protocol becomes possible: artifact sync across projects, proposal flow via the Artifact primitive, conflict resolution when parallel work diverges.
 
+> *(2026-08-31: [[plan-jurisdiction]]'s plural-membership subprojects — design law 3, the project graph is a DAG with approval-free edge creation: create child / raise parent / fork / watch — give this track its concrete unit: a **shared subproject** belonging to both parties' projects at once, each parent adopting on its own edge. Shadow projects (Track D) are jurisdiction's **fork/watch adoption** applied to an external party's repo, and the parent context an expanding agent *creates for itself* when its scope grows toward that party — the declared, legible form of scope expansion. Cross-project proposals (Track C below) are ordinary change requests under jurisdiction Protocol v0; Track F's per-relationship rate limits + anti-spam are its deferred per-source request filtering.)*
+
 ### PR: Project-to-project artifact-sync protocol
 
 Define the wire format and trust model. Shared threads land in both projects' radars; comments propagate (with provenance). Per-artifact opt-in: the user explicitly chooses which threads / plans / PRs sync to which peer projects.
@@ -144,7 +146,7 @@ How many proposals an external party can submit; how often a shadow project's ou
 
 ### PR: Audit logging
 
-Every cross-project action is logged with full context (who, when, what, why, on whose authority); the user can review and reject historical actions. Trail is exportable.
+Every cross-project action is logged with full context (who, when, what, why, on whose authority); the user can review and reject historical actions. Trail is exportable. *(2026-08-31: build on [[plan-jurisdiction]]'s merge-authority records + crossing-request queue — the single-project form of exactly this trail — rather than a parallel mechanism; same for the gated-by-default posture in the quiet-defaults PR.)*
 
 ### PR: Anti-spam
 

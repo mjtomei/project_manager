@@ -4,6 +4,8 @@ Run a population of pm variants in parallel, score them by an external fitness m
 
 This plan is intentionally underspecified. Many design choices should draw on prior work in evolutionary algorithms (selection pressure, population diversity, anchor strategies, novelty search, multi-objective fitness) and will be worked out collaboratively before phase breakdown.
 
+> **Cross-plan note (2026-08-31):** [[plan-jurisdiction]] Set B builds the seeded-bad-change **exam harness** as standing infrastructure — extending this plan's `signoff` two-evaluation-router A/B into the certification instrument for process grants; the appendix's A/B candidates get their measurement substrate from it plus #160's fixtures. The riscv-pareto campaign (`../riscv-pareto/pm/plans/plan-campaign.md`) is a natural future **target**: an external project exposing a numeric fitness with held-out structure (Pareto-front movement under a pinned eval pipeline).
+
 ## Goals
 
 - Use pm to improve any project that exposes a Claude-based fitness metric, including pm itself.
@@ -15,7 +17,7 @@ This plan is intentionally underspecified. Many design choices should draw on pr
 
 - Bug-fix loop demonstrably unsupervised — regression-loop Phase 7 evidence and coverage gates landed.
 - Benchmark loaders from plan-002 — held-out slices for variant evaluation come from here.
-- Per-plan auto-merge=false (`pr-b77702b`) so variant branches stage as candidates.
+- Per-plan gated-merge config on the plan auto-start watcher (`pr-ff9b728`, plan-regression Phase 11 — supersedes `pr-b77702b`'s auto_merge flag, which was rescoped) so variant branches stage as candidates.
 - Container isolation for variants (already in plan-qa).
 
 ## Core concepts

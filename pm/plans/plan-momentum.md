@@ -35,7 +35,7 @@ Anti-factors (push *down*, not up): raw chat-volume, recency-alone, flashiness �
 
 ## Signals (where the candidates come from)
 
-- **Development effort** (cheapest, v1): PR/plan state from `project.yaml`, git activity, review/QA status, dependency edges. Yields finish-line, unblocked, stalled, and contested candidates with no NLP.
+- **Development effort** (cheapest, v1): PR/plan state from `project.yaml`, git activity, review/QA status, dependency edges. Yields finish-line, unblocked, stalled, and contested candidates with no NLP. *(2026-08-31: when [[plan-jurisdiction]]'s feed ledger lands, prefer it as this signal's source — merge/verdict/escalation/adjudication events with authority records are a richer, already-structured candidate stream than re-deriving from `project.yaml` + git.)*
 - **Chat logs** (richer, v1.5): session transcripts mined (reuse [[plan-memory]]'s session-transcript sifting) for open questions, decisions, surfaced TODOs, and **parked items** ("come back to this later", "let's defer X") with their stated precondition. This is the human-facing cousin of [[plan-memory]]'s involuntary recall — same machinery, *human* target instead of agent.
 - **Ambient** (optional): [[plan-ambient]]'s attention/focus signals for *when* and *where* to surface, not *what*.
 
