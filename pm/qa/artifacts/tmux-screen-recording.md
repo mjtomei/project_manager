@@ -8,20 +8,24 @@ description: Capture a tmux pane transcript and an asciinema replay of a pm TUI 
 A scenario produces behavior worth confirming end-to-end through the
 pm TUI — a keybinding, a pane render, a flow you'd normally drive by
 hand — and you want unambiguous evidence of what happened, consumable
-by humans (replay) and downstream agents (parse the transcript or
-cast).
+by humans (replay) and downstream agents (parse the cast or the
+pane scrollback).
 
 ## What this recipe produces
 
-Three files per capture, written into `<capture-dir>/` (a
+Written per capture into `<capture-dir>/` (a
 subdirectory under the captures directory the scenario prompt
 names):
 
-- `transcript.log` — plain-text scrollback of the pane (**required** —
-  the load-bearing artifact for grep/diff and for consumers without
-  asciinema).
-- `recording.cast` — asciinema replay (**required** when `asciinema`
-  is available).
+- `transcript.log` — plain-text scrollback of the pane (comes free
+  from the `pipe-pane` in the capture flow; handy for grep/diff).
+- `recording.cast` — asciinema replay.
+- `recording.mp4` — H.264 video rendered from the cast (**required**;
+  plays everywhere including iOS Safari, unlike VP8/VP9 webm).
+  The embeddable view: the sign-off HTML report shows it inline via a
+  plain `<video controls>` element — native pause / scrub, no player
+  library, works offline. The `.cast` stays as the small,
+  exact-replay/grep source.
 - `manifest.md` — frontmatter + short prose: workdir path the capture
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.
@@ -80,6 +84,51 @@ tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
 tmux kill-session -t pm-recorder 2>/dev/null
 ```
 
+## Render to video
+
+Once the cast exists, render a `.mp4` sibling so the recording embeds
+in the sign-off HTML report as a `<video controls>` element. `agg`
+renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
+no single cast→video tool worth using (the dedicated ones are orders of
+magnitude slower and fragile). The intermediate GIF is discarded.
+
+```
+cast=<capture-dir>/recording.cast
+agg --idle-time-limit 2 "$cast" "$cast.gif"
+# 2x nearest-neighbor upscale for crisp text — but only while the result
+# stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
+# A pane large enough to blow that budget is already crisp at native
+# size; then just round dimensions down to even (H.264 requires even).
+vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
+    -show_entries stream=width,height -of csv=p=0 "$cast.gif")
+if [ -n "$gw" ] && [ -n "$gh" ] && \
+   [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
+    vf="scale=iw*2:ih*2:flags=neighbor"
+fi
+ffmpeg -y -i "$cast.gif" -vf "$vf" \
+    -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
+    -movflags +faststart "${cast%.cast}.mp4"
+rm -f "$cast.gif"
+```
+
+Notes:
+- `--idle-time-limit 2` caps the long pauses a TUI session accumulates,
+  dropping dead air without losing anything worth watching.
+- H.264 + `yuv420p` is the only combination that decodes everywhere,
+  including iOS Safari (VP8/VP9 webm and 4:4:4 chroma do not). 4:2:0
+  chroma subsampling would blur colored terminal text at native size,
+  so the nearest-neighbor upscale renders at 2x — crisp text, and the
+  doubling guarantees the even dimensions H.264 requires. The
+  size guard matters: an unconditional 2x on a large pane produces a
+  video past level 5.1 (e.g. 4276x2284), which desktop browsers play
+  but iPhone/iPad hardware decoders silently refuse. `crf 18` is
+  visually lossless for this content; favor
+  quality — file size is not a concern. `-movflags +faststart` puts the
+  moov atom up front so playback starts before the full download.
+  A long, busy session may take several minutes to encode; that's
+  expected and acceptable for a rare case.
+
 ## Manifest format
 
 ```
@@ -103,6 +152,7 @@ captured_at: <ISO date>
 
 - `transcript.log` — <one-line description>
 - `recording.cast` — <one-line description>
+- `recording.mp4` — <one-line description>
 - `<any extra file>` — <one-line description>
 ```
 
