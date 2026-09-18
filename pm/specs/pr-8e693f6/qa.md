@@ -112,9 +112,13 @@ window's internal layout and the actual agent authoring the report.
   explicit `width`/`height` attributes (ffprobe named as the probe) and the
   report CSS must include `video,img{max-width:100%;height:auto}` — so an
   authored report has no dimensionless media elements (no layout shift while
-  media loads). An agent-authored `report.html` produced under this prompt
-  (real-Claude scenario, per note-ce0f6d1) has `width` and `height` on every
-  `<video>` and `<img>` element.
+  media loads). The rule also requires that the report page never scroll
+  horizontally at any viewport width — `pre{overflow-x:auto}` and wide tables
+  wrapped in their own `overflow-x:auto` container (extended at commit
+  `a43a523d` after a 390px-viewport regression). An agent-authored
+  `report.html` produced under this prompt (real-Claude scenario, per
+  note-ce0f6d1) has `width` and `height` on every `<video>` and `<img>`
+  element and no whole-page horizontal scroll at a phone-width viewport.
 
 ### R5 — `sign_off` status across status surfaces
 * GIVEN a project with a PR in `sign_off` and a recorded sign-off verdict on
@@ -279,6 +283,19 @@ window's internal layout and the actual agent authoring the report.
 * THEN the `serving at http://…` line (the only way to learn the OS-assigned
   port) appears in the redirected output promptly — not held in a stdio
   buffer until exit (fixed at commit `73f85ad1`).
+
+### E8 — Dashboard index is usable on a phone-width viewport
+* GIVEN a dashboard page whose rows include a long unbroken-token title,
+  loaded in a browser at a 390px-wide viewport (and stepped up to desktop
+  widths).
+* WHEN the user scrolls, filters, sorts, and follows a report link.
+* THEN the page as a whole never scrolls horizontally at any width — the
+  table scrolls only inside its own wrapper (`overflow-x:auto` container),
+  long tokens wrap (`overflow-wrap:anywhere`) while the Title column keeps a
+  minimum width so normal titles wrap at word boundaries instead of
+  shattering per-character; all row content (status icons, relative mtimes,
+  verdict markers) stays present and interactive at phone width. (Fixed at
+  commit `40759cbb`; verified s67/s68.)
 
 ## Concurrency (shared resources the diff touches)
 

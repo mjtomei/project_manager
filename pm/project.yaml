@@ -23408,7 +23408,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: qa
+  status: sign_off
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -23449,9 +23449,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-07-19T01:43:44.299072+00:00'
+  updated_at: '2026-09-18T14:00:47.727000+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
-  reviewed_at: '2026-07-18T21:42:22.377584+00:00'
+  reviewed_at: '2026-07-22T01:52:32.996314+00:00'
   merged_at: null
   notes:
   - id: note-a9626ec
@@ -24521,6 +24521,12 @@ prs:
       PR relaunches an impl Claude window — kill it before driving panes by name.'
     created_at: '2026-07-18T23:36:53Z'
     last_edited: '2026-07-18T23:36:53Z'
+  - id: note-422773c
+    text: 'QA NEEDS_WORK: A freshly authored sign-off report stays visually stable
+      and phone-readable while its media loads: PASS; The dashboard index itself is
+      usable on a phone-sized browser: NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-4b1a11236913d1e3)'
+    created_at: '2026-07-18T23:42:21Z'
+    last_edited: '2026-07-18T23:42:21Z'
   - id: note-5779c04
     text: 'QA s68 (narrow-viewport fix 40759cbb full verification): PASS on all 3
       triples — Playwright Firefox has_touch context: zero page h-scroll at 390/768/1280
@@ -24533,8 +24539,26 @@ prs:
       (38/38 checks.json).'
     created_at: '2026-07-19T01:43:44Z'
     last_edited: '2026-07-19T01:43:44Z'
+  - id: note-a89d22f
+    text: 'QA PASS: Dashboard index is usable on a phone-sized browser without regressing
+      desktop behavior: PASS; Dashboard server end-to-end regression — liveness, verdict
+      extraction, empty states, and streaming still hold after the render change:
+      PASS; Dashboard stays coherent under concurrent phone/desktop readers while
+      captures and project state change underneath it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-88674f6fb21959f7)'
+    created_at: '2026-07-19T01:52:59Z'
+    last_edited: '2026-07-19T01:52:59Z'
+  - id: note-af58dff
+    text: 'QA PASS: End-to-end reviewer journey — a real sign-off pass authors the
+      report, the dashboard serves it, and explicit approval carries the PR through
+      the merge gate: PASS; Dashboard regression sweep — mixed real-world rows, robustness,
+      liveness, filter/sort, and error branches: PASS; Concurrent reviewers and writers
+      — approval integrity and server health while the report, record, and merge race:
+      PASS; Sign-off routing and status surfaces regression under auto-sequence: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-49cd3b5fc58763de)'
+    created_at: '2026-07-22T02:34:53Z'
+    last_edited: '2026-07-22T02:34:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc
-  signed_off_at: '2026-07-18T18:44:00.909874+00:00'
+  signed_off_at: '2026-09-18T14:00:47.727000+00:00'
 - id: pr-ff9b728
   plan: plan-regression
   title: Plan auto-start watcher — generalize impl watchers + become the auto-start
