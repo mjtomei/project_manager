@@ -309,6 +309,48 @@ captures under `impl/post-fix/`):
     scrolling (selection stuck) and j/k could move the selection off-screen,
     so Enter focused a row the user could not see.
 
+Fixes made during QA (recorded in the PR notes; listed here so the spec
+matches the code):
+
+14. *(QA s5, e7e8abdc)* **Review-loop adoption on restart.** A resumed loop
+    whose iteration counter is ahead of its history (an iteration was in
+    flight at the breadcrumb restart) polls the live review pane for that
+    iteration (`review_loop._adopt_in_flight_review`, using the saved
+    `_transcript_dir`) instead of relaunching N+1 with `--fresh`, which
+    killed the in-flight window. When there's no live pane or transcript to
+    adopt, the same iteration reruns. The "Auto-start: resumed after merge
+    restart" summary is logged last so it is painted.
+15. *(QA s5, 71ca9067)* **CLI commands during a restart.** External
+    commands are not dispatched until `consume_breadcrumb` has restored
+    state (`_cmd_queue_ready`). The startup drain then applies queued lines,
+    unless the queue file was last written more than
+    `_STARTUP_QUEUE_MAX_AGE` (60s) before the process started. Such a queue
+    was left by a dead TUI and is discarded, so it can't be replayed later.
+    `restart_app` sets SIGUSR1/SIGUSR2 to SIG_IGN across `execvp`, so a
+    signal arriving before the new handlers exist doesn't kill the TUI.
+16. *(QA s1, 29f37c17)* `_auto_review_idle_prs` runs the hidden
+    `pm pr review --no-window` (status transition only), because the review
+    loop launches iteration 1's window itself. Before this, a throwaway
+    Claude session was launched and immediately killed. The popup's QA
+    progress shows "qa planning" or "qa <verdict>", never a stale review
+    iteration.
+17. *(QA s3/s2, f4e89681, f9358d7c)* `log_message(force=)` shows
+    auto-start confirmations (targets +=, removed, OFF) even while a sticky
+    message is up. `log_message(hold=)` keeps "targets +=" / "ON (all …)"
+    readable against the scheduler messages it triggers in the same frame.
+    Held messages are deferred, and the latest one shows when the hold ends.
+    Closing a runs popup that was opened from the command bar returns focus
+    to the tree.
+18. *(QA s4, b336ee34, b62f797b)* The tree cursor follows `active_pr` only
+    when it changes, and not for the scheduler's own background
+    `pr start` (`_quiet_activations`). A tree reorder keeps the selection on
+    the same PR. Otherwise O/A could hit the wrong PR. Every log-line
+    message is also written to the `L` command log as `log: …`. A skip-qa
+    review PASS reports "QA skipped (skip_qa); awaiting sign-off".
+19. *(QA, 41451898)* The tmux `set-hook window-resized` stderr is captured
+    and logged, because tmux < 3.3 rejects the hook and its error was
+    painting over the TUI pane.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i
