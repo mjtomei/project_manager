@@ -140,3 +140,24 @@ Consistency check against current code and PR notes:
 - Run 1 verdicts: R1/R2/R3/R5 PASS. R4 and C1/C2 were NEEDS_WORK only because
   fixes landed mid-run (the padding and the tty hold). Run 2 re-verifies them on
   the fixed branch and adds E1, E2, E4 and E5, which run 1 did not cover.
+
+## Run-2 scenarios (detail behind the short QA_PLAN lines)
+- **S5 — every launch path plus edge cases, on a host without less.**
+  Story A: open the review window four ways: CLI `pm pr review`, TUI `d`,
+  `--fresh` on an `in_review` PR, and a `zz d` review loop with fake verdicts
+  `["NEEDS_WORK","PASS"]` so the loop relaunches the window. For each window,
+  check the header, diffstat, the distinctive `+` line, two blank rows, and a
+  live shell. The Claude pane must stay open. Resize or widen the window and the
+  last `+` line must survive. There must be no `less: command not found`.
+  Story B (edge cases): E1 hostile title; E2 unresolvable diff base, where git's
+  error is visible followed by a shell; E3 large diff, where the header is
+  reachable in copy-mode; E4 `SHELL=/bin/sh`; E5 install less and run
+  `--fresh`, which gives the pager, then remove less and run `--fresh`, which
+  gives cat. Also re-run `tests/test_review_window_quoting.py` (R5).
+- **S6 — concurrent launches, on a host without less.** Open review windows for
+  two PRs at the same moment from two panes or clients. Each window has 2 panes
+  with its own PR's diff, both PRs are `in_review`, and the registry lists all
+  four panes. Then run two `--fresh` of one PR at once from grouped sessions:
+  exactly one `review-<id>` window must remain, with a populated diff pane, and
+  the watching session must follow it. pr-3f85ad7 (duplicate window race) is a
+  known separate bug; record it, don't fail on it.

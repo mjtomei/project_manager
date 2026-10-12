@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-001
+  active_pr: pr-2ea2797
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25018,6 +25018,19 @@ prs:
       pm pr start.'
     created_at: '2026-10-12T16:50:52Z'
     last_edited: '2026-10-12T16:50:52Z'
+  - id: note-f8b1df4
+    text: 'impl done (b752adfc): diff_cmd in _launch_review_window now pipes through
+      `if command -v less ...; then less -R; else cat; fi`. Pre/post-fix captures
+      in $CAP/impl/{pre,post}-fix (diff_cmd extracted from the real _launch_review_window,
+      run in an isolated tmux pane on this less-less host; pm pr review not run since
+      it spawns Claude). Tests: tests/test_review_window_quoting.py adds a less-stripped-PATH
+      run (fails pre-fix) + stand-in-less run. Incidental: the existing bash -n checks
+      in that file were vacuous (fake_tmux patches the global subprocess.run), now
+      use _real_run. Full suite: only pre-existing failures: test_markdown_render
+      (pm venv lacks `markdown`) and test_hook_events::test_installer_writes_standalone_receiver
+      (fails on unmodified HEAD too).'
+    created_at: '2026-10-12T16:29:29Z'
+    last_edited: '2026-10-12T16:29:29Z'
 - id: pr-3ca6b36
   plan: plan-regression
   title: 'Regression test: CLI/command-bar help completeness, flag consistency, and
@@ -25587,3 +25600,28 @@ prs:
       once pr-71e9ec7 merges.'
     created_at: '2026-10-12T17:00:08Z'
     last_edited: '2026-10-12T17:00:08Z'
+- id: pr-2ea2797
+  plan: bugs
+  title: 'Bug: TUI plan-view pane runs bare `less <path>` — no fallback when less
+    is absent, path unquoted'
+  branch: pm/pr-2ea2797-bug-tui-plan-view-pane-runs-bare-less-path-no-fall
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pane_ops.py:241 (view plan from PR) and :665 (_launch_in_plans_window
+    on plan activation) launch the pane command f"less {plan_path}". Same bug class
+    as pr-71e9ec7 (review diff pane): on a host without less on PATH the plan pane
+    shows "less: command not found" (or dies) instead of the plan. Also plan_path
+    is interpolated unquoted, so a project root containing spaces/apostrophes breaks
+    the command. Fix: shell_quote(plan_path) and use the same guard as the review
+    diff pane: `if command -v less >/dev/null 2>&1; then less -R <path>; else cat
+    <path>; fi` (keep the pane alive, e.g. trailing `; exec $SHELL` or remain-on-exit,
+    so cat output is readable). Repro: drop less from PATH, open a plan in the TUI.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T16:33:57.919208+00:00'
+  updated_at: '2026-10-12T16:33:57.919208+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
