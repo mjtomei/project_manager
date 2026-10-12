@@ -380,7 +380,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
         assert result.exit_code != 0
         assert "already merged" in result.output
 
@@ -393,7 +394,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
         assert result.exit_code != 0
         assert "pending" in result.output
 
@@ -413,7 +415,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
@@ -453,7 +456,8 @@ class TestPrMerge:
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]), \
              mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--resolve-window"])
+                                               "--resolve-window",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         mock_launch.assert_called_once()
@@ -475,7 +479,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         mock_finalize.assert_called_once()
@@ -511,7 +516,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
@@ -537,7 +543,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         # Should still succeed (warning, not error)
         assert result.exit_code == 0
@@ -561,7 +568,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
@@ -590,7 +598,8 @@ class TestPrMerge:
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]), \
              mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--resolve-window"])
+                                               "--resolve-window",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         mock_launch.assert_called_once()
@@ -615,7 +624,8 @@ class TestPrMerge:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         # Soft failure with manual instructions exits non-zero so the
         # popup picker / TUI surfaces the error instead of closing
@@ -647,7 +657,8 @@ class TestPrMerge:
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_merge_project["pm_dir"]):
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-resolve-window"])
+                                               "--no-resolve-window",
+                                               "--no-signoff-check"])
 
         assert result.exit_code != 0
         assert "Pull manually" in result.output or "Fetch" in result.output
@@ -680,7 +691,8 @@ class TestGithubFallbackExitCode:
 
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=pm_dir):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code != 0
         assert "GitHub PR" in result.output
@@ -750,7 +762,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         assert "merged" in result.output.lower()
@@ -789,7 +802,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0, result.output
         # The github merge block was entered and used the fake-backed gh_ops,
@@ -824,7 +838,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         mock_restart.assert_called_once()
@@ -850,7 +865,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         mock_restart.assert_not_called()
@@ -876,7 +892,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         mock_finalize.assert_called_once()
@@ -916,7 +933,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
@@ -950,7 +968,8 @@ class TestGitHubMergePull:
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--resolve-window"])
+                                               "--resolve-window",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         assert "pull failed" in result.output.lower()
@@ -987,7 +1006,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         assert "already merged" in result.output.lower()
@@ -1013,7 +1033,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
@@ -1041,7 +1062,8 @@ class TestGitHubMergePull:
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root",
                                return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--no-signoff-check"])
 
         assert result.exit_code == 0
         assert "skipping pull" in result.output.lower()

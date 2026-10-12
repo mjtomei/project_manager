@@ -140,6 +140,32 @@ def extract_verdict_from_transcript(
     return None
 
 
+_REASON_RE = re.compile(
+    r'(?im)^\s*[*`]*\s*reason\s*[*`]*\s*[:\-]\s*[*`]*\s*(.+?)\s*[*`]*\s*$'
+)
+
+
+def extract_verdict_reason_from_transcript(
+    transcript_path: str | Path | None,
+) -> str:
+    """Return the latest ``Reason: ...`` line from the latest assistant turn.
+
+    Scenario runners are prompted to emit a single ``Reason: <one sentence>``
+    line immediately before their verdict keyword. We pick the *last* such
+    line in the turn so the line nearest the verdict wins if the agent wrote
+    multiple. Returns an empty string when no reason line is present.
+    """
+    text = read_latest_assistant_text(transcript_path)
+    if not text:
+        return ""
+    last = ""
+    for line in text.splitlines():
+        m = _REASON_RE.match(line)
+        if m:
+            last = m.group(1).strip()
+    return last
+
+
 def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
     """Return the concatenated ``text`` content of the latest assistant turn.
 
