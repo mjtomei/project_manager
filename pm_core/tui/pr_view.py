@@ -720,8 +720,11 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.log_message(f"Auto-start: bad command: {e}")
         else:
             _auto_start.handle_command(app, _as_args)
-        if len(app.screen_stack) <= 1:
-            app.query_one("#tech-tree", TechTree).focus()
+        # Unconditional: focus() targets the tree's own (base) screen, so
+        # when ``autostart status`` pushed the runs popup this doesn't
+        # steal focus from it — it makes Esc return to the tree instead
+        # of the command bar the popup was opened from.
+        app.query_one("#tech-tree", TechTree).focus()
         return
 
     # Handle QA commands — route to qa_loop_ui instead of CLI.

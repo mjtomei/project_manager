@@ -342,6 +342,8 @@ class ProjectManagerApp(App):
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
+        self._log_hold_until: float = 0.0  # see log_message(hold=)
+        self._log_held: tuple | None = None  # latest message deferred by a hold
         # z modifier key state (vim-style prefix, supports z/zz)
         self._z_count: int = 0
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
@@ -798,20 +800,34 @@ class ProjectManagerApp(App):
         self._update_status_bar()
 
     def log_message(self, msg: str, capture: bool = True, sticky: float = 0,
-                    force: bool = False) -> None:
+                    force: bool = False, hold: float = 0) -> None:
         """Show a message in the log line.
 
         A non-sticky message is dropped while a sticky one is showing,
         unless *force* (used for confirmations the user must see, e.g. a
         CLI ``autostart remove``); forcing doesn't extend the sticky window.
+
+        *hold* keeps this message up for that many seconds against the
+        follow-on messages it triggers in the same frame (e.g. auto-start's
+        "starting <pr>" / "Review loop started" right after "targets +=").
+        Unforced messages arriving during a hold — sticky ones included —
+        are deferred, and the latest is shown when the hold ends.
         """
         import time as _time
         now = _time.monotonic()
-        suppressed = sticky <= 0 and now < self._log_sticky_until and not force
+        held = hold <= 0 and now < self._log_hold_until and not force
+        suppressed = held or (
+            sticky <= 0 and now < self._log_sticky_until and not force)
         # The log line holds one message and is overwritten (often within
         # the same tick), so also record every message in the command log
         # that ``L`` tails — otherwise status updates are lost unseen.
         _record_log_message(self, msg, suppressed)
+        if hold > 0:
+            self._log_hold_until = now + hold
+            self.set_timer(hold, self._flush_held_log_message)
+        elif held:
+            self._log_held = (msg, capture, sticky)
+            return
         if sticky > 0:
             self._log_sticky_until = now + sticky
         elif suppressed:
@@ -824,6 +840,16 @@ class ProjectManagerApp(App):
         if capture:
             truncated = msg[:60].replace("\n", " ")
             self.call_after_refresh(self._capture_frame, f"log_message:{truncated}")
+
+    def _flush_held_log_message(self) -> None:
+        """Show the latest message deferred by a ``log_message`` hold."""
+        import time as _time
+        if _time.monotonic() < self._log_hold_until:
+            return  # a newer hold is active; its own timer flushes
+        held, self._log_held = self._log_held, None
+        if held:
+            msg, capture, sticky = held
+            self.log_message(msg, capture=capture, sticky=sticky)
 
     def log_error(self, title: str, detail: str = "", timeout: float = 5) -> None:
         """Show a red error in the log line that auto-clears."""

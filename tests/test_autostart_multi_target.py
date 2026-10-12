@@ -937,7 +937,8 @@ class TestLogLineRecording:
     def _app(self, sticky_until=0.0):
         from types import SimpleNamespace
         from pm_core.tui.app import ProjectManagerApp
-        a = SimpleNamespace(_log_sticky_until=sticky_until)
+        a = SimpleNamespace(_log_sticky_until=sticky_until,
+                            _log_hold_until=0.0, _log_held=None)
         a.query_one = MagicMock(side_effect=Exception("no dom"))
         a.call_after_refresh = lambda *x, **k: None
         a._capture_frame = None

@@ -24,6 +24,7 @@ in-memory but preserved across the merge-restart breadcrumb.
 import json
 import secrets
 import sys
+import time
 from pathlib import Path
 
 from pm_core.paths import configure_logger, pm_home
@@ -37,6 +38,9 @@ _log = configure_logger("pm.tui.auto_start")
 _MERGE_RESTART_MARKER = "merge-restart"
 _BREADCRUMB_FILE = "autostart-resume.json"
 _REPLY_MAX_AGE = 600  # seconds
+# How long a "targets +=" / "ON (all …)" confirmation holds the log line
+# against the scheduler messages it triggers, so it stays readable.
+CONFIRM_HOLD_SECONDS = 3.0
 
 
 def is_enabled(app) -> bool:
@@ -488,8 +492,11 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     summary = ", ".join(
         f"{c['pr_id']}{' (stop)' if c['policy'] == POLICY_STOP else ''}"
         for c in changes)
+    # hold: check_and_start's "starting <pr>" / review-loop messages land
+    # in the same frame and would overwrite this before it ever paints.
     app.log_message(f"Auto-start: targets += {summary} "
-                    f"({len(targets)} total)", force=True)
+                    f"({len(targets)} total)", force=True,
+                    hold=CONFIRM_HOLD_SECONDS)
     app.run_worker(check_and_start(app))
     return {"ok": True, "changes": changes}
 
@@ -553,7 +560,7 @@ def enable_all(app) -> dict:
     app._auto_start_all = True
     _sync_enabled(app)
     app.log_message("Auto-start: ON (all ready PRs — explicit backlog mode)",
-                    force=True)
+                    force=True, hold=CONFIRM_HOLD_SECONDS)
     _log.info("auto_start: all-mode enabled")
     app.run_worker(check_and_start(app))
     return {"ok": True, "changes": [{"pr_id": None, "action": "all_mode"}]}
@@ -573,7 +580,8 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
         if is_enabled(app):
             clear_targets(app)
         else:
-            app.log_message("No PR selected (use 'autostart all' for the whole backlog)")
+            app.log_message("No PR selected (use 'autostart all' for the "
+                            "whole backlog)", force=True)
         return
     if selected_pr_id in _targets(app):
         remove_targets(app, [selected_pr_id])
@@ -710,7 +718,10 @@ async def check_and_start(app) -> None:
         launching.add(pr_id)
         if pr.get("status") == "pending":
             _log.info("auto_start: starting ready PR %s", pr_id)
-            app.log_message(f"Auto-start: starting {pr_id}", force=True)
+            # Forced past sticky messages, but not past the "targets +="
+            # confirmation's hold: then it's deferred until the hold ends.
+            held = time.monotonic() < getattr(app, "_log_hold_until", 0.0)
+            app.log_message(f"Auto-start: starting {pr_id}", force=not held)
         else:
             # ``pm pr start --background`` no-ops when the window exists.
             _log.info("auto_start: ensuring impl window for in_progress PR %s",
@@ -1092,7 +1103,7 @@ def _dispatch(app, verb: str, ids: list[str], policy: str | None,
             if verb == "status":
                 open_popup = True
             else:
-                app.log_message(_list_summary(app))
+                app.log_message(_list_summary(app), force=True)
     else:
         result = {"ok": False, "error": "usage",
                   "message": f"unknown verb {verb!r}; usage: {USAGE}",
