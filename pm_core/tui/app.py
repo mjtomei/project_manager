@@ -752,13 +752,19 @@ class ProjectManagerApp(App):
         """Update the status bar to reflect active filters."""
         self._update_status_bar()
 
-    def log_message(self, msg: str, capture: bool = True, sticky: float = 0) -> None:
-        """Show a message in the log line."""
+    def log_message(self, msg: str, capture: bool = True, sticky: float = 0,
+                    force: bool = False) -> None:
+        """Show a message in the log line.
+
+        A non-sticky message is dropped while a sticky one is showing,
+        unless *force* (used for confirmations the user must see, e.g. a
+        CLI ``autostart remove``); forcing doesn't extend the sticky window.
+        """
         import time as _time
         now = _time.monotonic()
         if sticky > 0:
             self._log_sticky_until = now + sticky
-        elif now < self._log_sticky_until:
+        elif now < self._log_sticky_until and not force:
             return  # a sticky message is still showing
         try:
             log = self.query_one("#log-line", LogLine)

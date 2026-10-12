@@ -483,7 +483,7 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         f"{c['pr_id']}{' (stop)' if c['policy'] == POLICY_STOP else ''}"
         for c in changes)
     app.log_message(f"Auto-start: targets += {summary} "
-                    f"({len(targets)} total)")
+                    f"({len(targets)} total)", force=True)
     app.run_worker(check_and_start(app))
     return {"ok": True, "changes": changes}
 
@@ -518,9 +518,11 @@ def remove_targets(app, ids: list[str]) -> dict:
     _sync_enabled(app)
     if removed:
         rest = f"{len(targets)} remaining" if targets else "auto-start OFF"
-        app.log_message(f"Auto-start: removed {', '.join(removed)} ({rest})")
+        app.log_message(f"Auto-start: removed {', '.join(removed)} ({rest})",
+                        force=True)
     else:
-        app.log_message(f"Auto-start: {', '.join(ids)} not a target")
+        app.log_message(f"Auto-start: {', '.join(ids)} not a target",
+                        force=True)
     return {"ok": True, "changes": changes}
 
 
@@ -533,7 +535,8 @@ def clear_targets(app) -> dict:
     else:
         app._auto_start_targets = {}
         app._auto_start_all = False
-    app.log_message("Auto-start: OFF" if was else "Auto-start: already off")
+    app.log_message("Auto-start: OFF" if was else "Auto-start: already off",
+                    force=True)
     _log.info("auto_start: cleared targets=%s", removed)
     return {"ok": True,
             "changes": [{"pr_id": r, "action": "removed"} for r in removed]}
@@ -543,7 +546,8 @@ def enable_all(app) -> dict:
     """Explicit whole-backlog mode (the legacy targetless auto-start)."""
     app._auto_start_all = True
     _sync_enabled(app)
-    app.log_message("Auto-start: ON (all ready PRs — explicit backlog mode)")
+    app.log_message("Auto-start: ON (all ready PRs — explicit backlog mode)",
+                    force=True)
     _log.info("auto_start: all-mode enabled")
     app.run_worker(check_and_start(app))
     return {"ok": True, "changes": [{"pr_id": None, "action": "all_mode"}]}
@@ -630,9 +634,9 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
         _log.info("auto_start: target %s %s, removed (%d remaining)",
                   t, status, len(targets))
         app.log_message(f"Auto-start: target {t} {status} — removed "
-                        f"({len(targets)} remaining)")
+                        f"({len(targets)} remaining)", force=True)
     if done and not targets and not is_all_mode(app):
-        app.log_message("Auto-start: all targets complete — OFF")
+        app.log_message("Auto-start: all targets complete — OFF", force=True)
         _disable(app)
     elif done:
         _sync_enabled(app)  # refresh ◎ markers / AUTO ×N and watcher scope
@@ -699,7 +703,7 @@ async def check_and_start(app) -> None:
         launching.add(pr_id)
         if pr.get("status") == "pending":
             _log.info("auto_start: starting ready PR %s", pr_id)
-            app.log_message(f"Auto-start: starting {pr_id}")
+            app.log_message(f"Auto-start: starting {pr_id}", force=True)
         else:
             # ``pm pr start --background`` no-ops when the window exists.
             _log.info("auto_start: ensuring impl window for in_progress PR %s",
@@ -1024,7 +1028,7 @@ def handle_command(app, args: list[str]) -> dict:
                   "message": f"auto-start command failed: {e}", "changes": []}
 
     if not result.get("ok"):
-        app.log_message(f"Auto-start: {result.get('message')}")
+        app.log_message(f"Auto-start: {result.get('message')}", force=True)
     _log.info("auto_start: command %r → ok=%s error=%s", args,
               result.get("ok"), result.get("error"))
 
