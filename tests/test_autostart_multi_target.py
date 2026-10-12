@@ -577,6 +577,24 @@ class TestBuildStatus:
                     if r["pr_id"] == "d" and r["kind"] == "dep"]
         assert len(dep_rows) == 1 and dep_rows[0]["also"] == []
 
+    def test_review_pass_under_skip_qa_does_not_promise_qa(self):
+        """skip_qa: after review PASS no QA runs, so the reason must point
+        at sign-off, not "QA transition pending" (spec R10)."""
+        rl = {"p": {"iteration": 1, "verdict": "PASS", "running": False,
+                    "input_required": False}}
+        prs = [_pr("p", status="in_review")]
+        s = _status(prs, ["p"], review_loops=rl, skip_qa=True,
+                    stop_before_merge={"p"})
+        reason = _run(s, "p")["reason"]
+        assert "QA" not in reason.replace("QA skipped", "")
+        assert "QA skipped" in reason and "awaiting sign-off" in reason
+        s = _status(prs, ["p"], review_loops=rl, skip_qa=True,
+                    signoff={"p": {"verdict": "SIGNOFF_MERGE", "fresh": True}},
+                    stop_before_merge={"p"})
+        assert "press g" in _run(s, "p")["reason"]
+        s = _status(prs, ["p"], review_loops=rl)
+        assert _run(s, "p")["reason"] == "review passed; QA transition pending"
+
     def test_in_progress_without_window_is_paused(self):
         s = _status([_pr("a", status="in_progress")], ["a"])
         r = _run(s, "a")

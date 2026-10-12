@@ -1831,10 +1831,14 @@ class TestSpecGateRunningFlag:
     """The spec gate early-return must set state.running = False so that
     the QA loop UI's _on_qa_complete callback fires."""
 
-    def test_spec_gate_sets_running_false(self, tmp_path):
+    def test_spec_gate_sets_running_false(self, tmp_path, monkeypatch):
         """run_qa_sync must set state.running=False when spec gate fires."""
         from pm_core.qa_loop import run_qa_sync, QALoopState
         from pm_core import store
+
+        # The QA workdir lives under ~/.pm/workdirs/qa — keep it out of the
+        # real home (it leaked pr-specgate-* dirs into live QA sessions).
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
         pr_id = "pr-specgate"
         pm_dir = tmp_path / "pm"

@@ -193,6 +193,17 @@ def _signed_off_reason(pr_id: str, stop: set) -> str:
             "sign-off — press g")
 
 
+def _awaiting_signoff_reason(pr_id: str, inp: dict, stop: set,
+                             passed: str) -> str:
+    """Reason for a PR whose last gate (*passed*) is done and that now
+    needs sign-off before it can merge."""
+    signoff = (inp.get("signoff") or {}).get(pr_id) or {}
+    if signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE":
+        return _signed_off_reason(pr_id, stop)
+    return (f"{passed}; awaiting sign-off (press i — automatic "
+            "sign-off hand-off not yet implemented)")
+
+
 def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
     """Return ``(phase, state, reason)`` for one PR from live evidence."""
     pr_id = pr["id"]
@@ -268,6 +279,10 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
                     reason += f" (last {last})"
                 return phase, "running", reason
             if last in _REVIEW_PASS:
+                if inp.get("skip_qa"):
+                    # No QA will run: the next step is sign-off/merge.
+                    return (phase, "waiting", _awaiting_signoff_reason(
+                        pr_id, inp, stop, "review passed; QA skipped (skip_qa)"))
                 return phase, "waiting", "review passed; QA transition pending"
             if last in ("KILLED", "ERROR"):
                 return phase, "failed", f"review loop ended {last}"
@@ -295,12 +310,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
                             "press t / z t to re-run QA")
                 return phase, "waiting", "QA INPUT_REQUIRED — answer in QA window"
             if verdict == "PASS":
-                signoff = (inp.get("signoff") or {}).get(pr_id) or {}
-                if signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE":
-                    return phase, "waiting", _signed_off_reason(pr_id, stop)
                 return (phase, "waiting",
-                        "QA passed; awaiting sign-off (press i — automatic "
-                        "sign-off hand-off not yet implemented)")
+                        _awaiting_signoff_reason(pr_id, inp, stop, "QA passed"))
             if verdict == "NEEDS_WORK":
                 return phase, "waiting", "QA NEEDS_WORK; returning to review"
             if verdict:
