@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8e693f6
+  active_pr: pr-e308f3f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -24786,11 +24786,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:27:53.724681+00:00'
-  updated_at: '2026-05-26T00:27:53.724681+00:00'
+  updated_at: '2026-10-12T16:51:54.859744+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-32709a2
+    text: 'pr-71e9ec7 QA s4: concurrent `pm pr review --fresh A & --fresh A & --fresh
+      B` left two review-A windows (@8,@9) AND the pane registry ended with @8 listing
+      %10 twice, no entry for @9, and stale entries for killed windows @6/@7 — the
+      find/kill/create race also corrupts registry bookkeeping.'
+    created_at: '2026-10-12T16:51:54Z'
+    last_edited: '2026-10-12T16:51:54Z'
 - id: pr-7ab0a99
   plan: bugs
   title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
@@ -24934,11 +24941,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:28:00.384462+00:00'
-  updated_at: '2026-05-26T00:28:00.384462+00:00'
+  updated_at: '2026-10-12T16:52:02.395158+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-cf84a58
+    text: 'QA s4 (concurrent review launches): PASS on less-absent host — all diff
+      panes (2 concurrent + 3 concurrent --fresh) showed own header/diffstat/marker,
+      live shell, no less errors. Fake-claude PASS review panes exit immediately (no
+      session_id in manual review) so windows end with 1 pane; a resize after that
+      exit lets readline overwrite the last diff line (filed pr-e308f3f). Duplicate
+      review-A survived as known race pr-3f85ad7.'
+    created_at: '2026-10-12T16:52:02Z'
+    last_edited: '2026-10-12T16:52:02Z'
 - id: pr-3ca6b36
   plan: plan-regression
   title: 'Regression test: CLI/command-bar help completeness, flag consistency, and
@@ -25470,6 +25486,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-07-18T19:28:54.184220+00:00'
   updated_at: '2026-07-18T19:28:54.184220+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e308f3f
+  plan: bugs
+  title: 'Bug: review diff pane loses its last diff line when the pane is resized
+    (cat fallback)'
+  branch: pm/pr-e308f3f-bug-review-diff-pane-loses-its-last-diff-line-when
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py _launch_review_window diff_cmd: when less is absent
+    the diff is cat-ed onto the primary screen and the pane exec''s a shell whose
+    prompt (long workdir path) wraps to 2 rows in the half-width diff pane. When the
+    window later resizes wider (e.g. the right-hand Claude pane exits, or a wider
+    client attaches), tmux reflows the prompt to 1 row but readline''s SIGWINCH redraw
+    moves up by the old row count and overwrites the last diff line (the final +line
+    of the diff). Repro (pr-71e9ec7 QA scenario 4, less-absent host, fake-claude review
+    verdict PASS so the Claude pane exits): pm pr review <id>; capture the left pane:
+    "@@ -0,0 +1 @@" is followed directly by the prompt, the "+ALPHA_MARKER" line is
+    gone; recording.cast shows it was printed at t=25.0s and overwritten at t=25.15s
+    by ESC[17;1H<prompt>. Possible fixes: emit a trailing footer/blank line(s) after
+    the diff, or keep a fixed short PS1 in the diff shell.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T16:51:54.185658+00:00'
+  updated_at: '2026-10-12T16:51:54.185658+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
