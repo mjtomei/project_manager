@@ -705,6 +705,17 @@ class TestCLI:
         assert json.loads(res.output)["error"] == "unknown_pr"
         trig.assert_not_called()
 
+    def test_no_project_is_json_error(self, project, monkeypatch):
+        """Outside a project, --json must still emit JSON (exit 1)."""
+        def missing():
+            raise FileNotFoundError("No project.yaml found")
+        monkeypatch.setattr("pm_core.cli.autostart.state_root", missing)
+        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+            res = _cli(["remove", "pr-a", "--json", "-s", "pm-x"])
+        assert res.exit_code == 1
+        assert json.loads(res.output)["error"] == "no_project"
+        trig.assert_not_called()
+
     def test_merged_rejected(self, project):
         with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
             res = _cli(["add", "pr-m", "-s", "pm-x"])

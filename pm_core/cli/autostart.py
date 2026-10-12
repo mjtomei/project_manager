@@ -87,7 +87,11 @@ def _validate(ids: tuple[str, ...], *, for_add: bool) -> list[str]:
     merged/closed) PRs before anything is sent to the owner."""
     if not ids:
         raise _Fail(EXIT_INVALID, "usage", "no PR ids given")
-    data = store.load(state_root())
+    try:
+        data = store.load(state_root())
+    except FileNotFoundError as e:
+        # Keep the --json contract: report it like any other invalid input.
+        raise _Fail(EXIT_INVALID, "no_project", str(e))
     resolved, unknown, terminal = [], [], []
     for raw in ids:
         pr = _resolve_pr_id(data, raw)

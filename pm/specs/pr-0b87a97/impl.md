@@ -299,6 +299,10 @@ captures under `impl/post-fix/`):
     `Text`, not markup — an exception message containing `[...]` raised
     `MarkupError` and took the popup down instead of showing the error.
 
+12. *(review 15ef i3)* `pm autostart add|remove --json` run outside a pm
+    project reports `{"ok": false, "error": "no_project"}` (exit 1) instead
+    of a plain-text error, keeping the machine-readable contract.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i
