@@ -23,6 +23,11 @@ class CommandBar(Input):
     FOCUSED_PLACEHOLDER = "Type command (e.g. pr start pr-001)..."
 
     def __init__(self, **kwargs):
+        # Focus comes back to the bar programmatically (e.g. after a queued
+        # ``pm autostart`` command refocuses the tree mid-typing); Input's
+        # default select-on-focus would then select the half-typed command
+        # so the next keystroke replaces it.
+        kwargs.setdefault("select_on_focus", False)
         super().__init__(placeholder=self.UNFOCUSED_PLACEHOLDER, **kwargs)
 
     def on_focus(self) -> None:

@@ -96,3 +96,26 @@ def test_cli_command_from_queue_keeps_command_bar_focus(tmp_path):
 def test_cli_command_from_queue_leaves_tree_focus(tmp_path):
     from pm_core.tui.tech_tree import TechTree
     assert isinstance(_drain_while(tmp_path, typing=False), TechTree)
+
+
+def test_cli_command_from_queue_keeps_half_typed_text(tmp_path):
+    """QA repro (pr-0b87a97 s12): the refocus after a queued ``pm autostart
+    status`` went through Input's select-on-focus, selecting the whole
+    half-typed command, so the next keystroke replaced it and the bar
+    submitted only the suffix ("No such command '33987'")."""
+    async def body():
+        app, queue = _queue_host(tmp_path)
+        async with app.run_test(size=(80, 20)) as pilot:
+            from pm_core.tui.command_bar import CommandBar
+            cmd_bar = app.query_one("#command-bar", CommandBar)
+            cmd_bar.focus()
+            await pilot.pause()
+            await pilot.press(*"add pr-75")
+            queue.write_text("autostart status --reply r1\n")
+            with patch("pm_core.tui.auto_start.handle_command"):
+                app._drain_command_queue()
+            await pilot.pause()
+            await pilot.press(*"33")
+            await pilot.pause()
+            return cmd_bar.value
+    assert asyncio.run(body()) == "add pr-7533"
