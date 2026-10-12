@@ -244,6 +244,16 @@ def test_diff_pane_falls_back_to_cat_without_less(fake_tmux, diff_repo, tmp_path
     assert "+REVIEW_DIFF_MARKER" in result.stdout
 
 
+def test_diff_pane_cat_fallback_pads_before_prompt(fake_tmux, diff_repo, tmp_path):
+    """The cat fallback ends with blank rows so a wrapped shell prompt's
+    resize redraw (which moves up by its old row count) overwrites padding
+    rather than the last diff line."""
+    path = _path_without_less(tmp_path / "bin")
+    result = _run_diff_pane(fake_tmux, diff_repo, path)
+
+    assert result.stdout.endswith("+REVIEW_DIFF_MARKER\n\n\n"), result.stdout
+
+
 def test_diff_pane_still_uses_less_when_present(fake_tmux, diff_repo, tmp_path):
     """When ``less`` is available it is still the pager, invoked with -R."""
     path = _path_without_less(tmp_path / "bin", fake_less=True)

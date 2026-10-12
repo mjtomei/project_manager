@@ -1230,6 +1230,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # isn't on PATH (minimal hosts/containers) — a bare `| less -R`
         # swallows all the output and leaves a blank pane.  The check runs
         # in the pane's shell, not here, so it tests where the pane runs.
+        # The cat branch leaves the diff on the primary screen directly
+        # above the shell prompt.  A long prompt wraps in the half-width
+        # pane; when the pane later widens (Claude pane exits, wider
+        # client attaches) tmux reflows it to fewer rows but readline's
+        # SIGWINCH redraw still moves up by the old row count, overwriting
+        # the last diff line.  Two blank rows after the diff absorb that.
         shell = os.environ.get("SHELL", "/bin/bash")
         header = f"=== Review: {display_id} — {title} ==="
         # Use backend-appropriate diff base:
@@ -1257,7 +1263,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             f" && echo '--- Full diff ---'"
             f" && git --no-pager diff {diff_ref}...HEAD"
             f"; }} | if command -v less >/dev/null 2>&1;"
-            f" then less -R; else cat; fi"
+            f" then less -R; else cat; echo; echo; fi"
             f"; exec {shell}"
         )
 
