@@ -8,8 +8,11 @@ from pm_core.tui._shell import _run_shell
 
 _log = configure_logger("pm.tui")
 
-# Queued external commands older than this when a TUI starts were left by
-# one that died, not sent during a restart — drop rather than replay them.
+# Queued external commands last written this long before the TUI process
+# started were left by one that died, not sent during a restart — drop
+# rather than replay them.  Measured from process start, not drain time:
+# the startup drain waits for the breadcrumb scheduler pass, which can take
+# a while with several targets.
 _STARTUP_QUEUE_MAX_AGE = 60
 
 from textual.app import App, ComposeResult
@@ -338,6 +341,8 @@ class ProjectManagerApp(App):
         # External commands (SIGUSR2 queue) wait until startup has
         # restored breadcrumb state — see _drain_command_queue.
         self._cmd_queue_ready = False
+        import time as _time
+        self._started_wall: float = _time.time()
         self._is_portrait: bool = False
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
@@ -1225,7 +1230,8 @@ class ProjectManagerApp(App):
         import fcntl
         import time as _time
         try:
-            stale = (startup and _time.time() - queue.stat().st_mtime
+            started = getattr(self, "_started_wall", None) or _time.time()
+            stale = (startup and started - queue.stat().st_mtime
                      > _STARTUP_QUEUE_MAX_AGE)
         except OSError:
             stale = False

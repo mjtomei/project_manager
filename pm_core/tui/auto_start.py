@@ -355,10 +355,6 @@ def _finalize_all_transcripts(app) -> None:
             finalize_transcript(p)
 
 
-# Back-compat alias — the implementation lives in pm_core.autostart_state.
-_transitive_deps = autostart_state.transitive_deps
-
-
 def _disable(app) -> None:
     """Disable auto-start mode (in-memory only) and drop all targets."""
     _finalize_all_transcripts(app)

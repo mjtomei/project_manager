@@ -50,13 +50,13 @@ class TestKillPrWindows:
 
 
 # ---------------------------------------------------------------------------
-# auto_start._transitive_deps
+# autostart_state.transitive_deps
 # ---------------------------------------------------------------------------
 
 class TestTransitiveDeps:
     def test_linear_chain(self):
         """Finds all transitive deps in a linear chain."""
-        from pm_core.tui.auto_start import _transitive_deps
+        from pm_core.autostart_state import transitive_deps as _transitive_deps
         prs = [
             {"id": "a", "depends_on": []},
             {"id": "b", "depends_on": ["a"]},
@@ -67,7 +67,7 @@ class TestTransitiveDeps:
 
     def test_diamond_deps(self):
         """Handles diamond-shaped dependency graphs."""
-        from pm_core.tui.auto_start import _transitive_deps
+        from pm_core.autostart_state import transitive_deps as _transitive_deps
         prs = [
             {"id": "a", "depends_on": []},
             {"id": "b", "depends_on": ["a"]},
@@ -79,7 +79,7 @@ class TestTransitiveDeps:
 
     def test_no_deps(self):
         """PR with no deps returns empty set."""
-        from pm_core.tui.auto_start import _transitive_deps
+        from pm_core.autostart_state import transitive_deps as _transitive_deps
         prs = [
             {"id": "a", "depends_on": []},
         ]
@@ -88,7 +88,7 @@ class TestTransitiveDeps:
 
     def test_missing_pr(self):
         """Missing PR ID in the list is handled gracefully."""
-        from pm_core.tui.auto_start import _transitive_deps
+        from pm_core.autostart_state import transitive_deps as _transitive_deps
         prs = [
             {"id": "a", "depends_on": ["nonexistent"]},
         ]
@@ -97,7 +97,7 @@ class TestTransitiveDeps:
 
     def test_does_not_include_target(self):
         """Target itself is not in the returned set."""
-        from pm_core.tui.auto_start import _transitive_deps
+        from pm_core.autostart_state import transitive_deps as _transitive_deps
         prs = [
             {"id": "a", "depends_on": []},
             {"id": "b", "depends_on": ["a"]},

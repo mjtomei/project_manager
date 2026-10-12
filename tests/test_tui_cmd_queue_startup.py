@@ -56,6 +56,22 @@ def test_startup_drain_discards_stale_queue(tmp_path):
     assert queue.read_text() == ""
 
 
+def test_startup_drain_keeps_commands_sent_during_slow_startup(tmp_path):
+    """Staleness is judged against process start: a command sent during the
+    restart is still dispatched when the breadcrumb pass delayed the
+    startup drain past the max age."""
+    app, queue = _app(tmp_path)
+    queue.write_text("autostart add pr-z --reply r1\n")
+    sent = time.time() - _STARTUP_QUEUE_MAX_AGE - 30
+    os.utime(queue, (sent, sent))
+    app._started_wall = sent - 1  # TUI started just before the send
+    app._cmd_queue_ready = True
+    with patch("pm_core.tui.pr_view.handle_command_submitted") as handle:
+        app._drain_command_queue(startup=True)
+    assert [c.args[1] for c in handle.call_args_list] == [
+        "autostart add pr-z --reply r1"]
+
+
 def test_restart_app_ignores_ipc_signals_across_exec():
     """A SIGUSR2 landing between execvp and the new TUI's handler install
     must not kill the TUI (default action is terminate)."""

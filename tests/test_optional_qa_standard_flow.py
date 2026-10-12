@@ -92,7 +92,6 @@ class TestMaybeStartQaWithAutoStart:
                                      auto_start_target="pr-001")
 
         with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
-             patch("pm_core.tui.auto_start._transitive_deps", return_value=set()), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             from pm_core.tui.review_loop_ui import _maybe_start_qa
             _maybe_start_qa(app, "pr-001")

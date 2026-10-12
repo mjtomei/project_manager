@@ -57,14 +57,10 @@ def test_second_O_keeps_first_pr_advancing(tmp_path):
         asyncio.run(auto_start.auto_sequence_for_pr(app, "pr-a"))
         asyncio.run(auto_start.auto_sequence_for_pr(app, "pr-b"))
 
-    reviewed = []
+    cmds = []
 
     def fake_run_command(_app, cmd, **kw):
-        # Status-only transition: the review loop opens iteration 1's
-        # window itself, so a windowed `pr review` here would be a
-        # throwaway Claude session.
-        assert "--no-window" in cmd.split()
-        reviewed.append(cmd.split()[-1])
+        cmds.append(cmd.split())
 
     # Both implementations go idle on the same poll tick.
     with patch("pm_core.tui.pr_view.run_command", fake_run_command), \
@@ -74,5 +70,10 @@ def test_second_O_keeps_first_pr_advancing(tmp_path):
         review_loop_ui._auto_review_idle_prs(
             app, [("pr-a", prs[0]), ("pr-b", prs[1])])
 
-    assert reviewed == ["pr-a", "pr-b"]
+    # The retarget bug: pre-fix, only pr-b (the latest O) was in scope.
+    assert [c[-1] for c in cmds] == ["pr-a", "pr-b"]
+    # Status-only transition (separate fix): the review loop opens
+    # iteration 1's window itself, so a windowed `pr review` here would be
+    # a throwaway Claude session.
+    assert all("--no-window" in c for c in cmds)
     assert app._stop_before_merge == {"pr-a", "pr-b"}
