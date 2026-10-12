@@ -486,7 +486,8 @@ def run_fake_claude(
             :func:`_hold_open`.  ``None`` (default) stays open until the pane
             closes; a number stays open that many seconds then exits.
             Applies to no-verdict sessions always, and to verdict sessions
-            whenever *session_id* is set (so the poller has a live pane).
+            whenever *session_id* is set (so the poller has a live pane) or
+            stdin is a terminal (a manual review pane).
         session_id: Claude session id.  When set, the fake also writes a
             Claude-format JSONL transcript and emits the ``idle_prompt`` hook
             event — the inputs production verdict detection actually reads —
