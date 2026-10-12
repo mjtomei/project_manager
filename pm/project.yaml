@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2ea2797
+  active_pr: pr-5704ff0
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -24951,7 +24951,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:28:00.384462+00:00'
-  updated_at: '2026-10-12T17:00:07.867599+00:00'
+  updated_at: '2026-10-12T17:23:18.110601+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25031,6 +25031,26 @@ prs:
       (fails on unmodified HEAD too).'
     created_at: '2026-10-12T16:29:29Z'
     last_edited: '2026-10-12T16:29:29Z'
+  - id: note-4c1874d
+    text: 'QA s6 refine (run 2): the "2x --fresh" story runs --fresh on PR A and PR
+      B at the same moment, so it tests one window per PR with distinct names. Concurrent
+      --fresh of the SAME PR can still leave duplicate review-<id> windows: _launch_review_window
+      has no launch flock on this branch, the known race pr-3f85ad7, which is out
+      of scope here. Plain --fresh (not review-loop) only switches the invoking session;
+      sessions_on_window is collected only when review_loop is set, so a separate
+      watching session does NOT follow. Do not assert "watcher follows" for manual
+      --fresh.'
+    created_at: '2026-10-12T17:16:36Z'
+    last_edited: '2026-10-12T17:16:36Z'
+  - id: note-733477b
+    text: 'QA s6 (concurrent review launches, run 2): PASS on less-absent host. 2
+      concurrent pm pr review + 2 concurrent --fresh (A and B) each gave exactly one
+      review window per PR, 2 live panes (claude left 0, diff bash), isolated diff
+      via cat + blank rows + live prompt, markers survive resize -x 220, registry
+      entries match. pm pr show does not exist; take workdirs from pm pr start output.
+      Captures: /pm-captures/scenarios/6.'
+    created_at: '2026-10-12T17:23:18Z'
+    last_edited: '2026-10-12T17:23:18Z'
 - id: pr-3ca6b36
   plan: plan-regression
   title: 'Regression test: CLI/command-bar help completeness, flag consistency, and
@@ -25621,6 +25641,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T16:33:57.919208+00:00'
   updated_at: '2026-10-12T16:33:57.919208+00:00'
+- id: pr-5704ff0
+  plan: bugs
+  title: 'Bug: review loop fails "Not in a pm tmux session" when TUI pane resolves
+    to a non-pm-prefixed grouped session'
+  branch: pm/pr-5704ff0-bug-review-loop-fails-not-in-a-pm-tmux-session-whe
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/helpers.py _get_current_pm_session -> tmux.get_session_name()
+    runs display-message -t $TMUX_PANE #{session_name}; when the user has attached
+    a grouped viewer session not named pm-* (e.g. `tmux new-session -d -t pm-<tag>
+    -s viewer`), tmux reports that session for the shared TUI pane, so the name check
+    fails and loop_shared.get_pm_session returns None. Repro (pr-71e9ec7 QA s5): create
+    a grouped session named qa-view on the pm session, then press z z d in the TUI
+    -> review loop immediately ends "! ERROR (1 iteration)", debug log: RuntimeError:
+    Not in a pm tmux session (review_loop.py _run_claude_review). Renaming the grouped
+    session to pm-<tag>~9 fixes it. Fix idea: resolve the base pm session via #{session_group}
+    or list sessions containing the pane and pick the pm- one, or fall back to _get_session_name_for_cwd
+    as cli/helpers._get_pm_session does.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T17:25:41.895887+00:00'
+  updated_at: '2026-10-12T17:25:41.895887+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
