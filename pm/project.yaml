@@ -25264,7 +25264,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T01:44:38.301246+00:00'
-  updated_at: '2026-10-12T21:55:29.002660+00:00'
+  updated_at: '2026-10-12T23:40:05.606722+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25279,6 +25279,19 @@ prs:
       the pass, so ordering holds.'
     created_at: '2026-10-12T21:55:28Z'
     last_edited: '2026-10-12T21:55:28Z'
+  - id: note-257dea4
+    text: 'Specific mechanism found in pr-0b87a97 QA S15 (2026-10-12, debug log evidence
+      in that PR''s captures scenarios/15/evidence/debug-slice-char-c2.log): while
+      / is pending (command bar not focused yet, slow TUI startup), keys go to the
+      focused tech tree first; TechTree.on_key handles h/j/k/l/arrows (tech_tree.py
+      ~L1276) and stops them, so they never reach App.on_key''s _command_buffer. Repro:
+      pm tui restart, the moment the tree paints send ''/'' + ''autostart li'' via
+      tmux send-keys -l -> ''CommandBar: replaying buffered input: autostart i'' and
+      ''PR selected: <next PR>'' logged between focus_command and got-focus (l moved
+      selection, then was lost). Pre-existing (command_bar/app buffering identical
+      to master). Fix idea: in TechTree.on_key return early when app._command_pending.'
+    created_at: '2026-10-12T23:40:05Z'
+    last_edited: '2026-10-12T23:40:05Z'
 - id: pr-5f729ab
   plan: tui-ux
   title: Generalize launch responsiveness / progress feedback to all session launches
@@ -25918,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T23:36:12.489887+00:00'
+  updated_at: '2026-10-12T23:40:06.336689+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26149,6 +26162,18 @@ prs:
       or later.'
     created_at: '2026-10-12T23:36:12Z'
     last_edited: '2026-10-12T23:36:12Z'
+  - id: note-069f26f
+    text: 'QA S15 (round 3, restart adoption/CLI mid-restart/crumb): triples 1,2,4
+      PASS on a28609a2; 5,6 PASS on 3cc8ebd7. Triple 3 FAILED on a28609a2: after the
+      breadcrumb-restart startup drain refocused the command bar, ''autostart li''
+      was select-all''d and typing ''st'' submitted ''st'' (debug-slice-t3b.log) -
+      same select_on_focus root cause S12 fixed in b9b337d4; independently re-checked
+      on 3cc8ebd7: bar kept ''autostart li'', ''st''+Enter submitted ''autostart list''
+      incl. Z2. Separate pre-existing / -pending issue (tree eats h/j/k/l before App
+      buffering; lost ''l'' + selection move) noted on pr-6412997, not this PR. Recording
+      gotcha: scripts launched via timeout need #!/bin/bash (EPOCHREALTIME).'
+    created_at: '2026-10-12T23:40:06Z'
+    last_edited: '2026-10-12T23:40:06Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
