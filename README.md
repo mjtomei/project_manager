@@ -232,6 +232,25 @@ From the TUI:
 The loop runs in the background without stealing focus from your active window,
 so you can continue working while reviews iterate.
 
+## Auto-start targets
+
+Auto-start drives an explicit set of target PRs through implementation →
+review → QA inside the running TUI, starting each target's dependencies as they
+become ready (a dependency shared by several targets runs once). Targets are
+additive: pressing `O` (stop before merge) or `A` (auto-merge) on another PR
+adds it without dropping the others. An empty set means auto-start is off.
+
+```bash
+pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)
+pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
+pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
+pm autostart status --json             # what every target and dependency is doing
+```
+
+Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
+phase, running/waiting/paused/failed state with a reason, review iteration or QA
+progress, and Enter to jump to the run's tmux window.
+
 ## Shared sessions
 
 By default, `pm session` creates a private tmux session. To let other users

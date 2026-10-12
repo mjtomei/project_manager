@@ -583,6 +583,31 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
     app.log_message(f"Auto-sequence armed for {pr_id} (will stop before merge)")
 
 
+def on_state_loaded(app, old_statuses: dict) -> None:
+    """Kick a scheduler pass when a reload shows an in-scope PR newly
+    merged/closed (manual ``g``, CLI merge, another session).
+
+    The auto-merge path and sync already call ``check_and_start``; a merge
+    seen only through a state reload would otherwise leave a completed
+    target in the set and its dependents unstarted until some other event.
+    """
+    if not old_statuses or not is_enabled(app):
+        return
+    prs = (app._data or {}).get("prs") or []
+    terminal = autostart_state.TERMINAL_STATUSES
+    newly = [p["id"] for p in prs
+             if p.get("id") in old_statuses
+             and p.get("status") in terminal
+             and old_statuses.get(p["id"]) not in terminal]
+    if not newly:
+        return
+    managed = managed_ids(app, prs)
+    if managed is not None and not any(i in managed for i in newly):
+        return
+    _log.info("auto_start: reload saw %s merged/closed, scheduling pass", newly)
+    app.run_worker(check_and_start(app))
+
+
 def _prune_completed_targets(app, prs: list[dict]) -> None:
     """Remove targets whose PR merged/closed/vanished; leave the rest."""
     targets = _targets(app)
@@ -604,6 +629,8 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
     if done and not targets and not is_all_mode(app):
         app.log_message("Auto-start: all targets complete — OFF")
         _disable(app)
+    elif done:
+        _sync_enabled(app)  # refresh ◎ markers / AUTO ×N and watcher scope
 
 
 async def check_and_start(app) -> None:

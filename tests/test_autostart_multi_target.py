@@ -769,3 +769,24 @@ def test_finished_qa_not_relaunched_by_scheduler(tmp_path, recorded, relaunch):
          patch("pm_core.tui.qa_loop_ui.start_qa") as sq:
         auto_start._auto_start_qa_loops(app)
     assert sq.called is relaunch
+
+
+class TestReloadTrigger:
+    def test_manual_merge_seen_on_reload_kicks_scheduler(self, tmp_path):
+        prs = [_pr("d", status="merged"), _pr("a", deps=["d"]), _pr("b")]
+        app = _enabled_app(prs, ["a", "b"], tmp_path)
+        auto_start.on_state_loaded(app, {"d": "qa", "a": "pending", "b": "pending"})
+        assert len(app.workers) == 1
+
+    def test_out_of_scope_merge_ignored(self, tmp_path):
+        prs = [_pr("x", status="merged"), _pr("a")]
+        app = _enabled_app(prs, ["a"], tmp_path)
+        auto_start.on_state_loaded(app, {"x": "qa", "a": "pending"})
+        assert app.workers == []
+
+    def test_no_change_or_first_load_ignored(self, tmp_path):
+        prs = [_pr("a", status="merged")]
+        app = _enabled_app(prs, ["a"], tmp_path)
+        auto_start.on_state_loaded(app, {"a": "merged"})
+        auto_start.on_state_loaded(app, {})
+        assert app.workers == []
