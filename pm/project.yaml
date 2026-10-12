@@ -25918,7 +25918,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T22:51:26.347630+00:00'
+  updated_at: '2026-10-12T22:51:34.532439+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26018,6 +26018,31 @@ prs:
       after Y QA scenario ran (T2 bounced QA->review).'
     created_at: '2026-10-12T22:51:26Z'
     last_edited: '2026-10-12T22:51:26Z'
+  - id: note-e31b6cc
+    text: 'QA S10 round 2 stale-queue recipe: the CLI refuses a dead pidfile (os.kill
+      0) so a stale queue can only be left by a live-but-unresponsive TUI: hold it
+      with `while :; do kill -STOP $P; done`, run `pm autostart add Q --timeout 2`
+      (exit 2 owner_timeout; line stays in ~/.pm/tui-<sess>.cmd-queue), kill the loop
+      then `kill -9 $P` (no on_unmount, so the queue survives), wait >=65s, rerun
+      `pm session` from the test dir (prints "TUI pane missing — respawning...").
+      Expect Q absent + debug log "discarding stale queued commands". Only user CLI/picker
+      writes the queue, so in-flight panes do not refresh its mtime. Per-PR fake impl
+      delay: the fake cursor is global per session type, so set `"impl":{"delay":900}`
+      via config set just before adding C so only D (and later impls) stay busy.'
+    created_at: '2026-10-12T22:35:43Z'
+    last_edited: '2026-10-12T22:35:43Z'
+  - id: note-a4c09bd
+    text: 'QA S10 round 2 (rev bddbac33): PASS on all 5 triples — breadcrumb restart
+      identical windows/targets, B review adopted, A QA resumed w/o planner; parallel
+      status+add during restart rc=0, 7 tries=7 single adds, 0.3s hit deferred path,
+      296 SIGUSR2 across exec survived; stale Q queue discarded after kill -9 + 68s;
+      Ctrl+R & pm tui restart close popup + clean restart; master legacy {target:X}
+      crumb migrated (source legacy-breadcrumb). Filed pr-3951487 (respawned TUI window
+      named python3) and pr-97614ed (finished review summary lost after breadcrumb
+      restart; pre-existing). Clone pull --rebase had dropped 237179d7..bddbac33;
+      recovered via ff-only to origin before snapshots.'
+    created_at: '2026-10-12T22:51:34Z'
+    last_edited: '2026-10-12T22:51:34Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26145,6 +26170,47 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T22:51:25.629473+00:00'
   updated_at: '2026-10-12T22:51:25.629473+00:00'
+- id: pr-3951487
+  plan: bugs
+  title: 'Bug: respawned TUI window is named python3 instead of main after the TUI
+    pane dies'
+  branch: pm/pr-3951487-bug-respawned-tui-window-is-named-python3-instead-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/session.py ~L320 (TUI pane missing — respawning). Repro:
+    in a pm session kill -9 the TUI pid so the main window closes (no remain-on-exit),
+    then rerun `pm session` from the project dir: it prints "TUI pane missing — respawning..."
+    and the new TUI pane lands in a new window whose name is "python3" (window @17
+    in pr-0b87a97 QA S10), not "main". Later find_window_by_name(session, "main")
+    fallbacks and humans looking for main then miss it. Expected: respawned window
+    named main.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T22:50:28.195013+00:00'
+  updated_at: '2026-10-12T22:50:28.195013+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-97614ed
+  plan: bugs
+  title: 'Bug: finished review loop summary (⟳N✓ badge, runs popup/status review block)
+    lost after a breadcrumb TUI restart'
+  branch: pm/pr-97614ed-bug-finished-review-loop-summary-n-badge-runs-popu
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/auto_start.py save_breadcrumb persists only running review
+    loops (same on master). Repro (pr-0b87a97 QA S10): PR A reviewed NEEDS_WORK→PASS,
+    now in QA; `pm tui restart --breadcrumb`. Before: tree shows "● qa ⟳2✓", `pm autostart
+    status --json` runs[A].review={iteration:2,verdict:PASS}. After: tree shows "●
+    qa ◐" and runs[A].review is null. Cosmetic/info loss only; QA continues. Expected:
+    finished loop summary (iteration, latest verdict) survives the restart.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T22:50:28.881141+00:00'
+  updated_at: '2026-10-12T22:50:28.881141+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
