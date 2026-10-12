@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-a04e06c
+  active_pr: pr-b977417
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25908,7 +25908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T21:34:52.695418+00:00'
+  updated_at: '2026-10-12T21:35:43.566756+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -25961,6 +25961,18 @@ prs:
       of "merge blocked by sign-off gate" (pending-merge set not persisted).'
     created_at: '2026-10-12T21:34:52Z'
     last_edited: '2026-10-12T21:34:52Z'
+  - id: note-3c98e61
+    text: 'QA s5 (breadcrumb restart + CLI mid-restart): NEEDS_WORK, fixed. (1) e7e8abdc:
+      resumed review loop relaunched iteration N+1 with --fresh, killing the in-flight
+      review window (new id); now adopts the live pane. "Auto-start: resumed after
+      merge restart" summary was overwritten before paint; now logged last. (2) 71ca9067:
+      CLI cmds sent during restart timed out and stayed queued, then replayed by the
+      next unrelated SIGUSR2 (stale add Z applied 80s later); dispatch now deferred
+      until after consume_breadcrumb + startup drain, stale (>60s) queue discarded,
+      SIG_IGN for USR1/2 across execvp. (3) 41451898 incidental: tmux 3.2a set-hook
+      window-resized stderr painted over TUI. Filed bug for start-failure-stays-queued.'
+    created_at: '2026-10-12T21:35:43Z'
+    last_edited: '2026-10-12T21:35:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26010,6 +26022,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T21:30:06.148478+00:00'
   updated_at: '2026-10-12T21:30:06.148478+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b977417
+  plan: bugs
+  title: 'Bug: auto-start target whose pm pr start fails stays pending/queued forever
+    (no retry, no reason)'
+  branch: pm/pr-b977417-bug-auto-start-target-whose-pm-pr-start-fails-stay
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/auto_start.py _start_pr_quiet (pre-existing on master):
+    when `pm pr start` fails (e.g. "PR <id> is not committed on master yet. Run `pm
+    push`"), it only logs a warning. The target stays in the set, is never retried
+    by later scheduler passes, and `pm autostart status --json` / the runs popup show
+    phase pending, state queued, reason null indefinitely. Repro (pr-0b87a97 QA s5,
+    2026-10-12): fresh local-backend project, pm pr add X (no pm push), `pm autostart
+    add X` → status queued for 3+ minutes; after `pm push` + merge it still never
+    starts until `pm autostart remove X; add X`. Fix idea: record the start failure
+    as state=error/blocked with the stderr reason in status, and retry on the next
+    scheduler pass / reload.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T21:35:42.844845+00:00'
+  updated_at: '2026-10-12T21:35:42.844845+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
