@@ -714,7 +714,12 @@ def handle_command_submitted(app, cmd: str) -> None:
             break
     if _as_cmd == "autostart" or _as_cmd.startswith("autostart "):
         from pm_core.tui import auto_start as _auto_start
-        _auto_start.handle_command(app, shlex.split(_as_cmd)[1:])
+        try:
+            _as_args = shlex.split(_as_cmd)[1:]
+        except ValueError as e:
+            app.log_message(f"Auto-start: bad command: {e}")
+        else:
+            _auto_start.handle_command(app, _as_args)
         if len(app.screen_stack) <= 1:
             app.query_one("#tech-tree", TechTree).focus()
         return

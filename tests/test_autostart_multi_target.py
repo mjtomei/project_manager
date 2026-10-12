@@ -480,6 +480,43 @@ class TestHandleCommand:
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
             assert auto_start.write_reply("../evil", {}) is None
 
+    def test_handler_exception_still_writes_error_reply(self, tmp_path):
+        # Otherwise the CLI would wait out its timeout and misreport the
+        # failure as owner_timeout.
+        app = FakeApp([_pr("a")])
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch.object(auto_start, "add_targets",
+                          side_effect=RuntimeError("boom")):
+            r = auto_start.handle_command(app, ["add", "a", "--reply", "r2"])
+            payload = json.loads(
+                (tmp_path / "autostart-replies" / "r2.json").read_text())
+        assert r["error"] == "internal"
+        assert not payload["ok"] and payload["error"] == "internal"
+        assert "boom" in payload["message"]
+        assert payload["status"]["mode"] == "off"
+
+    def test_command_bar_list_logs_targets(self):
+        app = FakeApp([_pr("a"), _pr("b")])
+        auto_start.handle_command(app, ["add", "a"])
+        auto_start.handle_command(app, ["add", "b", "--auto-merge"])
+        auto_start.handle_command(app, ["list"])
+        assert app.logs[-1] == "Auto-start targets: a (stop), b"
+
+    def test_unknown_id_reload_flushes_write_queue_first(self, tmp_path):
+        app = FakeApp([_pr("a")], root=tmp_path)
+        calls = []
+        app._write_queue = MagicMock()
+        app._write_queue.flush_sync.side_effect = lambda: calls.append("flush")
+
+        def fake_load(_root):
+            calls.append("load")
+            return app._data
+
+        with patch("pm_core.tui.auto_start.store.load", side_effect=fake_load):
+            r = auto_start.add_targets(app, ["nope"])
+        assert r["error"] == "unknown_pr"
+        assert calls == ["flush", "load"]
+
 
 # ---------------------------------------------------------------------------
 # Status derivation (live evidence, not registry status alone)

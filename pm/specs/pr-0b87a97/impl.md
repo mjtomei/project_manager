@@ -273,6 +273,16 @@ captures under `impl/post-fix/`):
    tests patch `_adopt_live_qa` so they never scan the real
    `~/.pm/workdirs/qa`.
 
+7. *(review i1)* `A` with no selected PR turns auto-start off when it is on
+   (the pre-existing `A` toggle-off behaviour, documented in `pm tui keys`)
+   and prints "No PR selected" when off — it never enables the backlog.
+   This supersedes the R2 compatibility bullet for `A`.
+8. *(review i1)* `handle_command` writes an `{"ok": false, "error":
+   "internal"}` reply if a verb raises, so the CLI exits 1 with the cause
+   instead of waiting out its timeout as `owner_timeout`; command-bar
+   `autostart list` logs the targets + policies; the unknown-id reload in
+   `_resolve_ids` flushes the write queue before re-reading project.yaml.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i

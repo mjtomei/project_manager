@@ -418,6 +418,11 @@ def _resolve_ids(app, ids: list[str]) -> tuple[list[dict], list[str]]:
 
     found, missing = attempt(app._data)
     if missing and app._root:
+        # Flush pending in-memory writes first so the reload can't clobber
+        # un-flushed mutations (same rule as ``TechTreeApp._load_state``).
+        wq = getattr(app, "_write_queue", None)
+        if wq is not None:
+            wq.flush_sync()
         try:
             app._data = store.load(app._root)
         except Exception:
@@ -1008,6 +1013,39 @@ def handle_command(app, args: list[str]) -> dict:
     source = "cli" if reply_id else "command"
     open_popup = False
 
+    try:
+        result, open_popup = _dispatch(app, verb, ids, policy, source,
+                                       bool(reply_id))
+    except Exception as e:
+        # Never leave a CLI caller waiting for a reply that will not come
+        # (it would misreport the failure as owner_timeout).
+        _log.exception("auto_start: command %r failed", args)
+        result = {"ok": False, "error": "internal",
+                  "message": f"auto-start command failed: {e}", "changes": []}
+
+    if not result.get("ok"):
+        app.log_message(f"Auto-start: {result.get('message')}")
+    _log.info("auto_start: command %r → ok=%s error=%s", args,
+              result.get("ok"), result.get("error"))
+
+    if reply_id:
+        payload = dict(result)
+        try:
+            payload["status"] = build_status(app)
+        except Exception as e:
+            _log.exception("auto_start: build_status failed")
+            payload["status"] = None
+            payload.setdefault("message", f"status failed: {e}")
+        write_reply(reply_id, payload)
+    elif open_popup:
+        open_runs_popup(app)
+    return result
+
+
+def _dispatch(app, verb: str, ids: list[str], policy: str | None,
+              source: str, has_reply: bool) -> tuple[dict, bool]:
+    """Apply one ``autostart`` verb; returns ``(result, open_popup)``."""
+    open_popup = False
     if verb == "":
         if is_enabled(app):
             result = clear_targets(app)
@@ -1030,29 +1068,27 @@ def handle_command(app, args: list[str]) -> dict:
         result = enable_all(app)
     elif verb in ("list", "status"):
         result = {"ok": True, "changes": []}
-        open_popup = verb == "status" and not reply_id
+        if not has_reply:
+            if verb == "status":
+                open_popup = True
+            else:
+                app.log_message(_list_summary(app))
     else:
         result = {"ok": False, "error": "usage",
                   "message": f"unknown verb {verb!r}; usage: {USAGE}",
                   "changes": []}
+    return result, open_popup
 
-    if not result.get("ok"):
-        app.log_message(f"Auto-start: {result.get('message')}")
-    _log.info("auto_start: command %r → ok=%s error=%s", args,
-              result.get("ok"), result.get("error"))
 
-    if reply_id:
-        payload = dict(result)
-        try:
-            payload["status"] = build_status(app)
-        except Exception as e:
-            _log.exception("auto_start: build_status failed")
-            payload["status"] = None
-            payload.setdefault("message", f"status failed: {e}")
-        write_reply(reply_id, payload)
-    elif open_popup:
-        open_runs_popup(app)
-    return result
+def _list_summary(app) -> str:
+    """One log line for command-bar ``autostart list``."""
+    if not is_enabled(app):
+        return "Auto-start: off (no targets)"
+    if is_all_mode(app):
+        return "Auto-start: all ready PRs (backlog mode)"
+    parts = [f"{t}{' (stop)' if policy_for(app, t) == POLICY_STOP else ''}"
+             for t in get_targets(app)]
+    return f"Auto-start targets: {', '.join(parts)}"
 
 
 def open_runs_popup(app) -> None:
