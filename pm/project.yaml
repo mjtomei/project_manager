@@ -24951,7 +24951,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:28:00.384462+00:00'
-  updated_at: '2026-10-12T17:00:07.867599+00:00'
+  updated_at: '2026-10-12T17:23:18.110601+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25018,6 +25018,39 @@ prs:
       pm pr start.'
     created_at: '2026-10-12T16:50:52Z'
     last_edited: '2026-10-12T16:50:52Z'
+  - id: note-f8b1df4
+    text: 'impl done (b752adfc): diff_cmd in _launch_review_window now pipes through
+      `if command -v less ...; then less -R; else cat; fi`. Pre/post-fix captures
+      in $CAP/impl/{pre,post}-fix (diff_cmd extracted from the real _launch_review_window,
+      run in an isolated tmux pane on this less-less host; pm pr review not run since
+      it spawns Claude). Tests: tests/test_review_window_quoting.py adds a less-stripped-PATH
+      run (fails pre-fix) + stand-in-less run. Incidental: the existing bash -n checks
+      in that file were vacuous (fake_tmux patches the global subprocess.run), now
+      use _real_run. Full suite: only pre-existing failures: test_markdown_render
+      (pm venv lacks `markdown`) and test_hook_events::test_installer_writes_standalone_receiver
+      (fails on unmodified HEAD too).'
+    created_at: '2026-10-12T16:29:29Z'
+    last_edited: '2026-10-12T16:29:29Z'
+  - id: note-4c1874d
+    text: 'QA s6 refine (run 2): the "2x --fresh" story runs --fresh on PR A and PR
+      B at the same moment, so it tests one window per PR with distinct names. Concurrent
+      --fresh of the SAME PR can still leave duplicate review-<id> windows: _launch_review_window
+      has no launch flock on this branch, the known race pr-3f85ad7, which is out
+      of scope here. Plain --fresh (not review-loop) only switches the invoking session;
+      sessions_on_window is collected only when review_loop is set, so a separate
+      watching session does NOT follow. Do not assert "watcher follows" for manual
+      --fresh.'
+    created_at: '2026-10-12T17:16:36Z'
+    last_edited: '2026-10-12T17:16:36Z'
+  - id: note-733477b
+    text: 'QA s6 (concurrent review launches, run 2): PASS on less-absent host. 2
+      concurrent pm pr review + 2 concurrent --fresh (A and B) each gave exactly one
+      review window per PR, 2 live panes (claude left 0, diff bash), isolated diff
+      via cat + blank rows + live prompt, markers survive resize -x 220, registry
+      entries match. pm pr show does not exist; take workdirs from pm pr start output.
+      Captures: /pm-captures/scenarios/6.'
+    created_at: '2026-10-12T17:23:18Z'
+    last_edited: '2026-10-12T17:23:18Z'
 - id: pr-3ca6b36
   plan: plan-regression
   title: 'Regression test: CLI/command-bar help completeness, flag consistency, and
