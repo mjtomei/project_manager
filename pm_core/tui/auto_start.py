@@ -480,21 +480,33 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         is_new = pr_id not in targets
         if is_new:
             targets[pr_id] = autostart_state.make_target_record(source)
+        previous = policy_for(app, pr_id)
         effective = policy or (default_policy if is_new else None)
         if effective == POLICY_STOP:
             sbm.add(pr_id)
         elif effective == POLICY_AUTO:
             sbm.discard(pr_id)
-        changes.append({"pr_id": pr_id,
-                        "action": "added" if is_new else "unchanged",
-                        "policy": policy_for(app, pr_id)})
+        current = policy_for(app, pr_id)
+        if is_new:
+            action = "added"
+        elif current != previous:
+            # Re-add with a flag that flips the policy: report the change
+            # rather than "unchanged" (which reads as a refusal).
+            action = "policy_changed"
+        else:
+            action = "unchanged"
+        change = {"pr_id": pr_id, "action": action, "policy": current}
+        if action == "policy_changed":
+            change["previous_policy"] = previous
+        changes.append(change)
         _log.info("auto_start: target %s %s policy=%s source=%s", pr_id,
-                  "added" if is_new else "re-armed", policy_for(app, pr_id),
-                  source)
+                  "added" if is_new else "re-armed", current, source)
     _sync_enabled(app)
-    summary = ", ".join(
-        f"{c['pr_id']}{' (stop)' if c['policy'] == POLICY_STOP else ''}"
-        for c in changes)
+    def _label(c: dict) -> str:
+        if c["action"] == "policy_changed":
+            return f"{c['pr_id']} (now {c['policy'].replace('_', '-')})"
+        return f"{c['pr_id']}{' (stop)' if c['policy'] == POLICY_STOP else ''}"
+    summary = ", ".join(_label(c) for c in changes)
     # hold: check_and_start's "starting <pr>" / review-loop messages land
     # in the same frame and would overwrite this before it ever paints.
     app.log_message(f"Auto-start: targets += {summary} "

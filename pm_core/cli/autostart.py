@@ -174,6 +174,9 @@ def _print_changes(payload: dict) -> None:
     for c in payload.get("changes") or []:
         pol = c.get("policy")
         pol_s = f" ({pol.replace('_', '-')})" if pol else ""
+        prev = c.get("previous_policy")
+        if prev:
+            pol_s = f" ({pol.replace('_', '-')}; was {prev.replace('_', '-')})"
         click.echo(f"{c.get('action')}: {c.get('pr_id')}{pol_s}")
     st = payload.get("status") or {}
     targets = [t["pr_id"] for t in st.get("targets") or []]

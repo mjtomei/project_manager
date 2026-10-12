@@ -155,6 +155,19 @@ class TestAddRemove:
         auto_start.add_targets(app, ["a"])
         assert auto_start.policy_for(app, "a") == POLICY_AUTO
 
+    def test_readd_with_flipping_flag_reports_policy_changed(self):
+        app = FakeApp([_pr("a")])
+        auto_start.add_targets(app, ["a"])
+        r = auto_start.add_targets(app, ["a"], policy=POLICY_AUTO)
+        assert r["changes"] == [{"pr_id": "a", "action": "policy_changed",
+                                 "policy": POLICY_AUTO,
+                                 "previous_policy": POLICY_STOP}]
+        r = auto_start.add_targets(app, ["a"], policy=POLICY_AUTO)
+        assert r["changes"][0]["action"] == "unchanged"
+        r = auto_start.add_targets(app, ["a"], policy=POLICY_STOP)
+        assert r["changes"][0]["action"] == "policy_changed"
+        assert r["changes"][0]["previous_policy"] == POLICY_AUTO
+
     def test_auto_merge_flag_clears_stop(self):
         app = FakeApp([_pr("a")])
         auto_start.add_targets(app, ["a"])
