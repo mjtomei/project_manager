@@ -107,7 +107,7 @@ class TestTransitiveDeps:
 
 
 # ---------------------------------------------------------------------------
-# auto_start.is_enabled / get_target
+# auto_start.is_enabled / get_targets
 # ---------------------------------------------------------------------------
 
 class TestAutoStartHelpers:
@@ -129,17 +129,21 @@ class TestAutoStartHelpers:
         app._auto_start = False
         assert is_enabled(app) is False
 
-    def test_get_target(self):
-        from pm_core.tui.auto_start import get_target
+    def test_get_targets(self):
+        from pm_core.tui.auto_start import get_targets
         app = MagicMock()
-        app._auto_start_target = "pr-005"
-        assert get_target(app) == "pr-005"
+        app._auto_start_targets = {"pr-005": {}, "pr-002": {}}
+        assert get_targets(app) == ["pr-005", "pr-002"]
 
-    def test_get_target_none(self):
-        from pm_core.tui.auto_start import get_target
+    def test_get_targets_non_dict_is_empty(self):
+        """A MagicMock/legacy attribute must read as 'no targets'."""
+        from pm_core.tui.auto_start import get_targets, in_scope
         app = MagicMock()
-        app._auto_start_target = None
-        assert get_target(app) is None
+        app._auto_start = True
+        app._auto_start_all = False
+        app._data = {"prs": [{"id": "pr-001"}]}
+        assert get_targets(app) == []
+        assert in_scope(app, "pr-001") is False
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +157,8 @@ class TestAutoStartQALoops:
         """Create a mock app with auto-start enabled."""
         app = MagicMock()
         app._auto_start = True
-        app._auto_start_target = target
+        app._auto_start_targets = {target: {}} if target else {}
+        app._auto_start_all = not target
         app._data = {"prs": prs}
         app._qa_loops = {}
         return app
@@ -167,7 +172,7 @@ class TestAutoStartQALoops:
         app = self._make_app(prs)
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_called_once_with(app, "pr-a")
 
     def test_skips_non_qa_status(self):
@@ -181,7 +186,7 @@ class TestAutoStartQALoops:
         app = self._make_app(prs)
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_not_called()
 
     def test_skips_pr_without_workdir(self):
@@ -193,7 +198,7 @@ class TestAutoStartQALoops:
         app = self._make_app(prs)
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_not_called()
 
     def test_respects_target_dependency_tree(self):
@@ -207,7 +212,7 @@ class TestAutoStartQALoops:
         app = self._make_app(prs, target="pr-b")
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target="pr-b", prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         # pr-a (dep of pr-b) and pr-b (target) should be started; pr-c should not
         started_ids = [c[0][1] for c in mock_start.call_args_list]
         assert "pr-a" in started_ids
@@ -227,7 +232,7 @@ class TestAutoStartQALoops:
         app._qa_loops["pr-a"] = running_state
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_not_called()
 
     def test_skips_completed_qa_loop_awaiting_poll(self):
@@ -248,7 +253,7 @@ class TestAutoStartQALoops:
         app._qa_loops["pr-a"] = done_state
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_not_called()
 
     def test_noop_when_auto_start_disabled(self):
@@ -262,7 +267,7 @@ class TestAutoStartQALoops:
         app._qa_loops = {}
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_not_called()
 
     def test_no_target_starts_all_qa_prs(self):
@@ -275,7 +280,7 @@ class TestAutoStartQALoops:
         app = self._make_app(prs, target=None)
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         assert mock_start.call_count == 2
 
     def test_recovery_after_restart_starts_qa(self):
@@ -296,7 +301,7 @@ class TestAutoStartQALoops:
         assert app._qa_loops == {}
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target="pr-b", prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
         # pr-a and pr-b are in qa status and in dep tree; pr-c is in_review
         started_ids = [c[0][1] for c in mock_start.call_args_list]
         assert set(started_ids) == {"pr-a", "pr-b"}

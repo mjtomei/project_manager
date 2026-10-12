@@ -542,7 +542,7 @@ class TestOnQAComplete:
         app._root = pm_dir
         app._data = data
         app._auto_start = True
-        app._auto_start_target = "pr-001"
+        app._auto_start_targets = {"pr-001": {}}
         app._qa_loops = {}
         app._review_loops = {}
         app._self_driving_qa = {}
@@ -757,7 +757,7 @@ class TestMaybeStartQA:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = "pr-001"
+        app._auto_start_targets = {"pr-001": {}}
         app._qa_loops = {}
         app._self_driving_qa = {}
         return app
@@ -824,7 +824,8 @@ class TestMaybeStartQAScoping:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = target
+        app._auto_start_targets = {target: {}} if target else {}
+        app._auto_start_all = not target
         app._qa_loops = {}
         app._self_driving_qa = {}
         return app
@@ -954,7 +955,8 @@ class TestPollTriggersQA:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = target
+        app._auto_start_targets = {target: {}} if target else {}
+        app._auto_start_all = not target
         app._review_loops = {}
         app._qa_loops = {}
         app._self_driving_qa = {}
@@ -1047,7 +1049,8 @@ class TestSelfDrivingQALoop:
         app._root = pm_dir
         app._data = data
         app._auto_start = False  # Self-driving works independently of auto-start
-        app._auto_start_target = None
+        app._auto_start_targets = {}
+        app._auto_start_all = True
         app._qa_loops = {}
         app._review_loops = {}
         app._self_driving_qa = {

@@ -501,7 +501,7 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                 # state and defer to auto-start (if active) or the user.
                 app._self_driving_qa.pop(pr_id, None)
                 from pm_core.tui import auto_start as _auto_start
-                if _auto_start.is_enabled(app):
+                if _auto_start.in_scope(app, pr_id):
                     app.log_message(
                         f"[green bold]QA PASS[/] for {pr_id} "
                         f"({sd['pass_count']}/{required} consecutive) — ready to merge"
@@ -524,7 +524,7 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         else:
             # Legacy path — only auto-merge when auto-start is active
             from pm_core.tui import auto_start as _auto_start
-            if _auto_start.is_enabled(app):
+            if _auto_start.in_scope(app, pr_id):
                 app.log_message(f"[green bold]QA PASS[/] for {pr_id} — ready to merge")
                 _trigger_auto_merge(app, pr_id)
             else:

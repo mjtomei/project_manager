@@ -14,6 +14,14 @@ import pytest
 from pm_core.review_loop import ReviewLoopState, ReviewIteration
 
 
+@pytest.fixture(autouse=True)
+def _no_real_qa_adoption():
+    """consume_breadcrumb scans ~/.pm/workdirs/qa for resumable QA runs;
+    keep tests away from the real home directory."""
+    with patch("pm_core.tui.auto_start._adopt_live_qa"):
+        yield
+
+
 def _run_async(coro):
     """Run an async coroutine in a fresh event loop (safe across tests)."""
     loop = asyncio.new_event_loop()
@@ -38,7 +46,8 @@ def _make_app(
     """Create a minimal mock app with auto-start and review loop fields."""
     app = MagicMock()
     app._auto_start = auto_start
-    app._auto_start_target = target
+    app._auto_start_targets = {target: {}} if target else {}
+    app._auto_start_all = False
     app._auto_start_run_id = run_id
     app._review_loops = review_loops or {}
     app._root = root or Path("/tmp/pm-test")
@@ -258,7 +267,7 @@ class TestConsumeBreadcrumbReviewLoops:
 
         # Check auto-start was restored
         assert app._auto_start is True
-        assert app._auto_start_target == "pr-001"
+        assert list(app._auto_start_targets) == ["pr-001"]
 
         # Check review loop state was restored
         assert "pr-001" in app._review_loops

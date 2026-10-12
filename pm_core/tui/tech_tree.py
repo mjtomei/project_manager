@@ -527,11 +527,11 @@ class PRNode(Widget):
         try:
             from pm_core.tui import auto_start as _auto_start
             auto_start_enabled = _auto_start.is_enabled(self.app)
-            auto_start_target = (_auto_start.get_target(self.app)
-                                 if auto_start_enabled else None)
+            auto_start_targets = (set(_auto_start.get_targets(self.app))
+                                  if auto_start_enabled else set())
         except Exception:
             auto_start_enabled = False
-            auto_start_target = None
+            auto_start_targets = set()
 
         if is_selected:
             top = "╔" + "═" * (NODE_W - 2) + "╗"
@@ -544,7 +544,7 @@ class PRNode(Widget):
         border = "bold white" if is_selected else "dim"
 
         display_id = f"#{pr.get('gh_pr_number')}" if pr.get("gh_pr_number") else pr_id
-        is_auto_target = (auto_start_enabled and auto_start_target == pr_id)
+        is_auto_target = (auto_start_enabled and pr_id in auto_start_targets)
         max_id_len = NODE_W - 4
         truncated_id = ""
         if is_auto_target:
@@ -843,20 +843,20 @@ class TechTree(Widget):
     # -- layout caching ------------------------------------------------------
 
     def _auto_start_sig(self) -> tuple:
-        """Auto-start ``(enabled, target)`` — drives the ◎ marker on the target.
+        """Auto-start ``(enabled, targets)`` — drives the ◎ marker on targets.
 
-        The target is often a *pending* node (so it isn't covered by
-        ``refresh_active_nodes``), and toggling auto-start changes no PR data,
-        so this must be part of the layout signature for the marker to appear
-        and clear when the user toggles auto-start or repoints the target.
+        Targets are often *pending* nodes (so not covered by
+        ``refresh_active_nodes``), and adding/removing targets changes no PR
+        data, so this must be part of the layout signature for the markers to
+        appear and clear when the target set changes.
         """
         try:
             from pm_core.tui import auto_start as _auto_start
             enabled = _auto_start.is_enabled(self.app)
-            target = _auto_start.get_target(self.app) if enabled else None
-            return (enabled, target)
+            targets = tuple(_auto_start.get_targets(self.app)) if enabled else ()
+            return (enabled, targets)
         except Exception:
-            return (False, None)
+            return (False, ())
 
     def _signature(self) -> tuple:
         """A hashable signature of every input that affects layout or display.

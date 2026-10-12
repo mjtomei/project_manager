@@ -86,8 +86,8 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
 @click.option("--wait", default=120, type=int, help="Seconds between iterations")
 @click.option("--max-iterations", default=0, type=int,
               help="Maximum iterations (0 = unlimited)")
-@click.option("--auto-start-target", default=None, hidden=True,
-              help="Auto-start target PR ID (passed by watcher loop engine)")
+@click.option("--auto-start-target", "auto_start_targets", multiple=True, hidden=True,
+              help="Auto-start target PR ID; repeatable (passed by watcher loop engine)")
 @click.option("--meta-pm-root", default=None, hidden=True,
               help="Absolute path to meta workdir pm/ dir (passed by watcher loop engine)")
 @click.option("--watcher-type", default="auto-start", hidden=True,
@@ -95,7 +95,7 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
 @click.pass_context
 def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
                 transcript: str | None, wait: int, max_iterations: int,
-                auto_start_target: str | None, meta_pm_root: str | None,
+                auto_start_targets: tuple[str, ...], meta_pm_root: str | None,
                 watcher_type: str):
     """Manage watchers.
 
@@ -126,7 +126,7 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
     if iteration is not None:
         # Internal mode: create a single tmux window for this iteration
         _create_watcher_window(iteration, loop_id or "", transcript,
-                               auto_start_target=auto_start_target,
+                               auto_start_targets=list(auto_start_targets),
                                meta_pm_root=meta_pm_root,
                                watcher_type=watcher_type)
     else:
@@ -310,7 +310,7 @@ def watcher_list():
 
 def _create_watcher_window(iteration: int, loop_id: str,
                            transcript: str | None,
-                           auto_start_target: str | None = None,
+                           auto_start_targets: list[str] | None = None,
                            meta_pm_root: str | None = None,
                            watcher_type: str = "auto-start") -> None:
     """Create (or recreate) the watcher tmux window for one iteration."""
@@ -357,7 +357,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
         watcher_prompt = prompt_gen.generate_watcher_prompt(
             data, session_name=pm_session,
             iteration=iteration, loop_id=loop_id,
-            auto_start_target=auto_start_target,
+            auto_start_targets=auto_start_targets,
             meta_pm_root=meta_pm_root,
         )
 

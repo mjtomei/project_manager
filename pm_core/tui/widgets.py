@@ -26,7 +26,8 @@ class StatusBar(Static):
                        sort_text: str = "",
                        show_assist: bool = False,
                        auto_start: bool = False,
-                       watcher_status: str = "") -> None:
+                       watcher_status: str = "",
+                       auto_label: str = "") -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -40,7 +41,9 @@ class StatusBar(Static):
         filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
         sort_display = f"    [dim]sort:[/dim] [italic]{sort_text}[/italic]" if sort_text else ""
         assist_display = "    [dim]\\[H] Assist[/dim]" if show_assist else ""
-        auto_display = "    [bold yellow]AUTO[/bold yellow]" if auto_start else ""
+        auto_suffix = f" {auto_label}" if auto_label else ""
+        auto_display = (f"    [bold yellow]AUTO{auto_suffix}[/bold yellow]"
+                        if auto_start else "")
         if watcher_status == "input_required":
             watcher_display = "    [bold red]WCH!![/bold red]"
         elif watcher_status == "running":

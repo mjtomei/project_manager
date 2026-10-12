@@ -26,11 +26,18 @@ class AutoStartWatcher(BaseWatcher):
     KEYWORDS = ("READY", "INPUT_REQUIRED")
 
     def __init__(self, pm_root: str,
-                 auto_start_target: str | None = None,
+                 auto_start_targets: list[str] | None = None,
                  meta_pm_root: str | None = None,
-                 state: WatcherState | None = None):
+                 state: WatcherState | None = None,
+                 auto_start_target: str | None = None):
         super().__init__(pm_root, state=state)
-        self.auto_start_target = auto_start_target
+        # The TUI keeps this list current as targets are added/removed
+        # (auto_start._sync_enabled).  ``auto_start_target`` is the legacy
+        # single-target kwarg.
+        targets = list(auto_start_targets or [])
+        if auto_start_target and auto_start_target not in targets:
+            targets.append(auto_start_target)
+        self.auto_start_targets = targets
         self.meta_pm_root = meta_pm_root
 
     def generate_prompt(self, iteration: int) -> str:
@@ -43,7 +50,7 @@ class AutoStartWatcher(BaseWatcher):
             data = store.load(Path(self.pm_root))
             return generate_watcher_prompt(
                 data, iteration=iteration, loop_id=self.state.loop_id,
-                auto_start_target=self.auto_start_target,
+                auto_start_targets=self.auto_start_targets,
                 meta_pm_root=self.meta_pm_root,
             )
         except Exception as exc:
@@ -61,8 +68,8 @@ class AutoStartWatcher(BaseWatcher):
             cmd.extend(["--loop-id", self.state.loop_id])
         if transcript:
             cmd.extend(["--transcript", transcript])
-        if self.auto_start_target:
-            cmd.extend(["--auto-start-target", self.auto_start_target])
+        for target in self.auto_start_targets:
+            cmd.extend(["--auto-start-target", target])
         if self.meta_pm_root:
             cmd.extend(["--meta-pm-root", self.meta_pm_root])
         return cmd

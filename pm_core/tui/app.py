@@ -152,6 +152,7 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
+        Binding("a", "show_auto_runs", "Runs", show=True),
         Binding("O", "auto_sequence_pr", "Auto-seq", show=True),
         Binding("w", "focus_watcher", "Watcher", show=False),
         Binding("V", "review_spec", "Review Spec", show=False),
@@ -277,7 +278,7 @@ class ProjectManagerApp(App):
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
-                       "review_spec", "cleanup_pr"):
+                       "review_spec", "cleanup_pr", "show_auto_runs"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -336,10 +337,17 @@ class ProjectManagerApp(App):
         self._merge_propagation_phase: set[str] = set()
         # Animation frame counter for impl-pane idle polling throttle
         self._impl_poll_counter: int = 0
-        # Auto-start state (purely in-memory, lost on TUI restart)
+        # Auto-start state (in-memory; preserved only via the merge-restart
+        # breadcrumb).  ``_auto_start`` is derived: True iff there is at
+        # least one target or the explicit whole-backlog mode is on.
         self._auto_start: bool = False
-        self._auto_start_target: str | None = None
+        # Ordered {pr_id: {"added_at", "source"}} — see auto_start.add_targets
+        self._auto_start_targets: dict[str, dict] = {}
+        self._auto_start_all: bool = False
         self._auto_start_run_id: str | None = None
+        # PR ids whose ``pm pr start`` is in flight (shared-dep launch guard
+        # across concurrent check_and_start workers).
+        self._auto_start_launching: set[str] = set()
         # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
         # When a PR is in this set, _maybe_auto_merge stops at "ready to
         # merge" instead of launching the merge window.
@@ -708,6 +716,7 @@ class ProjectManagerApp(App):
             sort_text=sort_text,
             show_assist=not get_global_setting("hide-assist"),
             auto_start=self._auto_start,
+            auto_label=self._auto_start_label(),
             watcher_status=watcher_status,
         )
         self.query_one("#session-bar", SessionBar).refresh_session_info()
@@ -877,6 +886,20 @@ class ProjectManagerApp(App):
         from pm_core.tui.auto_start import toggle
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
+
+    def _auto_start_label(self) -> str:
+        """Status-bar suffix: ``×N`` for several targets, ``all`` for backlog."""
+        from pm_core.tui import auto_start as _auto_start
+        if not self._auto_start:
+            return ""
+        if _auto_start.is_all_mode(self):
+            return "all"
+        n = len(_auto_start.get_targets(self))
+        return f"×{n}" if n > 1 else ""
+
+    def action_show_auto_runs(self) -> None:
+        from pm_core.tui import auto_start as _auto_start
+        _auto_start.open_runs_popup(self)
 
     def action_auto_sequence_pr(self) -> None:
         from pm_core.tui.auto_start import auto_sequence_for_pr

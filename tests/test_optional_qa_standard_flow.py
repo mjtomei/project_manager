@@ -41,7 +41,8 @@ def _make_project(tmp_path, *, pr_status="in_review", auto_start=False,
     app._root = pm_dir
     app._data = data
     app._auto_start = auto_start
-    app._auto_start_target = auto_start_target
+    app._auto_start_targets = {auto_start_target: {}} if auto_start_target else {}
+    app._auto_start_all = not auto_start_target
     app._qa_loops = {}
     app._review_loops = {}
     app._self_driving_qa = {}
@@ -91,7 +92,6 @@ class TestMaybeStartQaWithAutoStart:
                                      auto_start_target="pr-001")
 
         with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
-             patch("pm_core.tui.auto_start.get_target", return_value="pr-001"), \
              patch("pm_core.tui.auto_start._transitive_deps", return_value=set()), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             from pm_core.tui.review_loop_ui import _maybe_start_qa

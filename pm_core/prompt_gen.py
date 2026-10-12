@@ -1008,7 +1008,8 @@ IMPORTANT: Do NOT report MERGED until ALL steps above are complete. Always end y
 def generate_watcher_prompt(data: dict, session_name: str | None = None,
                             iteration: int = 0, loop_id: str = "",
                             auto_start_target: str | None = None,
-                            meta_pm_root: str | None = None) -> str:
+                            meta_pm_root: str | None = None,
+                            auto_start_targets: list[str] | None = None) -> str:
     """Generate a Claude Code prompt for the autonomous watcher session.
 
     The watcher session observes auto-start and watches all active tmux
@@ -1030,9 +1031,11 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
         loop_id: Short unique loop identifier.
         meta_pm_root: Absolute path to the meta workdir's ``pm/`` directory
             where bugs.md and improvements.md live.
-        auto_start_target: The PR that auto-start is targeting. When set,
-            the monitor should only intervene on PRs in this PR's
-            transitive dependency fan-in.
+        auto_start_targets: The PRs auto-start is targeting. When set,
+            the monitor should only intervene on PRs in the union of their
+            transitive dependency fan-ins.
+        auto_start_target: Legacy single-target alias for
+            ``auto_start_targets``.
     """
     if not meta_pm_root:
         meta_pm_root = "pm"  # fallback to relative path
@@ -1052,19 +1055,21 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     except FileNotFoundError:
         pass
 
-    # Compute auto-start scope (dependency fan-in of the target)
+    # Compute auto-start scope (union of the targets' dependency fan-ins)
     auto_start_scope_block = ""
-    if auto_start_target:
-        from pm_core.tui.auto_start import _transitive_deps
-        managed_ids = _transitive_deps(all_prs, auto_start_target)
-        managed_ids.add(auto_start_target)
-        managed_list = ", ".join(sorted(managed_ids))
+    targets = list(auto_start_targets or [])
+    if auto_start_target and auto_start_target not in targets:
+        targets.append(auto_start_target)
+    if targets:
+        from pm_core.autostart_state import managed_ids as _managed_ids
+        managed_list = ", ".join(sorted(_managed_ids(all_prs, targets)))
+        target_list = ", ".join(f"**{t}**" for t in targets)
 
         auto_start_scope_block = f"""
 ### Auto-Start Scope
 
-Auto-start target: **{auto_start_target}**
-Managed PRs (target + its transitive dependencies): {managed_list}
+Auto-start targets: {target_list}
+Managed PRs (targets + their transitive dependencies): {managed_list}
 
 **IMPORTANT**: Only PRs in the managed set above are part of the auto-start pipeline.
 Other PRs may have active tmux windows from manual user activity -- do NOT attempt to

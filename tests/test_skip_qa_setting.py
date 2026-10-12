@@ -37,7 +37,8 @@ def _make_project(tmp_path, *, pr_status="in_review", auto_start=True,
     app._root = pm_dir
     app._data = data
     app._auto_start = auto_start
-    app._auto_start_target = auto_start_target
+    app._auto_start_targets = {auto_start_target: {}} if auto_start_target else {}
+    app._auto_start_all = not auto_start_target
     app._qa_loops = {}
     app._review_loops = {}
     app._self_driving_qa = {}
@@ -52,7 +53,6 @@ class TestSkipQaReviewPass:
         pm_dir, app = _make_project(tmp_path, skip_qa=True)
 
         with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
-             patch("pm_core.tui.auto_start.get_target", return_value="pr-001"), \
              patch("pm_core.tui.auto_start._transitive_deps", return_value=set()), \
              patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_qa:
@@ -67,7 +67,6 @@ class TestSkipQaReviewPass:
         pm_dir, app = _make_project(tmp_path, skip_qa=True)
 
         with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
-             patch("pm_core.tui.auto_start.get_target", return_value="pr-001"), \
              patch("pm_core.tui.auto_start._transitive_deps", return_value=set()), \
              patch("pm_core.tui.review_loop_ui._maybe_auto_merge"):
             from pm_core.tui.review_loop_ui import _maybe_start_qa
@@ -82,7 +81,6 @@ class TestSkipQaReviewPass:
         pm_dir, app = _make_project(tmp_path, skip_qa=False)
 
         with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
-             patch("pm_core.tui.auto_start.get_target", return_value="pr-001"), \
              patch("pm_core.tui.auto_start._transitive_deps", return_value=set()), \
              patch("pm_core.tui.qa_loop_ui.start_qa"):
             from pm_core.tui.review_loop_ui import _maybe_start_qa
@@ -125,7 +123,7 @@ class TestSkipQaAutoStartLoops:
         with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_qa:
             from pm_core.tui.auto_start import _auto_start_qa_loops
-            _auto_start_qa_loops(app, target="pr-001", prs=app._data["prs"])
+            _auto_start_qa_loops(app, prs=app._data["prs"])
 
         mock_qa.assert_not_called()
 
@@ -137,6 +135,6 @@ class TestSkipQaAutoStartLoops:
              patch("pm_core.tui.auto_start._transitive_deps", return_value=set()), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_qa:
             from pm_core.tui.auto_start import _auto_start_qa_loops
-            _auto_start_qa_loops(app, target="pr-001", prs=app._data["prs"])
+            _auto_start_qa_loops(app, prs=app._data["prs"])
 
         mock_qa.assert_called_once()

@@ -40,7 +40,7 @@ class _TreeApp(App):
         self._merge_input_required_prs = set()
         self._pane_idle_tracker = PaneIdleTracker()
         self._auto_start = False
-        self._auto_start_target = None
+        self._auto_start_targets = {}
 
     def compose(self) -> ComposeResult:
         with ScrollableContainer(id="sc"):
@@ -281,7 +281,7 @@ async def test_auto_start_toggle_rebuilds_for_marker():
         tree = app.query_one(TechTree)
         before = [id(n) for n in app.query(PRNode)]
         app._auto_start = True
-        app._auto_start_target = "pr-a"
+        app._auto_start_targets = {"pr-a": {}}
         tree.update_prs([_pr("pr-a", status="pending")])  # identical PR data
         await pilot.pause()
         after = [id(n) for n in app.query(PRNode)]

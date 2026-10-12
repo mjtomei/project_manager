@@ -705,17 +705,18 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.query_one("#tech-tree", TechTree).focus()
         return
 
-    # Handle auto-start commands
-    if cmd in ("autostart", "auto-start", "auto start"):
-        from pm_core.tui.auto_start import toggle
-        app.run_worker(toggle(app))
-        app.query_one("#tech-tree", TechTree).focus()
-        return
-    if cmd.startswith("autostart target") or cmd.startswith("auto-start target") or cmd.startswith("auto start target"):
-        from pm_core.tui.auto_start import set_target
-        target_pr = cmd.split("target", 1)[1].strip()
-        set_target(app, target_pr if target_pr else None)
-        app.query_one("#tech-tree", TechTree).focus()
+    # Handle auto-start commands: ``autostart [verb] [ids…] [flags]``
+    # (also reached by ``pm autostart …`` via the SIGUSR2 command queue).
+    _as_cmd = cmd
+    for _alias in ("auto-start", "auto start"):
+        if _as_cmd == _alias or _as_cmd.startswith(_alias + " "):
+            _as_cmd = "autostart" + _as_cmd[len(_alias):]
+            break
+    if _as_cmd == "autostart" or _as_cmd.startswith("autostart "):
+        from pm_core.tui import auto_start as _auto_start
+        _auto_start.handle_command(app, shlex.split(_as_cmd)[1:])
+        if len(app.screen_stack) <= 1:
+            app.query_one("#tech-tree", TechTree).focus()
         return
 
     # Handle QA commands — route to qa_loop_ui instead of CLI.

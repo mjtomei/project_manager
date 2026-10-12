@@ -34,7 +34,8 @@ def _make_app(tmp_path, *, prs=None, auto_start=True, target=None):
     app._root = pm_dir
     app._data = data
     app._auto_start = auto_start
-    app._auto_start_target = target
+    app._auto_start_targets = {target: {}} if target else {}
+    app._auto_start_all = not target
     app._auto_start_run_id = None
     app._qa_loops = {}
     app._review_loops = {}
@@ -148,7 +149,7 @@ class TestAutoStartQATargetScoping:
         app = _make_app(tmp_path, prs=prs, auto_start=True, target="pr-002")
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target="pr-002", prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
 
         # pr-001 (dep of target) and pr-002 (target itself) should start
         # pr-003 (unrelated) should be skipped
@@ -169,7 +170,7 @@ class TestAutoStartQATargetScoping:
         app = _make_app(tmp_path, prs=prs, auto_start=True)
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target=None, prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
 
         assert mock_start.call_count == 2
 
@@ -191,7 +192,7 @@ class TestAutoStartQATargetScoping:
         app = _make_app(tmp_path, prs=prs, auto_start=True, target="pr-c")
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            _auto_start_qa_loops(app, target="pr-c", prs=prs)
+            _auto_start_qa_loops(app, prs=prs)
 
         # All three: pr-a (transitive), pr-b (direct dep), pr-c (target)
         assert mock_start.call_count == 3

@@ -490,7 +490,7 @@ def _maybe_start_qa(app, pr_id: str) -> None:
       a review loop directly, so the review→QA transition must also be
       independent.
     - **Auto-start mode**: only transitions if auto-start is enabled and
-      the PR is within the target scope.
+      the PR is within some target's dependency closure.
 
     If the project-level ``skip_qa`` setting is true, QA is skipped and
     the PR goes straight to merge.
@@ -504,15 +504,10 @@ def _maybe_start_qa(app, pr_id: str) -> None:
     if not sd and not _auto_start.is_enabled(app):
         return
 
-    # Scope to auto-start target's dependency tree (skip for self-driving)
-    if not sd:
-        target = _auto_start.get_target(app)
-        if target:
-            prs = app._data.get("prs") or []
-            allowed = _auto_start._transitive_deps(prs, target)
-            allowed.add(target)
-            if pr_id not in allowed:
-                return
+    # Scope to the union of the auto-start targets' dependency closures
+    # (skip for self-driving)
+    if not sd and not _auto_start.in_scope(app, pr_id):
+        return
 
     # If project has skip_qa enabled, skip QA and go straight to merge.
     # Merge only happens via _maybe_auto_merge (which requires
@@ -562,8 +557,8 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 def _maybe_auto_merge(app, pr_id: str) -> None:
     """Auto-merge a PR after a passing review/QA.
 
-    Only runs when auto-start is enabled and the PR is in the active
-    auto-start target's dependency tree.  Manual ``zz d`` / ``zz t``
+    Only runs when auto-start is enabled and the PR is in some target's
+    dependency closure.  Manual ``zz d`` / ``zz t``
     never trigger merges — merge is an auto-start-only action.
 
     Runs ``pm pr merge --resolve-window --background <pr_id>``
@@ -577,16 +572,12 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     if not _auto_start.is_enabled(app):
         return
 
-    # Scope to auto-start target's dependency tree
-    target = _auto_start.get_target(app)
-    if target:
-        prs = app._data.get("prs") or []
-        allowed = _auto_start._transitive_deps(prs, target)
-        allowed.add(target)
-        if pr_id not in allowed:
-            return
+    # Scope to the union of the targets' dependency closures
+    if not _auto_start.in_scope(app, pr_id):
+        return
 
-    # Auto-sequence keypress: stop before merge.
+    # Per-PR stop-before-merge policy (O / CLI default).  Explicit stop
+    # wins even when an auto-merge target depends on this PR.
     if pr_id in getattr(app, "_stop_before_merge", set()):
         _log.info("auto_merge: %s in stop_before_merge — skipping merge", pr_id)
         app.log_message(
@@ -1029,26 +1020,18 @@ def _poll_impl_idle(app) -> None:
 def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
     """Transition newly-idle in_progress PRs to in_review and start review loops.
 
-    Only called when auto-start is enabled. Scopes to the auto-start
-    target's dependency tree when a target is set.
+    Only called when auto-start is enabled. Scopes to the union of the
+    auto-start targets' dependency closures.
     """
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
 
-    target = _auto_start.get_target(app)
     prs = app._data.get("prs") or []
-
-    # Scope to target's dependency tree
-    if target:
-        allowed = _auto_start._transitive_deps(prs, target)
-        allowed.add(target)
-    else:
-        allowed = None
-
     tdir = _auto_start.get_transcript_dir(app)
 
     for pr_id, pr in newly_idle:
-        if allowed is not None and pr_id not in allowed:
+        # Scope to the union of the targets' dependency closures
+        if not _auto_start.in_scope(app, pr_id, prs):
             continue
 
         _log.info("auto_review: impl idle for %s, transitioning to in_review", pr_id)
