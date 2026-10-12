@@ -7,8 +7,9 @@ over the existing session command queue (``trigger_tui_command``: SIGUSR2 +
 applies it on its event loop and writes a JSON reply to
 ``~/.pm/autostart-replies/<id>.json`` which this command reads back.
 
-Exit codes: 0 ok · 1 invalid input (nothing changed) · 2 owner unavailable
-or timed out (nothing sent / no reply).
+Exit codes: 0 ok · 1 invalid input (nothing changed) or an owner-side
+failure reported in the reply · 2 owner unavailable or timed out (nothing
+sent / no reply).
 """
 
 from __future__ import annotations
@@ -133,6 +134,16 @@ def _request(session: str | None, args: list[str], timeout: float) -> dict:
                 f"TUI for session {sess} did not reply within {timeout:g}s "
                 f"(busy or restarting); the command may still be applied",
                 session=sess)
+
+
+def _require_status(payload: dict) -> dict:
+    """The reply's status dict; an ok reply without one is an owner-side
+    failure (``build_status`` raised), never an empty success."""
+    status = payload.get("status")
+    if payload.get("ok") and not status:
+        raise _Fail(EXIT_INVALID, "status_unavailable",
+                    payload.get("message") or "owner returned no status")
+    return status or {}
 
 
 def _finish(payload: dict, as_json: bool, text_fn) -> None:
@@ -266,9 +277,9 @@ def autostart_list(session, timeout, as_json):
     """List targets and their merge policies."""
     try:
         payload = _request(session, ["list"], timeout)
+        st = _require_status(payload)
     except _Fail as f:
         _emit_fail(f, as_json)
-    st = payload.get("status") or {}
     out = {"ok": payload.get("ok", False), "schema": st.get("schema"),
            "owner": st.get("owner"), "mode": st.get("mode"),
            "targets": [{k: t.get(k) for k in
@@ -301,10 +312,13 @@ def autostart_status(session, timeout, as_json):
     """
     try:
         payload = _request(session, ["status"], timeout)
+        status = _require_status(payload)
     except _Fail as f:
         _emit_fail(f, as_json)
-    status = payload.get("status") or {}
     if as_json:
+        if not payload.get("ok"):
+            status = {**status, "ok": False, "error": payload.get("error"),
+                      "message": payload.get("message")}
         click.echo(json.dumps(status, indent=2, default=sorted))
         if not payload.get("ok"):
             raise SystemExit(EXIT_INVALID)

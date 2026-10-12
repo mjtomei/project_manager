@@ -694,6 +694,38 @@ class TestCLI:
         out = json.loads(res.output)
         assert (out["ok"], out["error"], out["message"]) == (False, "internal", "boom")
 
+    @pytest.mark.parametrize("verb", ["status", "list"])
+    def test_ok_reply_without_status_is_failure(self, project, tmp_path, verb):
+        """build_status raising on the owner must not read as an empty
+        success (``{}`` / no targets, exit 0)."""
+        import os
+        pidfile = tmp_path / "tui.pid"
+        pidfile.write_text(str(os.getpid()))
+        reply = {"ok": True, "changes": [], "status": None,
+                 "message": "status failed: boom"}
+        with patch("pm_core.cli.autostart._tui_pidfile_for_session",
+                   return_value=pidfile), \
+             patch("pm_core.cli.autostart._request", return_value=reply):
+            res = _cli([verb, "--json", "-s", "pm-x"])
+        assert res.exit_code == 1
+        out = json.loads(res.output)
+        assert out["error"] == "status_unavailable"
+        assert "boom" in out["message"]
+
+    def test_status_json_carries_owner_error(self, project, tmp_path):
+        import os
+        pidfile = tmp_path / "tui.pid"
+        pidfile.write_text(str(os.getpid()))
+        err = {"ok": False, "error": "internal", "message": "boom",
+               "changes": [], "status": {"schema": "pm.autostart.status/1"}}
+        with patch("pm_core.cli.autostart._tui_pidfile_for_session",
+                   return_value=pidfile), \
+             patch("pm_core.cli.autostart._request", return_value=err):
+            res = _cli(["status", "--json", "-s", "pm-x"])
+        assert res.exit_code == 1
+        out = json.loads(res.output)
+        assert (out["error"], out["message"]) == ("internal", "boom")
+
     def test_round_trip_through_tui_handler(self, project, tmp_path):
         """CLI → queue → TUI handle_command → reply file → CLI JSON."""
         pm_dir, home = project

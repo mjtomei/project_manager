@@ -289,6 +289,12 @@ captures under `impl/post-fix/`):
    does nothing when the PR list is empty (unloaded data is not "every target
    vanished").
 
+10. *(review i3)* `pm autostart status|list` treat an ok reply without a
+    status dict (owner-side `build_status` failure) as `status_unavailable`
+    (exit 1) instead of printing `{}` / "no targets" with exit 0, and
+    `status --json` carries the owner's `error`/`message` when the reply is
+    not ok.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i
