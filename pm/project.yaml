@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f094946
+  active_pr: pr-7c32e44
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25918,7 +25918,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T21:40:05.259621+00:00'
+  updated_at: '2026-10-12T22:51:26.347630+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26007,6 +26007,17 @@ prs:
       its handler) hits the default disposition — check the TUI pane survives.'
     created_at: '2026-10-12T21:03:04Z'
     last_edited: '2026-10-12T21:03:04Z'
+  - id: note-6d65735
+    text: 'QA s8 (shared dep under concurrent CLI/keys/merges): all 4 stories Thens
+      held on bddbac33+fix. Fixed 92973427: `pm pr auto-sequence` wrote sign_off +
+      the SIGNOFF_MERGE record without SIGUSR1, so TUI/autostart status/popup kept
+      "awaiting sign-off (press i…)" / "merge blocked… (no fresh SIGNOFF_MERGE)" until
+      an unrelated reload; and re-adding an existing target now logs "(already a target)".
+      Filed bug for D row "merge attempt failed" after sign-off. To get T2 mid-review
+      in story 4 I switched qa_scenario to ["NEEDS_WORK","PASS"] + review delay 75
+      after Y QA scenario ran (T2 bounced QA->review).'
+    created_at: '2026-10-12T22:51:26Z'
+    last_edited: '2026-10-12T22:51:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26110,6 +26121,30 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
   updated_at: '2026-10-12T21:39:47.961724+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7c32e44
+  plan: bugs
+  title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
+    was refused by the sign-off gate, after it is signed off'
+  branch: pm/pr-7c32e44-bug-auto-start-row-says-merge-attempt-failed-for-a
+  status: pending
+  depends_on: []
+  description: 'pm_core/autostart_state.py _derive pending_merge branch. Repro (pr-0b87a97
+    QA s8): non-target shared dep D (auto_merge policy) finishes QA, scheduler auto-merge
+    is refused by the sign-off gate -> row "merge blocked by sign-off gate (no fresh
+    SIGNOFF_MERGE)" (correct). Then `pm pr auto-sequence D` twice records a fresh
+    SIGNOFF_MERGE; after the TUI reloads the row flips to state=failed "merge attempt
+    failed; no merge window" although no merge has been attempted since sign-off,
+    and the scheduler does not retry the merge (user must press g). Expected: a signed-off/"press
+    g to merge" (or auto-retry) reason, not failed.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T22:51:25.629473+00:00'
+  updated_at: '2026-10-12T22:51:25.629473+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
