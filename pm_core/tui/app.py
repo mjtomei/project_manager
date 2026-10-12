@@ -8,6 +8,10 @@ from pm_core.tui._shell import _run_shell
 
 _log = configure_logger("pm.tui")
 
+# Queued external commands older than this when a TUI starts were left by
+# one that died, not sent during a restart — drop rather than replay them.
+_STARTUP_QUEUE_MAX_AGE = 60
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Vertical
@@ -331,6 +335,9 @@ class ProjectManagerApp(App):
         self._frame_change_count: int = 0
         self._last_frame_content: str | None = None
         self._session_name: str | None = None
+        # External commands (SIGUSR2 queue) wait until startup has
+        # restored breadcrumb state — see _drain_command_queue.
+        self._cmd_queue_ready = False
         self._is_portrait: bool = False
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
@@ -529,6 +536,11 @@ class ProjectManagerApp(App):
         # Resume auto-start if a breadcrumb was left by a merge-triggered restart
         from pm_core.tui import auto_start
         await auto_start.consume_breadcrumb(self)
+        # Now dispatch external commands, including any that arrived while
+        # the previous process was exec'ing (signal lost) or before the
+        # breadcrumb restore above (which would have overwritten them).
+        self._cmd_queue_ready = True
+        self._drain_command_queue(startup=True)
         # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
         self._capture_frame("mount")
@@ -1143,11 +1155,13 @@ class ProjectManagerApp(App):
             _log.debug("Could not write TUI pidfile %s: %s", pidfile, e)
             return
         # Pre-create the command queue file so external writers can
-        # always open it for append without a race.
+        # always open it for append without a race.  Open for append
+        # rather than touch: the startup drain judges staleness by mtime.
         queue = self._command_queue_file()
         if queue is not None:
             try:
-                queue.touch(exist_ok=True)
+                with open(queue, "a"):
+                    pass
             except OSError as e:
                 _log.debug("Could not create TUI command queue %s: %s",
                            queue, e)
@@ -1162,7 +1176,7 @@ class ProjectManagerApp(App):
             # for our tmux flow but log so it's visible if it ever fires.
             _log.debug("Could not install signal handlers: %s", e)
 
-    def _drain_command_queue(self) -> None:
+    def _drain_command_queue(self, startup: bool = False) -> None:
         """Read pending commands from the queue file and dispatch them.
 
         Each non-empty line is a command identical to what the in-TUI
@@ -1170,12 +1184,25 @@ class ProjectManagerApp(App):
         ``handle_command_submitted`` path so behavior matches exactly.
         Commands are processed in FIFO order; the queue is truncated
         after a successful read.
+
+        Until startup has restored state (``_cmd_queue_ready``) lines are
+        left in the file; the *startup* drain then dispatches them unless
+        the queue is stale (left behind by a TUI that died long ago).
         """
         from pm_core.tui import pr_view
+        if not self._cmd_queue_ready:
+            _log.info("queue dispatch: deferred until startup completes")
+            return
         queue = self._command_queue_file()
         if queue is None or not queue.exists():
             return
         import fcntl
+        import time as _time
+        try:
+            stale = (startup and _time.time() - queue.stat().st_mtime
+                     > _STARTUP_QUEUE_MAX_AGE)
+        except OSError:
+            stale = False
         try:
             # Take the same exclusive flock the appender uses around
             # write+signal so a racing append can't slip a line in
@@ -1192,6 +1219,10 @@ class ProjectManagerApp(App):
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except OSError as e:
             _log.debug("Could not read TUI command queue %s: %s", queue, e)
+            return
+        if stale and content.strip():
+            _log.warning("queue dispatch: discarding stale queued commands "
+                         "on startup: %r", content.splitlines())
             return
         for line in content.splitlines():
             cmd = line.strip()

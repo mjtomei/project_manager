@@ -712,6 +712,16 @@ def restart_app(app) -> None:
         app._driver.stop_application_mode()
     except Exception:
         pass  # new Textual app will reinitialize the terminal
+    # The pidfile keeps naming this pid across the exec, so CLI helpers
+    # keep sending SIGUSR1/SIGUSR2; until the new TUI installs its
+    # handlers the default action would kill it.  SIG_IGN survives exec;
+    # queued commands are dispatched by the new TUI's startup drain.
+    import signal
+    for sig in (signal.SIGUSR1, signal.SIGUSR2):
+        try:
+            signal.signal(sig, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
     pm = shutil.which("pm")
     if pm:
         os.execvp(pm, [pm, "_tui"])
