@@ -25918,7 +25918,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T23:23:23.615569+00:00'
+  updated_at: '2026-10-12T23:36:12.489887+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26124,6 +26124,31 @@ prs:
       HEAD is bf756471 or later before and after (git proxy rewinds, pr-8cdbe60).'
     created_at: '2026-10-12T23:23:23Z'
     last_edited: '2026-10-12T23:23:23Z'
+  - id: note-0aa40c6
+    text: 'S12 concretizer (round 3, a28609a2): R30 likely still broken. Live repro:
+      press / and type "autostart add pr-75" in the command bar, then from another
+      pane run `pm autostart status --json`, then type "33987" and Enter. The bar
+      submits just "33987" ("No such command"). The text stays on screen but is replaced
+      by the next keystroke. Probable cause: the e98caf98 refocus (`_drain_command_queue`
+      -> CommandBar.focus()) hits Textual 8.2.7 Input select_on_focus=True, which
+      selects all the text. Fix idea: CommandBar(select_on_focus=False), or restore
+      the cursor/selection after refocus. Baseline with no external command keeps
+      the text. Local backend: #N/N ids need gh_pr_number set in project.yaml at bootstrap
+      (chmod u+w first; the file is 0444).'
+    created_at: '2026-10-12T23:30:54Z'
+    last_edited: '2026-10-12T23:30:54Z'
+  - id: note-9b71e97
+    text: 'QA S12 fix b9b337d4: command bar lost half-typed text when a queued CLI
+      command (pm autostart status/add, picker) or other programmatic refocus returned
+      focus to it. Textual Input select_on_focus=True selected the whole value, so
+      the next keystroke replaced it (repro: "/autostart add pr-75", run pm autostart
+      status --json, type "33987" Enter -> submitted "33987", No such command). CommandBar
+      now defaults select_on_focus=False. Regression test: tests/test_view_focus_command_bar.py::test_cli_command_from_queue_keeps_half_typed_text
+      (fails before the fix with value "33"). Pre-fix evidence is in /pm-captures/scenarios/12/pre-fix.
+      S15 "autostart i" + "st" prefix loss likely has the same cause: retest on b9b337d4
+      or later.'
+    created_at: '2026-10-12T23:36:12Z'
+    last_edited: '2026-10-12T23:36:12Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
