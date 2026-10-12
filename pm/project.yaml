@@ -17,6 +17,31 @@ project:
   skip_qa: false
   nested_podman: true
   libyaml: false
+  model_config:
+    session_models:
+      impl: claude-opus-5-5
+      review: claude-opus-5-5
+      qa: claude-opus-5-5
+      qa_planning: claude-opus-5-5
+      qa_scenario: claude-opus-5-5
+      qa_concretize: claude-opus-5-5
+      qa_verification: claude-opus-5-5
+      qa_finalize: claude-opus-5-5
+      signoff: claude-opus-5-5
+      watcher: claude-opus-5-5
+      merge: claude-opus-5-5
+    session_effort:
+      impl: high
+      review: high
+      qa: high
+      qa_planning: high
+      qa_scenario: high
+      qa_concretize: high
+      qa_verification: high
+      qa_finalize: high
+      signoff: high
+      watcher: high
+      merge: high
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -23408,7 +23433,7 @@ prs:
   plan: plan-regression
   title: 'Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)'
   branch: pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca
-  status: sign_off
+  status: merged
   depends_on:
   - pr-2d5f712
   description: 'The human-facing surface for sign-off — the per-PR behavior report
@@ -23449,10 +23474,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/226
   gh_pr_number: 226
   created_at: '2026-05-25T13:59:01.287051+00:00'
-  updated_at: '2026-09-18T14:00:47.727000+00:00'
+  updated_at: '2026-10-12T16:20:44.772751+00:00'
   started_at: '2026-05-25T16:30:09.557322+00:00'
   reviewed_at: '2026-07-22T01:52:32.996314+00:00'
-  merged_at: null
+  merged_at: '2026-10-12T16:20:44.772751+00:00'
   notes:
   - id: note-a9626ec
     text: 'Behavior report/dashboard shipped standalone since deps (pr-2d5f712 sign-off
@@ -24935,7 +24960,7 @@ prs:
   title: 'Bug: review-window diff pane pipes through `less -R` with no fallback —
     blank pane where less is absent'
   branch: pm/pr-71e9ec7-bug-review-window-diff-pane-pipes-through-less-r-w
-  status: pending
+  status: merged
   depends_on: []
   description: 'pm_core/cli/pr.py:_launch_review_window line ~1256 ends the diff-pane
     command with `; }} | less -R`. On any host/container without `less` on PATH the
@@ -24951,10 +24976,10 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:28:00.384462+00:00'
-  updated_at: '2026-10-12T17:23:18.110601+00:00'
+  updated_at: '2026-10-12T18:11:52.140787+00:00'
   started_at: null
   reviewed_at: null
-  merged_at: null
+  merged_at: '2026-10-12T18:11:52.140787+00:00'
   notes:
   - id: note-cf84a58
     text: 'QA s4 (concurrent review launches): PASS on less-absent host — all diff
@@ -25668,3 +25693,204 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-b8561ac
+  plan: bugs
+  title: 'Bug: QA planner stalls when terminal capture truncates a complete transcript
+    plan'
+  branch: pm/pr-b8561ac-bug-qa-planner-stalls-when-terminal-capture-trunca
+  status: pending
+  depends_on: []
+  description: 'Observed on 2026-10-12 during supervised autostart trial pr-71e9ec7
+    (#228), Opus 5.5 / Claude Code 2.1.296. QA planner session 43dbdcf5-0253-40fa-a8bf-7231055d7643
+    emitted a valid four-scenario QA_PLAN_START/END plan (9409 characters) in its
+    JSONL transcript. pm_core/qa_loop.py run_qa_sync still calls tmux.capture_pane(full_scrollback=True)
+    after idle_prompt. Actual terminal capture held only 1729 characters from the
+    final scenario: log at 16:39:00Z says has_end=True, then has_end but 0 scenarios,
+    likely prompt template. The one idle event is consumed and no scenarios launch;
+    driver waits for another event or its timeout despite complete valid output. Read
+    completed planner assistant text from the session JSONL (using transcript_path_for
+    and read_latest_assistant_text, as other verdict paths do), parse that, and retain
+    event freshness/placeholder guards. Add a regression where pane capture has only
+    the plan tail but JSONL contains all four scenarios; verify prompt-template markers
+    do not count. Evidence: ~/.pm/debug/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc-6dd77b4a.log;
+    planner transcript in ~/.claude/projects/-home-matt--pm-workdirs-project-manager-828c8d0a-pm-pr-71e9ec7-bug-review-window-diff-pane-pipes-th-c423acf8/.
+    A compact re-emission was requested as a supervised workaround, not an unattended
+    success.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T16:41:09.231022+00:00'
+  updated_at: '2026-10-12T16:42:21.131559+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-042980f
+    text: 'Additional live finding: first compact re-emission captured scenarios 2,
+      3 and 4 only; parse_qa_plan accepted all three without noticing scenario 1 was
+      absent. Supervisor caught this before idle-triggered consumption and requested
+      a 22-line reply. Second compact reply preserves all four, confirmed by running
+      the real parser on the captured pane (1564 chars). This can cause silent coverage
+      loss, not just a stall. Regression tests should require complete transcript
+      extraction and cover truncation that leaves a valid suffix of scenario headers.'
+    created_at: '2026-10-12T16:42:21Z'
+    last_edited: '2026-10-12T16:42:21Z'
+- id: pr-488ac6d
+  plan: bugs
+  title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
+    ready to merge'
+  branch: pm/pr-488ac6d-bug-tui-auto-sequence-skips-sign-off-after-qa-pass
+  status: pending
+  depends_on: []
+  description: 'Live autostart qualification on 2026-10-12: TUI O auto-sequence of
+    pr-71e9ec7 (#228) completed implementation, review, QA NEEDS_WORK, repeat review,
+    then QA PASS with both new scenarios independently VERIFIED. At 17:32:23Z qa_loop_ui._on_qa_complete
+    called _trigger_auto_merge -> review_loop_ui._maybe_auto_merge. The stop_before_merge
+    check returned with the green ready-to-merge message before any sign-off launch.
+    Registry still status=qa, signoff=None. No TUI signoff routing exists in these
+    callbacks; plain A would instead call pr merge with no recorded approval and hit
+    the #226 merge gate, which gets misclassified as merge conflict tracking. This
+    is broader than skip_qa=true: reproduced with skip_qa=false. Wire TUI QA PASS
+    into the same sign-off state machine as the CLI auto-sequence. O must stop after
+    fresh SIGNOFF_MERGE; A may merge only then. Preserve SIGNOFF_REVIEW/REQA/HUMAN
+    routes, scope, current HEAD, and report evidence. Add a TUI integration test covering
+    QA PASS -> sign_off -> recorded current-head approval -> O stops / A merges. Evidence:
+    ~/.pm/debug/pm-pr-8e693f6-per-pr-bdd-behavior-report-html-co-l-b8230fbc-6dd77b4a.log
+    and QA round pr-71e9ec7-5bed0f57302cdd2e. Supervisor launching sign-off explicitly
+    to finish inspection; do not count that as automatic handoff success.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T17:33:48.614099+00:00'
+  updated_at: '2026-10-12T17:33:48.614099+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-40f49eb
+  plan: bugs
+  title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
+  branch: pm/pr-40f49eb-bug-dashboard-last-modified-reflects-report-age-in
+  status: pending
+  depends_on: []
+  description: 'Keep the existing "Last modified" column name, but make its value
+    represent when the PR was updated, including lifecycle transitions such as merging,
+    rather than report.html filesystem mtime.
+
+
+    Observed on 2026-10-12: PR #226 (pr-8e693f6) displayed "merged" alongside "24d
+    ago". Its report.html mtime was 2026-09-18 14:17 UTC, while PM recorded updated_at
+    and merged_at as 2026-10-12 16:20:44 UTC. The dashboard is combining current PR
+    status with an unrelated report-age timestamp.
+
+
+    Implementation direction: pm_core/behavior_report.py gather_dashboard_rows currently
+    reads report_path.stat().st_mtime and leaves timestamps empty for PRs without
+    reports. Source the displayed relative age, absolute-time tooltip, initial ordering,
+    and client-side sort key from the PR updated_at timestamp. Follow existing PM
+    timestamp fallback conventions for legacy entries (created_at when appropriate),
+    and handle missing/malformed values gracefully. Report existence must not determine
+    whether a PR update time is shown. Retain report links and verdict behavior.
+
+
+    Acceptance: keep the header exactly "Last modified"; a newly merged PR with an
+    old report shows the recent PR update and sorts accordingly; PRs without reports
+    still show their update timestamps; report file mtime alone does not override
+    a known PR updated_at; tooltip and numeric sorting agree with the displayed timestamp.
+    Add focused regression coverage for the observed merge case, no-report rows, ordering,
+    and missing timestamps.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T18:14:10.472626+00:00'
+  updated_at: '2026-10-12T18:14:10.472626+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0b87a97
+  plan: bugs
+  title: Support multiple autostart targets with CLI controls and a live TUI runs
+    popup
+  branch: pm/pr-0b87a97-support-multiple-autostart-targets-with-cli-contro
+  status: in_progress
+  depends_on: []
+  description: 'Problem: TUI autostart stores one _auto_start_target. Starting a second
+    independent PR replaces the first target, so subsequent phase transitions can
+    stop progressing for the first PR. We need to run several explicitly selected
+    PRs concurrently within the existing PM session, and inspect what each is actually
+    doing. This is the next bootstrap improvement requested by the user; pr-488ac6d
+    (automatic sign-off handoff) and pr-b8561ac (QA planner transcript extraction)
+    stay pending until this PR is finished.
+
+
+    Deliverables:
+
+    1. Replace the single target with an explicit collection of autostart targets
+    owned by the existing session scheduler. Adding a target is additive and idempotent,
+    never replaces another target or implicitly enables the whole backlog. Schedule
+    the union of their dependency closures, obey dependency readiness, and run shared
+    dependencies only once. Completion/removal of one target must not disable unrelated
+    targets. Preserve per-target stop-before-merge versus existing explicitly enabled
+    automatic-merge behavior; repeated O adds/arms the selected PR without discarding
+    others. An empty explicit target collection must not silently become all pending
+    PRs.
+
+    2. Provide real CLI commands (not only command-bar aliases) to add/list/remove
+    targets and inspect progress, with machine-readable status (for example pm autostart
+    add PR_ID..., pm autostart remove PR_ID..., pm autostart status --json). Reuse
+    the existing session command queue/IPC and scheduler; do not create a competing
+    polling loop or require a second PM session. Validate IDs before changing state;
+    report an unavailable owner explicitly. Removing a target stops future scheduling
+    for that target and must not kill an already-running worker or a dependency still
+    needed by another target. Keep existing single-target controls compatible or document
+    an intentional migration clearly.
+
+    3. Add a discoverable TUI popup pane showing the active target set and its running/queued
+    dependency PRs. CLI and popup must consume the same structured status representation.
+    Show PR ID/title, current lifecycle phase (implementation, review, QA, sign-off,
+    merge), review iteration or QA scenario progress when available, running/waiting/paused/failed/completed
+    state and a useful reason, and the relevant tmux window when available. Allow
+    focusing the selected run from the popup, refresh while open, and dismiss back
+    to the TUI cleanly. Use actual scheduler, worker, and recorded-verdict state:
+    a registry status alone does not prove that a worker is running or a PR is ready
+    to merge. No expensive model calls are needed for this view.
+
+    4. Preserve the target collection and per-target policies through the supported
+    TUI/merge restart path, migrate an existing single-target breadcrumb, and adopt
+    live workers/loops instead of launching duplicates. Changes to target state must
+    remain consistent when CLI commands and scheduler callbacks interleave. Reuse/extract
+    a small shared state/status helper where useful; keep this a bounded extension
+    of the current architecture, not a new daemon framework.
+
+
+    Acceptance evidence: in one PM session, add two independent targets, demonstrate
+    both advance without retargeting, and show their different current steps consistently
+    in CLI JSON and the popup. Exercise a shared dependency (one launch), removal/completion
+    of one target while the other continues, invalid-ID and empty-set handling, preservation
+    of stop-before-merge policy, and restart/adoption without duplicate workers. Use
+    focused tests and the existing fake-Claude/tmux fixtures for lifecycle coverage,
+    plus captured live popup/CLI behavior. Retain existing QA criteria and prompts;
+    do not weaken independent verification to make this pass. Update relevant CLI/key
+    help and living implementation/QA specs. Cover current sign-off state accurately
+    but leave the missing automatic sign-off transition to pr-488ac6d; this PR must
+    not bypass the existing sign-off merge gate or silently absorb the QA planner
+    fix.
+
+
+    Known bootstrap limitation: the controller launching this PR still has pr-b8561ac.
+    For this run only, keep the final machine-readable QA_PLAN block compact enough
+    to fit terminal capture (at most 22 lines, at most 60 columns per line); keep
+    the full scenario detail in qa.md and preserve all planned scenarios. This is
+    a temporary transport workaround, not permission to reduce verification. All workflow
+    roles use the existing project Opus 5.5/high configuration.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/229
+  gh_pr_number: 229
+  created_at: '2026-10-12T18:22:44.139556+00:00'
+  updated_at: '2026-10-12T18:23:30.711242+00:00'
+  started_at: '2026-10-12T18:23:30.711242+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
