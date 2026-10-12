@@ -497,3 +497,21 @@ async def test_jump_plan_bottom_selects_visual_bottom():
         assert sid != "root"  # not stuck on the root
         max_row = max(r for _, (c, r) in tree._node_positions.items())
         assert tree._node_positions[sid][1] == max_row
+
+
+@async_test
+async def test_reorder_keeps_cursor_on_same_pr():
+    # Auto-start starting a PR re-sorts the tree; the cursor must stay on
+    # the PR the user selected, not on whatever now occupies its slot.
+    prs = [_pr("pr-a"), _pr("pr-b"), _pr("pr-c")]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        tree.select_pr("pr-a")
+        before = list(tree._ordered_ids)
+        moved = [_pr("pr-a"), _pr("pr-b"), _pr("pr-c", status="in_progress")]
+        tree.update_prs(moved)
+        await pilot.pause()
+        assert tree._ordered_ids != before, "precondition: order changed"
+        assert tree.selected_pr_id == "pr-a"

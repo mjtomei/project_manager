@@ -897,6 +897,9 @@ class TechTree(Widget):
         # Cached id->pr lookup reused by selection / navigation / refresh paths,
         # so they don't each rebuild a dict over all PRs on every keystroke.
         self._pr_map = {pr["id"]: pr for pr in self._prs}
+        prev_ids = getattr(self, "_ordered_ids", None) or []
+        prev_sel = (prev_ids[self.selected_index]
+                    if 0 <= self.selected_index < len(prev_ids) else None)
         sig = self._signature()
         layout_changed = sig != self._layout_sig
         if layout_changed:
@@ -919,6 +922,11 @@ class TechTree(Widget):
         self._hidden_label_ids = result.hidden_label_ids
         self._plan_group_order = result.plan_group_order
 
+        # A reorder (status change, auto-start target change) keeps the
+        # cursor on the same PR rather than on whatever took its slot.
+        if (prev_sel and prev_sel in self._ordered_ids
+                and self._ordered_ids.index(prev_sel) != self.selected_index):
+            self.selected_index = self._ordered_ids.index(prev_sel)
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
 

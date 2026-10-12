@@ -36,6 +36,20 @@ from pm_core.tui import pr_view
 from pm_core.tui import review_loop_ui
 
 
+def _record_log_message(app, msg: str, suppressed: bool) -> None:
+    """Append a log-line message (markup stripped) to the command log."""
+    try:
+        from rich.text import Text
+        plain = Text.from_markup(msg).plain
+    except Exception:
+        plain = msg
+    plain = " ".join(plain.split())
+    if not plain or plain == getattr(app, "_last_logged_message", None):
+        return
+    app._last_logged_message = plain
+    _log.info("log: %s%s", plain, " (hidden by sticky message)" if suppressed else "")
+
+
 class ProjectManagerApp(App):
     """Interactive TUI for managing PR dependency graphs."""
 
@@ -348,6 +362,11 @@ class ProjectManagerApp(App):
         # PR ids whose ``pm pr start`` is in flight (shared-dep launch guard
         # across concurrent check_and_start workers).
         self._auto_start_launching: set[str] = set()
+        # active_pr the tree cursor last followed, and PRs the scheduler is
+        # starting in the background (id -> monotonic expiry) whose
+        # ``pr start`` activation must not move the user's cursor.
+        self._followed_active_pr: str | None = None
+        self._quiet_activations: dict[str, float] = {}
         # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
         # When a PR is in this set, _maybe_auto_merge stops at "ready to
         # merge" instead of launching the merge window.
@@ -728,6 +747,22 @@ class ProjectManagerApp(App):
         )
         self.query_one("#session-bar", SessionBar).refresh_session_info()
 
+    def _follow_active_pr(self, tree, active_pr: str | None) -> None:
+        """Move the tree cursor to *active_pr* when it changes.
+
+        Only on a change (``pm pr select`` etc.), not on every refresh —
+        otherwise any reload or auto-start target change snaps the cursor
+        off the PR the user is about to press O/A on.  Activations from the
+        auto-start scheduler's own background starts are skipped.
+        """
+        if not active_pr or active_pr == self._followed_active_pr:
+            return
+        self._followed_active_pr = active_pr
+        import time as _time
+        quiet_until = self._quiet_activations.pop(active_pr, 0.0)
+        if quiet_until < _time.monotonic():
+            tree.select_pr(active_pr)
+
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""
         if not self._data:
@@ -739,9 +774,7 @@ class ProjectManagerApp(App):
         tree.apply_project_settings(self._data.get("project", {}))
         tree.update_plans(self._data.get("plans") or [])
         tree.update_prs(self._data.get("prs") or [])
-        active_pr = self._data.get("project", {}).get("active_pr")
-        if active_pr:
-            tree.select_pr(active_pr)
+        self._follow_active_pr(tree, self._data.get("project", {}).get("active_pr"))
         self._update_filter_status()
 
         # Start animation timer if there are active PRs
@@ -762,9 +795,14 @@ class ProjectManagerApp(App):
         """
         import time as _time
         now = _time.monotonic()
+        suppressed = sticky <= 0 and now < self._log_sticky_until and not force
+        # The log line holds one message and is overwritten (often within
+        # the same tick), so also record every message in the command log
+        # that ``L`` tails — otherwise status updates are lost unseen.
+        _record_log_message(self, msg, suppressed)
         if sticky > 0:
             self._log_sticky_until = now + sticky
-        elif now < self._log_sticky_until and not force:
+        elif suppressed:
             return  # a sticky message is still showing
         try:
             log = self.query_one("#log-line", LogLine)

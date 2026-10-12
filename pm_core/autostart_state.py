@@ -507,7 +507,7 @@ def status_rows(status: dict) -> list[dict]:
             r = runs.get(dep)
             if not r:
                 continue
-            also = [x for x in r.get("needed_by") or [] if x != tid]
+            also = [x for x in r.get("needed_by") or [] if x not in (tid, dep)]
             rows.append({"pr_id": dep, "depth": 1, "kind": "dep", "run": r,
                          "also": also, "progress": _progress(r)})
     return rows

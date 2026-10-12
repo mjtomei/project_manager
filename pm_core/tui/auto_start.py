@@ -588,7 +588,8 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
     if not result["ok"]:
         app.log_message(f"Auto-sequence: {result['message']}")
         return
-    app.log_message(f"Auto-sequence armed for {pr_id} (will stop before merge)")
+    app.log_message(f"Auto-sequence armed for {pr_id} (will stop before merge)",
+                    force=True)
 
 
 def on_state_loaded(app, old_statuses: dict) -> None:
@@ -831,6 +832,13 @@ async def _start_pr_quiet(app, pr_id: str) -> None:
     overlap with user actions.
     """
     import asyncio
+    import time
+
+    # ``pr start`` makes the PR the active_pr; a scheduler-driven start must
+    # not drag the user's tree cursor onto it.
+    quiet = getattr(app, "_quiet_activations", None)
+    if isinstance(quiet, dict):
+        quiet[pr_id] = time.monotonic() + 120
 
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "start", "--background"]
     tdir = get_transcript_dir(app)
@@ -849,6 +857,8 @@ async def _start_pr_quiet(app, pr_id: str) -> None:
     if proc.returncode != 0:
         stderr_text = stderr.decode() if stderr else ""
         _log.warning("auto_start: pm pr start %s failed: %s", pr_id, stderr_text[:200])
+        if isinstance(quiet, dict):
+            quiet.pop(pr_id, None)
     else:
         _log.info("auto_start: pm pr start %s succeeded", pr_id)
 

@@ -250,6 +250,20 @@ class TestKeys:
         asyncio.run(auto_start.toggle(app, "a"))
         assert auto_start.get_targets(app) == ["b"]
 
+    def test_key_confirmations_are_forced(self):
+        """O / A feedback must survive a concurrent background sticky
+        message (e.g. "Review loop started"), so it is shown forced."""
+        app = FakeApp([_pr("a"), _pr("b")])
+        shown = []
+        app.log_message = lambda msg, **kw: shown.append((msg, kw))
+        asyncio.run(auto_start.auto_sequence_for_pr(app, "a"))
+        armed = [kw for m, kw in shown if m.startswith("Auto-sequence armed for a")]
+        assert armed and armed[0].get("force") is True
+        shown.clear()
+        asyncio.run(auto_start.toggle(app, "b"))
+        added = [kw for m, kw in shown if "targets += b" in m]
+        assert added and added[0].get("force") is True
+
     def test_A_without_selection_never_enables_backlog(self):
         app = FakeApp([_pr("a")])
         asyncio.run(auto_start.toggle(app, None))
@@ -554,6 +568,14 @@ class TestBuildStatus:
         rows = st.status_rows(s)
         dep_rows = [r for r in rows if r["pr_id"] == "d"]
         assert len(dep_rows) == 2 and dep_rows[0]["also"] == ["b"]
+
+    def test_dep_that_is_also_a_target_not_listed_as_needing_itself(self):
+        prs = [_pr("d", status="qa"), _pr("q", deps=["d"])]
+        s = _status(prs, ["d", "q"])
+        assert _run(s, "d")["needed_by"] == ["d", "q"]
+        dep_rows = [r for r in st.status_rows(s)
+                    if r["pr_id"] == "d" and r["kind"] == "dep"]
+        assert len(dep_rows) == 1 and dep_rows[0]["also"] == []
 
     def test_in_progress_without_window_is_paused(self):
         s = _status([_pr("a", status="in_progress")], ["a"])
@@ -880,3 +902,82 @@ class TestReloadTrigger:
         auto_start.on_state_loaded(app, {"a": "merged"})
         auto_start.on_state_loaded(app, {})
         assert app.workers == []
+
+
+class TestLogLineRecording:
+    """Every log-line message also lands in the command log (``L``)."""
+
+    def _app(self, sticky_until=0.0):
+        from types import SimpleNamespace
+        from pm_core.tui.app import ProjectManagerApp
+        a = SimpleNamespace(_log_sticky_until=sticky_until)
+        a.query_one = MagicMock(side_effect=Exception("no dom"))
+        a.call_after_refresh = lambda *x, **k: None
+        a._capture_frame = None
+        return a, ProjectManagerApp.log_message
+
+    def test_overwritten_and_hidden_messages_are_logged(self):
+        import time
+        app, log_message = self._app()
+        with patch("pm_core.tui.app._log") as lg:
+            log_message(app, "[green bold]QA PASS[/] for s — ready to merge")
+            log_message(app, "Auto-merge: u review passed, merging")
+            app._log_sticky_until = time.monotonic() + 60
+            log_message(app, "Auto-sequence armed for d")  # hidden by sticky
+            log_message(app, "Auto-sequence armed for d")  # dedup
+        lines = [c.args[0] % c.args[1:] for c in lg.info.call_args_list]
+        assert lines == [
+            "log: QA PASS for s — ready to merge",
+            "log: Auto-merge: u review passed, merging",
+            "log: Auto-sequence armed for d (hidden by sticky message)",
+        ]
+
+
+class TestCursorFollowsActivePr:
+    """The tree cursor follows active_pr changes, not every refresh, and
+    never the scheduler's own background starts."""
+
+    def _app(self):
+        from types import SimpleNamespace
+        from pm_core.tui.app import ProjectManagerApp
+        a = SimpleNamespace(_followed_active_pr=None, _quiet_activations={})
+        tree = MagicMock()
+        follow = lambda pr: ProjectManagerApp._follow_active_pr(a, tree, pr)
+        return a, tree, follow
+
+    def test_refresh_does_not_snap_cursor_back(self):
+        app, tree, follow = self._app()
+        follow("a")
+        tree.select_pr.assert_called_once_with("a")
+        tree.select_pr.reset_mock()
+        follow("a")  # reload / target change with unchanged active_pr
+        tree.select_pr.assert_not_called()
+        follow("b")  # pm pr select b
+        tree.select_pr.assert_called_once_with("b")
+
+    def test_scheduler_start_does_not_move_cursor(self):
+        import time
+        app, tree, follow = self._app()
+        follow("a")
+        tree.select_pr.reset_mock()
+        app._quiet_activations["u"] = time.monotonic() + 60
+        follow("u")  # auto-start's ``pr start --background u``
+        tree.select_pr.assert_not_called()
+        assert "u" not in app._quiet_activations
+
+    def test_start_pr_quiet_marks_activation(self):
+        app = FakeApp([_pr("u")])
+        app._quiet_activations = {}
+
+        class _P:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
+            asyncio.run(auto_start._start_pr_quiet(app, "u"))
+        assert "u" in app._quiet_activations
