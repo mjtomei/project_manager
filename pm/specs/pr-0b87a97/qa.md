@@ -476,8 +476,8 @@ Covers R7, R21, E2, E8, ambiguity 4.
   status "merge blocked by sign-off gate"/awaiting sign-off; `pm pr list`
   shows neither merged; no `--no-signoff-check` bypass appears anywhere.
 - WHEN several scheduler passes and a sync/reload happen, THEN no new QA run
-  starts for S or U and the QA PASS status line does not claim "merge
-  manually" for an already-merged PR.
+  starts for S or U (the stale "merge manually" log after a fast merge is
+  pr-92041d7, out of scope).
 - WHEN `add S` (no flag), `add S --auto-merge`, `remove S` + `add S`, THEN
   policies change only as flagged and the stop mark survives remove/re-add.
 - GIVEN stop-before-merge D needed by auto-merge Q, WHEN D is merge-ready,
