@@ -1226,7 +1226,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # Build the diff pane command first.  We use git --no-pager
         # and pipe through less ourselves so that quitting the pager
         # doesn't kill the pane (git's built-in pager can cause SIGPIPE
-        # exit codes that break && chains).
+        # exit codes that break && chains).  Fall back to cat when less
+        # isn't on PATH (minimal hosts/containers) — a bare `| less -R`
+        # swallows all the output and leaves a blank pane.  The check runs
+        # in the pane's shell, not here, so it tests where the pane runs.
         shell = os.environ.get("SHELL", "/bin/bash")
         header = f"=== Review: {display_id} — {title} ==="
         # Use backend-appropriate diff base:
@@ -1253,7 +1256,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             f" && echo ''"
             f" && echo '--- Full diff ---'"
             f" && git --no-pager diff {diff_ref}...HEAD"
-            f"; }} | less -R"
+            f"; }} | if command -v less >/dev/null 2>&1;"
+            f" then less -R; else cat; fi"
             f"; exec {shell}"
         )
 
