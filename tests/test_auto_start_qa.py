@@ -294,8 +294,10 @@ class TestRaceGuard:
 
         mock_start.assert_not_called()
 
-    def test_after_poll_cleanup_auto_start_can_restart(self, tmp_path):
-        """After poll_qa_state removes the loop entry, auto-start can restart."""
+    def test_after_poll_cleanup_finished_pass_is_not_relaunched(self, tmp_path):
+        """After poll_qa_state removes the loop entry, the PASS stays recorded
+        in runtime_state, so auto-start does not re-run the finished QA (it
+        awaits sign-off); once a new QA run is recorded it may restart."""
         from pm_core.tui.auto_start import _auto_start_qa_loops
         from pm_core.tui.qa_loop_ui import poll_qa_state
 
@@ -319,10 +321,16 @@ class TestRaceGuard:
             poll_qa_state(app)
         assert "pr-001" not in app._qa_loops
 
-        # Now auto-start can restart QA
+        # The finished PASS is not relaunched by the scheduler
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             _auto_start_qa_loops(app)
+        mock_start.assert_not_called()
 
+        # A newer QA run (e.g. started with 't') replaces the record
+        from pm_core import runtime_state
+        runtime_state.set_action_state("pr-001", "qa", "running")
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app)
         mock_start.assert_called_once_with(app, "pr-001")
 
 

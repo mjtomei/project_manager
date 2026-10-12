@@ -76,7 +76,9 @@ class FakeApp:
 
 @pytest.fixture(autouse=True)
 def _quiet_watcher():
-    with patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+    # Never consult the real ~/.pm/runtime from these tests.
+    with patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+         patch("pm_core.runtime_state.get_action_state", return_value={}):
         yield
 
 
@@ -559,7 +561,7 @@ class TestBuildStatus:
                          stop_before_merge={"a"},
                          signoff={"a": {"verdict": "SIGNOFF_MERGE", "fresh": True}}),
                  "a")
-        assert "stop-before-merge — press g" in r["reason"]
+        assert "stop-before-merge — press g" in r["reason"] and "fresh" in r["reason"]
         assert r["policy"] == POLICY_STOP
 
     def test_signoff_stale(self):
@@ -696,6 +698,11 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
         def log_message(self, msg, **kw):
             self.logs.append(msg)
 
+        restarted = 0
+
+        def action_restart(self):
+            self.restarted += 1
+
     async def body():
         app = Host()
         async with app.run_test(size=(140, 40)) as pilot:
@@ -715,5 +722,50 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
             await pilot.press("escape")
             await pilot.pause()
             assert not isinstance(app.screen, AutoRunsScreen)
+            # Ctrl+R (pm tui restart / merge restart) passes through the popup
+            app.push_screen(AutoRunsScreen())
+            await pilot.pause()
+            await pilot.press("ctrl+r")
+            await pilot.pause()
+            assert app.restarted == 1
+            assert not isinstance(app.screen, AutoRunsScreen)
 
     asyncio.run(body())
+
+
+def test_recorded_qa_verdict_used_when_loop_dropped(tmp_path):
+    """A finished QA run leaves _qa_loops after one tick; the runtime_state
+    verdict must still drive the reported state (not 'queued')."""
+    app = _enabled_app([_pr("a", status="qa", workdir="/w/a")], ["a"], tmp_path)
+    with patch("pm_core.runtime_state.get_action_state",
+               return_value={"state": "done", "verdict": "PASS"}):
+        s = auto_start.build_status(app)
+    r = _run(s, "a")
+    assert r["state"] == "waiting" and "awaiting sign-off" in r["reason"]
+    assert r["qa"]["recorded"] is True
+
+
+def test_qa_pass_with_fresh_signoff_reports_signed_off():
+    r = _run(_status([_pr("a", status="qa")], ["a"], stop_before_merge={"a"},
+                     qa_loops={"a": {"verdict": "PASS", "recorded": True}},
+                     signoff={"a": {"verdict": "SIGNOFF_MERGE", "fresh": True}}),
+             "a")
+    assert r["state"] == "waiting" and "signed off" in r["reason"]
+
+
+
+@pytest.mark.parametrize("recorded,relaunch", [
+    ({"state": "done", "verdict": "PASS"}, False),
+    ({"state": "done", "verdict": "INPUT_REQUIRED"}, False),
+    ({"state": "done", "verdict": "NEEDS_WORK"}, True),
+    ({"state": "running"}, True),
+    ({}, True),
+])
+def test_finished_qa_not_relaunched_by_scheduler(tmp_path, recorded, relaunch):
+    """Restart / extra scheduler passes must not re-run a QA run that
+    already finished PASS (awaiting sign-off) or INPUT_REQUIRED."""
+    app = _enabled_app([_pr("a", status="qa", workdir="/w/a")], ["a"], tmp_path)
+    with patch("pm_core.runtime_state.get_action_state", return_value=recorded), \
+         patch("pm_core.tui.qa_loop_ui.start_qa") as sq:
+        auto_start._auto_start_qa_loops(app)
+    assert sq.called is relaunch

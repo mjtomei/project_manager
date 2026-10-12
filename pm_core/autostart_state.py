@@ -182,6 +182,13 @@ def _policy(pr_id: str, stop: set) -> str:
     return POLICY_STOP if pr_id in stop else POLICY_AUTO
 
 
+def _signed_off_reason(pr_id: str, stop: set) -> str:
+    if pr_id in stop:
+        return "signed off (fresh SIGNOFF_MERGE); stop-before-merge — press g"
+    return ("signed off (fresh SIGNOFF_MERGE); merge not automated from "
+            "sign-off — press g")
+
+
 def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
     """Return ``(phase, state, reason)`` for one PR from live evidence."""
     pr_id = pr["id"]
@@ -278,8 +285,15 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
                     return phase, "running", "planning scenarios"
                 return phase, "running", f"scenario {done}/{total} done"
             if verdict == "INPUT_REQUIRED":
+                if qa.get("recorded"):
+                    return (phase, "waiting",
+                            "last QA run ended INPUT_REQUIRED (see QA note); "
+                            "press t / z t to re-run QA")
                 return phase, "waiting", "QA INPUT_REQUIRED — answer in QA window"
             if verdict == "PASS":
+                signoff = (inp.get("signoff") or {}).get(pr_id) or {}
+                if signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE":
+                    return phase, "waiting", _signed_off_reason(pr_id, stop)
                 return (phase, "waiting",
                         "QA passed; awaiting sign-off (press i — automatic "
                         "sign-off hand-off not yet implemented)")
@@ -301,10 +315,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
         if not signoff.get("fresh"):
             return phase, "waiting", f"{verdict} stale (HEAD moved); re-run sign-off"
         if verdict == "SIGNOFF_MERGE":
-            if pr_id in stop:
-                return phase, "waiting", "signed off; stop-before-merge — press g"
-            return (phase, "waiting",
-                    "signed off; merge not automated from sign-off — press g")
+            return phase, "waiting", _signed_off_reason(pr_id, stop)
         if verdict == "SIGNOFF_BLOCKED":
             return phase, "paused", "sign-off BLOCKED — needs human decision"
         return phase, "waiting", f"routed {verdict}"
@@ -374,6 +385,7 @@ def build_status(inp: dict) -> dict:
                 "running": bool(qa.get("running")),
                 "verdict": qa.get("verdict") or "",
                 "error": qa.get("error") or "",
+                "recorded": bool(qa.get("recorded")),
             } if qa else None),
             "signoff": ({
                 "verdict": signoff.get("verdict"),

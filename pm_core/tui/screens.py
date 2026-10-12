@@ -640,6 +640,9 @@ class AutoRunsScreen(ModalScreen):
         Binding("enter", "focus_run", "Focus window"),
         Binding("f", "focus_run", "Focus window", show=False),
         Binding("r", "refresh_runs", "Refresh"),
+        # The popup may stay open indefinitely; it must not swallow the
+        # Ctrl+R that `pm tui restart` / merge-triggered restarts send.
+        Binding("ctrl+r", "restart_app", "Restart", show=False),
     ]
 
     CSS = """
@@ -657,6 +660,9 @@ class AutoRunsScreen(ModalScreen):
     }
     #runs-title {
         text-style: bold;
+    }
+    #runs-body {
+        width: 100%;
     }
     #runs-footer {
         color: $text-muted;
@@ -810,6 +816,10 @@ class AutoRunsScreen(ModalScreen):
         if session:
             from pm_core import tmux as tmux_mod
             tmux_mod.select_window(session, win["id"])
+
+    def action_restart_app(self) -> None:
+        self.action_close()
+        self.app.action_restart()
 
     def action_close(self) -> None:
         if self._timer is not None:

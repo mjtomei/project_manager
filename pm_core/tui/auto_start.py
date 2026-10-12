@@ -665,9 +665,13 @@ async def check_and_start(app) -> None:
             _log.info("auto_start: %s launch already in flight, skipping", pr_id)
             continue
         launching.add(pr_id)
-        _log.info("auto_start: starting ready PR %s", pr_id)
         if pr.get("status") == "pending":
+            _log.info("auto_start: starting ready PR %s", pr_id)
             app.log_message(f"Auto-start: starting {pr_id}")
+        else:
+            # ``pm pr start --background`` no-ops when the window exists.
+            _log.info("auto_start: ensuring impl window for in_progress PR %s",
+                      pr_id)
         try:
             await _start_pr_quiet(app, pr_id)
             started = True
@@ -719,6 +723,21 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
 
 
+QA_HOLD_VERDICTS = ("PASS", "INPUT_REQUIRED")
+
+
+def recorded_qa_verdict(pr_id: str) -> str | None:
+    """Verdict of the PR's last *finished* QA run (runtime_state), or None."""
+    try:
+        from pm_core import runtime_state as _rs
+        rec = _rs.get_action_state(pr_id, "qa") or {}
+    except Exception:
+        return None
+    if rec.get("state") == "done":
+        return rec.get("verdict") or None
+    return None
+
+
 def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
     """Start QA loops for in-scope qa-status PRs without one running.
 
@@ -746,6 +765,16 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # and restart QA before the completion handler runs.
         qa_loop = app._qa_loops.get(pr_id)
         if qa_loop and (qa_loop.running or qa_loop.latest_verdict):
+            continue
+        # A finished run leaves _qa_loops one tick after completion; its
+        # verdict is recorded in runtime_state.  PASS waits for sign-off and
+        # INPUT_REQUIRED for a human — re-running QA on every later
+        # scheduler pass (or restart) would only duplicate finished work.
+        # Any real QA start (review→qa, ``t``) overwrites this record.
+        recorded = recorded_qa_verdict(pr_id)
+        if recorded in QA_HOLD_VERDICTS:
+            _log.debug("auto_start: %s QA already ended %s, not relaunching",
+                       pr_id, recorded)
             continue
         # Skip if no workdir
         if not pr.get("workdir"):
@@ -821,6 +850,17 @@ def collect_status_inputs(app) -> dict:
                     for pid, st in (app._review_loops or {}).items() if scoped(pid)}
     qa_loops = {pid: autostart_state.qa_progress_input(st)
                 for pid, st in (app._qa_loops or {}).items() if scoped(pid)}
+    # A finished QA run is dropped from _qa_loops after one poll tick; its
+    # verdict survives in runtime_state (qa action ``done``).  Report that
+    # recorded verdict rather than claiming the PR is merely queued.
+    for pr in prs:
+        pr_id = pr.get("id")
+        if (pr.get("status") == "qa" and pr_id not in qa_loops
+                and pr_id and scoped(pr_id)):
+            verdict = recorded_qa_verdict(pr_id)
+            if verdict:
+                qa_loops[pr_id] = {"running": False, "verdict": verdict,
+                                   "recorded": True}
 
     impl_idle: dict[str, str] = {}
     tracker = getattr(app, "_pane_idle_tracker", None)
@@ -839,7 +879,11 @@ def collect_status_inputs(app) -> dict:
                         else "idle" if tracker.is_idle(pr_id) else "active")
             except Exception:
                 pass
-        if status == "sign_off" or pr_id in pending_merge:
+        # Sign-off record freshness needs a ``git rev-parse``; only look
+        # where it matters (QA passed, sign-off step, or a pending merge).
+        qa_passed = (status == "qa"
+                     and (qa_loops.get(pr_id) or {}).get("verdict") == "PASS")
+        if qa_passed or status == "sign_off" or pr_id in pending_merge:
             from pm_core import signoff as _signoff
             rec = pr.get("signoff") or {}
             sha = _signoff.head_sha(pr.get("workdir"))
