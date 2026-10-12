@@ -417,6 +417,21 @@ class TestRunFakeClaudeNoVerdict:
             self._capture(verdict="NONE", preamble=0, hold=0)
         assert call(0) not in mock_sleep.call_args_list
 
+    def test_verdict_session_holds_open_on_a_tty(self):
+        # A manual review pane has no session_id but a tty on stdin: like
+        # a real interactive Claude, the fake must stay open after its
+        # verdict instead of collapsing the pane.
+        with patch("pm_core.fake_claude._stdin_is_tty", return_value=True), \
+             patch("pm_core.fake_claude._hold_open") as mock_hold:
+            self._capture(verdict="PASS", preamble=0, hold=None)
+        mock_hold.assert_called_once_with(None, session_id=None)
+
+    def test_verdict_session_exits_without_tty(self):
+        with patch("pm_core.fake_claude._stdin_is_tty", return_value=False), \
+             patch("pm_core.fake_claude._hold_open") as mock_hold:
+            self._capture(verdict="PASS", preamble=0, hold=None)
+        mock_hold.assert_not_called()
+
     def test_hold_none_blocks_on_stdin(self):
         # hold=None must read stdin until EOF — emulates staying open until
         # the pane's tty closes.  A finite StringIO returns immediately.

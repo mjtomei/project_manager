@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e308f3f
+  active_pr: pr-001
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -24973,6 +24973,22 @@ prs:
       /pm-captures/scenarios/3/{pre-fix,post-fix}, plus post-fix/story2-fresh/ab-resize-check.txt.'
     created_at: '2026-10-12T17:00:07Z'
     last_edited: '2026-10-12T17:00:07Z'
+  - id: note-e08b9cf
+    text: 'QA s4 re-eval: the cat-fallback last-diff-line overwrite on resize reproduced
+      in s4 story 1 too; s3''s 8282a632 (2 blank rows after cat) is the kept fix — the
+      s4 duplicate footer variant was dropped in the rebase. Verified on the real surface
+      in s4 post-fix with a live Claude pane forcing several resize redraws.'
+    created_at: '2026-10-12T17:00:17Z'
+    last_edited: '2026-10-12T17:00:17Z'
+  - id: note-15af145
+    text: 'Incidental (QA s4): fake-claude verdict sessions without a session_id now
+      stay open when stdin is a tty (manual `pm pr review` panes), like real interactive
+      Claude — previously the review-claude pane exited at once, collapsing the review
+      window to 1 pane and dropping its registry entry. CLI pipes/unit tests (non-tty)
+      still exit immediately. Note: with both panes live, pm layout puts review-claude
+      on the left (left 0) and review-diff on the right.'
+    created_at: '2026-10-12T17:00:17Z'
+    last_edited: '2026-10-12T17:00:17Z'
 - id: pr-3ca6b36
   plan: plan-regression
   title: 'Regression test: CLI/command-bar help completeness, flag consistency, and

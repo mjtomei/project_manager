@@ -15,7 +15,8 @@ one for any pane whose verdict a loop will poll) it also:
   * emits (and, while held open, periodically refreshes) the
     ``idle_prompt`` hook event the poller waits on.
 
-Without a ``session_id`` (CLI / unit-test use) it just writes to stdout.
+Without a ``session_id`` (CLI / unit-test use) it just writes to stdout,
+staying open afterwards only when stdin is a terminal (a live tmux pane).
 """
 
 import json
@@ -382,6 +383,13 @@ def _emit_idle_hook(session_id: str) -> None:
         pass
 
 
+def _stdin_is_tty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def _hold_open(hold: float | None, session_id: str | None = None) -> None:
     """Keep the process alive after the session's output.
 
@@ -545,7 +553,12 @@ def run_fake_claude(
     #    - verdict sessions stay open when a session_id was provided, so the
     #      poller has a live pane and a refreshed hook to detect against —
     #      the loop kills the pane once it has read the verdict.
-    #    Without a session_id a verdict session exits immediately (CLI /
-    #    unit-test use), preserving the original drop-in behaviour.
-    if no_verdict or session_id:
+    #    - verdict sessions launched on a terminal (e.g. a manual
+    #      ``pm pr review`` pane, which gets no session_id) stay open too:
+    #      a real interactive Claude does, and exiting would collapse the
+    #      review window to its diff pane.
+    #    Otherwise (no session_id, stdin not a tty — CLI pipes / unit tests)
+    #    a verdict session exits immediately, preserving the original
+    #    drop-in behaviour.
+    if no_verdict or session_id or _stdin_is_tty():
         _hold_open(hold, session_id=session_id)
