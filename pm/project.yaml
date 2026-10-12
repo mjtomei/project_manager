@@ -3257,15 +3257,49 @@ prs:
   reviewed_at: '2026-03-23T15:03:46.791455+00:00'
 - id: pr-b53bfe2
   plan: bugs
-  title: Fix trust prompt blocking implementation sessions
+  title: Resolve workspace trust across all automated workflow sessions
   branch: pm/pr-b53bfe2-fix-trust-prompt-blocking-implementation-sessions
   status: pending
   depends_on: []
-  description: Claude Code trust prompt blocks automated sessions in new workdirs.
-    The existing --dangerously-skip-permissions flag is too broad. Need targeted auto-accept
-    via settings or TUI detection.
+  description: 'Workspace trust prompts block unattended PM sessions in newly created
+    workdirs. Reproduced in #228 and again in #229 after moving to the main PM session:
+    the host QA planner sat at trust for one hour, timed out with zero scenarios,
+    and the finalizer then blocked at the same prompt. Existing broad permission-bypass
+    flags do not establish workspace trust reliably. The old suggestion that the watcher
+    framework might subsume this issue is not verified and does not satisfy acceptance.
+
+
+    Provide reliable, narrowly scoped trust bootstrap for PM-created or explicitly
+    authorized project workdirs across all workflow roles: implementation, review,
+    host QA planning, scenario preparation/execution, independent verification, QA
+    finalization, sign-off, and merge resolution. Cover newly created QA fixture/interactive
+    checkouts, reused workdirs, and restart/session handoff. Use supported provider
+    configuration or explicit handling of the known workspace prompt; do not globally
+    trust arbitrary folders or conflate workspace trust with blanket tool permission
+    bypass. Keep provider-specific mechanics behind the existing session-launch boundary
+    so other runtimes can supply their own behavior. If bootstrap cannot complete,
+    expose a bounded, actionable failure rather than waiting an hour and proceeding
+    toward finalization with zero scenarios.
+
+
+    Acceptance: start the real CLI in a fresh known checkout with no pre-existing
+    trust entry and verify that the intended prompt runs without manual keys; exercise
+    both host and container/session paths, new QA checkouts, and resumed work. Unknown/unapproved
+    workspace behavior remains explicit. Verify an actual QA plan and worker activity,
+    not only window creation or registry status. Preserve evidence of the original
+    blocked path and the repaired path.
+
+
+    Qualification prerequisite (user decision 2026-10-12): after #229, this PR is
+    the third required fix alongside pr-488ac6d (automatic sign-off handoff) and pr-b8561ac
+    (complete QA planner transcript). Only after all three are adopted and a subsequent
+    representative untouched PR runs from start through nonempty verified QA and fresh
+    sign-off with no human or external-agent shepherding may autostart be called healthy.
+    A configured stop before merge is allowed; manually accepting trust, rewriting
+    a plan, restarting workers, editing phase state, or launching sign-off disqualifies
+    the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-03-08T21:50:08.519655+00:00'
+  updated_at: '2026-10-12T21:08:15.463081+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3273,6 +3307,16 @@ prs:
       programmatic fix.
     created_at: '2026-03-08T21:50:08Z'
     last_edited: '2026-03-08T21:50:08Z'
+  - id: note-b6d2642
+    text: 'Reproduced on #229 after main-session handoff (2026-10-12): review loop
+      a022 PASS on iteration 4 at 19:31:47Z. Host QA planner blocked on workspace-trust
+      prompt for #229 workdir. At 20:31:53Z the driver timed out, parsed zero scenarios,
+      set INPUT_REQUIRED, then launched a finalizer that also blocked on the same
+      trust prompt. No QA scenarios executed. Supervisor accepted trust for this known
+      checkout and requested fresh QA through the TUI. Evidence: captures/pr-0b87a97/qa-recovery-20261012
+      in project_manager-c5a1006b session. The failed run must not count as QA coverage.'
+    created_at: '2026-10-12T20:57:15Z'
+    last_edited: '2026-10-12T20:57:15Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
