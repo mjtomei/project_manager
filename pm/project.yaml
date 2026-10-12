@@ -24999,6 +24999,25 @@ prs:
       on the left (left 0) and review-diff on the right.'
     created_at: '2026-10-12T17:00:17Z'
     last_edited: '2026-10-12T17:00:17Z'
+  - id: note-b9ef4ba
+    text: 'QA env: the stock pm-dev container has NO less (command -v less is empty).
+      For less-present scenarios: sudo apt-get update && sudo apt-get install -y less
+      (sudo is NOPASSWD; works). Toggling at /usr/bin/less needs no tmux restart:
+      the pane resolves it at runtime via the server PATH, which includes /usr/bin.
+      Observe the pager with tmux list-panes -F "#{pane_index} #{pane_current_command}"
+      (less vs bash).'
+    created_at: '2026-10-12T16:43:58Z'
+    last_edited: '2026-10-12T16:43:58Z'
+  - id: note-a5d52e5
+    text: 'QA s2 (pager unchanged w/ less): PASS. Spec mismatches for future runs:
+      (1) diff pane pane_current_command is bash, not less, both pre- and post-fix
+      (less is a grandchild of the pane bash -c), so verify less via ps/(END); (2)
+      diff pane is index 1, Claude pane index 0 after rebalance; (3) review fake with
+      verdicts [PASS] exits immediately on manual pm pr review (no session-id), so
+      use review verdicts [] to keep 2 panes; (4) pm push + merge is needed before
+      pm pr start.'
+    created_at: '2026-10-12T16:50:52Z'
+    last_edited: '2026-10-12T16:50:52Z'
 - id: pr-3ca6b36
   plan: plan-regression
   title: 'Regression test: CLI/command-bar help completeness, flag consistency, and
