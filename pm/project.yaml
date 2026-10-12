@@ -26031,3 +26031,46 @@ prs:
       that guard alone.'
     created_at: '2026-10-12T22:43:42Z'
     last_edited: '2026-10-12T22:43:42Z'
+- id: pr-b19db15
+  plan: bugs
+  title: 'Bug: QA artifact rendering wait can match itself and stall completed work'
+  branch: pm/pr-b19db15-bug-qa-artifact-rendering-wait-can-match-itself-an
+  status: pending
+  depends_on: []
+  description: 'Observed in #229 QA round 2 scenario 10 on 2026-10-12. Both agg/ffmpeg
+    rendering jobs had finished and ffprobe confirmed valid videos (TUI 734.48s, CLI
+    126.78s), but the worker remained blocked for about eight minutes in an improvised
+    shell loop using ! pgrep -f "dl-agg/agg|ffmpeg -loglevel". pgrep matched the waiting
+    shell itself because its command line contained the same pattern. No renderer
+    was still running. The shepherd verified the output files, terminated only the
+    waiting shell (container PID 8808), and told the worker to continue. This was
+    a generated worker command, not a matching polling loop in checked-in PM code;
+    current recording recipes prescribe synchronous rendering but do not explicitly
+    guard against this workaround.
+
+
+    Harden QA artifact completion guidance and any shared rendering helper so workers
+    wait on the actual job handle/PID and check its exit status, with a bounded timeout
+    and actionable failure. Validate the expected artifact before declaring success;
+    a leftover file alone is insufficient. Avoid broad process-name polling that can
+    match the polling shell itself. Keep the correction small and reusable for tmux-screen-recording.md
+    and cli-recording.md. Add meaningful regression coverage if introducing a helper:
+    completed renderer while a shell contains the renderer pattern, renderer failure,
+    and timeout. Exercise the prescribed workflow in a real scenario and preserve
+    completion/failure evidence. Do not silently treat a killed wait or stale output
+    as a successful rendering job.
+
+
+    Evidence: captures/pr-0b87a97/shepherd-20261012/qa-round-2-s10-render-wait-recovery.json
+    in session project_manager-c5a1006b; native worker session 48124da4-b9df-405b-979e-30c421bc9e48.
+    This intervention means #229 is still a supervised run and cannot qualify unattended
+    autostart.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T23:04:43.463024+00:00'
+  updated_at: '2026-10-12T23:04:43.463024+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
