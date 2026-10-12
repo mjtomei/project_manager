@@ -753,6 +753,31 @@ class TestCLI:
         assert res.exit_code == 2
         assert json.loads(res.output)["error"] == "owner_unavailable"
 
+    def test_zombie_owner_is_unavailable_not_timeout(self, project, tmp_path):
+        """A killed-but-unreaped TUI passes kill(pid, 0); it can never reply,
+        so it is a stale owner, not a busy one (QA s7: kill -9 the TUI while
+        its tmux server hadn't reaped it → 10s owner_timeout)."""
+        import subprocess, sys, time
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        deadline = time.monotonic() + 5
+        while (time.monotonic() < deadline
+               and "Z" not in open(f"/proc/{child.pid}/stat").read().rpartition(")")[2].split()[:1]):
+            time.sleep(0.02)
+        pidfile = tmp_path / "tui.pid"
+        pidfile.write_text(str(child.pid))
+        try:
+            with patch("pm_core.cli.autostart._tui_pidfile_for_session",
+                       return_value=pidfile), \
+                 patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+                res = _cli(["status", "--json", "-s", "pm-x", "--timeout", "5"])
+        finally:
+            child.wait()
+        assert res.exit_code == 2
+        out = json.loads(res.output)
+        assert out["error"] == "owner_unavailable"
+        assert "stale pidfile" in out["message"]
+        trig.assert_not_called()
+
     def test_owner_timeout(self, project, tmp_path):
         pidfile = tmp_path / "tui.pid"
         import os
