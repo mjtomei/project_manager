@@ -684,11 +684,13 @@ def create_container(
     # through to the mount when the host path isn't visible.
     if session_tag and pr_id:
         try:
-            from pm_core.paths import captures_dir, CONTAINER_CAPTURES_MOUNT
+            from pm_core.paths import (captures_dir, CAPTURES_PR_ENV,
+                                       CONTAINER_CAPTURES_MOUNT)
             host_captures = captures_dir(pr_id, session_tag=session_tag)
             if host_captures is not None:
                 cmd.extend(["-v",
-                            f"{host_captures}:{CONTAINER_CAPTURES_MOUNT}"])
+                            f"{host_captures}:{CONTAINER_CAPTURES_MOUNT}",
+                            "-e", f"{CAPTURES_PR_ENV}={pr_id}"])
         except Exception:
             _log.warning("Failed to resolve captures dir for pr=%s tag=%s",
                          pr_id, session_tag, exc_info=True)

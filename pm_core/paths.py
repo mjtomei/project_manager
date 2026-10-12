@@ -119,7 +119,12 @@ def captures_dir(pr_id: str,
         if host_path.is_dir():
             return host_path
     mount = Path(CONTAINER_CAPTURES_MOUNT)
-    if mount.is_dir():
+    # The mount belongs to one PR (PM_CAPTURES_PR, set at container
+    # creation). A throwaway pm project driven inside the container
+    # (e.g. nested fake-Claude QA runs) must not write its own PRs'
+    # captures into it.
+    mount_pr = os.environ.get(CAPTURES_PR_ENV)
+    if mount.is_dir() and (not mount_pr or mount_pr == pr_id):
         return mount
     if host_path is not None:
         host_path.mkdir(parents=True, exist_ok=True)
@@ -155,6 +160,10 @@ def captures_root(session_tag: str | None = None,
 # chance of colliding with anything the host repo might already have at
 # a top-level ``/captures`` path.
 CONTAINER_CAPTURES_MOUNT = "/pm-captures"
+
+# Env var naming the PR whose captures dir is mounted at
+# CONTAINER_CAPTURES_MOUNT (see captures_dir).
+CAPTURES_PR_ENV = "PM_CAPTURES_PR"
 
 
 def latest_qa_status_path(pr_id: str) -> Path | None:
