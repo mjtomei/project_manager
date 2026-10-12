@@ -8,6 +8,11 @@
    `| if command -v less >/dev/null 2>&1; then less -R; else cat; fi`.
    When `less` is absent the header/status/diffstat/diff are printed with `cat`
    to the pane's scrollback, and then `exec $SHELL` leaves an interactive shell.
+   (Updated per QA s3/s4, commit 8282a632: the cat branch is
+   `else cat; echo; echo; fi`. When the pane widens, a wrapped shell prompt's
+   SIGWINCH redraw moves up by its old row count. The two blank rows absorb
+   that move, so the last diff line is not overwritten. This is the bug filed
+   as pr-e308f3f.)
 2. A regression test in `tests/test_review_window_quoting.py` runs the
    captured `diff_cmd` (with the trailing `exec $SHELL` removed) under bash
    with PATH stripped of `less`, against a real git repo, and asserts the
@@ -31,6 +36,15 @@
   there is only one call site.
 - With `cat`, a long diff scrolls past. Resolved: acceptable. tmux
   copy-mode scrollback is available, and this matches the sign-off precedent.
+
+## Incidental changes (from QA, recorded in PR notes)
+- `tests/test_review_window_quoting.py`: the existing `bash -n` checks were
+  vacuous. The `fake_tmux` fixture patches the global `subprocess.run`, so
+  these checks now use `_real_run`, captured at import time.
+- `pm_core/fake_claude.py` (f5a029a4): a verdict session with no
+  `session_id` now stays open when stdin is a tty. Manual `pm pr review`
+  panes stay open the way a real interactive Claude does. Non-tty callers
+  (CLI pipes, unit tests) still exit immediately.
 
 ## Edge Cases
 - `less` exists but is not executable or is broken: out of scope.
