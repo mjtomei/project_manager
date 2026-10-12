@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-001
+  active_pr: pr-5704ff0
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25620,3 +25620,30 @@ prs:
       once pr-71e9ec7 merges.'
     created_at: '2026-10-12T17:00:08Z'
     last_edited: '2026-10-12T17:00:08Z'
+- id: pr-5704ff0
+  plan: bugs
+  title: 'Bug: review loop fails "Not in a pm tmux session" when TUI pane resolves
+    to a non-pm-prefixed grouped session'
+  branch: pm/pr-5704ff0-bug-review-loop-fails-not-in-a-pm-tmux-session-whe
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/helpers.py _get_current_pm_session -> tmux.get_session_name()
+    runs display-message -t $TMUX_PANE #{session_name}; when the user has attached
+    a grouped viewer session not named pm-* (e.g. `tmux new-session -d -t pm-<tag>
+    -s viewer`), tmux reports that session for the shared TUI pane, so the name check
+    fails and loop_shared.get_pm_session returns None. Repro (pr-71e9ec7 QA s5): create
+    a grouped session named qa-view on the pm session, then press z z d in the TUI
+    -> review loop immediately ends "! ERROR (1 iteration)", debug log: RuntimeError:
+    Not in a pm tmux session (review_loop.py _run_claude_review). Renaming the grouped
+    session to pm-<tag>~9 fixes it. Fix idea: resolve the base pm session via #{session_group}
+    or list sessions containing the pane and pick the pm- one, or fall back to _get_session_name_for_cwd
+    as cli/helpers._get_pm_session does.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T17:25:41.895887+00:00'
+  updated_at: '2026-10-12T17:25:41.895887+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
