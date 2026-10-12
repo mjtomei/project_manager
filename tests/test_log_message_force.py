@@ -174,3 +174,42 @@ def test_starting_message_deferred_by_confirmation_hold(tmp_path):
         asyncio.run(auto_start.check_and_start(app))
     assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
     assert app._log_held[0] == "Auto-start: starting pr-x"
+
+
+# QA s13 (pr-0b87a97): ``g`` on a stop-before-merge target — the merge's
+# own reload pruned the target and logged "target Y merged — removed", but
+# the "Merging Y..." spinner (0.1s ticks) and the merge's result line
+# overwrote it before it painted.
+
+def test_merged_target_message_survives_merge_spinner():
+    app, shown = _stub_app()
+    app._auto_start_targets = {"pr-y": {"policy": "stop_before_merge"},
+                               "pr-t": {"policy": "stop_before_merge"}}
+    app._auto_start_all = False
+    _log(app, "⠋ Merging pr-y...", capture=False)
+    with patch.object(auto_start, "_sync_enabled"):
+        auto_start._prune_completed_targets(
+            app, [{"id": "pr-y", "status": "merged"},
+                  {"id": "pr-t", "status": "qa"}])
+    _log(app, "⠙ Merging pr-y...", capture=False)
+    _log(app, "⏳ pr-z: Independent Z")  # merge's last stdout line
+    assert shown[-1] == " Auto-start: target pr-y merged — removed (1 remaining)"
+    app._log_hold_until = 0.0  # hold expires
+    for cb in app.timers:
+        cb()
+    assert shown[-1] == " ⏳ pr-z: Independent Z"
+
+
+def test_last_merged_target_one_line_with_off():
+    # A separate "all targets complete — OFF" line overwrote the merged
+    # line in the same frame; the last completion is now one message.
+    app, shown = _stub_app()
+    app._auto_start_targets = {"pr-y": {"policy": "stop_before_merge"}}
+    app._auto_start_all = False
+    with patch.object(auto_start, "_disable") as disable:
+        auto_start._prune_completed_targets(
+            app, [{"id": "pr-y", "status": "merged"}])
+    disable.assert_called_once()
+    _log(app, "⠙ Merging pr-y...", capture=False)
+    assert shown == [" Auto-start: target pr-y merged — removed "
+                     "(all targets complete — auto-start OFF)"]

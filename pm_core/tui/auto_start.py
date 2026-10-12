@@ -663,15 +663,24 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
         if pr is None or status in autostart_state.TERMINAL_STATUSES:
             targets.pop(t, None)
             done.append((t, status or "missing"))
+    if not done:
+        return
     for t, status in done:
         _log.info("auto_start: target %s %s, removed (%d remaining)",
                   t, status, len(targets))
-        app.log_message(f"Auto-start: target {t} {status} — removed "
-                        f"({len(targets)} remaining)", force=True)
-    if done and not targets and not is_all_mode(app):
-        app.log_message("Auto-start: all targets complete — OFF", force=True)
+    turn_off = not targets and not is_all_mode(app)
+    rest = ("all targets complete — auto-start OFF" if turn_off
+            else f"{len(targets)} remaining")
+    # One line, held: a TUI ``g`` merge prunes here from the reload its own
+    # merge triggers, while the "Merging <pr>..." spinner repaints every
+    # 0.1s and the merge's result line follows — unheld (or followed by a
+    # separate "OFF" line) this never painted.
+    app.log_message(
+        "Auto-start: " + ", ".join(f"target {t} {s}" for t, s in done)
+        + f" — removed ({rest})", force=True, hold=CONFIRM_HOLD_SECONDS)
+    if turn_off:
         _disable(app)
-    elif done:
+    else:
         _sync_enabled(app)  # refresh ◎ markers / AUTO ×N and watcher scope
 
 
