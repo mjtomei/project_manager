@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T23:49:53.992316+00:00'
+  updated_at: '2026-10-12T23:54:13.985162+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26186,6 +26186,18 @@ prs:
       ×N clipped in unzoomed ~40-col pane).'
     created_at: '2026-10-12T23:49:53Z'
     last_edited: '2026-10-12T23:49:53Z'
+  - id: note-5ffe415
+    text: 'QA s13 (shared dep, concurrent CLI/keys/merges): every Then held except
+      one. The TUI never painted "Auto-start: target Y merged — removed (N remaining)"
+      after a g merge of a stop target. The prune ran from the reload the merge itself
+      triggered, and was forced but unheld, so the 0.1s Merging spinner and then the
+      merge result line overwrote it. On the last target, a second "all targets complete
+      — OFF" line also overwrote it. Fixed in e0d891a7: one held line, with OFF folded
+      in. D2 only showed its line because a held "targets +=" line happened to precede
+      it. Recipe: four shell panes busy-wait on one touch file, which gives starts
+      within ~30us. Read the log line from tail -3 of capture-pane.'
+    created_at: '2026-10-12T23:54:13Z'
+    last_edited: '2026-10-12T23:54:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
