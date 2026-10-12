@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-5704ff0
+  active_pr: pr-fc644c4
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25931,3 +25931,30 @@ prs:
     created_at: '2026-10-12T19:11:26Z'
     last_edited: '2026-10-12T19:11:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
+- id: pr-fc644c4
+  plan: bugs
+  title: 'Bug: auto-review launches a throwaway review session that the review loop
+    immediately replaces'
+  branch: pm/pr-fc644c4-bug-auto-review-launches-a-throwaway-review-sessio
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/review_loop_ui.py _auto_review_idle_prs (pre-existing
+    on master): when an impl goes idle under auto-start it runs `pm pr review --background
+    <pr>` (launches a review window + Claude session) and then _start_loop immediately
+    relaunches iteration 1 with `pr review --fresh --review-loop`, killing the first
+    window ~0.2s later. Every auto-reviewed PR burns one extra Claude session start.
+    Repro (pr-0b87a97 QA s1, 2026-10-12): fake-claude review verdicts ["NEEDS_WORK","PASS"],
+    arm O on two PRs -> debug log shows `fake-claude --verdict NEEDS_WORK` (no --session-id,
+    the throwaway) then `--verdict PASS --session-id ...` (the loop) at the same second
+    for each PR, and both PRs pass review on iteration 1; the scripted NEEDS_WORK
+    is eaten by the killed window. Fix idea: transition status to in_review without
+    launching a window (or let the loop adopt the existing window for iteration 1).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T21:19:46.180048+00:00'
+  updated_at: '2026-10-12T21:19:46.180048+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
