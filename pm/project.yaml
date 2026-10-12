@@ -25918,7 +25918,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T23:15:50.634515+00:00'
+  updated_at: '2026-10-12T23:23:23.615569+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26114,6 +26114,16 @@ prs:
       installer deselected).'
     created_at: '2026-10-12T23:15:50Z'
     last_edited: '2026-10-12T23:15:50Z'
+  - id: note-15fdda0
+    text: 'QA plan round 3 (S11-S15) is in qa.md section 8, committed and pushed as
+      bf756471 (verified on GitHub before emitting QA_PLAN_END). No application code
+      changed during planning, so review 9448 i2 PASS still applies to e98caf98. Added
+      R30-R33 (command-bar focus vs drained CLI cmds/reloads, 80-col AUTO xN, auto-sequence
+      sign-off refresh + policy_changed, zombie owner), round-2 env notes in section
+      2, and ambiguity 10 (known filed bugs out of scope). Workers: check /workspace
+      HEAD is bf756471 or later before and after (git proxy rewinds, pr-8cdbe60).'
+    created_at: '2026-10-12T23:23:23Z'
+    last_edited: '2026-10-12T23:23:23Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
