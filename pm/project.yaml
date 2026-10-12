@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-b977417
+  active_pr: pr-f094946
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25908,7 +25908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T21:35:43.566756+00:00'
+  updated_at: '2026-10-12T21:40:05.259621+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -25973,6 +25973,20 @@ prs:
       window-resized stderr painted over TUI. Filed bug for start-failure-stays-queued.'
     created_at: '2026-10-12T21:35:43Z'
     last_edited: '2026-10-12T21:35:43Z'
+  - id: note-a4a9252
+    text: 'QA s2 (CLI target mgmt/validation/owner errors): all CLI/JSON/exit-code
+      Thens held. Fixed f9358d7c: "Auto-start: targets += X" (A key / autostart target)
+      and "ON (all ready PRs…)" never painted (same-frame "starting X"/"Review loop
+      started" overwrote them) -> log_message(hold=3s) defers follow-ups; Esc on runs
+      popup opened via command-bar `autostart status` returned focus to the command
+      bar -> tree refocused unconditionally. Env notes for re-runs: run `pm push`
+      + `git merge pm/sync-*` before adding targets (else pm pr start fails "not committed
+      on master", only visible in ~/.pm/debug log); tmux SIGCONTs a SIGSTOPped pane
+      process, so the owner_timeout step needs a `while :; do kill -STOP $P; done`
+      loop; record via a grouped view session because auto-started QA select_window
+      switches attached clients (filed pr-f094946).'
+    created_at: '2026-10-12T21:40:05Z'
+    last_edited: '2026-10-12T21:40:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26048,6 +26062,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T21:35:42.844845+00:00'
   updated_at: '2026-10-12T21:35:42.844845+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f094946
+  plan: bugs
+  title: 'Bug: auto-started QA loop selects its new window, pulling attached clients
+    off the TUI'
+  branch: pm/pr-f094946-bug-auto-started-qa-loop-selects-its-new-window-pu
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py ~3155: on first-time QA window creation the loop
+    calls tmux_mod.select_window(session, qa-<pr>) unless a popup suppress-switch
+    flag was consumed. That is right for a user-initiated QA start, but when auto-start
+    (pm_core/tui/auto_start.py check_and_start -> qa_loop_ui.start_qa) launches QA
+    in the background, every client attached to the pm session is switched from the
+    TUI window to the new qa-<pr> window with no user action. Repro (pr-0b87a97 QA
+    s2): pm session with an attached client on window main, pm fake-claude config
+    set {"_all": {}}, pm autostart add <pending PR>; the impl goes idle, review PASSes,
+    QA starts and the attached client jumps to qa-<pr> (debug log: "select_window:
+    target=<sess>:qa-<pr>"). Expected: background (auto-start) QA launches should
+    be focus-safe like _start_pr_quiet / review loops (switch=False). Related: #159
+    (refocus consolidation).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T21:39:47.961724+00:00'
+  updated_at: '2026-10-12T21:39:47.961724+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
