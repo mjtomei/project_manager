@@ -124,7 +124,7 @@ def test_diff_cmd_is_shell_safe(fake_tmux, title):
 
     # bash -n parses without executing; non-zero exit => syntax error.
     result = _real_run([bash, "-n", "-c", diff_cmd],
-                            capture_output=True, text=True)
+                       capture_output=True, text=True)
     assert result.returncode == 0, (
         f"diff_cmd has shell syntax error for title={title!r}:\n"
         f"  stderr: {result.stderr}\n"
@@ -146,7 +146,7 @@ def test_diff_cmd_workdir_with_apostrophe(fake_tmux, tmp_path):
     if not bash:
         pytest.skip("bash not available")
     result = _real_run([bash, "-n", "-c", diff_cmd],
-                            capture_output=True, text=True)
+                       capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
