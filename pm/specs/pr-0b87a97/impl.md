@@ -283,6 +283,12 @@ captures under `impl/post-fix/`):
    `autostart list` logs the targets + policies; the unknown-id reload in
    `_resolve_ids` flushes the write queue before re-reading project.yaml.
 
+9. *(review i2)* `REPLY_DIR` lives in `autostart_state` (shared by the CLI
+   poller and the TUI writer); `pm autostart list --json` carries the owner's
+   `error`/`message` when the reply is not ok; `_prune_completed_targets`
+   does nothing when the PR list is empty (unloaded data is not "every target
+   vanished").
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i

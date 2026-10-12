@@ -332,6 +332,13 @@ class TestCheckAndStart:
         assert app._auto_start is False
         assert not auto_start.is_all_mode(app)
 
+    def test_empty_pr_data_does_not_prune_targets(self, tmp_path):
+        """Unloaded/empty PR data must not read as "every target vanished"."""
+        app = _enabled_app([], ["a", "b"], tmp_path)
+        auto_start._prune_completed_targets(app, [])
+        assert auto_start.get_targets(app) == ["a", "b"]
+        assert app._auto_start is True
+
     def test_out_of_scope_not_started(self, tmp_path):
         prs = [_pr("a"), _pr("x")]
         app = _enabled_app(prs, ["a"], tmp_path)
@@ -672,6 +679,20 @@ class TestCLI:
             res = _cli(["list", "--json", "-s", "pm-x", "--timeout", "0.3"])
         assert res.exit_code == 2
         assert json.loads(res.output)["error"] == "owner_timeout"
+
+    def test_list_json_carries_owner_error(self, project, tmp_path):
+        import os
+        pidfile = tmp_path / "tui.pid"
+        pidfile.write_text(str(os.getpid()))
+        err = {"ok": False, "error": "internal", "message": "boom",
+               "changes": [], "status": None}
+        with patch("pm_core.cli.autostart._tui_pidfile_for_session",
+                   return_value=pidfile), \
+             patch("pm_core.cli.autostart._request", return_value=err):
+            res = _cli(["list", "--json", "-s", "pm-x"])
+        assert res.exit_code == 1
+        out = json.loads(res.output)
+        assert (out["ok"], out["error"], out["message"]) == (False, "internal", "boom")
 
     def test_round_trip_through_tui_handler(self, project, tmp_path):
         """CLI → queue → TUI handle_command → reply file → CLI JSON."""

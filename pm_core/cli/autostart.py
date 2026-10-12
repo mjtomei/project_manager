@@ -22,7 +22,7 @@ import click
 
 from pm_core import store
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_STOP, TERMINAL_STATUSES, format_text,
+    POLICY_AUTO, POLICY_STOP, REPLY_DIR, TERMINAL_STATUSES, format_text,
 )
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -112,7 +112,7 @@ def _request(session: str | None, args: list[str], timeout: float) -> dict:
     """Send ``autostart <args> --reply ID`` to the owner and wait for the reply."""
     sess, pid = _resolve_owner(session)
     reply_id = f"{int(time.time())}-{secrets.token_hex(4)}"
-    reply = pm_home() / "autostart-replies" / f"{reply_id}.json"
+    reply = pm_home() / REPLY_DIR / f"{reply_id}.json"
     cmd = " ".join(["autostart", *args, "--reply", reply_id])
     _log.info("autostart cli: session=%s pid=%d cmd=%r", sess, pid, cmd)
     if not trigger_tui_command(sess, cmd):
@@ -274,6 +274,9 @@ def autostart_list(session, timeout, as_json):
            "targets": [{k: t.get(k) for k in
                         ("pr_id", "title", "policy", "added_at", "source")}
                        for t in st.get("targets") or []]}
+    if not out["ok"]:
+        out["error"] = payload.get("error")
+        out["message"] = payload.get("message")
 
     def text(_p):
         click.echo(f"Auto-start: {out['mode']}")

@@ -3283,7 +3283,16 @@ prs:
     changes (e.g. resetting PRs to pending) are not detected until the next merge
     or 5-minute background sync.
   created_at: null
-  updated_at: null
+  updated_at: '2026-10-12T19:22:11.717327+00:00'
+  notes:
+  - id: note-bd83810
+    text: 'From pr-0b87a97: TechTreeApp._load_state now calls auto_start.on_state_loaded(app,
+      old_statuses), which kicks one check_and_start pass when a reload shows an in-scope
+      PR newly merged/closed. It only reacts to merged/closed transitions; extending
+      it to other manual status changes (e.g. reset to pending) is the natural hook
+      for this bug.'
+    created_at: '2026-10-12T19:22:11Z'
+    last_edited: '2026-10-12T19:22:11Z'
 - id: pr-80b04db
   plan: bugs
   title: Fix merge propagation overwriting project.yaml with stale PR branch data

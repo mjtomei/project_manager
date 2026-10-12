@@ -29,14 +29,13 @@ from pathlib import Path
 from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
 from pm_core import autostart_state
-from pm_core.autostart_state import POLICY_AUTO, POLICY_STOP
+from pm_core.autostart_state import POLICY_AUTO, POLICY_STOP, REPLY_DIR
 from pm_core.tui._shell import _run_shell_async
 
 _log = configure_logger("pm.tui.auto_start")
 
 _MERGE_RESTART_MARKER = "merge-restart"
 _BREADCRUMB_FILE = "autostart-resume.json"
-REPLY_DIR = "autostart-replies"
 _REPLY_MAX_AGE = 600  # seconds
 
 
@@ -616,7 +615,8 @@ def on_state_loaded(app, old_statuses: dict) -> None:
 def _prune_completed_targets(app, prs: list[dict]) -> None:
     """Remove targets whose PR merged/closed/vanished; leave the rest."""
     targets = _targets(app)
-    if not targets:
+    # No PR data at all means "not loaded", not "every target vanished".
+    if not targets or not prs:
         return
     pr_map = {p.get("id"): p for p in prs}
     done = []

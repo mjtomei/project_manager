@@ -43,6 +43,10 @@ _STATUS_PHASE = {
 
 TERMINAL_STATUSES = ("merged", "closed")
 
+# ``pm_home()`` subdirectory where the TUI writes ``pm autostart`` replies
+# (``<reply_id>.json``) and the CLI polls for them.
+REPLY_DIR = "autostart-replies"
+
 # Review-loop verdicts that mean "review passed" (mirrors review_loop).
 _REVIEW_PASS = ("PASS", "PASS_WITH_SUGGESTIONS")
 
