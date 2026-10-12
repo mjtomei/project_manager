@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-fc644c4
+  active_pr: pr-92041d7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25908,7 +25908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T19:11:26.286194+00:00'
+  updated_at: '2026-10-12T21:20:22.008804+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -25930,6 +25930,13 @@ prs:
       installer test fail identically on base.'
     created_at: '2026-10-12T19:11:26Z'
     last_edited: '2026-10-12T19:11:26Z'
+  - id: note-93cb1bf
+    text: 'QA s3: fixed TUI dropping "Auto-start: removed X (N remaining)" when a
+      CLI remove lands during a sticky log message (log_message force=True for auto-start
+      confirmations, f4e89681). Filed pr-92041d7 for stale "QA PASS … merge manually"
+      logged after a fast merge.'
+    created_at: '2026-10-12T21:20:21Z'
+    last_edited: '2026-10-12T21:20:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-fc644c4
   plan: bugs
@@ -25954,6 +25961,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T21:19:46.180048+00:00'
   updated_at: '2026-10-12T21:19:46.180048+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-92041d7
+  plan: bugs
+  title: 'Bug: stale "QA PASS for <pr> — merge manually or enable auto-start" logged
+    after the PR already merged'
+  branch: pm/pr-92041d7-bug-stale-qa-pass-for-pr-merge-manually-or-enable-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.py ~L526-533 (QA-complete UI handler). Repro
+    (pr-0b87a97 QA s3 post-fix, fake Claude): auto-start target Y (stop-before-merge)
+    finishes QA; within ~1s of qa_loop logging "QA complete … PASS" run `pm pr signoff
+    record Y` + `pm pr merge Y`. The reload prunes Y from targets ("Auto-start: target
+    Y merged — removed"), then the QA-complete poll handler runs, sees Y no longer
+    in auto-start scope and logs "QA PASS for Y — merge manually or enable auto-start"
+    for a PR that is already merged. Status is not reverted (pm pr list still shows
+    merged); purely a misleading log line. Fix: skip/adjust the PASS message when
+    the PR status is already merged/closed.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T21:20:17.110748+00:00'
+  updated_at: '2026-10-12T21:20:17.110748+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
