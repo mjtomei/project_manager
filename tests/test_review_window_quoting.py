@@ -13,6 +13,7 @@ the silent-failure path now logs a warning.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,6 +22,11 @@ from unittest import mock
 import pytest
 
 from pm_core.cli import pr as pr_mod
+
+# The ``fake_tmux`` fixture monkeypatches ``pr_mod.subprocess.run`` — that
+# is the global ``subprocess.run`` — so tests that genuinely shell out must
+# use this reference captured at import time, or they silently get a Mock.
+_real_run = subprocess.run
 
 
 HOSTILE_TITLES = [
@@ -117,8 +123,8 @@ def test_diff_cmd_is_shell_safe(fake_tmux, title):
         pytest.skip("bash not available")
 
     # bash -n parses without executing; non-zero exit => syntax error.
-    result = subprocess.run([bash, "-n", "-c", diff_cmd],
-                            capture_output=True, text=True)
+    result = _real_run([bash, "-n", "-c", diff_cmd],
+                       capture_output=True, text=True)
     assert result.returncode == 0, (
         f"diff_cmd has shell syntax error for title={title!r}:\n"
         f"  stderr: {result.stderr}\n"
@@ -139,8 +145,8 @@ def test_diff_cmd_workdir_with_apostrophe(fake_tmux, tmp_path):
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("bash not available")
-    result = subprocess.run([bash, "-n", "-c", diff_cmd],
-                            capture_output=True, text=True)
+    result = _real_run([bash, "-n", "-c", diff_cmd],
+                       capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -160,3 +166,98 @@ def test_logs_warning_when_pane_creation_fails(fake_tmux, monkeypatch):
     fake_log.warning.assert_called()
     msg = fake_log.warning.call_args.args[0]
     assert "new_window_get_pane returned None" in msg
+
+
+# --- pr-71e9ec7: diff pane must not depend on ``less`` being installed ---
+
+def _git(repo, *args):
+    _real_run(["git", "-C", str(repo), *args], check=True,
+              capture_output=True, text=True)
+
+
+@pytest.fixture
+def diff_repo(tmp_path):
+    """A git repo on ``pm/pr-001`` with one commit ahead of ``origin/master``."""
+    if not shutil.which("git"):
+        pytest.skip("git not available")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "master")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "f.txt").write_text("base\n")
+    _git(repo, "add", "f.txt")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "update-ref", "refs/remotes/origin/master", "HEAD")
+    _git(repo, "checkout", "-qb", "pm/pr-001")
+    (repo / "f.txt").write_text("base\nREVIEW_DIFF_MARKER\n")
+    _git(repo, "commit", "-qam", "change")
+    return repo
+
+
+def _path_without_less(bin_dir: Path, *, fake_less: bool = False) -> str:
+    """Mirror every executable on PATH into *bin_dir* except ``less``.
+
+    With *fake_less*, install a stand-in ``less`` that tags its output so
+    the test can tell it was used.
+    """
+    bin_dir.mkdir()
+    for d in os.environ.get("PATH", "").split(":"):
+        src = Path(d)
+        if not d or not src.is_dir():
+            continue
+        for entry in src.iterdir():
+            dst = bin_dir / entry.name
+            if entry.name == "less" or dst.exists() or dst.is_symlink():
+                continue
+            dst.symlink_to(entry)
+    if fake_less:
+        less = bin_dir / "less"
+        less.write_text("#!/bin/sh\necho FAKE_LESS \"$@\"\ncat\n")
+        less.chmod(0o755)
+    return str(bin_dir)
+
+
+def _run_diff_pane(fake_tmux, repo, path):
+    """Build diff_cmd for *repo* and run it (minus the trailing interactive
+    ``exec $SHELL``) under *path*, returning the CompletedProcess."""
+    pr_mod._launch_review_window(_make_data(), _make_pr("Demo PR", str(repo)))
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    pane_cmd, sep, _ = diff_cmd.rpartition("; exec ")
+    assert sep, f"diff_cmd no longer ends in exec $SHELL: {diff_cmd}"
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash not available")
+    return _real_run([bash, "-c", pane_cmd], capture_output=True, text=True,
+                     env={"PATH": path, "HOME": str(repo.parent)})
+
+
+def test_diff_pane_falls_back_to_cat_without_less(fake_tmux, diff_repo, tmp_path):
+    """With no ``less`` on PATH the diff pane must still print the diff
+    instead of swallowing it into a failed pager (blank pane)."""
+    path = _path_without_less(tmp_path / "bin")
+    result = _run_diff_pane(fake_tmux, diff_repo, path)
+
+    assert "less: command not found" not in result.stderr, result.stderr
+    assert "=== Review: pr-001" in result.stdout, result.stdout
+    assert "--- Full diff ---" in result.stdout
+    assert "+REVIEW_DIFF_MARKER" in result.stdout
+
+
+def test_diff_pane_cat_fallback_pads_before_prompt(fake_tmux, diff_repo, tmp_path):
+    """The cat fallback ends with blank rows so a wrapped shell prompt's
+    resize redraw (which moves up by its old row count) overwrites padding
+    rather than the last diff line."""
+    path = _path_without_less(tmp_path / "bin")
+    result = _run_diff_pane(fake_tmux, diff_repo, path)
+
+    assert result.stdout.endswith("+REVIEW_DIFF_MARKER\n\n\n"), result.stdout
+
+
+def test_diff_pane_still_uses_less_when_present(fake_tmux, diff_repo, tmp_path):
+    """When ``less`` is available it is still the pager, invoked with -R."""
+    path = _path_without_less(tmp_path / "bin", fake_less=True)
+    result = _run_diff_pane(fake_tmux, diff_repo, path)
+
+    assert result.stdout.startswith("FAKE_LESS -R\n"), result.stdout
+    assert "+REVIEW_DIFF_MARKER" in result.stdout

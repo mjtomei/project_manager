@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8e693f6
+  active_pr: pr-5704ff0
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -24786,11 +24786,28 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:27:53.724681+00:00'
-  updated_at: '2026-05-26T00:27:53.724681+00:00'
+  updated_at: '2026-10-12T17:02:30.361750+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-32709a2
+    text: 'pr-71e9ec7 QA s4: concurrent `pm pr review --fresh A & --fresh A & --fresh
+      B` left two review-A windows (@8,@9) AND the pane registry ended with @8 listing
+      %10 twice, no entry for @9, and stale entries for killed windows @6/@7 — the
+      find/kill/create race also corrupts registry bookkeeping.'
+    created_at: '2026-10-12T16:51:54Z'
+    last_edited: '2026-10-12T16:51:54Z'
+  - id: note-aaa14cb
+    text: 'pr-71e9ec7 QA s4 (with live fake-claude panes): in `--fresh A & --fresh
+      A`, both processes logged new_window_get_pane ... id=@8 (name-based lookup),
+      so the second process split its review-claude into the first window. Result:
+      @8 had 2 claude panes + 1 diff (registry listed %10 review-diff twice), and
+      @9 was an orphaned diff-only window. In an earlier run, one launch also printed
+      "Review window error: split-window -t %10 ... exit status 1" because the other
+      process had killed its pane.'
+    created_at: '2026-10-12T17:02:30Z'
+    last_edited: '2026-10-12T17:02:30Z'
 - id: pr-7ab0a99
   plan: bugs
   title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
@@ -24934,11 +24951,106 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:28:00.384462+00:00'
-  updated_at: '2026-05-26T00:28:00.384462+00:00'
+  updated_at: '2026-10-12T17:23:18.110601+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-cf84a58
+    text: 'QA s4 (concurrent review launches): PASS on less-absent host — all diff
+      panes (2 concurrent + 3 concurrent --fresh) showed own header/diffstat/marker,
+      live shell, no less errors. Fake-claude PASS review panes exit immediately (no
+      session_id in manual review) so windows end with 1 pane; a resize after that
+      exit lets readline overwrite the last diff line (filed pr-e308f3f). Duplicate
+      review-A survived as known race pr-3f85ad7.'
+    created_at: '2026-10-12T16:52:02Z'
+    last_edited: '2026-10-12T16:52:02Z'
+  - id: note-11e55c9
+    text: 'QA s3 refine: pm-dev container has no less at all (command -v less empty)
+      so no PATH stripping needed. fake-claude scripted review cursor (~/.pm/sessions/<tag>/fake-claude.state)
+      persists across launches and is NOT reset by config set — use weighted {"PASS":100}
+      for non-loop launches, then set ["NEEDS_WORK","PASS"] right before zz d so the
+      loop gets 2 iterations. Review-window pane index 0 is not always the diff pane
+      after rebalance — identify the diff pane as the bash pane whose scrollback starts
+      with "=== Review:".'
+    created_at: '2026-10-12T16:50:50Z'
+    last_edited: '2026-10-12T16:50:50Z'
+  - id: note-958d103
+    text: 'QA s3: TUI d / --fresh / zz d all show the diff via cat on a less-absent
+      host. Fixed 8282a632: cat fallback now ends with 2 blank rows. Before that,
+      a wrapped-prompt redraw on pane widen (the fake Claude pane exiting after --fresh)
+      overwrote the last +line of the diff. This is the bug filed as pr-e308f3f. Evidence:
+      /pm-captures/scenarios/3/{pre-fix,post-fix}, plus post-fix/story2-fresh/ab-resize-check.txt.'
+    created_at: '2026-10-12T17:00:07Z'
+    last_edited: '2026-10-12T17:00:07Z'
+  - id: note-e08b9cf
+    text: 'QA s4 re-eval: the cat-fallback last-diff-line overwrite on resize reproduced
+      in s4 story 1 too; s3''s 8282a632 (2 blank rows after cat) is the kept fix —
+      the s4 duplicate footer variant was dropped in the rebase. Verified on the real
+      surface in s4 post-fix with a live Claude pane forcing several resize redraws.'
+    created_at: '2026-10-12T17:00:17Z'
+    last_edited: '2026-10-12T17:00:17Z'
+  - id: note-15af145
+    text: 'Incidental (QA s4): fake-claude verdict sessions without a session_id now
+      stay open when stdin is a tty (manual `pm pr review` panes), like real interactive
+      Claude — previously the review-claude pane exited at once, collapsing the review
+      window to 1 pane and dropping its registry entry. CLI pipes/unit tests (non-tty)
+      still exit immediately. Note: with both panes live, pm layout puts review-claude
+      on the left (left 0) and review-diff on the right.'
+    created_at: '2026-10-12T17:00:17Z'
+    last_edited: '2026-10-12T17:00:17Z'
+  - id: note-b9ef4ba
+    text: 'QA env: the stock pm-dev container has NO less (command -v less is empty).
+      For less-present scenarios: sudo apt-get update && sudo apt-get install -y less
+      (sudo is NOPASSWD; works). Toggling at /usr/bin/less needs no tmux restart:
+      the pane resolves it at runtime via the server PATH, which includes /usr/bin.
+      Observe the pager with tmux list-panes -F "#{pane_index} #{pane_current_command}"
+      (less vs bash).'
+    created_at: '2026-10-12T16:43:58Z'
+    last_edited: '2026-10-12T16:43:58Z'
+  - id: note-a5d52e5
+    text: 'QA s2 (pager unchanged w/ less): PASS. Spec mismatches for future runs:
+      (1) diff pane pane_current_command is bash, not less, both pre- and post-fix
+      (less is a grandchild of the pane bash -c), so verify less via ps/(END); (2)
+      diff pane is index 1, Claude pane index 0 after rebalance; (3) review fake with
+      verdicts [PASS] exits immediately on manual pm pr review (no session-id), so
+      use review verdicts [] to keep 2 panes; (4) pm push + merge is needed before
+      pm pr start.'
+    created_at: '2026-10-12T16:50:52Z'
+    last_edited: '2026-10-12T16:50:52Z'
+  - id: note-f8b1df4
+    text: 'impl done (b752adfc): diff_cmd in _launch_review_window now pipes through
+      `if command -v less ...; then less -R; else cat; fi`. Pre/post-fix captures
+      in $CAP/impl/{pre,post}-fix (diff_cmd extracted from the real _launch_review_window,
+      run in an isolated tmux pane on this less-less host; pm pr review not run since
+      it spawns Claude). Tests: tests/test_review_window_quoting.py adds a less-stripped-PATH
+      run (fails pre-fix) + stand-in-less run. Incidental: the existing bash -n checks
+      in that file were vacuous (fake_tmux patches the global subprocess.run), now
+      use _real_run. Full suite: only pre-existing failures: test_markdown_render
+      (pm venv lacks `markdown`) and test_hook_events::test_installer_writes_standalone_receiver
+      (fails on unmodified HEAD too).'
+    created_at: '2026-10-12T16:29:29Z'
+    last_edited: '2026-10-12T16:29:29Z'
+  - id: note-4c1874d
+    text: 'QA s6 refine (run 2): the "2x --fresh" story runs --fresh on PR A and PR
+      B at the same moment, so it tests one window per PR with distinct names. Concurrent
+      --fresh of the SAME PR can still leave duplicate review-<id> windows: _launch_review_window
+      has no launch flock on this branch, the known race pr-3f85ad7, which is out
+      of scope here. Plain --fresh (not review-loop) only switches the invoking session;
+      sessions_on_window is collected only when review_loop is set, so a separate
+      watching session does NOT follow. Do not assert "watcher follows" for manual
+      --fresh.'
+    created_at: '2026-10-12T17:16:36Z'
+    last_edited: '2026-10-12T17:16:36Z'
+  - id: note-733477b
+    text: 'QA s6 (concurrent review launches, run 2): PASS on less-absent host. 2
+      concurrent pm pr review + 2 concurrent --fresh (A and B) each gave exactly one
+      review window per PR, 2 live panes (claude left 0, diff bash), isolated diff
+      via cat + blank rows + live prompt, markers survive resize -x 220, registry
+      entries match. pm pr show does not exist; take workdirs from pm pr start output.
+      Captures: /pm-captures/scenarios/6.'
+    created_at: '2026-10-12T17:23:18Z'
+    last_edited: '2026-10-12T17:23:18Z'
 - id: pr-3ca6b36
   plan: plan-regression
   title: 'Regression test: CLI/command-bar help completeness, flag consistency, and
@@ -25470,6 +25582,88 @@ prs:
   gh_pr_number: null
   created_at: '2026-07-18T19:28:54.184220+00:00'
   updated_at: '2026-07-18T19:28:54.184220+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e308f3f
+  plan: bugs
+  title: 'Bug: review diff pane loses its last diff line when the pane is resized
+    (cat fallback)'
+  branch: pm/pr-e308f3f-bug-review-diff-pane-loses-its-last-diff-line-when
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py _launch_review_window diff_cmd: when less is absent
+    the diff is cat-ed onto the primary screen and the pane exec''s a shell whose
+    prompt (long workdir path) wraps to 2 rows in the half-width diff pane. When the
+    window later resizes wider (e.g. the right-hand Claude pane exits, or a wider
+    client attaches), tmux reflows the prompt to 1 row but readline''s SIGWINCH redraw
+    moves up by the old row count and overwrites the last diff line (the final +line
+    of the diff). Repro (pr-71e9ec7 QA scenario 4, less-absent host, fake-claude review
+    verdict PASS so the Claude pane exits): pm pr review <id>; capture the left pane:
+    "@@ -0,0 +1 @@" is followed directly by the prompt, the "+ALPHA_MARKER" line is
+    gone; recording.cast shows it was printed at t=25.0s and overwritten at t=25.15s
+    by ESC[17;1H<prompt>. Possible fixes: emit a trailing footer/blank line(s) after
+    the diff, or keep a fixed short PS1 in the diff shell.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T16:51:54.185658+00:00'
+  updated_at: '2026-10-12T17:00:08.549861+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-d822b52
+    text: 'Fixed on pr-71e9ec7 by 8282a632 (QA s3): the cat-fallback diff pane prints
+      2 blank rows before exec shell, so the redraw lands on padding. Close this PR
+      once pr-71e9ec7 merges.'
+    created_at: '2026-10-12T17:00:08Z'
+    last_edited: '2026-10-12T17:00:08Z'
+- id: pr-2ea2797
+  plan: bugs
+  title: 'Bug: TUI plan-view pane runs bare `less <path>` — no fallback when less
+    is absent, path unquoted'
+  branch: pm/pr-2ea2797-bug-tui-plan-view-pane-runs-bare-less-path-no-fall
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pane_ops.py:241 (view plan from PR) and :665 (_launch_in_plans_window
+    on plan activation) launch the pane command f"less {plan_path}". Same bug class
+    as pr-71e9ec7 (review diff pane): on a host without less on PATH the plan pane
+    shows "less: command not found" (or dies) instead of the plan. Also plan_path
+    is interpolated unquoted, so a project root containing spaces/apostrophes breaks
+    the command. Fix: shell_quote(plan_path) and use the same guard as the review
+    diff pane: `if command -v less >/dev/null 2>&1; then less -R <path>; else cat
+    <path>; fi` (keep the pane alive, e.g. trailing `; exec $SHELL` or remain-on-exit,
+    so cat output is readable). Repro: drop less from PATH, open a plan in the TUI.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T16:33:57.919208+00:00'
+  updated_at: '2026-10-12T16:33:57.919208+00:00'
+- id: pr-5704ff0
+  plan: bugs
+  title: 'Bug: review loop fails "Not in a pm tmux session" when TUI pane resolves
+    to a non-pm-prefixed grouped session'
+  branch: pm/pr-5704ff0-bug-review-loop-fails-not-in-a-pm-tmux-session-whe
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/helpers.py _get_current_pm_session -> tmux.get_session_name()
+    runs display-message -t $TMUX_PANE #{session_name}; when the user has attached
+    a grouped viewer session not named pm-* (e.g. `tmux new-session -d -t pm-<tag>
+    -s viewer`), tmux reports that session for the shared TUI pane, so the name check
+    fails and loop_shared.get_pm_session returns None. Repro (pr-71e9ec7 QA s5): create
+    a grouped session named qa-view on the pm session, then press z z d in the TUI
+    -> review loop immediately ends "! ERROR (1 iteration)", debug log: RuntimeError:
+    Not in a pm tmux session (review_loop.py _run_claude_review). Renaming the grouped
+    session to pm-<tag>~9 fixes it. Fix idea: resolve the base pm session via #{session_group}
+    or list sessions containing the pane and pick the pm- one, or fall back to _get_session_name_for_cwd
+    as cli/helpers._get_pm_session does.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T17:25:41.895887+00:00'
+  updated_at: '2026-10-12T17:25:41.895887+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
