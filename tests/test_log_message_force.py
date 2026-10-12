@@ -90,6 +90,16 @@ def test_forced_message_shown_during_hold():
     assert shown[-1] == " Auto-start: removed pr-x (auto-start OFF)"
 
 
+def test_hidden_hold_message_does_not_hold_the_line():
+    app, shown = _stub_app()
+    _log(app, "Review loop done: PASS", sticky=10)
+    _log(app, "held but hidden by the sticky", hold=3)
+    assert app._log_hold_until == 0.0 and not app.timers
+    app._log_sticky_until = 0.0  # sticky expires
+    _log(app, "next message")
+    assert shown[-1] == " next message"
+
+
 def test_newer_hold_not_cut_short_by_older_timer():
     app, shown = _stub_app()
     _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)

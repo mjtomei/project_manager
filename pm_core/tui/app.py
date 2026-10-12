@@ -827,16 +827,17 @@ class ProjectManagerApp(App):
         # the same tick), so also record every message in the command log
         # that ``L`` tails — otherwise status updates are lost unseen.
         _record_log_message(self, msg, suppressed)
-        if hold > 0:
-            self._log_hold_until = now + hold
-            self.set_timer(hold, self._flush_held_log_message)
-        elif held:
+        if held:
             self._log_held = (msg, capture, sticky)
             return
         if sticky > 0:
             self._log_sticky_until = now + sticky
         elif suppressed:
             return  # a sticky message is still showing
+        if hold > 0:
+            # Only a message that is actually shown holds the line.
+            self._log_hold_until = now + hold
+            self.set_timer(hold, self._flush_held_log_message)
         try:
             log = self.query_one("#log-line", LogLine)
             log.update(f" {msg}")

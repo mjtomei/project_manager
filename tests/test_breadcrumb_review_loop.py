@@ -406,6 +406,9 @@ class TestConsumeBreadcrumbReviewLoops:
         mock_start.assert_called_once()
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
+        # Resumed in its saved transcript dir, not a fresh manual-<hex> one
+        # (an in-flight iteration's transcript lives there).
+        assert kwargs.get("transcript_dir") == "/tmp/transcripts"
 
     def test_breadcrumb_deleted_after_consumption(self, tmp_path):
         breadcrumb_data = {"target": "pr-001", "run_id": "run-123"}

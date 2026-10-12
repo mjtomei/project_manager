@@ -297,7 +297,12 @@ async def consume_breadcrumb(app) -> None:
             if rstate and not rstate.running:
                 pr = store.get_pr(app._data, pr_id)
                 if pr and pr.get("status") == "in_review":
-                    tdir = get_transcript_dir(app)
+                    # Keep the loop's own dir: an in-flight iteration's
+                    # transcript lives there, and a manual loop would
+                    # otherwise get a fresh ``manual-<hex>`` dir, so an
+                    # adopted INPUT_REQUIRED follow-up (and finalize)
+                    # would look in the wrong place.
+                    tdir = rstate._transcript_dir or get_transcript_dir(app)
                     _start_loop(
                         app, pr_id, pr,
                         transcript_dir=str(tdir),

@@ -351,6 +351,12 @@ matches the code):
     and logged, because tmux < 3.3 rejects the hook and its error was
     painting over the TUI pane.
 
+20. *(review 15ef i6)* A breadcrumb-resumed review loop keeps its saved
+    `_transcript_dir` (a manual loop used to get a fresh `manual-<hex>`
+    dir, so an adopted iteration's INPUT_REQUIRED follow-up and transcript
+    finalize looked in the wrong dir). `log_message(hold=)` only holds the
+    line when the message is actually shown (not when a sticky hides it).
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i
