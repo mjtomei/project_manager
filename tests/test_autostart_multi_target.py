@@ -277,6 +277,17 @@ class TestKeys:
         added = [kw for m, kw in shown if "targets += b" in m]
         assert added and added[0].get("force") is True
 
+    def test_readd_confirmation_marks_unchanged(self):
+        """QA s8: re-adding an existing target replied ``unchanged`` but the
+        TUI logged a plain "targets += b" as if it had been added."""
+        app = FakeApp([_pr("a"), _pr("b")])
+        shown = []
+        app.log_message = lambda msg, **kw: shown.append(msg)
+        auto_start.add_targets(app, ["b"])
+        assert "(already a target)" not in shown[-1]
+        auto_start.add_targets(app, ["a", "b"])
+        assert "a (stop), b (stop) (already a target)" in shown[-1]
+
     def test_A_without_selection_never_enables_backlog(self):
         app = FakeApp([_pr("a")])
         asyncio.run(auto_start.toggle(app, None))

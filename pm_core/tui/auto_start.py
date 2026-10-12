@@ -505,7 +505,9 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     def _label(c: dict) -> str:
         if c["action"] == "policy_changed":
             return f"{c['pr_id']} (now {c['policy'].replace('_', '-')})"
-        return f"{c['pr_id']}{' (stop)' if c['policy'] == POLICY_STOP else ''}"
+        stop = " (stop)" if c["policy"] == POLICY_STOP else ""
+        already = " (already a target)" if c["action"] == "unchanged" else ""
+        return f"{c['pr_id']}{stop}{already}"
     summary = ", ".join(_label(c) for c in changes)
     # hold: check_and_start's "starting <pr>" / review-loop messages land
     # in the same frame and would overwrite this before it ever paints.

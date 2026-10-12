@@ -3127,6 +3127,7 @@ def pr_auto_sequence(pr_id: str):
                     p["status"] = "qa"
                     _record_status_timestamp(p, "qa")
             store.locked_update(root, _to_qa)
+            trigger_tui_refresh()
             _launch_qa_detached(root, pr_id)
             click.echo("advanced: qa")
             return
@@ -3175,6 +3176,7 @@ def pr_auto_sequence(pr_id: str):
                     p["status"] = "sign_off"
                     _record_status_timestamp(p, "sign_off")
             store.locked_update(root, _to_signoff)
+            trigger_tui_refresh()
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
@@ -3196,6 +3198,7 @@ def pr_auto_sequence(pr_id: str):
                     p["status"] = "in_review"
                     _record_status_timestamp(p, "in_review")
             store.locked_update(root, _to_review)
+            trigger_tui_refresh()
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
             iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
@@ -3253,6 +3256,7 @@ def pr_auto_sequence(pr_id: str):
                 if p:
                     p.pop("signoff", None)
             store.locked_update(root, _clear_signoff)
+            trigger_tui_refresh()
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
@@ -3287,6 +3291,9 @@ def pr_auto_sequence(pr_id: str):
         # verdict can only mutate state here, never from a manual signoff run.
         hop = signoff_mod.decide_signoff_hop(verdict)
         hop = signoff_mod.apply_signoff_hop(root, pr_id, hop)
+        # The verdict record / hop status was written behind the TUI's back;
+        # without a reload its rows keep saying "awaiting sign-off".
+        trigger_tui_refresh()
         if hop in ("qa", "review", "impl"):
             # A bounce moved the PR out of sign_off: retire the stale sign-off
             # window + transcript so re-entry runs a genuine fresh router
