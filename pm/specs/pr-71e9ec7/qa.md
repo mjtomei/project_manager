@@ -4,8 +4,9 @@
 `pm pr review <id>` (and every path that reaches it: the TUI review action,
 the review loop relauncher `pm pr review --fresh --review-loop`, and
 `pm pr review` on a PR that is already `in_review`) opens a tmux window
-`review-<display-id>`. The window has two panes: the left **diff pane** and the
-right **Claude pane**. The diff pane shows the header `=== Review: <id> — <title> ===`,
+`review-<display-id>`. The window has two panes: the **diff pane** and the
+**Claude pane** (with both live, pm layout puts Claude on the left and the
+diff on the right; identify the diff pane by its `=== Review:` header). The diff pane shows the header `=== Review: <id> — <title> ===`,
 then `git status`, then `--- Change summary ---` (diffstat), then
 `--- Full diff ---`, and finally `exec $SHELL`.
 Before the fix, this output was piped to a bare `less -R`. Now it goes through
@@ -35,7 +36,7 @@ pane's own shell when the pane runs.
    Given a pm session on a host where `less` is not on PATH, and a started PR
    with committed changes,
    When the user opens the review window for that PR,
-   Then the left pane shows the review header with the PR id and title, the git
+   Then the diff pane shows the review header with the PR id and title, the git
    status, the `--- Change summary ---` diffstat that names the changed file, and
    `--- Full diff ---` with the distinctive added line. After the output an
    interactive shell prompt appears in the same pane. The pane does not show
@@ -44,7 +45,7 @@ pane's own shell when the pane runs.
    Given R1's review window,
    When the user types a command into the diff pane (for example `git log --oneline -1`),
    Then the command runs in the PR workdir and prints its output. The pane and the
-   window stay open, and the right-hand Claude pane is still present.
+   window stay open, and the Claude pane is still present.
 3. **R3 — pager behaviour unchanged when less exists.**
    Given a pm session on a host with `less` installed,
    When the user opens the review window,
@@ -118,3 +119,24 @@ and `project.yaml` (status flip to `in_review`).
   pane deterministically. This PR does not change the Claude pane.
 - *Is broken-but-present `less` in scope?* No. `command -v` only checks
   resolvability, as decided in impl.md.
+
+## Updates after QA run 1 (2026-10-12)
+Consistency check against current code and PR notes:
+- The cat fallback is now `cat; echo; echo` (8282a632). Two blank rows
+  follow the diff so that a readline redraw when the pane widens (Claude pane
+  exits, wider client attaches) cannot overwrite the last diff line (this was
+  pr-e308f3f). Every less-absent check must also resize or widen the pane and
+  confirm that the last `+` diff line is still visible.
+- fake-claude verdict sessions with no session_id now stay open when stdin is
+  a tty. So a manual `pm pr review` window keeps both panes, and the pane registry
+  keeps its review-claude entry. Non-tty CLI use still exits immediately.
+- `pane_current_command` of the diff pane is `bash`, not `less`, because less is
+  a grandchild. To verify the pager, use the process tree or `(END)` on screen.
+- The fake-claude scripted-verdict cursor persists across launches. Use weighted
+  `{"PASS":100}` for non-loop launches, and switch to `["NEEDS_WORK","PASS"]`
+  right before a review loop.
+- The stock pm-dev container has no `less`. To get a less-present host, run
+  `sudo apt-get install -y less`. This takes effect without restarting tmux.
+- Run 1 verdicts: R1/R2/R3/R5 PASS. R4 and C1/C2 were NEEDS_WORK only because
+  fixes landed mid-run (the padding and the tty hold). Run 2 re-verifies them on
+  the fixed branch and adds E1, E2, E4 and E5, which run 1 did not cover.
