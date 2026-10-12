@@ -282,6 +282,33 @@ class TestConsumeBreadcrumbReviewLoops:
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
 
+    def test_resume_summary_is_last_log_message(self, tmp_path):
+        """The auto-start summary must not be overwritten by the per-loop
+        resume messages (one is sticky) before it is ever painted."""
+        breadcrumb_data = {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-001"}, {"pr_id": "pr-002"}],
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {"pr-002": {"iteration": 1, "history": []}},
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+        app = _make_app(auto_start=False, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop"):
+            mock_store.get_pr.return_value = {"id": "pr-002", "status": "in_review"}
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert "Review loop resumed for pr-002 at iteration 1" in msgs
+        assert msgs[-1] == "Auto-start: resumed after merge restart → pr-001, pr-002"
+        assert app.log_message.call_args.kwargs.get("sticky", 0) > 0
+
     def test_skips_loop_restart_if_pr_not_in_review(self, tmp_path):
         breadcrumb_data = {
             "target": "pr-001",

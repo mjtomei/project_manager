@@ -274,12 +274,6 @@ async def consume_breadcrumb(app) -> None:
             app._review_loops[pr_id] = rstate
         _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
 
-    if had_auto_start:
-        desc = "all" if all_mode else ", ".join(targets)
-        note = " (migrated legacy breadcrumb)" if migrated else ""
-        app.log_message(f"Auto-start: resumed after merge restart → {desc}{note}")
-    elif review_loops_data:
-        app.log_message("Resumed review loop state after restart")
     app._update_display()
 
     if had_auto_start:
@@ -303,9 +297,10 @@ async def consume_breadcrumb(app) -> None:
                         transcript_dir=str(tdir),
                         resume_state=rstate,
                     )
-                    app.log_message(
-                        f"Review loop resumed for {pr_id} at iteration {rstate.iteration}"
-                    )
+                    msg = (f"Review loop resumed for {pr_id} "
+                           f"at iteration {rstate.iteration}")
+                    _log.info("consume_breadcrumb: %s", msg)
+                    app.log_message(msg)
 
     # Resume watchers (list format, or legacy single-watcher dict)
     watchers_data = data.get("watchers", [])
@@ -323,6 +318,17 @@ async def consume_breadcrumb(app) -> None:
                 watcher_type=wd.get("type", "auto-start"),
             )
         _log.info("consume_breadcrumb: resumed %d watcher(s)", len(watchers_data))
+
+    # Summarise last: the per-loop resume messages above (one of them
+    # sticky) would otherwise overwrite this before it is ever painted.
+    if had_auto_start:
+        desc = "all" if all_mode else ", ".join(targets)
+        note = " (migrated legacy breadcrumb)" if migrated else ""
+        msg = f"Auto-start: resumed after merge restart → {desc}{note}"
+        _log.info("consume_breadcrumb: %s", msg)
+        app.log_message(msg, sticky=5)
+    elif review_loops_data:
+        app.log_message("Resumed review loop state after restart", sticky=5)
 
 
 def _adopt_live_qa(app) -> None:

@@ -316,6 +316,55 @@ class TestRunReviewLoopSync:
         mock_review.assert_called_once()
 
 
+class TestResumeInFlightIteration:
+    """A breadcrumb-resumed loop adopts the iteration still running in its
+    review window instead of relaunching (which killed the window)."""
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_adopts_live_iteration(self, mock_adopt, mock_review):
+        mock_adopt.return_value = "All good.\n\n**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=1,
+                                _transcript_dir="/saved")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        mock_review.assert_not_called()
+        assert mock_adopt.call_args.args[2] == "/saved"
+        assert result.iteration == 1
+        assert result.latest_verdict == VERDICT_PASS
+        assert [h.iteration for h in result.history] == [1]
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_continues_after_adopted_needs_work(self, mock_adopt, mock_review):
+        mock_adopt.return_value = "**NEEDS_WORK**"
+        mock_review.return_value = "**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=2,
+                                history=[ReviewIteration(1, "NEEDS_WORK", "")])
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        assert mock_review.call_args.kwargs["iteration"] == 3
+        assert [h.iteration for h in result.history] == [1, 2, 3]
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_reruns_same_iteration_when_nothing_live(self, mock_adopt, mock_review):
+        mock_adopt.return_value = None
+        mock_review.return_value = "**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=1)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        assert mock_review.call_args.kwargs["iteration"] == 1
+        assert result.iteration == 1
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_completed_iteration_not_adopted(self, mock_adopt, mock_review):
+        mock_review.return_value = "**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=1,
+                                history=[ReviewIteration(1, "NEEDS_WORK", "")])
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        mock_adopt.assert_not_called()
+        assert mock_review.call_args.kwargs["iteration"] == 2
+
+
 class TestStartReviewLoopBackground:
     @patch("pm_core.review_loop._run_claude_review")
     def test_runs_in_background_thread(self, mock_review):

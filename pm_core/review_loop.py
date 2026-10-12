@@ -210,6 +210,54 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     return content
 
 
+def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
+                            transcript_dir: str | None) -> str | None:
+    """Collect the verdict of an iteration that was in flight at a TUI restart.
+
+    A resumed loop (breadcrumb restore) whose counter was bumped but has
+    no history entry for that iteration still has a live review window
+    running it.  Poll that pane instead of relaunching (``--fresh`` would
+    kill it and start the next iteration).  Returns the verdict output,
+    ``None`` when there is nothing to adopt (no window / transcript), and
+    raises :class:`PaneKilledError` if the adopted pane dies first.
+    """
+    import os
+    from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
+    from pm_core.verdict_transcript import (
+        extract_verdict_from_transcript,
+        read_latest_assistant_text,
+    )
+
+    session = _get_pm_session()
+    if not session or not transcript_dir:
+        return None
+    window_name = _compute_review_window_name(pr_data)
+    pane_id = _find_claude_pane(session, window_name)
+    transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+    if not pane_id or not os.path.lexists(transcript):
+        return None
+    session_id = session_id_from_transcript(transcript)
+    if not session_id:
+        return None
+
+    _log.info("review_loop: adopting in-flight iteration %d for %s "
+              "(pane %s, transcript=%s)", state.iteration, state.pr_id,
+              pane_id, transcript)
+    # The verdict may have landed between the breadcrumb write and now;
+    # the poller only wakes on idle events newer than its start.
+    ev = hook_events.read_event(session_id)
+    if ev and ev.get("event_type") == "idle_prompt":
+        verdict = extract_verdict_from_transcript(transcript, ALL_VERDICTS)
+        if verdict:
+            return read_latest_assistant_text(transcript) or verdict
+
+    content = _poll_for_verdict(pane_id, transcript)
+    if content is None:
+        raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
+    return content
+
+
 def _wait_for_follow_up_verdict(pr_data: dict,
                                  state: ReviewLoopState) -> str | None:
     """Poll the existing review pane for a follow-up verdict."""
@@ -259,28 +307,41 @@ def run_review_loop_sync(
     Returns:
         The final state.
     """
+    # A resumed loop's in-flight iteration was launched under the saved
+    # transcript dir, which may differ from the caller's (manual runs).
+    saved_transcript_dir = state._transcript_dir or transcript_dir
     # Stash transcript_dir on state so _on_complete_from_thread can finalize
     state._transcript_dir = transcript_dir
     state.running = True
     state.stop_requested = False
 
+    last_done = state.history[-1].iteration if state.history else 0
+    adopt = state.iteration > last_done
+
     try:
-        while state.iteration < max_iterations:
+        while state.iteration < max_iterations or adopt:
             if state.stop_requested:
                 _log.info("review_loop: stop requested after %d iterations", state.iteration)
                 break
 
-            state.iteration += 1
-            _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
-
-            iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
-
             try:
-                output = _run_claude_review(
-                    state.pr_id, pm_root, pr_data,
-                    iteration=state.iteration, loop_id=state.loop_id,
-                    transcript=iter_transcript,
-                )
+                output = None
+                if adopt:
+                    adopt = False
+                    output = _adopt_in_flight_review(
+                        state, pr_data, saved_transcript_dir)
+                    if output is None:
+                        # Nothing live to adopt — rerun the same iteration.
+                        state.iteration -= 1
+                if output is None:
+                    state.iteration += 1
+                    _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
+                    iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+                    output = _run_claude_review(
+                        state.pr_id, pm_root, pr_data,
+                        iteration=state.iteration, loop_id=state.loop_id,
+                        transcript=iter_transcript,
+                    )
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
