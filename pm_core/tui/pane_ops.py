@@ -18,6 +18,9 @@ from pm_core.tui.screens import ConnectScreen
 
 _log = configure_logger("pm.tui.pane_ops")
 
+# Lines of existing log history the L pane shows before following.
+LOG_PANE_BACKLOG_LINES = 500
+
 
 
 
@@ -260,7 +263,11 @@ def view_log(app) -> None:
     if not log_path.exists():
         app.log_message("No log file yet.")
         return
-    launch_pane(app, f"tail -f {log_path}", "log", fresh=fresh)
+    # Plain ``tail -f`` shows only the last 10 lines; the debug log is busy
+    # (pane layout, review-loop polling), so status-line messages mirrored as
+    # "log: ..." a few seconds earlier would already be gone when L opens.
+    launch_pane(app, f"tail -n {LOG_PANE_BACKLOG_LINES} -f {log_path}", "log",
+                fresh=fresh)
 
 
 def launch_meta(app) -> None:
