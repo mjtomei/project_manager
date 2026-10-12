@@ -3,6 +3,7 @@
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
+from textual.geometry import Region
 from textual.widgets import Label, Static
 from textual.screen import ModalScreen
 
@@ -687,7 +688,12 @@ class AutoRunsScreen(ModalScreen):
         self._timer = None
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="runs-container"):
+        container = VerticalScroll(id="runs-container")
+        # Not focusable: a focused scroll container claims ↑/↓ for
+        # scrolling once the rows overflow, so they would stop moving the
+        # selection.  The selected row is scrolled into view instead.
+        container.can_focus = False
+        with container:
             yield Label("Auto-start runs", id="runs-title")
             yield Static("", id="runs-body")
             yield Label(
@@ -753,6 +759,8 @@ class AutoRunsScreen(ModalScreen):
         self.query_one("#runs-title", Label).update(title)
 
         body = Text()
+        body_widget = self.query_one("#runs-body", Static)
+        row_texts: list[tuple[Text, Text]] = []
         if mode == "off" or not self._rows:
             if mode == "off":
                 body.append("No auto-start targets (auto-start off).\n", style="bold")
@@ -760,7 +768,7 @@ class AutoRunsScreen(ModalScreen):
                 body.append("No active runs.\n", style="bold")
             body.append("Add a target with O (stop before merge) or A on a PR,\n"
                         "or `pm autostart add PR_ID`.", style="dim")
-            self.query_one("#runs-body", Static).update(body)
+            body_widget.update(body)
             return
         for i, row in enumerate(self._rows):
             r = row["run"]
@@ -797,7 +805,34 @@ class AutoRunsScreen(ModalScreen):
                               style="dim yellow")
             body.append_text(detail)
             body.append("\n")
-        self.query_one("#runs-body", Static).update(body)
+            row_texts.append((line, detail))
+        body_widget.update(body)
+        # After the refresh: the body's width and the container's scrollable
+        # height are only known once the new content has been laid out.
+        self.call_after_refresh(self._scroll_selected_into_view, row_texts,
+                                self._selected)
+
+    def _scroll_selected_into_view(self, row_texts: list[tuple], selected: int
+                                   ) -> None:
+        """Scroll the container so row *selected* (two Texts, either of
+        which may wrap) is visible."""
+        if not (0 <= selected < len(row_texts)):
+            return
+        body = self.query_one("#runs-body", Static)
+        width = body.content_region.width
+        if width <= 0:
+            return
+
+        def height(t) -> int:
+            return len(t.wrap(self.app.console, width))
+
+        top = body.virtual_region.y + sum(
+            height(a) + height(b) for a, b in row_texts[:selected])
+        h = sum(height(t) for t in row_texts[selected])
+        if selected == 0:  # keep the title in view at the top
+            top, h = 0, top + h
+        self.query_one("#runs-container", VerticalScroll).scroll_to_region(
+            Region(0, top, 1, h), animate=False, immediate=True)
 
     def action_move(self, delta: int) -> None:
         if not self._rows:

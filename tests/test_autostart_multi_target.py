@@ -883,6 +883,57 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
     asyncio.run(body())
 
 
+def test_runs_popup_arrows_select_and_scroll_when_rows_overflow(tmp_path):
+    """With more rows than fit, ↑/↓ still move the selection (a focused
+    scroll container used to eat them) and the selected row stays visible."""
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from pm_core.tui.screens import AutoRunsScreen
+
+    prs = [_pr(f"t{i}", title=("long " * 30) if i == 3 else f"T{i}")
+           for i in range(20)]
+
+    class Host(App):
+        def __init__(self):
+            super().__init__()
+            fake = _enabled_app(prs, [p["id"] for p in prs], tmp_path)
+            for k, v in vars(fake).items():
+                if k not in ("logs", "workers"):
+                    setattr(self, k, v)
+
+        def log_message(self, msg, **kw):
+            pass
+
+    def selected_visible(app) -> bool:
+        # The screenshot holds only what is on screen; ▶ marks the selection.
+        return "▶" in app.export_screenshot()
+
+    async def body():
+        app = Host()
+        async with app.run_test(size=(60, 20)) as pilot:
+            app.push_screen(AutoRunsScreen())
+            await pilot.pause()
+            screen = app.screen
+            container = screen.query_one("#runs-container", VerticalScroll)
+            for _ in range(12):
+                await pilot.press("down")
+            await pilot.pause()
+            assert screen._selected == 12
+            assert container.scroll_y > 0
+            assert selected_visible(app)
+            for _ in range(7):
+                await pilot.press("j")
+            await pilot.pause()
+            assert screen._selected == 19
+            assert selected_visible(app)
+            for _ in range(19):
+                await pilot.press("up")
+            await pilot.pause()
+            assert screen._selected == 0 and container.scroll_y == 0
+
+    asyncio.run(body())
+
+
 def test_runs_popup_survives_status_error_with_brackets(tmp_path):
     """A failing refresh shows the error as plain text — an exception message
     with ``[...]`` must not be parsed as markup and kill the popup."""

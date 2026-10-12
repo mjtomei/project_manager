@@ -303,6 +303,12 @@ captures under `impl/post-fix/`):
     project reports `{"ok": false, "error": "no_project"}` (exit 1) instead
     of a plain-text error, keeping the machine-readable contract.
 
+13. *(review 15ef i4)* The runs popup's scroll container is not focusable
+    and the selected row is scrolled into view after each render: once the
+    rows overflowed the popup, the focused `VerticalScroll` claimed ↑/↓ for
+    scrolling (selection stuck) and j/k could move the selection off-screen,
+    so Enter focused a row the user could not see.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i

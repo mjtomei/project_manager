@@ -22,6 +22,8 @@ in-memory but preserved across the merge-restart breadcrumb.
 """
 
 import json
+import os
+import re
 import secrets
 import sys
 import time
@@ -845,7 +847,6 @@ async def _start_pr_quiet(app, pr_id: str) -> None:
     overlap with user actions.
     """
     import asyncio
-    import time
 
     # ``pr start`` makes the PR the active_pr; a scheduler-driven start must
     # not drag the user's tree cursor onto it.
@@ -887,7 +888,6 @@ def collect_status_inputs(app) -> dict:
     ``git rev-parse`` per in-scope sign-off/pending-merge PR — no model
     calls.
     """
-    import os
     from pm_core import tmux as tmux_mod
 
     prs = (app._data or {}).get("prs") or []
@@ -991,9 +991,6 @@ def reply_dir() -> Path:
 
 def write_reply(reply_id: str, payload: dict) -> Path | None:
     """Atomically write a CLI reply file; prunes stale replies."""
-    import os
-    import re
-    import time
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", reply_id or ""):
         _log.warning("auto_start: refusing bad reply id %r", reply_id)
         return None
