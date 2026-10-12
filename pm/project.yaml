@@ -24786,7 +24786,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:27:53.724681+00:00'
-  updated_at: '2026-10-12T16:51:54.859744+00:00'
+  updated_at: '2026-10-12T17:02:30.361750+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -24798,6 +24798,16 @@ prs:
       find/kill/create race also corrupts registry bookkeeping.'
     created_at: '2026-10-12T16:51:54Z'
     last_edited: '2026-10-12T16:51:54Z'
+  - id: note-aaa14cb
+    text: 'pr-71e9ec7 QA s4 (with live fake-claude panes): in `--fresh A & --fresh
+      A`, both processes logged new_window_get_pane ... id=@8 (name-based lookup),
+      so the second process split its review-claude into the first window. Result:
+      @8 had 2 claude panes + 1 diff (registry listed %10 review-diff twice), and
+      @9 was an orphaned diff-only window. In an earlier run, one launch also printed
+      "Review window error: split-window -t %10 ... exit status 1" because the other
+      process had killed its pane.'
+    created_at: '2026-10-12T17:02:30Z'
+    last_edited: '2026-10-12T17:02:30Z'
 - id: pr-7ab0a99
   plan: bugs
   title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
@@ -24975,9 +24985,9 @@ prs:
     last_edited: '2026-10-12T17:00:07Z'
   - id: note-e08b9cf
     text: 'QA s4 re-eval: the cat-fallback last-diff-line overwrite on resize reproduced
-      in s4 story 1 too; s3''s 8282a632 (2 blank rows after cat) is the kept fix — the
-      s4 duplicate footer variant was dropped in the rebase. Verified on the real surface
-      in s4 post-fix with a live Claude pane forcing several resize redraws.'
+      in s4 story 1 too; s3''s 8282a632 (2 blank rows after cat) is the kept fix —
+      the s4 duplicate footer variant was dropped in the rebase. Verified on the real
+      surface in s4 post-fix with a live Claude pane forcing several resize redraws.'
     created_at: '2026-10-12T17:00:17Z'
     last_edited: '2026-10-12T17:00:17Z'
   - id: note-15af145
