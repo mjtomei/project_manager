@@ -502,6 +502,7 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         _log.info("auto_start: target %s %s policy=%s source=%s", pr_id,
                   "added" if is_new else "re-armed", current, source)
     _sync_enabled(app)
+
     def _label(c: dict) -> str:
         if c["action"] == "policy_changed":
             return f"{c['pr_id']} (now {c['policy'].replace('_', '-')})"

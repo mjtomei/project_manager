@@ -357,6 +357,36 @@ matches the code):
     finalize looked in the wrong dir). `log_message(hold=)` only holds the
     line when the message is actually shown (not when a sticky hides it).
 
+QA round 2 fixes (revision after the review-15ef PASS; reviewed in
+review-loop 9448):
+
+21. *(QA plan r2, 237179d7)* `captures_dir` falls through to the
+    `/pm-captures` mount only for the PR named by `PM_CAPTURES_PR`
+    (`paths.CAPTURES_PR_ENV`, set by `create_container` next to the mount).
+    Nested throwaway pm projects in a scenario container no longer write
+    their PRs' captures into the enclosing PR's evidence. Containers created
+    without the env var keep the old behaviour. This covers only the capture
+    routing part of pr-1ae1d2d; binding report membership to real run ids
+    stays with that PR.
+22. *(QA s9, 785dd557)* `add` that flips an existing target's policy via
+    `--auto-merge`/`--stop-before-merge` reports `action: policy_changed`
+    with `previous_policy` (CLI "policy_changed: X (auto-merge; was
+    stop-before-merge)", TUI "X (now auto-merge)"), not "unchanged".
+23. *(QA s8, 92973427)* `pm pr auto-sequence` sends a TUI refresh after each
+    status / sign-off write, so autostart status and the popup stop saying
+    "awaiting sign-off" once the SIGNOFF_MERGE record exists. Re-adding an
+    existing target logs "(already a target)".
+24. *(QA s7, a5ef5aa4)* Background `_load_state` re-runs the `_show_*_view`
+    methods; they no longer take focus while the command bar is focused or
+    `/` is pending (`_focus_view_widget`), so a half-typed
+    `autostart add …` isn't delivered to the tree as hotkeys.
+25. *(QA s7, 7f5cb46b)* `pm autostart` treats a zombie (exited, unreaped)
+    TUI pid as a stale pidfile → `owner_unavailable`, not `owner_timeout`.
+26. *(QA s6, ce0b79e9, 45b0b437)* The one-row status bar puts `AUTO ×N` /
+    `WCH` right after the project name and the repo path last, with
+    `nowrap` + ellipsis, so the auto-start indicator survives 80-col
+    terminals and the `L` split.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i

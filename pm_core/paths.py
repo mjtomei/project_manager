@@ -101,7 +101,9 @@ def captures_dir(pr_id: str,
        tmux-derived tag, else the cwd-derived tag.
     2. Otherwise the container bind-mount at
        :data:`CONTAINER_CAPTURES_MOUNT` if it exists (set up by
-       :func:`container.create_container`).
+       :func:`container.create_container`) and belongs to *pr_id* — the
+       container's :data:`CAPTURES_PR_ENV` names the mounted PR; when it
+       is unset any PR may use the mount.
     3. Otherwise create and return the host path.
 
     The ``~/.pm`` path takes precedence so on the host we always land
