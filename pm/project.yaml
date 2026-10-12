@@ -25908,7 +25908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T21:20:22.008804+00:00'
+  updated_at: '2026-10-12T21:26:18.483449+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -25937,34 +25937,18 @@ prs:
       logged after a fast merge.'
     created_at: '2026-10-12T21:20:21Z'
     last_edited: '2026-10-12T21:20:21Z'
+  - id: note-451404f
+    text: 'QA s1 incidental fix (29f37c17): auto-review ran `pm pr review --background`
+      then the review loop relaunched iter 1 with --fresh, killing a throwaway Claude
+      session per PR (pre-existing on master; ate the first scripted fake review verdict
+      so spec config never reached review iter 2). Added hidden `pm pr review --no-window`,
+      used by _auto_review_idle_prs. Also runs-popup progress showed stale "review
+      #N" during QA planning / after QA verdict; now "qa planning" / "qa <verdict>".
+      Bug PR pr-fc644c4 filed then closed as fixed here. Note: user `pm tui restart`
+      (no merge marker) drops all autostart targets by design (same on master).'
+    created_at: '2026-10-12T21:26:18Z'
+    last_edited: '2026-10-12T21:26:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
-- id: pr-fc644c4
-  plan: bugs
-  title: 'Bug: auto-review launches a throwaway review session that the review loop
-    immediately replaces'
-  branch: pm/pr-fc644c4-bug-auto-review-launches-a-throwaway-review-sessio
-  status: pending
-  depends_on: []
-  description: 'pm_core/tui/review_loop_ui.py _auto_review_idle_prs (pre-existing
-    on master): when an impl goes idle under auto-start it runs `pm pr review --background
-    <pr>` (launches a review window + Claude session) and then _start_loop immediately
-    relaunches iteration 1 with `pr review --fresh --review-loop`, killing the first
-    window ~0.2s later. Every auto-reviewed PR burns one extra Claude session start.
-    Repro (pr-0b87a97 QA s1, 2026-10-12): fake-claude review verdicts ["NEEDS_WORK","PASS"],
-    arm O on two PRs -> debug log shows `fake-claude --verdict NEEDS_WORK` (no --session-id,
-    the throwaway) then `--verdict PASS --session-id ...` (the loop) at the same second
-    for each PR, and both PRs pass review on iteration 1; the scripted NEEDS_WORK
-    is eaten by the killed window. Fix idea: transition status to in_review without
-    launching a window (or let the loop adopt the existing window for iteration 1).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-10-12T21:19:46.180048+00:00'
-  updated_at: '2026-10-12T21:19:46.180048+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-92041d7
   plan: bugs
   title: 'Bug: stale "QA PASS for <pr> — merge manually or enable auto-start" logged
