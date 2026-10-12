@@ -19,6 +19,7 @@ def _app(tmp_path):
     app = ProjectManagerApp.__new__(ProjectManagerApp)
     app._session_name = "pm-test"
     app._cmd_queue_ready = False
+    app._command_bar_in_use = lambda: False
     queue = tmp_path / "tui-pm-test.cmd-queue"
     app._command_queue_file = lambda: queue
     return app, queue

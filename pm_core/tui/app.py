@@ -704,10 +704,15 @@ class ProjectManagerApp(App):
         then sends the rest of a half-typed command to the tree as hotkeys
         (``t`` starts QA, Enter opens the edit pane) and strands the text.
         """
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        if cmd_bar.has_focus or self._command_pending:
+        if self._command_bar_in_use():
             return
         widget.focus()
+
+    def _command_bar_in_use(self) -> bool:
+        """True while the user is typing a command (or has pressed ``/``
+        and the command bar is about to take focus)."""
+        cmd_bar = self.query_one("#command-bar", CommandBar)
+        return bool(cmd_bar.has_focus or self._command_pending)
 
     def _show_normal_view(self) -> None:
         """Show the normal tech tree view."""
@@ -1273,6 +1278,11 @@ class ProjectManagerApp(App):
             _log.warning("queue dispatch: discarding stale queued commands "
                          "on startup: %r", content.splitlines())
             return
+        # Queued commands come from outside (``pm autostart``, the picker)
+        # and their command-bar branches refocus the tree.  If the user is
+        # typing a command of their own, hand focus back afterwards so the
+        # rest of it isn't delivered to the tree as hotkeys.
+        typing = self._command_bar_in_use()
         for line in content.splitlines():
             cmd = line.strip()
             if not cmd:
@@ -1283,6 +1293,10 @@ class ProjectManagerApp(App):
                 _log.info("queue dispatch: cmd=%r result=ok", cmd)
             except Exception:
                 _log.exception("queue dispatch: cmd=%r result=exc", cmd)
+        if typing and content.strip():
+            # focus() is deferred (call_later), so this lands after any
+            # tree.focus() the dispatched commands queued.
+            self.query_one("#command-bar", CommandBar).focus()
 
     def on_unmount(self) -> None:
         """Clean up the reload pidfile and command queue on shutdown."""

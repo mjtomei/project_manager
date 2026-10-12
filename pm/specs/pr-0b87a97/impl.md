@@ -386,6 +386,12 @@ review-loop 9448):
     `WCH` right after the project name and the repo path last, with
     `nowrap` + ellipsis, so the auto-start indicator survives 80-col
     terminals and the `L` split.
+27. *(review 9448 i2)* Commands drained from the SIGUSR2 queue (`pm
+    autostart …`, picker) run the same command-bar branches, which refocus
+    the tree. When the user is typing in the command bar at the time,
+    `_drain_command_queue` gives focus back to the bar afterwards, so a
+    `pm autostart status` poll can't turn a half-typed command into tree
+    hotkeys. This is the queue-side counterpart of item 24.
 
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
