@@ -25918,7 +25918,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T22:54:06.535295+00:00'
+  updated_at: '2026-10-12T22:56:42.411662+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26069,6 +26069,24 @@ prs:
       /pm-captures (filed pr-8cdbe60 for proxy).'
     created_at: '2026-10-12T22:54:06Z'
     last_edited: '2026-10-12T22:54:06Z'
+  - id: note-fedef3f
+    text: 'QA s7 (CLI/command-bar targets, validation, owners; checks on bddbac33
+      + fixes, final 7f5cb46b): NEEDS_WORK, fixed. (1) a5ef5aa4: background _load_state
+      (auto-review sync pr review, SIGUSR1 reload from external pm pr edit) re-ran
+      _show_*_view which focused the tree unconditionally, stealing focus from the
+      command bar mid-typing; command-bar "autostart add B" went to the tree as hotkeys
+      (t started QA on the selected PR, r refresh) and B was never added. View methods
+      now skip focus while the command bar is focused or / is pending (pre-existing
+      on master, exposed by auto-start). (2) 7f5cb46b: pm autostart treated a zombie
+      (killed, unreaped) TUI pid as alive -> owner_timeout after the full timeout,
+      and the queued cmd was replayed by the next TUI in that session; now owner_unavailable
+      (stale pidfile). Env: tmux SIGCONTs a STOPped pane child (even a tight STOP
+      loop leaves it running ~20%); hold the TUI by SIGSTOPping the tmux server first,
+      then the TUI, and run the CLI with -s from a shell on another tmux socket. The
+      container git proxy rewound /workspace to ad9a84db mid-run (recovered by ff
+      to bddbac33); see pr-8cdbe60.'
+    created_at: '2026-10-12T22:56:42Z'
+    last_edited: '2026-10-12T22:56:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26299,8 +26317,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:54:04.987012+00:00'
-  updated_at: '2026-10-12T22:54:04.987012+00:00'
+  updated_at: '2026-10-12T22:56:41.644886+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6ca17c6
+    text: 'Also hit in pr-0b87a97 QA s7 (2026-10-12): nested pm pr start (autostart
+      add on a /tmp local-backend test project) ran git pull --rebase in its own PR
+      workdir; the wrapper executed it in /workspace (reflog "pull --rebase" 22:38:36
+      UTC) and rebased the scenario clone onto the then-stale GitHub origin, dropping
+      3 published commits (recovered by ff). Fix idea: proxy only when git rev-parse
+      --show-toplevel == the container workdir, else exec real git.'
+    created_at: '2026-10-12T22:56:41Z'
+    last_edited: '2026-10-12T22:56:41Z'
