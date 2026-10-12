@@ -25779,6 +25779,22 @@ prs:
       extraction and cover truncation that leaves a valid suffix of scenario headers.'
     created_at: '2026-10-12T16:42:21Z'
     last_edited: '2026-10-12T16:42:21Z'
+  - id: note-2e5f197
+    text: 'Required planner-handoff hardening found during #229 round 2: the planner committed
+      application fix 237179d7 and QA specs 0b4c6b1b/bddbac33 but did not push before
+      emitting QA_PLAN_END. The driver cloned this local head, then swapped origin to
+      GitHub, where the branch was still ad9a84db. A later pull --rebase in scenario workspaces
+      treated bddbac33 as the old upstream fork point and dropped the unpublished commits,
+      losing both the fix and S6-S10 instructions. The shepherd pushed bddbac33 and informed
+      all five workers to recover. Extend the planner handoff work to ensure required
+      committed artifacts are published before remote-backed fan-out, verify worker revision/spec
+      consistency, and fail clearly instead of silently testing a different tree. Application
+      code edited during planning must also invalidate the earlier review and receive
+      review before sign-off. Regression coverage should reproduce local clone + origin
+      swap + pull with an unpublished planner head. Evidence: captures/pr-0b87a97/shepherd-20261012/qa-round-2-planner-publication-recovery.json
+      in session project_manager-c5a1006b. This recovery invalidates unattended qualification.'
+    created_at: '2026-10-12T22:43:16Z'
+    last_edited: '2026-10-12T22:43:16Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -25936,7 +25952,32 @@ prs:
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8eb20ee
+    text: 'Sign-off evidence guard: nested fake QA fixtures have written synthetic PASS
+      metadata into this PR capture directory (Smoke, s, s1/s2, Alpha check/Beta check;
+      an extra index 6 existed while the real first round had only indices 1–5). See shepherd-20261012/nested-fixture-metadata-observation.json
+      under this session captures. Determine actual coverage/verdicts from each real QA
+      run qa_status.json, the corresponding worker/verifier transcripts, real recipes
+      and recordings, and final code revision. Do not count orphan fixture metadata as
+      a tested scenario or silently treat fake PASS records as real QA evidence. Report
+      any remaining metadata/evidence discrepancy explicitly.'
+    created_at: '2026-10-12T21:35:04Z'
+    last_edited: '2026-10-12T21:35:04Z'
+  - id: note-2c13bb5
+    text: 'QA round 2 review/evidence guard: review loop 15ef passed application revision
+      ad9a84db. The QA planner then committed application changes in 237179d7 (capture
+      mount ownership), followed by QA spec commits 0b4c6b1b and bddbac33. Those application
+      changes must receive review before final sign-off; do not equate the earlier review
+      PASS with review of the newer revision. If this QA round returns PASS without a
+      review bounce, shepherd it through another review before sign-off. Also, the controlling
+      main-directory PM is still the old master code: its container launcher does not
+      set the newly introduced PM_CAPTURES_PR. Do not assume the new guard isolates this
+      running outer QA environment without verifying ownership propagation. Continue to
+      use real run status and the archived evidence index rather than trusting arbitrary
+      scenario sidecars.'
+    created_at: '2026-10-12T22:32:07Z'
+    last_edited: '2026-10-12T22:32:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-1ae1d2d
   plan: bugs
@@ -25978,3 +26019,15 @@ prs:
       nested PRs and test fixtures, and give persisted evidence explicit PR/run ownership.'
     created_at: '2026-10-12T21:42:00Z'
     last_edited: '2026-10-12T21:42:00Z'
+  - id: note-e446d9e
+    text: 'Partial overlap with #229: its QA round-2 planner committed 237179d7, adding
+      PM_CAPTURES_PR to new container launches and checking that ownership before using
+      /pm-captures. That code still needs the subsequent review/QA cycle. Older running
+      controllers do not supply the marker and retain the legacy collision behavior; this
+      was observed again in round 2. Explicit persisted PR/run identity, trustworthy report
+      membership, and handling of stale/orphan fixture records remain part of this bug.
+      Reconcile against the final #229 implementation before starting; do not reimplement
+      an already-landed path guard or close the whole evidence-integrity issue based on
+      that guard alone.'
+    created_at: '2026-10-12T22:43:42Z'
+    last_edited: '2026-10-12T22:43:42Z'
