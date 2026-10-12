@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-924acb8
+  active_pr: pr-22c92ef
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T23:40:06.336689+00:00'
+  updated_at: '2026-10-12T23:49:53.992316+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26174,6 +26174,18 @@ prs:
       gotcha: scripts launched via timeout need #!/bin/bash (EPOCHREALTIME).'
     created_at: '2026-10-12T23:40:06Z'
     last_edited: '2026-10-12T23:40:06Z'
+  - id: note-c2fe86f
+    text: 'QA S11 (two O, popup==CLI, narrow, dismissals, clear) on a28609a2: all
+      Thens held except L — the log pane was plain `tail -f` (10 lines), so the mirrored
+      "log: Auto-sequence armed ..." lines were already scrolled out by the busy debug
+      log when L opened. Fixed 808c8583 (`tail -n 500 -f`, tests/test_log_pane_backlog.py),
+      verified live after pm tui restart. Env: fake-claude `config set` resets verdict
+      cursors (A took NW,NW,PASS after CFG2); after L at 80 cols the log pane is the
+      active pane, so send TUI keys to the TUI pane id, not $SESS:main; popup Enter/f
+      switch the attached grouped $SESS~1, not bare $SESS. Filed pr-22c92ef (AUTO
+      ×N clipped in unzoomed ~40-col pane).'
+    created_at: '2026-10-12T23:49:53Z'
+    last_edited: '2026-10-12T23:49:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26418,3 +26430,25 @@ prs:
       --show-toplevel == the container workdir, else exec real git.'
     created_at: '2026-10-12T22:56:41Z'
     last_edited: '2026-10-12T22:56:41Z'
+- id: pr-22c92ef
+  plan: bugs
+  title: 'Bug: status bar clips "AUTO ×N" to "AUTO …" when the TUI pane is ~40 cols
+    (80-col terminal, L split unzoomed)'
+  branch: pm/pr-22c92ef-bug-status-bar-clips-auto-n-to-auto-when-the-tui-p
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/widgets.py StatusBar.update_status: the row is " Project:
+    <name>    AUTO ×N ..."; with an 80-col window, press L, then unzoom (tmux prefix
+    z / select-pane) so the TUI pane is 39 cols: the bar reads "Project: pm-s11-1791847753    AUTO
+    …" and the target count is lost. Zoomed mobile mode (default at 80 cols) is fine.
+    Consider dropping the "Project:" label / truncating the project name before the
+    AUTO/WCH segments when narrow. Seen in QA S11 of pr-0b87a97.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T23:49:49.156193+00:00'
+  updated_at: '2026-10-12T23:49:49.156193+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
