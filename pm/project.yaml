@@ -25918,7 +25918,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T22:52:27.208060+00:00'
+  updated_at: '2026-10-12T22:54:06.535295+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26057,6 +26057,18 @@ prs:
       prefers the host path.'
     created_at: '2026-10-12T22:52:27Z'
     last_edited: '2026-10-12T22:52:27Z'
+  - id: note-facfde2
+    text: 'QA s9 (merge policies/sign-off gate/QA hold/skip-QA): all Thens held; fixed
+      785dd557 — `pm autostart add X --auto-merge|--stop-before-merge` that flips
+      an existing target policy reported "unchanged: X (new policy)"; now action policy_changed
+      + previous_policy, CLI "policy_changed: X (auto-merge; was stop-before-merge)",
+      TUI "(now auto-merge)". Env hazard: container ~/.local/bin/git proxies pull
+      from nested test projects into /workspace (pull --rebase dropped unpushed commits)
+      — use PATH=<realgit dir> for nested pm sessions; PM_CAPTURES_PR unset in outer
+      containers so nested fake QA wrote scenarios/1/{verdict.md,scenario.json} into
+      /pm-captures (filed pr-8cdbe60 for proxy).'
+    created_at: '2026-10-12T22:54:06Z'
+    last_edited: '2026-10-12T22:54:06Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26159,7 +26171,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-12T22:52:26.436409+00:00'
+  updated_at: '2026-10-12T22:54:05.748558+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26171,6 +26183,14 @@ prs:
       to ~2 got pulled to qa windows at each auto-QA start (A, B, C).'
     created_at: '2026-10-12T22:52:26Z'
     last_edited: '2026-10-12T22:52:26Z'
+  - id: note-a6df411
+    text: 'Seen in pr-0b87a97 QA s9: after auto-started QA pulled the grouped view
+      client onto qa-<pr>, pressing L in the TUI opened the log pane inside the QA
+      window (launch_pane resolves the window from the client session), and the QA
+      loop then registered that log pane as role=qa-planner (pane_registry). Fixing
+      select_window should also cover this.'
+    created_at: '2026-10-12T22:54:05Z'
+    last_edited: '2026-10-12T22:54:05Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
@@ -26254,6 +26274,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T22:52:25.678569+00:00'
   updated_at: '2026-10-12T22:52:25.678569+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8cdbe60
+  plan: bugs
+  title: 'Bug: container git proxy forwards pull/fetch/push from any repo to the scenario
+    workdir'
+  branch: pm/pr-8cdbe60-bug-container-git-proxy-forwards-pull-fetch-push-f
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py wrapper_script (~line 457): the in-container
+    ~/.local/bin/git proxies push|fetch|pull|ls-remote to HOST_WORKDIR regardless
+    of cwd. A throwaway pm project driven inside a QA scenario container (nested fake-Claude
+    QA: pm pr start runs git_ops.pull_rebase in its new clone) therefore runs `git
+    pull --rebase` against the scenario /workspace instead. Repro (pr-0b87a97 QA s9,
+    2026-10-12): unpushed local commits on /workspace + origin behind -> `pm autostart
+    add <pr>` in /tmp/proj -> /workspace reflog shows "pull --rebase" and the 3 unpushed
+    commits were dropped (fork-point). Fix idea: in the wrapper, exec REAL_GIT unless
+    `$REAL_GIT rev-parse --show-toplevel` (honouring -C) is /workspace. Workaround:
+    PATH=<dir with git -> /usr/bin/git> for nested projects.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T22:54:04.987012+00:00'
+  updated_at: '2026-10-12T22:54:04.987012+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
