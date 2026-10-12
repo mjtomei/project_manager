@@ -50,7 +50,9 @@ class StatusBar(Static):
             watcher_display = "    [bold cyan]WCH[/bold cyan]"
         else:
             watcher_display = ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}{sort_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{auto_display}{watcher_display}{assist_display}")
+        # The repo path goes last: it is long and the bar is one row, so on
+        # a narrow terminal anything after it (sync, AUTO ×N, WCH) was cut.
+        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}{sort_display}    {sync_display}{auto_display}{watcher_display}{assist_display}    repo: [cyan]{safe_repo}[/cyan]")
 
 
 class SessionBar(Static):

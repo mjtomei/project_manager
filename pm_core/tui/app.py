@@ -72,6 +72,8 @@ class ProjectManagerApp(App):
         color: $text;
         padding: 0 1;
         margin-top: 1;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
     }
     SessionBar {
         height: 1;
