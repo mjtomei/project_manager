@@ -60,6 +60,10 @@ def test_second_O_keeps_first_pr_advancing(tmp_path):
     reviewed = []
 
     def fake_run_command(_app, cmd, **kw):
+        # Status-only transition: the review loop opens iteration 1's
+        # window itself, so a windowed `pr review` here would be a
+        # throwaway Claude session.
+        assert "--no-window" in cmd.split()
         reviewed.append(cmd.split()[-1])
 
     # Both implementations go idle on the same poll tick.

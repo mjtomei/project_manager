@@ -608,6 +608,15 @@ class TestBuildStatus:
         assert r["reason"] == "scenario 2/5 done"
         assert st.status_rows(s)[0]["progress"] == "qa 2/5 PASS:2"
 
+    def test_qa_progress_never_shows_stale_review_iteration(self):
+        rl = {"a": {"running": False, "iteration": 1, "verdict": "PASS"}}
+        planning = _status([_pr("a", status="qa")], ["a"], review_loops=rl,
+                           qa_loops={"a": {"running": True, "planning": True}})
+        assert st.status_rows(planning)[0]["progress"] == "qa planning"
+        done = _status([_pr("a", status="qa")], ["a"], review_loops=rl,
+                       qa_loops={"a": {"verdict": "PASS"}})
+        assert st.status_rows(done)[0]["progress"] == "qa PASS"
+
     def test_qa_pass_awaits_signoff(self):
         r = _run(_status([_pr("a", status="qa")], ["a"],
                          qa_loops={"a": {"verdict": "PASS"}}), "a")

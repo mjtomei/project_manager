@@ -1037,9 +1037,11 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
         _log.info("auto_review: impl idle for %s, transitioning to in_review", pr_id)
         app.log_message(f"Auto-review: {pr_id} implementation idle, starting review")
 
-        # Run `pm pr review --background <pr_id>` synchronously to
-        # transition status and open the review window without stealing focus
-        review_cmd = f"pr review --background {pr_id}"
+        # Run `pm pr review --no-window <pr_id>` synchronously to transition
+        # status only.  The review loop started below launches iteration 1's
+        # window itself (with --fresh); opening one here too would start a
+        # throwaway Claude session that the loop kills ~0.2s later.
+        review_cmd = f"pr review --no-window {pr_id}"
         pr_view.run_command(app, review_cmd)
 
         # Reload state — subprocess modified project.yaml on disk

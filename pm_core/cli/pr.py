@@ -1346,7 +1346,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 @click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
-def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None):
+@click.option("--no-window", is_flag=True, default=False, hidden=True,
+              help="Only transition to in_review; the caller's review loop "
+                   "launches the window itself (used by auto-start)")
+def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool):
     """Mark a PR as in_review and launch a review window.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
@@ -1377,6 +1380,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
+        if no_window:
+            return
         _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                               review_loop=review_loop,
                               review_iteration=review_iteration,
@@ -1412,6 +1417,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     store.locked_update(root, apply)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
+    if no_window:
+        return
     _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                           review_loop=review_loop,
                           review_iteration=review_iteration,

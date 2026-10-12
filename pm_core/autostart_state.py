@@ -469,6 +469,12 @@ def _progress(run: dict) -> str:
         counts = qa.get("counts") or {}
         tally = " ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
         return f"qa {qa.get('done', 0)}/{qa['total']}" + (f" {tally}" if tally else "")
+    # QA without a scenario count (still planning, or finished and its
+    # scenario list cleared) must not fall back to the stale review iteration.
+    if qa and qa.get("planning"):
+        return "qa planning"
+    if qa and qa.get("verdict"):
+        return f"qa {qa['verdict']}"
     rv = run.get("review")
     if rv and rv.get("iteration"):
         return f"review #{rv['iteration']}"
