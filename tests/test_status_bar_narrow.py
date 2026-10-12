@@ -2,7 +2,8 @@
 
 The bar is a single row; the repo path used to sit before sync/AUTO/WCH, so
 at ~100 columns (e.g. with the L log pane split beside the TUI) the long
-path pushed ``AUTO ×N`` off the row entirely.
+path pushed ``AUTO ×N`` off the row entirely; at 80 columns even the
+filter/sync segments did.
 """
 
 import asyncio
@@ -39,6 +40,10 @@ def test_auto_segment_visible_at_100_columns():
     line = _bar_text(100)
     assert "AUTO ×2" in line
     assert "synced" in line
+
+
+def test_auto_segment_visible_at_80_columns():
+    assert "AUTO ×2" in _bar_text(80)
 
 
 def test_repo_path_still_shown_when_wide():
