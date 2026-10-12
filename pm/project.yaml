@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7c32e44
+  active_pr: pr-924acb8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25918,7 +25918,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T22:51:34.532439+00:00'
+  updated_at: '2026-10-12T22:52:27.208060+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26043,6 +26043,20 @@ prs:
       recovered via ff-only to origin before snapshots.'
     created_at: '2026-10-12T22:51:34Z'
     last_edited: '2026-10-12T22:51:34Z'
+  - id: note-0641429
+    text: 'QA S6 incidental fix (ce0b79e9, 45b0b437): the one-row TUI status bar wrapped
+      after "repo:", so the long path pushed sync/AUTO ×N/WCH off the row below ~135
+      cols (L log pane split, 80-col terminals): armed targets showed ◎ but no AUTO
+      segment. AUTO/WCH now follow the project name, repo path is last, bar is nowrap+ellipsis;
+      tests/test_status_bar_narrow.py. S6 env: /workspace HEAD was rewound to ad9a84db
+      at 22:37:33Z by an external pull --rebase mid-run (live run 2 TUI loaded ad9a84db;
+      autostart code identical to bddbac33), ff-recovered to bddbac33 ~22:46Z. PM_CAPTURES_PR
+      unset in this container so nested fake QA overwrote /pm-captures/scenarios/1/prompt.md
+      (pr-2e8fe5a "S6 bravo" Smoke, 22:42:35) — fixture pollution, not evidence. Mitigation
+      for nested runs: pre-create ~/.pm/sessions/<nested-tag>/captures/<pr> so captures_dir
+      prefers the host path.'
+    created_at: '2026-10-12T22:52:27Z'
+    last_edited: '2026-10-12T22:52:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26145,11 +26159,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-12T21:39:47.961724+00:00'
+  updated_at: '2026-10-12T22:52:26.436409+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5568915
+    text: 'Seen again in pr-0b87a97 QA S6 (2026-10-12): the grouped "$SESS~N" view-session
+      workaround does NOT escape this — select_window targets the attached client
+      session, logged as select_window: target=$SESS~2:qa-<pr>. A recorder attached
+      to ~2 got pulled to qa windows at each auto-QA start (A, B, C).'
+    created_at: '2026-10-12T22:52:26Z'
+    last_edited: '2026-10-12T22:52:26Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
@@ -26211,6 +26232,28 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T22:50:28.881141+00:00'
   updated_at: '2026-10-12T22:50:28.881141+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-924acb8
+  plan: bugs
+  title: 'Bug: pm tui capture run from a pane while a grouped $SESS~N client is attached
+    configures the ~N session, not the TUI'
+  branch: pm/pr-924acb8-bug-pm-tui-capture-run-from-a-pane-while-a-grouped
+  status: pending
+  depends_on: []
+  description: 'Repro: pm session; tmux new-session -d -s "$S~2" -t "$S" and attach
+    a client to it; in a window of $S run `pm tui capture -b 5000` (no -s). It prints
+    "Capture config for session $S~2" and writes ~/.pm/debug/$S~2-capture.json; the
+    TUI reads $S-capture.json, so the buffer stays 100 frames and log_message frames
+    roll off. `-s $S` works. Session resolution for tui subcommands should map a ~N
+    grouped session to its base pm session (pm_core/cli tui capture session lookup).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T22:52:25.678569+00:00'
+  updated_at: '2026-10-12T22:52:25.678569+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
