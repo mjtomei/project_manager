@@ -693,6 +693,20 @@ class ProjectManagerApp(App):
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, f"show_guide_view:{state}")
 
+    def _focus_view_widget(self, widget) -> None:
+        """Focus *widget* unless the user is typing in the command bar.
+
+        The ``_show_*_view`` methods also run on every ``_load_state`` —
+        background reloads (auto-start progress, auto-review's sync
+        ``pr review``, an external ``pm pr edit`` SIGUSR1).  Stealing focus
+        then sends the rest of a half-typed command to the tree as hotkeys
+        (``t`` starts QA, Enter opens the edit pane) and strands the text.
+        """
+        cmd_bar = self.query_one("#command-bar", CommandBar)
+        if cmd_bar.has_focus or self._command_pending:
+            return
+        widget.focus()
+
     def _show_normal_view(self) -> None:
         """Show the normal tech tree view."""
         tree_container = self.query_one("#tree-container")
@@ -708,7 +722,7 @@ class ProjectManagerApp(App):
         self._qa_visible = False
         # Restore status bar to normal view
         self._update_status_bar()
-        self.query_one("#tech-tree", TechTree).focus()
+        self._focus_view_widget(self.query_one("#tech-tree", TechTree))
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
 
@@ -1345,7 +1359,7 @@ class ProjectManagerApp(App):
         self._current_guide_step = None
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
-        plans_pane.focus()
+        self._focus_view_widget(plans_pane)
         self._update_plans_status_bar()
         self.call_after_refresh(self._capture_frame, "show_plans_view")
 
@@ -1427,7 +1441,7 @@ class ProjectManagerApp(App):
         self._current_guide_step = None
         self._refresh_qa_pane()
         qa_pane = self.query_one("#qa-pane", QAPane)
-        qa_pane.focus()
+        self._focus_view_widget(qa_pane)
         self._update_qa_status_bar()
         self.call_after_refresh(self._capture_frame, "show_qa_view")
 
