@@ -26033,7 +26033,8 @@ prs:
     last_edited: '2026-10-12T22:43:42Z'
 - id: pr-b19db15
   plan: bugs
-  title: 'Bug: QA artifact rendering wait can match itself and stall completed work'
+  title: 'Bug: generated background-job waits can match themselves and stall completed
+    work'
   branch: pm/pr-b19db15-bug-qa-artifact-rendering-wait-can-match-itself-an
   status: pending
   depends_on: []
@@ -26069,8 +26070,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-12T23:04:43.463024+00:00'
+  updated_at: '2026-10-12T23:09:15.916240+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-55e963a
+    text: 'Second reproduction in #229 review round 3 iteration 1, native session
+      cd99f203-abeb-4cc8-9f39-08b708308eed: a generated until ! pgrep -f "pytest -q
+      -p no:cacheprovider tests/" wait matched its own shell after the suite had already
+      finished (2972 pass, known base hook installer failure). No pytest process remained.
+      Shepherd terminated only wait shell PID 1959 and queued the completed result.
+      Evidence: shepherd-20261012/review-round-3-i1-wait-recovery.json. Broaden this
+      fix to shared background-job guidance used by review/test execution as well
+      as QA artifact recipes; use actual job identity, completion and exit status
+      with a bound. Preserve pipeline failure status too: piping pytest to tail without
+      pipefail misleadingly reports shell exit 0 despite a failed test. Both reproductions
+      are improvised worker commands, not a checked-in PM polling loop.'
+    created_at: '2026-10-12T23:09:15Z'
+    last_edited: '2026-10-12T23:09:15Z'
