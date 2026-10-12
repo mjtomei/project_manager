@@ -872,6 +872,31 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
     asyncio.run(body())
 
 
+def test_runs_popup_survives_status_error_with_brackets(tmp_path):
+    """A failing refresh shows the error as plain text — an exception message
+    with ``[...]`` must not be parsed as markup and kill the popup."""
+    from textual.app import App
+    from textual.widgets import Static
+    from pm_core.tui.screens import AutoRunsScreen
+
+    class Host(App):
+        pass
+
+    async def body():
+        app = Host()
+        with patch("pm_core.tui.auto_start.build_status",
+                   side_effect=KeyError("[/bad]")):
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AutoRunsScreen())
+                await pilot.pause()
+                screen = app.screen
+                assert isinstance(screen, AutoRunsScreen)
+                text = str(screen.query_one("#runs-body", Static).render())
+                assert "status failed" in text and "[/bad]" in text
+
+    asyncio.run(body())
+
+
 def test_recorded_qa_verdict_used_when_loop_dropped(tmp_path):
     """A finished QA run leaves _qa_loops after one tick; the runtime_state
     verdict must still drive the reported state (not 'queued')."""

@@ -25264,11 +25264,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T01:44:38.301246+00:00'
-  updated_at: '2026-05-26T01:44:38.301246+00:00'
+  updated_at: '2026-10-12T21:55:29.002660+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0a64051
+    text: 'From pr-0b87a97 review: on_mount awaits auto_start.consume_breadcrumb,
+      which awaits check_and_start; that pass runs pm pr start --background serially
+      for every ready/in_progress PR in the union of target closures (each up to 300s).
+      With several targets this keeps the event loop (keys) and the startup cmd-queue
+      drain blocked after a merge restart. A likely fix is app.run_worker(check_and_start(app))
+      in consume_breadcrumb: review loops and QA adoption are already restored before
+      the pass, so ordering holds.'
+    created_at: '2026-10-12T21:55:28Z'
+    last_edited: '2026-10-12T21:55:28Z'
 - id: pr-5f729ab
   plan: tui-ux
   title: Generalize launch responsiveness / progress feedback to all session launches

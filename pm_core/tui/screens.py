@@ -722,7 +722,10 @@ class AutoRunsScreen(ModalScreen):
         try:
             self._status = _auto_start.build_status(self.app)
         except Exception as e:  # never let a refresh tick kill the popup
-            self.query_one("#runs-body", Static).update(f"[red]status failed: {e}[/]")
+            # Text, not markup: the exception text may contain brackets.
+            from rich.text import Text
+            self.query_one("#runs-body", Static).update(
+                Text(f"status failed: {e}", style="red"))
             return
         self._rows = status_rows(self._status)
         # Keep the same run selected across refreshes when it still exists.

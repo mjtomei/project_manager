@@ -295,6 +295,10 @@ captures under `impl/post-fix/`):
     `status --json` carries the owner's `error`/`message` when the reply is
     not ok.
 
+11. *(review 15ef i2)* The runs popup renders a failed status refresh as plain
+    `Text`, not markup — an exception message containing `[...]` raised
+    `MarkupError` and took the popup down instead of showing the error.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i
