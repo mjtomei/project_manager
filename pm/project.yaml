@@ -25762,11 +25762,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-12T17:33:48.614099+00:00'
+  updated_at: '2026-10-12T19:11:27.048214+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-7ddccd7
+    text: 'From pr-0b87a97 (multi-target auto-start): the auto-start catch-up path
+      now holds QA PRs whose recorded runtime_state QA verdict is PASS or INPUT_REQUIRED
+      (auto_start.recorded_qa_verdict / QA_HOLD_VERDICTS) instead of re-running QA
+      every scheduler pass. When you add the automatic qa->sign_off hand-off, PASS
+      will move the PR out of qa so that hold becomes moot; also update autostart_state._derive
+      (qa PASS reason "awaiting sign-off (press i ...)") and keep the sign_off branch
+      reasons in sync. pm autostart status / runs popup (key a) already report sign_off
+      state from the recorded pr.signoff verdict + HEAD freshness.'
+    created_at: '2026-10-12T19:11:26Z'
+    last_edited: '2026-10-12T19:11:26Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
@@ -25888,9 +25899,26 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T18:23:30.711242+00:00'
+  updated_at: '2026-10-12T19:11:26.286194+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5257357
+    text: 'Impl done (commits 65166b67, 7e24a46a, fe36c38f). Multi-target auto-start:
+      autostart_state.py (pure status builder, schema pm.autostart.status/1), pm autostart
+      add/remove/clear/list/status [--json] over the SIGUSR2 cmd queue with JSON reply
+      files (exit 1 invalid, 2 owner_unavailable/owner_timeout), runs popup on key
+      a. Live fake-Claude verification captured under impl/pre-fix (single-target
+      retarget repro: Alpha stuck in_progress after O on Beta) and impl/post-fix (4
+      targets, shared dep one window, remove keeps shared dep, breadcrumb restart
+      adopts in-flight QA with identical windows, popup==CLI JSON, stop-before-merge
+      vs auto-merge + sign-off gate, completion prune, empty set = off). Found+fixed
+      during verification: finished QA (PASS/INPUT_REQUIRED) was re-run by every scheduler
+      pass/restart; popup swallowed Ctrl+R (pm tui restart); merges seen only via
+      reload never pruned targets or started dependents. See impl.md section 5. Pre-existing
+      env failures: tests/test_markdown_render.py (no markdown module in venv) + test_hook_events
+      installer test fail identically on base.'
+    created_at: '2026-10-12T19:11:26Z'
+    last_edited: '2026-10-12T19:11:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
