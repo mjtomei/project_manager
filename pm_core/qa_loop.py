@@ -407,12 +407,23 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
         if not known or _git_capture(
                 workdir_path, "merge-base", "--is-ancestor",
                 remote, head).returncode != 0:
+            # Behind (e.g. an earlier QA worker pushed a fix the PR workdir
+            # never pulled) needs only a pull; diverged needs reconciling.
+            behind = known and _git_capture(
+                workdir_path, "merge-base", "--is-ancestor",
+                head, remote).returncode == 0
+            if behind:
+                problem, action = "is behind", "Pull the PR branch in the PR workdir"
+            else:
+                problem, action = ("diverged from",
+                                   "Reconcile the PR workdir with the "
+                                   "upstream (pull, then push)")
             raise PlannerHandoffError(
-                f"PR branch {branch} diverged: planner head {head[:12]} in "
-                f"{workdir_path} does not contain {real_url} {branch} at "
-                f"{remote[:12]}. Reconcile the PR workdir with the upstream "
-                f"(pull, then push) and restart QA — scenarios were not "
-                f"launched so none tested a different tree.")
+                f"PR branch {branch} {problem} upstream: planner head "
+                f"{head[:12]} in {workdir_path} does not contain {real_url} "
+                f"{branch} at {remote[:12]}. {action} and restart QA — "
+                f"scenarios were not launched so none tested a different "
+                f"tree.")
 
     _log.info("planner handoff: publishing %s %s -> %s (upstream was %s)",
               branch, head[:12], real_url, (remote or "absent")[:12])

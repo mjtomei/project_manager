@@ -498,6 +498,27 @@ class TestPlannerHeadPublication:
         # Never force-pushed over someone else's commit.
         assert _git(s["remote"], "rev-parse", "pm/pr-001") != s["c"]
 
+    def test_behind_remote_says_behind_not_diverged(self, remote_setup):
+        # The upstream already has the planner head plus a later commit
+        # (e.g. a previous QA worker's pushed fix the workdir never pulled).
+        s = remote_setup
+        _git(s["workdir"], "push", "origin", "pm/pr-001")
+        other = s["tmp"] / "other"
+        _git(s["tmp"], "clone", "-b", "pm/pr-001", str(s["remote"]),
+             str(other))
+        (other / "x.txt").write_text("x\n")
+        _git(other, "add", ".")
+        _git(other, *s["env_git"], "commit", "-m", "qa: worker fix")
+        _git(other, "push", "origin", "pm/pr-001")
+        _git(s["workdir"], "fetch", "origin")
+        with patch("pm_core.push_proxy.resolve_real_origin",
+                   return_value=s["real_url"]):
+            with pytest.raises(qa_loop.PlannerHandoffError) as ei:
+                qa_loop._publish_planner_head(str(s["workdir"]), "pm/pr-001")
+        msg = str(ei.value)
+        assert "is behind upstream" in msg and "diverged" not in msg
+        assert "Pull the PR branch" in msg
+
     def test_origin_not_pushing_upstream_falls_back_to_direct_push(
             self, remote_setup):
         """origin = local main repo that itself tracks the upstream: the
