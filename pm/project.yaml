@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-edc256b
+  active_pr: pr-a75da60
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -26919,6 +26919,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T01:50:20.375427+00:00'
   updated_at: '2026-10-13T01:50:20.375427+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a75da60
+  plan: bugs
+  title: 'Bug: local-backend pm pr merge of a second PR always falls to the merge-resolution
+    window (workdir master not refreshed before merge)'
+  branch: pm/pr-a75da60-bug-local-backend-pm-pr-merge-of-a-second-pr-alway
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py local backend: the merge step runs `git checkout
+    master; git merge --no-ff <branch>` in the PR workdir without first fetching the
+    main repo master, then _pull_from_workdir does `git fetch <workdir> master; git
+    merge --ff-only FETCH_HEAD` in the main repo. Once another PR (with commits) has
+    merged, the workdir master is stale, so the ff-only fails (rc=128) and pm launches
+    a merge-resolution Claude window for a trivially mergeable PR. Repro (pr-0b87a97
+    QA S28, local backend, two independent PRs W1/W2 each with one commit on its branch,
+    both signed off): g on W1 merges; g on W2 logs "Opened merge resolution window
+    merge-pr-<W2>". Workaround: in the W2 workdir, fetch origin, reset master to origin/master,
+    then g again. Fix idea: fetch + ff the workdir master from the main repo before
+    the --no-ff merge. Evidence: /pm-captures/scenarios/28/evidence/t4-w2-attempt1-nonff.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T02:58:29.741629+00:00'
+  updated_at: '2026-10-13T02:58:29.741629+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
