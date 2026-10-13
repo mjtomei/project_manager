@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T00:28:45.430671+00:00'
+  updated_at: '2026-10-13T00:35:47.859429+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26220,6 +26220,22 @@ prs:
       is the paint evidence for that span.'
     created_at: '2026-10-13T00:28:45Z'
     last_edited: '2026-10-13T00:28:45Z'
+  - id: note-d38106e
+    text: 'QA S16 (round 4, rev 51507548): every Then held except one. At 80x12 with
+      L split, Enter on a window-less runs-popup row (C blocked on A) logged "No live
+      window for C", but the popup covered the log line, so nothing showed on screen.
+      Fixed in d1885432: the notice is now also shown on the selected row, and moving
+      the selection clears it (test_runs_popup_no_window_notice_visible_on_short_terminal).
+      Spec wording issues, not bugs: (1) S16 expects A under C with "also needed by",
+      but b336ee34 deliberately dropped self-references, so "also needed by" appears
+      only for deps shared by two or more targets (verified with temp target D). (2)
+      At 80 cols the status bar clips "[H] As…" as well as the repo path, the same
+      as S11 "syn…". Env: the L pane opens in whichever window the client is on, and
+      auto-QA select_window (pr-f094946) can move the client there, so press prefix+0
+      before L. Run pm push only if it prints a sync branch; committing pm/ on master
+      directly also works.'
+    created_at: '2026-10-13T00:35:47Z'
+    last_edited: '2026-10-13T00:35:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
