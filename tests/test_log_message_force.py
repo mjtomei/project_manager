@@ -90,6 +90,32 @@ def test_forced_message_shown_during_hold():
     assert shown[-1] == " Auto-start: removed pr-x (auto-start OFF)"
 
 
+# QA s22 (pr-0b87a97): a "Selected: X" deferred by a confirmation hold
+# was flushed when the hold ended, wiping the newer forced answer to a
+# command-bar `autostart list` / bare `autostart` typed inside the hold.
+
+def test_newer_forced_message_drops_older_deferred_one():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)
+    _log(app, "Selected: pr-y")  # deferred by the hold
+    _log(app, "Auto-start targets: pr-x (stop)", force=True)
+    app._log_hold_until = 0.0  # hold expires
+    for cb in app.timers:
+        cb()
+    assert shown[-1] == " Auto-start targets: pr-x (stop)"
+
+
+def test_message_deferred_after_forced_one_still_flushes():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)
+    _log(app, "Auto-start targets: pr-x (stop)", force=True)
+    _log(app, "Selected: pr-y")  # newer than the forced message
+    app._log_hold_until = 0.0
+    for cb in app.timers:
+        cb()
+    assert shown[-1] == " Selected: pr-y"
+
+
 def test_hidden_hold_message_does_not_hold_the_line():
     app, shown = _stub_app()
     _log(app, "Review loop done: PASS", sticky=10)

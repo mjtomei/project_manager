@@ -855,6 +855,9 @@ class ProjectManagerApp(App):
             self._log_sticky_until = now + sticky
         elif suppressed:
             return  # a sticky message is still showing
+        # Anything deferred so far is older than this message; flushing it
+        # when the hold ends would overwrite this newer (e.g. forced) one.
+        self._log_held = None
         if hold > 0:
             # Only a message that is actually shown holds the line.
             self._log_hold_until = now + hold
