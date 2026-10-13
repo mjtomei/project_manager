@@ -26,6 +26,12 @@ LOG_PANE_BACKLOG_LINES = 500
 # status messages) pushed them hundreds of lines up into scrollback.
 LOG_PANE_RECAP_LINES = 8
 LOG_PANE_RECAP_PATTERN = r"\[tui\] log: Auto-(start|sequence|merge)"
+# Opening L writes its own burst of debug lines (split, pane-opened hook,
+# rebalance, "launched pane") right after the pane starts; in a half-width
+# split each wraps to two rows, so following immediately pushed the recap
+# header off the top before the user saw it.  Let that burst land first and
+# print it above the recap.
+LOG_PANE_SETTLE_SECONDS = 1.0
 
 
 
@@ -278,21 +284,25 @@ def log_pane_command(log_path) -> str:
     Plain ``tail -f`` shows only the last 10 lines; the debug log is busy
     (pane layout, review-loop polling), so an "Auto-sequence armed" line
     mirrored a minute earlier sits hundreds of lines up — in scrollback, not
-    on screen.  Show the backlog, repeat the last few auto-start
-    confirmations ("HH:MM:SS log: ...") at the bottom, then follow from the
-    line count taken first, so nothing written in between is lost.  No
-    ``exec``: launch_pane's EXIT trap must still run.
+    on screen.  Show the backlog, wait for the pane's own launch lines and
+    print them, repeat the last few auto-start confirmations ("HH:MM:SS log:
+    ...") at the bottom, then follow from the line count taken last, so
+    nothing written in between is lost.  No ``exec``: launch_pane's EXIT
+    trap must still run.
     """
     f = shlex.quote(str(log_path))
     pattern = shlex.quote(LOG_PANE_RECAP_PATTERN)
     return (
         f'n=$(wc -l < {f}); '
         f'head -n "$n" {f} | tail -n {LOG_PANE_BACKLOG_LINES}; '
+        f'sleep {LOG_PANE_SETTLE_SECONDS}; '
+        f'm=$(wc -l < {f}); '
+        f'head -n "$m" {f} | tail -n "+$((n + 1))"; '
         f'echo "── recent auto-start messages ──"; '
-        f'head -n "$n" {f} | grep -E {pattern} | tail -n {LOG_PANE_RECAP_LINES}'
+        f'head -n "$m" {f} | grep -E {pattern} | tail -n {LOG_PANE_RECAP_LINES}'
         f' | sed "s/ [A-Z]* *\\[tui\\] log: / log: /"; '
         f'echo "── following log ──"; '
-        f'tail -n "+$((n + 1))" -f {f}'
+        f'tail -n "+$((m + 1))" -f {f}'
     )
 
 

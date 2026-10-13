@@ -5,7 +5,9 @@ overwritten before it painted can be recovered with L; a bare ``tail -f``
 starts at the last 10 lines, which the busy debug log pushes past in seconds.
 Even with a 500-line backlog, an auto-start confirmation a minute old sits
 hundreds of lines up (scrollback, not on screen), so the pane repeats the
-last few "log: Auto-..." lines at the bottom before following.
+last few "log: Auto-..." lines at the bottom before following.  Opening L
+logs its own burst of lines; those are printed above the recap so they
+cannot scroll its header off a half-width split.
 """
 
 import subprocess
@@ -31,10 +33,10 @@ def test_view_log_launches_log_pane_command(tmp_path, monkeypatch):
 
 
 def _run_pane(cmd: str) -> list[str]:
-    """Run the pane command for ~1s (tail -f never exits) and return output."""
+    """Run the pane command past the settle delay (tail -f never exits)."""
     proc = subprocess.Popen(["bash", "-c", cmd], stdout=subprocess.PIPE, text=True)
     try:
-        out, _ = proc.communicate(timeout=1)
+        out, _ = proc.communicate(timeout=pane_ops.LOG_PANE_SETTLE_SECONDS + 1.5)
     except subprocess.TimeoutExpired:
         proc.kill()
         out, _ = proc.communicate()
@@ -84,7 +86,7 @@ def test_log_pane_follows_lines_appended_after_open(tmp_path):
     log.write_text("old 1\n01:00:00 INFO  [tui] log: Auto-start: removed pr-x\n")
     proc = subprocess.Popen(["bash", "-c", pane_ops.log_pane_command(log)],
                             stdout=subprocess.PIPE, text=True)
-    time.sleep(0.4)
+    time.sleep(pane_ops.LOG_PANE_SETTLE_SECONDS + 0.6)
     with log.open("a") as fh:
         fh.write("new 1\n")
     time.sleep(1.5)
@@ -94,3 +96,30 @@ def test_log_pane_follows_lines_appended_after_open(tmp_path):
         "old 1", "01:00:00 INFO  [tui] log: Auto-start: removed pr-x",
         "── recent auto-start messages ──", "01:00:00 log: Auto-start: removed pr-x",
         "── following log ──", "new 1"]
+
+
+def test_log_pane_prints_launch_burst_above_recap(tmp_path):
+    # S26: the L pane's own launch lines (pane-opened hook, rebalance,
+    # "launched pane") land just after it starts.  Followed immediately, they
+    # wrapped to ~16 rows in a 60-col split and scrolled the recap header off
+    # screen; they must be printed before the recap instead.
+    log = tmp_path / "tui.log"
+    log.write_text("old 1\n01:00:00 INFO  [tui] log: Auto-sequence armed for pr-a\n")
+    proc = subprocess.Popen(["bash", "-c", pane_ops.log_pane_command(log)],
+                            stdout=subprocess.PIPE, text=True)
+    time.sleep(0.3)
+    with log.open("a") as fh:
+        fh.write("01:00:05 INFO  [pane_layout] rebalance: window @0\n"
+                 "01:00:05 INFO  [tui.pane_ops] launched pane: role=log id=%9\n")
+    time.sleep(pane_ops.LOG_PANE_SETTLE_SECONDS + 0.4)
+    with log.open("a") as fh:
+        fh.write("later 1\n")
+    time.sleep(1.5)
+    proc.kill()
+    out, _ = proc.communicate()
+    assert out.splitlines() == [
+        "old 1", "01:00:00 INFO  [tui] log: Auto-sequence armed for pr-a",
+        "01:00:05 INFO  [pane_layout] rebalance: window @0",
+        "01:00:05 INFO  [tui.pane_ops] launched pane: role=log id=%9",
+        "── recent auto-start messages ──", "01:00:00 log: Auto-sequence armed for pr-a",
+        "── following log ──", "later 1"]

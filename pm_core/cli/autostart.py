@@ -216,8 +216,9 @@ def autostart():
 
     \b
     Policies (per PR, also set by the O / A keys):
-      stop-before-merge  (default for new CLI targets, and O) — stop when
-                         ready to merge; press g after sign-off
+      stop-before-merge  (--stop-before-merge, the default for new CLI
+                         targets, and O) — stop when ready to merge;
+                         press g after sign-off
       auto-merge         (--auto-merge, and A) — merge via `pm pr merge`,
                          which still enforces the sign-off gate
 

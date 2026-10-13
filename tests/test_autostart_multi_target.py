@@ -722,6 +722,14 @@ def _cli(args):
 
 
 class TestCLI:
+    def test_group_help_names_both_policy_flags(self):
+        # S26: `pm autostart --help` spelled only --auto-merge as a flag.
+        res = _cli(["--help"])
+        assert res.exit_code == 0
+        for word in ("add", "remove", "clear", "list", "status",
+                     "--stop-before-merge", "--auto-merge"):
+            assert word in res.output
+
     def test_unknown_id_rejected_before_sending(self, project):
         with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
             res = _cli(["add", "pr-a", "nope", "--json", "-s", "pm-x"])
