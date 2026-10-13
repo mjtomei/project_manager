@@ -680,3 +680,18 @@ class TestTrustCli:
         r = self._run("status", str(repo))
         assert "approved: no" in r.output
         assert f"pm trust add {repo}" in r.output
+
+
+def test_grace_setting_is_configurable_via_pm_set(home):
+    """The grace the bounded-failure message relies on must be settable
+    through ``pm set`` (it was rejected as an unknown setting)."""
+    from click.testing import CliRunner
+    from pm_core.cli import cli
+    r = CliRunner().invoke(cli, ["set", "trust-prompt-grace-seconds", "30"])
+    assert r.exit_code == 0, r.output
+    assert wt.prompt_grace_seconds() == 30.0
+    listed = CliRunner().invoke(cli, ["set", "list"]).output
+    assert "trust-prompt-grace-seconds" in listed
+    bad = CliRunner().invoke(cli, ["set", "trust-prompt-grace-seconds", "soon"])
+    assert bad.exit_code != 0
+    assert wt.prompt_grace_seconds() == 30.0

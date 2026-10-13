@@ -260,7 +260,7 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
-                 "qa-verdict-reminder-timeout"}
+                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -274,6 +274,7 @@ _SETTING_DEFAULTS = {
     "qa-max-scenarios": "(unset)",
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
+    "trust-prompt-grace-seconds": "120",
     "spec-mode": "prompt",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
@@ -328,6 +329,9 @@ def set_cmd(setting, value):
                                    reminder to a scenario agent (0 or unset = disabled)
 
       qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
+
+      trust-prompt-grace-seconds  Seconds an unattended session may sit at Claude's
+                                  workspace-trust prompt before pm fails it (default 120)
 
       spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
     """
