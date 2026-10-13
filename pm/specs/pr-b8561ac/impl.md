@@ -53,7 +53,8 @@ applies to any plan before accepting it:
    is fresh.
 Marker lines match after removing Claude Code's display bullet (`●`/`⏺`),
 markdown emphasis and whitespace. Placeholder titles are a whole
-`<multi word phrase>`, or its unclosed start when a narrow pane wrapped it.
+`<multi word phrase>`, or its unclosed start when a narrow pane wrapped it
+(`<descriptive title for`, or a lone `<descriptive`).
 A real title like `<Enter> key` is not a placeholder.
 An incomplete plan is not consumed. The driver logs the reason, sets
 `state.latest_output` to a visible "planner plan incomplete: …" message, and

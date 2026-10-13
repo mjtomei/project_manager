@@ -15,6 +15,7 @@ Two live failures motivated these:
 
 import json
 import os
+import re
 import subprocess
 import time
 from contextlib import ExitStack
@@ -626,10 +627,23 @@ class TestAngleBracketTitles:
         "<descriptive title for this scenario>",
         "<descriptive title for next scenario>",
         # wrapped by a narrow pane
-        "<descriptive title for",
+        "<descriptive title for", "<descriptive",
         "Scenario Title", "..."])
     def test_template_placeholders_still_detected(self, title):
         assert qa_loop._is_placeholder_title(title)
+
+    @pytest.mark.parametrize("title", ["<Enter>", "<Enter> key submits",
+                                       "<Esc>/<q> close the popup"])
+    def test_closed_leading_token_is_a_real_title(self, title):
+        assert not qa_loop._is_placeholder_title(title)
+
+    def test_template_wrapped_after_first_word_is_not_a_plan(self):
+        """A pane narrow enough to wrap the template's header right after
+        ``<descriptive`` must not turn the echoed template into a plan."""
+        text = re.sub(r'(SCENARIO \d+: <descriptive) ', r'\1\n', TEMPLATE_PROMPT)
+        assert "SCENARIO 1: <descriptive\n" in text
+        sc = parse_qa_plan(text)
+        assert sc == [] or qa_loop.qa_plan_problem(text, sc, 1) is not None
 
 
 # ---------------------------------------------------------------------------

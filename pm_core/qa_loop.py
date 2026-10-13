@@ -949,12 +949,13 @@ def _is_placeholder_title(title: str) -> bool:
 
     Template placeholders are a whole ``<multi word phrase>`` (e.g.
     ``<descriptive title for this scenario>``), or its unclosed start when
-    a narrow pane wrapped the line (``<descriptive title for``); a real
-    title that merely starts with ``<`` (``<Enter> key submits``) is not
-    one.
+    a narrow pane wrapped the line (``<descriptive title for``, or just
+    ``<descriptive``); a real title that merely starts with ``<``
+    (``<Enter> key submits``) is not one.
     """
     return (title in _PLACEHOLDER_TITLES
-            or re.fullmatch(r'<[^<>]*\s[^<>]*>?', title) is not None)
+            or re.fullmatch(r'<[^<>]*\s[^<>]*>?', title) is not None
+            or re.fullmatch(r'<[^<>\s]+', title) is not None)
 
 
 def _marker_line_offsets(text: str, marker: str) -> list[int]:
