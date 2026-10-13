@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T00:10:25.823458+00:00'
+  updated_at: '2026-10-13T00:28:45.430671+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26207,6 +26207,19 @@ prs:
       that the pm checkout HEAD is 8162fbb0 or later before and after the run.'
     created_at: '2026-10-13T00:10:25Z'
     last_edited: '2026-10-13T00:10:25Z'
+  - id: note-97dad82
+    text: 'QA s19 (round 4, 51507548): every documented S19 contract item held, with
+      no app changes. Concretized-step display gaps, all outside #229 scope: (1) post-sign-off
+      U row "merge attempt failed; no merge window" = known pr-7c32e44, patch preserved
+      uncommitted under scenarios/19/patches and noted there; (2) "Auto-merge: X …
+      merging" never paints (the same-frame sync merge Error overwrites it), and skip-QA
+      "review passed, skipping QA" / J "ready to merge … press g" are hidden by the
+      sticky 10s "Review loop done". Both are identical on master, are not R23 items,
+      and are filed as pr-0a08055. The recorder view was switched to a QA window by
+      known pr-f094946 from 00:16:25 to 00:21:35; the 0.1s capture-pane sampler (tui/statusline-samples.log)
+      is the paint evidence for that span.'
+    created_at: '2026-10-13T00:28:45Z'
+    last_edited: '2026-10-13T00:28:45Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26348,7 +26361,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:51:25.629473+00:00'
-  updated_at: '2026-10-12T22:51:25.629473+00:00'
+  updated_at: '2026-10-13T00:28:44.734008+00:00'
+  notes:
+  - id: note-ab536bd
+    text: 'Re-observed in pr-0b87a97 QA s19 (round 4, 51507548), auto-merge TARGET
+      U (not just a dep): gate refused the auto-merge, pm pr auto-sequence U -> ready_to_merge,
+      then popup + status --json flipped to merge/failed "merge attempt failed; no
+      merge window". Kept out of #229 per scope; an unapplied, unit-tested patch is
+      at <session captures>/pr-0b87a97/scenarios/19/patches/ (s19-combined-uncommitted.patch;
+      README.md describes it). It records gate refusals in app._gate_refused_merge_prs
+      at _maybe_auto_merge time, and _derive then falls through to the signed-off
+      reason "…press g". Evidence: scenarios/19/cli/status-poll.log 00:19:52+.'
+    created_at: '2026-10-13T00:28:44Z'
+    last_edited: '2026-10-13T00:28:44Z'
 - id: pr-3951487
   plan: bugs
   title: 'Bug: respawned TUI window is named python3 instead of main after the TUI
@@ -26469,6 +26494,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-12T23:49:49.156193+00:00'
   updated_at: '2026-10-12T23:49:49.156193+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0a08055
+  plan: bugs
+  title: 'Bug: TUI hides post-review-PASS auto-start lines (skip-QA, Auto-merge merging,
+    gate error, ready to merge) behind the sticky Review-loop-done / same-frame merge
+    error'
+  branch: pm/pr-0a08055-bug-tui-hides-post-review-pass-auto-start-lines-sk
+  status: pending
+  depends_on: []
+  description: 'Pre-existing on master (/opt/pm-src identical). pm_core/tui/review_loop_ui.py:
+    poll_loop_state logs "Review loop done for X: PASS" with sticky=10, then _maybe_start_qa
+    logs "Auto-start: X review passed, skipping QA (skip_qa enabled)", _maybe_auto_merge
+    logs "Auto-merge: X review passed, merging" / "✓ X ready to merge (auto-sequence
+    armed — press g)" and the gate Error — all unforced, so they are dropped while
+    the sticky line is up (debug log: "(hidden by sticky message)"). On the QA-PASS
+    path, "Auto-merge: X … merging" is logged and the synchronous pm pr merge Error
+    lands in the same frame, so only the Error ever paints. Repro (pr-0b87a97 QA s19,
+    /pm-captures/scenarios/19): skip-qa on, pm autostart add K --auto-merge + add
+    J; after review PASS the TUI only shows "Review loop done … PASS" (statusline-samples.log
+    00:27:35/00:27:40). Fix idea: force+hold these lines (log_message(force=True,
+    hold=CONFIRM_HOLD_SECONDS)) — see patches/review_loop_ui-and-hold-test.patch under
+    s19 captures for the Auto-merge half. Visible only in L / ~/.pm/debug log today.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T00:28:35.641755+00:00'
+  updated_at: '2026-10-13T00:28:35.641755+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
