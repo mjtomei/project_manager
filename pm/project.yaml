@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-12T21:08:15.463081+00:00'
+  updated_at: '2026-10-13T06:30:17.540428+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3317,6 +3317,24 @@ prs:
       in project_manager-c5a1006b session. The failed run must not count as QA coverage.'
     created_at: '2026-10-12T20:57:15Z'
     last_edited: '2026-10-12T20:57:15Z'
+  - id: note-15afe47
+    text: 'Impl done (e82f88b0, 83f0b832, spec b78d2c17). Trust is bootstrapped at
+      the launch boundary: build_claude_shell_cmd/launch_claude write projects[<checkout>].hasTrustDialogAccepted
+      under Claude own <config>.lock for ~/.pm/workdirs or `pm trust add` paths only
+      (never parents; unknown dirs keep the prompt); containers get /workspace seeded
+      into their .claude.json copy. --dangerously-skip-permissions does NOT bypass
+      the dialog (pre-fix capture). Dialog defaults to "No, exit" so WorkspacePromptWatch
+      accepts by cursor (Down+Enter) only for approved workdirs, else fails after
+      trust-prompt-grace-seconds (120s). Planner fails fast INPUT_REQUIRED w/o finalizer;
+      zero-scenario runs skip the finalizer. Live finding: host review pane was split
+      without -c and ran Claude in the TUI pm/ dir -> fixed (cwd=workdir + launch
+      `cd <cwd> &&`). Evidence: captures impl/pre-fix + impl/post-fix (real claude
+      2.1.296: host, container, unapproved, fallback-accept, live QA e2e w/ restart:
+      fresh PR clone planner -> s-1 worker PASS -> VERIFIED -> FINALIZE_DONE; reused
+      untrusted review). Full suite 3040 pass; 13 failures pre-existing env (markdown
+      module, PM_HOST_HOME).'
+    created_at: '2026-10-13T06:30:17Z'
+    last_edited: '2026-10-13T06:30:17Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -25811,7 +25829,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-12T16:42:21.131559+00:00'
+  updated_at: '2026-10-13T06:30:18.276998+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25843,6 +25861,16 @@ prs:
       in session project_manager-c5a1006b. This recovery invalidates unattended qualification.'
     created_at: '2026-10-12T22:43:16Z'
     last_edited: '2026-10-12T22:43:16Z'
+  - id: note-21f341e
+    text: 'Merge heads-up from pr-b53bfe2 (workspace trust): both PRs edit the run_qa_sync
+      planner poll loop. pr-b53bfe2 adds a WorkspacePromptWatch check at the top of
+      the loop (cleared on first idle event) and an early `if trust_blocked:` return
+      (INPUT_REQUIRED, no execution/finalizer) placed just before the post-loop plan
+      read. git merge-tree shows one conflict hunk there: keep the trust_blocked early-return
+      block before your final _read_planner_plan gated read. Also _execute_and_finalize
+      now skips the finalizer when state.scenarios is empty.'
+    created_at: '2026-10-13T06:30:18Z'
+    last_edited: '2026-10-13T06:30:18Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
