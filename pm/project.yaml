@@ -25958,6 +25958,31 @@ prs:
       A merge lines).'
     created_at: '2026-10-13T07:18:48Z'
     last_edited: '2026-10-13T07:18:48Z'
+  - id: note-a414f41
+    text: 'Group B refine (QA run 2, 2026-10-13): R9b-restart must use `pm tui restart
+      --breadcrumb` (keeps auto-start targets + run_id, so the driver sees the old
+      run stamp signoff-<pr>.head=X vs HEAD Y and retires it with a "stale" line).
+      Plain Ctrl+R + re-arm mints a NEW autostart run dir (auto_start.py:385), so
+      the old window is found by name but its transcript/stamp are invisible -> step_signoff
+      returns "running" until that window dies; if the PR sticks there, that is known
+      pr-5410ae4 (orphan after run-dir change), not a new bug. To hit the restart
+      path deterministically, commit X->Y right after issuing the restart (while the
+      new TUI boots), not before. E1: lock file must be pre-created (touch+chmod 0444)
+      before the PR reaches sign_off; the user is non-root so open("w") fails. E2:
+      TUI merge is a synchronous `pm pr merge` with a 30 s timeout, so hold the .merge
+      lock only a few seconds.'
+    created_at: '2026-10-13T12:47:27Z'
+    last_edited: '2026-10-13T12:47:27Z'
+  - id: note-2a9ac6f
+    text: 'QA s5 (Group B) incidental fix a1d4324b: signoff_ui.step logged "signoff:
+      launching router" at INFO on every 5 s poll while the relaunch backoff skipped
+      the launch, so the L log showed phantom relaunches (11 lines in a 60 s B4 window-death
+      backoff, 36 in B6 launch-failure). Now logged inside _launch past the backoff/in-flight
+      gates. Regression: test_throttled_polls_do_not_log_a_launch (fails on 272ed914).
+      Post-fix live: exactly 2 lines, both real launches. B2 Ctrl+R variant stranded
+      behind the orphan window = pr-5410ae4 (noted there).'
+    created_at: '2026-10-13T13:35:05Z'
+    last_edited: '2026-10-13T13:35:05Z'
   - id: note-1e891a2
     text: 'QA s6 Group C (adc6d89d): C-a1/a2/a3, C-c, C-d (2 race orders), C-e, C-f,
       C-g held live. C-b found + fixed c762e3d5: a CLI qa-run-bg run retired by a
@@ -27402,6 +27427,16 @@ prs:
   reviewed_at: null
   merged_at: null
   notes:
+  - id: note-22f3bc7
+    text: 'QA pr-488ac6d s5 B2 variant (2026-10-13): reproduced with a HEAD move.
+      O target router @33 launched on X (run autostart-<pr>-ae4fdd80, 120 s delay);
+      plain Ctrl+R, re-arm (new run dir a24ca70d), commit X->Y. The TUI showed "sign-off
+      review running" behind the orphan, which also escaped the R9b stale check because
+      the head stamp sits in the old run dir. The old X verdict printed and was correctly
+      never recorded. Recovery: kill the orphan window, then one relaunch on Y recorded
+      @Y. A fix here should also retire an orphan whose stamp != HEAD.'
+    created_at: '2026-10-13T13:35:05Z'
+    last_edited: '2026-10-13T13:35:05Z'
   - id: note-1b32640
     text: 'pr-488ac6d b8e97482 (QA s4) adds signoff_ui._adopt_orphaned_run: when the
       current auto-start run dir has no sign-off run for a PR whose signoff-<pr> window
