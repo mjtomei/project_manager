@@ -137,6 +137,39 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
     store.locked_update(root, _apply)
 
 
+def signoff_launch_stamp(transcript) -> Path:
+    """Sidecar of a router transcript holding the HEAD its run launched on.
+
+    ``signoff-<pr>.jsonl`` -> ``signoff-<pr>.head``.  A transcript verdict is
+    only bound to the revision the router was launched against: HEAD at
+    verdict-*read* time can be a later, unreviewed commit.
+    """
+    return Path(transcript).with_suffix(".head")
+
+
+def stamp_signoff_launch(transcript, sha: str | None) -> None:
+    """Record *sha* as the revision the run writing *transcript* reviews."""
+    stamp = signoff_launch_stamp(transcript)
+    try:
+        if sha:
+            stamp.parent.mkdir(parents=True, exist_ok=True)
+            stamp.write_text(sha + "\n")
+        elif stamp.exists():
+            stamp.unlink()
+    except OSError as e:
+        _log.warning("sign-off launch stamp %s: %s", stamp, e)
+
+
+def signoff_launched_sha(tdir: Path, pr_id: str) -> str | None:
+    """HEAD the driver's current sign-off run launched on, or None."""
+    try:
+        sha = signoff_launch_stamp(
+            signoff_transcript(tdir, pr_id)).read_text().strip()
+    except OSError:
+        return None
+    return sha or None
+
+
 def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
     """Return the recorded verdict if it is fresh (record sha == *current_sha*).
 
@@ -272,6 +305,13 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 tmux_mod.select_window(pm_session, existing["id"])
                 print(f"Switched to existing sign-off window '{window_name}'")
                 return
+
+        # Bind this run to the revision it reviews: the driver only records
+        # its transcript verdict while HEAD still equals this stamp.  Only a
+        # newly created window stamps; the fast path above reuses a run whose
+        # stamp is already on disk.
+        if transcript:
+            stamp_signoff_launch(transcript, head_sha(workdir))
 
         _resolution = resolve_model_and_provider(
             "signoff",
@@ -493,11 +533,12 @@ def retire_signoff_run(session: str, pr_entry: dict, tdir: Path) -> None:
         home_window.park_if_on(session, win["id"])
         tmux_mod.kill_window(session, win["id"])
     transcript = signoff_transcript(tdir, pr_entry["id"])
-    try:
-        if transcript.is_symlink() or transcript.exists():
-            transcript.unlink()
-    except OSError:
-        pass
+    for f in (transcript, signoff_launch_stamp(transcript)):
+        try:
+            if f.is_symlink() or f.exists():
+                f.unlink()
+        except OSError:
+            pass
 
 
 class SignoffStep:
@@ -535,8 +576,11 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
        a hand-recorded approval without a wasted re-run.
     2. A STALE record (HEAD moved since it ran) is never trusted: retire that
        run (window + transcript), clear the record -> ``launch``.
-    3. No record: read this driver's transcript; a verdict there is recorded
-       (origin ``auto-sequence``, sha = current HEAD) so later ticks adopt it.
+    3. No record: a run launched on another revision than the current HEAD
+       (see :func:`stamp_signoff_launch`; unstamped counts as unknown) is
+       retired before its verdict can count -> ``launch`` (stale).  Otherwise
+       read this driver's transcript; a verdict there is recorded (origin
+       ``auto-sequence``, sha = the launched HEAD) so later ticks adopt it.
     4. Still nothing: ``launch`` if the window is gone, else ``running``.
     5. Verdict: pure :func:`decide_signoff_hop`, then the auto-sequence-only
        :func:`apply_signoff_hop`; a bounce also retires the run so re-entry
@@ -566,6 +610,14 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
 
     if verdict is None:
         tverdict = read_verdict(tdir, pr_id)
+        launched = signoff_launched_sha(tdir, pr_id)
+        if current_sha and (launched or tverdict is not None) \
+                and launched != current_sha:
+            # HEAD moved while the router ran (or the run carries no launch
+            # revision): its verdict reviewed other code.  Retire it before
+            # it is recorded against the new HEAD.
+            retire(session, pr_entry, tdir)
+            return SignoffStep("launch", stale=True, sha=current_sha)
         if tverdict is not None:
             record_signoff_verdict(root, pr_id, tverdict, current_sha,
                                    origin="auto-sequence")

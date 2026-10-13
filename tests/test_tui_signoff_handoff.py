@@ -111,6 +111,9 @@ class World:
             pr_view.run_command(
                 app,
                 f"pr signoff --background --transcript {transcript} {pr_id}")
+            # What ``launch_signoff_window`` stamps next to the transcript of
+            # a newly created window: the HEAD the router run reviews.
+            Path(transcript).with_suffix(".head").write_text(self.head + "\n")
         finally:
             app._signoff_launch_inflight.discard(pr_id)  # worker finished
 
@@ -255,6 +258,77 @@ def test_head_moved_after_approval_reruns_signoff(world_factory):
     assert not (w.tdir / f"signoff-{PR}.jsonl").exists()  # transcript retired
     assert len(w.launches()) == 2           # fresh router against new HEAD
     assert w.merges() == []
+
+
+@pytest.mark.parametrize("stop", [True, False], ids=["O", "A"])
+def test_verdict_from_run_launched_on_old_head_is_not_recorded(world_factory,
+                                                              stop):
+    """HEAD moves while the router still runs: its verdict reviewed the old
+    HEAD and must never be recorded (or merged) against the new one."""
+    app, w = world_factory(stop=stop)
+    _qa_pass(app)                          # router launched on HEAD A
+    head_a = w.head
+    w.head = "e" * 40                      # unreviewed commit B lands
+    w.emit("SIGNOFF_MERGE")                # the old run (on A) finishes
+    _poll(app)
+
+    assert app.pr().get("signoff") is None  # nothing recorded against B
+    assert w.merges() == []
+    assert not any("ready to merge" in m or "signed off" in m
+                   for m in app.logs)
+    assert any("stale (HEAD moved)" in m for m in app.logs)
+    assert not (w.tdir / f"signoff-{PR}.jsonl").exists()  # old run retired
+    assert len(w.launches()) == 2           # fresh router against B
+    assert (w.tdir / f"signoff-{PR}.head").read_text().strip() == w.head
+
+    _poll(app, 2)                           # new run still working
+    assert app.pr().get("signoff") is None and w.merges() == []
+
+    w.emit("SIGNOFF_MERGE")                 # the new run on B finishes
+    _poll(app, 2)
+    assert app.pr()["signoff"]["sha"] == w.head != head_a
+    if stop:
+        assert sum("ready to merge" in m for m in app.logs) == 1
+        assert w.merges() == []
+    else:
+        assert len(w.merges()) == 1
+        assert app.pr()["status"] == "merged"
+
+
+def test_head_moved_before_verdict_retires_running_run(world_factory):
+    """No need to wait out the old run: it is retired on the next pass."""
+    app, w = world_factory(stop=True)
+    _qa_pass(app)
+    w.head = "e" * 40
+    _poll(app)
+    assert w.window and len(w.launches()) == 2  # retired + relaunched
+    assert any("stale (HEAD moved)" in m for m in app.logs)
+    _poll(app, 3)
+    assert len(w.launches()) == 2               # the new run is current
+
+
+@pytest.mark.parametrize("stamp", ["old", None], ids=["old-stamp", "unstamped"])
+def test_restart_does_not_adopt_run_of_another_head(world_factory, stamp):
+    """A TUI restart reuses the running router window.  Its verdict counts
+    only when the run's launch stamp equals the current HEAD; an unstamped
+    run (launched by an older pm) reviewed an unknown revision."""
+    app, w = world_factory(stop=False)
+    _qa_pass(app)
+    stamp_path = w.tdir / f"signoff-{PR}.head"
+    if stamp:
+        w.head = "e" * 40                   # stamp says A, HEAD is B
+    else:
+        stamp_path.unlink()
+    # Restart: in-memory driver state is gone, window + transcript remain.
+    for attr in ("_signoff_acted", "_signoff_launched_at",
+                 "_signoff_launch_inflight"):
+        if hasattr(app, attr):
+            delattr(app, attr)
+    w.emit("SIGNOFF_MERGE")
+    _poll(app)
+    assert app.pr().get("signoff") is None
+    assert w.merges() == []
+    assert len(w.launches()) == 2
 
 
 def test_gate_refusal_is_not_tracked_as_conflict(world_factory):

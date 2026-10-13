@@ -132,6 +132,21 @@ ready line is printed again with Y. `pm autostart status` shows "… stale
 (HEAD moved); sign-off relaunches against current HEAD" while it is stale.
 `g` before the new verdict is refused by the gate.
 
+R9b. HEAD moves while the router is still running (before its first
+verdict). Given an `O` (and separately an `A`) target whose sign-off router
+was launched on HEAD X and is still in its fake `delay`; When the user
+commits on the PR branch (HEAD → Y) before that router prints a verdict;
+Then on the next scheduler pass the log says "Sign-off for <pr> is stale
+(HEAD moved) — re-running", the old window is killed and one new router
+window is launched on Y. The old run's verdict is never recorded: project.yaml
+has no `signoff` record, there is no ready line, and for `A` no merge until
+the new router's SIGNOFF_MERGE is recorded with sha Y. Only then does `O`
+print its ready line `@ <Y8>` once, or `A` merge once. Each run is bound to
+the HEAD it launched on (`<run>/signoff-<pr>.head` next to the transcript),
+not to HEAD at verdict-read time. The same applies after a TUI restart that
+reuses the running window: a run with no stamp, or one stamped with another
+HEAD, is retired instead of being adopted.
+
 R10. Window death & relaunch backoff. Given a PR in `sign_off` whose router
 window is still running (long `delay`); When the user kills that window;
 Then `pm autostart status` shows "no sign-off window; relaunches on next
@@ -214,7 +229,7 @@ PR.
 
 ## Pass / Fail criteria
 
-Pass = every Then above observed on screen/CLI/project.yaml at 210a2efa+,
+Pass = every Then above (including R9b under both O and A) observed on screen/CLI/project.yaml at 210a2efa+,
 with artifacts saved. Fail = any "ready to merge" claim or merge attempt
 without a fresh SIGNOFF_MERGE on the current HEAD; a gate refusal tracked as
 a merge conflict; duplicate sign-off windows; repeated per-poll log spam; a

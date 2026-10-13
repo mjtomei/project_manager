@@ -161,3 +161,25 @@ Update existing tests whose expectations encoded the old shortcut.
 * PR leaves scope / auto-start turned off → driver stops acting (window keeps
   running; `i`/`g` still work manually).
 * `g` merge path is unchanged and already gated by `pm pr merge`.
+
+## Verdict binding to the launched revision (QA s2 follow-up)
+
+`step_signoff` used to record a transcript verdict with `sha` = HEAD at
+verdict-*read* time. A commit that landed while the router was still running
+(before its first verdict) was therefore stamped as reviewed, and the shared
+gate let `A` merge unreviewed code. `launch_signoff_window` now writes
+`<run>/signoff-<pr>.head` next to the `--transcript` symlink when it creates
+a new window. It runs inside the per-PR launch lock. The existing-window fast
+path does not restamp, because a reused run keeps the revision it launched
+on. `step_signoff` retires the run and returns `launch(stale=True)` before
+anything is recorded when that stamp differs from the current HEAD, or when a
+transcript verdict exists without a stamp (e.g. a run started by an older
+pm). This holds for both drivers (TUI scheduler and `pm pr auto-sequence`),
+whether the run is still going or has finished, and across a TUI restart.
+`retire_signoff_run` removes the stamp together with the transcript. With an
+unknown HEAD (workdir missing) the old behaviour stays, so the forced stale
+relaunch cannot loop. Tests: `test_verdict_from_run_launched_on_old_head_is_not_recorded[O|A]`,
+`test_head_moved_before_verdict_retires_running_run`,
+`test_restart_does_not_adopt_run_of_another_head`, CLI
+`test_verdict_of_run_launched_on_old_head_not_recorded`, and the
+`TestWindowLaunchWorkdir` stamp tests.

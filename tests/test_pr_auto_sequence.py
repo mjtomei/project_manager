@@ -382,6 +382,7 @@ class TestSignOff:
              patch("pm_core.cli.pr.store.load", return_value=data), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.signoff.head_sha", return_value="abc"), \
+             patch("pm_core.signoff.signoff_launched_sha", return_value="abc"), \
              patch("pm_core.cli.pr._check_signoff_verdict",
                    return_value="SIGNOFF_BLOCKED"), \
              patch("pm_core.cli.pr.store.locked_update",
@@ -393,6 +394,31 @@ class TestSignOff:
         assert pr["signoff"]["verdict"] == "SIGNOFF_BLOCKED"
         assert pr["signoff"]["origin"] == "auto-sequence"
         assert pr["signoff"]["sha"] == "abc"
+
+    def test_verdict_of_run_launched_on_old_head_not_recorded(self, runner,
+                                                               tmp_path):
+        """HEAD moved while the router ran: its verdict reviewed the launched
+        HEAD, not the current one -> retire + relaunch, record nothing."""
+        pr = _pr("sign_off")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.signoff.head_sha", return_value="new"), \
+             patch("pm_core.signoff.signoff_launched_sha", return_value="old"), \
+             patch("pm_core.cli.pr._check_signoff_verdict",
+                   return_value="SIGNOFF_MERGE"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._retire_signoff_window") as mock_retire, \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: sign_off_relaunched" in result.output
+        assert "ready_to_merge" not in result.output
+        mock_retire.assert_called_once()
+        assert "signoff" not in pr
 
     def test_reqa_relaunches_qa(self, runner, tmp_path):
         pr = _pr("sign_off")
