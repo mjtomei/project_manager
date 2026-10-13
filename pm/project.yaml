@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2428766
+  active_pr: pr-488ac6d
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -25578,7 +25578,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-06-20T20:26:14.099710+00:00'
-  updated_at: '2026-06-21T01:45:28.863711+00:00'
+  updated_at: '2026-10-13T06:33:14.362759+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25607,6 +25607,13 @@ prs:
       but sign_off never auto-launched; had to launch it manually.'
     created_at: '2026-06-21T01:45:28Z'
     last_edited: '2026-06-21T01:45:28Z'
+  - id: note-49511f0
+    text: 'pr-488ac6d fixes the TUI side of this bug: QA PASS (legacy + self-driving)
+      and skip_qa review PASS now go to sign_off, and _maybe_auto_merge waits for
+      a fresh SIGNOFF_MERGE. Still open here: the CLI `pm pr auto-sequence` skip_qa
+      branch still prints "ready_to_merge (skip_qa)" without running sign-off.'
+    created_at: '2026-10-13T06:33:14Z'
+    last_edited: '2026-10-13T06:33:14Z'
 - id: pr-e0b4515
   plan: bugs
   title: QA finalizer can route back to implementation when an oversight requires
@@ -27282,6 +27289,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T05:08:46.426074+00:00'
   updated_at: '2026-10-13T05:08:46.426074+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5410ae4
+  plan: bugs
+  title: 'Bug: TUI sign-off driver shows an orphaned router window as "running" forever
+    after the auto-start run dir changes'
+  branch: pm/pr-5410ae4-bug-tui-sign-off-driver-shows-an-orphaned-router-w
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/signoff_ui.step reads the router verdict only from get_transcript_dir(app)/signoff-<pr>.jsonl.
+    The run id is kept across breadcrumb restarts, but turning auto-start off and
+    on again (or a TUI crash restart with no breadcrumb) creates a new autostart-<tag>-<hex>
+    dir. A sign-off window launched under the old run dir is then never read: step_signoff
+    sees no record, no transcript and a live window, so it returns "running" every
+    5 s, and autostart status says "sign-off review running" with no end. Repro: auto-start
+    a PR to sign_off, disable and re-enable auto-start before the router prints its
+    verdict, then let it print SIGNOFF_MERGE. The PR stays sign_off until a human
+    runs pm pr signoff record. Possible fixes: a stable per-PR sign-off transcript
+    path (like the CLI transcripts/auto-sequence/<pr>), or retire and relaunch a window
+    that has no transcript in the current run dir when the step first sees it. pr-488ac6d
+    documented manual i windows as "running until recorded"; this orphan case is different.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T06:17:29.491425+00:00'
+  updated_at: '2026-10-13T06:17:29.491425+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

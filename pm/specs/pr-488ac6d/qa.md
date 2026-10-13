@@ -1,0 +1,247 @@
+# pr-488ac6d — QA spec: TUI auto-sequence must hand QA PASS to sign-off
+
+Code under test: branch `pm/pr-488ac6d-bug-tui-auto-sequence-skips-sign-off-after-qa-pass`
+at **210a2efa** (post-review: shared merge-gate helper, *asynchronous*
+`pm pr signoff` launch worker, in-flight de-dupe, per-tick reload skip,
+skip_qa reason). The implementation captures under `impl/{pre,post}-fix`
+predate the async-launch review rounds — **workers must validate against
+210a2efa themselves** (`git log -1` in the clone they install from must
+show 210a2efa or a descendant) and must observe the real background
+launch, not reuse those captures.
+
+## What changed (user-visible)
+
+* TUI auto-start (`O` = stop before merge, `A` = auto-merge) used to treat a
+  QA PASS as "ready to merge": `O` printed a green "ready to merge" line with
+  the PR still `qa` and no sign-off; `A` called `pm pr merge`, hit the
+  sign-off gate and then mis-tracked the refusal as a merge conflict.
+* Now a QA PASS (or, with `skip_qa`, a review PASS) moves the PR to
+  `sign_off`, launches the sign-off router window **in the background**
+  (`pm pr signoff --background --transcript <run>/signoff-<pr>.jsonl`), reads
+  its verdict, records it against the current HEAD (origin `auto-sequence`),
+  and routes it:
+  * `SIGNOFF_MERGE` → `O`: "✓ <pr> signed off (SIGNOFF_MERGE @ <sha8>) —
+    ready to merge … press 'g'"; `A`: merges.
+  * `SIGNOFF_REQA` → back to `qa`, QA loop restarted.
+  * `SIGNOFF_REVIEW` → back to `in_review`, review loop restarted.
+  * `SIGNOFF_IMPL` → back to `in_progress`, impl window relaunched fresh.
+  * `SIGNOFF_BLOCKED` → stays `sign_off`, red sticky "needs a human decision"
+    line, never merges.
+* `pm pr signoff` accepts `in_review` PRs when `project.skip_qa` is true.
+* `pm autostart status` / runs popup (`a`) reasons updated (see R9).
+* CLI `pm pr auto-sequence` refactored onto the same sign-off state machine;
+  its output is meant to be unchanged.
+
+## Setup (all scenarios)
+
+Follow `pm/qa/instructions/tui-manual-test.md`:
+1. Install pm from the PR clone (editable; `export PYTHONPATH=<clone>`;
+   `pm which` shows the clone). Confirm HEAD is 210a2efa or later.
+2. Throwaway git project, `pm init --backend local --no-import`, add PRs with
+   `pm pr add`. Give each PR a real commit on its branch once its workdir
+   exists (the impl stage) so merges and HEAD shas are meaningful.
+3. Start `pm session`; drive everything through the TUI keys / `pm autostart`
+   / `pm pr` commands run in a pane of the *test* tmux session.
+4. Use fake-claude (`pm fake-claude config set`) so every Claude session is
+   deterministic. Baseline config:
+   ```json
+   {"_all": {},
+    "review": {"verdicts": ["PASS"]},
+    "qa_planning": {"verdicts": ["QA_PLAN"], "body": "SCENARIO 1: s\nFOCUS: f\nINSTRUCTION: none\nSTEPS:\n  GIVEN a\n  WHEN b\n  THEN c"},
+    "qa_concretize": {"verdicts": ["REFINED_STEPS"]},
+    "qa_scenario": {"verdicts": ["PASS"]},
+    "qa_verification": {"verdicts": ["VERIFIED"]},
+    "qa_finalize": {"verdicts": ["FINALIZE_DONE"]},
+    "signoff": {"verdicts": ["SIGNOFF_MERGE"]}}
+   ```
+   The `signoff` cursor persists across launches per session, so a scripted
+   list (e.g. `["SIGNOFF_REQA","SIGNOFF_MERGE"]`) yields one verdict per
+   router launch. Use `{"verdict": "...", "delay": N}` entries when a
+   scenario needs the router window to stay up for a while.
+5. Artifacts: tmux pane transcript + asciinema of the TUI
+   (`tmux-screen-recording.md`) and CLI recordings of `pm autostart status`,
+   `pm pr show`, `pm pr merge`/`pm pr signoff` commands (`cli-recording.md`).
+   Also save `pm/project.yaml` snapshots showing `status` and the `signoff`
+   record (`verdict`, `sha`, `origin`) at each key point.
+
+## Requirements (Given / When / Then)
+
+R1. Bug repro — O stops only after sign-off. Given an auto-start target with
+`O` policy, `skip_qa` false, fake review PASS / QA PASS / SIGNOFF_MERGE;
+When the sequence runs from pending; Then: after QA PASS the log says
+"QA PASS for <pr> — handing off to sign-off" and "Auto-start: <pr> →
+sign-off" (never "ready to merge" at that moment); the PR shows `sign_off`;
+a `signoff-…` tmux window appears without stealing focus from the TUI;
+after the router prints SIGNOFF_MERGE the PR record has
+`signoff.verdict=SIGNOFF_MERGE`, `sha`=branch HEAD, `origin=auto-sequence`;
+only then the log shows "✓ <pr> signed off (SIGNOFF_MERGE @ <sha8>) — ready
+to merge … press 'g'"; the PR is NOT merged; `pm autostart status` reason
+reads "signed off (fresh SIGNOFF_MERGE); stop-before-merge — press g".
+
+R2. No repetition. Given R1's end state; When the TUI keeps running ≥ 60 s
+(12+ scheduler polls); Then the ready line appears exactly once, no second
+sign-off window opens, the TUI stays responsive (keys navigate normally).
+
+R3. Manual merge after O. Given R1's end state; When the user presses `g`;
+Then the merge succeeds through the normal gate (no `--no-signoff-check`)
+and the PR becomes `merged`.
+
+R4. A merges only after sign-off. Given an `A` target (optionally with a
+dependent PR also in scope); When the sequence runs; Then the PR passes
+through `sign_off`, "Auto-merge: <pr> signed off, merging" appears only
+after the SIGNOFF_MERGE record exists, the PR becomes `merged`, the
+dependent starts, and there is no merge-conflict / resolve window and no
+"no sign-off verdict recorded yet" error anywhere in the log.
+
+R5. Policy flip. Given an `O` PR already signed off (R1 end state); When the
+user switches it to `A`; Then on a following scheduler pass it merges
+(once), without re-running sign-off.
+
+R6. Bounce routes. Given a target with `signoff` scripted
+`["SIGNOFF_REQA","SIGNOFF_REVIEW","SIGNOFF_MERGE"]`; When the sequence runs;
+Then: first verdict → "Sign-off routed <pr> back to QA (SIGNOFF_REQA)", PR
+`qa`, a new QA run starts (not an instant re-hand-off from the old PASS),
+the old sign-off window is gone; second → "…back to review
+(SIGNOFF_REVIEW)", PR `in_review`, a fresh review loop runs, then QA again;
+third → normal SIGNOFF_MERGE finish per policy. Each bounce clears the
+previous `signoff` record; captures/report files are not deleted.
+
+R7. Impl bounce and BLOCKED. Given a target with `signoff` scripted
+`["SIGNOFF_IMPL","SIGNOFF_BLOCKED"]` and `A` policy; When the sequence runs;
+Then IMPL → "…back to implementation (SIGNOFF_IMPL)", PR `in_progress`, the
+impl window is relaunched (fresh), and the PR later re-enters review → QA →
+sign-off; BLOCKED → red sticky "Sign-off BLOCKED for <pr> — needs a human
+decision", PR stays `sign_off`, no merge attempt even under `A`,
+`pm autostart status` reports it blocked/paused, and the line is not
+repeated every poll.
+
+R8. Manual approval & report-hash gate. Given R7's BLOCKED end state and a
+`captures/<pr>/report.html` carrying `<meta name="pm-signoff-verdict"
+content="SIGNOFF_MERGE">`; When the user runs `pm pr signoff record <pr>`;
+Then the record becomes origin `manual` with a report hash and the `A`
+driver merges on a later pass. Variant (fresh PR, `O` → then `A`): after
+recording, edit report.html; Then the TUI logs one yellow "Not merging
+<pr>: … report.html changed since the recorded approval …" and never calls
+merge; `g` is also refused with the same reason.
+
+R9. Stale HEAD. Given an `O` PR signed off at sha X; When the user commits a
+new change on the PR branch (HEAD → Y); Then within a few polls the log says
+"Sign-off for <pr> is stale (HEAD moved) — re-running", the old window is
+retired, a new router window is launched, the new record has sha Y, and the
+ready line is printed again with Y. `pm autostart status` shows "… stale
+(HEAD moved); sign-off relaunches against current HEAD" while it is stale.
+`g` before the new verdict is refused by the gate.
+
+R10. Window death & relaunch backoff. Given a PR in `sign_off` whose router
+window is still running (long `delay`); When the user kills that window;
+Then `pm autostart status` shows "no sign-off window; relaunches on next
+scheduler pass" and a single new window appears within ~60 s (not one per
+5 s poll); the verdict from the new window is recorded normally.
+
+R11. Restart / late enable catch-up. Given a PR whose QA PASSed while it was
+NOT an auto-start target (log: "QA PASS for <pr> — press i to sign off", PR
+stays `qa`, no sign-off window); When the user then adds it as an `O`
+target; Then the next scheduler pass hands it to sign-off and it finishes
+like R1. Variant: quit and restart the TUI while a PR sits in `qa` with a
+recorded PASS (or in `sign_off` mid-run) with auto-start re-armed; Then it is
+picked up without re-running QA.
+
+R12. Scope removal. Given a target in `sign_off` with the router running;
+When the user removes it from auto-start (`pm autostart remove`); Then the
+TUI stops acting on it (no recording, no hop, no merge), the window is left
+alone, and `i` / `g` still work manually.
+
+R13. skip_qa. Given `project.skip_qa: true` and an `O` target; When the
+review loop PASSes; Then no QA runs, the PR goes `in_review → sign_off`, the
+router runs and SIGNOFF_MERGE ends with the O ready line; `pm autostart
+status` for an in_review skip_qa PR says "skip_qa set; sign-off follows the
+review PASS". CLI: `pm pr signoff <pr>` on an `in_review` PR succeeds
+(→ `sign_off`) with skip_qa true and is refused ("expected qa or sign_off")
+with skip_qa false.
+
+R14. CLI auto-sequence regression. Given a PR driven only by repeated
+`pm pr auto-sequence <pr>` calls (no TUI auto-start) and fake verdicts;
+When it reaches QA PASS and then sign-off; Then output lines are the same
+shapes as on master (`sign_off …`, `ready_to_merge`, bounce lines), the
+transcript lives under `transcripts/auto-sequence/<pr>`, and SIGNOFF_REQA
+bounces once and then completes. (Known, tracked: its skip_qa branch still
+prints `ready_to_merge (skip_qa)` without sign-off — pr-dd4f07b.)
+
+## Concurrency (shared resources)
+
+Shared resources touched by the diff: `pm/project.yaml` (locked_update from
+TUI scheduler, sign-off CLI, router, merge, autostart control); the tmux
+window `signoff-<pr>` in the session + the per-PR launch lock
+`~/.pm/workdirs/.signoff-launch-<session>-<pr>.lock`; the run-dir transcript
+symlink `signoff-<pr>.jsonl`; runtime_state QA records; the fake-claude
+scripted cursor; `captures/<pr>/report.html`; the autostart control socket.
+
+C1. Two targets at once. Given two independent PRs, one `O` and one `A`,
+added together; When both reach QA PASS near-simultaneously; Then each gets
+exactly one sign-off window, each record carries its own branch's sha, the
+`A` one merges and the `O` one stops with its ready line, project.yaml
+stays parseable with no lost status/note fields, and the TUI never freezes
+while the two background launches run.
+
+C2. Manual vs scheduler launch race. Given a target just entering `sign_off`;
+When the user simultaneously runs `pm pr signoff <pr>` (and/or presses `i`)
+from another pane; Then only one `signoff-<pr>` window exists, and the
+verdict it emits is still picked up (if the scheduler's transcript isn't
+attached, the user can `pm pr signoff record` and the driver adopts it).
+
+C3. Status polling during transitions. While C1 runs, a background loop
+calls `pm autostart status --json` every second; Then every response is
+valid JSON with a sensible phase/reason for each PR and no errors.
+
+C4. CLI driver beside TUI driver. While the TUI drives a target, run the
+`pm pr auto-sequence` loop (R14) on a different, non-targeted PR in the same
+project; Then both finish correctly and neither driver acts on the other's
+PR.
+
+## Edge cases
+
+* E1 Launch failure: make `pm pr signoff` fail (e.g. remove the PR's
+  workdir path then let it relaunch, or run without tmux) → red "Sign-off
+  launch failed for <pr>: …" line, retried at most once per ~60 s, TUI
+  responsive.
+* E2 A merge refused mid-merge (HEAD moved between gate and merge): logs
+  "Merge of <pr> refused by the sign-off gate" and is NOT tracked as a merge
+  conflict (no resolve window, PR not shown as conflict). Best effort —
+  timing dependent; record as not-driven if it can't be produced.
+* E3 Self-driving `zz t` QA reaching required passes on an in-scope PR logs
+  "(n/n consecutive) — handing off to sign-off"; out of scope logs "press i
+  to sign off" and does nothing else.
+
+## Pass / Fail criteria
+
+Pass = every Then above observed on screen/CLI/project.yaml at 210a2efa+,
+with artifacts saved. Fail = any "ready to merge" claim or merge attempt
+without a fresh SIGNOFF_MERGE on the current HEAD; a gate refusal tracked as
+a merge conflict; duplicate sign-off windows; repeated per-poll log spam; a
+bounce that loops; TUI freezing during the launch; lost project.yaml data.
+
+Reporting rules (supervisor):
+* Every bug found must end with a fix in this PR, an existing/new bug PR
+  (`pm pr list --plan bugs` first; known: pr-dd4f07b CLI skip_qa, pr-5410ae4
+  orphaned router window after run-dir change, pr-7c32e44 dep row says
+  "merge attempt failed" after gate refusal, pr-8e60aa9 auto-sequence
+  terminal-verdict advance) or an explicit unresolved verdict. "Nonblocking"
+  is not a reason to leave a bug untracked.
+* Verification must be independent (separate verifier), not self-graded.
+* The final report must disclose that this validation was supervised and
+  that manual outer trust prompts were resolved by the supervisor.
+* Do not count a supervisor/hand-launched sign-off as automatic hand-off
+  success: the auto hand-off has to be observed launching the window itself.
+
+## Ambiguities (resolved)
+
+* "HUMAN route": there is no SIGNOFF_HUMAN verdict; the human route is
+  SIGNOFF_BLOCKED (stay in sign_off, sticky log, no merge).
+* skip_qa: the TUI routes review PASS to sign-off (R13); the CLI
+  auto-sequence skip_qa branch is out of scope (tracked in pr-dd4f07b).
+* A manually launched `i` window has no transcript in the TUI run dir, so
+  the driver shows it as running until `pm pr signoff record`; that is
+  intended (pr-5410ae4 covers the different orphan-after-run-dir-change case).
+* `test_hook_events::test_installer_writes_standalone_receiver` was reported
+  failing by the implementer but passes in the planning environment
+  (environment-dependent); not a finding for this PR.
