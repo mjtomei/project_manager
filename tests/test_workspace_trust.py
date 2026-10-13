@@ -441,6 +441,28 @@ def test_poll_for_verdict_raises_when_blocked(home, tmp_path):
                                          workdir="/not/approved")
 
 
+def test_adopted_review_polls_with_pr_workdir(tmp_path):
+    """Restart handoff: an adopted in-flight review pane is watched with the
+    PR workdir, so a pre-fix container dialog (/workspace) can still fall
+    back to the approved host checkout."""
+    from pm_core import review_loop
+    transcript_dir = tmp_path / "t"
+    transcript_dir.mkdir()
+    sid = str(uuid.uuid4())
+    (transcript_dir / "review-pr-x-i2.jsonl").symlink_to(tmp_path / f"{sid}.jsonl")
+    state = review_loop.ReviewLoopState(pr_id="pr-x")
+    state.iteration = 2
+    pr_data = {"id": "pr-x", "workdir": "/wd/pr-x"}
+    with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+         patch("pm_core.review_loop._find_claude_pane", return_value="%5"), \
+         patch("pm_core.hook_events.read_event", return_value=None), \
+         patch("pm_core.review_loop._poll_for_verdict",
+               return_value="PASS") as poll:
+        assert review_loop._adopt_in_flight_review(
+            state, pr_data, str(transcript_dir)) == "PASS"
+    assert poll.call_args.kwargs["workdir"] == "/wd/pr-x"
+
+
 def test_pane_idle_reports_trust_prompt_as_waiting(home, tmp_path):
     from pm_core.pane_idle import PaneIdleTracker
     transcript = tmp_path / f"{uuid.uuid4()}.jsonl"

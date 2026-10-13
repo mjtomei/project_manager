@@ -255,7 +255,8 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
         if verdict:
             return read_latest_assistant_text(transcript) or verdict
 
-    content = _poll_for_verdict(pane_id, transcript)
+    content = _poll_for_verdict(pane_id, transcript,
+                                 workdir=pr_data.get("workdir"))
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
