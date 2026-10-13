@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+import re
 import shlex
 import shutil
 import subprocess
@@ -928,6 +929,44 @@ def transcript_path_for(cwd: str, session_id: str) -> Path:
     letting ``build_claude_shell_cmd(transcript=...)`` create one.
     """
     return _claude_project_dir(cwd) / f"{session_id}.jsonl"
+
+
+_PANE_SESSION_RE = re.compile(
+    r"--(?:session-id|resume)[ =]"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+_PANE_CD_RE = re.compile(r'^"?cd (\S+) && ')
+_PANE_CONTAINER_RE = re.compile(r"\b(?:podman|docker) exec\b")
+
+
+def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
+    """Claude's native transcript for the session a pane was launched with.
+
+    A restarted TUI can't find the transcript symlinks an earlier TUI made
+    (they live in that TUI's run dir), so it would never track, idle-detect
+    or trust-watch those panes again.  The session id is in the pane's own
+    start command (``--session-id``/``--resume``), and the directory Claude
+    runs in is the ``cd`` prefix of a host launch, ``/workspace`` for a
+    container exec, else *workdir*.  Returns None when no session id shows.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.container import _CONTAINER_WORKDIR
+    cmd = tmux_mod.pane_start_command(pane_id)
+    m = _PANE_SESSION_RE.search(cmd)
+    if not m:
+        return None
+    cd = _PANE_CD_RE.match(cmd)
+    if cd:
+        try:
+            cwd = shlex.split(cd.group(1))[0]
+        except (ValueError, IndexError):
+            return None
+    elif _PANE_CONTAINER_RE.search(cmd):
+        cwd = _CONTAINER_WORKDIR
+    elif workdir:
+        cwd = workdir
+    else:
+        return None
+    return transcript_path_for(cwd, m.group(1))
 
 
 def finalize_transcript(transcript_path: Path) -> None:

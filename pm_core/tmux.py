@@ -596,6 +596,13 @@ def set_pane_option(pane_id: str, name: str, value: str) -> None:
     _run(_tmux_cmd("set-option", "-p", "-t", pane_id, name, value))
 
 
+def pane_start_command(pane_id: str) -> str:
+    """Return the command a pane was started with, or "" if it is gone."""
+    result = _run(_tmux_cmd("display-message", "-p", "-t", pane_id,
+                            "#{pane_start_command}"), text=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 
