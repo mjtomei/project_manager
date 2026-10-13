@@ -69,7 +69,7 @@ def _real(path: str | Path) -> str:
     return os.path.realpath(os.path.abspath(os.path.expanduser(str(path))))
 
 
-def _is_within(path: str, root: str) -> bool:
+def is_within(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip("/") + "/")
 
 
@@ -98,7 +98,7 @@ def approved_roots() -> list[str]:
 def approved_path(path: str | Path) -> bool:
     """True when *path* is a PM-created or explicitly authorized workdir."""
     real = _real(path)
-    return any(_is_within(real, root) for root in approved_roots())
+    return any(is_within(real, root) for root in approved_roots())
 
 
 def _git_toplevel(path: str) -> str | None:
@@ -342,9 +342,16 @@ class ClaudeWorkspaceTrust(TrustRuntime):
             return None
         for i, line in enumerate(lines):
             if "Accessing workspace:" in line:
-                for nxt in lines[i + 1:i + 4]:
-                    if nxt.strip().startswith("/"):
-                        return nxt.strip()
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    if lines[j].strip().startswith("/"):
+                        # A long path hard-wraps onto following lines in a
+                        # narrow pane; the block ends at the blank line.
+                        parts = []
+                        for cont in lines[j:j + 6]:
+                            if not cont.strip():
+                                break
+                            parts.append(cont.strip())
+                        return "".join(parts)
         return ""
 
     def accept_keys(self, screen: str) -> list[str] | None:
@@ -395,7 +402,7 @@ def blocked_message(path: str, waited: float) -> str:
 
 __all__ = [
     "TrustOutcome", "TrustRuntime", "ClaudeWorkspaceTrust",
-    "approved_path", "approved_roots", "authorized_roots",
+    "approved_path", "approved_roots", "authorized_roots", "is_within",
     "set_authorized_roots", "trust_keys", "register_trust_runtime",
     "get_trust_runtime", "prompt_grace_seconds", "blocked_message",
     "TRUSTED", "ALREADY", "UNAPPROVED", "UNSUPPORTED", "ERROR",

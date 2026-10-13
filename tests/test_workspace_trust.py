@@ -308,6 +308,12 @@ class TestPromptDetection:
         assert rt.detect_prompt("Welcome to Claude Code\n> ") is None
         assert rt.detect_prompt("") is None
 
+    def test_wrapped_path_is_rejoined(self):
+        # A long workdir path hard-wraps in a narrow pane.
+        path = "/home/u/.pm/workdirs/proj-1234/pr-abc-a-very-long-branch-name"
+        screen = TRUST_SCREEN.format(path=path[:30] + "\n " + path[30:])
+        assert wt.get_trust_runtime().detect_prompt(screen) == path
+
     def test_mention_in_conversation_is_not_a_prompt(self):
         text = "The dialog says 'Accessing workspace:' but no options here"
         assert wt.get_trust_runtime().detect_prompt(text) is None
@@ -391,10 +397,26 @@ class TestPromptWatch:
         pane = _FakePane(TRUST_SCREEN.format(path="/no-such-container-dir"))
         with patch("pm_core.tmux.capture_pane", pane.capture), \
              patch("pm_core.tmux.send_keys_literal", pane.send), \
+             patch("pm_core.container._CONTAINER_WORKDIR",
+                   "/no-such-container-dir"), \
              patch("pm_core.claude_launcher.time.sleep"):
             w = WorkspacePromptWatch("%1", str(wd), grace=0)
             assert w.check() is None
         assert pane.keys == ["Down", "Enter"]
+
+    def test_unresolvable_host_path_not_accepted_via_workdir(self, home):
+        """A shown path that is neither a host dir nor container-internal
+        (e.g. mis-parsed) must not be trusted by proxy of the workdir."""
+        wd = _pm_workdir(home)
+        pane = _FakePane(TRUST_SCREEN.format(path="/home/u/proj/p"))
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", pane.send), \
+             patch("pm_core.container._CONTAINER_WORKDIR",
+                   "/no-such-container-dir"):
+            w = WorkspacePromptWatch("%1", str(wd), grace=0)
+            msg = w.check()
+        assert pane.keys == []
+        assert msg and "pm trust add /home/u/proj/p" in msg
 
     def test_watch_ends_once_transcript_exists(self, home, tmp_path):
         """Claude writes the transcript only after the dialog; once it

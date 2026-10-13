@@ -466,10 +466,17 @@ class WorkspacePromptWatch:
 
         A host path on the dialog decides: the session may have started
         somewhere other than *workdir* (never trust that by proxy).  Only an
-        unreadable or container-internal path falls back to *workdir*.
+        unreadable or container-internal path falls back to *workdir*; any
+        other path that isn't a host directory (e.g. mis-parsed) is refused.
         """
         from pm_core import workspace_trust
-        target = shown if shown and os.path.isdir(shown) else self.workdir
+        from pm_core.container import _CONTAINER_WORKDIR
+        if shown and os.path.isdir(shown):
+            target = shown
+        elif not shown or workspace_trust.is_within(shown, _CONTAINER_WORKDIR):
+            target = self.workdir
+        else:
+            return None
         if target and workspace_trust.approved_path(target):
             return target
         return None
