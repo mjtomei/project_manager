@@ -3270,7 +3270,7 @@ def pr_qa_run_bg(pr_id: str):
     Used by ``pm pr auto-sequence`` to spawn a detached QA driver.  Not
     intended for direct human use — prefer the TUI ``t`` key.
     """
-    from pm_core.qa_loop import QALoopState, run_qa_sync
+    from pm_core.qa_loop import QALoopState, clear_resume_file, run_qa_sync
 
     root = state_root()
     data = store.load(root)
@@ -3307,6 +3307,15 @@ def pr_qa_run_bg(pr_id: str):
     except Exception as e:
         _log.exception("pr_qa_run_bg: QA crashed for %s: %s", pr_id, e)
         raise SystemExit(1)
+
+    # This process finished the run and auto-sequence reads qa_status.json
+    # itself, so drop the resume snapshot before exiting.  It exists only so
+    # a TUI can pick up a run whose driver *died*; left behind, the TUI's
+    # resume scan would "recover" this completed run once our pid is gone —
+    # e.g. a run retired by a sign-off re-qa bounce finishes late and logs a
+    # stale "QA PASS — press i" against the PR's new QA run.
+    if state.latest_verdict and state.qa_workdir:
+        clear_resume_file(state.qa_workdir)
 
 
 @pr.command("dashboard")
