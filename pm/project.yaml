@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T01:21:48.733758+00:00'
+  updated_at: '2026-10-13T01:49:37.704736+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26394,6 +26394,19 @@ prs:
       12. Workers: pm checkout HEAD must be dd0f6ca8 or later before and after.'
     created_at: '2026-10-13T01:21:48Z'
     last_edited: '2026-10-13T01:21:48Z'
+  - id: note-b43349b
+    text: 'QA S22 (round 5, CLI/command bar/validation/owners/pulls) on 81628e35:
+      all 10 triples held except triple 6. Fixed 9caf9baf: log_message kept a message
+      deferred during a 3s confirmation hold (e.g. tree-nav "Selected: X") after a
+      newer forced message painted, then flushed it at hold end. That wiped the command-bar
+      answer to `/autostart list` / bare `/autostart` typed within 3s of an add/remove/OFF
+      (painted ~0.2s). Showing a message now drops the older deferred one (tests in
+      test_log_message_force.py; pre/post repro scenarios/22/{pre,post}-fix/hold-flush-stale-selected).
+      S23 is integrating it with its held-confirmation queue. Background-sync "pulling..."
+      lasts ~26ms, so a 0.1s sampler misses it; use a 20ms one. Filed pr-edc256b (WCH
+      missing until next refresh after w s).'
+    created_at: '2026-10-13T01:49:37Z'
+    last_edited: '2026-10-13T01:49:37Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
