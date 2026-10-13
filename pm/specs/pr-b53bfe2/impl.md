@@ -78,10 +78,11 @@ R6. **Bounded, actionable failure.**
   global setting `trust-prompt-grace-seconds`), it reports a message naming
   the path and the fix (`pm trust add <path>` or accept in the pane, then
   restart).
-- QA planner (`qa_loop.run_qa_sync`): if `prepare_workspace` fails for the
-  PR workdir, or the watch fires, planning stops immediately with
-  `INPUT_REQUIRED` and a `_error` explaining the trust block; no execution
-  phase and **no finalizer** run.
+- QA planner (`qa_loop.run_qa_sync`): the planner pane is watched until its
+  first idle turn; if the watch fires (dialog visible past the grace — a
+  failed bootstrap is caught this way too, after the R5 accept attempt),
+  planning stops with `INPUT_REQUIRED` and a `_error` explaining the trust
+  block; no execution phase and **no finalizer** run.
 - Zero scenarios after planning (any cause): the finalizer is skipped
   (`_execute_and_finalize`), since there are no scenario pushes to
   reconcile. This removes the second #229 hang.
