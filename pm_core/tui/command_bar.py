@@ -19,7 +19,9 @@ class CommandSubmitted(Message):
 class CommandBar(Input):
     """Command input bar at the bottom of the TUI."""
 
-    UNFOCUSED_PLACEHOLDER = "press / to type a command"
+    # The bottom hint doubles as the TUI's footer (no Footer widget, so no
+    # extra row): it advertises the auto-start runs popup key (R18).
+    UNFOCUSED_PLACEHOLDER = "press / to type a command · a Runs"
     FOCUSED_PLACEHOLDER = "Type command (e.g. pr start pr-001)..."
 
     def __init__(self, **kwargs):

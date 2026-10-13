@@ -150,7 +150,7 @@ Derivation uses live evidence, never status alone:
 - merged → completed; closed → completed "closed".
 
 Popup `AutoRunsScreen` (ModalScreen in `pm_core/tui/screens.py`), opened by
-new key `a` (shown in footer as "Runs"), by command-bar `autostart status`,
+new key `a` (shown in the bottom command-bar hint as "a Runs"; §5 item 43), by command-bar `autostart status`,
 listed in `?` help and `pm tui keys`. Rows grouped by target (target header
 with policy + state, then unmerged closure PRs, shared deps shown once per
 target with "also needed by"). Keys: j/k/↑/↓ select, Enter/f focus the
@@ -474,6 +474,22 @@ QA round 6 fixes (reviewed in review-loop 66f9):
     wrapped to ~16 rows in a 60-col split right after the recap and pushed
     its header off screen. `pm autostart --help` names `--stop-before-merge`
     as a flag next to `--auto-merge`.
+
+QA round 7 fixes:
+
+42. *(QA s31, d6778d7f)* `O`'s "Auto-sequence armed for X (will stop
+    before merge)" is now `add_targets`' own held confirmation (`confirm=`),
+    which replaces O's never-visible "targets +=" line. Before, it was forced
+    but unheld, so it lasted only as long as an earlier hold: a second `O`
+    inside the first `O`'s 3s hold had the armed line replaced ~0.1s later by
+    its deferred "Auto-start: starting X". It now queues behind an active hold
+    and shows for its own 3s.
+43. *(QA s31, R18)* The TUI has no Footer widget. The "footer" in R18 / this
+    spec ("shown in footer as \"Runs\"") is the visible bottom command-bar
+    hint: `CommandBar.UNFOCUSED_PLACEHOLDER` is now
+    "press / to type a command · a Runs". It uses no extra row. The focused
+    placeholder and typing are unchanged. The hint clips in a narrow unzoomed
+    split, the same as the rest of that row.
 
 Out of scope and filed (see qa.md ambiguity 12): pr-7c32e44 (the
 post-sign-off "merge attempt failed" row) and pr-0a08055 (transient

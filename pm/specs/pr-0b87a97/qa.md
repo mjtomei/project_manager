@@ -101,7 +101,10 @@ review/QA.
   tmux window (popup closes); Esc/q/a close back to the TUI with normal keys
   working; Ctrl+R while open still restarts the TUI.
 - **R18 discoverability.** `a` appears in footer ("Runs"), `?` help, and
-  `pm tui keys`; `pm autostart --help` documents verbs/policies.
+  `pm tui keys`; `pm autostart --help` documents verbs/policies. "Footer"
+  means the visible bottom command-bar hint ("press / to type a command ·
+  a Runs" while the bar is unfocused); the TUI has no Textual Footer widget
+  (impl §5 item 43).
 
 ### Restart & consistency
 - **R19 breadcrumb restart.** Given several targets with mixed policies and

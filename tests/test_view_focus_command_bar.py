@@ -119,3 +119,40 @@ def test_cli_command_from_queue_keeps_half_typed_text(tmp_path):
             await pilot.pause()
             return cmd_bar.value
     assert asyncio.run(body()) == "add pr-7533"
+
+
+def test_unfocused_hint_advertises_runs_popup():
+    """QA s31 (pr-0b87a97): R18 promises a visible "Runs" hint for ``a``
+    but the TUI has no Footer widget; the unfocused command-bar hint is the
+    bottom row, so it carries it.  Focusing the bar still shows the typing
+    placeholder, and blurring restores the hint."""
+    async def body():
+        from textual.app import App
+        from pm_core.tui.command_bar import CommandBar
+        from pm_core.tui.tech_tree import TechTree
+
+        class Host(App):
+            _command_pending = False
+            _command_buffer: list = []
+
+            def compose(self):
+                yield TechTree(id="tech-tree")
+                yield CommandBar(id="command-bar")
+
+        app = Host()
+        async with app.run_test(size=(80, 12)) as pilot:
+            cmd_bar = app.query_one("#command-bar", CommandBar)
+            app.query_one("#tech-tree", TechTree).focus()
+            await pilot.pause()
+            seen = [cmd_bar.placeholder]
+            cmd_bar.focus()
+            await pilot.pause()
+            seen.append(cmd_bar.placeholder)
+            app.query_one("#tech-tree", TechTree).focus()
+            await pilot.pause()
+            seen.append(cmd_bar.placeholder)
+            return seen
+    unfocused, focused, again = asyncio.run(body())
+    assert "a Runs" in unfocused and "press / to type a command" in unfocused
+    assert focused == "Type command (e.g. pr start pr-001)..."
+    assert again == unfocused
