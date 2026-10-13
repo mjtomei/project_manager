@@ -2395,6 +2395,17 @@ def _poll_tmux_verdicts(
             if scenario.index not in pending or not scenario.window_name:
                 continue
 
+            # The concretizer already settled this scenario (rejected, or
+            # blocked at the workspace-trust prompt) and no worker was
+            # launched: keep its recorded reason instead of overwriting it
+            # with "no session id" below.
+            if (not scenario.session_id
+                    and scenario.index in state.scenario_verdicts):
+                pending.discard(scenario.index)
+                verdicts_changed = True
+                _launch_next_queued()
+                continue
+
             pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
             if pane_id and not tmux_mod.pane_exists(pane_id):
                 pane_id = None

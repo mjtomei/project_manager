@@ -690,6 +690,31 @@ def test_trust_blocked_worker_watched_during_verdict_grace(tmp_path):
     assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
 
 
+def test_concretizer_trust_reason_survives_verdict_polling(tmp_path):
+    """A scenario whose concretizer was trust-blocked has a window (the
+    concretizer's) but no worker session: polling must keep its reason, not
+    overwrite it with "no session id registered"."""
+    import itertools
+    from pm_core.qa_loop import QALoopState, QAScenario, _poll_tmux_verdicts
+    scenario = QAScenario(index=3, title="T", focus="f")
+    scenario.window_name = "qa-s3"
+    state = QALoopState(pr_id="pr-c")
+    state.scenarios = [scenario]
+    reason = "blocked at workspace-trust prompt: stuck at /x"
+    state.scenario_verdicts[3] = "INPUT_REQUIRED"
+    state.scenario_verdict_reasons[3] = reason
+    clock = itertools.count(0, 100)
+    with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+         patch("pm_core.qa_loop.time.sleep"), \
+         patch("pm_core.qa_loop.time.monotonic", lambda: next(clock)), \
+         patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+        _poll_tmux_verdicts(state, {}, {}, "sess", str(tmp_path),
+                            tmp_path / "status.json", lambda *a: None)
+    assert state.scenario_verdicts[3] == "INPUT_REQUIRED"
+    assert state.scenario_verdict_reasons[3] == reason
+
+
 def test_impl_idle_sweep_keeps_qa_tracker_keys(tmp_path):
     """_poll_impl_idle must not unregister qa:<pr>:s<n> keys: re-registering
     them every poll gave each QA pane a fresh trust watch, so its two-attempt
