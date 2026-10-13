@@ -3772,6 +3772,22 @@ prs:
       scenarios/1-8 untouched.'
     created_at: '2026-10-13T20:19:20Z'
     last_edited: '2026-10-13T20:19:20Z'
+  - id: note-308ba07
+    text: 'QA planning round 5 (c86e1caf, pushed; supervised; planner made no app
+      edits): qa.md maps SCENARIO 9 host H1-H7, 10 workflow/container W1-W6, 11 local
+      merge M1-M5. Corrections from round-4 notes: H7.1 now asserts the shell pm pr
+      start limit (pr-c9e69fb, not watched), H7.2 moved to the hard-kill route, new
+      H7.6 is the first post-review live test of 211cfb95 (one red line, once more
+      after a restarted TUI). Accept key pattern DOWN@no, ENTER@yes[, ENTER@yes];
+      H5 expects 10/10. Ambiguity 10: W3.3 resume uses the terminal fall-through route;
+      TUI s is recorded against pr-9f97a8f (pre-existing), not FAIL. Ambiguity 9:
+      S8 round-4 items were spec errors: M2a (command bar, PR intent stated, no Updating
+      master CONFLICT line), M2b (auto-start recipe), M2c (ambiguous conflict asks,
+      expected), M4 index.lock, M4b dirty overlap stashed/restored. Tracked list adds
+      pr-9f97a8f, pr-c9e69fb, pr-f8acf21. Captures under scenarios/9-11; scenarios/1-8
+      must stay untouched. Planned=launched=3.'
+    created_at: '2026-10-13T19:42:26Z'
+    last_edited: '2026-10-13T19:42:26Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
