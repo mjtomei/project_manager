@@ -834,11 +834,15 @@ Covers R39 together with the R23, R35, R36, R37 and R38 checks that use
   recap. `L` only reports what the TUI logged; opening it changes no
   status.
 - GIVEN targets with in-flight review/QA and `L` open, WHEN the user runs
-  `pm tui restart --breadcrumb` and opens `L` again after the TUI comes
-  back, THEN the recap shows "Auto-start: resumed after merge restart"
-  (or the resume summary), targets and windows are unchanged
-  (`tmux list-windows` before and after), and there is at most one log
-  pane.
+  `pm tui restart --breadcrumb` and presses `L` after the TUI comes
+  back, THEN ordinary `L` focuses the existing live log pane; its live
+  output contains "Auto-start: resumed after merge restart" (or the
+  resume summary), targets and windows are unchanged (`tmux list-windows`
+  before and after), and there is at most one log pane. WHEN the user
+  then uses `z L` (fresh), THEN the new recap contains that resume line
+  and there is still only one log pane. This distinguishes the existing
+  focus behavior from a fresh launch; ordinary `L` does not regenerate
+  an already-open pane's recap.
 - GIVEN the TUI at 80x12 with `L` split, WHEN the user opens the runs
   popup and dismisses it, THEN `AUTO ×N` is still shown, the popup works
   as in S26, and Esc followed by `L` (with a short pause) opens `L`, not
