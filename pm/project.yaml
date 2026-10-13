@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T08:22:56.556623+00:00'
+  updated_at: '2026-10-13T12:44:46.702243+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25997,6 +25997,22 @@ prs:
       failure (tests/test_hook_events.py).'
     created_at: '2026-10-13T08:22:56Z'
     last_edited: '2026-10-13T08:22:56Z'
+  - id: note-7a8f6b3
+    text: 'Sign-off (2026-10-13, fresh, supervised launch; HEAD f1a96f25, app code
+      6ac3a4f2): routed SIGNOFF_MERGE as a recommendation only (stop-before-merge;
+      no merge, no manual approval recorded). No app-code change since review a6b3
+      i2 (5b74c7e2); QA round 3 (pr-b8561ac-226a9766c4ee3f96) S5 R1-R7 + S6 R8-R11
+      PASS, both independently VERIFIED, on 6ac3a4f2. Round 1 (partial intake by pre-fix
+      host 6cfd047e) is NOT counted. Residual pane-fallback case (stale START directly
+      followed by an offset SCENARIO 2..N suffix, transcript unavailable) was claimed
+      "tracked in pr-8efa789" but was not recorded there; filed as pr-c59597f with
+      repro. Remaining tracked bugs: pr-c59597f, pr-62fdd54, pr-31413e8, pr-1ae1d2d
+      (fixture scenarios 7-19 in captures are synthetic, not coverage), pr-ae66f59
+      (note), pr-8efa789. Baseline failure: tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      fails identically on master; full suite 3100 passed / 1 failed. Report: captures
+      report.html.'
+    created_at: '2026-10-13T12:44:46Z'
+    last_edited: '2026-10-13T12:44:46Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -27513,6 +27529,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T09:08:03.676136+00:00'
   updated_at: '2026-10-13T09:08:03.676136+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c59597f
+  plan: bugs
+  title: 'Bug: QA planner pane fallback accepts a stale QA_PLAN_START directly followed
+    by a truncated offset suffix (SCENARIO 2..N) as a complete later-round plan'
+  branch: pm/pr-c59597f-bug-qa-planner-pane-fallback-accepts-a-stale-qa-pl
+  status: pending
+  depends_on: []
+  description: 'Residual from pr-b8561ac (disclosed in its QA S3 note and qa.md R4,
+    previously described as ''tracked in pr-8efa789'', but pr-8efa789 covers verdicts
+    after a /loop wakeup turn and has no record of this). When the planner''s JSONL
+    transcript is missing/unreadable or its latest assistant turn holds no plan, run_qa_sync
+    falls back to the tmux pane (after _PLANNER_GRACE). On a later QA round (scenario_start>1),
+    a pane whose surviving text is an earlier block''s QA_PLAN_START line, only blank
+    lines, then a truncated SCENARIO 2..4 suffix + QA_PLAN_END is byte-identical to
+    a fresh complete plan numbered from 2, so qa_plan_problem/_read_planner_plan accept
+    it and scenario 1 of the real plan is silently lost. Repro (pm_core/qa_loop.py
+    at pr-b8561ac HEAD f1a96f25): _read_planner_plan(None, lambda: ''> prompt echo\nQA_PLAN_START\n\nSCENARIO
+    2: Bravo\nSTEPS: b\nSCENARIO 3: Charlie\nSTEPS: c\nSCENARIO 4: Delta\nSTEPS: d\nQA_PLAN_END\n'',
+    None, 2) -> source=pane, scenarios [2,3,4], no problems. Pane text alone cannot
+    distinguish the two; options: (a) never accept an offset-numbered plan from the
+    pane fallback without corroboration (e.g. require the planner to also echo a per-run
+    nonce or scenario count line inside the block, e.g. ''QA_PLAN_START n=4 run=<loop_id>''),
+    (b) read the plan from older assistant turns of the transcript so the pane fallback
+    is rarely needed (overlaps pr-8efa789''s older-turn reading), (c) when falling
+    back to the pane at scenario_start>1, require the plan to be numbered from 1 so
+    the driver renumbers. Prefer (a): it makes completeness provable for both sources.
+    Keep the existing pr-b8561ac regression tests (tests/test_qa_planner_handoff.py)
+    passing.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T12:44:32.028018+00:00'
+  updated_at: '2026-10-13T12:44:32.028018+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
