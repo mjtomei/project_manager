@@ -355,8 +355,16 @@ after it starts working, to bound cost:
 - review loop;
 - QA planner, concretizer, scenario worker, verifier and finalizer (from W1);
 - sign-off (or the sign-off launch path as the TUI drives it);
-- merge resolution: create a merge conflict on a PR branch, then trigger
-  merge so pm launches the resolution Claude session;
+- merge resolution (local backend, R10): merge one PR, then merge a second
+  PR that conflicts with it, so pm launches the resolution Claude session.
+  **Assert the `merge-<pr>` pane runs in the PR workdir**, not the project
+  root, and that the project root gains no trust entry. After Claude reports
+  MERGED, `pm pr merge --propagation-only` (what the TUI runs) must
+  fast-forward the main repo without a second window. Also: two independent
+  PRs merge in turn with no window at all (pr-a75da60); a commit landing on
+  the main repo's base between the workdir merge and propagation is
+  integrated in the workdir; uncommitted work in the main repo survives every
+  path untouched. Reference run: impl `post-fix/local-merge-*`;
 - `pm meta` (meta workdir under `~/.pm/workdirs`).
 
 For the review pane, **assert the pane's current directory is the PR

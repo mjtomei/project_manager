@@ -123,9 +123,10 @@ R7. **Unknown/unapproved workspace behavior stays explicit.** For a cwd
 outside the approved roots nothing is written; the launcher logs
 `workspace trust: <path> not approved`, the dialog appears as before, and
 the R6 failure path names `pm trust add <path>` as the remedy.  A merge
-resolution window opened in an unapproved directory (main-repo merges
-resolve in the project root, see pr-e835d8f) prints the same remedy when it
-opens, since nothing watches that pane for a bounded failure.
+resolution window that still opens in an unapproved directory (the
+vanilla/GitHub pull-from-origin window runs in the project root, pr-19990de)
+prints the same remedy when it opens, since nothing watches that pane for a
+bounded failure.
 
 R8. **CLI.** `pm trust status [PATH]`, `pm trust add PATH`,
 `pm trust remove PATH`, `pm trust list`. `add` records the authorization
@@ -149,6 +150,35 @@ launches with `cd <cwd> &&` so every role runs in the directory it
 bootstrapped regardless of how the pane was created. Container launches are
 unchanged (`exec -w /workspace`).
 
+R10. **Local-backend merge resolution runs in the PR workdir** (user
+decision 2026-10-13, option (a); found by QA as pr-e835d8f, together with
+pr-a75da60). Before, `pm pr merge` merged onto the workdir's stale
+`<base>`, so the fast-forward into the main repo failed and
+`_pull_from_workdir` opened the resolution window in the main repo — the
+project root, which pm deliberately does not auto-trust and which holds the
+user's own work — where it sat at the trust dialog. Now:
+- before the PR merge, `_sync_workdir_base` fetches `<base>` from the main
+  repo into the workdir and merges it (fast-forward when possible; never a
+  reset, so an earlier unpropagated merge commit is kept). Independent PRs
+  merge straight through (pr-a75da60); a real conflict surfaces in the PR
+  workdir and the window opens there.
+- at propagation (`_propagate_to_repo`), if the main repo's `<base>` has
+  commits the workdir's lacks (it moved since the workdir merge), it is
+  integrated into the workdir the same way and the fast-forward retried; a
+  conflict opens the window in the PR workdir. The TUI's existing MERGED →
+  `--propagation-only` follow-up then fast-forwards the main repo.
+- any other failure in the main repo itself (fetch error, uncommitted work
+  blocking the fast-forward after the auto-stash) is reported with
+  `pm pr merge --propagation-only <pr>` as the next step and exits non-zero;
+  no Claude session is sent into the main repo, and nothing there is reset.
+- the local merge prompt tells Claude its result must contain the main
+  repo's current `<base>` and `<branch>` and not to touch the main repo.
+  The old pull-from-workdir prompt variant (resolve in the main repo) is
+  gone.
+The project root is still never trusted automatically. Out of scope here
+and tracked as pr-19990de: the vanilla/GitHub pull-from-origin window, and the
+vanilla workdir's `<base>` not being fast-forwarded to `origin/<base>`.
+
 ## Implicit requirements
 
 - The config write must not clobber concurrent Claude writes: take the same
@@ -171,7 +201,9 @@ unchanged (`exec -w /workspace`).
 
 1. *Should the project's own base checkout (pm root) be auto-approved?* No.
    Automated sessions run in PM-created workdirs; the base checkout is the
-   user's interactive space. The user can `pm trust add` it.
+   user's interactive space. The user can `pm trust add` it. Local-backend
+   merge resolution therefore moved into the PR workdir (R10) rather than
+   trusting the root.
 2. *Grace period length.* 120s default (configurable): long enough for a
    human watching to accept manually, ~30x shorter than the 1h planner
    timeout.
