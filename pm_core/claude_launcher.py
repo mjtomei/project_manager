@@ -445,6 +445,11 @@ class WorkspacePromptWatch:
     # tracker's, and CLI pollers build a fresh tracker per call), so the
     # attempts already spent are also kept on the tmux pane itself.
     _ATTEMPTS_OPTION = "@pm_trust_accept_attempts"
+    # The pid of the process that last reported this pane as blocked, so a
+    # second watch in the same TUI (e.g. the orphan watch taking over a
+    # review pane after its loop already failed on the dialog) does not
+    # report it again.  A restarted TUI (new pid) still reports it once.
+    _REPORTED_OPTION = "@pm_trust_reported_by"
 
     def __init__(self, pane_id: str, workdir: str | None = None,
                  grace: float | None = None, interval: float = 5.0,
@@ -460,6 +465,10 @@ class WorkspacePromptWatch:
         self._last_check = 0.0
         self._first_seen: float | None = None
         self._accept_attempts = 0
+        self._reported = False
+        # Set when the grace first runs out: another watch in this process
+        # had already reported this pane.
+        self.reported_elsewhere = False
         self.shown_path: str | None = None
 
     @property
@@ -540,6 +549,13 @@ class WorkspacePromptWatch:
                 return None
         waited = now - self._first_seen
         if waited >= self.grace:
+            if not self._reported:
+                self._reported = True
+                pid = str(os.getpid())
+                self.reported_elsewhere = tmux_mod.get_pane_option(
+                    self.pane_id, self._REPORTED_OPTION) == pid
+                tmux_mod.set_pane_option(self.pane_id, self._REPORTED_OPTION,
+                                         pid)
             return workspace_trust.blocked_message(
                 shown or self.workdir or "", waited)
         return None

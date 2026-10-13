@@ -825,6 +825,69 @@ def test_impl_idle_sweep_accepts_orphan_review_pane_after_restart(
         assert app._untracked_trust_watches == {}
 
 
+def test_orphan_watch_skips_pane_already_reported_by_this_tui(
+        home, tmp_path, monkeypatch, pane_options):
+    """A review pane whose loop already ended in the trust ERROR is picked
+    up by the orphan watch once the loop stops (the PR is in_review and the
+    loop's transcripts are per iteration).  It must not post the same
+    blocked message a second time in the same TUI, but a restarted TUI
+    (another pid) still reports the pane once.  Before the fix the user saw
+    the red trust line again ~grace after the loop's ERROR."""
+    from types import SimpleNamespace
+    from pm_core.claude_launcher import WorkspacePromptWatch
+    from pm_core.pane_idle import PaneIdleTracker
+    from pm_core.tui import review_loop_ui
+    wd = _pm_workdir(home)
+    sid = "6ca0ccf2-e478-4bbd-bdc2-b90ad8e2af11"
+    monkeypatch.setattr(
+        "pm_core.tmux.pane_start_command",
+        lambda pane: f'"cd {wd} && claude --session-id {sid} \\"x\\""')
+    monkeypatch.setattr("pm_core.tmux.capture_pane",
+                        lambda pane, *a, **k: TRUST_SCREEN.format(path=wd))
+    monkeypatch.setattr("pm_core.tmux.pane_exists", lambda pane: True)
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr("pm_core.tmux.send_keys_literal",
+                        lambda pane, key: sent.append((pane, key)))
+    monkeypatch.setattr("pm_core.workspace_trust.prompt_grace_seconds",
+                        lambda: 0)
+    monkeypatch.setattr(
+        review_loop_ui, "_find_impl_pane",
+        lambda session, name: "%4" if name == "review-pr-c" else None)
+    # The loop's watch already spent the accept budget and reported.
+    pane_options[("%4", "@pm_trust_accept_attempts")] = "2"
+    assert WorkspacePromptWatch("%4", workdir=str(wd), grace=0).check()
+
+    def _app():
+        pr = {"id": "pr-c", "status": "in_review", "workdir": str(wd)}
+        logs: list[str] = []
+        app = SimpleNamespace(
+            _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
+            _data={"prs": [pr]}, _review_loops={}, _pending_merge_prs=set(),
+            _merge_propagation_phase=set(), _root=tmp_path / "pm",
+            _auto_start_run_id=None,
+            log_message=lambda msg, **k: logs.append(msg))
+        return app, logs
+
+    app, logs = _app()
+    with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+        for _ in range(3):
+            review_loop_ui._poll_impl_idle(app)
+            for w in app._untracked_trust_watches.values():
+                w._last_check = 0.0
+    assert logs == []
+    assert sent == []
+    # A restarted TUI (the marker names another pid) reports it once.
+    pane_options[("%4", "@pm_trust_reported_by")] = "1"
+    app, logs = _app()
+    with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+        for _ in range(3):
+            review_loop_ui._poll_impl_idle(app)
+            for w in app._untracked_trust_watches.values():
+                w._last_check = 0.0
+    assert len(logs) == 1 and "pm trust add" in logs[0]
+    assert sent == []
+
+
 def test_trust_blocked_concretizer_reports_reason_not_reject(tmp_path):
     from pm_core.qa_loop import (
         QAScenario, _concretize_failure_label, _concretize_scenario,

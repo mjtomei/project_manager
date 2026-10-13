@@ -829,7 +829,10 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
     msg = watch.check()
     if msg and pane_id not in app._untracked_trust_reported:
         app._untracked_trust_reported.add(pane_id)
-        app.log_message(f"[red]{msg}[/]", sticky=30)
+        # Skip a pane another watch in this TUI already reported (e.g. a
+        # review pane whose loop ended in the trust ERROR).
+        if not watch.reported_elsewhere:
+            app.log_message(f"[red]{msg}[/]", sticky=30)
 
 
 def _prune_untracked_trust(app, seen: set[str]) -> None:
