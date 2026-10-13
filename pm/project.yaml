@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T18:13:16.350623+00:00'
+  updated_at: '2026-10-13T19:23:28.304928+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3609,6 +3609,23 @@ prs:
       --session-id so they are never trust-watched (qa.md Shell launches note is wrong).'
     created_at: '2026-10-13T18:13:16Z'
     last_edited: '2026-10-13T18:13:16Z'
+  - id: note-c8b3c48
+    text: 'QA S7 round 4 (workflow/container trust, supervised; no outer trust prompt
+      accepted manually; NO app edits; captures pr-b53bfe2/scenarios/7, REPORT.md)
+      on 5e372554 (S6 pushed 211cfb95 orphan-watch change mid-run; not covered by
+      S7): every trust Then W1-W6 held live: W1 real 3-scenario QA PASS/VERIFIED/FINALIZE_DONE
+      0 dialogs; W2 all roles incl. R9 review cwd; W3.5 hard-kill orphan watch accepted
+      5s after pm session, 1 attempt, review PASS in pane; breadcrumb adoption PASS;
+      W4 fallback Down+Enter 1 attempt; W5 zero/worker/concretizer; W6 seeding, reuse
+      via QA concretizer->worker container, pr-8c0d680 branch, real container workers
+      + hooks. INPUT_REQUIRED only because W3.3 resume Then fails on pre-existing
+      pr-9f97a8f (TUI s never resumes; terminal fall-through path resumes fine with
+      trust bootstrap) which also makes pr-d76385d unreachable. Filed pr-f8acf21 (pre-existing:
+      stopped QA run launches workers/finalizer and records QA PASS with ? scenarios).
+      Note on pr-b8561ac (terminal capture duplicated a scenario: planned 4, parsed/launched
+      5).'
+    created_at: '2026-10-13T19:23:28Z'
+    last_edited: '2026-10-13T19:23:28Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
