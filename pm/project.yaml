@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T08:09:08.518618+00:00'
+  updated_at: '2026-10-13T08:17:12.941257+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25974,6 +25974,20 @@ prs:
       ptrace scope 1) - chmod 555 ~/.pm/hooks to suppress idle events instead.'
     created_at: '2026-10-13T08:09:08Z'
     last_edited: '2026-10-13T08:09:08Z'
+  - id: note-69c795c
+    text: 'Review a6b3 i1 (83f36913): re-reviewed the app-code changes made after
+      78b2 i1 (0d9c2969 bullet markers and stale START, 02805ddf/264f6d01 outcome
+      detail, 254402e8 stop and unverdicted, ae077932, e8e6b5ea). All sound. Two fixes:
+      (1) the START-to-first-header adjacency check for offset plans now runs only
+      on pane text, so a fresh transcript plan at scenario_start>1 with prose after
+      QA_PLAN_START is no longer rejected and stalled; (2) placeholder detection again
+      catches a template title wrapped by a narrow pane ("<descriptive title for",
+      no closing ">"), while "<Enter> key" stays a real title. Both have failing-then-passing
+      tests. Full suite: 3095 passed; 1 failure in tests/test_hook_events.py, which
+      this PR does not touch (environment). The impl captures predate 4ffcd694 and
+      later; the live evidence for those changes is under scenarios/3.'
+    created_at: '2026-10-13T08:17:12Z'
+    last_edited: '2026-10-13T08:17:12Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
