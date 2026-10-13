@@ -25877,7 +25877,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-13T05:58:33.769225+00:00'
+  updated_at: '2026-10-13T07:17:52.915207+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25910,6 +25910,35 @@ prs:
       them. Pre-existing unrelated failure: test_hook_events::test_installer_writes_standalone_receiver.'
     created_at: '2026-10-13T05:58:33Z'
     last_edited: '2026-10-13T05:58:33Z'
+  - id: note-8ce8b39
+    text: 'QA s2 refiner: E1 spec suggestions (remove workdir / no tmux) do NOT produce
+      the red "Sign-off launch failed" line - launch_signoff_window prints and returns
+      exit 0 on those paths (no-workdir/no-tmux/session-missing/ContainerError), so
+      the TUI logs it as launched and only the 60s window-gone relaunch follows. Refined
+      E1 forces a non-zero exit with chmod 0444 on ~/.pm/workdirs/.signoff-launch-<session>-<pr>.lock
+      instead. E2 is made deterministic by holding ~/.pm/workdirs/.merge-<repo_id>-<pr>.lock
+      with flock(1) while committing to the workdir; pm pr merge then reloads and
+      its gate refuses. The R9 "stale (HEAD moved)" autostart-status reason only lasts
+      <=5s, until the next scheduler pass clears the record, so it needs a status
+      poll loop started before the commit.'
+    created_at: '2026-10-13T06:38:21Z'
+    last_edited: '2026-10-13T06:38:21Z'
+  - id: note-1c19801
+    text: 'QA s2 (0ff2be65): fixed the in-flight sign-off HEAD race. step_signoff
+      stamped a transcript verdict with HEAD at READ time, so a commit landing while
+      the router still ran (before its first verdict) was recorded as reviewed: O
+      printed ready @B and A merged unreviewed B (reproduced live pre-fix). Now launch_signoff_window
+      writes <run>/signoff-<pr>.head (new windows only, inside the launch lock; the
+      reuse fast path keeps the old stamp). step_signoff retires the run and relaunches
+      it (stale) when the stamp != current HEAD or a transcript verdict has no stamp,
+      before recording. This covers the TUI and CLI drivers and restarts. New qa.md
+      R9b; impl.md section. Tests: test_verdict_from_run_launched_on_old_head_is_not_recorded[O|A],
+      test_head_moved_before_verdict_retires_running_run, test_restart_does_not_adopt_run_of_another_head,
+      CLI + launch-stamp tests (10 fail on 838d55f8). Live pre/post: captures scenarios/2/{pre,post}-fix.
+      Needs another reviewer pass. S2 triples R9/R10/R12/E1/E2 all held on 838d55f8.
+      Note: Ctrl+R user restart leaves auto-start off (re-add targets).'
+    created_at: '2026-10-13T07:17:52Z'
+    last_edited: '2026-10-13T07:17:52Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
