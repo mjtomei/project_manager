@@ -17,23 +17,31 @@ This spec is grounded in `git diff master...HEAD`:
   TUI's idle tracker cannot register (`5a293bf1`, revised in review 80f0
   i1/i2, `af1a3fd4` and `ac7522e0`; duplicate-report guard `211cfb95`,
   reviewed in review 1317 i1)
+- `cli/guide.py`: the TUI guide/assist pane (`pm guide` in a pm tmux pane)
+  calls `prepare_workspace(os.getcwd())` for real Claude only (`911e75b7`,
+  fake-guide skip `24796646`, reviewed in review 5a14 i1)
+- `qa_loop.parse_qa_plan`: the plan body never starts before the last
+  `QA_PLAN_START` ahead of the final `QA_PLAN_END` (`4c3fb81c`, reviewed
+  in review 5a14 i1)
 - `pm/specs/pr-b53bfe2/impl.md`
 
-The current QA round (round 5, after review 1317 i1) has exactly three
+The current QA round (round 6, after review 5a14 i1) has exactly three
 scenarios. Each one executes one of the named sections below **in full**,
 together with the shared **Setup** and **Harness notes**. The planner output
 only names the section; the concretizer and worker must read the whole
 section here, every H/W/M story:
 
-- **SCENARIO 9: Host trust policy and configuration** → section
+- **SCENARIO 12: Host trust policy and configuration** → section
   "Host trust policy and configuration" (H1–H7)
-- **SCENARIO 10: Workflow and container trust** → section
+- **SCENARIO 13: Workflow and container trust** → section
   "Workflow and container trust" (W1–W6)
-- **SCENARIO 11: Local merge trust** → section "Local merge trust"
+- **SCENARIO 14: Local merge trust** → section "Local merge trust"
   (M1–M5, incl. M2a/M2b/M2c and M4b)
 
-Scenario numbers before round 5 map to the same sections: 6/3 = host,
-7/4 = workflow/container, 8/5 = local merge.
+Scenario numbers before round 6 map to the same sections: 9/6/3 = host,
+10/7/4 = workflow/container, 11/8/5 = local merge. In the section texts
+below, "Scenario 6/7/8" means the host/workflow/merge scenario of the
+current round.
 
 The runner must launch exactly as many scenarios as were planned (3).
 A planned/launched mismatch is itself a FAIL to report.
@@ -77,11 +85,34 @@ A planned/launched mismatch is itself a FAIL to report.
     and real Claude asked for input on genuinely ambiguous same-line
     conflicts. Resolved in Ambiguity 9: both were spec errors, and M2–M4
     are corrected below.
-- The head changed after round 4 (`211cfb95`, the orphan-watch report
-  guard), and that code runs on every TUI poll for every impl/review pane
-  the tracker cannot register. So **no earlier coverage counts as PASS for
-  this round**. All three sections run again in full on the current
-  head.
+- Round 5 on `c86e1caf` (run `pr-b53bfe2-90290adcb8ef20bf`):
+  - S9 host trust: **NEEDS_WORK** only because it made an app fix. Every
+    H Then held, including the first post-review live test of `211cfb95`
+    (H7.6) and H5 10/10. Gap fixed in `911e75b7`: the TUI guide/assist
+    pane (`H`, `pm guide` in a pm tmux pane) never called
+    `prepare_workspace`, so an unapproved project root logged no "not
+    approved" line and approved dirs got no bootstrap. Review 5a14 i1
+    reviewed it and made it skip a fake guide (`24796646`). Filed
+    `pr-629c47e` (the other TUI interactive panes: `c`, discuss, watcher
+    review, QA author have the same gap).
+  - S10 workflow/container: **NEEDS_WORK** only because it made an app
+    fix. Every trust Then held live, including real container workers
+    (W6.7), the W3.5 orphan accept and the container hard-kill variant of
+    `211cfb95`. W3.3 terminal resume continued the earlier conversation.
+    Fixed in `4c3fb81c`: W3.4's planner plan was numbered from 2, and the
+    terminal plan parse reached back to a committed qa.md SCENARIO line
+    echoed in the prompt (planned 1, launched 2). Reviewed in review
+    5a14 i1. `pr-f8acf21` reproduced; W3.6 terminal resume with bootstrap
+    defeated sits silently at "No, exit" (`pr-d76385d`).
+  - S11 local merge: **PASS**. M1–M5 incl. M2a/M2b/M2c, M4b and
+    concurrency held live. Merge intent was carried in the PR **title**
+    (the merge prompt does not include the PR description; M2 corrected
+    below).
+- The head changed after round 5 (`911e75b7`, `4c3fb81c`, `24796646`).
+  `4c3fb81c` touches the QA plan parse used by every QA run, and
+  `911e75b7` changes what the TUI guide pane does at launch. So **no
+  earlier coverage counts as PASS for this round**. All three sections run
+  again in full on the current head; S11's PASS is context, not coverage.
 
 ## Run disclosures (read first)
 
@@ -102,8 +133,13 @@ A planned/launched mismatch is itself a FAIL to report.
   and revised in review 80f0 i1/i2 (`af1a3fd4`, `ac7522e0`), and passed
   live in round 4. The round-4 QA fix `211cfb95` (orphan watch does not
   re-report a pane this TUI already reported) was reviewed in review
-  1317 i1. **This round is its first live test after review**, so H7.6
-  must exercise it.
+  1317 i1 and passed live in round 5 (H7.6 and the W3.5 container
+  variant). The round-5 QA fixes `911e75b7` (guide/assist pane bootstrap)
+  and `4c3fb81c` (plan parse never starts before the last
+  `QA_PLAN_START`) were reviewed in review 5a14 i1, which also made the
+  guide skip bootstrap under a fake guide (`24796646`). **This round is
+  their first live test after review**: H2.5 must exercise the guide pane
+  (real and fake), and W1/W3.4 must show planned = launched.
 - **Any app edit made in this round is unreviewed.** Commit it with a
   fail-before/pass-after regression test, name the commit in the report, and
   state that it needs another review pass before fresh sign-off. An all-PASS
@@ -148,6 +184,10 @@ A planned/launched mismatch is itself a FAIL to report.
   - `pr-f8acf21`: stopping a QA run still launches queued workers and a
     finalizer, then records QA PASS with unrun scenarios. Watch for it in
     W3.4, and never count such a PASS as coverage.
+  - `pr-629c47e`: the TUI `c`, discuss, watcher-review and QA-author panes
+    run Claude in the project root without consulting workspace trust (no
+    "not approved" log line, no bootstrap). Only the guide/assist pane is
+    fixed here (`911e75b7`).
 
 ## Background facts (verified with claude 2.1.296)
 
@@ -252,6 +292,25 @@ Steps:
 
 ## Harness notes (learned in earlier rounds; read before driving)
 
+- **Round-5 lessons.**
+  - `tmux pipe-pane -o` toggles: starting a second pipe on a pane (e.g. a
+    hook plus a poller) closes the first. Use one pipe per pane and verify
+    it is still open (`#{pane_pipe}`).
+  - The scratch-HOME OAuth copy goes stale when the outer host rotates its
+    token. If real Claude starts failing auth mid-run, re-copy
+    `.credentials.json` (never into captures).
+  - `pm container enable` is global. Disable it again when container
+    stories are done.
+  - While the stand-in `claude` symlink is swapped in, the Claude Code
+    tool shell's `grep` (aliased to `claude -G`) and `pm trust` probes of
+    `claude` hang. Use `/usr/bin/grep` and keep swap windows short.
+  - A round-4 S8 `pipe-pane` was still appending to
+    `scenarios/8/panes/pm-home.22.log` from outside during round 5. Growth
+    of that one file is not a contamination by your scenario; name it in
+    the report if your start/end listings differ only there.
+  - Do not run `pm notes` (an editor) inside a pane you are capturing for
+    a story; edit `pm/notes.txt` directly.
+
 - **Evidence authenticity.** Round 3's `scenarios/1`–`3` `prompt.md`,
   `scenario.json` and `verdict.md` were overwritten by nested fixture
   metadata (moved to `scenarios/4/contamination`; originals lost). Do
@@ -260,10 +319,10 @@ Steps:
   and logs written by the scenario itself (e.g. `scenarios/4/W3-*`,
   `scenarios/5/*`, `impl/{pre,post}-fix/*`).
 - **Capture isolation for this round.** Each scenario writes only under
-  its own `scenarios/<n>/` (9, 10 or 11) and never deletes or rewrites
+  its own `scenarios/<n>/` (12, 13 or 14) and never deletes or rewrites
   another scenario's files or earlier rounds' files. At the end, list
   your directory with sizes and mtimes in the report and confirm that
-  `scenarios/1`–`8` were not modified during your run (compare a listing
+  `scenarios/1`–`11` were not modified during your run (compare a listing
   taken at start with one taken at the end).
 - **Captures (round-3 incident).** Never unset `PM_CAPTURES_PR`. In round 3
   a nested throwaway QA run inside S4 wrote its own `prompt.md`,
@@ -401,6 +460,23 @@ refusal. All of it runs on the host path, with no pm containers.
    - pm's log has `workspace trust: <path> not approved` (quote that line
      only).
 4. `pm trust status` in a `~/.pm/workdirs/...` dir prints `approved: yes`.
+5. **TUI guide/assist pane (`911e75b7` + `24796646`, first live test after
+   review).**
+   - Given: the unapproved project root from step 1, real Claude for
+     `guide` (no fake-claude `guide`/`_all` entry).
+   - When: the user opens guide/assist from the TUI (`H`).
+   - Then: the guide pane shows the dialog for the project root, pm sends
+     no keys, the config gains no entry, and pm's log has
+     `workspace trust: <root> not approved`. (Round 5 pre-fix: no log
+     line at all.)
+   - Then: after `pm trust add <root>`, closing the guide pane and opening
+     it again from the TUI shows no dialog, and the config has the root's
+     entry written before Claude starts.
+   - Fake guide: with a fake-claude `guide` entry and the root's entry
+     removed again, opening the guide writes **no** trust entry and logs
+     no trust line (a fake guide has no dialog, like `launch_claude`).
+   - Record, without failing, that `c`/discuss panes still log nothing
+     (`pr-629c47e`); add a note there if the scope differs.
 
 ### H3. `pm trust` CLI
 
@@ -603,6 +679,13 @@ fallback, the zero-scenario path and containers.
    - the config gains entries for the PR workdir and the scenario clone.
 4. Window creation or registry status alone does **not** count. Show
    plan text, worker activity and verdicts.
+5. **Planned = launched (`4c3fb81c`).** Quote the planner's final plan and
+   the TUI/pm log line "QA plan parsed: N". N must equal the number of
+   SCENARIO blocks in the planner's own final plan and the number of
+   scenario windows launched. The throwaway PR's committed qa.md must
+   contain a line-start `SCENARIO` heading (as round 5's did) so the
+   echoed-prompt case is exercised; if the planner numbers from 2 or
+   higher, that is the exact pre-fix case.
 
 ### W2. Every role starts without the dialog
 
@@ -800,8 +883,9 @@ This was the live R9 finding.
 Scenario 8 covers merge resolution, a role named in acceptance. It runs on
 the host path with the **local** backend (`pm init --backend local`), real
 Claude for the resolution window, and the isolated config from Setup. Seed
-uncommitted user work in the main repo (e.g. an untracked `notes.txt` and a
-modified tracked file) before M1 and check it is untouched after every story.
+uncommitted user work in the main repo (e.g. an untracked `user-work.txt`,
+not `notes.txt`, to avoid confusion with `pm/notes.txt`, and a modified
+tracked file) before M1 and check it is untouched after every story.
 Reference run: impl captures `post-fix/local-merge-*`.
 First run `pytest -q tests/test_local_merge_sync.py` with the PR install's
 Python (real git; all must pass) and record the output.
@@ -816,14 +900,18 @@ Python (real git; all must pass) and record the output.
 
 ### M2. A real conflict is resolved in the PR workdir (pr-e835d8f)
 
-Give every conflict PR a description that names the winning side (e.g.
-"on conflict keep this PR's line"), so a real Claude window can resolve it
-without asking. M2c covers the ambiguous case on purpose.
+Give every conflict PR a **title** that names the winning side (e.g.
+"D: shared.txt line 2 - on conflict keep this PR line"), and/or a
+`## Merge` section in pm notes, so a real Claude window can resolve it
+without asking. The merge prompt (`generate_merge_prompt`) includes only
+the PR title, the git error and the General/Merge/Local pm notes sections,
+**not** the PR description, so a description alone does not reach Claude.
+M2c covers the ambiguous case on purpose (neutral title, no notes).
 
 **M2a. Manual merge (command bar).**
 
 - Given two PRs that edit the same lines; the first is merged. The second
-  PR's description names the winning side.
+  PR's title names the winning side.
 - When the user merges the second from the TUI command bar
   (`pr merge --resolve-window --no-signoff-check <pr>`).
 - Then:
@@ -845,8 +933,10 @@ without asking. M2c covers the ambiguous case on purpose.
 
 **M2b. Auto-start merge.**
 
-- Given a third conflicting PR (description names the winning side) set
-  up for the auto-start merge route in Harness notes.
+- Given a third conflicting PR (title names the winning side) set up for
+  the auto-start merge route in Harness notes. It must already be
+  `in_review` before `pm autostart add` (a shell-started fake impl is
+  untracked, `pr-c9e69fb`), or re-add the target after it gets there.
 - When auto-start reaches the merge.
 - Then the window opens in the PR workdir with no dialog, Claude reports
   MERGED without input, and the TUI runs `pm pr merge --propagation-only`
@@ -865,9 +955,11 @@ without asking. M2c covers the ambiguous case on purpose.
 
 ### M3. The main repo's base moves during the merge
 
-- Given a PR whose workdir merge has finished but not propagated (e.g.
-  answer an M2c window slowly, or stop after the workdir merge), and a new
-  commit is then made on the main repo's base.
+- Given a PR whose workdir merge has finished but not propagated, and a
+  new commit is then made on the main repo's base. Recipe (round 5): put a
+  `.git/index.lock` in the main repo before step 1 (the merge exits 1
+  after the workdir merge), remove the lock, commit on the main repo's
+  base, then run `pm pr merge --propagation-only --resolve-window <pr>`.
 - When propagation runs.
 - Then the new commit is integrated in the PR workdir and the fast-forward
   retried. A non-conflicting commit propagates with no window. A
@@ -1012,3 +1104,13 @@ surfaces are:
     still exercised and its fresh session must still start with no
     dialog. The supervisor may still choose to fix `pr-9f97a8f` here;
     then `pr-d76385d` must be tested with it.
+11. **Round-5 corrections and new coverage (round 6).** The S11
+    concretizer found that the merge prompt never includes the PR
+    description, so M2 now carries the winning side in the PR title (or a
+    `## Merge` pm notes section); round-4 Z resolving hands-off was
+    incidental. The M3 "stop after the workdir merge" recipe is the
+    index.lock route. The round-5 app fixes `911e75b7` (guide pane) and
+    `4c3fb81c` (plan parse) are reviewed (review 5a14 i1) and get their
+    first post-review live tests in H2.5 and W1.5/W3.4. The other TUI
+    interactive panes with the same guide gap stay tracked in
+    `pr-629c47e`; the supervisor may still choose to fix them here.
