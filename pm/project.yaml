@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T06:48:47.565212+00:00'
+  updated_at: '2026-10-13T06:50:34.904646+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25867,6 +25867,32 @@ prs:
       and the pm/-only PASS all held live; captures in scenarios/2/{pre,post}-fix.'
     created_at: '2026-10-13T06:48:47Z'
     last_edited: '2026-10-13T06:48:47Z'
+  - id: note-51506a2
+    text: 'QA S1 refine (2026-10-13): _publish_planner_head classifies "behind" only
+      when the upstream commit object is already in the PR workdir (cat-file -e).
+      The realistic case is that a second actor or an earlier QA worker pushes and
+      the PR workdir never fetched. That case is reported as "diverged" with the reconcile
+      hint, even though the workdir is strictly behind. Verified by calling the function
+      directly against a file:// bare upstream: no fetch gives diverged, git fetch
+      origin gives "is behind". A likely fix is to fetch the branch from real_url
+      (or check ancestry after fetching) before classifying. Setup tips for QA: a
+      file:// bare repo as origin counts as a real upstream (resolve_real_origin treats
+      "://" as non-local, and pm init auto-detects the vanilla backend). Prepend a
+      dir that symlinks git to /usr/bin/git to PATH, because the ~/.local/bin git
+      proxy forwards ls-remote/push to the host. Seed and push pm/specs/<pr>/qa.md
+      on the PR branch, or the spec gate stops QA before the handoff. Scenario 0 (s-0)
+      is cloned before planning, so it is not pinned to the planner head.'
+    created_at: '2026-10-13T06:29:14Z'
+    last_edited: '2026-10-13T06:29:14Z'
+  - id: note-84940eb
+    text: 'QA S1 (2026-10-13): all 3 stories driven live on a file:// upstream. Fixed
+      e8e6b5ea: _publish_planner_head now fetches the branch (FETCH_HEAD only) before
+      classifying, so a never-fetched strictly-behind PR workdir says "is behind …
+      Pull the PR branch" instead of "diverged … Reconcile" (regression: test_behind_remote_says_behind_not_diverged[never-fetched]).
+      Story 1 publish-before-fan-out, 2a/2a''/2b blocking + no force push, and story
+      3 queued-dequeue clone refusal all held. Captures: scenarios/1/{story1,pre-fix,post-fix}.'
+    created_at: '2026-10-13T06:50:34Z'
+    last_edited: '2026-10-13T06:50:34Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
