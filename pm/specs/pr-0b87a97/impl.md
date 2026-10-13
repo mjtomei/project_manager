@@ -412,7 +412,8 @@ QA round 4 fixes (reviewed in review-loop 6ad2):
 31. *(QA s16, d1885432)* Enter/f on a window-less runs-popup row also shows
     "No live window for X" on the selected row's detail line
     (`AutoRunsScreen._notice`), because on a short terminal the popup
-    covers the app's log line. Moving the selection clears it.
+    covers the app's log line. Moving the selection clears it, and so
+    does a refresh that finds a window for that row (review 6ad2 i2).
 32. *(QA s17, b68801b8)* `do_normal_sync` paints "pulling" through
     `app._update_status_bar(sync_state="pulling")`. The bare
     `StatusBar.update_status()` it used before dropped `AUTO ×N`, the

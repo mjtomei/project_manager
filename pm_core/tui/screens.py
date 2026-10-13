@@ -810,7 +810,11 @@ class AutoRunsScreen(ModalScreen):
                 detail.append(f" (also needed by {', '.join(row['also'])})",
                               style="dim yellow")
             if sel and self._notice and self._notice[0] == self._selected_key:
-                detail.append(f"  ⚠ {self._notice[1]}", style="bold red")
+                if r.get("window"):
+                    # A refresh found a window since: the notice is stale.
+                    self._notice = None
+                else:
+                    detail.append(f"  ⚠ {self._notice[1]}", style="bold red")
             body.append_text(detail)
             body.append("\n")
             row_texts.append((line, detail))

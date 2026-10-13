@@ -1027,7 +1027,28 @@ def test_runs_popup_no_window_notice_visible_on_short_terminal(tmp_path):
             assert isinstance(app.screen, AutoRunsScreen)
             assert seen == ["No live window for t4"]
             assert "No live window for t4" in screen_text(app)
+            # A refresh that finds a window for the row drops the notice.
+            screen = app.screen
+            real = auto_start.build_status
+
+            def with_window(a):
+                st = real(a)
+                for run in st["runs"]:
+                    if run["pr_id"] == "t4":
+                        run["window"] = {"name": "t4", "id": "@9"}
+                return st
+
+            with patch.object(auto_start, "build_status", with_window):
+                screen.action_refresh_runs()
+                await pilot.pause()
+            assert "No live window" not in screen_text(app)
+            screen.action_refresh_runs()  # window gone again: stays cleared
+            await pilot.pause()
+            assert "No live window" not in screen_text(app)
             # Moving the selection clears the notice.
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "No live window for t4" in screen_text(app)
             await pilot.press("k")
             await pilot.pause()
             assert "No live window" not in screen_text(app)
