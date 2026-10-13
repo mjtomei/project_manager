@@ -16,6 +16,7 @@ Verdicts (shared with review):
 """
 
 import json
+import os
 import re
 import secrets
 import sys
@@ -635,6 +636,10 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     data = {
         "pr_id": state.pr_id,
         "loop_id": state.loop_id,
+        # The process running this orchestration loop: a TUI must not adopt
+        # a run another live driver (e.g. a `pm pr auto-sequence` QA child)
+        # is still collecting verdicts for (see resume_owned_elsewhere).
+        "owner_pid": os.getpid(),
         "qa_workdir": state.qa_workdir,
         "session_tag": state.session_tag,
         "use_containers": bool(use_containers),
@@ -668,6 +673,32 @@ def _load_resume_file(qa_workdir: str | Path) -> dict | None:
         return json.loads(_resume_file_path(qa_workdir).read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+
+
+def resume_owned_elsewhere(resume_data: dict) -> bool:
+    """True when another live process still drives the snapshot's run.
+
+    The snapshot exists so a TUI can pick up a run whose daemon thread died
+    with it.  A run written by a different process that is still alive (a
+    CLI auto-sequence QA child, another TUI) is not orphaned: resuming it
+    would start a second orchestration loop on the same scenarios —
+    duplicate verifier / finalize panes and a second completion.  A TUI
+    restart execs in place, so its own old runs carry its current pid.
+    """
+    pid = resume_data.get("owner_pid")
+    if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, owned by another user
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat.rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return True
 
 
 def clear_resume_file(qa_workdir: str | Path) -> None:

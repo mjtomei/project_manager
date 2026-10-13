@@ -405,6 +405,11 @@ def _resume_incomplete_qa(app) -> None:
             continue
         if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
             continue
+        # Not orphaned: another live process (a `pm pr auto-sequence` QA
+        # child) is driving it.  Re-checked each scan, so the run is still
+        # recovered if that process dies before finishing.
+        if qa_loop.resume_owned_elsewhere(rdata):
+            continue
 
         # Only resume PRs still in QA — skip (and forget) ones that have
         # already moved on.

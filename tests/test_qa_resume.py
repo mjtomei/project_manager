@@ -236,6 +236,51 @@ def test_resume_skips_non_qa_pr(tmp_path):
     assert not _resume_file_path(qa_dir).exists()
 
 
+def test_resume_skips_run_owned_by_live_process(tmp_path):
+    """A run another live process drives (a `pm pr auto-sequence` QA child)
+    is not orphaned: adopting it would start a second orchestration loop —
+    duplicate verifier / finalize panes and a second completion.  Once that
+    process is gone the run is recovered as before."""
+    import subprocess
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="")
+    owner = subprocess.Popen(["sleep", "30"])
+    try:
+        rfile = _resume_file_path(qa_dir)
+        data = json.loads(rfile.read_text())
+        data["owner_pid"] = owner.pid
+        rfile.write_text(json.dumps(data))
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+             patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+            qa_loop_ui._resume_incomplete_qa(app)
+        resume_bg.assert_not_called()
+        on_complete.assert_not_called()
+        assert "pr-001" not in app._qa_loops
+        assert "pr-001" not in app._resumed_qa_pr_ids   # re-checked later
+        assert rfile.is_file()
+    finally:
+        owner.kill()
+        owner.wait()
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_called_once()
+    assert "pr-001" in app._qa_loops
+
+
+def test_resume_snapshot_records_owner_pid(tmp_path):
+    import os
+    state = _make_state(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    loaded = _load_resume_file(tmp_path)
+    assert loaded["owner_pid"] == os.getpid()
+    # Our own pid (a TUI restart execs in place) is never "elsewhere".
+    assert not qa_loop.resume_owned_elsewhere(loaded)
+
+
 def test_resume_skips_already_tracked(tmp_path):
     app = _make_app(tmp_path)
     app._qa_loops["pr-001"] = QALoopState(pr_id="pr-001")
