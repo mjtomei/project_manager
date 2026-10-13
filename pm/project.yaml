@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T22:40:04.022098+00:00'
+  updated_at: '2026-10-13T23:10:36.836170+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3788,6 +3788,18 @@ prs:
       must stay untouched. Planned=launched=3.'
     created_at: '2026-10-13T19:42:26Z'
     last_edited: '2026-10-13T19:42:26Z'
+  - id: note-04a508d
+    text: 'Review 5a14 i1 (24796646) reviewed the unreviewed QA edits 911e75b7 (tmux
+      guide/assist calls prepare_workspace) and 4c3fb81c (parse_qa_plan never starts
+      before the last QA_PLAN_START). Both are correct and their regression tests
+      fail before and pass after. Only fix: the guide called prepare_workspace even
+      under a fake-claude guide, which the launcher never does. It now bootstraps
+      for real Claude only, and a test covers the fake case. Spec R1/R6 updated. Expect
+      a qa_loop.py merge conflict with pr-b8561ac in run_qa_sync (trust_blocked block
+      vs its plan gate), which is ordinary sibling integration. Full suite 3090 pass,
+      plus the 1 known env failure (test_hook_events standalone receiver).'
+    created_at: '2026-10-13T23:10:36Z'
+    last_edited: '2026-10-13T23:10:36Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
