@@ -451,6 +451,12 @@ class TestPromptWatch:
         (d / "trust-prompt-grace-seconds").write_text("7\n")
         assert wt.prompt_grace_seconds() == 7.0
 
+    def test_blocked_message_without_path_keeps_command_runnable(self):
+        assert "`pm trust add /w/x`" in wt.blocked_message("/w/x", 130)
+        msg = wt.blocked_message("", 130)
+        assert "for the session workdir" in msg
+        assert "`pm trust add <path>`" in msg
+
 
 # ---------------------------------------------------------------------------
 # Bounded failure in the pollers
