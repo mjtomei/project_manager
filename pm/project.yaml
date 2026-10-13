@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T00:35:47.859429+00:00'
+  updated_at: '2026-10-13T00:38:15.857721+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26236,6 +26236,19 @@ prs:
       directly also works.'
     created_at: '2026-10-13T00:35:47Z'
     last_edited: '2026-10-13T00:35:47Z'
+  - id: note-5a5002d
+    text: 'QA s19 r4 re-evaluated -> INPUT_REQUIRED (contract conflict for the next
+      QA plan). The literal S19 Thens demand displays outside #229 scope: (a) U post-sign-off
+      reason "signed off … press g" = needs pr-7c32e44, excluded by qa.md §5 item
+      10; (b) TUI paint of "Auto-merge: X … merging" and skip-QA "review passed, skipping
+      QA" / "ready to merge … press g" — pre-existing on master (same-frame sync merge
+      Error; sticky 10s Review-loop-done), filed pr-0a08055, not R23 items; (c) popup
+      header labels only stop-before-merge, no auto_merge tag for U. Next planner:
+      either scope these out of S19 Thens (assert status/L instead) or bring pr-7c32e44/pr-0a08055
+      into scope explicitly. All other S19 Thens held on 51507548; triple 7 re-run
+      on a clean tree (captures scenarios/19/rerun-t7) held.'
+    created_at: '2026-10-13T00:38:15Z'
+    last_edited: '2026-10-13T00:38:15Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
