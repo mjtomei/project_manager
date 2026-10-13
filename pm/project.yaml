@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T04:08:00.138126+00:00'
+  updated_at: '2026-10-13T04:12:53.363839+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26561,6 +26561,20 @@ prs:
       of grouped sessions — sort -u pane ids.'
     created_at: '2026-10-13T04:08:00Z'
     last_edited: '2026-10-13T04:08:00Z'
+  - id: note-4dc76fe
+    text: 'QA S31 (round 7, 7e9d414a): NEEDS_WORK, fixed d6778d7f. O logged "Auto-sequence
+      armed" forced but unheld, so a second O inside the first O 3s hold (O A, r,
+      O B ~2.8s later) showed B armed line for 0.1s before the deferred "starting
+      B" flushed over it. The armed line is now add_targets held confirmation (confirm=),
+      with a regression test that fails before and passes after; verified live (E
+      armed 28 samples vs B 1 sample pre-fix). Every other S31 Then held. Open for
+      supervisor, NOT counted as passed: (1) popup r: the ~1.85s was my poll-loop
+      timeout (invalid). Rename proxy gave 24-33ms; real PM state change (CLI add/remove
+      with popup open) gave 16-27ms with r vs 0.39-1.12s without (captures scenarios/31/popup-r-real-state).
+      (2) R18 footer "Runs": the TUI renders no Footer widget (master neither), so
+      this is a contract question: add a footer, or drop it from R18. Captures: /pm-captures/scenarios/31.'
+    created_at: '2026-10-13T04:12:53Z'
+    last_edited: '2026-10-13T04:12:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
