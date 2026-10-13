@@ -84,14 +84,39 @@ def start_signoff(app, pr_id: str) -> None:
         return
     if moved["from"]:
         _log.info("start_signoff: %s %s -> sign_off", pr_id, moved["from"])
+        _launched_at(app).pop(pr_id, None)
         _reload(app)
         app.log_message(f"Auto-start: {pr_id} → sign-off")
     step(app, pr_id)
 
 
-def _launch(app, pr_id: str, tdir) -> None:
+# A launch that fails to produce a window (no tmux, CLI error) would
+# otherwise be retried — synchronously — on every 5 s poll.  Only the
+# "window gone" relaunch is throttled: a fresh sign_off entry or a stale-run
+# relaunch always launches.
+RELAUNCH_BACKOFF_SECONDS = 60.0
+
+
+def _launched_at(app) -> dict:
+    d = getattr(app, "_signoff_launched_at", None)
+    if not isinstance(d, dict):
+        d = {}
+        app._signoff_launched_at = d
+    return d
+
+
+def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
+    import time
     from pm_core.tui import pr_view
     from pm_core import signoff as signoff_mod
+    launched = _launched_at(app)
+    now = time.monotonic()
+    last = launched.get(pr_id)
+    if not force and last is not None and now - last < RELAUNCH_BACKOFF_SECONDS:
+        _log.debug("signoff: %s launched <%ds ago, not relaunching",
+                   pr_id, RELAUNCH_BACKOFF_SECONDS)
+        return
+    launched[pr_id] = now
     try:
         tdir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -120,17 +145,19 @@ def step(app, pr_id: str) -> None:
 
     tdir = _auto_start.get_transcript_dir(app)
     result = signoff_mod.step_signoff(app._root, pr, session=session, tdir=tdir)
-    _log.info("signoff step %s: %r", pr_id, result)
+    _log.debug("signoff step %s: %r", pr_id, result)
 
     if result.action == "running":
         return
     if result.action == "launch":
+        _log.info("signoff: launching router for %s (stale=%s)",
+                  pr_id, result.stale)
         _acted(app).pop(pr_id, None)
         if result.stale:
             _reload(app)
             app.log_message(
                 f"Sign-off for {pr_id} is stale (HEAD moved) — re-running")
-        _launch(app, pr_id, tdir)
+        _launch(app, pr_id, tdir, force=result.stale)
         return
 
     hop = result.hop
@@ -142,6 +169,8 @@ def step(app, pr_id: str) -> None:
         _acted(app)[pr_id] = key
     else:
         _acted(app).pop(pr_id, None)
+        _launched_at(app).pop(pr_id, None)
+    _log.info("signoff: %s routed %s -> %s", pr_id, result.verdict, hop)
 
     if hop == "ready_to_merge":
         from pm_core.tui.review_loop_ui import _maybe_auto_merge

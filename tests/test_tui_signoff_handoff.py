@@ -371,3 +371,27 @@ def test_adopts_existing_fresh_manual_approval(world_factory):
     assert w.launches() == []
     assert any("ready to merge" in m for m in app.logs)
     assert w.merges() == []
+
+
+def test_dead_window_relaunch_is_throttled(world_factory):
+    """A launch that never produces a window is not retried every poll."""
+    app, w = world_factory(stop=True)
+
+    def no_window(a, cmd, *x, **kw):
+        w.commands.append(cmd)     # launch "fails": window never appears
+
+    with patch("pm_core.tui.pr_view.run_command", no_window):
+        _qa_pass(app)
+        _poll(app, 4)
+    assert len(w.launches()) == 1
+    # After the backoff the dead window is relaunched.
+    for k in list(app._signoff_launched_at):
+        app._signoff_launched_at[k] -= signoff_backoff()
+    with patch("pm_core.tui.pr_view.run_command", no_window):
+        _poll(app)
+    assert len(w.launches()) == 2
+
+
+def signoff_backoff():
+    from pm_core.tui import signoff_ui
+    return signoff_ui.RELAUNCH_BACKOFF_SECONDS
