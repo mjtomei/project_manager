@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T13:55:49.426664+00:00'
+  updated_at: '2026-10-13T15:56:16.697738+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3530,6 +3530,26 @@ prs:
       when the planner pane exits; otherwise the 1h planner timeout applies.'
     created_at: '2026-10-13T13:21:41Z'
     last_edited: '2026-10-13T13:21:41Z'
+  - id: note-e399788
+    text: 'QA S4 round 3 (supervised; no outer trust prompt accepted manually; captures
+      pr-b53bfe2/scenarios/4, REPORT.md): NEEDS_WORK. W1-W6 Thens held live on scratch
+      HOME (W6.1 route for all), incl. real container QA worker activity (W6.7: hooks
+      from nested containers now arrive; 3 scenarios PASS/VERIFIED/FINALIZE_DONE).
+      Live bug fixed in 5a293bf1 (UNREVIEWED, needs review before sign-off): after
+      a hard TUI kill, a review/impl pane left at the trust dialog was never watched
+      again (tracker looks for transcript symlinks in the new TUI run dir); now an
+      orphan WorkspacePromptWatch recovers the session from the pane start command;
+      pre-fix pane sat at dialog 5+ min, post-fix accepted in 2s with 1 attempt and
+      review PASS. Filed pr-5d66709 (review loop not adopted after hard kill), pr-1710f9a
+      (bootstrap locks even when already trusted), pr-f2f9ef8 (TUI start resets tmux
+      hook arrays), pr-1e9c117 (captures_dir fail-open), pr-dc4dd45 (blocked msg says
+      pm trust add for approved dir). HARNESS INCIDENT: S4 unset PM_CAPTURES_PR so
+      nested throwaway QA overwrote scenarios/1-3 prompt.md/scenario.json/verdict.md
+      (moved to scenarios/4/contamination, originals lost; S3 live prompt.md lost).
+      W2-signoff ran on a PR in qa via d->t because TUI t from in_progress never reaches
+      qa.'
+    created_at: '2026-10-13T15:56:16Z'
+    last_edited: '2026-10-13T15:56:16Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -27561,11 +27581,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T07:34:49.309576+00:00'
-  updated_at: '2026-10-13T07:34:49.309576+00:00'
+  updated_at: '2026-10-13T15:56:17.532387+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-af2ed31
+    text: 'Seen live in pr-b53bfe2 QA S4 W6-prefix (2026-10-13): with host /workspace
+      present, the blocked reason for a container dialog on /workspace tells the user
+      to run `pm trust add /workspace`, which would authorize the HOST /workspace
+      (the wrong directory) and still not fix the container copy. The fix for this
+      PR should also give a container-correct remedy.'
+    created_at: '2026-10-13T15:56:17Z'
+    last_edited: '2026-10-13T15:56:17Z'
 - id: pr-e835d8f
   plan: bugs
   title: 'Bug: local-backend merge-resolution window runs in the unapproved project
