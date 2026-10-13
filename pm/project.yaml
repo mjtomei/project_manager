@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T03:21:08.746498+00:00'
+  updated_at: '2026-10-13T03:27:30.184349+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26484,6 +26484,13 @@ prs:
       scenarios/26.'
     created_at: '2026-10-13T03:21:08Z'
     last_edited: '2026-10-13T03:21:08Z'
+  - id: note-3c3aead
+    text: 'Review 66f9 i1 (rev 3a0d2fab): reviewed the only app delta since review
+      4be9, S26 5ef79e37 (L pane settle + launch burst above the recap, --stop-before-merge
+      in group help). No code defects; spec §5 item 41 added. Suite: 3017 passed,
+      1 baseline failure in test_hook_events installer.'
+    created_at: '2026-10-13T03:27:30Z'
+    last_edited: '2026-10-13T03:27:30Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
