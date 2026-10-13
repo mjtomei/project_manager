@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T20:44:44.324831+00:00'
+  updated_at: '2026-10-13T22:38:49.019888+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3706,6 +3706,40 @@ prs:
       from outside.'
     created_at: '2026-10-13T20:44:44Z'
     last_edited: '2026-10-13T20:44:44Z'
+  - id: note-ad2e543
+    text: 'QA S10 round 5 (workflow/container trust, supervised; no outer trust prompt
+      accepted manually; one app edit d2375480, see next note; captures pr-b53bfe2/scenarios/10, REPORT.md)
+      on c86e1caf: every trust Then held live with real claude 2.1.296 under a scratch
+      HOME: W1 real 3-scenario QA PASS/VERIFIED/FINALIZE_DONE with 0 dialogs in 13
+      QA panes; W2 impl/review(R9 cwd+cd prefix)/signoff/meta; W3.2; W3.3 terminal
+      --resume continued run-1 conversation (TUI s fresh = pr-9f97a8f); W3.4 new clones
+      bootstrapped; W3.5 orphan accept 5s after pm session, 1 attempt, review PASS;
+      breadcrumb adoption PASS; container hard-kill variant: one red line, reported_by=new
+      pid, no keys, no duplicate in 105s (first post-review live test of 211cfb95
+      in the container path); W4.1/W4.3; W5 zero/worker/concretizer; W6.4-W6.7 incl.
+      real container worker + hook-driven verdicts. Reported: W3.4 planned 1 != launched
+      2 because the terminal plan parse picked up the committed qa.md SCENARIO line
+      echoed in the planner prompt (fixed in d2375480, note on pr-b8561ac); pr-f8acf21 reproduced;
+      W3.6 terminal resume with bootstrap defeated sits silently at No (pr-d76385d).
+      Harness lessons: tmux pipe-pane -o toggles (double hook+poller closed some captures;
+      W6.5 re-run), scratch-HOME OAuth copy goes stale when the outer host rotates
+      the token (re-copy), pm container enable is global.'
+    created_at: '2026-10-13T22:30:42Z'
+    last_edited: '2026-10-13T22:30:42Z'
+  - id: note-fb07d55
+    text: 'QA S10 r5 app edit d2375480 (UNREVIEWED, needs a review pass before sign-off):
+      parse_qa_plan anchored the plan at the last "SCENARIO 1:" before the final QA_PLAN_END,
+      so a planner plan numbered from 2+ reached back into prompt text (committed
+      qa.md echoed in the terminal capture) -> W3.4 planned 1, launched 2. The body
+      now never starts before the last QA_PLAN_START ahead of the end marker. Regression
+      test test_real_plan_not_numbered_from_one_ignores_prompt_spec fails before/passes
+      after; on the two live planner panes the old parser gives 2 and 2 (incl. a duplicated
+      re-rendered plan block), the new one 1 and 1; live post-fix TUI run logged "QA
+      plan parsed: 1". Full suite 3077 pass, 13 known env failures (markdown module
+      x12, hook_events standalone receiver). Transcript-based parsing (pr-b8561ac)
+      remains the real fix for truncation.'
+    created_at: '2026-10-13T22:38:48Z'
+    last_edited: '2026-10-13T22:38:48Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -26200,7 +26234,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T18:57:51.873458+00:00'
+  updated_at: '2026-10-13T22:38:49.770391+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26269,6 +26303,26 @@ prs:
       would fix both truncation and duplication. Captures pr-b53bfe2/scenarios/7/W3-interrupted-QA/fresh-planner-pane.txt.'
     created_at: '2026-10-13T18:57:51Z'
     last_edited: '2026-10-13T18:57:51Z'
+  - id: note-b7efed1
+    text: 'QA pr-b53bfe2 r5 S10 W3.4 (2026-10-13, c86e1caf): the terminal-capture
+      plan parse also picks up PROMPT text. With a committed pm/specs/<pr>/qa.md containing
+      a "SCENARIO 1: yellow.txt content" line, the real planner emitted a QA_PLAN
+      with exactly one scenario (it said "the plan has one"), but pm logged "Skipping
+      placeholder scenario 2/3" (prompt template) and "QA plan parsed: 2 scenario(s)"
+      and launched 2; the extra one was the qa.md SCENARIO echoed in the planner prompt
+      QA Spec section. Planned 1 != launched 2. A transcript-based plan parse avoids
+      it. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA (planner-pane-full.txt,
+      plan-text-restarted-run.txt).'
+    created_at: '2026-10-13T22:00:48Z'
+    last_edited: '2026-10-13T22:00:48Z'
+  - id: note-6cbdf33
+    text: 'Incidental fix in pr-b53bfe2 d2375480 (unreviewed): parse_qa_plan now never
+      starts before the last QA_PLAN_START ahead of the final QA_PLAN_END, which stops
+      prompt text (a qa.md SCENARIO 1 line) and a re-rendered duplicate plan block
+      from being parsed when the plan is numbered from 2+. It does not address truncation;
+      the transcript-based parse here is still needed.'
+    created_at: '2026-10-13T22:38:49Z'
+    last_edited: '2026-10-13T22:38:49Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -28160,7 +28214,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T17:10:44.065060+00:00'
-  updated_at: '2026-10-13T18:57:50.380544+00:00'
+  updated_at: '2026-10-13T22:00:56.291119+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28176,6 +28230,16 @@ prs:
       Captures pr-b53bfe2/scenarios/7/W3-6-resume-trust-reset.'
     created_at: '2026-10-13T18:57:50Z'
     last_edited: '2026-10-13T18:57:50Z'
+  - id: note-cca87df
+    text: 'QA pr-b53bfe2 r5 S10 W3.6 (2026-10-13, c86e1caf), live: terminal fall-through
+      resume with bootstrap defeated (entry deleted + fresh lock 25s): pm logged "could
+      not lock" then launch_claude --resume <id>; the dialog sat at "No, exit" for
+      100s+ with no watch, no keys and no pm log line, so a manual answer at the terminal
+      is needed. TUI s on a PR prepared the same way still starts a fresh --session-id
+      (pr-9f97a8f) and the tracker accepted by cursor (1 attempt, Enter processed
+      only after the lock was released). Scope unchanged; captures pr-b53bfe2/scenarios/10/W3-6-edge-cases.'
+    created_at: '2026-10-13T22:00:56Z'
+    last_edited: '2026-10-13T22:00:56Z'
 - id: pr-f8acf21
   plan: bugs
   title: 'Bug: stopping a QA run (zz t, or z t superseding a resumed run) still launches
@@ -28210,11 +28274,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-13T18:57:33.967457+00:00'
+  updated_at: '2026-10-13T22:18:20.648960+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1ab6498
+    text: 'Reproduced again in QA pr-b53bfe2 r5 S10 W3.4 (c86e1caf): kill -9 TUI mid-worker,
+      pm session (auto-resume), z t -> old thread "Scenario 1 window died - retry
+      1/10", relaunched s1 into the OLD clone, launched a finalizer pane into the
+      new planner window, logged "QA complete: PASS (finalize=None)" with "?" scenario.
+      This time no QA PASS PR note was persisted. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA/pm-log-stale-run.txt.'
+    created_at: '2026-10-13T22:18:20Z'
+    last_edited: '2026-10-13T22:18:20Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
