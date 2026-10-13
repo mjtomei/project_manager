@@ -179,6 +179,71 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
     _reload(app)
 
 
+def _entered_signoff_epoch(pr: dict) -> float | None:
+    """``signed_off_at`` (set on every sign_off entry) as epoch seconds."""
+    from datetime import datetime
+    ts = pr.get("signed_off_at")
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _adopt_orphaned_run(app, pr: dict, tdir, session: str) -> None:
+    """Move the PR's live router run from an earlier auto-start run dir into *tdir*.
+
+    A user restart (Ctrl+R) leaves auto-start off, so re-arming creates a new
+    ``autostart-*`` run dir, but the router window launched under the old
+    dir keeps writing its transcript there.  :func:`step_signoff` only reads
+    *tdir*, so the adopted window read as "running" forever and its verdict
+    was never recorded (pr-5410ae4).  When *tdir* holds no run of its own,
+    no launch is in flight and the PR's sign-off window is alive, move the
+    newest stamped run of another auto-start run dir (``manual-*`` dirs and
+    unstamped runs are never adopted) launched since the PR entered
+    ``sign_off`` (transcript + launch stamp) into *tdir*.  ``step_signoff``
+    then binds it to HEAD as usual: recorded when its stamp is the current
+    HEAD, retired as stale otherwise.  Moving (not copying) keeps a consumed
+    verdict from being replayed by a later sign_off entry.
+    """
+    from pm_core import signoff as signoff_mod
+    pr_id = pr["id"]
+    own = signoff_mod.signoff_transcript(tdir, pr_id)
+    own_stamp = signoff_mod.signoff_launch_stamp(own)
+    if own.is_symlink() or own.exists() or own_stamp.exists():
+        return
+    if pr_id in _inflight(app) or not app._root:
+        return
+    since = _entered_signoff_epoch(pr)
+    best = None
+    for stamp in (app._root / "transcripts").glob(f"*/{own_stamp.name}"):
+        if stamp.parent == tdir or stamp.parent.name.startswith("manual-"):
+            continue
+        try:
+            mtime = stamp.stat().st_mtime
+        except OSError:
+            continue
+        if since is not None and mtime < since - 1:
+            continue  # a run from an earlier sign_off episode
+        if best is None or mtime > best[0]:
+            best = (mtime, stamp)
+    if best is None or signoff_mod.signoff_window_pane(session, pr) is None:
+        return
+    stamp = best[1]
+    transcript = signoff_mod.signoff_transcript(stamp.parent, pr_id)
+    try:
+        tdir.mkdir(parents=True, exist_ok=True)
+        if transcript.is_symlink() or transcript.exists():
+            transcript.rename(own)
+        stamp.rename(own_stamp)
+    except OSError as e:
+        _log.warning("signoff: adopting %s run from %s failed: %s",
+                     pr_id, stamp.parent.name, e)
+        return
+    _log.info("signoff: %s adopted router run from %s", pr_id, stamp.parent.name)
+
+
 def step(app, pr_id: str, pr: dict | None = None) -> None:
     """Advance one in-scope ``sign_off`` PR through the shared state machine.
 
@@ -201,6 +266,7 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         return
 
     tdir = _auto_start.get_transcript_dir(app)
+    _adopt_orphaned_run(app, pr, tdir, session)
     result = signoff_mod.step_signoff(app._root, pr, session=session, tdir=tdir)
     _log.debug("signoff step %s: %r", pr_id, result)
 

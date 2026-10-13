@@ -340,6 +340,102 @@ def test_restart_does_not_adopt_run_of_another_head(world_factory, stamp):
     assert len(w.launches()) == 2
 
 
+def _restart_into_new_run_dir(app, run_id="run2"):
+    """Ctrl+R leaves auto-start off; re-arming creates a fresh run dir while
+    the router window launched under the old one keeps running."""
+    for attr in ("_signoff_acted", "_signoff_launched_at",
+                 "_signoff_launch_inflight"):
+        if hasattr(app, attr):
+            delattr(app, attr)
+    app._auto_start_run_id = run_id
+    return app._root / "transcripts" / run_id
+
+
+def _router_symlink(w, tmp_path):
+    """Like claude_launcher: the run dir transcript is a symlink to the
+    router session's JSONL, which the router keeps appending to."""
+    target = tmp_path / "router-session.jsonl"
+    target.write_text("")
+    (w.tdir / f"signoff-{PR}.jsonl").symlink_to(target)
+    return target
+
+
+def _write_verdict(target, verdict):
+    lines = [{"type": "user", "message": {"content": "go"}},
+             {"type": "assistant", "message": {"content": [
+                 {"type": "text", "text": f"Report written.\n\n{verdict}"}]}}]
+    target.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+
+
+@pytest.mark.parametrize("stop", [True, False], ids=["O", "A"])
+def test_restart_with_new_run_dir_adopts_running_router(world_factory,
+                                                        tmp_path, stop):
+    """pr-5410ae4 in the restart story: after Ctrl+R + re-arm the TUI reads a
+    new run dir.  The still-running router (same window, HEAD unchanged) must
+    be adopted and its verdict recorded once — not read as running forever."""
+    app, w = world_factory(stop=stop)
+    _qa_pass(app)
+    target = _router_symlink(w, tmp_path)
+    new_tdir = _restart_into_new_run_dir(app)
+
+    _poll(app)                             # mid-run: adopted, still running
+    assert (new_tdir / f"signoff-{PR}.head").read_text().strip() == w.head
+    assert not (w.tdir / f"signoff-{PR}.head").exists()
+    assert app.pr().get("signoff") is None
+    assert w.window and len(w.launches()) == 1
+    assert not any("stale" in m for m in app.logs)
+
+    _write_verdict(target, "SIGNOFF_MERGE")  # router finishes after restart
+    _poll(app, 3)
+    rec = app.pr()["signoff"]
+    assert (rec["verdict"], rec["sha"], rec["origin"]) == \
+        ("SIGNOFF_MERGE", w.head, "auto-sequence")
+    assert len(w.launches()) == 1
+    if stop:
+        assert sum("ready to merge" in m for m in app.logs) == 1
+        assert w.merges() == []
+    else:
+        assert len(w.merges()) == 1
+        assert app.pr()["status"] == "merged"
+
+
+def test_restart_with_new_run_dir_retires_run_of_another_head(world_factory,
+                                                             tmp_path):
+    """The adopted run is still bound to its launch HEAD (R9b): HEAD moved
+    across the restart -> retired and relaunched, never recorded."""
+    app, w = world_factory(stop=False)
+    _qa_pass(app)
+    target = _router_symlink(w, tmp_path)
+    _write_verdict(target, "SIGNOFF_MERGE")
+    _restart_into_new_run_dir(app)
+    w.head = "e" * 40
+    _poll(app)
+    assert app.pr().get("signoff") is None
+    assert w.merges() == []
+    assert len(w.launches()) == 2
+    assert any("stale (HEAD moved)" in m for m in app.logs)
+
+
+def test_run_from_earlier_signoff_episode_is_not_adopted(world_factory,
+                                                         tmp_path):
+    """Only runs launched since the PR entered sign_off are adopted; an older
+    leftover next to a live (e.g. manual ``i``) window is left alone."""
+    import os
+    app, w = world_factory(stop=False)
+    _qa_pass(app)
+    target = _router_symlink(w, tmp_path)
+    _write_verdict(target, "SIGNOFF_MERGE")
+    stamp = w.tdir / f"signoff-{PR}.head"
+    old = stamp.stat().st_mtime - 3600
+    os.utime(stamp, (old, old))
+    new_tdir = _restart_into_new_run_dir(app)
+    _poll(app)
+    assert stamp.exists()
+    assert not (new_tdir / f"signoff-{PR}.head").exists()
+    assert app.pr().get("signoff") is None
+    assert w.merges() == []
+
+
 def test_gate_refusal_is_not_tracked_as_conflict(world_factory):
     """A merge refused by the sign-off gate must not land in
     _pending_merge_prs (it was the #226 misclassification)."""

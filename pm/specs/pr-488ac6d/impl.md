@@ -183,3 +183,24 @@ relaunch cannot loop. Tests: `test_verdict_from_run_launched_on_old_head_is_not_
 `test_restart_does_not_adopt_run_of_another_head`, CLI
 `test_verdict_of_run_launched_on_old_head_not_recorded`, and the
 `TestWindowLaunchWorkdir` stamp tests.
+
+## Router adoption across a new auto-start run dir (QA s4 follow-up)
+
+A user restart (Ctrl+R) leaves auto-start off, so re-arming creates a new
+`transcripts/autostart-*` run dir. The router window launched under the old
+dir kept writing its transcript and `.head` stamp there, but `step_signoff`
+only reads the current dir. So the re-armed TUI "adopted" the live window and
+then showed "sign-off review running" forever, and the verdict was never
+recorded (the A6 restart-mid-sign_off story; same mechanism as pr-5410ae4).
+`signoff_ui._adopt_orphaned_run` runs before each TUI `step_signoff`. It
+acts only when the current run dir has no transcript or stamp for the PR, no
+launch is in flight, and the PR's `signoff-<pr>` window is alive. It then
+*moves* the newest stamped run of another (non-`manual-*`) run dir into the
+current dir, but only a run launched since the PR's current `signed_off_at`.
+`step_signoff` then applies the usual R9b binding: it records when the stamp
+equals HEAD and retires the run as stale otherwise. A move, not a copy, means a
+consumed verdict can't be replayed, and a manual `i` window (no transcript)
+still reads as running until `pm pr signoff record`. Tests:
+`test_restart_with_new_run_dir_adopts_running_router[O|A]`,
+`test_restart_with_new_run_dir_retires_run_of_another_head`,
+`test_run_from_earlier_signoff_episode_is_not_adopted`.
