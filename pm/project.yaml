@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T04:17:27.300396+00:00'
+  updated_at: '2026-10-13T04:18:07.190321+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26587,6 +26587,20 @@ prs:
       installer failure. Final HEAD 3831cbba + this note.'
     created_at: '2026-10-13T04:17:27Z'
     last_edited: '2026-10-13T04:17:27Z'
+  - id: note-24b69be
+    text: 'QA S31 popup-r update (R16): resolved by measuring a real PM state change,
+      not by a scope waiver. (1) The first ~1.85s reading is INVALID: my poll loop
+      timed out because the popup never shows a renamed window name, then printed
+      "visible" anyway. The file is kept and marked INVALID at /pm-captures/scenarios/31/run/notes/popup-r-refresh-samples.txt.
+      (2) The corrected rename probe (an out-of-band tmux rename, a proxy only) gave
+      24-33ms (popup-r-refresh-samples2.txt). (3) Real PM state change: CLI pm autostart
+      add/remove with the popup open gave 16-27ms with r vs 0.39-1.12s without (2s
+      timer), 6 trials each, at /pm-captures/scenarios/31/popup-r-real-state/ (manifest.md,
+      notes/popup-r-real-state.txt, recording). R18 is implemented by 3831cbba, with
+      live 80x12 narrow-view evidence in scenarios/31/r18-runs-hint. The S31 verdict
+      rests on the two real fixes, d6778d7f (O armed hold) and 3831cbba (R18 hint).'
+    created_at: '2026-10-13T04:18:07Z'
+    last_edited: '2026-10-13T04:18:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
