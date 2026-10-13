@@ -532,3 +532,50 @@ def test_zero_scenarios_skip_finalizer(tmp_path):
             notify=lambda: None)
     finalize.assert_not_called()
     assert state.latest_verdict == "INPUT_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# pm trust CLI
+# ---------------------------------------------------------------------------
+
+class TestTrustCli:
+    def _run(self, *args):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        return CliRunner().invoke(cli, ["trust", *args])
+
+    def test_add_authorizes_and_bootstraps(self, home, tmp_path):
+        repo = _git_checkout(tmp_path / "mine")
+        r = self._run("add", str(repo))
+        assert r.exit_code == 0, r.output
+        assert str(repo) in wt.authorized_roots()
+        assert _projects()[str(repo)]["hasTrustDialogAccepted"] is True
+        status = self._run("status", str(repo))
+        assert "approved: yes" in status.output
+        assert "trusted:  yes" in status.output
+        assert str(repo) in self._run("list").output
+
+    def test_add_refuses_home_and_root(self, home):
+        for p in (str(home), "/"):
+            r = self._run("add", p)
+            assert r.exit_code != 0
+            assert "refusing" in r.output
+        assert wt.authorized_roots() == []
+        assert not _cfg().exists()
+
+    def test_remove_drops_authorization_only(self, home, tmp_path):
+        repo = _git_checkout(tmp_path / "mine")
+        self._run("add", str(repo))
+        r = self._run("remove", str(repo))
+        assert r.exit_code == 0, r.output
+        assert wt.authorized_roots() == []
+        assert not wt.approved_path(repo)
+        # Claude's own entry is left alone (revoking is a Claude action).
+        assert _projects()[str(repo)]["hasTrustDialogAccepted"] is True
+        assert self._run("remove", str(repo)).exit_code != 0
+
+    def test_status_unapproved_names_remedy(self, home, tmp_path):
+        repo = _git_checkout(tmp_path / "other")
+        r = self._run("status", str(repo))
+        assert "approved: no" in r.output
+        assert f"pm trust add {repo}" in r.output

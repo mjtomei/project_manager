@@ -461,14 +461,18 @@ class WorkspacePromptWatch:
         """Whether the last check saw the trust dialog on screen."""
         return self._first_seen is not None
 
-    def _may_accept(self, shown: str) -> bool:
+    def _accept_target(self, shown: str) -> str | None:
+        """The approved directory the dialog may be accepted for, else None.
+
+        A host path on the dialog decides: the session may have started
+        somewhere other than *workdir* (never trust that by proxy).  Only an
+        unreadable or container-internal path falls back to *workdir*.
+        """
         from pm_core import workspace_trust
-        # A host path on the dialog decides: the session may have started
-        # somewhere other than *workdir* (never trust that by proxy).  Only
-        # an unreadable or container-internal path falls back to *workdir*.
-        if shown and os.path.isdir(shown):
-            return workspace_trust.approved_path(shown)
-        return bool(self.workdir) and workspace_trust.approved_path(self.workdir)
+        target = shown if shown and os.path.isdir(shown) else self.workdir
+        if target and workspace_trust.approved_path(target):
+            return target
+        return None
 
     def check(self, force: bool = False) -> str | None:
         from pm_core import tmux as tmux_mod, workspace_trust
@@ -495,16 +499,16 @@ class WorkspacePromptWatch:
             self._first_seen = now
             _log.warning("workspace trust: pane %s is at the trust prompt "
                          "(%s)", self.pane_id, shown or self.workdir)
-        if (self._accept_attempts < self.MAX_ACCEPT_ATTEMPTS
-                and self._may_accept(shown)):
+        target = (self._accept_target(shown)
+                  if self._accept_attempts < self.MAX_ACCEPT_ATTEMPTS else None)
+        if target:
             keys = self._runtime.accept_keys(screen)
             if keys:
                 self._accept_attempts += 1
                 _log.info("workspace trust: accepting prompt in pane %s for "
                           "approved workdir %s (keys=%s)", self.pane_id,
-                          shown or self.workdir, keys)
-                if self.workdir:
-                    prepare_workspace(self.workdir)
+                          target, keys)
+                prepare_workspace(target)
                 for key in keys:
                     tmux_mod.send_keys_literal(self.pane_id, key)
                     time.sleep(0.2)
