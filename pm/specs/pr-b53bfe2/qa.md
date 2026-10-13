@@ -8,37 +8,49 @@ This spec is grounded in `git diff master...HEAD`:
 - `container.py`: config seeding
 - Trust watches in `loop_shared`, `qa_loop`, `review_loop` and `pane_idle`
 - `cli/trust.py`
-- `cli/pr.py`: review split cwd
+- `cli/pr.py`: review split cwd; local-backend merge sync/propagation
+  (R10, `_sync_workdir_base`, `_propagate_to_repo`, `_launch_merge_window`)
 - `cli/meta.py`: meta cwd
+- `cli/__init__.py`: `trust-prompt-grace-seconds` setting
 - `pm/specs/pr-b53bfe2/impl.md`
 
-The QA plan has exactly two scenarios. Each one executes one of the two named
-sections below in full, together with the shared **Setup**:
+The current QA round (after review 356c i3) has exactly three scenarios.
+Each one executes one of the named sections below **in full**, together with
+the shared **Setup**. The planner output only names the section; the
+concretizer and worker must read the whole section here, every H/W/M story:
 
-- **SCENARIO 1: Host trust policy and configuration** → section
-  "Host trust policy and configuration"
-- **SCENARIO 2: Workflow and container trust** → section
-  "Workflow and container trust"
+- **SCENARIO 3: Host trust policy and configuration** → section
+  "Host trust policy and configuration" (H1–H6)
+- **SCENARIO 4: Workflow and container trust** → section
+  "Workflow and container trust" (W1–W6)
+- **SCENARIO 5: Local merge trust** → section "Local merge trust" (M1–M5)
+
+The runner must launch exactly as many scenarios as were planned (3).
+A planned/launched mismatch is itself a FAIL to report.
+
+Earlier rounds: run #230 ran Scenarios 1 and 2 against older code. S1
+found and fixed bugs, so its result is not a PASS for the current head; S2
+ended INPUT_REQUIRED. **No earlier coverage counts as PASS for this round.**
 
 ## Run disclosures (read first)
 
-- **Supervised run.** This is QA planning run #230. The supervisor manually
-  accepted the outer host planner and Scenario-0 trust prompts on verified pm
-  checkout paths. So this run is supervised: it is **not** an unattended
-  autostart qualification trial. Do not report it as one.
-- **The planner edited application code.** Commit `7d79fce1` registered
-  `trust-prompt-grace-seconds` in `pm_core/cli/__init__.py`. That setting is
-  documented, but `pm set` used to reject it as "Unknown setting". The
-  commit adds the regression test
-  `tests/test_workspace_trust.py::test_grace_setting_is_configurable_via_pm_set`
-  (fails before the fix, passes after).
-  - This edit is **unreviewed**. It must go through another review pass
-    before sign-off.
-  - All-PASS QA does **not** make it reviewed. The host controller lacks
-    the planner-code-change guard.
-  - Scenario reports must repeat this disclosure.
-- **No more app edits during planning.** Findings from these scenarios are
-  fixed or filed through the normal flow, as the steps say.
+- **Supervised run.** This round is supervised validation. The outer host
+  still lacks #231 and the supervisor may accept outer planner/QA trust
+  prompts on verified pm checkout paths. It is **not** an unattended
+  autostart qualification trial. Do not report it as one, and state in
+  every report whether any outer trust prompt was accepted manually.
+- **App edits so far and their review state.** The run #230 planner and
+  QA edits (`7d79fce1` grace setting, `f650a308` locked `pm trust`
+  add/remove with rollback, `8cd40e87` blocked-planner status pane,
+  `37ad95eb` QA log markup, `3130d141`/`0c84b817` per-pane accept budget,
+  `c056b32a` concretizer reason) were reviewed in review 356c i1. The local
+  merge change (`bca1d21a`, `d1b791f9`) was reviewed in 356c i3
+  (`3c7df387`). These are reviewed, but **this QA round is their first live
+  test**, so Scenarios 3–5 must exercise each of them.
+- **Any app edit made in this round is unreviewed.** Commit it with a
+  fail-before/pass-after regression test, name the commit in the report, and
+  state that it needs another review pass before fresh sign-off. An all-PASS
+  QA run does **not** review it. The planner itself makes no app edits.
 - **Every known remaining bug** must end with one of: a fix (commit), a
   tracking PR, or an explicit UNRESOLVED verdict. A bug being nonblocking
   never excuses leaving it untracked. Already tracked:
@@ -75,7 +87,7 @@ sections below in full, together with the shared **Setup**:
 - **fake-claude.** Launches through fake-claude skip the bootstrap, by
   design.
 
-## Setup (both scenarios)
+## Setup (all scenarios)
 
 **Instruction:** `pm/qa/instructions/tui-manual-test.md` (throwaway project,
 `pm session`, fake-claude).
@@ -151,7 +163,7 @@ Steps:
 
 ## Host trust policy and configuration
 
-Scenario 1 covers host policy, config writes, the CLI, locks and bounded
+Scenario 3 covers host policy, config writes, the CLI, locks and bounded
 refusal. All of it runs on the host path, with no pm containers.
 
 ### H1. The original bug reproduces pre-fix and is fixed post-fix
@@ -322,7 +334,7 @@ Uses the stand-in and `trust-prompt-grace-seconds` 30.
 
 ## Workflow and container trust
 
-Scenario 2 covers every workflow role, reused workdirs, restart, the
+Scenario 4 covers every workflow role, reused workdirs, restart, the
 fallback, the zero-scenario path and containers.
 
 ### W1. Full QA on a fresh checkout with real Claude (acceptance; the #229 path)
@@ -355,16 +367,8 @@ after it starts working, to bound cost:
 - review loop;
 - QA planner, concretizer, scenario worker, verifier and finalizer (from W1);
 - sign-off (or the sign-off launch path as the TUI drives it);
-- merge resolution (local backend, R10): merge one PR, then merge a second
-  PR that conflicts with it, so pm launches the resolution Claude session.
-  **Assert the `merge-<pr>` pane runs in the PR workdir**, not the project
-  root, and that the project root gains no trust entry. After Claude reports
-  MERGED, `pm pr merge --propagation-only` (what the TUI runs) must
-  fast-forward the main repo without a second window. Also: two independent
-  PRs merge in turn with no window at all (pr-a75da60); a commit landing on
-  the main repo's base between the workdir merge and propagation is
-  integrated in the workdir; uncommitted work in the main repo survives every
-  path untouched. Reference run: impl `post-fix/local-merge-*`;
+- merge resolution is covered separately in Scenario 5 ("Local merge
+  trust"); W2 does not repeat it;
 - `pm meta` (meta workdir under `~/.pm/workdirs`).
 
 For the review pane, **assert the pane's current directory is the PR
@@ -475,11 +479,101 @@ This was the live R9 finding.
      dir.
    - The pm-on-a-host-`/workspace` limitation is tracked in `pr-8c0d680`.
      Note if it applies to your environment.
-7. **Container QA:**
-   - Run W1's QA with container mode on and `qa-max-scenarios 1`.
-   - The scenario container worker starts with no dialog and reaches a
+7. **Container QA (actual worker activity is required).** Run #230 never
+   launched a container worker: hook events could not reach pm from the
+   nested container, so QA had no session id to poll. Before the QA run,
+   make the hook path work the supported way:
+   - run pm itself (`pm session`) with the same `HOME` whose `.claude.json`
+     the container copies (the scratch HOME from step 1), so pm's hook
+     installer writes `$HOME/.pm/hook_receiver.py` and the hooks in
+     `$HOME/.claude/settings.json`, and `create_container` bind-mounts that
+     `$HOME/.pm/hooks` into the container;
+   - smoke-test it: start a container review for the PR and confirm a hook
+     event file for its session appears under `$HOME/.pm/hooks` on the host
+     side after the first turn. Record the listing.
+   Then run W1's QA with container mode on and `qa-max-scenarios 1`:
+   - the scenario container worker starts with no dialog, visibly works and
+     reaches a verdict; verification and the finalizer run.
+   - If hook events still never arrive, do not call it PASS. File a bug
+     (`pm pr add … --plan bugs`, with the exact mount/receiver evidence),
+     mark container QA worker coverage **UNRESOLVED / missing**, and still
+     show container worker activity through the W6.4 review reaching a
      verdict.
    - If cost or time forces truncation, record exactly what ran.
+
+## Local merge trust
+
+Scenario 5 covers merge resolution, a role named in acceptance. It runs on
+the host path with the **local** backend (`pm init --backend local`), real
+Claude for the resolution window, and the isolated config from Setup. Seed
+uncommitted user work in the main repo (e.g. an untracked `notes.txt` and a
+modified tracked file) before M1 and check it is untouched after every story.
+Reference run: impl captures `post-fix/local-merge-*`.
+First run `pytest -q tests/test_local_merge_sync.py` with the PR install's
+Python (real git; all must pass) and record the output.
+
+### M1. Independent PRs merge with no window (pr-a75da60)
+
+- Given two PRs that touch different files, both with workdirs.
+- When the user merges the first, then the second, from the TUI.
+- Then both merges reach `merged` with no `merge-<pr>` window, the main
+  repo's base contains both commits, and the project root gains no trust
+  entry in the isolated config.
+
+### M2. A real conflict is resolved in the PR workdir (pr-e835d8f)
+
+- Given two PRs that edit the same lines; the first is merged.
+- When the user merges the second from the TUI.
+- Then:
+  - a `merge-<pr>` window opens and its `#{pane_current_path}` is the
+    **PR workdir**, not the project root (record it);
+  - the pane shows no trust dialog (continuous capture from launch) and no
+    manual keys are sent;
+  - the PR workdir has `hasTrustDialogAccepted: true`; the project root has
+    no entry;
+  - after Claude resolves and reports MERGED, the TUI's follow-up
+    (`pm pr merge --propagation-only`) fast-forwards the main repo with no
+    second window, and the PR shows `merged`.
+
+### M3. The main repo's base moves during the merge
+
+- Given a PR whose workdir merge has finished but not propagated (e.g.
+  answer the M2 window slowly, or stop after the workdir merge), and a new
+  commit is then made on the main repo's base.
+- When propagation runs.
+- Then the new commit is integrated in the PR workdir and the fast-forward
+  retried. A non-conflicting commit propagates with no window; a
+  conflicting one opens the window in the PR workdir again. The main repo
+  is never reset and keeps both histories.
+
+### M4. A main-repo-side failure exits without a window
+
+- Given a main-repo state that blocks the fast-forward, e.g. a
+  `.git/index.lock` in the main repo, or uncommitted changes that conflict
+  with the incoming files.
+- When the user merges a PR.
+- Then `pm pr merge` exits non-zero with a message that names
+  `pm pr merge --propagation-only <pr>`; no Claude window opens in the
+  project root; nothing in the main repo is reset or lost. After the
+  blocker is cleared, the printed command completes the merge.
+- Note in the report whether the TUI leaves the PR pending until the user
+  runs the command (known benign behaviour from review i3).
+
+### M5. Unapproved merge window stays explicit
+
+- Given the vanilla/GitHub-style pull-from-origin path, which still opens
+  in the project root (out of scope, pr-19990de), or any merge window in an
+  unapproved dir.
+- Then pm prints the `pm trust add <dir>` remedy when the window opens,
+  sends no keys to the dialog and writes no trust for the root. If this
+  path cannot be driven without a GitHub remote, say so and cite
+  pr-19990de; do not mark it PASS.
+
+### Concurrency
+
+While M2's window is open, start a review loop on a third PR and run
+`pm trust add` on a scratch dir from another shell. The config stays valid
+JSON with all three trust entries and no lock or temp leftovers.
 
 ## Pass / fail
 
@@ -503,6 +597,11 @@ surfaces are:
 - the config is corrupted, loses keys or mode, or leaves lock or temp files
   behind;
 - an authorization is lost under concurrency and goes untracked;
+- a merge resolution window opens in the project root for a local-backend
+  merge, or uncommitted main-repo work is lost;
+- a container scenario is reported PASS without a container worker actually
+  working;
+- the number of launched scenarios differs from the planned number;
 - evidence contains credentials.
 
 **Report requirements:**
@@ -510,9 +609,10 @@ surfaces are:
 - Every bug found must be reported with a fix commit, a tracking PR id, or
   an UNRESOLVED verdict.
 - Each scenario report must repeat the Run disclosures:
-  - the run was supervised;
-  - the planner app edit `7d79fce1` is unreviewed and must be reviewed
-    again before sign-off.
+  - the run was supervised, and whether any outer trust prompt was
+    accepted manually;
+  - any app edit made in this round is unreviewed and needs another review
+    pass before fresh sign-off.
 
 ## Ambiguities (resolved)
 
@@ -526,3 +626,10 @@ surfaces are:
 3. **Isolation.** `CLAUDE_CONFIG_DIR` for host paths, and a scratch HOME for
    container paths (because of `pr-7e0eec4`).
 4. **Watcher-framework subsumption** (pr-3032fb6) is not relied on.
+5. **Merge resolution (pr-e835d8f).** Supervisor chose option (a): local
+   merges resolve in the PR workdir (R10). The project root is still never
+   auto-trusted. The vanilla/GitHub pull-from-origin window is out of scope
+   (pr-19990de).
+6. **Container worker hooks.** The supported route is running pm under the
+   same HOME the container copies, so the hook receiver and hooks dir are
+   the ones mounted (W6.7). A failure there is filed, not waived.
