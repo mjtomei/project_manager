@@ -3626,6 +3626,57 @@ prs:
       5).'
     created_at: '2026-10-13T19:23:28Z'
     last_edited: '2026-10-13T19:23:28Z'
+  - id: note-c0c4d1d
+    text: 'S8 concretizer round 4 (2026-10-13): two corrections to qa.md M2/M4. (1)
+      M4: a dirty main-repo file that overlaps the incoming files does NOT block the
+      merge. _propagate_to_repo stashes (--include-untracked), fast-forwards and pops,
+      exit 0. Only a blocker such as .git/index.lock gives the exit-1 "--propagation-only"
+      message. Refined as M4 (index.lock) + M4b (dirty overlap stashed and restored).
+      (2) M2 auto-start route: _attempt_merge runs pr merge WITHOUT --no-signoff-check,
+      and pm autostart add defaults to --stop-before-merge. Reaching _maybe_auto_merge
+      needs all of: pm autostart add --auto-merge <pr>; pm project set skip-qa on;
+      a SIGNOFF_MERGE recorded at the workdir HEAD (report.html with <meta name="pm-signoff-verdict"
+      content="SIGNOFF_MERGE"> under ~/.pm/sessions/<tag>/captures/<pr>/, then pm
+      pr signoff record <pr>); fake review PASS with merge left real. MERGED detection
+      then needs pm hooks in $CFG/settings.json and $CFG/projects symlinked to ~/.claude/projects.'
+    created_at: '2026-10-13T17:15:24Z'
+    last_edited: '2026-10-13T17:15:24Z'
+  - id: note-2cc0244
+    text: 'QA S8 local merge trust (round 4, supervised; worker accepted no outer
+      trust prompt; no app edits) on 5e372554: M1, M2a, concurrency, M3, M4, M4b,
+      M2b and M5 held live with real claude 2.1.296 + isolated CLAUDE_CONFIG_DIR.
+      Every merge window opened in the PR workdir with no dialog. Root /scratch/s8/lproj
+      was never trusted or reset, and notes.txt/README.md user work survived. M2b
+      auto-start: the TUI propagated by itself after MERGED ("Step 1 merged"/"✓ Merged
+      … conflict resolved by Claude"). M5: the root window stayed on "No, exit" for
+      80s with 0 accept attempts and the remedy printed. Spec fix for the next round:
+      the qa.md M2a "Updating master in the PR workdir … CONFLICT" line cannot appear
+      in M2a. That base sync is a clean fast-forward; the conflict is at the PR-branch
+      merge, and the TUI shows "Opened merge resolution window". That line only appears
+      in M3 F. The D/F windows asked INPUT_REQUIRED on genuinely ambiguous same-line
+      edits, and the tester answered after first output. Give conflict PRs a description
+      naming the winning side (as done for Z) to avoid that. Captures /pm-captures/scenarios/8
+      (manifest.md); scenarios/1-5 untouched.'
+    created_at: '2026-10-13T17:44:53Z'
+    last_edited: '2026-10-13T17:44:53Z'
+  - id: note-65a5f1d
+    text: 'QA S8 round 4, re-evaluated after the verifier flag: INPUT_REQUIRED (supersedes
+      the earlier S8 PASS note). The trust Thens all held: no dialog in any workdir
+      merge window, the root was never trusted or reset, user work was kept, and M5
+      stayed explicit. Two M2a/M3 Thens were not met as written. (1) qa.md M2a expects
+      the TUI line "Updating master in the PR workdir … CONFLICT", but with the M2a
+      Given the base sync is a clean fast-forward and the conflict is at the PR-branch
+      merge, so only "Opened merge resolution window" appears. This needs a decision:
+      correct the spec, or change the product to surface the conflict text in the
+      TUI. (2) Hands-off resolution was not observed. For D (shared.txt) and F (f.txt),
+      real Claude stopped at INPUT_REQUIRED on genuinely ambiguous same-line edits,
+      and MERGED came only after tester input. M2b ran hands-off only because a PR
+      description naming the winning side was added outside the spec. This needs a
+      decision: either the spec gives conflict PRs a resolvable intent, or merge windows
+      should resolve such conflicts without asking. Captures /pm-captures/scenarios/8
+      (manifest.md updated).'
+    created_at: '2026-10-13T17:48:28Z'
+    last_edited: '2026-10-13T17:48:28Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
