@@ -439,6 +439,11 @@ class WorkspacePromptWatch:
     """
 
     MAX_ACCEPT_ATTEMPTS = 2
+    # The cap is per pane, not per watch: one pane can be watched by
+    # several watches (the QA loop's worker watch and the TUI idle
+    # tracker's, and CLI pollers build a fresh tracker per call), so the
+    # attempts already spent are also kept on the tmux pane itself.
+    _ATTEMPTS_OPTION = "@pm_trust_accept_attempts"
 
     def __init__(self, pane_id: str, workdir: str | None = None,
                  grace: float | None = None, interval: float = 5.0,
@@ -481,6 +486,15 @@ class WorkspacePromptWatch:
             return target
         return None
 
+    def _pane_attempts(self) -> int:
+        """Accept attempts any watch has already made on this pane."""
+        from pm_core import tmux as tmux_mod
+        try:
+            return int(tmux_mod.get_pane_option(
+                self.pane_id, self._ATTEMPTS_OPTION) or 0)
+        except ValueError:
+            return 0
+
     def check(self, force: bool = False) -> str | None:
         from pm_core import tmux as tmux_mod, workspace_trust
         if self.started:
@@ -506,12 +520,15 @@ class WorkspacePromptWatch:
             self._first_seen = now
             _log.warning("workspace trust: pane %s is at the trust prompt "
                          "(%s)", self.pane_id, shown or self.workdir)
+        used = max(self._accept_attempts, self._pane_attempts())
         target = (self._accept_target(shown)
-                  if self._accept_attempts < self.MAX_ACCEPT_ATTEMPTS else None)
+                  if used < self.MAX_ACCEPT_ATTEMPTS else None)
         if target:
             keys = self._runtime.accept_keys(screen)
             if keys:
-                self._accept_attempts += 1
+                self._accept_attempts = used + 1
+                tmux_mod.set_pane_option(self.pane_id, self._ATTEMPTS_OPTION,
+                                         str(self._accept_attempts))
                 _log.info("workspace trust: accepting prompt in pane %s for "
                           "approved workdir %s (keys=%s)", self.pane_id,
                           target, keys)

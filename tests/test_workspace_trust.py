@@ -55,6 +55,18 @@ OLD_TRUST_SCREEN = """
 """
 
 
+@pytest.fixture(autouse=True)
+def pane_options(monkeypatch):
+    """In-memory tmux pane options: never touch a real tmux server's panes."""
+    opts: dict[tuple[str, str], str] = {}
+    monkeypatch.setattr("pm_core.tmux.get_pane_option",
+                        lambda pane, name: opts.get((pane, name)))
+    monkeypatch.setattr("pm_core.tmux.set_pane_option",
+                        lambda pane, name, value: opts.__setitem__(
+                            (pane, name), value))
+    return opts
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """Isolated HOME (pm settings + workdirs) and Claude config dir."""
@@ -369,6 +381,24 @@ class TestPromptWatch:
             assert pane.keys == ["Down", "Enter"]
             assert w.check(force=True) is None
             assert not w.visible
+
+    def test_accept_budget_is_shared_by_watches_on_one_pane(self, home):
+        """Two watches on one pane (QA loop + TUI idle tracker) must not
+        each spend their own budget: at most two accepts per pane."""
+        wd = _pm_workdir(home)
+        pane = _FakePane(TRUST_SCREEN.format(path=wd))
+        pane.send = lambda pane_id, key: pane.keys.append(key)  # stuck dialog
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", pane.send), \
+             patch("pm_core.claude_launcher.time.sleep"):
+            watches = [WorkspacePromptWatch("%1", str(wd), grace=60)
+                       for _ in range(2)]
+            for _ in range(3):
+                for w in watches:
+                    w.check(force=True)
+            # A watch built later (e.g. a fresh CLI tracker) inherits it too.
+            WorkspacePromptWatch("%1", str(wd), grace=60).check(force=True)
+        assert pane.keys.count("Enter") == 2
 
     def test_unapproved_prompt_fails_after_grace(self, home, tmp_path):
         foreign = _git_checkout(tmp_path / "foreign")

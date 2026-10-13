@@ -583,6 +583,19 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
     return f"{base}~{max_n + 1}"
 
 
+def get_pane_option(pane_id: str, name: str) -> str | None:
+    """Return a pane-scoped (user) option's value, or None if unset/gone."""
+    result = _run(_tmux_cmd("show-options", "-p", "-q", "-v", "-t",
+                            pane_id, name), text=True)
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    return value or None
+
+
+def set_pane_option(pane_id: str, name: str, value: str) -> None:
+    """Set a pane-scoped (user) option; silently ignores a gone pane."""
+    _run(_tmux_cmd("set-option", "-p", "-t", pane_id, name, value))
+
+
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 
