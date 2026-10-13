@@ -628,9 +628,14 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     # wins even when an auto-merge target depends on this PR.
     if pr_id in getattr(app, "_stop_before_merge", set()):
         _log.info("auto_merge: %s in stop_before_merge — skipping merge", pr_id)
+        # The O stop line is printed once per (verdict, sha, policy) and is
+        # the user's cue to press g, so force it past a sticky message (e.g.
+        # "Review loop done" right before a fast skip_qa sign-off) and hold
+        # it against same-frame follow-ons (another target's merge lines).
         app.log_message(
             f"[green bold]✓ {pr_id} signed off[/] (SIGNOFF_MERGE @ {sha[:8]}) "
-            f"— ready to merge (auto-sequence armed — press 'g' to merge)"
+            f"— ready to merge (auto-sequence armed — press 'g' to merge)",
+            force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
         return
 

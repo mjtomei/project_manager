@@ -60,10 +60,12 @@ class App:
         self._merge_propagation_phase = set()
         self._session_name = "pm-test"
         self.logs: list[str] = []
+        self.log_kw: list[dict] = []
         self.workers: list = []
 
     def log_message(self, msg, **kw):
         self.logs.append(msg)
+        self.log_kw.append(kw)
 
     def run_worker(self, coro):
         self.workers.append(coro)
@@ -217,6 +219,12 @@ def test_O_stops_only_after_fresh_signoff_merge(world_factory):
     assert w.merges() == []                # O never merges
     ready = [m for m in app.logs if "ready to merge" in m]
     assert len(ready) == 1 and "signed off" in ready[0]
+    # The stop line is the cue to press g: forced past a sticky message
+    # (a fast sign-off right after "Review loop done") and held against
+    # same-frame follow-ons, so it is actually painted.
+    kw = app.log_kw[app.logs.index(ready[0])]
+    assert kw.get("force") is True
+    assert kw.get("hold", 0) >= auto_start.CONFIRM_HOLD_SECONDS
 
     reloads = []
     app._load_state = lambda: reloads.append(1)
