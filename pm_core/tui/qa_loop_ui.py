@@ -9,6 +9,8 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zz t   — start/stop QA loop
 """
 
+from rich.markup import escape
+
 from pm_core.paths import configure_logger, get_global_setting_value
 from pm_core import store
 from pm_core.qa_loop import (
@@ -463,7 +465,9 @@ def _resume_incomplete_qa(app) -> None:
 def _on_qa_update(app, state: QALoopState) -> None:
     """Handle QA progress update — log to TUI."""
     if state.latest_output:
-        app.log_message(f"QA [{state.pr_id}]: {state.latest_output}")
+        # Escape: the log line renders markup, which would swallow the
+        # "[pr-…]" prefix and bracketed parts like "[finalize: …]".
+        app.log_message(escape(f"QA [{state.pr_id}]: {state.latest_output}"))
 
 
 def _on_qa_complete(app, state: QALoopState) -> None:
