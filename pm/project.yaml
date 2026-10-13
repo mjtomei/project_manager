@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T02:59:26.061189+00:00'
+  updated_at: '2026-10-13T03:21:08.746498+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26471,6 +26471,19 @@ prs:
       them.'
     created_at: '2026-10-13T02:59:26Z'
     last_edited: '2026-10-13T02:59:26Z'
+  - id: note-591f6b3
+    text: 'QA S26 (round 6) on e17d5671: every Then held except L. At L open (60-col
+      split) both armed lines were visible, but the "── recent auto-start messages
+      ──" header had already scrolled off. The pane own launch burst (pane-opened
+      hook, 3x rebalance, launched pane, ~16 wrapped rows) followed right after the
+      recap. Fixed in 5ef79e37: the L command waits LOG_PANE_SETTLE_SECONDS=1, prints
+      the burst, then recap, then follows. Live post-fix: header + both armed lines
+      + footer on screen for 10s+. Same commit spells --stop-before-merge in pm autostart
+      --help. Env: the spec PATH drops ~/.local/bin, which holds the fake-claude shim,
+      so impl windows die at once; append a dir containing only fake-claude. Captures:
+      scenarios/26.'
+    created_at: '2026-10-13T03:21:08Z'
+    last_edited: '2026-10-13T03:21:08Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
