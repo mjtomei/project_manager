@@ -983,6 +983,53 @@ def test_runs_popup_arrows_select_and_scroll_when_rows_overflow(tmp_path):
     asyncio.run(body())
 
 
+def test_runs_popup_no_window_notice_visible_on_short_terminal(tmp_path):
+    """Enter on a window-less row must say so on screen even when the popup
+    covers the app's log line (80x12 with overflowing rows)."""
+    import html
+    import re
+    from textual.app import App
+    from pm_core.tui.screens import AutoRunsScreen
+
+    prs = [_pr(f"t{i}") for i in range(6)]
+    seen = []
+
+    class Host(App):
+        def __init__(self):
+            super().__init__()
+            fake = _enabled_app(prs, [p["id"] for p in prs], tmp_path)
+            for k, v in vars(fake).items():
+                if k not in ("logs", "workers"):
+                    setattr(self, k, v)
+
+        def log_message(self, msg, **kw):
+            seen.append(msg)  # the real log line is under the popup here
+
+    def screen_text(app) -> str:
+        svg = re.sub(r"<[^>]+>", "", app.export_screenshot())
+        # Collapse borders/wrapping: the notice may wrap inside the popup.
+        return re.sub(r"[│\s]+", " ", html.unescape(svg))
+
+    async def body():
+        app = Host()
+        async with app.run_test(size=(80, 12)) as pilot:
+            app.push_screen(AutoRunsScreen())
+            await pilot.pause()
+            for _ in range(4):
+                await pilot.press("j")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, AutoRunsScreen)
+            assert seen == ["No live window for t4"]
+            assert "No live window for t4" in screen_text(app)
+            # Moving the selection clears the notice.
+            await pilot.press("k")
+            await pilot.pause()
+            assert "No live window" not in screen_text(app)
+
+    asyncio.run(body())
+
+
 def test_runs_popup_survives_status_error_with_brackets(tmp_path):
     """A failing refresh shows the error as plain text — an exception message
     with ``[...]`` must not be parsed as markup and kill the popup."""

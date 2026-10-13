@@ -686,6 +686,8 @@ class AutoRunsScreen(ModalScreen):
         self._selected = 0
         self._selected_key: tuple | None = None
         self._timer = None
+        # (row key, message) shown on the selected row's detail line.
+        self._notice: tuple | None = None
 
     def compose(self) -> ComposeResult:
         container = VerticalScroll(id="runs-container")
@@ -803,6 +805,8 @@ class AutoRunsScreen(ModalScreen):
             if row.get("also"):
                 detail.append(f" (also needed by {', '.join(row['also'])})",
                               style="dim yellow")
+            if sel and self._notice and self._notice[0] == self._selected_key:
+                detail.append(f"  ⚠ {self._notice[1]}", style="bold red")
             body.append_text(detail)
             body.append("\n")
             row_texts.append((line, detail))
@@ -839,6 +843,7 @@ class AutoRunsScreen(ModalScreen):
             return
         self._selected = max(0, min(len(self._rows) - 1, self._selected + delta))
         self._selected_key = self._row_key(self._rows, self._selected)
+        self._notice = None
         self._render_rows()
 
     def action_focus_run(self) -> None:
@@ -847,7 +852,12 @@ class AutoRunsScreen(ModalScreen):
         run = self._rows[self._selected]["run"]
         win = run.get("window")
         if not win:
-            self.app.log_message(f"No live window for {run['pr_id']}")
+            msg = f"No live window for {run['pr_id']}"
+            self.app.log_message(msg)
+            # On a short terminal the popup covers the app's log line, so
+            # also show the notice on the selected row (always in view).
+            self._notice = (self._selected_key, msg)
+            self._render_rows()
             return
         session = getattr(self.app, "_session_name", None)
         self.action_close()
