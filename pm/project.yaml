@@ -26249,6 +26249,29 @@ prs:
       on a clean tree (captures scenarios/19/rerun-t7) held.'
     created_at: '2026-10-13T00:38:15Z'
     last_edited: '2026-10-13T00:38:15Z'
+  - id: note-d43f59b
+    text: 'S17 refine (round 4): R29 lists status, but `pm autostart status/list --json`
+      never reads the project: outside a project they resolve the owner by tmux session
+      (exit 0 from a pane in a pm session, exit 2 owner_unavailable with none). Only
+      add/remove give no_project (exit 1), as impl §5 item 12 says. The refined S17
+      Then uses this split.'
+    created_at: '2026-10-13T00:14:48Z'
+    last_edited: '2026-10-13T00:14:48Z'
+  - id: note-212a04d
+    text: 'QA S17 (round 4, rev 51507548): all 8 triples held: add/re-add (#N, N),
+      policy flip, validation exit codes with no TUI side effects, remove under a
+      sticky error + clear (C never started in 60s), command-bar verbs, A key, 3 interrupted
+      typings (bar kept prefix, no select-all), owners 1-5 incl. zombie/stale owner_unavailable
+      in ~0.06s plus respawn without replay, owner_timeout drained once. Incidental
+      fix b68801b8: the "pulling..." status bar used a bare update_status() and dropped
+      AUTO xN/filter/WCH on every r/background sync; now goes through _update_status_bar
+      (tests/test_sync_status_bar_pulling.py). Spec-wording notes: mode is "targets"
+      (not "on"); A on a PR that kept an earlier stop mark adds "(stop)" by design
+      (remove keeps stop marks); test A on a never-stop-marked PR. A pm tui restart
+      under concurrent pytest load took 30s (CLI owner_timeout, drained on mount);
+      quiet restart 0.6s.'
+    created_at: '2026-10-13T00:39:08Z'
+    last_edited: '2026-10-13T00:39:08Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
