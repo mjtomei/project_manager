@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T05:42:06.803818+00:00'
+  updated_at: '2026-10-13T06:48:47.565212+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25859,6 +25859,14 @@ prs:
       not /workspace).'
     created_at: '2026-10-13T05:42:06Z'
     last_edited: '2026-10-13T05:42:06Z'
+  - id: note-6ec5fb9
+    text: 'QA s2 incidental fix ae077932: QA progress log line now escapes markup
+      (pm_core/tui/qa_loop_ui._on_qa_update). Before, Textual dropped the "[pr-id]"
+      prefix ("QA : …") and the L/debug log mirror also dropped "[finalize: …]". Regression
+      test in tests/test_qa_note_recording.py. R11 planner-edit NEEDS_WORK, resume,
+      and the pm/-only PASS all held live; captures in scenarios/2/{pre,post}-fix.'
+    created_at: '2026-10-13T06:48:47Z'
+    last_edited: '2026-10-13T06:48:47Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
