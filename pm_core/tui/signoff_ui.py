@@ -120,6 +120,10 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
         _log.debug("signoff: %s launched <%ds ago, not relaunching",
                    pr_id, RELAUNCH_BACKOFF_SECONDS)
         return
+    # Logged here, past the in-flight / backoff gates: step() asks for a
+    # launch on every poll while the window is gone, and an INFO line per
+    # skipped poll read as a relaunch every 5 s in the L log.
+    _log.info("signoff: launching router for %s (stale=%s)", pr_id, force)
     launched[pr_id] = now
     try:
         tdir.mkdir(parents=True, exist_ok=True)
@@ -203,8 +207,6 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
     if result.action == "running":
         return
     if result.action == "launch":
-        _log.info("signoff: launching router for %s (stale=%s)",
-                  pr_id, result.stale)
         _acted(app).pop(pr_id, None)
         if result.stale:
             _reload(app)

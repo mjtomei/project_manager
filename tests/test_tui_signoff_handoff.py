@@ -493,6 +493,25 @@ def test_dead_window_relaunch_is_throttled(world_factory):
     assert len(w.launches()) == 2
 
 
+def test_throttled_polls_do_not_log_a_launch(world_factory, caplog):
+    """The L log names a launch only when one happens: a poll skipped by the
+    relaunch backoff used to log "launching router" every 5 s (QA s5 B4/B6)."""
+    import logging
+    app, w = world_factory(stop=True)
+
+    def no_window(a, cmd, *x, **kw):
+        w.commands.append(cmd)
+
+    caplog.set_level(logging.INFO, logger="pm.tui.signoff_ui")
+    with patch("pm_core.tui.pr_view.run_command", no_window):
+        _qa_pass(app)
+        _poll(app, 6)
+    launched = [r for r in caplog.records
+                if "launching router" in r.getMessage()]
+    assert len(w.launches()) == 1
+    assert len(launched) == 1
+
+
 def signoff_backoff():
     from pm_core.tui import signoff_ui
     return signoff_ui.RELAUNCH_BACKOFF_SECONDS
