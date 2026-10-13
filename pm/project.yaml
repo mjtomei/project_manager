@@ -25877,7 +25877,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-13T14:09:46.430258+00:00'
+  updated_at: '2026-10-13T17:11:29.921538+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26008,6 +26008,18 @@ prs:
       t on in_review skips the qa transition).'
     created_at: '2026-10-13T14:09:46Z'
     last_edited: '2026-10-13T14:09:46Z'
+  - id: note-6d88dde
+    text: 'Sign-off review 2026-10-13 (stop-before-merge, supervised). Report at <captures>/report.html.
+      Disposition audit: the unknown-HEAD edge that review i2 accepted (git rev-parse
+      HEAD keeps failing -> verdict recorded with sha=None -> next tick treats it
+      as stale -> retire + forced relaunch, a new router after every verdict, never
+      merges) is reproduced at unit level and pre-existing in the CLI on master. It
+      is NOT covered by pr-7c32e44 (that PR is only about the autostart row text)
+      and is now filed as pr-a9fa258. impl.md "cannot loop" claim corrected. Remaining
+      pr-5410ae4 scope (unstamped legacy orphans, mtime heuristic) noted on pr-5410ae4.
+      The CLI skip_qa sign-off bypass is still tracked by pr-dd4f07b.'
+    created_at: '2026-10-13T17:11:29Z'
+    last_edited: '2026-10-13T17:11:29Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
@@ -27422,7 +27434,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:17:29.491425+00:00'
-  updated_at: '2026-10-13T14:09:47.168904+00:00'
+  updated_at: '2026-10-13T17:11:29.200939+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -27447,6 +27459,25 @@ prs:
       are still not adopted).'
     created_at: '2026-10-13T14:09:47Z'
     last_edited: '2026-10-13T14:09:47Z'
+  - id: note-ef41152
+    text: 'Scope after pr-488ac6d (sign-off review, 2026-10-13). FIXED in pr-488ac6d
+      by b8e97482 (QA-verified live at 1c162a86: s7 A6 "Ctrl+R in sign_off" and s8
+      B2b): when the window is alive and the current auto-start run dir has no run
+      for the PR, signoff_ui._adopt_orphaned_run moves the newest *stamped* (.head)
+      router run of another non-manual run dir, launched since signed_off_at, into
+      the current dir. step_signoff then records the verdict (stamp == HEAD) or retires
+      it as stale (stamp != HEAD). That covers both Ctrl+R + re-arm and auto-start
+      off/on. STILL OPEN here: (1) an orphan run with no .head stamp (launched by
+      pm before 0ff2be65) is never adopted, so a live window from such a run still
+      reads "sign-off review running" until it dies or `pm pr signoff record` is run;
+      (2) adoption depends on a stamp-mtime heuristic (>= signed_off_at - 1 s) rather
+      than a stable per-PR transcript path; the more robust fix proposed in this PR
+      (a stable per-PR sign-off transcript path like the CLI transcripts/auto-sequence/<pr>)
+      was not done; (3) manual-* run dirs (TUI `i`) are excluded on purpose, which
+      is the documented "running until recorded" behaviour, not this bug. Re-verify
+      (1)/(2) and close or narrow this PR.'
+    created_at: '2026-10-13T17:11:29Z'
+    last_edited: '2026-10-13T17:11:29Z'
 - id: pr-328cfd0
   plan: bugs
   title: 'Bug: zz t on an in_review PR runs QA without moving it to qa; arming auto-start
@@ -27467,6 +27498,50 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T14:01:30.872312+00:00'
   updated_at: '2026-10-13T14:01:30.872312+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a9fa258
+  plan: bugs
+  title: 'Bug: sign-off driver relaunches a new router after every verdict while the
+    PR''s HEAD can''t be read'
+  branch: pm/pr-a9fa258-bug-sign-off-driver-relaunches-a-new-router-after-
+  status: pending
+  depends_on: []
+  description: 'pm_core/signoff.py step_signoff (shared by the TUI scheduler, pm_core/tui/signoff_ui.step,
+    and pm pr auto-sequence). This was already true of the CLI auto-sequence on master
+    6cfd047e. pr-488ac6d makes the TUI scheduler drive the same path. When head_sha(workdir)
+    returns None (the workdir exists but `git rev-parse HEAD` keeps failing, e.g.
+    a corrupt or half-cloned repo), each tick does the following. (1) The transcript
+    verdict is recorded with sha=None (record_signoff_verdict, origin auto-sequence)
+    and the hop is applied. For SIGNOFF_MERGE the hop is ready_to_merge, and the merge
+    gate then refuses the merge (no fresh sha), so nothing merges. (2) On the next
+    tick, fresh_recorded_verdict(pr, None) is None but a recorded verdict exists.
+    So step_signoff takes the stale branch: it retires the window and transcript,
+    clears the record and returns launch(stale=True). The TUI _launch(force=True)
+    skips the 60 s relaunch backoff. Result: a brand-new router (a full Claude sign-off
+    session) is launched after every verdict, forever. Each cycle repeats the yellow
+    "Not merging" line, because _signoff_acted is cleared on every launch. Status
+    flips between "signed off" and "stale (HEAD moved)". Unit repro (sign-off review
+    of pr-488ac6d, 2026-10-13): patch pm_core.signoff.head_sha to return None, give
+    step_signoff a transcript verdict SIGNOFF_MERGE and a live window pane, and call
+    it 4 times. The results alternate hop(ready_to_merge, sha=None) / launch(stale=True),
+    with retire called twice. A missing workdir takes a separate path: launch_signoff_window
+    prints and exits 0 with no window, and the TUI then retries every 60 s. It is
+    cheaper but still endless. pr-488ac6d impl.md claimed the unknown-HEAD case "cannot
+    loop". Review iteration i2 of pr-488ac6d accepted this edge as existing CLI behaviour,
+    and the claim is wrong. Expected: when HEAD is unknown, do not record a verdict
+    (or record it and never treat a sha-less record as stale). Surface a blocked/error
+    state with the reason ("cannot read HEAD of <workdir>") in pm autostart status
+    and the TUI log, and launch no further routers until HEAD is readable. Add a regression
+    test for both drivers. Not covered by pr-7c32e44, which is only about the autostart
+    row text after a gate refusal.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T17:11:18.902783+00:00'
+  updated_at: '2026-10-13T17:11:18.902783+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

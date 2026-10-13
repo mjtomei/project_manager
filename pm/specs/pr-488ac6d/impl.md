@@ -177,8 +177,13 @@ transcript verdict exists without a stamp (e.g. a run started by an older
 pm). This holds for both drivers (TUI scheduler and `pm pr auto-sequence`),
 whether the run is still going or has finished, and across a TUI restart.
 `retire_signoff_run` removes the stamp together with the transcript. With an
-unknown HEAD (workdir missing) the old behaviour stays, so the forced stale
-relaunch cannot loop. Tests: `test_verdict_from_run_launched_on_old_head_is_not_recorded[O|A]`,
+unknown HEAD the old behaviour stays: the stamp check is skipped, so it
+cannot add a new relaunch loop. *Correction (sign-off review):* that old
+behaviour already loops. A verdict gets recorded with sha=None, the next tick
+treats that record as stale, retires the run and force-launches a new router,
+and this repeats after every verdict without ever merging. It was pre-existing
+in the CLI driver; the TUI now inherits it. Tracked as pr-a9fa258 (out of scope
+here). Tests: `test_verdict_from_run_launched_on_old_head_is_not_recorded[O|A]`,
 `test_head_moved_before_verdict_retires_running_run`,
 `test_restart_does_not_adopt_run_of_another_head`, CLI
 `test_verdict_of_run_launched_on_old_head_not_recorded`, and the
