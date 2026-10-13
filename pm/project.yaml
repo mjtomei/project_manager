@@ -21266,11 +21266,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-05-17T20:17:14.811858+00:00'
+  updated_at: '2026-10-13T03:40:41.462348+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-54d5a8b
+    text: 'Live reproduction on #229, 2026-10-13 03:33Z: QA planner prompt reached
+      149760 bytes after repeated QA specs and PR notes. build_claude_shell_cmd writes
+      a prompt file but expands it as one quoted $(cat ...) argv entry. Planner window
+      exited before discovery; QA reported Could not find planner pane, with zero
+      scenarios. Harmless local reproduction: /bin/true with a 120000-byte argument
+      exits 0; with 149760 bytes raises errno 7 Argument list too long. Supervised
+      recovery archived completed QA rounds 1-5 verbatim in qa-rounds-1-5.md, retaining
+      all active requirements and S26-S30, lowering generated prompt to 96583 bytes
+      (commit 0277e29d). This is a documentation workaround, not a fix for the unbounded
+      prompt builder. Preserve/surface child launch errors and support bounded/file-based
+      instruction transport. Evidence: captures/pr-0b87a97/shepherd-20261012/qa-round-7-launch-failure.json
+      in session project_manager-c5a1006b.'
+    created_at: '2026-10-13T03:40:41Z'
+    last_edited: '2026-10-13T03:40:41Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -25992,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T03:31:24.465801+00:00'
+  updated_at: '2026-10-13T03:40:42.041460+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26497,6 +26512,18 @@ prs:
       2998 passed (markdown_render + installer deselected as baseline).'
     created_at: '2026-10-13T03:31:24Z'
     last_edited: '2026-10-13T03:31:24Z'
+  - id: note-5c2b266
+    text: 'Supervised recovery after review 66f9 PASS: first round-7 launch pr-0b87a97-1c4694f0e44f9c4c
+      failed before planner startup (149760-byte argv prompt, existing pr-ace66e5),
+      zero scenarios/coverage. Commit 0277e29d archives superseded rounds 1-5 verbatim
+      in qa-rounds-1-5.md; current requirements/scope and S26-S30 steps remain unchanged,
+      application code unchanged. Prompt now 96583 bytes before these notes. Fresh
+      QA must use the published revision and impact-based scope guidance note-b8d46d9:
+      retest L/help delta, explicitly carry S27-S30 verified round-6 evidence forward
+      where unaffected. Keep archive/history available; no historical failure is reclassified
+      as a pass.'
+    created_at: '2026-10-13T03:40:42Z'
+    last_edited: '2026-10-13T03:40:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
