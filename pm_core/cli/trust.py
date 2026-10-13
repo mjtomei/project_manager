@@ -55,7 +55,11 @@ def trust_add(path):
     """Authorize PATH (and everything under it) and trust it now."""
     from pm_core import workspace_trust as wt
     p = _abs(path)
-    if p == os.path.abspath(os.path.expanduser("~")) or p == "/":
+    # Home or any directory containing it (/, /home) would authorize every
+    # workspace the user has — the blanket trust pm deliberately avoids.
+    home = _abs("~")
+    if wt.is_within(home, p) or wt.is_within(os.path.realpath(home),
+                                             os.path.realpath(p)):
         raise click.ClickException(
             f"refusing to authorize {p}: pick a specific project directory")
     wt.set_authorized_roots(wt.authorized_roots() + [p])

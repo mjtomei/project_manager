@@ -117,7 +117,8 @@ R8. **CLI.** `pm trust status [PATH]`, `pm trust add PATH`,
 `pm trust remove PATH`, `pm trust list`. `add` records the authorization
 and bootstraps the entry immediately; `remove` drops the authorization (it
 does not edit Claude's config — revoking Claude trust remains a Claude
-action).
+action).  `add` refuses the home directory and any directory containing it
+(`/`, `/home`), which would amount to blanket trust.
 
 R9. **Launch cwd == bootstrapped cwd.** Trusting a checkout only helps if
 Claude actually runs there. Found live: `cli/pr.py:_launch_review_window`

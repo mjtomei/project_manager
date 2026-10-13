@@ -1243,7 +1243,7 @@ def _concretize_scenario(
             verdicts=_CONCRETIZE_VERDICTS,
             grace_period=_CONCRETIZE_GRACE,
             log_prefix=f"qa-concretize-{scenario.index}",
-            workdir=scenario.worktree_path,
+            workdir=scenario_cwd,
         )
     except WorkspaceTrustBlocked as e:
         return None, _TRUST_BLOCKED_PREFIX + str(e)

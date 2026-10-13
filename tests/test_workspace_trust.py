@@ -600,7 +600,7 @@ class TestTrustCli:
         assert str(repo) in self._run("list").output
 
     def test_add_refuses_home_and_root(self, home):
-        for p in (str(home), "/"):
+        for p in (str(home), str(home.parent), "/"):
             r = self._run("add", p)
             assert r.exit_code != 0
             assert "refusing" in r.output
