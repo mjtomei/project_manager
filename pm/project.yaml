@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T02:04:07.605708+00:00'
+  updated_at: '2026-10-13T02:35:26.276694+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26437,6 +26437,18 @@ prs:
       only 500 lines of backlog, so open it right after the merge.'
     created_at: '2026-10-13T02:04:07Z'
     last_edited: '2026-10-13T02:04:07Z'
+  - id: note-953f368
+    text: 'QA plan round 6 (S26-S30) is in qa.md section 11, committed and pushed
+      as ac83bdec (verified on the remote before QA_PLAN_END). Planning changed no
+      application code, so review 4be9 (8a222466) still applies. Added R38 (deferred
+      drop 9caf9baf, held queue 1c4da9e1, L recap bd754a14, scoped refresh/sync/prefix/error
+      clears a140e22f/64d44b9b/8a222466), round-5 env notes in section 2, and ambiguity
+      14 (pr-edc256b, pr-ae66f59 out of scope). New interleavings: r/sync during a
+      held prune line, CLI remove inside a w/y/z prefix window, CLI add before an
+      error auto-clear, command-bar answer within 3s of clear, back-to-back held lines.
+      Workers: pm checkout HEAD must be ac83bdec or later before and after.'
+    created_at: '2026-10-13T02:35:26Z'
+    last_edited: '2026-10-13T02:35:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
