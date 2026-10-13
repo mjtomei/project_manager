@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T07:34:58.439187+00:00'
+  updated_at: '2026-10-13T08:05:20.444070+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3360,6 +3360,28 @@ prs:
       planner bug is tracked by pr-b8561ac.'
     created_at: '2026-10-13T07:34:58Z'
     last_edited: '2026-10-13T07:34:58Z'
+  - id: note-be73f76
+    text: 'S1 refiner (run #230): preview on 1230647b shows `pm trust add <dir>` appends
+      <dir> to ~/.pm/settings/trusted-workspaces BEFORE bootstrap, so a failing add
+      (e.g. unparseable CLAUDE_CONFIG_DIR/.claude.json -> "could not read ...") exits
+      non-zero yet leaves <dir> authorized in `pm trust list`. Also: trusted-workspaces
+      is written via plain write_text with no lock (H5 lost-update suspect is real
+      by construction). /home refusal is HOME-relative (only refused when HOME is
+      under /home) - keep the real HOME for H3 refusal checks.'
+    created_at: '2026-10-13T07:41:01Z'
+    last_edited: '2026-10-13T07:41:01Z'
+  - id: note-4d0dce7
+    text: 'QA S1 (run #230, supervised): H1-H6 driven live; captures /pm-captures/scenarios/1.
+      QA app edits (UNREVIEWED, need review with 7d79fce1 before sign-off): f650a308
+      pm trust add/remove flock + atomic trusted-workspaces write (12-way parallel
+      adds lost roots 8/12, 10/12) and failed add rolls back its root (broken-config
+      add left dir in list); 8cd40e87 trust-blocked QA planner now splits the qa_status.py
+      pane so the error block is visible (was only in json/log); 37ad95eb cherry-pick
+      of pr-b8561ac ae077932 (QA log line markup ate [pr-id]). Harness: login-shell
+      panes prepend ~/.local/bin so stand-in needed the ~/.local/bin/claude symlink
+      swapped.'
+    created_at: '2026-10-13T08:05:20Z'
+    last_edited: '2026-10-13T08:05:20Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -25854,7 +25876,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T06:30:18.276998+00:00'
+  updated_at: '2026-10-13T08:05:21.207109+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25896,6 +25918,12 @@ prs:
       now skips the finalizer when state.scenarios is empty.'
     created_at: '2026-10-13T06:30:18Z'
     last_edited: '2026-10-13T06:30:18Z'
+  - id: note-3799bc5
+    text: pr-b53bfe2 cherry-picked ae077932 (QA log-line markup escape) as 37ad95eb
+      because its QA Thens depend on the QA [pr-id] prefix; identical change, merge
+      should resolve trivially.
+    created_at: '2026-10-13T08:05:21Z'
+    last_edited: '2026-10-13T08:05:21Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
