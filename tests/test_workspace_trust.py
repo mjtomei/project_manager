@@ -749,6 +749,7 @@ def test_pane_transcript_path_from_start_command(monkeypatch):
         "%2": f"podman exec -it c bash -c 'claude --resume {sid}'",
         "%3": f"claude --session-id {sid}",
         "%4": "bash",
+        "%5": f'"cd \'/h/a b\' && claude --session-id {sid}"',
     }
     monkeypatch.setattr("pm_core.tmux.pane_start_command",
                         lambda pane: cmds.get(pane, ""))
@@ -760,6 +761,8 @@ def test_pane_transcript_path_from_start_command(monkeypatch):
         cl.transcript_path_for("/h/wd", sid))
     assert cl.pane_transcript_path("%4", "/h/wd") is None
     assert cl.pane_transcript_path("%9", "/h/wd") is None
+    assert cl.pane_transcript_path("%5", "/other") == (
+        cl.transcript_path_for("/h/a b", sid))
 
 
 def test_impl_idle_sweep_accepts_orphan_review_pane_after_restart(
@@ -773,10 +776,13 @@ def test_impl_idle_sweep_accepts_orphan_review_pane_after_restart(
     from pm_core.tui import review_loop_ui
     wd = _pm_workdir(home)
     sid = "6ca0ccf2-e478-4bbd-bdc2-b90ad8e2af11"
-    monkeypatch.setattr(
-        "pm_core.tmux.pane_start_command",
-        lambda pane: f'"cd {wd} && claude --session-id {sid} \\"x\\""'
-        if pane == "%4" else "")
+    start_cmd_calls: list[str] = []
+
+    def _start_cmd(pane):
+        start_cmd_calls.append(pane)
+        return (f'"cd {wd} && claude --session-id {sid} \\"x\\""'
+                if pane == "%4" else "")
+    monkeypatch.setattr("pm_core.tmux.pane_start_command", _start_cmd)
     monkeypatch.setattr("pm_core.tmux.capture_pane",
                         lambda pane, *a, **k: TRUST_SCREEN.format(path=wd))
     monkeypatch.setattr("pm_core.tmux.pane_exists", lambda pane: True)
@@ -802,7 +808,21 @@ def test_impl_idle_sweep_accepts_orphan_review_pane_after_restart(
             for w in app._untracked_trust_watches.values():
                 w._last_check = 0.0
             review_loop_ui._poll_impl_idle(app)
-    assert sent.count(("%4", "Enter")) == 2
+        assert sent.count(("%4", "Enter")) == 2
+        # Once past the dialog the finished watch stays cached: no tmux
+        # lookup per tick for a pane the tracker can never register.
+        from pm_core.claude_launcher import transcript_path_for
+        t = transcript_path_for(str(wd), sid)
+        t.parent.mkdir(parents=True, exist_ok=True)
+        t.write_text("{}\n")
+        for _ in range(3):
+            review_loop_ui._poll_impl_idle(app)
+        assert start_cmd_calls == ["%4"]
+        # A pane that disappears is forgotten.
+        monkeypatch.setattr(review_loop_ui, "_find_impl_pane",
+                            lambda session, name: None)
+        review_loop_ui._poll_impl_idle(app)
+        assert app._untracked_trust_watches == {}
 
 
 def test_trust_blocked_concretizer_reports_reason_not_reject(tmp_path):

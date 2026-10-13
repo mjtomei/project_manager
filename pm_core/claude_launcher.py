@@ -934,7 +934,8 @@ def transcript_path_for(cwd: str, session_id: str) -> Path:
 _PANE_SESSION_RE = re.compile(
     r"--(?:session-id|resume)[ =]"
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
-_PANE_CD_RE = re.compile(r'^"?cd (\S+) && ')
+# shlex.quote() output: a bare word, or a single-quoted one (spaces).
+_PANE_CD_RE = re.compile(r'^"?cd ((?:\'[^\']*\'|[^\s\'])+) && ')
 _PANE_CONTAINER_RE = re.compile(r"\b(?:podman|docker) exec\b")
 
 

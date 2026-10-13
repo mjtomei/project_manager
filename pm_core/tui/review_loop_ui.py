@@ -816,14 +816,16 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
         app._untracked_trust_reported = set()
     watches = app._untracked_trust_watches
     seen.add(pane_id)
-    watch = watches.get(pane_id)
-    if watch is None:
+    if pane_id not in watches:
+        # Resolved once per pane: None (no session id in its command)
+        # and finished watches stay cached, so the steady state after a
+        # restart costs no tmux call per tick.
         transcript = pane_transcript_path(pane_id, workdir)
-        if transcript is None:
-            return
-        watch = WorkspacePromptWatch(pane_id, workdir=workdir,
-                                     transcript_path=transcript)
-        watches[pane_id] = watch
+        watches[pane_id] = transcript and WorkspacePromptWatch(
+            pane_id, workdir=workdir, transcript_path=transcript)
+    watch = watches[pane_id]
+    if watch is None:
+        return
     msg = watch.check()
     if msg and pane_id not in app._untracked_trust_reported:
         app._untracked_trust_reported.add(pane_id)
@@ -831,11 +833,12 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
 
 
 def _prune_untracked_trust(app, seen: set[str]) -> None:
-    """Drop orphan trust watches for panes that are gone or past the dialog."""
+    """Drop orphan trust watches for panes that are gone or now tracked."""
     watches = getattr(app, "_untracked_trust_watches", None) or {}
     for pane_id in list(watches):
-        if pane_id not in seen or watches[pane_id].started:
+        if pane_id not in seen:
             watches.pop(pane_id, None)
+            app._untracked_trust_reported.discard(pane_id)
 
 
 def _poll_impl_idle(app) -> None:
