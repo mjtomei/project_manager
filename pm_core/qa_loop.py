@@ -948,11 +948,13 @@ def _is_placeholder_title(title: str) -> bool:
     """True for the prompt template's example scenario titles.
 
     Template placeholders are a whole ``<multi word phrase>`` (e.g.
-    ``<descriptive title for this scenario>``); a real title that merely
-    starts with ``<`` (``<Enter> key submits``) is not one.
+    ``<descriptive title for this scenario>``), or its unclosed start when
+    a narrow pane wrapped the line (``<descriptive title for``); a real
+    title that merely starts with ``<`` (``<Enter> key submits``) is not
+    one.
     """
     return (title in _PLACEHOLDER_TITLES
-            or re.fullmatch(r'<[^<>]*\s[^<>]*>', title) is not None)
+            or re.fullmatch(r'<[^<>]*\s[^<>]*>?', title) is not None)
 
 
 def _marker_line_offsets(text: str, marker: str) -> list[int]:
@@ -968,7 +970,8 @@ def _marker_line_offsets(text: str, marker: str) -> list[int]:
 
 
 def qa_plan_problem(text: str, scenarios: list[QAScenario],
-                    scenario_start: int = 1) -> str | None:
+                    scenario_start: int = 1,
+                    start_may_be_stale: bool = True) -> str | None:
     """Return why *scenarios* (parsed from *text*) is not a complete plan.
 
     ``parse_qa_plan`` is deliberately lenient — it happily parses a
@@ -990,6 +993,10 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
     Numbering alone can't prove completeness: on a later round a
     truncated SCENARIO 2..4 suffix is indistinguishable from a whole plan
     numbered from ``scenario_start=2``, so START/END provenance decides.
+    For the same reason a plan numbered from a later offset must have
+    nothing but blank lines between its START and first header, unless
+    *start_may_be_stale* is False (transcript text: every START in the
+    planner's latest turn is its own, so prose there is harmless).
 
     Returns ``None`` when the plan is complete.
     """
@@ -1033,7 +1040,8 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
     # earlier block (e.g. the echoed template, its headers and END redrawn
     # away) and only a suffix of this plan is left.
     between = body[body.find("\n") + 1:first_header_pos]
-    if first != 1 and re.sub(r'[*`\s]', '', between):
+    if (start_may_be_stale and first != 1
+            and re.sub(r'[*`\s]', '', between)):
         return (f"text between QA_PLAN_START and SCENARIO {first} — the "
                 "START is from an earlier block (plan truncated)")
     if headers != list(range(first, first + len(headers))):
@@ -1069,19 +1077,23 @@ def _read_planner_plan(transcript_path: str | None,
     # The whole latest turn is the planner's own output, so QA_PLAN_END
     # may sit anywhere in it.  In the pane only an END near the bottom is
     # fresh output — an earlier one can be the echoed prompt template.
-    sources: list[tuple[str, Callable[[], str], Callable[[str], bool]]] = [
+    # Only the pane can hold a START left over from an earlier block.
+    sources: list[tuple[str, Callable[[], str], Callable[[str], bool],
+                        bool]] = [
         ("transcript", lambda: read_latest_assistant_text(transcript_path),
-         lambda t: bool(_marker_line_offsets(t, "QA_PLAN_END"))),
+         lambda t: bool(_marker_line_offsets(t, "QA_PLAN_END")), False),
     ]
     if capture_pane is not None:
         sources.append(("pane", capture_pane,
-                        lambda t: _tail_has_marker_on_own_line(t, "QA_PLAN_END")))
-    for name, read, has_end in sources:
+                        lambda t: _tail_has_marker_on_own_line(t, "QA_PLAN_END"),
+                        True))
+    for name, read, has_end, start_may_be_stale in sources:
         text = read() or ""
         if not has_end(text):
             continue
         scenarios = parse_qa_plan(text, pm_root=pm_root)
-        problem = qa_plan_problem(text, scenarios, scenario_start)
+        problem = qa_plan_problem(text, scenarios, scenario_start,
+                                  start_may_be_stale=start_may_be_stale)
         if problem is None:
             result.text, result.scenarios, result.source = text, scenarios, name
             return result

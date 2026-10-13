@@ -589,6 +589,22 @@ class TestBareStaleStart:
         assert plan.scenarios == []
         assert plan.problems and plan.problems[0].startswith("pane:")
 
+    def test_transcript_offset_plan_with_prose_after_start_ok(self, tmp_path):
+        """Every START in the planner's own turn is fresh, so prose between
+        it and SCENARIO 2 must not reject a transcript plan; the same text
+        in the pane is rejected (its START may be stale)."""
+        text = "QA_PLAN_START\n\nRound two:\n\n" + _renumbered(
+            FULL_PLAN[FULL_PLAN.index("SCENARIO 1:"):], 1)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, [("user", TEMPLATE_PROMPT),
+                                       ("assistant", text)])
+        plan = qa_loop._read_planner_plan(str(transcript), None, None, 2)
+        assert [s.index for s in plan.scenarios] == [2, 3, 4, 5]
+        assert plan.source == "transcript"
+        plan = qa_loop._read_planner_plan(None, lambda: text, None, 2)
+        assert plan.scenarios == []
+        assert "earlier block" in plan.problems[0]
+
     @pytest.mark.parametrize("sep", ["\n", "\n\n", "\n**\n"])
     def test_fresh_offset_plan_with_only_blank_lines_after_start_ok(self, sep):
         text = "QA_PLAN_START" + sep + _renumbered(
@@ -609,6 +625,8 @@ class TestAngleBracketTitles:
     @pytest.mark.parametrize("title", [
         "<descriptive title for this scenario>",
         "<descriptive title for next scenario>",
+        # wrapped by a narrow pane
+        "<descriptive title for",
         "Scenario Title", "..."])
     def test_template_placeholders_still_detected(self, title):
         assert qa_loop._is_placeholder_title(title)

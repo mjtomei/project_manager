@@ -46,6 +46,15 @@ applies to any plan before accepting it:
    title) counts as a dropped scenario and rejects the plan.
 3. Indices must be contiguous ascending and start at `1` or `scenario_start`
    (the driver already renumbers a plan that started at 1).
+4. Pane text only: a plan numbered from a later offset must have only blank
+   lines between its START and first header. Other text means a bare stale
+   START (template headers and END redrawn away) paired with a suffix. The
+   transcript skips this check, since every START in the planner's own turn
+   is fresh.
+Marker lines match after removing Claude Code's display bullet (`●`/`⏺`),
+markdown emphasis and whitespace. Placeholder titles are a whole
+`<multi word phrase>`, or its unclosed start when a narrow pane wrapped it.
+A real title like `<Enter> key` is not a placeholder.
 An incomplete plan is not consumed. The driver logs the reason, sets
 `state.latest_output` to a visible "planner plan incomplete: …" message, and
 keeps waiting for the next idle. That is a clear failure, not a silent stall.
