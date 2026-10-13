@@ -24,6 +24,7 @@ ambiguity the router emits ``SIGNOFF_BLOCKED`` and escalates rather than merging
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from pm_core import store
@@ -541,6 +542,7 @@ def retire_signoff_run(session: str, pr_entry: dict, tdir: Path) -> None:
             pass
 
 
+@dataclass(frozen=True)
 class SignoffStep:
     """Outcome of one :func:`step_signoff` tick.
 
@@ -551,20 +553,11 @@ class SignoffStep:
     *sha* is the branch HEAD the step evaluated against.
     """
 
-    __slots__ = ("action", "hop", "verdict", "stale", "sha")
-
-    def __init__(self, action: str, hop: str | None = None,
-                 verdict: str | None = None, stale: bool = False,
-                 sha: str | None = None):
-        self.action = action
-        self.hop = hop
-        self.verdict = verdict
-        self.stale = stale
-        self.sha = sha
-
-    def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return (f"SignoffStep(action={self.action!r}, hop={self.hop!r}, "
-                f"verdict={self.verdict!r}, stale={self.stale!r})")
+    action: str
+    hop: str | None = None
+    verdict: str | None = None
+    stale: bool = False
+    sha: str | None = None
 
 
 def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,

@@ -157,12 +157,20 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
 
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "signoff",
            "--background", "--transcript", str(transcript), pr_id]
+    proc = None
     try:
         proc = await _run_shell_async(
             cmd, cwd=str(app._root) if app._root else None,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
     except Exception as e:
+        # A hung launch would keep holding the per-PR launch lock, so every
+        # later relaunch would only queue behind it: kill it.
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
         _log.exception("signoff_ui: launch failed for %s", pr_id)
         app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: {e}")
         return

@@ -664,6 +664,38 @@ def test_launch_quiet_runs_signoff_off_the_event_loop(tmp_path):
                for m in app.logs)
 
 
+def test_hung_launch_is_killed_on_timeout(tmp_path):
+    """A ``pm pr signoff`` that never exits holds the per-PR launch lock;
+    the timeout must kill it rather than leave it blocking relaunches."""
+    from pm_core.tui import signoff_ui
+    app = App(tmp_path, stop=True)
+    killed = []
+
+    class Proc:
+        returncode = None
+
+        async def communicate(self):
+            await asyncio.sleep(3600)
+
+        def kill(self):
+            killed.append(True)
+
+    async def fake_shell(cmd, **kw):
+        return Proc()
+
+    async def instant_timeout(aw, timeout):
+        aw.close()
+        raise asyncio.TimeoutError
+
+    signoff_ui._inflight(app).add(PR)
+    with patch("pm_core.tui._shell._run_shell_async", fake_shell), \
+            patch("asyncio.wait_for", instant_timeout):
+        asyncio.run(signoff_ui._launch_quiet(app, PR, tmp_path / "t.jsonl"))
+    assert killed == [True]
+    assert PR not in signoff_ui._inflight(app)
+    assert any("Sign-off launch failed" in m for m in app.logs)
+
+
 def test_slow_launch_in_flight_is_not_duplicated(world_factory):
     """A launch still running past the relaunch backoff (container start)
     must not be stacked with a second ``pm pr signoff``."""
