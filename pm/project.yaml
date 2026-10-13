@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T17:11:19.740904+00:00'
+  updated_at: '2026-10-13T18:13:16.350623+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3578,6 +3578,37 @@ prs:
       untouched. Planned=launched=3.'
     created_at: '2026-10-13T17:11:19Z'
     last_edited: '2026-10-13T17:11:19Z'
+  - id: note-5bf7122
+    text: 'S6 concretizer (round 4): qa.md H7.1/H7.2 and the ''Shell launches'' harness
+      note claim a shell ''pm pr start <pr>'' without --transcript is orphan-trust-watched.
+      Code says otherwise: build_claude_shell_cmd adds --session-id only when transcript=
+      is given, so pane_transcript_path() returns None and _watch_untracked_trust
+      caches None (no keys, no report). The orphan watch is reachable only for panes
+      WITH a session id that the current TUI cannot register: TUI-launched panes after
+      a hard TUI kill + pm session restart, review panes after a restart, or a hand-made
+      window whose command has --session-id. Refined H7.1 asserts the actual behaviour
+      (not watched; design limit, same as round-3 S3 note), and H7.2 moves to the
+      hard-kill route (as round-3 W3.5 did). Also: a second accept attempt is Enter
+      only (the cursor is already on Yes), so the key logs read DOWN@no, ENTER@yes,
+      ENTER@yes; trusted-workspaces is flock''d since f650a308, so H5 expects 10/10.'
+    created_at: '2026-10-13T17:16:33Z'
+    last_edited: '2026-10-13T17:16:33Z'
+  - id: note-42dfb22
+    text: 'QA S6 round 4 (host trust H1-H7, supervised; worker accepted no outer trust
+      prompt by hand; captures /pm-captures/scenarios/6, REPORT.md) on 5e372554: all
+      H Thens held live with real claude 2.1.296 + stand-in, incl. first live test
+      of the 80f0 orphan watch (H7b hard-kill: new TUI accepted orphaned dialog in
+      ~5s, attempts=1; H7c budget held at 2 across restart, one red line; H7d no false
+      fires; H7e unapproved cwd no keys/no trust). Live bug fixed in 211cfb95 (UNREVIEWED,
+      needs review before sign-off): after a review loop ends in the trust ERROR,
+      the orphan watch took over the in_review review pane and posted the same red
+      trust line again ~35s later; WorkspacePromptWatch now records the reporting
+      pid on the pane (@pm_trust_reported_by) and the orphan watch skips a pane this
+      TUI already reported (restarted TUI still reports once); fail-before/pass-after
+      test, live re-run clean. Filed pr-c9e69fb: shell `pm pr start` panes have no
+      --session-id so they are never trust-watched (qa.md Shell launches note is wrong).'
+    created_at: '2026-10-13T18:13:16Z'
+    last_edited: '2026-10-13T18:13:16Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -28014,6 +28045,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T17:10:44.065060+00:00'
   updated_at: '2026-10-13T17:10:44.065060+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c9e69fb
+  plan: bugs
+  title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
+    in start command), so a dialog left after a bootstrap lock timeout sits forever'
+  branch: pm/pr-c9e69fb-bug-shell-pm-pr-start-impl-panes-are-never-trust-w
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA round 4 S6 H7a (captures /pm-captures/scenarios/6/H7/a).
+    `pm pr start <pr>` from a shell (no --transcript) launches `cd <workdir> && claude
+    "$(cat prompt)"` with no --session-id. The TUI idle tracker cannot register it
+    (no transcript symlink) and the orphan trust watch (review_loop_ui._watch_untracked_trust
+    -> claude_launcher.pane_transcript_path) needs a session id in the start command,
+    so the pane is never trust-watched: with the stand-in dialog for grace+60s there
+    were 0 keys, no ⏸ and no red message. Normally the launch bootstrap trusts the
+    workdir first, but if bootstrap is defeated (config lock held >15s, see H4c, or
+    a trust reset) the shell-started pane sits at the "No, exit" dialog forever with
+    no R5 fallback and no actionable message. qa.md Harness notes claimed such panes
+    are watched by the orphan watch; that is wrong on 5e372554/211cfb95. Fix options:
+    always pass --session-id for impl launches (generate/save one like launch_claude),
+    or let the orphan watch fall back to the PR workdir transcript dir without a session
+    id. Repro: stand-in claude on PATH, hold $CLAUDE_CONFIG_DIR/.claude.json.lock
+    fresh, run `pm pr start <pending pr>` from a shell with the TUI running.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T18:12:32.244073+00:00'
+  updated_at: '2026-10-13T18:12:32.244073+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
