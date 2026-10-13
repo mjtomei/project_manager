@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T13:41:13.638514+00:00'
+  updated_at: '2026-10-13T13:55:49.426664+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3502,6 +3502,18 @@ prs:
       pr-b53bfe2/scenarios/5.'
     created_at: '2026-10-13T13:41:13Z'
     last_edited: '2026-10-13T13:41:13Z'
+  - id: note-b58a260
+    text: 'QA S3 round 3 (host trust/config, supervised; worker accepted no trust
+      prompt by hand) on 6f64e2c7: H1-H6 all PASS live with real claude 2.1.296 +
+      stand-in; first live test of 7d79fce1 (pm set grace 30 works), f650a308 (H5
+      5x5 rounds x4 + 12-way x2: no lost roots; broken-config add rolled back), 8cd40e87
+      (qa_status pane shows "QA planning did not start"/pm trust add/not QA coverage),
+      37ad95eb ([pr-id] intact), 3130d141/0c84b817 (<=2 accepts per pane, never ENTER@no).
+      No app edits this round. Filed pr-d72df02 (killed impl pane keeps cyan spinner;
+      pre-existing). Design limit noted: shell `pm pr start` without --transcript
+      is never TUI-tracked, so no R5 fallback/⏸ for it. Captures /pm-captures/scenarios/3.'
+    created_at: '2026-10-13T13:55:49Z'
+    last_edited: '2026-10-13T13:55:49Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -27728,6 +27740,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T13:38:20.751436+00:00'
   updated_at: '2026-10-13T13:38:20.751436+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d72df02
+  plan: bugs
+  title: 'Bug: tech-tree node keeps the cyan busy spinner after its impl pane is killed'
+  branch: pm/pr-d72df02-bug-tech-tree-node-keeps-the-cyan-busy-spinner-aft
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/pane_idle.py PaneIdleTracker.poll sets state.gone=True,
+    idle=False when the pane disappears; pm_core/tui/tech_tree.py renders the busy
+    spinner whenever tracker.is_tracked(pr_id) and not tracker.is_idle(pr_id), without
+    checking is_gone. _poll_impl_idle then skips the PR (no pane found) so the state
+    never changes. Repro (seen live in pr-b53bfe2 QA S3, 2026-10-13): TUI s on a PR
+    with real Claude, let it finish its turn, kill the impl window (tmux kill-window);
+    the node shows "◎ in_progress ◐" spinning indefinitely (pr-3850181/pr-5aa4cee/pr-1e86a9b
+    in the throwaway project, minutes after their windows were gone). Same lines exist
+    on master, so pre-existing. Expected: no marker (or a gone/dead marker) once the
+    pane is gone.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T13:44:01.388726+00:00'
+  updated_at: '2026-10-13T13:44:01.388726+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
