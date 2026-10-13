@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T12:53:43.971744+00:00'
+  updated_at: '2026-10-13T13:03:18.982985+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3462,6 +3462,19 @@ prs:
       The changed merge code needs another review pass.'
     created_at: '2026-10-13T12:53:43Z'
     last_edited: '2026-10-13T12:53:43Z'
+  - id: note-073520d
+    text: 'Review 356c i3 (3c7df387): reviewed bca1d21a local-merge-in-workdir + d1b791f9.
+      Logic sound (sync before merge, DIVERGED retry, main-repo failures exit 1 w/o
+      window). Added real-git test for the main-repo-side failure path (index.lock
+      blocks ff -> exit 1, no window, --propagation-only next step works after clearing).
+      Fixed stale _launch_merge_window comment (only vanilla/GitHub pull-from-origin
+      window runs in project root now). Known benign: when step-1 MERGED propagation
+      hits a main-repo failure, TUI keeps the PR in _merge_propagation_phase/pending
+      with no window until the user runs the printed --propagation-only command (status
+      -> merged clears it). Full suite 3085 pass, 1 pre-existing env failure (test_hook_events
+      standalone receiver).'
+    created_at: '2026-10-13T13:03:18Z'
+    last_edited: '2026-10-13T13:03:18Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
