@@ -547,13 +547,15 @@ def remove_targets(app, ids: list[str]) -> dict:
     _log.info("auto_start: remove %s → removed=%s remaining=%s",
               ids, removed, list(targets))
     _sync_enabled(app)
+    # hold: a racing ``g`` merge's spinner frames would overwrite this
+    # within 0.1s (QA s18), like "targets +=" above.
     if removed:
         rest = f"{len(targets)} remaining" if targets else "auto-start OFF"
         app.log_message(f"Auto-start: removed {', '.join(removed)} ({rest})",
-                        force=True)
+                        force=True, hold=CONFIRM_HOLD_SECONDS)
     else:
         app.log_message(f"Auto-start: {', '.join(ids)} not a target",
-                        force=True)
+                        force=True, hold=CONFIRM_HOLD_SECONDS)
     return {"ok": True, "changes": changes}
 
 
@@ -567,7 +569,7 @@ def clear_targets(app) -> dict:
         app._auto_start_targets = {}
         app._auto_start_all = False
     app.log_message("Auto-start: OFF" if was else "Auto-start: already off",
-                    force=True)
+                    force=True, hold=CONFIRM_HOLD_SECONDS)
     _log.info("auto_start: cleared targets=%s", removed)
     return {"ok": True,
             "changes": [{"pr_id": r, "action": "removed"} for r in removed]}

@@ -213,3 +213,39 @@ def test_last_merged_target_one_line_with_off():
     _log(app, "⠙ Merging pr-y...", capture=False)
     assert shown == [" Auto-start: target pr-y merged — removed "
                      "(all targets complete — auto-start OFF)"]
+
+
+# QA s18 (pr-0b87a97): ``pm autostart remove Y2`` racing a TUI ``g`` merge
+# painted "Auto-start: removed …" for ~0.1s before the "⠙ Merging …"
+# spinner frame overwrote it.
+
+def test_autostart_remove_and_clear_confirmations_hold():
+    app = MagicMock()
+    app._auto_start_targets = {"pr-x": {"policy": "stop_before_merge"},
+                               "pr-y": {"policy": "stop_before_merge"}}
+    app._auto_start_all = False
+    app._data = {"prs": [{"id": "pr-x"}, {"id": "pr-y"}]}
+    with patch.object(auto_start, "_sync_enabled"), \
+            patch.object(auto_start, "is_enabled", return_value=True), \
+            patch.object(auto_start, "_disable"):
+        auto_start.remove_targets(app, ["pr-x"])
+        auto_start.remove_targets(app, ["pr-x"])  # now not a target
+        auto_start.clear_targets(app)
+    for needle in ("removed pr-x", "pr-x not a target", "Auto-start: OFF"):
+        calls = [c for c in app.log_message.call_args_list
+                 if needle in c.args[0]]
+        assert calls and calls[0].kwargs.get("hold", 0) > 0, needle
+        assert calls[0].kwargs.get("force") is True, needle
+
+
+def test_remove_confirmation_survives_merge_spinner():
+    app, shown = _stub_app()
+    _log(app, "⠋ Merging pr-d2...")
+    _log(app, "Auto-start: removed pr-y2 (3 remaining)", force=True, hold=3)
+    _log(app, "⠙ Merging pr-d2...")
+    _log(app, "⏳ pr-y2: Y2")
+    assert shown[-1] == " Auto-start: removed pr-y2 (3 remaining)"
+    app._log_hold_until = 0.0  # hold expires
+    for cb in app.timers:
+        cb()
+    assert shown[-1] == " ⏳ pr-y2: Y2"
