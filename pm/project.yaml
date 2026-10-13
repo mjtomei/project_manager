@@ -27490,3 +27490,30 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-31413e8
+  plan: bugs
+  title: 'Bug: fresh-start (z t) logs the superseded QA run as "QA complete: INPUT_REQUIRED
+    — <title>: ?" after the new run has started'
+  branch: pm/pr-31413e8-bug-fresh-start-z-t-logs-the-superseded-qa-run-as-
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py run_qa_sync completion + pm_core/tui/qa_loop_ui.py
+    _on_qa_update. Repro (pr-b8561ac QA S6 stop-fresh, captures scenarios/6/stop-fresh):
+    start QA on a PR (t), wait for Launched scenario N, then Esc z t on the same PR.
+    fresh_start_qa sets stop_requested on the old loop and starts a new one; about
+    5s later the old loop finishes its stop path and its completion still reaches
+    the TUI log as "QA [pr-x]: QA complete: INPUT_REQUIRED — Alpha check: ?; Beta
+    check: ?", printed after the new run has already logged "Planning QA scenarios...".
+    To a user it reads as if the fresh run ended INPUT_REQUIRED. Since 254402e8 it
+    is no longer a false PASS and no PR note is written, but the line should say the
+    run was stopped/superseded (e.g. "QA stopped (superseded by fresh start)") or
+    be suppressed for a loop whose stop_requested was set by fresh_start_qa.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T09:08:03.676136+00:00'
+  updated_at: '2026-10-13T09:08:03.676136+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
