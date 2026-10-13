@@ -463,6 +463,18 @@ def _planner_code_changes(workdir_path: str, before: str | None,
                   if p and not p.startswith("pm/"))
 
 
+def planner_code_changes_suffix(state: QALoopState) -> str:
+    """Summary suffix explaining a planner-forced NEEDS_WORK (or ``""``)."""
+    if not state.planner_code_changes:
+        return ""
+    shown = ", ".join(state.planner_code_changes[:5])
+    more = len(state.planner_code_changes) - 5
+    if more > 0:
+        shown += f" (+{more} more)"
+    return (f" — planner edited application code ({shown}); "
+            "review required before sign-off")
+
+
 def _setup_clone_override(clone_path: Path) -> None:
     """Configure a clone so Claude sessions in it use the correct pm_core.
 
@@ -3873,17 +3885,9 @@ def _execute_and_finalize(
     finalize_suffix = ""
     if state.finalize_verdict:
         finalize_suffix = f" [finalize: {state.finalize_verdict}]"
-    planner_suffix = ""
-    if state.planner_code_changes:
-        shown = ", ".join(state.planner_code_changes[:5])
-        more = len(state.planner_code_changes) - 5
-        if more > 0:
-            shown += f" (+{more} more)"
-        planner_suffix = (f" — planner edited application code ({shown}); "
-                          "review required before sign-off")
     state.latest_output = (
         f"QA complete: {state.latest_verdict}{finalize_suffix} — "
-        + "; ".join(summary_parts) + planner_suffix
+        + "; ".join(summary_parts) + planner_code_changes_suffix(state)
     )
 
     _log.info("QA complete for %s: %s (finalize=%s)",

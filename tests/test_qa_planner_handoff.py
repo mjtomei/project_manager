@@ -619,3 +619,22 @@ class TestPlannerCodeChangesForceReview:
         data = qa_loop._load_resume_file(tmp_path)
         rebuilt = qa_loop.build_resume_state(data)
         assert rebuilt.planner_code_changes == ["app.py"]
+
+    def test_qa_note_explains_planner_code_edit(self, tmp_path):
+        # The PR note is what the next review session sees; an all-PASS
+        # NEEDS_WORK must say the planner's code edit is why.
+        from pm_core import store
+        from pm_core.tui import qa_loop_ui
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = parse_qa_plan(FULL_PLAN)
+        state.scenario_verdicts = {s.index: "PASS" for s in state.scenarios}
+        state.latest_verdict = qa_loop.VERDICT_NEEDS_WORK
+        state.planner_code_changes = ["app.py"]
+        data = {"prs": [{"id": "pr-001", "notes": []}]}
+        app = MagicMock(_root=tmp_path)
+        with patch.object(store, "locked_update",
+                          side_effect=lambda root, fn: fn(data)):
+            qa_loop_ui._record_qa_note(app, state)
+        note = data["prs"][0]["notes"][0]["text"]
+        assert note.startswith("QA NEEDS_WORK:")
+        assert "planner edited application code (app.py)" in note

@@ -88,7 +88,8 @@ specs, qa instructions, project.yaml) is application code. Store it as
 `_execute_and_finalize`, a non-empty list forces the overall verdict to
 `NEEDS_WORK`, with a reason in `latest_output`. `qa_loop_ui` already routes
 `NEEDS_WORK` to `in_review` and a new review, so sign-off can't happen without
-re-review.
+re-review. The same reason (`planner_code_changes_suffix`) is appended to the
+QA PR note, so the next review session sees why an all-PASS run was bounced.
 
 ## Implicit Requirements
 - The transcript path is `claude_launcher.transcript_path_for(workdir_path,

@@ -18,6 +18,7 @@ from pm_core.qa_loop import (
     VERDICT_INPUT_REQUIRED,
     start_qa_background,
     _compute_qa_window_name,
+    planner_code_changes_suffix,
 )
 from pm_core.loop_shared import get_pm_session
 
@@ -641,6 +642,8 @@ def _record_qa_note(app, state: QALoopState) -> None:
             v = state.scenario_verdicts.get(s.index, "?")
             summary_parts.append(f"{s.title}: {v}")
         note_text = f"QA {state.latest_verdict}: " + "; ".join(summary_parts)
+        # Tell the next review session why QA bounced an all-PASS run.
+        note_text += planner_code_changes_suffix(state)
         if state.qa_workdir:
             note_text += f" (workdir: {state.qa_workdir})"
 
