@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T00:38:15.857721+00:00'
+  updated_at: '2026-10-13T00:43:22.044092+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26272,6 +26272,17 @@ prs:
       quiet restart 0.6s.'
     created_at: '2026-10-13T00:39:08Z'
     last_edited: '2026-10-13T00:39:08Z'
+  - id: note-2d83bc9
+    text: 'QA s19 r4 final: NEEDS_WORK. Fixed 3239e71b: the runs popup target headers
+      now name the auto-merge policy too (R14; before, only [stop-before-merge] was
+      tagged, so U/K/Q showed no policy). Regression test in tests/test_autostart_multi_target.py;
+      live pre/post evidence in scenarios/19/{pre-fix,post-fix}. Contract conflicts
+      for the next S19 plan, not fixed here by scope: (a) post-sign-off "signed off
+      … press g" needs pr-7c32e44 (qa.md §5 item 10); (b) painting "Auto-merge: X
+      … merging", skip-QA "skipping QA" and "ready to merge … press g" is pre-existing
+      on master (pr-0a08055). Assert those via status/L, or bring the bugs into scope.'
+    created_at: '2026-10-13T00:43:21Z'
+    last_edited: '2026-10-13T00:43:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
