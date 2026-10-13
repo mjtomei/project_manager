@@ -12,53 +12,104 @@ This spec is grounded in `git diff master...HEAD`:
   (R10, `_sync_workdir_base`, `_propagate_to_repo`, `_launch_merge_window`)
 - `cli/meta.py`: meta cwd
 - `cli/__init__.py`: `trust-prompt-grace-seconds` setting
+- `tui/review_loop_ui.py` + `claude_launcher.pane_transcript_path` +
+  `tmux.pane_start_command`: the orphan trust watch for Claude panes the
+  TUI's idle tracker cannot register (`5a293bf1`, revised in review 80f0
+  i1/i2, `af1a3fd4` and `ac7522e0`)
 - `pm/specs/pr-b53bfe2/impl.md`
 
-The current QA round (after review 356c i3) has exactly three scenarios.
-Each one executes one of the named sections below **in full**, together with
-the shared **Setup**. The planner output only names the section; the
-concretizer and worker must read the whole section here, every H/W/M story:
+The current QA round (round 4, after review 80f0 i2) has exactly three
+scenarios. Each one executes one of the named sections below **in full**,
+together with the shared **Setup** and **Harness notes**. The planner output
+only names the section; the concretizer and worker must read the whole
+section here, every H/W/M story:
 
-- **SCENARIO 3: Host trust policy and configuration** → section
-  "Host trust policy and configuration" (H1–H6)
-- **SCENARIO 4: Workflow and container trust** → section
+- **SCENARIO 6: Host trust policy and configuration** → section
+  "Host trust policy and configuration" (H1–H7)
+- **SCENARIO 7: Workflow and container trust** → section
   "Workflow and container trust" (W1–W6)
-- **SCENARIO 5: Local merge trust** → section "Local merge trust" (M1–M5)
+- **SCENARIO 8: Local merge trust** → section "Local merge trust" (M1–M5)
 
 The runner must launch exactly as many scenarios as were planned (3).
 A planned/launched mismatch is itself a FAIL to report.
 
-Earlier rounds: run #230 ran Scenarios 1 and 2 against older code. S1
-found and fixed bugs, so its result is not a PASS for the current head; S2
-ended INPUT_REQUIRED. **No earlier coverage counts as PASS for this round.**
+### Earlier rounds
+
+- Run #230 round 1–2 (Scenarios 1 and 2) ran against older code: S1 found
+  and fixed bugs, S2 ended INPUT_REQUIRED.
+- Round 3 on `6f64e2c7` (run `pr-b53bfe2-6a3fbfb2c02d32ea`):
+  - S3 host trust: **PASS** (H1–H6 live; filed `pr-d72df02`).
+  - S4 workflow/container: **NEEDS_WORK**. Every W Then held, including
+    real container QA worker activity (W6.7), except W3.5: a review pane
+    left at the trust dialog after a hard TUI kill was never watched again.
+    Fixed in `5a293bf1` (orphan trust watch), then revised in review 80f0
+    (`af1a3fd4`, `ac7522e0`). Filed `pr-5d66709`, `pr-1710f9a`,
+    `pr-f2f9ef8`, `pr-1e9c117`, `pr-dc4dd45`. Harness incident: see
+    Harness notes, captures.
+  - S5 local merge: **INPUT_REQUIRED**. All trust Thens held; the M2 "TUI
+    follow-up" and the M5 sequence did not match this spec because of two
+    pre-existing, out-of-scope merge bugs (`pr-c50d365`, `pr-ea04ba8`).
+    Resolved in Ambiguity 7: the spec was wrong, M2 and M5 are corrected
+    below, and both bugs stay tracked.
+- The head changed after round 3 (orphan watch), and that code runs on every
+  TUI poll for every impl/review pane the tracker cannot register, so
+  **no earlier coverage counts as PASS for this round**. All three sections
+  run again in full on the current head.
 
 ## Run disclosures (read first)
 
 - **Supervised run.** This round is supervised validation. The outer host
-  still lacks #231 and the supervisor may accept outer planner/QA trust
-  prompts on verified pm checkout paths. It is **not** an unattended
-  autostart qualification trial. Do not report it as one, and state in
-  every report whether any outer trust prompt was accepted manually.
+  still lacks #231 and `pr-b8561ac`, and the supervisor may accept outer
+  planner/QA trust prompts on verified pm checkout paths. It is **not** an
+  unattended autostart qualification trial. Do not report it as one, and
+  state in every report whether any outer trust prompt was accepted
+  manually.
 - **App edits so far and their review state.** The run #230 planner and
   QA edits (`7d79fce1` grace setting, `f650a308` locked `pm trust`
   add/remove with rollback, `8cd40e87` blocked-planner status pane,
   `37ad95eb` QA log markup, `3130d141`/`0c84b817` per-pane accept budget,
-  `c056b32a` concretizer reason) were reviewed in review 356c i1. The local
-  merge change (`bca1d21a`, `d1b791f9`) was reviewed in 356c i3
-  (`3c7df387`). These are reviewed, but **this QA round is their first live
-  test**, so Scenarios 3–5 must exercise each of them.
+  `c056b32a` concretizer reason) were reviewed in review 356c i1 and passed
+  live in round 3. The local merge change (`bca1d21a`, `d1b791f9`) was
+  reviewed in 356c i3 (`3c7df387`) and its trust Thens passed live in
+  round 3. The round-3 QA fix `5a293bf1` (orphan trust watch) was reviewed
+  and revised in review 80f0 i1/i2 (`af1a3fd4`, `ac7522e0`). **This round
+  is the first live test of the revised orphan watch**, so H7 and W3.5 must
+  exercise it.
 - **Any app edit made in this round is unreviewed.** Commit it with a
   fail-before/pass-after regression test, name the commit in the report, and
   state that it needs another review pass before fresh sign-off. An all-PASS
   QA run does **not** review it. The planner itself makes no app edits.
 - **Every known remaining bug** must end with one of: a fix (commit), a
   tracking PR, or an explicit UNRESOLVED verdict. A bug being nonblocking
-  never excuses leaving it untracked. Already tracked:
+  never excuses leaving it untracked. Before filing, check this list and
+  `pm pr list --plan bugs` for duplicates. Already tracked:
   - `pr-7e0eec4`: the container copies `$HOME/.claude.json` and ignores
     `CLAUDE_CONFIG_DIR`.
   - `pr-8c0d680`: the known `/workspace` host-dir limit.
   - `pr-b8561ac`: the old host terminal-intake planner bug, where terminal
     capture truncates a complete plan.
+  - `pr-d72df02`: a killed impl pane keeps the cyan busy spinner.
+  - `pr-5d66709`: an in-flight review loop is not adopted after a hard TUI
+    kill (only the trust-dialog part is fixed here).
+  - `pr-1710f9a`: bootstrap takes the config lock even when already
+    trusted.
+  - `pr-f2f9ef8`: TUI start resets tmux hook arrays.
+  - `pr-1e9c117`: `captures_dir()` uses the `/pm-captures` mount for any
+    PR when `PM_CAPTURES_PR` is unset.
+  - `pr-dc4dd45`: the blocked message says `pm trust add` for an already
+    approved dir.
+  - `pr-c50d365`: manual merges (TUI `g` / command bar) get no TUI MERGED
+    follow-up (`--propagation-only` must be run by hand).
+  - `pr-ea04ba8`: a vanilla merge always fails the dual-pushurl push to the
+    checked-out main repo and opens a spurious window.
+  - `pr-19990de`: vanilla/GitHub pull-from-origin resolution still runs in
+    the project root.
+  - `pr-9e37213`: the orphan trust watch caches a transient tmux
+    start-command read failure as "no session" for the pane's lifetime
+    (review 80f0 i3).
+  - `pr-d76385d`: a resumed session's existing transcript ends every trust
+    watch at once, so a dialog after a trust reset is never accepted or
+    reported (review 80f0 i3; tracker, orphan and loop watches).
 
 ## Background facts (verified with claude 2.1.296)
 
@@ -121,8 +172,8 @@ Steps:
      in the test tmux session's global environment (`tmux set-environment
      -g`), **before** launching pm sessions. Both pm and Claude honour it.
    - Exception: container mode reads `$HOME/.claude.json` regardless (bug
-     `pr-7e0eec4`). Scenario 2 handles that by using a scratch HOME, as
-     described there.
+     `pr-7e0eec4`). Scenario 7 (W6) handles that by using a scratch
+     HOME, as described there.
    - Back up whatever file you modify before editing it.
 3. **Do not leak credentials into evidence.**
    - Never copy `.credentials.json`, `oauthAccount`, API keys, env dumps, or
@@ -161,9 +212,80 @@ Steps:
      tmux recipe) from launch until the first real output. A single late
      snapshot is not enough.
 
+## Harness notes (learned in earlier rounds; read before driving)
+
+- **Evidence authenticity.** Round 3's `scenarios/1`–`3` `prompt.md`,
+  `scenario.json` and `verdict.md` were overwritten by nested fixture
+  metadata (moved to `scenarios/4/contamination`; originals lost). Do
+  **not** cite those files, or anything under `contamination`, as
+  evidence. Round-3 evidence that may be cited is limited to recordings
+  and logs written by the scenario itself (e.g. `scenarios/4/W3-*`,
+  `scenarios/5/*`, `impl/{pre,post}-fix/*`).
+- **Capture isolation for this round.** Each scenario writes only under
+  its own `scenarios/<n>/` (6, 7 or 8) and never deletes or rewrites
+  another scenario's files or earlier rounds' files. At the end, list
+  your directory with sizes and mtimes in the report and confirm that
+  `scenarios/1`–`5` were not modified during your run (compare a listing
+  taken at start with one taken at the end).
+- **Captures (round-3 incident).** Never unset `PM_CAPTURES_PR`. In round 3
+  a nested throwaway QA run inside S4 wrote its own `prompt.md`,
+  `scenario.json` and `verdict.md` into the real `/pm-captures` mount and
+  overwrote other scenarios' evidence (bug `pr-1e9c117`). Keep
+  `PM_CAPTURES_PR` set to this PR id in every shell and in the test tmux
+  session's environment, and before the first nested QA run confirm that a
+  throwaway PR's captures land under the throwaway session's own
+  `~/.pm/sessions/<tag>/captures/<pr>` and not in `/pm-captures`. Only write
+  into your own scenario's captures subdirectory.
+- **git proxy.** Scenario containers have `~/.local/bin/git` as a push proxy
+  that also forwards fetch/pull to the outer workdir. That breaks the
+  local-path fetches the local merge uses (`_sync_workdir_base`,
+  `_propagate_to_repo`, the merge prompt) and real-git tests. Put
+  `/usr/bin` first on PATH (or move the proxy aside) for throwaway-project
+  work, and restore it before pushing anything for this PR.
+- **Login-shell PATH.** pm panes take the TUI process's PATH (login shells
+  prepend `~/.local/bin`), not the tmux global env. To make the stand-in or
+  fake-claude win, swap the `~/.local/bin/claude` symlink (back it up) or
+  start the TUI with the right PATH.
+- **Claude settings.** `tui=fullscreen` in Claude settings triggers the
+  planner transcript bug `pr-b8561ac`; leave it out of the scratch config.
+- **CLAUDE_CONFIG_DIR and pm.** pm reads transcripts from
+  `~/.claude/projects` and hooks from `~/.claude/settings.json` regardless
+  of `CLAUDE_CONFIG_DIR`. With a scratch `CLAUDE_CONFIG_DIR`, symlink
+  `$CFG/projects -> ~/.claude/projects` and copy `~/.claude/settings.json`
+  into `$CFG`, or use the scratch-HOME route (W6.1) for everything.
+- **Scratch HOME (W6.1 route).** `/home/pm/.claude` in scenario containers is
+  a bind mount of the outer host's `~/.claude`. For container work, run pm
+  under a scratch HOME (copy `.claude.json`, `.credentials.json`,
+  `settings.json` minus hooks/tui, `.profile`, `.gitconfig`; a
+  `.local/bin` with only `claude` and fake-claude) with `CLAUDE_CONFIG_DIR`,
+  `PM_HOST_HOME`, `ANTHROPIC_API_KEY` and `CLAUDECODE` unset. Round 3 got
+  real container hook events and worker activity this way.
+- **Containers.** Review containers are removed when their window dies, so
+  container reuse is only reachable via the impl container or the QA
+  concretizer→worker container. Host `/workspace` exists in this
+  environment, so a dialog showing `/workspace` is never auto-accepted
+  (`pr-8c0d680`).
+- **QA with fake planners.** Fake-planner QA needs
+  `pm/specs/<pr>/qa.md` committed in the throwaway PR workdir (spec gate).
+  A plan with zero scenarios only ends when the planner pane exits;
+  otherwise the 1h planner timeout applies. `qa-max-scenarios` is a
+  concurrency cap, not a plan-size cap.
+- **Sign-off route.** TUI `t` from `in_progress` never reaches `qa`; drive
+  sign-off on a PR already in `qa` (round 3 used `d` then `t`).
+- **Merges in throwaway projects.** TUI `g` is refused by the sign-off gate
+  (no fresh SIGNOFF_MERGE), so the TUI route is the command bar
+  `pr merge --resolve-window --no-signoff-check <pr>`. That route has no
+  MERGED follow-up (`pr-c50d365`); only auto-start merges get one.
+- **`pm meta`** sets the session override to a GitHub-master clone and
+  removes `~/.pm/sessions/<tag>` on exit, which wipes a fake-claude config,
+  so run it last.
+- **Shell launches.** `pm pr start` from a shell without `--transcript` is
+  not registered by the TUI idle tracker; on the current head it is still
+  trust-watched by the orphan watch (H7).
+
 ## Host trust policy and configuration
 
-Scenario 3 covers host policy, config writes, the CLI, locks and bounded
+Scenario 6 covers host policy, config writes, the CLI, locks and bounded
 refusal. All of it runs on the host path, with no pm containers.
 
 ### H1. The original bug reproduces pre-fix and is fixed post-fix
@@ -332,9 +454,54 @@ Uses the stand-in and `trust-prompt-grace-seconds` 30.
    ends in ERROR with the trust message (path plus remedy) instead of
    polling forever.
 
+### H7. Orphan trust watch for panes the TUI did not launch (first live test)
+
+The TUI now trust-watches every impl/review pane it finds but cannot
+register with its idle tracker: panes an earlier TUI launched, and impl
+panes started from a shell without `--transcript`. It recovers the Claude
+session from the pane's own start command. Uses the stand-in, grace 30s,
+and the stand-in key log.
+
+1. **Shell-started impl at a stuck dialog.**
+   - Given: the TUI is running; the stand-in `claude` is on PATH for the
+     shell; a PR with an approved workdir.
+   - When: the user starts that PR's implementation from a separate shell
+     (`pm pr start <pr>`, not the TUI).
+   - Then:
+     - the stand-in key log shows at most 2 accept attempts, each Down then
+       Enter, and never Enter while the cursor is on "No, exit";
+     - after about grace + 15s the TUI log shows **one** red message naming
+       the path and the remedy; it is not repeated on later polls;
+     - the TUI stays responsive (navigate, open the PR) while it happens.
+2. **Same with real Claude: the fallback actually unblocks.**
+   - Given: the TUI is running, bootstrap is defeated for a fresh approved
+     workdir (hold a fresh `<config>.lock` as in H4.4, or delete its entry
+     right after launch), real Claude.
+   - When: the user starts the PR from a shell.
+   - Then: the dialog is visible briefly, pm accepts it by cursor, the
+     session reaches its first real output, and the config gains the entry.
+3. **Hard TUI restart, budget across restarts.**
+   - Given: a TUI-launched impl pane at the stand-in dialog that already
+     received its accept attempts.
+   - When: the user hard-kills the TUI process (not `pm tui restart`) and
+     starts `pm session` again.
+   - Then: the pane gets **no** further Enter (the per-pane budget spans
+     restarts; total stays at most 2), and the new TUI reports the blocked
+     pane once.
+4. **No false fires.**
+   - Panes with no Claude session id in their start command (e.g. a plain
+     shell window named like an impl window) get no keys and no message.
+   - A pane past the dialog that later prints dialog-like text (`cat` the
+     `TRUST_SCREEN` fixture in a real session) gets no keys and no message.
+   - Once the pane is gone (window killed), nothing more is logged for it.
+5. **Unapproved cwd stays explicit.** A shell-started Claude pane whose
+   start command `cd`s into an unapproved dir (e.g. the throwaway project
+   root, launched with a PR window name) gets no keys, and pm writes no
+   trust for that dir.
+
 ## Workflow and container trust
 
-Scenario 4 covers every workflow role, reused workdirs, restart, the
+Scenario 7 covers every workflow role, reused workdirs, restart, the
 fallback, the zero-scenario path and containers.
 
 ### W1. Full QA on a fresh checkout with real Claude (acceptance; the #229 path)
@@ -367,7 +534,7 @@ after it starts working, to bound cost:
 - review loop;
 - QA planner, concretizer, scenario worker, verifier and finalizer (from W1);
 - sign-off (or the sign-off launch path as the TUI drives it);
-- merge resolution is covered separately in Scenario 5 ("Local merge
+- merge resolution is covered separately in Scenario 8 ("Local merge
   trust"); W2 does not repeat it;
 - `pm meta` (meta workdir under `~/.pm/workdirs`).
 
@@ -394,11 +561,45 @@ This was the live R9 finding.
      and QA is started again.
    - Then: the restarted run re-bootstraps any new clones, never sits at
      the dialog, and produces its own nonempty plan and worker activity.
-5. **Adopted review:**
-   - If a review pane was left in flight across a TUI restart, the adopted
-     review continues.
-   - If it is sitting at the dialog for its approved workdir, pm accepts
-     it with cursor keys.
+5. **Review left at the dialog across a hard TUI kill (round-3 failure,
+   fixed by the orphan watch; regression check).**
+   - Given: a review loop with real Claude whose pane sits at the dialog
+     for its approved workdir (bootstrap defeated, e.g. entry deleted and a
+     fresh lock held until the TUI is killed).
+   - When: the user hard-kills the TUI process and runs `pm session` again.
+   - Then:
+     - the new TUI accepts the dialog by cursor within a few seconds
+       (at most 2 attempts total for that pane) and the review session
+       reaches a verdict in its pane;
+     - record the pre-fix comparison from round 3 (pane sat at the dialog
+       5+ minutes; captures `scenarios/4/W3-adopted-review`).
+   - The loop itself is not adopted after a hard kill (`pr-5d66709`):
+     report whether the verdict is collected, but do not fail W3.5 on that.
+   - A graceful restart (`pm tui restart`, breadcrumb) adopts the loop:
+     show the adopted review continues and reaches a verdict.
+   - Container variant, if the environment allows: the same with a
+     container review pane. The dialog shows `/workspace`; with host
+     `/workspace` present (`pr-8c0d680`) expect a single report, not an
+     accept. Record which happened.
+6. **Known edge cases left by review 80f0 i3 (reproduce, confirm
+   tracking).** Both are filed; the goal is to confirm the live scope, not
+   to fix them in this round unless the fix is small and gets a
+   fail-before/pass-after test (then flag it unreviewed).
+   - **Resumed session after trust reset (`pr-d76385d`).** Given a PR whose
+     impl session already ran (its transcript exists). Kill its window,
+     delete its `projects[<workdir>]` entry from the config in use, and
+     defeat bootstrap (hold a fresh `<config>.lock` for about 25s). When the
+     user starts the PR again (resume). Then record what the pane shows and
+     whether pm accepts the dialog, marks the pane "needs you", or reports
+     after the grace. Expected per the bug: the dialog sits unaccepted and
+     unreported. Record the outcome against `pr-d76385d`, and add a pm
+     note on that PR if the scope differs (e.g. also review/QA resumes).
+   - **Transient start-command read failure (`pr-9e37213`).** Only a code
+     path for an injected failure reaches this; do not patch the app to
+     simulate it. If a user-level route exists (e.g. briefly making the tmux
+     socket unreadable while a restarted TUI first polls an orphan pane at
+     the stand-in dialog), try it once and record the result; otherwise
+     write "not driven live, tracked in `pr-9e37213`".
 
 ### W4. Explicit fallback for a visible dialog (approved workdir)
 
@@ -479,8 +680,11 @@ This was the live R9 finding.
      dir.
    - The pm-on-a-host-`/workspace` limitation is tracked in `pr-8c0d680`.
      Note if it applies to your environment.
-7. **Container QA (actual worker activity is required).** Run #230 never
-   launched a container worker: hook events could not reach pm from the
+7. **Container QA (actual worker activity is required).** Round 3
+   achieved this for the first time (scratch-HOME route, hooks arrived, 3
+   container scenarios reached PASS/VERIFIED/FINALIZE_DONE). Repeat it on
+   the current head with the same route and keep the evidence; a regression
+   here is a FAIL. Run #230 never launched a container worker: hook events could not reach pm from the
    nested container, so QA had no session id to poll. Before the QA run,
    make the hook path work the supported way:
    - run pm itself (`pm session`) with the same `HOME` whose `.claude.json`
@@ -503,7 +707,7 @@ This was the live R9 finding.
 
 ## Local merge trust
 
-Scenario 5 covers merge resolution, a role named in acceptance. It runs on
+Scenario 8 covers merge resolution, a role named in acceptance. It runs on
 the host path with the **local** backend (`pm init --backend local`), real
 Claude for the resolution window, and the isolated config from Setup. Seed
 uncommitted user work in the main repo (e.g. an untracked `notes.txt` and a
@@ -531,9 +735,16 @@ Python (real git; all must pass) and record the output.
     manual keys are sent;
   - the PR workdir has `hasTrustDialogAccepted: true`; the project root has
     no entry;
-  - after Claude resolves and reports MERGED, the TUI's follow-up
-    (`pm pr merge --propagation-only`) fast-forwards the main repo with no
-    second window, and the PR shows `merged`.
+  - after Claude resolves and reports MERGED in the window, propagation
+    fast-forwards the main repo with no second window and the PR shows
+    `merged`. Propagation route:
+    - auto-start merge (`_maybe_auto_merge`): the TUI runs
+      `pm pr merge --propagation-only` itself; drive at least one M2 merge
+      this way if the auto-start setup allows it, and show it;
+    - manual command-bar/`g` merge: the TUI does not follow up
+      (`pr-c50d365`, pre-existing); the user runs
+      `pm pr merge --propagation-only <pr>` and that completes it. This is
+      expected, not a failure of this PR.
 
 ### M3. The main repo's base moves during the merge
 
@@ -562,12 +773,17 @@ Python (real git; all must pass) and record the output.
 ### M5. Unapproved merge window stays explicit
 
 - Given the vanilla/GitHub-style pull-from-origin path, which still opens
-  in the project root (out of scope, pr-19990de), or any merge window in an
-  unapproved dir.
-- Then pm prints the `pm trust add <dir>` remedy when the window opens,
-  sends no keys to the dialog and writes no trust for the root. If this
-  path cannot be driven without a GitHub remote, say so and cite
-  pr-19990de; do not mark it PASS.
+  in the project root (out of scope, `pr-19990de`). With the vanilla
+  backend the first `pm pr merge` always fails its dual-pushurl push to the
+  checked-out main repo and opens a spurious window in the PR workdir
+  (`pr-ea04ba8`, pre-existing); the root window is reached by a second
+  `pm pr merge --propagation-only <pr>` with a diverged main repo. That
+  sequence is expected.
+- Then, for the root window: pm prints the `pm trust add <dir>` remedy when
+  it opens, sends no keys to the dialog, and writes no trust for the root;
+  the dialog stays on "No, exit". The spurious workdir window shows no
+  dialog. If this path cannot be driven, say so and cite `pr-19990de`;
+  do not mark it PASS.
 
 ### Concurrency
 
@@ -602,7 +818,12 @@ surfaces are:
 - a container scenario is reported PASS without a container worker actually
   working;
 - the number of launched scenarios differs from the planned number;
-- evidence contains credentials.
+- evidence contains credentials;
+- a scenario overwrites or deletes another scenario's or an earlier round's
+  captures, or cites the contaminated round-3 `scenarios/1`–`3` metadata
+  as evidence;
+- a bug is left with only a "nonblocking" label and no fix, tracking PR
+  or UNRESOLVED verdict.
 
 **Report requirements:**
 
@@ -633,3 +854,14 @@ surfaces are:
 6. **Container worker hooks.** The supported route is running pm under the
    same HOME the container copies, so the hook receiver and hooks dir are
    the ones mounted (W6.7). A failure there is filed, not waived.
+7. **Pre-existing merge follow-up bugs (round-3 S5 INPUT_REQUIRED).** Both
+   are pre-existing on master and are not trust bugs: `pr-c50d365` (manual
+   merges get no MERGED follow-up; the local merge resolved in the workdir
+   on master too, so propagation was already needed) and `pr-ea04ba8`
+   (vanilla dual-pushurl push). They stay tracked in their own PRs. M2 and
+   M5 now state the real sequence instead of failing on it. The supervisor
+   can still choose to fix them here; until then they are not blockers for
+   this PR.
+8. **Orphan watch scope.** The orphan watch only trust-watches; it does not
+   adopt idle tracking or loops (`pr-5d66709`). H7 and W3.5 test only the
+   trust behaviour plus what the user sees in the pane.

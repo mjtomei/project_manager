@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T15:56:16.697738+00:00'
+  updated_at: '2026-10-13T17:11:19.740904+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3475,6 +3475,18 @@ prs:
       standalone receiver).'
     created_at: '2026-10-13T13:03:18Z'
     last_edited: '2026-10-13T13:03:18Z'
+  - id: note-0b36885
+    text: 'QA planning round 3 (6f64e2c7, pushed): qa.md now has three sections, S3
+      Host trust H1-H6, S4 Workflow/container W1-W6, S5 Local merge trust M1-M5 (R10
+      merge-in-workdir, independent merges, base moved, main-repo failure, unapproved
+      window). W6.7 requires real container worker activity: run pm under the scratch
+      HOME the container copies so hooks mount, smoke-test the hook events, and if
+      they still fail, file the bug and mark it UNRESOLVED. Disclosures were updated:
+      QA/review edits were reviewed in 356c i1/i3 but this is their first live test.
+      Any edit in this round is unreviewed. Planned count must equal launched count
+      (3).'
+    created_at: '2026-10-13T13:14:23Z'
+    last_edited: '2026-10-13T13:14:23Z'
   - id: note-61cbf6f
     text: 'QA S5 concretizer (2026-10-13): in throwaway projects TUI g is refused
       by the sign-off gate (no fresh SIGNOFF_MERGE), so the TUI route is the command
@@ -3550,6 +3562,22 @@ prs:
       qa.'
     created_at: '2026-10-13T15:56:16Z'
     last_edited: '2026-10-13T15:56:16Z'
+  - id: note-bc61073
+    text: 'QA planning round 4 (supervised; planner made no app edits): qa.md now
+      maps SCENARIO 6 host H1-H7 (new H7 = first live test of the 80f0-revised orphan
+      trust watch: shell-started pane, real-Claude fallback, hard-kill budget, no
+      false fires, unapproved cwd), SCENARIO 7 workflow/container W1-W6 (W3.5 hard-kill
+      regression for 5a293bf1; W3.6 reproduces the two review 80f0 i3 edge cases,
+      filed as pr-d76385d resumed-session transcript gate and pr-9e37213 cached start-command
+      read failure; W6.7 must repeat the round-3 nested-container worker success),
+      SCENARIO 8 local merge M1-M5. Ambiguity 7: round-3 S5 INPUT_REQUIRED resolved
+      as spec error; pr-c50d365/pr-ea04ba8 are pre-existing on master, stay tracked,
+      M2/M5 corrected (supervisor may still choose to fix here). New Harness notes:
+      never unset PM_CAPTURES_PR, write only under scenarios/<6|7|8>, do not cite
+      round-3 scenarios/1-3 metadata or contamination/ as evidence, prove scenarios/1-5
+      untouched. Planned=launched=3.'
+    created_at: '2026-10-13T17:11:19Z'
+    last_edited: '2026-10-13T17:11:19Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -27924,6 +27952,68 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T15:27:52.547247+00:00'
   updated_at: '2026-10-13T15:27:52.547247+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9e37213
+  plan: bugs
+  title: 'Bug: orphan trust watch permanently caches a transient tmux start-command
+    read failure as no-session'
+  branch: pm/pr-9e37213-bug-orphan-trust-watch-permanently-caches-a-transi
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 review 80f0 i3 / QA planning round 4. pm_core/tui/review_loop_ui.py
+    _watch_untracked_trust resolves pane_transcript_path(pane_id, workdir) once per
+    pane and caches the result in app._untracked_trust_watches. tmux.pane_start_command
+    returns "" on any display-message failure (e.g. a transient tmux server/socket
+    error), so pane_transcript_path returns None and None is cached until the pane
+    disappears (_prune_untracked_trust only drops panes not seen). An orphan impl/review
+    pane (earlier TUI launch, or shell pm pr start without --transcript) that hits
+    one failed read is then never trust-watched: if it is at the workspace-trust dialog
+    for an approved workdir it sits there with no accept and no report. Repro: monkeypatch
+    pm_core.tmux.pane_start_command to return "" on the first call and the real command
+    after; _poll_impl_idle never builds a WorkspacePromptWatch for the pane. Fix idea:
+    distinguish a failed read (returncode != 0 or pane present but empty) from a command
+    with no session id, and only cache the latter; or retry None entries every N ticks.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T17:10:33.362324+00:00'
+  updated_at: '2026-10-13T17:10:33.362324+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d76385d
+  plan: bugs
+  title: 'Bug: trust watch never handles a resumed session (--resume) whose existing
+    transcript ends the watch immediately'
+  branch: pm/pr-d76385d-bug-trust-watch-never-handles-a-resumed-session-re
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 review 80f0 i3 / QA planning round 4. WorkspacePromptWatch.check
+    (pm_core/claude_launcher.py) ends the watch for good as soon as transcript_path
+    exists, on the assumption that Claude writes the JSONL only after the dialog.
+    A resumed session (pm pr start resuming the impl session, review/QA resume, or
+    an orphan pane launched with --resume) already has its transcript from the earlier
+    run, so the watch is started=True on its first check. If the dialog then shows
+    (bootstrap defeated: held/stale config lock past the 15s give-up, trust entry
+    removed by the user or reset between launches, pm trust remove + re-add), no watch
+    accepts it and no blocked report or needs-you state appears: the pane sits at
+    the dialog silently. Affects the PaneIdleTracker watch (pane_idle.py, transcript_path=state.transcript_path),
+    the orphan watch (tui/review_loop_ui._watch_untracked_trust via pane_transcript_path)
+    and loop_shared/qa_loop watches given a pre-existing transcript. Repro: start
+    a PR (real claude), let it write its transcript, kill the window, delete projects[<workdir>]
+    from .claude.json and hold a fresh <config>.lock for 25s, start the PR again (resume):
+    the dialog shows and is never accepted. Fix idea: record the transcript size/mtime
+    at watch creation and end the watch only when it grows, or for --resume launches
+    gate on a hook event instead of transcript existence.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T17:10:44.065060+00:00'
+  updated_at: '2026-10-13T17:10:44.065060+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
