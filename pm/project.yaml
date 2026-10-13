@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T07:47:20.715808+00:00'
+  updated_at: '2026-10-13T08:09:08.518618+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25950,6 +25950,30 @@ prs:
       is qa->in_review only; QA on an in_progress PR stays in_progress).'
     created_at: '2026-10-13T07:47:20Z'
     last_edited: '2026-10-13T07:47:20Z'
+  - id: note-8c9dd10
+    text: 'QA S3 (extraction, R1-R7 + edges) 2026-10-13: all stories driven live in
+      the TUI with fake-claude (80x23 planner, history-limit 0); captures scenarios/3
+      (README index). Fixes: 0d9c2969 per supervisor: pane fallback now accepts real
+      Claude Code "● QA_PLAN_START"/"⏺" bullet-prefixed markers (complete plan with
+      missing/non-plan transcript used to stall, or pick the closed template START);
+      a bare stale START (template headers+END redrawn away) + SCENARIO 2..4 suffix
+      at scenario_start=2 is now rejected ("text between QA_PLAN_START and SCENARIO
+      N") - pre-fix it was accepted live and QA PASSed over 3 of 4; real titles like
+      "<Enter> key" are no longer placeholders. fake-claude gains display_bullet (pane-only
+      bullet, transcript raw) to drive it live. da7eb85a/02805ddf: an incomplete plan
+      that is not consumed no longer ends with an empty "QA complete: INPUT_REQUIRED
+      — " / note "QA INPUT_REQUIRED:  " (reason kept via qa_outcome_detail; S4 extended
+      it in 264f6d01). Residual (inherent to the pane fallback, not waived): a stale
+      START directly followed by a 2..4 suffix with nothing in between is indistinguishable
+      from a fresh offset plan in the pane; the transcript stays authoritative and
+      reading older turns is pr-8efa789. R4 failed repro kept live: cd0432c0 accepted
+      3 from pane (R4-pre-cd0432c0-*), HEAD rejects. These are application-code changes
+      after review 78b2 i1 and need re-review before sign-off. Harness gotchas: blocking
+      the transcript dir also blocks verifier transcripts (same cwd) - unblock after
+      acceptance; kill -STOP cannot freeze a fake pane (tmux SIGCONTs; SIGTTIN discarded;
+      ptrace scope 1) - chmod 555 ~/.pm/hooks to suppress idle events instead.'
+    created_at: '2026-10-13T08:09:08Z'
+    last_edited: '2026-10-13T08:09:08Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -27256,11 +27280,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T01:50:20.375427+00:00'
-  updated_at: '2026-10-13T01:50:20.375427+00:00'
+  updated_at: '2026-10-13T08:09:09.251179+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-87c2bd5
+    text: 'Another trigger (pr-b8561ac QA S3, 2026-10-13, not a resume): a live run
+      whose verifier pane disappeared (verification FLAGGED "verifier pane disappeared")
+      sent the follow-up to the fake scenario pane, which exits on stdin input; the
+      second send_keys(pane_id, "") at qa_loop._poll_tmux_verdicts (~line 2713, the
+      follow-up Enter loop; same unguarded call at master line 2329) raised CalledProcessError
+      -> "QA thread crashed", verdict ERROR. The pane_exists check before the follow-up
+      is not enough; the Enter loop needs it too (or catch CalledProcessError). Log:
+      pm-s3-1791875844-0dc81d7c.log 07:44:27-28; capture scenarios/3/R3x-bullet-head-J-attempt1-verifier-blocked
+      in the pr-b8561ac captures.'
+    created_at: '2026-10-13T08:09:09Z'
+    last_edited: '2026-10-13T08:09:09Z'
 - id: pr-a75da60
   plan: bugs
   title: 'Bug: local-backend pm pr merge of a second PR always falls to the merge-resolution
