@@ -3257,15 +3257,49 @@ prs:
   reviewed_at: '2026-03-23T15:03:46.791455+00:00'
 - id: pr-b53bfe2
   plan: bugs
-  title: Fix trust prompt blocking implementation sessions
+  title: Resolve workspace trust across all automated workflow sessions
   branch: pm/pr-b53bfe2-fix-trust-prompt-blocking-implementation-sessions
   status: pending
   depends_on: []
-  description: Claude Code trust prompt blocks automated sessions in new workdirs.
-    The existing --dangerously-skip-permissions flag is too broad. Need targeted auto-accept
-    via settings or TUI detection.
+  description: 'Workspace trust prompts block unattended PM sessions in newly created
+    workdirs. Reproduced in #228 and again in #229 after moving to the main PM session:
+    the host QA planner sat at trust for one hour, timed out with zero scenarios,
+    and the finalizer then blocked at the same prompt. Existing broad permission-bypass
+    flags do not establish workspace trust reliably. The old suggestion that the watcher
+    framework might subsume this issue is not verified and does not satisfy acceptance.
+
+
+    Provide reliable, narrowly scoped trust bootstrap for PM-created or explicitly
+    authorized project workdirs across all workflow roles: implementation, review,
+    host QA planning, scenario preparation/execution, independent verification, QA
+    finalization, sign-off, and merge resolution. Cover newly created QA fixture/interactive
+    checkouts, reused workdirs, and restart/session handoff. Use supported provider
+    configuration or explicit handling of the known workspace prompt; do not globally
+    trust arbitrary folders or conflate workspace trust with blanket tool permission
+    bypass. Keep provider-specific mechanics behind the existing session-launch boundary
+    so other runtimes can supply their own behavior. If bootstrap cannot complete,
+    expose a bounded, actionable failure rather than waiting an hour and proceeding
+    toward finalization with zero scenarios.
+
+
+    Acceptance: start the real CLI in a fresh known checkout with no pre-existing
+    trust entry and verify that the intended prompt runs without manual keys; exercise
+    both host and container/session paths, new QA checkouts, and resumed work. Unknown/unapproved
+    workspace behavior remains explicit. Verify an actual QA plan and worker activity,
+    not only window creation or registry status. Preserve evidence of the original
+    blocked path and the repaired path.
+
+
+    Qualification prerequisite (user decision 2026-10-12): after #229, this PR is
+    the third required fix alongside pr-488ac6d (automatic sign-off handoff) and pr-b8561ac
+    (complete QA planner transcript). Only after all three are adopted and a subsequent
+    representative untouched PR runs from start through nonempty verified QA and fresh
+    sign-off with no human or external-agent shepherding may autostart be called healthy.
+    A configured stop before merge is allowed; manually accepting trust, rewriting
+    a plan, restarting workers, editing phase state, or launching sign-off disqualifies
+    the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-03-08T21:50:08.519655+00:00'
+  updated_at: '2026-10-12T21:08:15.463081+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3273,6 +3307,16 @@ prs:
       programmatic fix.
     created_at: '2026-03-08T21:50:08Z'
     last_edited: '2026-03-08T21:50:08Z'
+  - id: note-b6d2642
+    text: 'Reproduced on #229 after main-session handoff (2026-10-12): review loop
+      a022 PASS on iteration 4 at 19:31:47Z. Host QA planner blocked on workspace-trust
+      prompt for #229 workdir. At 20:31:53Z the driver timed out, parsed zero scenarios,
+      set INPUT_REQUIRED, then launched a finalizer that also blocked on the same
+      trust prompt. No QA scenarios executed. Supervisor accepted trust for this known
+      checkout and requested fresh QA through the TUI. Evidence: captures/pr-0b87a97/qa-recovery-20261012
+      in project_manager-c5a1006b session. The failed run must not count as QA coverage.'
+    created_at: '2026-10-12T20:57:15Z'
+    last_edited: '2026-10-12T20:57:15Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -25767,6 +25811,23 @@ prs:
       extraction and cover truncation that leaves a valid suffix of scenario headers.'
     created_at: '2026-10-12T16:42:21Z'
     last_edited: '2026-10-12T16:42:21Z'
+  - id: note-2e5f197
+    text: 'Required planner-handoff hardening found during #229 round 2: the planner
+      committed application fix 237179d7 and QA specs 0b4c6b1b/bddbac33 but did not
+      push before emitting QA_PLAN_END. The driver cloned this local head, then swapped
+      origin to GitHub, where the branch was still ad9a84db. A later pull --rebase
+      in scenario workspaces treated bddbac33 as the old upstream fork point and dropped
+      the unpublished commits, losing both the fix and S6-S10 instructions. The shepherd
+      pushed bddbac33 and informed all five workers to recover. Extend the planner
+      handoff work to ensure required committed artifacts are published before remote-backed
+      fan-out, verify worker revision/spec consistency, and fail clearly instead of
+      silently testing a different tree. Application code edited during planning must
+      also invalidate the earlier review and receive review before sign-off. Regression
+      coverage should reproduce local clone + origin swap + pull with an unpublished
+      planner head. Evidence: captures/pr-0b87a97/shepherd-20261012/qa-round-2-planner-publication-recovery.json
+      in session project_manager-c5a1006b. This recovery invalidates unattended qualification.'
+    created_at: '2026-10-12T22:43:16Z'
+    last_edited: '2026-10-12T22:43:16Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -26294,6 +26355,32 @@ prs:
       kept in evidence).'
     created_at: '2026-10-13T01:01:33Z'
     last_edited: '2026-10-13T01:01:33Z'
+  - id: note-8eb20ee
+    text: 'Sign-off evidence guard: nested fake QA fixtures have written synthetic
+      PASS metadata into this PR capture directory (Smoke, s, s1/s2, Alpha check/Beta
+      check; an extra index 6 existed while the real first round had only indices
+      1–5). See shepherd-20261012/nested-fixture-metadata-observation.json under this
+      session captures. Determine actual coverage/verdicts from each real QA run qa_status.json,
+      the corresponding worker/verifier transcripts, real recipes and recordings,
+      and final code revision. Do not count orphan fixture metadata as a tested scenario
+      or silently treat fake PASS records as real QA evidence. Report any remaining
+      metadata/evidence discrepancy explicitly.'
+    created_at: '2026-10-12T21:35:04Z'
+    last_edited: '2026-10-12T21:35:04Z'
+  - id: note-2c13bb5
+    text: 'QA round 2 review/evidence guard: review loop 15ef passed application revision
+      ad9a84db. The QA planner then committed application changes in 237179d7 (capture
+      mount ownership), followed by QA spec commits 0b4c6b1b and bddbac33. Those application
+      changes must receive review before final sign-off; do not equate the earlier
+      review PASS with review of the newer revision. If this QA round returns PASS
+      without a review bounce, shepherd it through another review before sign-off.
+      Also, the controlling main-directory PM is still the old master code: its container
+      launcher does not set the newly introduced PM_CAPTURES_PR. Do not assume the
+      new guard isolates this running outer QA environment without verifying ownership
+      propagation. Continue to use real run status and the archived evidence index
+      rather than trusting arbitrary scenario sidecars.'
+    created_at: '2026-10-12T22:32:07Z'
+    last_edited: '2026-10-12T22:32:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -26602,3 +26689,113 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-1ae1d2d
+  plan: bugs
+  title: 'Bug: nested QA fixtures overwrite the enclosing PR scenario evidence metadata'
+  branch: pm/pr-1ae1d2d-bug-nested-qa-fixtures-overwrite-the-enclosing-pr-
+  status: pending
+  depends_on: []
+  description: 'Observed during #229 live QA on 2026-10-12. The real QA run pr-0b87a97-1302d0167f638df7
+    contains scenarios 1–5; at 21:34Z only 1 and 3 had real NEEDS_WORK verdicts. Yet
+    the enclosing captures/pr-0b87a97/scenarios directory contained synthetic PASS
+    records: 1 title Smoke, 2 title s, 3 title s1, 4 title s2, 5 title Alpha check,
+    6 title Beta check. Records 1/2/5/6 were refreshed during the live scenario fixture
+    tests; 3/4 remained from implementation verification. Nested fake-Claude/QA projects
+    appear to inherit capture routing for the outer PR and can overwrite scenario.json,
+    verdict.md and prompt.md or leave extra fake scenarios. These records must never
+    be mistaken for real PR QA coverage by dashboard/report/sign-off. Reproduce with
+    a nested QA fixture under an outer scenario capture environment; isolate fixture
+    capture state from the enclosing PR, preserve outer evidence, and ensure report
+    scenario membership/verdicts are bound to real run IDs. Do not just trust arbitrary
+    scenario directories. Evidence: /home/matt/.pm/sessions/project_manager-c5a1006b/captures/pr-0b87a97/shepherd-20261012/nested-fixture-metadata-observation.json
+    and the referenced real qa_status.json. The outer driver may rewrite some records
+    on completion, which does not prove fixture isolation or remove orphan records.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T21:35:03.724695+00:00'
+  updated_at: '2026-10-12T21:42:00.057612+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-cd48d30
+    text: 'Root-cause inspection: pm_core/paths.py captures_dir(pr_id, ...) returns
+      the shared /pm-captures bind mount whenever the requested host path is absent,
+      without checking which PR owns the mount. In a scenario container, nested fixture
+      PR IDs therefore resolve to the enclosing PR mount. _persist_scenario_verdicts
+      writes scenario.json and verdict.md to this result; other capture writers use
+      the same routing. Preserve the intended outer-worker mount behavior while isolating
+      nested PRs and test fixtures, and give persisted evidence explicit PR/run ownership.'
+    created_at: '2026-10-12T21:42:00Z'
+    last_edited: '2026-10-12T21:42:00Z'
+  - id: note-e446d9e
+    text: 'Partial overlap with #229: its QA round-2 planner committed 237179d7, adding
+      PM_CAPTURES_PR to new container launches and checking that ownership before
+      using /pm-captures. That code still needs the subsequent review/QA cycle. Older
+      running controllers do not supply the marker and retain the legacy collision
+      behavior; this was observed again in round 2. Explicit persisted PR/run identity,
+      trustworthy report membership, and handling of stale/orphan fixture records
+      remain part of this bug. Reconcile against the final #229 implementation before
+      starting; do not reimplement an already-landed path guard or close the whole
+      evidence-integrity issue based on that guard alone.'
+    created_at: '2026-10-12T22:43:42Z'
+    last_edited: '2026-10-12T22:43:42Z'
+- id: pr-b19db15
+  plan: bugs
+  title: 'Bug: generated background-job waits can match themselves and stall completed
+    work'
+  branch: pm/pr-b19db15-bug-qa-artifact-rendering-wait-can-match-itself-an
+  status: pending
+  depends_on: []
+  description: 'Observed in #229 QA round 2 scenario 10 on 2026-10-12. Both agg/ffmpeg
+    rendering jobs had finished and ffprobe confirmed valid videos (TUI 734.48s, CLI
+    126.78s), but the worker remained blocked for about eight minutes in an improvised
+    shell loop using ! pgrep -f "dl-agg/agg|ffmpeg -loglevel". pgrep matched the waiting
+    shell itself because its command line contained the same pattern. No renderer
+    was still running. The shepherd verified the output files, terminated only the
+    waiting shell (container PID 8808), and told the worker to continue. This was
+    a generated worker command, not a matching polling loop in checked-in PM code;
+    current recording recipes prescribe synchronous rendering but do not explicitly
+    guard against this workaround.
+
+
+    Harden QA artifact completion guidance and any shared rendering helper so workers
+    wait on the actual job handle/PID and check its exit status, with a bounded timeout
+    and actionable failure. Validate the expected artifact before declaring success;
+    a leftover file alone is insufficient. Avoid broad process-name polling that can
+    match the polling shell itself. Keep the correction small and reusable for tmux-screen-recording.md
+    and cli-recording.md. Add meaningful regression coverage if introducing a helper:
+    completed renderer while a shell contains the renderer pattern, renderer failure,
+    and timeout. Exercise the prescribed workflow in a real scenario and preserve
+    completion/failure evidence. Do not silently treat a killed wait or stale output
+    as a successful rendering job.
+
+
+    Evidence: captures/pr-0b87a97/shepherd-20261012/qa-round-2-s10-render-wait-recovery.json
+    in session project_manager-c5a1006b; native worker session 48124da4-b9df-405b-979e-30c421bc9e48.
+    This intervention means #229 is still a supervised run and cannot qualify unattended
+    autostart.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-12T23:04:43.463024+00:00'
+  updated_at: '2026-10-12T23:09:15.916240+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-55e963a
+    text: 'Second reproduction in #229 review round 3 iteration 1, native session
+      cd99f203-abeb-4cc8-9f39-08b708308eed: a generated until ! pgrep -f "pytest -q
+      -p no:cacheprovider tests/" wait matched its own shell after the suite had already
+      finished (2972 pass, known base hook installer failure). No pytest process remained.
+      Shepherd terminated only wait shell PID 1959 and queued the completed result.
+      Evidence: shepherd-20261012/review-round-3-i1-wait-recovery.json. Broaden this
+      fix to shared background-job guidance used by review/test execution as well
+      as QA artifact recipes; use actual job identity, completion and exit status
+      with a bound. Preserve pipeline failure status too: piping pytest to tail without
+      pipefail misleadingly reports shell exit 0 despite a failed test. Both reproductions
+      are improvised worker commands, not a checked-in PM polling loop.'
+    created_at: '2026-10-12T23:09:15Z'
+    last_edited: '2026-10-12T23:09:15Z'
