@@ -218,7 +218,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # Clear log message after 1 second for manual refresh
         if is_manual:
-            app.set_timer(1.0, app._clear_log_message)
+            app.clear_log_message_later(1.0)
     except SystemExit as e:
         _log.error("Sync raised SystemExit(%s) — suppressing to prevent TUI crash", e.code)
     except Exception as e:
@@ -281,8 +281,8 @@ async def startup_github_sync(app) -> None:
         else:
             app.log_message("GitHub sync: up to date")
 
-        app.set_timer(2.0, app._clear_log_message)
+        app.clear_log_message_later(2.0)
     except Exception as e:
         _log.exception("GitHub sync error")
         app.log_message(f"GitHub sync error: {e}")
-        app.set_timer(3.0, app._clear_log_message)
+        app.clear_log_message_later(3.0)

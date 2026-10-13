@@ -933,10 +933,16 @@ class ProjectManagerApp(App):
         if detail:
             msg += f" {detail}"
         self.log_message(msg, sticky=timeout)
-        # Clear only this error: a newer message (e.g. a held auto-start
-        # confirmation forced past the error) must not be blanked by it.
-        seq = self._log_seq
-        self.set_timer(timeout, lambda: self._clear_log_message(seq=seq))
+        self.clear_log_message_later(timeout)
+
+    def clear_log_message_later(self, delay: float) -> None:
+        """Clear the latest log-line message after *delay* seconds.
+
+        Only that message: if a newer one (e.g. a held auto-start
+        confirmation forced past it) has the line by then, it stays.
+        """
+        seq = getattr(self, "_log_seq", 0)
+        self.set_timer(delay, lambda: self._clear_log_message(seq=seq))
 
     def _clear_log_message(self, seq: int | None = None) -> None:
         """Clear the log line message.

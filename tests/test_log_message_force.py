@@ -29,6 +29,10 @@ def _stub_app():
         app, msg, **kw)
     app._flush_held_log_message = (
         lambda: ProjectManagerApp._flush_held_log_message(app))
+    app._clear_log_message = (
+        lambda seq=None: ProjectManagerApp._clear_log_message(app, seq=seq))
+    app.clear_log_message_later = (
+        lambda delay: ProjectManagerApp.clear_log_message_later(app, delay))
     return app, shown
 
 
@@ -371,8 +375,6 @@ def test_newer_forced_message_drops_older_queued_confirmation():
 
 def test_error_timeout_does_not_blank_newer_held_confirmation():
     app, shown = _stub_app()
-    app._clear_log_message = (
-        lambda seq=None: ProjectManagerApp._clear_log_message(app, seq=seq))
     ProjectManagerApp.log_error(app, "Error:", "merge failed", timeout=5)
     clear_error = app.timers[-1]
     _log(app, "Auto-start: removed pr-y (1 remaining)", force=True, hold=3)
@@ -382,8 +384,6 @@ def test_error_timeout_does_not_blank_newer_held_confirmation():
 
 def test_error_timeout_still_clears_its_own_error():
     app, shown = _stub_app()
-    app._clear_log_message = (
-        lambda seq=None: ProjectManagerApp._clear_log_message(app, seq=seq))
     ProjectManagerApp.log_error(app, "Error:", "merge failed", timeout=5)
     app.timers[-1]()
     assert shown[-1] == ""
@@ -392,11 +392,37 @@ def test_error_timeout_still_clears_its_own_error():
 
 def test_error_expiring_behind_a_hold_is_not_shown_late():
     app, shown = _stub_app()
-    app._clear_log_message = (
-        lambda seq=None: ProjectManagerApp._clear_log_message(app, seq=seq))
     _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)
     ProjectManagerApp.log_error(app, "Error:", "stale", timeout=1)  # deferred
     app.timers[-1]()  # the error's timer fires before the hold ends
     app._log_hold_until = 0.0
     app.timers[0]()
     assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
+
+
+# Review 4be9 (pr-0b87a97): the manual-refresh / GitHub-sync clear timers
+# blanked the line unconditionally, so a held prune line from the
+# check_and_start that the refresh itself ran ("target W merged — removed")
+# vanished after 1s, and "Refreshed" then painted when the hold ended.
+
+def test_refresh_clear_timer_does_not_blank_held_prune_line():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: target pr-w merged — removed (1 remaining)",
+         force=True, hold=3)
+    _log(app, "Refreshed")  # deferred by the hold
+    app.clear_log_message_later(1.0)
+    app.timers[-1]()  # the 1s refresh clear fires inside the hold
+    assert shown[-1] == (" Auto-start: target pr-w merged — removed "
+                         "(1 remaining)")
+    app._log_hold_until = 0.0
+    app.timers[0]()  # hold ends: the expired "Refreshed" is not shown late
+    assert shown[-1] == (" Auto-start: target pr-w merged — removed "
+                         "(1 remaining)")
+
+
+def test_refresh_clear_timer_clears_its_own_message():
+    app, shown = _stub_app()
+    _log(app, "Refreshed")
+    app.clear_log_message_later(1.0)
+    app.timers[-1]()
+    assert shown[-1] == ""

@@ -427,6 +427,29 @@ QA round 4 fixes (reviewed in review-loop 6ad2):
     held for `CONFIRM_HOLD_SECONDS`, like "targets +=" (item 17), so a
     racing `g` merge spinner can't overwrite them.
 
+QA round 5 fixes (reviewed in review-loop 4be9):
+
+35. *(QA s22, 9caf9baf)* Showing a log-line message drops any older
+    message deferred by a hold, so a hold ending can't flush a stale
+    "Selected: X" over a newer forced answer (e.g. command-bar
+    `autostart list` typed within 3s of an add).
+36. *(QA s23, 1c4da9e1)* A held message arriving during another hold is
+    queued (at most `_LOG_HELD_QUEUE_MAX` = 3) and shown with its own hold
+    when the current one ends, so back-to-back confirmations ("Z not a
+    target", "target W merged — removed") are each readable. Messages
+    carry arrival sequence numbers; a replay never paints over a newer
+    message.
+37. *(QA s21, bd754a14)* `L` prints the backlog, then the last
+    `LOG_PANE_RECAP_LINES` "log: Auto-start/Auto-sequence/Auto-merge"
+    lines under a "recent auto-start messages" divider, then follows
+    (`pane_ops.log_pane_command`).
+38. *(review 4be9 i1)* Every timed log-line clear goes through
+    `app.clear_log_message_later(delay)`, which clears only the message
+    that was latest when it was scheduled. Before, the manual-refresh and
+    GitHub-sync timers cleared unconditionally and blanked a held prune
+    line logged by the refresh's own `check_and_start` after 1s (item 36
+    had already scoped `log_error` and Busy this way).
+
 Out of scope and filed (see qa.md ambiguity 12): pr-7c32e44 (the
 post-sign-off "merge attempt failed" row) and pr-0a08055 (transient
 skip-QA / "Auto-merge … merging" log paints hidden by a sticky line;
