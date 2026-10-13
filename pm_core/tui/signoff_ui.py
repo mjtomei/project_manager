@@ -108,6 +108,11 @@ def _launched_at(app) -> dict:
 def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
     import time
     from pm_core import signoff as signoff_mod
+    if pr_id in _inflight(app):
+        # A launch slower than the backoff (container start) is still
+        # running; a second ``pm pr signoff`` would only queue on its lock.
+        _log.debug("signoff: %s launch still in flight", pr_id)
+        return
     launched = _launched_at(app)
     now = time.monotonic()
     last = launched.get(pr_id)
@@ -122,7 +127,17 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
         app.log_message(f"[red]Cannot create transcript dir[/] {tdir}: {e}")
         return
     transcript = signoff_mod.signoff_transcript(tdir, pr_id)
+    _inflight(app).add(pr_id)
     app.run_worker(_launch_quiet(app, pr_id, transcript))
+
+
+def _inflight(app) -> set:
+    """PR ids whose ``pm pr signoff`` launch worker has not finished."""
+    s = getattr(app, "_signoff_launch_inflight", None)
+    if not isinstance(s, set):
+        s = set()
+        app._signoff_launch_inflight = s
+    return s
 
 
 async def _launch_quiet(app, pr_id: str, transcript) -> None:
@@ -147,6 +162,8 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
         _log.exception("signoff_ui: launch failed for %s", pr_id)
         app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: {e}")
         return
+    finally:
+        _inflight(app).discard(pr_id)
     if proc.returncode != 0:
         err = (stderr.decode(errors="replace") if stderr else "").strip()
         _log.warning("signoff_ui: pm pr signoff %s exit=%s: %s",

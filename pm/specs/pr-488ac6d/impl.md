@@ -57,7 +57,8 @@ R2. **TUI sign-off driver** — new `pm_core/tui/signoff_ui.py`:
         subprocess (argv list, like `auto_start._start_pr_quiet`), never the
         synchronous `pr_view.run_command` — that blocks the event loop and
         kills launches slower than 30 s (container start).  Failures are
-        logged; the 60 s relaunch backoff covers the window not being up yet.
+        logged; the 60 s relaunch backoff covers the window not being up
+        yet, and a launch still in flight is never stacked with a second one.
       - `running` → nothing.
       - hop `ready_to_merge` (fresh SIGNOFF_MERGE on current HEAD) →
         `_maybe_auto_merge` (O: stop with the ready line; A: merge).

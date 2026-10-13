@@ -106,8 +106,12 @@ class World:
         """Stand-in for ``signoff_ui._launch_quiet`` (a worker coroutine in
         the TUI): records the command via the patchable ``run_command``."""
         from pm_core.tui import pr_view
-        pr_view.run_command(
-            app, f"pr signoff --background --transcript {transcript} {pr_id}")
+        try:
+            pr_view.run_command(
+                app,
+                f"pr signoff --background --transcript {transcript} {pr_id}")
+        finally:
+            app._signoff_launch_inflight.discard(pr_id)  # worker finished
 
     def emit(self, verdict: str) -> None:
         """The router pane prints its verdict into the TUI's transcript."""
@@ -455,3 +459,25 @@ def test_launch_quiet_runs_signoff_off_the_event_loop(tmp_path):
                                 str(transcript), PR]
     assert any("Sign-off launch failed" in m and "is merged" in m
                for m in app.logs)
+
+
+def test_slow_launch_in_flight_is_not_duplicated(world_factory):
+    """A launch still running past the relaunch backoff (container start)
+    must not be stacked with a second ``pm pr signoff``."""
+    from pm_core.tui import signoff_ui
+    app, w = world_factory(stop=True)
+    pending = []
+    with patch("pm_core.tui.signoff_ui._launch_quiet",
+               lambda a, pr_id, t: pending.append(pr_id)):
+        _qa_pass(app)
+        for k in list(app._signoff_launched_at):
+            app._signoff_launched_at[k] -= signoff_backoff()
+        _poll(app, 2)
+    assert pending == [PR]
+    # Worker finishes without a window: the next pass past the backoff
+    # relaunches.
+    signoff_ui._inflight(app).discard(PR)
+    for k in list(app._signoff_launched_at):
+        app._signoff_launched_at[k] -= signoff_backoff()
+    _poll(app)
+    assert len(w.launches()) == 1
