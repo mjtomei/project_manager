@@ -1288,7 +1288,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
 
-        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd, background=True)
+        # Explicit cwd: without -c tmux starts the split in the calling
+        # process's cwd (the TUI's pm dir), not the PR workdir.
+        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd,
+                                             background=True, cwd=workdir)
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than

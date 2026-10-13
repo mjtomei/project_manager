@@ -787,11 +787,18 @@ def build_claude_shell_cmd(
         # host path as ``write_dir`` and a container-internal ``cwd``; their
         # trust is seeded into the container's config copy at creation
         # (container.create_container).
+        cd_prefix = ""
         if cwd and (write_dir is None
                     or os.path.realpath(write_dir) == os.path.realpath(cwd)):
             prepare_workspace(cwd)
+            # Run Claude in the directory that was just bootstrapped, not
+            # wherever the pane happens to start (a tmux split without -c
+            # starts in the *caller's* cwd — the review pane once launched
+            # in the TUI's pm/ dir and sat at the trust prompt there).
+            if os.path.isdir(cwd):
+                cd_prefix = f"cd {shlex.quote(cwd)} && "
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-        cmd = f"{env_prefix}claude{skip}"
+        cmd = f"{cd_prefix}{env_prefix}claude{skip}"
 
     # Explicit model param overrides provider's model_flag
     effective_model = model or model_flag

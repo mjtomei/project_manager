@@ -108,6 +108,17 @@ and bootstraps the entry immediately; `remove` drops the authorization (it
 does not edit Claude's config — revoking Claude trust remains a Claude
 action).
 
+R9. **Launch cwd == bootstrapped cwd.** Trusting a checkout only helps if
+Claude actually runs there. Found live: `cli/pr.py:_launch_review_window`
+split the review Claude pane with no `-c`, so tmux started it in the
+*calling* process's cwd (the TUI's `pm/` dir); the reviewer sat at the trust
+prompt for that dir while the PR checkout (correctly trusted) went unused,
+and its transcript landed outside the path the loop polls. Fixes: the review
+split passes `cwd=workdir`, and `build_claude_shell_cmd` prefixes host
+launches with `cd <cwd> &&` so every role runs in the directory it
+bootstrapped regardless of how the pane was created. Container launches are
+unchanged (`exec -w /workspace`).
+
 ## Implicit requirements
 
 - The config write must not clobber concurrent Claude writes: take the same

@@ -228,6 +228,16 @@ class TestLaunchBoundary:
                                session_type="qa_planning")
         assert _projects()[str(wd)]["hasTrustDialogAccepted"] is True
 
+    def test_host_launch_runs_in_bootstrapped_dir(self, home):
+        """Claude must run where trust was established, whatever cwd the
+        pane happens to start in (review pane regression)."""
+        wd = _pm_workdir(home)
+        cmd = build_claude_shell_cmd(prompt="p", cwd=str(wd), session_type="review")
+        assert cmd.startswith(f"cd {wd} && claude")
+        container = build_claude_shell_cmd(prompt="p", cwd="/workspace",
+                                           write_dir=str(wd), session_type="review")
+        assert not container.startswith("cd ")
+
     def test_resume_launch_bootstraps(self, home):
         wd = _pm_workdir(home)
         build_claude_shell_cmd(cwd=str(wd), session_id=str(uuid.uuid4()),
