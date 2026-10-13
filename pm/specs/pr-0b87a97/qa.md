@@ -86,9 +86,12 @@ review/QA.
 ### Popup (key `a`)
 - **R14 popup content.** When the user presses `a`, Then a modal lists each
   target (header with policy + state) and its unmerged closure PRs with
-  ID/title, phase, state, reason, review iteration/QA progress, window. Shared
-  deps appear with "also needed by". Empty set shows "No auto-start targets
-  (auto-start off)".
+  ID/title, phase, state, reason, review iteration/QA progress, window. Every
+  target header names its policy (`[stop-before-merge]` or `[auto-merge]`).
+  A dependency shared by two or more targets is listed under each target with
+  "also needed by <the other targets>"; a target that is itself in another
+  target's closure is not annotated with itself (b336ee34). Empty set shows
+  "No auto-start targets (auto-start off)".
 - **R15 popup == CLI.** For the same moment, the popup and `pm autostart
   status --json` agree on targets, phases, states and reasons.
 - **R16 live refresh.** While open, the popup refreshes (~2s) to reflect
@@ -181,6 +184,20 @@ review/QA.
   merged — removed (N remaining)"; for the last target the same line says
   "all targets complete — auto-start OFF". The merge spinner/result line
   does not hide it, and it is in `L` (e0d891a7).
+
+### Added from QA round 4 fixes (verify on the final revision)
+- **R37 round-4 display fixes.**
+  - Runs popup: every target header carries its policy tag, auto-merge
+    included; dependency rows carry only a stop mark (3239e71b).
+  - Enter/f on a row with no live window keeps the popup open and shows
+    "No live window for X" on the selected row, so it is visible even when
+    the popup covers the log line (80x12). Moving the selection clears it
+    (d1885432).
+  - While `r` or a background sync is pulling, the status bar keeps
+    `AUTO ×N`, the filter segment and WCH (b68801b8).
+  - "Auto-start: removed X (N remaining)", "X not a target" and
+    "Auto-start: OFF" from `pm autostart remove|clear` stay readable when a
+    `g` merge spinner is running at the same moment (79575dcc).
 
 ## 2. Setup
 Per `pm/qa/instructions/tui-manual-test.md`: install pm from this branch
@@ -311,6 +328,49 @@ targets/policies or relaunching finished/in-flight work; any traceback.
    filed and out of scope: pr-22c92ef (`AUTO ×N` clipped in an unzoomed
    ~40-column pane; 80 columns must still show it), pr-6412997 (with `/`
    pending, the tree consumes h/j/k/l before the command bar opens).
+
+12. Scope boundaries for round 5 and later. Round 4 S19 first reported
+   PASS although some concrete Thens had failed. Independent verification
+   flagged it, and it ended NEEDS_WORK with one in-scope fix (3239e71b).
+   Planners and refiners must follow these rules:
+   - **In scope (assert them):**
+     - The policy and gate behaviour in R7, R21, R32 and R36: a
+       stop-before-merge PR is never merged automatically; an auto-merge PR
+       merges only after a fresh SIGNOFF_MERGE, through `pm pr merge`
+       without `--no-signoff-check`; and so on.
+     - The policy tags on the popup headers (R14, R37).
+     - Every fix listed in R23–R37.
+   - **Out of scope (do not write Thens that need them):**
+     - pr-7c32e44. After an auto-merge PR whose merge the gate refused is
+       signed off, its status row may read "merge attempt failed; no merge
+       window" (state failed), and the scheduler may not retry the merge.
+       In that case assert:
+       - `signoff.fresh` is true in `status --json`, and no row still says
+         "awaiting sign-off";
+       - the user's `g` (or `pm pr merge`) then merges it with the gate
+         passing.
+     - pr-0a08055 (pre-existing on master). These lines may not paint in
+       the TUI log line: "Auto-merge: X … merging", the skip-QA "review
+       passed, skipping QA", and "ready to merge … press g", because the
+       sticky "Review loop done" line or a same-frame merge error hides
+       them. Assert those transitions through `status --json`, the popup,
+       the `L` log and project.yaml instead. The R23/R36 lines are still
+       required to paint.
+     - Everything listed in ambiguities 10 and 11.
+   - **Wording, not bugs:**
+     - `mode` is "targets", not "on".
+     - `A` on a PR that kept an earlier stop mark adds it as stop (the stop
+       mark survives a remove, per ambiguity 2), so use a PR that was never
+       stop-marked to test `A` → auto-merge.
+     - The status bar at 80 columns clips the repo path and may clip the
+       last characters of a filter label. Only `AUTO ×N` must survive.
+   - **Rules for writing Thens:**
+     - Concrete steps must not add obligations that the R-items and
+       scenario text above do not require. Mark any extra observation as
+       informational.
+     - A literal Then that fails is never waived as a harness or wording
+       issue. Fix it (NEEDS_WORK), or return INPUT_REQUIRED and name the
+       contract conflict.
 
 No unresolved ambiguities.
 
@@ -923,6 +983,11 @@ Covers R7, R21, R32, R36, E2, E8, ambiguity 4.
   - the status says "QA skipped (skip_qa); awaiting sign-off";
   - the gate still applies;
   - the stop target stops.
+
+Note for round 5 and later: S19's post-sign-off row for U and the transient
+"Auto-merge … merging" / skip-QA log paints fall under ambiguity 12
+(pr-7c32e44, pr-0a08055). Assert them through status, the popup and `L`. The
+policy tag on U's header (R14) is in scope.
 
 ### S20 — Restart adoption, CLI during restart, typing after restart
 Covers R19, R20, R26, R27, R33, R34, ambiguities 7–8.

@@ -407,6 +407,30 @@ QA round 3 fixes (reviewed in review-loop 472d):
     targets complete — auto-start OFF" folded in for the last target), so
     the `g` merge spinner and result line don't overwrite it.
 
+QA round 4 fixes (reviewed in review-loop 6ad2):
+
+31. *(QA s16, d1885432)* Enter/f on a window-less runs-popup row also shows
+    "No live window for X" on the selected row's detail line
+    (`AutoRunsScreen._notice`), because on a short terminal the popup
+    covers the app's log line. Moving the selection clears it.
+32. *(QA s17, b68801b8)* `do_normal_sync` paints "pulling" through
+    `app._update_status_bar(sync_state="pulling")`. The bare
+    `StatusBar.update_status()` it used before dropped `AUTO ×N`, the
+    filter segment and WCH during every pull.
+33. *(QA s19, 3239e71b)* Runs-popup target headers name their policy
+    whether it is stop-before-merge or auto-merge (R14). Dependency rows
+    show only a stop mark, because a dependency's merge follows its
+    targets.
+34. *(QA s18, 79575dcc)* The `remove_targets` and `clear_targets`
+    confirmations ("removed X", "X not a target", "OFF") are forced and
+    held for `CONFIRM_HOLD_SECONDS`, like "targets +=" (item 17), so a
+    racing `g` merge spinner can't overwrite them.
+
+Out of scope and filed (see qa.md ambiguity 12): pr-7c32e44 (the
+post-sign-off "merge attempt failed" row) and pr-0a08055 (transient
+skip-QA / "Auto-merge … merging" log paints hidden by a sticky line;
+pre-existing on master).
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i
