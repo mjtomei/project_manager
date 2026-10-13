@@ -2433,6 +2433,31 @@ def _poll_tmux_verdicts(
                 _launch_next_queued()
                 continue
 
+            # Workers with no hook event yet may be sitting at the
+            # workspace-trust prompt.  Watch them before the verdict grace
+            # check: the grace only delays verdict polling, and gating the
+            # watch on it would push a blocked worker's failure out to
+            # verdict grace + trust grace after launch.
+            if (pane_id and scenario.session_id
+                    and _hook_events.read_event(scenario.session_id) is None):
+                watch = _trust_watches.get(scenario.index)
+                if watch is None or watch.pane_id != pane_id:
+                    watch = WorkspacePromptWatch(
+                        pane_id, scenario.worktree_path,
+                        transcript_path=scenario.transcript_path)
+                    _trust_watches[scenario.index] = watch
+                blocked = watch.check()
+                if blocked:
+                    _log.warning("Scenario %d worker blocked: %s",
+                                 scenario.index, blocked)
+                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                    state.scenario_verdict_reasons[scenario.index] = (
+                        _TRUST_BLOCKED_PREFIX + blocked)
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
+                    _launch_next_queued()
+                    continue
+
             if in_grace:
                 continue
 
@@ -2454,24 +2479,6 @@ def _poll_tmux_verdicts(
             ev = _hook_events.read_event(scenario.session_id)
             ev_ts = float((ev or {}).get("timestamp") or 0)
             last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
-            if ev is None and pane_id:
-                watch = _trust_watches.get(scenario.index)
-                if watch is None or watch.pane_id != pane_id:
-                    watch = WorkspacePromptWatch(
-                        pane_id, scenario.worktree_path,
-                        transcript_path=scenario.transcript_path)
-                    _trust_watches[scenario.index] = watch
-                blocked = watch.check()
-                if blocked:
-                    _log.warning("Scenario %d worker blocked: %s",
-                                 scenario.index, blocked)
-                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                    state.scenario_verdict_reasons[scenario.index] = (
-                        _TRUST_BLOCKED_PREFIX + blocked)
-                    pending.discard(scenario.index)
-                    verdicts_changed = True
-                    _launch_next_queued()
-                    continue
             if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
                 # No new idle_prompt — skip this scenario this tick.
                 # Stop fires per-turn (not just at session end); relying

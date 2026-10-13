@@ -1005,10 +1005,14 @@ def _poll_impl_idle(app) -> None:
         if key.startswith("review:") and key not in active_review_keys:
             tracker.unregister(key)
 
-    # Unregister PRs no longer active
+    # Unregister PRs no longer active.  ``qa:`` keys belong to
+    # qa_loop_ui.poll_qa_state, which unregisters them when the run ends;
+    # dropping them here would re-register a fresh state (and a fresh
+    # workspace-trust watch with a reset accept budget) on every QA poll.
     for key in tracker.tracked_keys():
         if (not key.startswith("merge:")
                 and not key.startswith("review:")
+                and not key.startswith("qa:")
                 and key not in active_pr_ids):
             tracker.unregister(key)
 

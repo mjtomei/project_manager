@@ -628,6 +628,62 @@ def test_trust_blocked_worker_marked_input_required(tmp_path):
         "blocked at workspace-trust prompt: Claude is waiting at the prompt")
 
 
+def test_trust_blocked_worker_watched_during_verdict_grace(tmp_path):
+    """The verdict grace period must not delay the trust watch: a worker
+    stuck at the dialog fails within trust grace of launch, not verdict
+    grace + trust grace."""
+    from pm_core.qa_loop import QALoopState, QAScenario, _poll_tmux_verdicts
+    scenario = QAScenario(index=1, title="T", focus="f")
+    scenario.window_name = "qa-s1"
+    scenario.session_id = "sid-trust-grace"
+    scenario.worktree_path = str(tmp_path)
+    state = QALoopState(pr_id="pr-w")
+    state.scenarios = [scenario]
+    ticks = []
+
+    def _sleep(_s):
+        ticks.append(_s)
+        if len(ticks) > 3:
+            raise RuntimeError("trust watch never ran inside verdict grace")
+
+    with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+         patch("pm_core.qa_loop.time.sleep", _sleep), \
+         patch("pm_core.qa_loop.time.monotonic", return_value=0.0), \
+         patch("pm_core.hook_events.read_event", return_value=None), \
+         patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch.object(WorkspacePromptWatch, "check",
+                      return_value="Claude is waiting at the prompt"), \
+         patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+        _poll_tmux_verdicts(state, {}, {}, "sess", str(tmp_path),
+                            tmp_path / "status.json", lambda *a: None)
+    assert len(ticks) == 1
+    assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
+
+
+def test_impl_idle_sweep_keeps_qa_tracker_keys(tmp_path):
+    """_poll_impl_idle must not unregister qa:<pr>:s<n> keys: re-registering
+    them every poll gave each QA pane a fresh trust watch, so its two-attempt
+    accept budget never ran out (an accept every ~5s, forever)."""
+    from types import SimpleNamespace
+    from pm_core.pane_idle import PaneIdleTracker
+    from pm_core.tui import review_loop_ui
+    target = tmp_path / "11111111-2222-3333-4444-555555555555.jsonl"
+    target.write_text("")
+    link = tmp_path / "transcript-s1.jsonl"
+    link.symlink_to(target)
+    tracker = PaneIdleTracker()
+    tracker.register("qa:pr-q:s1", "%9", str(link))
+    tracker.register("pr-gone", "%8", str(link))
+    app = SimpleNamespace(
+        _session_name="sess", _pane_idle_tracker=tracker,
+        _data={"prs": []}, _review_loops={}, _pending_merge_prs=set(),
+        _merge_propagation_phase=set(), log_message=lambda *a, **k: None)
+    with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+        review_loop_ui._poll_impl_idle(app)
+    assert tracker.is_tracked("qa:pr-q:s1")
+    assert not tracker.is_tracked("pr-gone")
+
+
 def test_trust_blocked_concretizer_reports_reason_not_reject(tmp_path):
     from pm_core.qa_loop import (
         QAScenario, _concretize_failure_label, _concretize_scenario,
