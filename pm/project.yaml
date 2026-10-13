@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T08:17:12.941257+00:00'
+  updated_at: '2026-10-13T08:22:56.556623+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25988,6 +25988,15 @@ prs:
       later; the live evidence for those changes is under scenarios/3.'
     created_at: '2026-10-13T08:17:12Z'
     last_edited: '2026-10-13T08:17:12Z'
+  - id: note-42318fa
+    text: 'Review a6b3 i2: re-reviewed full diff; one fix — a lone unclosed "<descriptive"
+      title (template header wrapped right after its first word by a narrow pane)
+      is again a placeholder, so the echoed template cannot parse as a 2-scenario
+      plan; "<Enter>"/"<Enter> key"/"<Esc>/<q> …" stay real titles. Failing-then-passing
+      tests in TestAngleBracketTitles. Full suite 3100 passed, 1 pre-existing env
+      failure (tests/test_hook_events.py).'
+    created_at: '2026-10-13T08:22:56Z'
+    last_edited: '2026-10-13T08:22:56Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
