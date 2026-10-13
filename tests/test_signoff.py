@@ -220,11 +220,13 @@ class TestPrListLine:
 
 
 class TestSignoffCommand:
-    def _invoke(self, tmp_path, pr):
+    def _invoke(self, tmp_path, pr, skip_qa=False):
         from click.testing import CliRunner
         from pm_core.cli.pr import pr_signoff
         data = {"project": {"active_pr": pr["id"], "base_branch": "master",
                             "backend": "local"}, "prs": [pr]}
+        if skip_qa:
+            data["project"]["skip_qa"] = True
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
              patch("pm_core.cli.pr.store.load", return_value=data), \
              patch("pm_core.cli.pr.store.locked_update",
@@ -246,6 +248,23 @@ class TestSignoffCommand:
         pr = {"id": "pr-001", "title": "T", "status": "qa",
               "branch": "pm/pr-001"}
         result, mock_launch, data = self._invoke(tmp_path, pr)
+        assert result.exit_code == 0, result.output
+        assert data["prs"][0]["status"] == "sign_off"
+        mock_launch.assert_called_once()
+
+    def test_in_review_rejected_without_skip_qa(self, tmp_path):
+        pr = {"id": "pr-001", "title": "T", "status": "in_review",
+              "branch": "pm/pr-001"}
+        result, mock_launch, data = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert data["prs"][0]["status"] == "in_review"
+        mock_launch.assert_not_called()
+
+    def test_in_review_enters_sign_off_with_skip_qa(self, tmp_path):
+        """skip_qa has no QA stage: sign-off follows review (pr-488ac6d)."""
+        pr = {"id": "pr-001", "title": "T", "status": "in_review",
+              "branch": "pm/pr-001"}
+        result, mock_launch, data = self._invoke(tmp_path, pr, skip_qa=True)
         assert result.exit_code == 0, result.output
         assert data["prs"][0]["status"] == "sign_off"
         mock_launch.assert_called_once()

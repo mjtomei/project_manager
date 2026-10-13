@@ -399,3 +399,141 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
 
     store.locked_update(root, _apply)
     return hop if transitioned["ok"] else "unknown"
+
+
+# --- Driver step (shared by `pm pr auto-sequence` and the TUI scheduler) ---
+# Both auto-sequence drivers run the SAME sign-off state machine; only how they
+# launch windows (click invoke vs TUI subprocess / TUI loops) differs.  The
+# step below owns every sign-off state side effect; launching stays with the
+# caller.
+
+def signoff_transcript(tdir: Path, pr_id: str) -> Path:
+    """The sign-off router's transcript symlink under a driver's *tdir*."""
+    return tdir / f"signoff-{pr_id}.jsonl"
+
+
+def signoff_transcript_verdict(tdir: Path, pr_id: str) -> str | None:
+    """Return the routing verdict in *tdir*'s sign-off transcript, or None."""
+    from pm_core.verdict_transcript import extract_verdict_from_transcript
+
+    transcript = signoff_transcript(tdir, pr_id)
+    if not (transcript.is_file() or transcript.is_symlink()):
+        return None
+    return extract_verdict_from_transcript(str(transcript), SIGNOFF_VERDICTS)
+
+
+def signoff_window_pane(session: str, pr_entry: dict) -> str | None:
+    """Return the first pane id of the PR's sign-off tmux window, or None."""
+    win = tmux_mod.find_window_by_name(session, signoff_window_name(pr_entry))
+    if not win:
+        return None
+    panes = tmux_mod.get_pane_indices(session, win["index"])
+    return panes[0][0] if panes else None
+
+
+def retire_signoff_run(session: str, pr_entry: dict, tdir: Path) -> None:
+    """Tear down a PR's sign-off window + transcript when bouncing out of sign_off.
+
+    A bounce hop (re-qa / review / impl) moves the PR out of ``sign_off`` while
+    the router's window and its single ``signoff-<id>.jsonl`` transcript live on
+    (the QA loop only sweeps ``qa-*`` windows).  Unlike review's
+    iteration-numbered transcripts, sign-off reuses one transcript path, so on
+    re-entry the existing-window fast path would switch to the stale window and
+    the transcript check would replay the *old* verdict — re-bouncing forever
+    (a re-qa never changes HEAD, so the consumed record can't guard it).
+    Retiring both forces a genuine fresh router run on the next sign_off entry.
+    Captures / ``report.html`` are left alone.
+    """
+    from pm_core import home_window
+    win = tmux_mod.find_window_by_name(session, signoff_window_name(pr_entry))
+    if win:
+        home_window.park_if_on(session, win["id"])
+        tmux_mod.kill_window(session, win["id"])
+    transcript = signoff_transcript(tdir, pr_entry["id"])
+    try:
+        if transcript.is_symlink() or transcript.exists():
+            transcript.unlink()
+    except OSError:
+        pass
+
+
+class SignoffStep:
+    """Outcome of one :func:`step_signoff` tick.
+
+    *action* is ``"launch"`` (caller must launch a fresh router window),
+    ``"running"`` (router still working — nothing to do) or ``"hop"`` (a
+    verdict was acted on; *hop* is :func:`apply_signoff_hop`'s result).
+    *stale* is True when a launch follows retiring an outdated run.
+    *sha* is the branch HEAD the step evaluated against.
+    """
+
+    __slots__ = ("action", "hop", "verdict", "stale", "sha")
+
+    def __init__(self, action: str, hop: str | None = None,
+                 verdict: str | None = None, stale: bool = False,
+                 sha: str | None = None):
+        self.action = action
+        self.hop = hop
+        self.verdict = verdict
+        self.stale = stale
+        self.sha = sha
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (f"SignoffStep(action={self.action!r}, hop={self.hop!r}, "
+                f"verdict={self.verdict!r}, stale={self.stale!r})")
+
+
+def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
+                 read_verdict=None, window_pane=None,
+                 retire=None) -> SignoffStep:
+    """Advance a ``sign_off`` PR one auto-sequence tick (state side only).
+
+    1. ADOPT a fresh recorded verdict (record sha == current HEAD) — picks up
+       a hand-recorded approval without a wasted re-run.
+    2. A STALE record (HEAD moved since it ran) is never trusted: retire that
+       run (window + transcript), clear the record -> ``launch``.
+    3. No record: read this driver's transcript; a verdict there is recorded
+       (origin ``auto-sequence``, sha = current HEAD) so later ticks adopt it.
+    4. Still nothing: ``launch`` if the window is gone, else ``running``.
+    5. Verdict: pure :func:`decide_signoff_hop`, then the auto-sequence-only
+       :func:`apply_signoff_hop`; a bounce also retires the run so re-entry
+       starts a genuine fresh router.
+
+    *read_verdict* / *window_pane* / *retire* default to this module's
+    helpers; the CLI passes its own module-level names so existing patch
+    points keep working.
+    """
+    read_verdict = read_verdict or signoff_transcript_verdict
+    window_pane = window_pane or signoff_window_pane
+    retire = retire or retire_signoff_run
+    pr_id = pr_entry["id"]
+    current_sha = head_sha(pr_entry.get("workdir"))
+
+    verdict = fresh_recorded_verdict(pr_entry, current_sha)
+
+    if verdict is None and (pr_entry.get("signoff") or {}).get("verdict"):
+        retire(session, pr_entry, tdir)
+
+        def _clear(d):
+            p = store.get_pr(d, pr_id)
+            if p:
+                p.pop("signoff", None)
+        store.locked_update(root, _clear)
+        return SignoffStep("launch", stale=True, sha=current_sha)
+
+    if verdict is None:
+        tverdict = read_verdict(tdir, pr_id)
+        if tverdict is not None:
+            record_signoff_verdict(root, pr_id, tverdict, current_sha,
+                                   origin="auto-sequence")
+            verdict = tverdict
+
+    if verdict is None:
+        if window_pane(session, pr_entry) is None:
+            return SignoffStep("launch", sha=current_sha)
+        return SignoffStep("running", sha=current_sha)
+
+    hop = apply_signoff_hop(root, pr_id, decide_signoff_hop(verdict))
+    if hop in _BOUNCE_HOP_STATUS:
+        retire(session, pr_entry, tdir)
+    return SignoffStep("hop", hop=hop, verdict=verdict, sha=current_sha)

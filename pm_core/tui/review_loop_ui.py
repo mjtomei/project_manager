@@ -416,6 +416,9 @@ def _poll_loop_state_inner(app) -> None:
     app._impl_poll_counter += 1
     if app._impl_poll_counter % 5 == 0:
         _poll_impl_idle(app)
+        # Sign-off verdicts (auto-start only), same cadence
+        from pm_core.tui import signoff_ui
+        signoff_ui.advance_all(app)
 
     # Poll watcher loop state
     from pm_core.tui.watcher_ui import poll_watcher_state
@@ -493,9 +496,10 @@ def _maybe_start_qa(app, pr_id: str) -> None:
       the PR is within some target's dependency closure.
 
     If the project-level ``skip_qa`` setting is true, QA is skipped and
-    the PR goes straight to merge.
+    the PR goes straight to sign-off (via ``_maybe_auto_merge``'s gate).
 
-    QA completion is handled by qa_loop_ui which triggers merge on QA PASS.
+    QA completion is handled by qa_loop_ui which hands a QA PASS to
+    sign-off; only a fresh SIGNOFF_MERGE reaches the merge.
     """
     from pm_core.tui import auto_start as _auto_start
 
@@ -509,9 +513,9 @@ def _maybe_start_qa(app, pr_id: str) -> None:
     if not sd and not _auto_start.in_scope(app, pr_id):
         return
 
-    # If project has skip_qa enabled, skip QA and go straight to merge.
-    # Merge only happens via _maybe_auto_merge (which requires
-    # auto-start to be enabled) — manual zz d / zz t do not auto-merge.
+    # If project has skip_qa enabled, skip QA.  _maybe_auto_merge (which
+    # requires auto-start — manual zz d / zz t do not auto-merge) hands the
+    # PR to sign-off: its gate never merges without a fresh SIGNOFF_MERGE.
     project = (app._data or {}).get("project") or {}
     if project.get("skip_qa"):
         _log.info("auto_qa: skip_qa enabled, skipping QA for %s", pr_id)
@@ -554,14 +558,39 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 # Auto-merge passing reviews
 # ---------------------------------------------------------------------------
 
+def _fresh_signoff_sha(app, pr_id: str) -> tuple[str | None, dict]:
+    """``(sha, pr)``: *sha* is the HEAD when *pr_id* (re-read from disk)
+    carries a fresh SIGNOFF_MERGE record, else None.
+
+    Mirrors the ``pm pr merge`` sign-off gate (#226) so auto-start never
+    calls a merge that gate would refuse.
+    """
+    from pm_core import signoff as signoff_mod
+    try:
+        data = store.load(app._root) if app._root else app._data
+    except (store.ProjectYamlParseError, OSError):
+        data = app._data
+    pr = store.get_pr(data or {}, pr_id) or {}
+    sha = signoff_mod.head_sha(pr.get("workdir"))
+    if signoff_mod.fresh_recorded_verdict(pr, sha) == signoff_mod.SIGNOFF_MERGE:
+        return sha, pr
+    return None, pr
+
+
 def _maybe_auto_merge(app, pr_id: str) -> None:
-    """Auto-merge a PR after a passing review/QA.
+    """Auto-merge a signed-off PR (auto-start only).
 
     Only runs when auto-start is enabled and the PR is in some target's
     dependency closure.  Manual ``zz d`` / ``zz t``
     never trigger merges — merge is an auto-start-only action.
 
-    Runs ``pm pr merge --resolve-window --background <pr_id>``
+    Sign-off gate first: without a fresh ``SIGNOFF_MERGE`` on the current
+    HEAD nothing merges and nothing claims "ready to merge" — a ``qa`` (or
+    skip_qa ``in_review``) PR is handed to the sign-off step instead, and a
+    ``sign_off`` PR is left to the sign-off driver (``signoff_ui``).
+
+    Then the per-PR stop-before-merge policy (O) stops with the ready line;
+    otherwise runs ``pm pr merge --resolve-window --background <pr_id>``
     synchronously, then triggers ``auto_start.check_and_start()`` to
     kick off newly-ready dependents.  If the merge fails (conflict),
     ``--resolve-window`` causes a Claude merge-resolution window to open;
@@ -576,22 +605,40 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     if not _auto_start.in_scope(app, pr_id):
         return
 
+    sha, pr = _fresh_signoff_sha(app, pr_id)
+    if not sha:
+        if pr.get("status") in ("qa", "in_review"):
+            from pm_core.tui import signoff_ui
+            signoff_ui.start_signoff(app, pr_id)
+        else:
+            _log.info("auto_merge: %s has no fresh SIGNOFF_MERGE (status=%s) "
+                      "— not merging", pr_id, pr.get("status"))
+        return
+
     # Per-PR stop-before-merge policy (O / CLI default).  Explicit stop
     # wins even when an auto-merge target depends on this PR.
     if pr_id in getattr(app, "_stop_before_merge", set()):
         _log.info("auto_merge: %s in stop_before_merge — skipping merge", pr_id)
         app.log_message(
-            f"[green bold]✓ {pr_id} ready to merge[/] "
-            f"(auto-sequence armed — press 'g' to merge)"
+            f"[green bold]✓ {pr_id} signed off[/] (SIGNOFF_MERGE @ {sha[:8]}) "
+            f"— ready to merge (auto-sequence armed — press 'g' to merge)"
         )
         return
 
-    _log.info("auto_merge: review passed for %s, merging", pr_id)
-    app.log_message(f"Auto-merge: {pr_id} review passed, merging")
+    _log.info("auto_merge: %s signed off, merging", pr_id)
+    app.log_message(f"Auto-merge: {pr_id} signed off, merging")
 
     if _attempt_merge(app, pr_id, resolve_window=True):
         _log.info("auto_merge: %s merged, starting dependents", pr_id)
         app.run_worker(_auto_start.check_and_start(app))
+    elif not _fresh_signoff_sha(app, pr_id)[0]:
+        # The sign-off gate refused (HEAD / report changed since approval):
+        # that is not a conflict — no resolve window opened, so don't track
+        # one.  The sign-off driver re-runs against the new HEAD.
+        _log.info("auto_merge: %s refused by sign-off gate", pr_id)
+        app.log_message(
+            f"[yellow]Merge of {pr_id} refused by the sign-off gate[/] "
+            f"(approval no longer matches) — sign-off will re-run")
     else:
         # Merge failed (conflict) — a resolve window was launched.
         # Mark for idle tracking so _poll_impl_idle discovers the pane

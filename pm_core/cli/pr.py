@@ -1462,8 +1462,9 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
 
     Sign-off is the comprehensive PR-level review + verdict router that runs
     between QA and merge.  If PR_ID is omitted, infers from cwd or auto-selects
-    a single ``qa``/``sign_off`` PR.  A PR currently in ``qa`` is transitioned
-    to ``sign_off``.
+    a single ``qa``/``sign_off`` PR.  A PR currently in ``qa`` (or
+    ``in_review`` when the project sets ``skip_qa``) is transitioned to
+    ``sign_off``.
     """
     from pm_core import signoff as signoff_mod
 
@@ -1484,16 +1485,20 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     if status == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
-    if status not in ("qa", "sign_off"):
+    # With project.skip_qa there is no QA stage: sign-off follows review.
+    entry_statuses = ("qa",)
+    if (data.get("project") or {}).get("skip_qa"):
+        entry_statuses = ("qa", "in_review")
+    if status not in entry_statuses + ("sign_off",):
         click.echo(
             f"PR {pr_id} is {status} — sign-off runs after QA "
             f"(expected qa or sign_off).", err=True)
         raise SystemExit(1)
 
-    if status == "qa":
+    if status in entry_statuses:
         def apply(d):
             pr = store.get_pr(d, pr_id)
-            if pr and pr.get("status") == "qa":
+            if pr and pr.get("status") == status:
                 pr["status"] = "sign_off"
                 _record_status_timestamp(pr, "sign_off")
         store.locked_update(root, apply)
@@ -2956,49 +2961,20 @@ def _check_review_verdict(tdir: Path, pr_id: str) -> tuple[str | None, int]:
 def _signoff_window_pane(session: str, pr_entry: dict) -> str | None:
     """Return the first pane id of the sign-off tmux window, or None."""
     from pm_core import signoff as signoff_mod
-    win = tmux_mod.find_window_by_name(
-        session, signoff_mod.signoff_window_name(pr_entry))
-    if not win:
-        return None
-    panes = tmux_mod.get_pane_indices(session, win["index"])
-    return panes[0][0] if panes else None
+    return signoff_mod.signoff_window_pane(session, pr_entry)
 
 
 def _check_signoff_verdict(tdir: Path, pr_id: str) -> str | None:
     """Return the sign-off routing verdict, or None if none emitted yet."""
-    from pm_core.verdict_transcript import extract_verdict_from_transcript
-    from pm_core.signoff import SIGNOFF_VERDICTS
-
-    transcript = tdir / f"signoff-{pr_id}.jsonl"
-    if not (transcript.is_file() or transcript.is_symlink()):
-        return None
-    return extract_verdict_from_transcript(str(transcript), SIGNOFF_VERDICTS)
+    from pm_core import signoff as signoff_mod
+    return signoff_mod.signoff_transcript_verdict(tdir, pr_id)
 
 
 def _retire_signoff_window(session: str, pr_entry: dict, tdir: Path) -> None:
-    """Tear down a PR's sign-off window + transcript when bouncing out of sign_off.
-
-    A bounce hop (re-qa / review / impl) moves the PR out of ``sign_off`` while
-    the router's window and its single ``signoff-<id>.jsonl`` transcript live on
-    (the QA loop only sweeps ``qa-*`` windows).  Unlike review's
-    iteration-numbered transcripts, sign-off reuses one transcript path, so on
-    re-entry the existing-window fast path would switch to the stale window and
-    ``_check_signoff_verdict`` would replay the *old* verdict — re-bouncing
-    forever (a re-qa never changes HEAD, so the consumed record can't guard it).
-    Retiring both forces a genuine fresh router run on the next sign_off entry.
-    """
-    from pm_core import signoff as signoff_mod, home_window
-    win = tmux_mod.find_window_by_name(
-        session, signoff_mod.signoff_window_name(pr_entry))
-    if win:
-        home_window.park_if_on(session, win["id"])
-        tmux_mod.kill_window(session, win["id"])
-    transcript = tdir / f"signoff-{pr_entry['id']}.jsonl"
-    try:
-        if transcript.is_symlink() or transcript.exists():
-            transcript.unlink()
-    except OSError:
-        pass
+    """Tear down a PR's sign-off window + transcript when bouncing out of
+    sign_off (see :func:`pm_core.signoff.retire_signoff_run`)."""
+    from pm_core import signoff as signoff_mod
+    signoff_mod.retire_signoff_run(session, pr_entry, tdir)
 
 
 def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
@@ -3234,71 +3210,32 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: no pm tmux session")
             return
         from pm_core import signoff as signoff_mod
-        current_sha = signoff_mod.head_sha(pr_entry.get("workdir"))
 
-        # ADOPT a fresh recorded verdict (recorded sha == current HEAD) rather
-        # than relaunching — this picks up a hand-triggered `pm pr signoff`
-        # verdict without a wasted re-run.
-        verdict = signoff_mod.fresh_recorded_verdict(pr_entry, current_sha)
-
-        # A STALE record (a completed run, now outdated because HEAD moved
-        # since it ran) must NOT be trusted: neither its recorded verdict nor
-        # its transcript reflect the current code, so replaying either would
-        # recommend on unreviewed changes.  Retire that run and relaunch a
-        # fresh router against current HEAD (R11: stale -> relaunch).  The
-        # record is cleared so this doesn't re-fire every tick until the
-        # driver records the fresh router's transcript verdict below.
-        if verdict is None and (pr_entry.get("signoff") or {}).get("verdict"):
-            _retire_signoff_window(pm_session, pr_entry, tdir)
-
-            def _clear_signoff(d):
-                p = store.get_pr(d, pr_id)
-                if p:
-                    p.pop("signoff", None)
-            store.locked_update(root, _clear_signoff)
+        # Shared state machine (also driven by the TUI scheduler): adopt a
+        # fresh record, retire+relaunch a stale run, record the transcript
+        # verdict, then decide + apply the hop.  Launching is ours.
+        step = signoff_mod.step_signoff(
+            root, pr_entry, session=pm_session, tdir=tdir,
+            read_verdict=_check_signoff_verdict,
+            window_pane=_signoff_window_pane,
+            retire=_retire_signoff_window)
+        if step.stale:
             trigger_tui_refresh()
+        if step.action == "launch":
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
                        transcript=str(signoff_transcript))
             click.echo("advanced: sign_off_relaunched")
             return
-
-        if verdict is None:
-            # No record: read the current run's transcript. If it has emitted a
-            # verdict, record it (origin auto-sequence) so future ticks adopt
-            # it, then act on it below.
-            tverdict = _check_signoff_verdict(tdir, pr_id)
-            if tverdict is not None:
-                signoff_mod.record_signoff_verdict(
-                    root, pr_id, tverdict, current_sha, origin="auto-sequence")
-                verdict = tverdict
-
-        if verdict is None:
-            # No verdict yet (no record, transcript empty). Relaunch the window
-            # if it's gone, otherwise the router is still running.
-            if _signoff_window_pane(pm_session, pr_entry) is None:
-                signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
-                ctx = click.get_current_context()
-                ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False,
-                           background=True, transcript=str(signoff_transcript))
-                click.echo("advanced: sign_off_relaunched")
-                return
+        if step.action == "running":
             click.echo("running: sign_off")
             return
 
-        # Decision (pure) then side-effect (auto-sequence only): a sign-off
-        # verdict can only mutate state here, never from a manual signoff run.
-        hop = signoff_mod.decide_signoff_hop(verdict)
-        hop = signoff_mod.apply_signoff_hop(root, pr_id, hop)
+        hop = step.hop
         # The verdict record / hop status was written behind the TUI's back;
         # without a reload its rows keep saying "awaiting sign-off".
         trigger_tui_refresh()
-        if hop in ("qa", "review", "impl"):
-            # A bounce moved the PR out of sign_off: retire the stale sign-off
-            # window + transcript so re-entry runs a genuine fresh router
-            # instead of replaying this verdict (which would loop forever).
-            _retire_signoff_window(pm_session, pr_entry, tdir)
         if hop == "ready_to_merge":
             # Sign-off always gates at merge: this is a recommendation only.
             # The PR stays in sign_off; the merge decision is made elsewhere

@@ -557,7 +557,7 @@ class TestOnQAComplete:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
@@ -573,15 +573,16 @@ class TestOnQAComplete:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
         mock_merge.assert_not_called()
-        # Should inform user to merge manually
+        # Should point the user at manual sign-off (never "ready to merge")
         app.log_message.assert_called()
         msg = app.log_message.call_args[0][0]
-        assert "merge manually" in msg
+        assert "press i to sign off" in msg
+        assert "ready to merge" not in msg
 
     def test_needs_work_transitions_to_in_review(self, tmp_path):
         """QA NEEDS_WORK should transition PR from qa → in_review."""
@@ -1133,7 +1134,7 @@ class TestSelfDrivingQALoop:
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_PASS}
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
@@ -1156,7 +1157,7 @@ class TestSelfDrivingQALoop:
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_PASS}
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
