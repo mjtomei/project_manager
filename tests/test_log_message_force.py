@@ -131,8 +131,15 @@ def test_newer_hold_not_cut_short_by_older_timer():
     _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)
     _log(app, "Auto-start: targets += pr-y (2 total)", force=True, hold=3)
     _log(app, "chatter")
-    app.timers[0]()  # first hold's timer fires; second hold still active
+    assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
+    app._log_hold_until = 0.0  # first hold expires
+    app.timers[0]()  # → the queued second confirmation, with its own hold
     assert shown[-1] == " Auto-start: targets += pr-y (2 total)"
+    app.timers[0]()  # the first hold's timer again: second hold still active
+    assert shown[-1] == " Auto-start: targets += pr-y (2 total)"
+    app._log_hold_until = 0.0
+    app.timers[1]()
+    assert shown[-1] == " chatter"
 
 
 def test_autostart_add_and_all_confirmations_hold():
@@ -275,3 +282,121 @@ def test_remove_confirmation_survives_merge_spinner():
     for cb in app.timers:
         cb()
     assert shown[-1] == " ⏳ pr-y2: Y2"
+
+
+# QA s23 (pr-0b87a97): ``pm autostart remove Z`` (not a target) racing a TUI
+# ``g`` merge of target W painted "Auto-start: Z not a target" for ~0.1s:
+# W's held "target W merged — removed" prune line replaced it at once,
+# because a held message never waited for another hold to end.
+
+def test_held_confirmation_not_replaced_by_next_held_line():
+    app, shown = _stub_app()
+    app._auto_start_targets = {"pr-w": {"policy": "stop_before_merge"},
+                               "pr-t": {"policy": "stop_before_merge"}}
+    app._auto_start_all = False
+    _log(app, "⠋ Merging pr-w...", capture=False)
+    _log(app, "Auto-start: pr-z not a target", force=True, hold=3)
+    with patch.object(auto_start, "_sync_enabled"):
+        auto_start._prune_completed_targets(
+            app, [{"id": "pr-w", "status": "merged"},
+                  {"id": "pr-t", "status": "qa"}])
+    _log(app, "⠙ Merging pr-w...", capture=False)
+    _log(app, "⏳ pr-z: Z")  # merge's last stdout line
+    assert shown[-1] == " Auto-start: pr-z not a target"
+    app._log_hold_until = 0.0  # not-a-target hold expires
+    app.timers[0]()
+    assert shown[-1] == (" Auto-start: target pr-w merged — removed "
+                         "(1 remaining)")
+    app._log_hold_until = 0.0  # merged-line hold expires
+    app.timers[-1]()
+    assert shown[-1] == " ⏳ pr-z: Z"
+
+
+def test_queued_held_message_hidden_by_sticky_does_not_stall_queue():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)
+    _log(app, "unforced held", hold=3)  # queued
+    _log(app, "Auto-start: removed pr-x (0 remaining)", force=True, hold=3)
+    _log(app, "chatter")
+    app._log_hold_until = 0.0
+    app._log_sticky_until = time.monotonic() + 10  # a sticky took the line
+    app.timers[0]()  # unforced queued one is hidden; the forced one shows
+    assert shown[-1] == " Auto-start: removed pr-x (0 remaining)"
+    app._log_sticky_until = 0.0
+    app._log_hold_until = 0.0
+    app.timers[-1]()
+    assert shown[-1] == " chatter"
+
+
+def test_held_queue_is_bounded():
+    from pm_core.tui import app as app_mod
+    app, shown = _stub_app()
+    _log(app, "first", force=True, hold=3)
+    for i in range(app_mod._LOG_HELD_QUEUE_MAX + 2):
+        _log(app, f"queued {i}", force=True, hold=3)
+    assert len(app._log_held_queue) == app_mod._LOG_HELD_QUEUE_MAX
+    assert app._log_held_queue[-1][0] == (
+        f"queued {app_mod._LOG_HELD_QUEUE_MAX + 1}")
+
+
+# Integration of the s23 queue with s22's "newer shown message drops older
+# deferred ones" (9caf9baf): flushing an older queued confirmation must not
+# drop a message deferred after it, and an error's auto-clear timer must not
+# blank a newer confirmation.
+
+def test_flushed_older_confirmation_keeps_newer_deferred_message():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: pr-z not a target", force=True, hold=3)
+    _log(app, "Auto-start: target pr-w merged — removed (1 remaining)",
+         force=True, hold=3)  # queued
+    _log(app, "⏳ pr-z: Z")  # deferred; newer than the queued line
+    app._log_hold_until = 0.0
+    app.timers[0]()
+    assert shown[-1] == " Auto-start: target pr-w merged — removed (1 remaining)"
+    app._log_hold_until = 0.0
+    app.timers[-1]()
+    assert shown[-1] == " ⏳ pr-z: Z"
+
+
+def test_newer_forced_message_drops_older_queued_confirmation():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)
+    _log(app, "Auto-start: targets += pr-y (2 total)", force=True, hold=3)
+    _log(app, "Auto-start targets: pr-x, pr-y", force=True)  # cmd-bar answer
+    app._log_hold_until = 0.0
+    for cb in list(app.timers):
+        cb()
+    assert shown[-1] == " Auto-start targets: pr-x, pr-y"
+
+
+def test_error_timeout_does_not_blank_newer_held_confirmation():
+    app, shown = _stub_app()
+    app._clear_log_message = (
+        lambda seq=None: ProjectManagerApp._clear_log_message(app, seq=seq))
+    ProjectManagerApp.log_error(app, "Error:", "merge failed", timeout=5)
+    clear_error = app.timers[-1]
+    _log(app, "Auto-start: removed pr-y (1 remaining)", force=True, hold=3)
+    clear_error()  # the error's 5s timer fires while the confirmation shows
+    assert shown[-1] == " Auto-start: removed pr-y (1 remaining)"
+
+
+def test_error_timeout_still_clears_its_own_error():
+    app, shown = _stub_app()
+    app._clear_log_message = (
+        lambda seq=None: ProjectManagerApp._clear_log_message(app, seq=seq))
+    ProjectManagerApp.log_error(app, "Error:", "merge failed", timeout=5)
+    app.timers[-1]()
+    assert shown[-1] == ""
+    assert app._log_sticky_until == 0.0
+
+
+def test_error_expiring_behind_a_hold_is_not_shown_late():
+    app, shown = _stub_app()
+    app._clear_log_message = (
+        lambda seq=None: ProjectManagerApp._clear_log_message(app, seq=seq))
+    _log(app, "Auto-start: targets += pr-x (1 total)", force=True, hold=3)
+    ProjectManagerApp.log_error(app, "Error:", "stale", timeout=1)  # deferred
+    app.timers[-1]()  # the error's timer fires before the hold ends
+    app._log_hold_until = 0.0
+    app.timers[0]()
+    assert shown[-1] == " Auto-start: targets += pr-x (1 total)"

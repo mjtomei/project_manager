@@ -30,7 +30,8 @@ def guard_pr_action(app, action_desc: str) -> bool:
     if app._inflight_pr_action:
         _log.info("action blocked: %s (busy: %s)", action_desc, app._inflight_pr_action)
         app.log_message(f"Busy: {app._inflight_pr_action}", sticky=1.0)
-        app.set_timer(1.0, app._clear_log_message)
+        seq = app._log_seq
+        app.set_timer(1.0, lambda: app._clear_log_message(seq=seq))
         return False
     return True
 

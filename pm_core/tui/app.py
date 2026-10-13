@@ -43,6 +43,11 @@ from pm_core.tui import pr_view
 from pm_core.tui import review_loop_ui
 
 
+# Held confirmations queued behind the current hold (see log_message); more
+# than this and the oldest is dropped from the line (it is still in ``L``).
+_LOG_HELD_QUEUE_MAX = 3
+
+
 def _record_log_message(app, msg: str, suppressed: bool) -> None:
     """Append a log-line message (markup stripped) to the command log."""
     try:
@@ -351,6 +356,9 @@ class ProjectManagerApp(App):
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
         self._log_hold_until: float = 0.0  # see log_message(hold=)
         self._log_held: tuple | None = None  # latest message deferred by a hold
+        self._log_held_queue: list = []  # held messages waiting for the line
+        self._log_seq: int = 0  # arrival number of the latest log message
+        self._log_shown_seq: int = 0  # arrival number of the one on the line
         # z modifier key state (vim-style prefix, supports z/zz)
         self._z_count: int = 0
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
@@ -826,7 +834,8 @@ class ProjectManagerApp(App):
         self._update_status_bar()
 
     def log_message(self, msg: str, capture: bool = True, sticky: float = 0,
-                    force: bool = False, hold: float = 0) -> None:
+                    force: bool = False, hold: float = 0,
+                    _seq: int | None = None) -> None:
         """Show a message in the log line.
 
         A non-sticky message is dropped while a sticky one is showing,
@@ -837,27 +846,55 @@ class ProjectManagerApp(App):
         follow-on messages it triggers in the same frame (e.g. auto-start's
         "starting <pr>" / "Review loop started" right after "targets +=").
         Unforced messages arriving during a hold — sticky ones included —
-        are deferred, and the latest is shown when the hold ends.
+        are deferred, and the latest is shown when the hold ends. Another
+        held message arriving during a hold is queued and shown (with its
+        own hold) when the current hold ends, so back-to-back confirmations
+        (e.g. a CLI "not a target" and a merged target's prune line) are
+        each readable instead of the newer one replacing the older at once.
+
+        Messages are numbered as they arrive (*_seq* is passed back only
+        when a deferred or queued message is replayed). A replay never
+        paints over a message that arrived after it: once a newer message
+        is shown, older deferred/queued ones are dropped (they are still
+        in ``L``).
         """
         import time as _time
         now = _time.monotonic()
+        replay = _seq is not None
+        if not replay:
+            _seq = self._log_seq = getattr(self, "_log_seq", 0) + 1
         held = hold <= 0 and now < self._log_hold_until and not force
         suppressed = held or (
             sticky <= 0 and now < self._log_sticky_until and not force)
         # The log line holds one message and is overwritten (often within
         # the same tick), so also record every message in the command log
         # that ``L`` tails — otherwise status updates are lost unseen.
-        _record_log_message(self, msg, suppressed)
+        if not replay:
+            _record_log_message(self, msg, suppressed)
+        if hold > 0 and now < self._log_hold_until:
+            queue = getattr(self, "_log_held_queue", None)
+            if queue is None:
+                queue = self._log_held_queue = []
+            if len(queue) >= _LOG_HELD_QUEUE_MAX:
+                queue.pop(0)  # still in the L log; keep the newest
+            queue.append((msg, capture, sticky, force, hold, _seq))
+            return
         if held:
-            self._log_held = (msg, capture, sticky)
+            self._log_held = (msg, capture, sticky, _seq)
             return
         if sticky > 0:
             self._log_sticky_until = now + sticky
         elif suppressed:
             return  # a sticky message is still showing
-        # Anything deferred so far is older than this message; flushing it
-        # when the hold ends would overwrite this newer (e.g. forced) one.
-        self._log_held = None
+        # Anything deferred or queued before this message is older than it;
+        # flushing it when the hold ends would overwrite this newer one.
+        # Only those: a replayed older message keeps newer deferred ones.
+        self._log_shown_seq = _seq
+        if self._log_held and self._log_held[-1] < _seq:
+            self._log_held = None
+        queue = getattr(self, "_log_held_queue", None)
+        if queue:
+            queue[:] = [q for q in queue if q[-1] > _seq]
         if hold > 0:
             # Only a message that is actually shown holds the line.
             self._log_hold_until = now + hold
@@ -872,14 +909,23 @@ class ProjectManagerApp(App):
             self.call_after_refresh(self._capture_frame, f"log_message:{truncated}")
 
     def _flush_held_log_message(self) -> None:
-        """Show the latest message deferred by a ``log_message`` hold."""
+        """Show what a ``log_message`` hold kept back: queued held
+        confirmations first (oldest first), then the latest deferred
+        message."""
         import time as _time
         if _time.monotonic() < self._log_hold_until:
             return  # a newer hold is active; its own timer flushes
+        queue = getattr(self, "_log_held_queue", None)
+        while queue:
+            msg, capture, sticky, force, hold, seq = queue.pop(0)
+            self.log_message(msg, capture=capture, sticky=sticky,
+                             force=force, hold=hold, _seq=seq)
+            if _time.monotonic() < self._log_hold_until:
+                return  # shown and holding; its own timer flushes the rest
         held, self._log_held = self._log_held, None
-        if held:
-            msg, capture, sticky = held
-            self.log_message(msg, capture=capture, sticky=sticky)
+        if held and held[-1] > getattr(self, "_log_shown_seq", 0):
+            msg, capture, sticky, seq = held
+            self.log_message(msg, capture=capture, sticky=sticky, _seq=seq)
 
     def log_error(self, title: str, detail: str = "", timeout: float = 5) -> None:
         """Show a red error in the log line that auto-clears."""
@@ -887,10 +933,23 @@ class ProjectManagerApp(App):
         if detail:
             msg += f" {detail}"
         self.log_message(msg, sticky=timeout)
-        self.set_timer(timeout, self._clear_log_message)
+        # Clear only this error: a newer message (e.g. a held auto-start
+        # confirmation forced past the error) must not be blanked by it.
+        seq = self._log_seq
+        self.set_timer(timeout, lambda: self._clear_log_message(seq=seq))
 
-    def _clear_log_message(self) -> None:
-        """Clear the log line message."""
+    def _clear_log_message(self, seq: int | None = None) -> None:
+        """Clear the log line message.
+
+        With *seq*, only if that message is still the one on the line (or
+        is still waiting behind a hold — then it is dropped instead).
+        """
+        if seq is not None:
+            if self._log_held and self._log_held[-1] == seq:
+                self._log_held = None  # expired before it was shown
+                return
+            if getattr(self, "_log_shown_seq", 0) != seq:
+                return  # a newer message has the line
         self._log_sticky_until = 0.0
         try:
             log = self.query_one("#log-line", LogLine)

@@ -684,7 +684,8 @@ def show_connect(app) -> None:
         app.push_screen(ConnectScreen(command))
     else:
         app.log_message("Not a shared session")
-        app.set_timer(2, app._clear_log_message)
+        seq = app._log_seq
+        app.set_timer(2, lambda: app._clear_log_message(seq=seq))
 
 
 def quit_app(app) -> None:
