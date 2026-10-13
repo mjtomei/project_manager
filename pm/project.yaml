@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2428766
+  active_pr: pr-7f90572
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T08:05:20.444070+00:00'
+  updated_at: '2026-10-13T09:21:38.651088+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3382,6 +3382,47 @@ prs:
       swapped.'
     created_at: '2026-10-13T08:05:20Z'
     last_edited: '2026-10-13T08:05:20Z'
+  - id: note-b53cf82
+    text: 'QA S2 concretizer (2026-10-13): (1) pm hard-codes ~/.claude/projects (claude_launcher._claude_project_dir,
+      verdict_transcript) and ~/.claude/settings.json (hooks) while workspace_trust
+      honours CLAUDE_CONFIG_DIR - a scratch CLAUDE_CONFIG_DIR holding only .claude.json+credentials
+      breaks transcript/hook verdict detection AND the transcript gate that ends the
+      trust watch (W4.3 false-positive risk). QA recipe: symlink $CFG/projects ->
+      ~/.claude/projects and copy ~/.claude/settings.json into $CFG. Candidate follow-up
+      bug (pm ignores CLAUDE_CONFIG_DIR for transcripts/hooks). (2) Review containers
+      are always rm+recreated (cli/pr.py remove_container review-<pr>), so W6 reuse/strip-/workspace
+      simulation can only be driven via the impl container (create_container reuses
+      a running one). (3) Host /workspace exists in the pm-dev container, so a /workspace
+      dialog is never auto-accepted here (pr-8c0d680 applies). (4) The container-local
+      ~/.claude.json already has projects[/workspace] trusted, so W6 seeding is vacuous
+      unless that entry is removed (after a backup) before the container is created.
+      (5) qa-max-scenarios is a concurrency cap, not a plan-size cap. (6) Fake-planner
+      QA runs hit the spec gate unless the PR already has a qa spec (pm pr spec <pr>
+      qa). (7) pm meta sets the session override to a GitHub-master clone and rm -rf
+      ~/.pm/sessions/<tag> on exit, which wipes the fake-claude config, so run it
+      last.'
+    created_at: '2026-10-13T07:42:43Z'
+    last_edited: '2026-10-13T07:42:43Z'
+  - id: note-a89c888
+    text: 'QA S2 (run #230, supervised; captures pr-b53bfe2/scenarios/2) found three
+      live trust-fallback bugs and fixed them with regression tests. These QA app
+      edits are UNREVIEWED and need review together with 7d79fce1 before sign-off.
+      (1) 3130d141: _poll_impl_idle unregistered qa:<pr>:s<n> tracker keys every tick,
+      so each QA poll made a fresh WorkspacePromptWatch and stuck panes got an accept
+      every ~5s forever (28 accepts live). Also, the worker trust watch sat behind
+      the 30s verdict grace, so blocks fired at 60s, not grace+15. (2) 0c84b817: the
+      accept budget is now per pane (tmux @pm_trust_accept_attempts), because two
+      watches each sent 2 accepts. (3) c056b32a: a trust-blocked concretizer reason
+      was overwritten with "no session id registered". Not fixed (filed): pr-e835d8f,
+      the local-backend merge-resolution window runs in the unapproved project root
+      and always shows the dialog (W2 vs impl ambiguity 1, needs a decision); pr-9f97a8f,
+      TUI s never resumes an impl session; pr-7f90572, killing the meta window leaves
+      the override. pr-7e0eec4 confirmed; pr-8c0d680 applies. Container QA truncated:
+      hooks cannot fire in nested containers here, so the worker never launched. Harness:
+      Claude settings tui=fullscreen triggers pr-b8561ac; panes take the TUI process
+      PATH, not tmux global env.'
+    created_at: '2026-10-13T09:21:38Z'
+    last_edited: '2026-10-13T09:21:38Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -25876,7 +25917,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T08:05:21.207109+00:00'
+  updated_at: '2026-10-13T09:00:32.471115+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25924,6 +25965,18 @@ prs:
       should resolve trivially.
     created_at: '2026-10-13T08:05:21Z'
     last_edited: '2026-10-13T08:05:21Z'
+  - id: note-c11dda8
+    text: 'QA pr-b53bfe2 S2 (2026-10-13): another trigger for this bug. With Claude
+      Code 2.1.296 settings tui=fullscreen (the host ~/.claude/settings.json has "tui":
+      "fullscreen"), the planner pane is on the alternate screen (alternate_on=1,
+      history_size=0), so capture-pane holds only the last screenful and the SCENARIO
+      header has scrolled away. At 200 cols Claude also opens a right-hand file-diff
+      side panel, so the visible QA_PLAN_END line ends with a "│" border and _tail_has_marker_on_own_line
+      returns has_end=False. The single idle_prompt is consumed and the planner waits
+      for its 1h timeout. Captures: pr-b53bfe2/scenarios/2/tui/t1-attempt1-qa-prA-stalled.
+      Reading the plan from the JSONL transcript fixes all of these.'
+    created_at: '2026-10-13T09:00:32Z'
+    last_edited: '2026-10-13T09:00:32Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -27393,6 +27446,88 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T07:34:49.309576+00:00'
   updated_at: '2026-10-13T07:34:49.309576+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e835d8f
+  plan: bugs
+  title: 'Bug: local-backend merge-resolution window runs in the unapproved project
+    root and always stops at the workspace-trust dialog'
+  branch: pm/pr-e835d8f-bug-local-backend-merge-resolution-window-runs-in-
+  status: pending
+  depends_on: []
+  description: 'Found in QA pr-b53bfe2 scenario 2 (2026-10-13, captures pr-b53bfe2/scenarios/2/tui/t4-merge-resolve-prC).
+    With backend local, pm pr merge merges the PR branch into the WORKDIR master,
+    which is stale and lacks the conflicting main-repo commit (see pr-a75da60). The
+    conflict therefore only appears at the ff-only pull into the main repo, and cli/pr.py
+    _pull_after_merge calls _launch_merge_window(cwd=repo_dir). The resolution Claude
+    runs in the project root, which pr-b53bfe2 deliberately does not approve (impl
+    ambiguity 1: base checkout not auto-approved). pm logs "workspace trust: <root>
+    not approved; leaving the prompt explicit" and the merge-<pr> pane sits at "Accessing
+    workspace: <root>" until a human answers it. The command-bar merge gives no actionable
+    hint such as pm trust add <root>. For auto-merge (review_loop_ui tracks merge:<pr>)
+    the pane is only shown as needs-you. This contradicts qa.md W2 (merge resolution
+    starts with no dialog in its approved workdir). Options: resolve in the PR workdir
+    after refreshing its master (fixes pr-a75da60 too); approve the root for merge
+    sessions only; or surface "pm trust add <root>" in the TUI when the merge window
+    opens. Needs a policy decision.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T09:00:14.213613+00:00'
+  updated_at: '2026-10-13T09:00:14.213613+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9f97a8f
+  plan: bugs
+  title: 'Bug: TUI s on a PR whose impl window was closed starts a fresh Claude session
+    instead of resuming the previous one'
+  branch: pm/pr-9f97a8f-bug-tui-s-on-a-pr-whose-impl-window-was-closed-sta
+  status: pending
+  depends_on: []
+  description: 'Found in QA pr-b53bfe2 scenario 2 (2026-10-13, captures pr-b53bfe2/scenarios/2/tui/t6-resume-impl-prB).
+    In the tmux path of cli/pr.py pr_start, build_claude_shell_cmd gets no session
+    id or resume flag, so every relaunch uses a new --session-id. Example: original
+    a12008a6, relaunch cc615e24. Earlier turns are gone, and the new session only
+    rediscovers prior work from git ("A previous session committed it ... in 4be3514").
+    Only the non-tmux fallback calls launch_claude(resume=not fresh). Yet pm pr start
+    --fresh is documented as "Start a fresh session (do not resume)", which implies
+    the default resumes. Same on master 6cfd047e. Fix: persist the impl session id
+    per PR (session_key pr:start:<id>) and pass --resume in the tmux path unless --fresh,
+    or correct the help text.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T09:00:23.696476+00:00'
+  updated_at: '2026-10-13T09:00:23.696476+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7f90572
+  plan: bugs
+  title: 'Bug: closing the pm meta window (kill-window) leaves the session override
+    active, so pm silently keeps using the meta clone'
+  branch: pm/pr-7f90572-bug-closing-the-pm-meta-window-kill-window-leaves-
+  status: pending
+  depends_on: []
+  description: 'Found in QA pr-b53bfe2 scenario 2 (2026-10-13, captures pr-b53bfe2/scenarios/2/tui/attempts/t16-attempt1-killwindow-override-left).
+    cli/meta.py launches the window as "<claude cmd> ; rm -rf ~/.pm/sessions/<tag>",
+    so the override is cleared only when Claude exits normally. If the user closes
+    the window (tmux kill-window or prefix-&), SIGHUP kills the shell before the rm
+    runs. ~/.pm/sessions/<tag>/override stays, and every later pm command in that
+    session runs the meta clone (pm which -> ~/.pm/workdirs/meta-<tag>/pm_core) until
+    it is removed by hand. Fix: run the cleanup from a trap on EXIT/HUP in the pane
+    command, or have pm _pane-closed / the wrapper drop an override whose meta window
+    is gone.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T09:20:01.185973+00:00'
+  updated_at: '2026-10-13T09:20:01.185973+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
