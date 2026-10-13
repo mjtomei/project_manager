@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T04:50:57.207995+00:00'
+  updated_at: '2026-10-13T05:00:03.766849+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26601,6 +26601,21 @@ prs:
       rests on the two real fixes, d6778d7f (O armed hold) and 3831cbba (R18 hint).'
     created_at: '2026-10-13T04:18:07Z'
     last_edited: '2026-10-13T04:18:07Z'
+  - id: note-559c45d
+    text: 'QA plan round 8 (S33-S34) is in qa.md section 13, committed and pushed
+      as 75dc1c39 (verified on the remote before QA_PLAN_END). Planning changed no
+      application code. Since a092a1f9 the app delta is d6778d7f (O armed line = add_targets
+      held confirm) + 3831cbba (bottom hint "· a Runs"); no review pass of those two
+      is recorded yet, so review them before sign-off. S33 = full S31/S26 rerun +
+      rapid second O inside the hold + hint at full width and 80x12 L split; S34 =
+      O inside CLI/prune/O holds (max 3 queued), O on auto-merge target flips to stop,
+      O racing CLI writers, command-bar answer within O hold, hint vs drained CLI/popup/breadcrumb
+      restart. Added R40, ambiguity 17. S32 (7e9d414a) and S27-S30 (e17d5671) carried
+      forward; S27-S30 text moved verbatim to qa-round-6-carried.md to keep the planner
+      prompt under the argv limit. Workers: pm checkout HEAD must be 75dc1c39 or later
+      before and after.'
+    created_at: '2026-10-13T04:27:51Z'
+    last_edited: '2026-10-13T04:27:51Z'
   - id: note-986b70a
     text: 'S34 refine (r8): command-bar bare `autostart` while targets exist turns
       auto-start OFF and clears every target (handle_command/_dispatch, by design;
@@ -26650,6 +26665,17 @@ prs:
       by the supervisor (pr-b19db15). Captures /pm-captures/scenarios/33.'
     created_at: '2026-10-13T04:50:57Z'
     last_edited: '2026-10-13T04:50:57Z'
+  - id: note-8507df9
+    text: 'QA8 finalization correction: planner note-559c45d says no review of d6778d7f/3831cbba
+      was recorded yet; that statement was stale. Review round 8, loop 4c37, native
+      reviewer 0e768957-9340-4f54-9cbc-8452808860c8, passed at 935d99ab before QA8
+      started. It independently tested the rapid-O regression fail-before/pass-after
+      and 159 focused tests; full-suite exclusions and baseline installer failure
+      are in captures/shepherd-20261012/review-round-8-i1.json. QA8 S33/S34 now both
+      PASS and independently VERIFIED on unchanged application code. This note corrects
+      the historical statement rather than removing it.'
+    created_at: '2026-10-13T05:00:03Z'
+    last_edited: '2026-10-13T05:00:03Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
