@@ -1,7 +1,14 @@
 # pr-488ac6d — QA spec: TUI auto-sequence must hand QA PASS to sign-off
 
 Code under test: branch `pm/pr-488ac6d-bug-tui-auto-sequence-skips-sign-off-after-qa-pass`
-at **272ed914** or later. Since 210a2efa, QA run 1 added: 0ff2be65 (sign-off
+at **1c162a86** or later. QA run 2 added: c762e3d5 (CLI qa-run-bg drops
+its resume snapshot after finishing — no stale "press i" after a CLI
+SIGNOFF_REQA bounce), a1d4324b ("signoff: launching router" logged only on a
+real launch, not on backoff-skipped polls), b8e97482 (after Ctrl+R + re-arm
+mints a new autostart run dir, the live stamped router run is adopted into
+it, then recorded if stamp==HEAD or retired as stale), 1c162a86 (a hung
+`pm pr signoff` launch is killed at its 300 s timeout so it stops holding the
+launch lock). Since 210a2efa, QA run 1 added: 0ff2be65 (sign-off
 verdict bound to the HEAD its router launched on — R9b), 6c81d3cb (O ready
 line logged force+hold so it is visible on the TUI log line), 687bca6b +
 272ed914 (TUI QA-resume scan skips QA runs owned by another live process,
@@ -10,7 +17,7 @@ with a pid-reuse guard — R15). Earlier baseline was **210a2efa** (post-review:
 skip_qa reason). The implementation captures under `impl/{pre,post}-fix`
 predate the async-launch review rounds — **workers must validate against
 210a2efa themselves** (`git log -1` in the clone they install from must
-show 272ed914 or a descendant) and must observe the real background
+show 1c162a86 or a descendant) and must observe the real background
 launch, not reuse those captures.
 
 ## What changed (user-visible)
@@ -40,7 +47,7 @@ launch, not reuse those captures.
 
 Follow `pm/qa/instructions/tui-manual-test.md`:
 1. Install pm from the PR clone (editable; `export PYTHONPATH=<clone>`;
-   `pm which` shows the clone). Confirm HEAD is 272ed914 or later. (There is no `pm pr show`;
+   `pm which` shows the clone). Confirm HEAD is 1c162a86 or later. (There is no `pm pr show`;
    read status/workdir from `pm pr list` and project.yaml.)
 2. Throwaway git project, `pm init --backend local --no-import`, add PRs with
    `pm pr add`. Give each PR a real commit on its branch once its workdir
@@ -247,7 +254,7 @@ PR.
 
 ## Pass / Fail criteria
 
-Pass = every Then above (including R9b under both O and A) observed on screen/CLI/project.yaml at 272ed914+,
+Pass = every Then above (including R9b under both O and A) observed on screen/CLI/project.yaml at 1c162a86+,
 with artifacts saved. Fail = any "ready to merge" claim or merge attempt
 without a fresh SIGNOFF_MERGE on the current HEAD; a gate refusal tracked as
 a merge conflict; duplicate sign-off windows; repeated per-poll log spam; a
@@ -300,7 +307,7 @@ cli-recording.md`.
 
 * Install pm editable from the PR clone (`pip install -e`,
   `export PYTHONPATH=<clone>`). `pm which` must point at the clone, and
-  `git log -1` in the clone must show 272ed914 or a descendant. Use a
+  `git log -1` in the clone must show 1c162a86 or a descendant. Use a
   private `TMUX_TMPDIR`, and put fake-claude first on PATH.
 * Throwaway git project, `pm init --backend local --no-import`, one
   `pm pr add` per story PR, and a minimal `pm/specs/<id>/qa.md` per PR.
@@ -381,9 +388,17 @@ Covers R9, R9b, R10, R12, E1, E2.
   * Then O's ready line shows `@ <Y8>` once, and A merges once with the
     Y commit included.
   * Every status sample is valid JSON, and project.yaml loses no data.
-* B2 (R9b restart). With an O target's router running on X, commit
-  (→ Y), then Ctrl+R and re-arm. The old run is retired, not adopted,
-  its verdict is never recorded, and the final record carries sha Y.
+* B2 (R9b restart). With an O target's router running on X (long
+  delay), restart the TUI and commit X → Y right after issuing the
+  restart, while the new TUI boots. Drive it twice: (a) `pm tui restart
+  --breadcrumb` (keeps targets + run id); (b) Ctrl+R then re-arm (new
+  autostart run dir; since b8e97482 the live run is adopted into it
+  first). Either way the old run is retired with one "stale" line, not
+  recorded, one new window launches on Y, and the final record carries
+  sha Y with one ready line. A PR stuck on "sign-off review running"
+  forever after (b) is a regression of b8e97482, not pr-5410ae4.
+  Also check the `L` log shows "signoff: launching router" only for
+  real launches (a1d4324b), never once per poll during backoff.
 * B3 (R9). With an O target signed off at X and a 1 s status loop
   already running, commit (→ Y). Expected:
   * A "stale (HEAD moved) — re-running" line, the old window retired,
