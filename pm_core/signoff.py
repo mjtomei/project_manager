@@ -619,6 +619,7 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
             retire(session, pr_entry, tdir)
             return SignoffStep("launch", stale=True, sha=current_sha)
         if tverdict is not None:
+            # launched == current_sha here (or HEAD is unknown).
             record_signoff_verdict(root, pr_id, tverdict, current_sha,
                                    origin="auto-sequence")
             verdict = tverdict

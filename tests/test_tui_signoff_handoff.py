@@ -108,6 +108,7 @@ class World:
     def launch_quiet(self, app, pr_id, transcript):
         """Stand-in for ``signoff_ui._launch_quiet`` (a worker coroutine in
         the TUI): records the command via the patchable ``run_command``."""
+        from pm_core import signoff as so
         from pm_core.tui import pr_view
         try:
             pr_view.run_command(
@@ -115,7 +116,7 @@ class World:
                 f"pr signoff --background --transcript {transcript} {pr_id}")
             # What ``launch_signoff_window`` stamps next to the transcript of
             # a newly created window: the HEAD the router run reviews.
-            Path(transcript).with_suffix(".head").write_text(self.head + "\n")
+            so.stamp_signoff_launch(transcript, self.head)
         finally:
             app._signoff_launch_inflight.discard(pr_id)  # worker finished
 

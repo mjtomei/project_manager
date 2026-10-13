@@ -249,6 +249,7 @@ def test_resume_skips_run_owned_by_live_process(tmp_path):
         rfile = _resume_file_path(qa_dir)
         data = json.loads(rfile.read_text())
         data["owner_pid"] = owner.pid
+        data["owner_start"] = qa_loop._proc_start_time(owner.pid)
         rfile.write_text(json.dumps(data))
 
         with patch("pathlib.Path.home", return_value=tmp_path), \
@@ -271,12 +272,32 @@ def test_resume_skips_run_owned_by_live_process(tmp_path):
     assert "pr-001" in app._qa_loops
 
 
+def test_owner_pid_reused_by_unrelated_process_is_not_owner():
+    """The dead owner's pid now belongs to an unrelated process (different
+    start time): the run is orphaned and must stay resumable."""
+    import subprocess
+    other = subprocess.Popen(["sleep", "30"])
+    try:
+        start = qa_loop._proc_start_time(other.pid)
+        assert start
+        live = {"owner_pid": other.pid, "owner_start": start}
+        assert qa_loop.resume_owned_elsewhere(live)
+        reused = {"owner_pid": other.pid, "owner_start": str(int(start) + 1)}
+        assert not qa_loop.resume_owned_elsewhere(reused)
+        # Snapshots written before owner_start existed: pid liveness only.
+        assert qa_loop.resume_owned_elsewhere({"owner_pid": other.pid})
+    finally:
+        other.kill()
+        other.wait()
+
+
 def test_resume_snapshot_records_owner_pid(tmp_path):
     import os
     state = _make_state(tmp_path)
     _write_resume_file(state, use_containers=False, concurrency_cap=0)
     loaded = _load_resume_file(tmp_path)
     assert loaded["owner_pid"] == os.getpid()
+    assert loaded["owner_start"] == qa_loop._proc_start_time(os.getpid())
     # Our own pid (a TUI restart execs in place) is never "elsewhere".
     assert not qa_loop.resume_owned_elsewhere(loaded)
 
