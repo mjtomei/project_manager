@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7f90572
+  active_pr: pr-dc4dd45
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3514,6 +3514,22 @@ prs:
       is never TUI-tracked, so no R5 fallback/⏸ for it. Captures /pm-captures/scenarios/3.'
     created_at: '2026-10-13T13:55:49Z'
     last_edited: '2026-10-13T13:55:49Z'
+  - id: note-c12a803
+    text: 'S4 concretizer (2026-10-13): in scenario containers /home/pm/.claude is
+      a bind mount of the OUTER host ~/.claude, and ~/.local/bin/git proxies fetch/pull
+      to the outer workdir. Run S4 under a scratch HOME (copy .claude.json, .credentials.json,
+      settings.json minus hooks/tui, .profile, .gitconfig; .local/bin with only claude
+      + fake-claude) with CLAUDE_CONFIG_DIR, PM_HOST_HOME, ANTHROPIC_API_KEY and CLAUDECODE
+      unset. Then pm hooks, transcripts and the container hook mount all live under
+      the same HOME, which is the W6.7 route. CLAUDE_CONFIG_DIR isolation splits hooks
+      and transcripts away from where pm reads them (~/.claude). Review containers
+      are removed when their window dies, so container reuse is only reachable via
+      the QA concretizer->worker container. In this env host /workspace exists, so
+      pr-8c0d680 applies to the W6.6 dialog. Fake-planner QA needs pm/specs/<pr>/qa.md
+      committed in the PR workdir (spec gate). A plan with zero scenarios only ends
+      when the planner pane exits; otherwise the 1h planner timeout applies.'
+    created_at: '2026-10-13T13:21:41Z'
+    last_edited: '2026-10-13T13:21:41Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -27765,6 +27781,121 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T13:44:01.388726+00:00'
   updated_at: '2026-10-13T13:44:01.388726+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5d66709
+  plan: bugs
+  title: 'Bug: review loop in flight is abandoned after a hard TUI kill (only breadcrumb
+    restarts adopt it)'
+  branch: pm/pr-5d66709-bug-review-loop-in-flight-is-abandoned-after-a-har
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA S4 W3-adopted-review (2026-10-13). Repro: zz
+    d on a PR (review loop, real Claude), then kill the TUI pid (crash/OOM/kill) and
+    run pm session. The restarted TUI never resumes the loop: _adopt_in_flight_review
+    (review_loop.py) only runs for loops restored from a breadcrumb, which is written
+    only by `pm tui restart --breadcrumb` / merge restarts. The review pane keeps
+    running but its verdict is never collected and no further iterations run; runtime_state
+    sweeps the running review-loop entry at mount. The third pass of review_loop_ui._poll_impl_idle
+    cannot re-register the pane either: it looks for review-<pr>.jsonl in the new
+    TUI manual-<token> run dir. (Trust-dialog part fixed in 5a293bf1 by an orphan
+    trust watch; loop adoption itself is not.) Captures pm-captures/pr-b53bfe2/scenarios/4/W3-adopted-review.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T15:27:49.592899+00:00'
+  updated_at: '2026-10-13T15:27:49.592899+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1710f9a
+  plan: bugs
+  title: 'Bug: workspace-trust bootstrap takes Claude config lock even when the workdir
+    is already trusted (15s launch stall on a busy lock)'
+  branch: pm/pr-1710f9a-bug-workspace-trust-bootstrap-takes-claude-config-
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA S4 (2026-10-13). workspace_trust.ClaudeTrustRuntime.bootstrap
+    always calls _acquire_lock before reading the config, so launching into an already-trusted
+    workdir still waits up to LOCK_TIMEOUT_SECONDS (15s) when <config>.lock is held
+    fresh, then logs "could not lock" (observed 14:02:45->14:03:00 for pr-ba3293e
+    whose entry was already true). Fix idea: lock-free read first; return ALREADY
+    when every trust key is already true, only lock to write.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T15:27:50.328508+00:00'
+  updated_at: '2026-10-13T15:27:50.328508+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f2f9ef8
+  plan: bugs
+  title: 'Bug: pm session/TUI start replaces the global tmux after-new-window/after-split-window
+    hook arrays, dropping hooks at other indices'
+  branch: pm/pr-f2f9ef8-bug-pm-session-tui-start-replaces-the-global-tmux-
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA S4 (2026-10-13). A QA harness hook set at after-split-window[5]
+    / after-new-window[5] (pipe-pane capture) disappeared after each TUI restart via
+    kill pid + pm session (show-hooks -g showed only pm index 0). pm should set its
+    own index (or append) rather than reset the whole array, so user/test hooks survive.
+    Impact: continuous pane capture silently stopped for panes created after the restart.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T15:27:51.064753+00:00'
+  updated_at: '2026-10-13T15:27:51.064753+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1e9c117
+  plan: bugs
+  title: 'Bug: captures_dir() uses the /pm-captures mount for any PR when PM_CAPTURES_PR
+    is unset (nested throwaway QA overwrote real scenario captures)'
+  branch: pm/pr-1e9c117-bug-captures-dir-uses-the-pm-captures-mount-for-an
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA S4 (2026-10-13). paths.captures_dir: when the
+    per-session host captures dir does not exist and PM_CAPTURES_PR is unset, it returns
+    /pm-captures for ANY pr_id (fail-open). A throwaway pm project driven inside a
+    scenario container with PM_CAPTURES_PR unset (harness mistake) wrote its pr-01c151a/pr-e6715a3
+    scenario prompt.md/scenario.json/verdict.md into /pm-captures/scenarios/1..3 of
+    pr-b53bfe2, destroying the originals (quarantined to scenarios/4/contamination).
+    Suggest fail-closed: only use the mount when PM_CAPTURES_PR equals pr_id, else
+    fall back to the host path.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T15:27:51.803055+00:00'
+  updated_at: '2026-10-13T15:27:51.803055+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dc4dd45
+  plan: bugs
+  title: 'Bug: trust-blocked message for an approved pm workdir tells the user to
+    `pm trust add` it'
+  branch: pm/pr-dc4dd45-bug-trust-blocked-message-for-an-approved-pm-workd
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA S4 W5 (2026-10-13). When a session in an approved
+    pm-created workdir (~/.pm/workdirs/qa/.../s-1/repo) stays at the trust dialog
+    after the 2 accept attempts, workspace_trust.blocked_message says "pm only auto-trusts
+    pm-created workdirs ... To proceed: run `pm trust add <that workdir>`". The dir
+    is already approved, so the remedy is wrong; it should say the auto-accept did
+    not take and to accept in the pane / check the config lock.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T15:27:52.547247+00:00'
+  updated_at: '2026-10-13T15:27:52.547247+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
