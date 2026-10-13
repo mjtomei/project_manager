@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-12T16:42:21.131559+00:00'
+  updated_at: '2026-10-13T05:42:06.803818+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25843,6 +25843,22 @@ prs:
       in session project_manager-c5a1006b. This recovery invalidates unattended qualification.'
     created_at: '2026-10-12T22:43:16Z'
     last_edited: '2026-10-12T22:43:16Z'
+  - id: note-84fe757
+    text: 'Impl done (d67a8959, 05043b12). Planner plan now read from the planner
+      JSONL latest assistant turn (_read_planner_plan; pane only a gated fallback
+      with _PLANNER_GRACE). qa_plan_problem rejects truncated plans (needs QA_PLAN_START
+      before last END, headers == parsed, contiguous, starts at 1 or scenario_start);
+      incomplete plans are reported in latest_output/_error, not consumed. Handoff:
+      _publish_planner_head ff-pushes the PR branch before fan-out (never force; PlannerHandoffError
+      -> INPUT_REQUIRED on divergence/failed publish), create_scenario_workdir(expected_head=)
+      pins clones, planner app-code edits outside pm/ force QA NEEDS_WORK (persisted
+      in qa_resume.json). Tests: tests/test_qa_planner_handoff.py (incl. real-git
+      clone+origin swap+pull --rebase). Captures: impl/pre-fix/{stall,suffix} reproduce
+      stall + silent scenario-1 loss via TUI+fake-claude+history-limit 0; impl/post-fix/{stall,suffix}
+      reach QA PASS with all 4. Repro script recipe in pre-fix README (run from /tmp,
+      not /workspace).'
+    created_at: '2026-10-13T05:42:06Z'
+    last_edited: '2026-10-13T05:42:06Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
