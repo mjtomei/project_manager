@@ -70,7 +70,9 @@ R5. **Explicit handling of the known prompt (fallback).** If the dialog is
 still seen for an approved workdir (e.g. a container created before this
 fix, a config-write race), the watchdog selects "Yes, I trust this folder"
 by reading the cursor position from the screen (Up/Down to that row, then
-Enter), never blind Enter. At most 2 attempts.
+Enter), never blind Enter. At most 2 attempts per pane: the count is kept
+on the tmux pane (`@pm_trust_accept_attempts`), so the QA loop's watch,
+the TUI idle tracker's watch and per-call CLI trackers share one budget.
 When the dialog names a host directory, that directory decides (it must
 itself be approved — a session that started outside its intended approved
 workdir is never trusted by proxy); only an unreadable or container-internal
@@ -85,14 +87,16 @@ captured dialog — never sends keys or reports a false block.
 R6. **Bounded, actionable failure.**
 - `WorkspacePromptWatch(pane_id, workdir)` checks the pane at most every
   5s; if the dialog stays visible for longer than the grace (default 120s,
-  global setting `trust-prompt-grace-seconds`), it reports a message naming
+  global setting `trust-prompt-grace-seconds`, settable with `pm set`), it reports a message naming
   the path and the fix (`pm trust add <path>` or accept in the pane, then
   restart).
 - QA planner (`qa_loop.run_qa_sync`): the planner pane is watched until its
   first idle turn; if the watch fires (dialog visible past the grace — a
   failed bootstrap is caught this way too, after the R5 accept attempt),
   planning stops with `INPUT_REQUIRED` and a `_error` explaining the trust
-  block; no execution phase and **no finalizer** run.
+  block; no execution phase and **no finalizer** run. The qa_status
+  pane is still split beside the planner so the error is visible in the
+  QA window, not only in the log.
 - Zero scenarios after planning (any cause): the finalizer is skipped
   (`_execute_and_finalize`), since there are no scenario pushes to
   reconcile. This removes the second #229 hang.
@@ -102,7 +106,12 @@ R6. **Bounded, actionable failure.**
   callers catch it and record the reason.
 - QA scenario workers (`_poll_tmux_verdicts`): a worker that never gets
   past the dialog is marked `INPUT_REQUIRED` with reason
-  "blocked at workspace-trust prompt …".
+  "blocked at workspace-trust prompt …". Workers are watched from launch,
+  not after the verdict grace. A scenario whose concretizer was blocked
+  (no worker session) keeps its reason and is settled at once rather than
+  later overwritten with "no session id". `qa:<pr>:s<n>` tracker keys
+  belong to `qa_loop_ui`; the impl-idle poller must not unregister them
+  (doing so reset the watch, and its accept budget, on every tick).
 - `pane_idle.PaneIdleTracker.poll` (TUI-tracked impl/sign-off/merge panes):
   before the first hook event, a trust-blocked pane is reported as
   `waiting_for_input` (the TUI's existing "needs you" state).  The tracker
@@ -120,7 +129,11 @@ R8. **CLI.** `pm trust status [PATH]`, `pm trust add PATH`,
 and bootstraps the entry immediately; `remove` drops the authorization (it
 does not edit Claude's config — revoking Claude trust remains a Claude
 action).  `add` refuses the home directory and any directory containing it
-(`/`, `/home`), which would amount to blanket trust.
+(`/`, `/home`), which would amount to blanket trust.  `add`/`remove`
+serialize on an flock beside `trusted-workspaces` and replace the file
+atomically (parallel adds otherwise lost roots); an `add` whose bootstrap
+fails removes the root it added, so a failed command leaves nothing
+authorized.
 
 R9. **Launch cwd == bootstrapped cwd.** Trusting a checkout only helps if
 Claude actually runs there. Found live: `cli/pr.py:_launch_review_window`

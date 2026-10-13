@@ -284,6 +284,7 @@ def _list_settings():
     """Print all settings and their current values."""
     from pm_core.paths import get_global_setting, get_global_setting_value
     all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
             val = "on" if get_global_setting(name) else "off"
@@ -292,7 +293,7 @@ def _list_settings():
             val = raw if raw else _SETTING_DEFAULTS.get(name, "(unset)")
         default = _SETTING_DEFAULTS.get(name, "")
         marker = " (default)" if val == default else ""
-        click.echo(f"  {name:<22} {val}{marker}")
+        click.echo(f"  {name:<{width}} {val}{marker}")
 
 
 @cli.command("set")
