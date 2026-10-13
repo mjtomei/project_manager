@@ -241,6 +241,19 @@ review/QA.
   written after that is lost (5ef79e37). `pm autostart --help` names
   `--stop-before-merge` next to `--auto-merge` in its policy list.
 
+### Added from QA round 7 fixes (verify on the final revision)
+- **R40 O's armed line is a held confirmation.** `O` shows "Auto-sequence
+  armed for X (will stop before merge)" as its one held confirmation
+  (it replaces O's "targets +=" line). A second `O` inside an earlier
+  hold (another `O`, a CLI add/remove/clear, a merge prune line) queues
+  behind it and is readable for its own ~3 s; the deferred "starting X"
+  never paints over it. Re-pressing `O` on a target re-arms it with the
+  same line, and `O` on an auto-merge target switches it to
+  stop-before-merge (d6778d7f). The bottom row of the TUI, while the
+  command bar is unfocused, reads "press / to type a command · a Runs"
+  (R18; 3831cbba); focusing the bar shows the usual typing placeholder,
+  and leaving it restores the hint.
+
 ## 2. Setup
 Per `pm/qa/instructions/tui-manual-test.md`: install pm from this branch
 (`./install.sh --local` or editable venv with `PYTHONPATH` pointing at the
@@ -518,6 +531,28 @@ targets/policies or relaunching finished/in-flight work; any traceback.
    concretization's extra obligation under ambiguity 12; it does not
    turn the original literal assertion into a pass.
 
+17. Round 8 (S33–S34) runs on the commit that adds §13 of this spec or
+   a later commit of this branch. Round 7 S32 is independently VERIFIED
+   on 7e9d414a (its extra transient-feedback assertion stays FAILED and
+   out of scope, ambiguity 16, pr-2428766). S31 ended NEEDS_WORK with two
+   application commits: d6778d7f (`O` armed line via `add_targets`
+   `confirm=`) and 3831cbba (bottom hint "· a Runs"). The `L` pane
+   command, scheduler decisions, merge gates, restart adoption, popup
+   refresh and the log-line hold/clear code are unchanged. By the
+   impact-based scope guidance (PR note after round 7), round 8 re-runs
+   S31 end to end as S33, and S34 covers the places where the two
+   commits meet other workflows: `O` inside other held confirmations
+   (CLI, merge prune, other `O`s) and command-bar answers, `O` on an
+   existing/auto-merge/refused PR, `O` racing CLI writers, and the hint
+   across focus changes, queued CLI commands, the popup, narrow splits
+   and a breadcrumb restart. S32 (7e9d414a) and S27–S30 (e17d5671) are
+   carried forward with those revisions and are not reclassified.
+   No review pass of these two commits is recorded yet; if review
+   changes other code, the plan must expand. Ambiguity 12 still governs scope; with
+   four or more held confirmations back to back the held queue keeps
+   only the newest three on screen by design (R38), so Thens about
+   back-to-back lines use at most three.
+
 No unresolved ambiguities.
 
 ## 6. Shared setup and historical scenarios
@@ -528,8 +563,11 @@ prompt within the launcher's command-line argument limit (pr-ace66e5);
 no requirement, scope decision, scenario, or evidence is discarded.
 Use the current definitions below for new execution, and consult the history
 file when tracing an earlier run. Preserve the original run IDs and verdicts.
-Round 6 (§11) stays here as the carried-forward definition of S27–S30
-(see ambiguity 15); round 7 (§12) is the current execution.
+Round 6 S26 (§11) stays here because S31/S33 re-run it; the
+carried-forward S27–S30 definitions are verbatim in
+[qa-round-6-carried.md](qa-round-6-carried.md) (ambiguities 15, 17).
+Round 7 (§12) defines S31, which S33 re-runs; round 8 (§13) is the
+current execution.
 
 The machine-readable QA_PLAN block for this run is deliberately compact (PR
 transport workaround: ≤22 lines × ≤60 cols, pending pr-b8561ac). Each
@@ -624,154 +662,8 @@ Covers bug §0, R1, R10, R14–R18, R23–R25, R28, R31, R35–R38.
   mode is off, the popup shows the empty "auto-start off" message, and no
   backlog PR is listed or started.
 
-### S27 — CLI/command bar, validation, owners, typing, prefixes, pulls
-Covers R2, R8, R9, R11–R13, R23, R29, R30, R32 (policy flip), R33, R34,
-R37 (pulling status bar), R38 (deferred drop, prefix/error clears).
-- GIVEN PRs A, B, C pending and M merged before the session (with
-  `gh_pr_number` set), WHEN the user runs `pm autostart add A B` and
-  re-adds A as `pr-…`, `#N` and `N`, THEN every command exits 0; `list` /
-  `list --json` show exactly A and B, stop-before-merge, with added_at and
-  source; re-adds report "already a target" with no second A window; the
-  TUI shows ◎ on both with a readable confirmation.
-- WHEN `add A --auto-merge` then `add A` (no flag), THEN the first reports
-  policy_changed (was stop-before-merge) and the second keeps auto-merge.
-- WHEN `add A nosuch`, `add M`, `add`, `remove nosuch`, `remove C`, each
-  with and without `--json`, THEN the first four exit 1 `unknown_pr` /
-  `terminal_pr` / usage with the list unchanged; `remove C` is ok
-  `not_target`.
-- GIVEN A and B targets and a tree filter, WHEN the user presses `r` and a
-  background sync runs, THEN during "pulling" the status bar keeps
-  `AUTO ×2`, the filter segment and WCH (if watchers run).
-- GIVEN the user has just pressed `w` (and separately `y`, and `z`) so a
-  prefix hint is showing, WHEN another pane runs `pm autostart remove A`
-  inside the 2 s prefix window and the prefix then auto-cancels (repeat:
-  user presses Esc), THEN "removed A (1 remaining)" is readable for its
-  full hold after the hint clears (not blanked by the prefix timer).
-- GIVEN an error message showing in the log line (e.g. a refused action),
-  WHEN a CLI `add` lands before its auto-clear, THEN the "targets +=" line
-  is not erased when the error's timer fires.
-- WHEN the user runs `clear`, and within 3 s moves in the tree and types
-  `autostart list` (and separately bare `autostart`) in the command bar,
-  THEN the command-bar answer stays on screen; no stale "Selected: X"
-  replaces it when the hold ends. "Auto-start: OFF" was readable; C never
-  starts afterwards; A's window is kept.
-- GIVEN the TUI, WHEN the user drives the command bar (`autostart target
-  C`, `add B`, `list`, `remove C`, bare `autostart` on and off, `autostart
-  all`) and `A` on a never-stop-marked non-target, a target, and nothing
-  selected, THEN `target` is additive, bare-when-off prints usage, only
-  `all` enables backlog mode with a readable "ON (all…)" line, and `A` adds
-  auto-merge / removes only that PR / says "No PR selected".
-- GIVEN half of `autostart add B` typed in the command bar, WHEN another
-  pane runs `pm autostart status --json`, then `add C`, then an external
-  `pm pr edit` triggers a reload, and the user finishes typing and presses
-  Enter after each interruption (repeat with the interruption after one
-  character), THEN the bar keeps focus and text, cursor at the end with
-  nothing selected; the submitted command is the full text and B is added;
-  no keystroke acted as a tree hotkey.
-- GIVEN each owner: no session; killed TUI with stale pidfile; zombie
-  (killed, unreaped) TUI; `-s nonexistent`, WHEN `status --json` and `add
-  A` run, THEN each exits 2 `owner_unavailable` immediately, and a command
-  refused for a zombie owner is not applied by the next TUI.
-- GIVEN a directory outside any pm project, WHEN `add A --json` and
-  `remove A --json` run, THEN each exits 1 with `no_project` JSON;
-  `status --json` there exits 0 from a pane inside a running pm session
-  and exits 2 `owner_unavailable` with no session.
-- GIVEN the TUI held suspended, WHEN a command runs with `--timeout 2`,
-  THEN it exits 2 `owner_timeout` saying it may still be applied; after
-  resume the state is consistent and the command was applied at most once.
-
-### S28 — Shared dependency under concurrent CLI, keys and merges
-Covers R3–R6, R22, R24, R36, R37 (confirmations vs spinner), R38 (held
-queue, sync clears), E1, E3, E4, E6, E9.
-- GIVEN a diamond X→D←Y, independent Z and chain T2→T1, all pending, WHEN
-  two shells add X and Y at the same instant, THEN both exit 0 with their
-  own replies; D is launched exactly once and Z never starts; status lists
-  D once with needed_by [X, Y], X/Y "blocked on D", and the popup lists D
-  under both with "also needed by" the other.
-- GIVEN D running, WHEN at the same moment one shell removes X, another
-  re-adds Y and adds T2, a third fires 10 parallel `status --json`, and the
-  user presses `O` on T1, THEN every command gets its own valid reply (no
-  timeouts); the target set is {Y, T2, T1}; D keeps running with needed_by
-  [Y]; T1 runs once and T2 waits on T1; ◎ marks and popup match the CLI;
-  no PR has two windows; the cursor stays where the user put it.
-- GIVEN D finished, WHEN the user merges D with `g` while a CLI `remove Y`
-  races the merge (repeat with `add Y`), THEN the outcome is consistent (Y
-  removed, or pruned and started exactly once); "removed Y (N remaining)"
-  (or "targets +=") is readable after the spinner and in `L`; X is not
-  started; no traceback.
-- GIVEN a slowed `g` merge of a target W spinning, WHEN the user runs `pm
-  autostart remove` on a non-target Q, and separately `pm autostart clear`
-  during another slowed merge, THEN "Q not a target" and then "target W
-  merged — removed" are each readable in turn (neither replaced in one
-  frame), likewise "Auto-start: OFF", and all are in `L` (re-add targets
-  afterwards to continue).
-- GIVEN Y advancing, WHEN Y is merged by hand while a background or manual
-  GitHub/refresh sync finishes right after, THEN "target Y merged — removed
-  (N remaining)" is readable for its full hold (the sync's own result line
-  clear does not cut it short) and is in `L`; T1/T2 keep advancing.
-- WHEN T1 and then T2 merge, THEN the last prune line says "all targets
-  complete — auto-start OFF", the mode is off, the popup is empty, and Z
-  never starts.
-
-### S29 — Merge policies, sign-off gate, finished QA, skip-QA (scoped)
-Covers R7, R14/R37 (policy tags), R21, R32, R36, E2, E8, ambiguities 4 and
-12. Post-sign-off and transient paints are asserted in the ambiguity-12
-tolerant form.
-- GIVEN independent S and U, WHEN S is added with the default policy (and
-  with `O`) and U with `--auto-merge` (and with `A` on a never-stop-marked
-  PR), THEN list/status show stop_before_merge for S and auto_merge for U,
-  and the popup headers read `[stop-before-merge]` and `[auto-merge]`.
-- WHEN both pass review and QA, THEN S is held with a "sign off / press g"
-  reason; U's merge is refused by the sign-off gate (no SIGNOFF_MERGE) and
-  status says merge blocked by sign-off gate / awaiting sign-off; `pm pr
-  list` shows neither merged; nothing passes `--no-signoff-check` (debug
-  log and merge commands).
-- WHEN the user signs U off through `pm pr auto-sequence` from another
-  pane, THEN `status --json` shows `signoff.fresh` true for U at once and no
-  row in the TUI, status or open popup still says "awaiting sign-off"; U
-  then merges through `pm pr merge` with the gate passing (scheduler, or
-  the user's `g` per pr-7c32e44); U leaves the target set with a readable
-  "target U merged — removed" line that is also in `L`.
-- WHEN several scheduler passes and a sync/reload happen, THEN no new QA
-  run starts for S or U.
-- WHEN `add S` (no flag), `add S --auto-merge`, then `remove S` + `add S`,
-  THEN policies change only as flagged, `policy_changed` names the previous
-  policy, and the stop mark survives remove/re-add.
-- GIVEN stop-before-merge D needed by auto-merge Q, WHEN D is
-  merge-ready, THEN D is not auto-merged, Q waits on D, Q's header says
-  `[auto-merge]` and D's row carries only the stop mark.
-- GIVEN skip-QA enabled, WHEN an auto-merge and a stop-before-merge target
-  pass review, THEN (via `status --json`, popup, `L`, `pm pr list`) the
-  status says "QA skipped (skip_qa); awaiting sign-off", the auto-merge
-  target is not merged without a fresh SIGNOFF_MERGE, and the stop target
-  stops.
-
-### S30 — Restart adoption, CLI during restart, typing after restart
-Covers R19, R20, R26, R27, R33, R34, ambiguities 7–8, 14.
-- GIVEN A (stop, QA in flight), B (auto-merge, review iteration running),
-  C (waiting on D, D impl running), WHEN the user runs `pm tui restart
-  --breadcrumb`, THEN `list --json` shows A, B, C with the same policies;
-  `tmux list-windows -F '#{window_id} #{window_name}'` is identical before
-  and after; A's QA continues without re-planning and B's review keeps its
-  window; the resume summary is readable; the popup shows the same runs
-  and policy tags.
-- WHEN during the restart one shell runs `status --json` and another `add
-  Z`, followed later by an unrelated `status`, THEN each initial command
-  succeeds or exits 2 within `--timeout`; Z is applied exactly once right
-  after startup, not by the later command; the TUI pane survives.
-- GIVEN the user typing `autostart li` in the command bar right after the
-  restart, WHEN the deferred startup queue (Z) drains and the user types
-  `st` and Enter, THEN the bar kept focus and text with nothing selected,
-  and the submitted command is `autostart list` with Z in its output.
-- GIVEN a queue left by a TUI that died more than 60 s ago, WHEN a new TUI
-  starts, THEN that command is not applied.
-- GIVEN the popup open, WHEN the user presses Ctrl+R, and separately runs
-  `pm tui restart`, THEN the TUI restarts (popup does not swallow it) and
-  targets are dropped by design.
-- GIVEN a legacy single-target breadcrumb produced by the master build
-  (override → /opt/pm-src, `O`, override back, `pm tui restart
-  --breadcrumb`), WHEN the new build consumes it, THEN that PR is the only
-  target with stop-before-merge, and no windows are duplicated.
+S27–S30 (round 6, PASS/VERIFIED on e17d5671, carried forward) are
+preserved verbatim in [qa-round-6-carried.md](qa-round-6-carried.md).
 
 ## 12. QA round 7 scenarios (S31–S32, full detail — authoritative)
 
@@ -867,3 +759,111 @@ Covers R39 together with the R23, R35, R36, R37 and R38 checks that use
   popup and dismisses it, THEN `AUTO ×N` is still shown, the popup works
   as in S26, and Esc followed by `L` (with a short pause) opens `L`, not
   Alt+L.
+
+## 13. QA round 8 scenarios (S33–S34, full detail — authoritative)
+
+Use the setup in §6 and every environment note in §2 (rounds 1–6). Run
+against the PR branch head: check `git -C <pm checkout> log -1` before and
+after the run. It must be the commit that adds this section or a later
+commit of this branch (it contains d6778d7f and 3831cbba). Record the TUI
+(tmux screen recording through a grouped view session plus a 0.1 s
+`capture-pane` sampler of the TUI pane and, when `L` is open, of the log
+pane) and every `pm` command (CLI recording). Ambiguities 12 and 17
+govern scope. Mark extra observations informational. A literal Then that
+fails is fixed (NEEDS_WORK) or returned INPUT_REQUIRED with the contract
+conflict named. It is never waived. Each verdict names the revision it
+covers.
+
+Shared resources driven concurrently in round 8:
+- The single TUI log line, its hold timer and its held queue (max 3):
+  `O` presses, CLI confirmations and merge prune lines landing inside
+  each other's holds (S33, S34).
+- The command queue, SIGUSR2 and reply files: CLI adds/removes/status
+  racing `O`, and a CLI command drained while the command bar is empty
+  or half-typed (S34).
+- The in-memory target set, stop marks and merge breadcrumb: `O`
+  re-arm/policy switch racing CLI writers, and a breadcrumb restart
+  (S34).
+- The command bar (bottom row): its focus, text and hint (S33, S34).
+- tmux windows: one per run, never duplicated by repeated `O` (S33, S34).
+
+### S33 — Bug repro: two O targets advance; popup == CLI; L; Runs hint
+Re-runs S31 (§12), and through it S26 (§11), end to end on the final
+revision. Every S26 and S31 Then still applies unchanged. In addition:
+- The pytest step must include
+  `test_second_O_inside_first_hold_keeps_its_armed_line`
+  (tests/test_autostart_multi_target.py) and
+  `test_unfocused_hint_advertises_runs_popup`
+  (tests/test_view_focus_command_bar.py); all pass.
+- The two-`O` story: GIVEN A and B pending and auto-start off, WHEN the
+  user presses `O` on A, presses `r`, and presses `O` on B about 2.5–2.9 s
+  after the first `O` (inside A's hold), THEN "Auto-sequence armed for A
+  …" is readable for its hold and then "Auto-sequence armed for B …" is
+  readable for its own ~3 s; neither is replaced by "starting A/B" or a
+  refresh line within a frame; both are in the `L` recap; `AUTO ×2`, ◎ on
+  both, one impl window each. A then leaves `in_progress` for review and
+  QA without user action (bug §0), in the TUI, `pm pr list` and
+  `status --json`.
+- The `L` recap story runs at both the default half-width split (~60
+  columns) and a full-width 80-column terminal, as in S31.
+- The hint story: GIVEN the TUI with the command bar unfocused, at full
+  width and at 80x12 with `L` split, THEN the bottom row reads "press /
+  to type a command · a Runs" and pressing `a` opens the runs popup.
+  WHEN the user presses `/`, THEN the bar shows the typing placeholder;
+  the user types `autostart list` and presses Enter, and separately types
+  part of a command and presses Esc; THEN the command runs as typed (no
+  dropped or selected characters), and after each the hint "· a Runs" is
+  back with the tree focused and normal keys working.
+
+### S34 — O hold and the Runs hint across workflows
+Covers R40 with R2, R7, R18, R22, R23, R34, R36, R38 and R19 as far as
+`O` and the hint reach them. Setup: independent pending PRs P1–P4 and a
+target W whose `g` merge is slowed (§2 round 5 notes), fake Claude as in
+§6, CLI helper panes in the test tmux session.
+- GIVEN auto-start off, WHEN a CLI pane runs `pm autostart add P1` and
+  within its 3 s hold the user presses `O` on P2 and then `O` on P3,
+  THEN "targets += P1", "Auto-sequence armed for P2 …" and "Auto-sequence
+  armed for P3 …" are each readable in turn (no line replaced within a
+  frame; no "starting Px" painted over an armed line before its hold
+  ends); all three are in the `L` recap; the target set is {P1, P2, P3}
+  with P1–P3 stop-before-merge; each starts exactly once.
+- GIVEN P4 added with `pm autostart add P4 --auto-merge` (popup header
+  `[auto-merge]`), WHEN the user presses `O` on P4, THEN the armed line is
+  readable; `list --json`, `status --json` and the popup header now show
+  stop-before-merge for P4; no second P4 window. WHEN the user presses
+  `O` on P4 again, THEN the same armed line shows, the set and the other
+  policies are unchanged, still one window. WHEN a CLI pane then runs
+  `pm autostart add P4 --auto-merge`, THEN it reports `policy_changed`
+  (was stop-before-merge).
+- GIVEN W ready to merge with its merge slowed, WHEN the user merges W
+  with `g` and presses `O` on another pending PR while the "target W
+  merged — removed (N remaining)" line is held, THEN the prune line and
+  then the armed line are each readable in turn after the spinner; both
+  are in `L`; the newly armed PR starts once.
+- GIVEN the user just pressed `O` on a PR, WHEN within 3 s the user moves
+  in the tree and types `autostart list` (and separately bare
+  `autostart`) in the command bar, THEN the command-bar answer stays on
+  screen when the armed hold ends; no stale "Selected: X" or "starting
+  X" replaces it; the list includes the armed PR.
+- GIVEN targets P1 and P2, WHEN the user presses `O` on P3 at the same
+  instant as two CLI panes run `pm autostart remove P1` and `add P4` and
+  a third fires 10 `status --json` polls, THEN every CLI command exits 0
+  with its own reply; the final set equals the serial result
+  {P2, P3, P4}; P3 is stop-before-merge; every confirmation is in `L`
+  exactly once; no PR has two windows; the cursor stays on P3.
+- GIVEN the bar unfocused and empty, WHEN another pane runs `pm
+  autostart status --json` and `add` (drained from the queue), THEN the
+  bottom row still reads "… · a Runs" and the tree keeps focus. GIVEN
+  half of `autostart add P1` typed in the bar, WHEN the same CLI commands
+  drain, THEN the text is kept with the cursor at the end (R34), Enter submits the full
+  command, and the hint returns afterwards.
+- GIVEN the runs popup open, WHEN it is closed with Esc, `q` and `a`, and
+  opened from the command bar `autostart status` then closed with Esc,
+  THEN the bottom row reads "… · a Runs" each time and `a` reopens the
+  popup.
+- GIVEN targets added with `O` (stop) and with `--auto-merge`, WHEN the
+  user runs `pm tui restart --breadcrumb`, THEN after the restart the
+  targets and policies are unchanged (`list --json`, popup headers),
+  `tmux list-windows` is identical before and after, the bottom row
+  reads "… · a Runs", and `O` on a pending PR then shows its armed line
+  and adds it without disturbing the restored targets.
