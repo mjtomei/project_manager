@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T03:27:30.184349+00:00'
+  updated_at: '2026-10-13T03:31:24.465801+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26491,6 +26491,12 @@ prs:
       1 baseline failure in test_hook_events installer.'
     created_at: '2026-10-13T03:27:30Z'
     last_edited: '2026-10-13T03:27:30Z'
+  - id: note-99a6d9a
+    text: 'Review 66f9 i2 (rev 8e9d3e76): no app delta since i1 (only a project.yaml
+      note). Re-checked 5ef79e37 (L settle/burst/recap, help text): no defects. Suite:
+      2998 passed (markdown_render + installer deselected as baseline).'
+    created_at: '2026-10-13T03:31:24Z'
+    last_edited: '2026-10-13T03:31:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
