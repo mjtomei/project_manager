@@ -203,3 +203,27 @@ def test_local_merge_prompt_names_main_repo_sync(project):
         data, "pr-002", "CONFLICT (content)", main_repo=str(project.repo))
     assert f"git fetch {project.repo} master && git merge FETCH_HEAD" in prompt
     assert "Do not change the main repo directory" in prompt
+
+
+def test_main_repo_side_failure_exits_without_a_window(project):
+    """A failure in the main repo itself (here: a stale index.lock blocks the
+    fast-forward) is reported with the --propagation-only next step and a
+    non-zero exit; no Claude window is sent into the main repo."""
+    commit(project.wd2, "two.txt", "2\n", "pr2")
+    lock = project.repo / ".git" / "index.lock"
+    lock.write_text("")
+    head_before = git(project.repo, "rev-parse", "HEAD")
+
+    r, windows, finalized = merge(project, "pr-002", "--resolve-window")
+    assert r.exit_code == 1, r.output
+    assert not windows and not finalized
+    assert "pm pr merge --propagation-only pr-002" in r.output
+    lock.unlink()
+    assert git(project.repo, "rev-parse", "HEAD") == head_before
+
+    # Once the user clears the blocker, the documented next step finishes.
+    r, windows, finalized = merge(project, "pr-002", "--propagation-only",
+                                  "--resolve-window")
+    assert r.exit_code == 0, r.output
+    assert not windows and finalized
+    assert (project.repo / "two.txt").exists()
