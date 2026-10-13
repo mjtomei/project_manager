@@ -458,6 +458,12 @@ QA round 5 fixes (reviewed in review-loop 4be9):
     2s clear cut its 3s hold short. A manual refresh with no result line
     (e.g. "No workdirs") now logs "Refreshed" so "Refreshing..." is
     replaced and cleared.
+40. *(review 4be9 i3)* The `z`/`w`/`y` prefix hints keep their arrival
+    number (`_prefix_hint_seq`), and every prefix clear (the 2s `w`/`y`
+    auto-cancel timers, the second key, Esc, `zzz`) clears only that hint
+    (`_clear_prefix_hint`). Before, a held auto-start confirmation from a
+    CLI command that landed during the 2s prefix window was blanked when
+    the timer fired.
 
 Out of scope and filed (see qa.md ambiguity 12): pr-7c32e44 (the
 post-sign-off "merge attempt failed" row) and pr-0a08055 (transient

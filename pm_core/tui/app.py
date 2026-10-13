@@ -220,7 +220,7 @@ class ProjectManagerApp(App):
             if self._w_cancel_timer:
                 self._w_cancel_timer.stop()
                 self._w_cancel_timer = None
-            self._clear_log_message()
+            self._clear_prefix_hint()
             key = event.character or event.key
             if key == "w":
                 self._action_watcher_list()
@@ -241,7 +241,7 @@ class ProjectManagerApp(App):
             if self._y_cancel_timer:
                 self._y_cancel_timer.stop()
                 self._y_cancel_timer = None
-            self._clear_log_message()
+            self._clear_prefix_hint()
             key = event.character or event.key
             if key in ("s", "d", "t"):
                 pr_view.cleanup_then_action(self, key)
@@ -255,7 +255,8 @@ class ProjectManagerApp(App):
                 return
             self._y_mode = True
             self._z_count = 0
-            self.log_message("[bold]y …[/] [dim](cleanup-then: s=start d=review t=qa)[/]")
+            self._prefix_hint_seq = self.log_message(
+                "[bold]y …[/] [dim](cleanup-then: s=start d=review t=qa)[/]")
             self._y_cancel_timer = self.set_timer(2.0, self._cancel_y_mode)
             event.prevent_default()
             event.stop()
@@ -265,7 +266,8 @@ class ProjectManagerApp(App):
             if not self.check_action("focus_watcher", ()):
                 return
             self._w_mode = True
-            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop r=review)[/]")
+            self._prefix_hint_seq = self.log_message(
+                "[bold]w …[/] [dim](w=list f=focus s=start/stop r=review)[/]")
             # Auto-cancel after 2 seconds
             self._w_cancel_timer = self.set_timer(2.0, self._cancel_w_mode)
             event.prevent_default()
@@ -276,10 +278,11 @@ class ProjectManagerApp(App):
                 # zzz → cancel (toggle off).  Only z and zz are valid prefixes;
                 # a third z resets.
                 self._z_count = 0
-                self._clear_log_message()
+                self._clear_prefix_hint()
             else:
                 self._z_count += 1
-                self.log_message(f"[bold]{'z' * self._z_count} …[/]")
+                self._prefix_hint_seq = self.log_message(
+                    f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
         elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._y_mode):
@@ -294,7 +297,7 @@ class ProjectManagerApp(App):
                 if self._y_cancel_timer:
                     self._y_cancel_timer.stop()
                     self._y_cancel_timer = None
-            self._clear_log_message()
+            self._clear_prefix_hint()
             # Don't prevent — let escape also do its normal thing
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
@@ -404,6 +407,8 @@ class ProjectManagerApp(App):
         # y prefix key state (cleanup-then-action)
         self._y_mode: bool = False
         self._y_cancel_timer = None
+        # Arrival number of the z/w/y prefix hint on the log line
+        self._prefix_hint_seq: int | None = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
         # Self-driving QA state (zz t — tracks pass counts per PR)
@@ -1098,17 +1103,23 @@ class ProjectManagerApp(App):
             return
         self.run_worker(auto_sequence_for_pr(self, pr_id))
 
+    def _clear_prefix_hint(self) -> None:
+        """Clear the z/w/y prefix hint — only it: a message that arrived
+        after it (e.g. a held auto-start confirmation from a CLI command
+        during the 2s prefix window) keeps the line."""
+        self._clear_log_message(seq=self._prefix_hint_seq)
+
     def _cancel_w_mode(self) -> None:
         """Auto-cancel w prefix mode after timeout."""
         if self._w_mode:
             self._w_mode = False
-            self._clear_log_message()
+            self._clear_prefix_hint()
 
     def _cancel_y_mode(self) -> None:
         """Auto-cancel y prefix mode after timeout."""
         if self._y_mode:
             self._y_mode = False
-            self._clear_log_message()
+            self._clear_prefix_hint()
 
     def action_cleanup_pr(self) -> None:
         pr_view.cleanup_pr(self)

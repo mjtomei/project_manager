@@ -505,3 +505,30 @@ def test_manual_refresh_clear_does_not_cut_short_held_prune_line(tmp_path):
     app._log_hold_until = 0.0
     app.timers[0]()  # hold ends: the expired "Refreshed" is not shown late
     assert shown[-1] == f" {_PRUNE}"
+
+
+# Review 4be9 i3: the w/y prefix auto-cancel timers (2s) cleared the log
+# line unconditionally, blanking a held confirmation from a CLI command
+# that landed while the prefix hint was up.
+
+def _prefix_app():
+    app, shown = _stub_app()
+    app._w_mode = True
+    app._clear_prefix_hint = (
+        lambda: ProjectManagerApp._clear_prefix_hint(app))
+    app._prefix_hint_seq = app.log_message("[bold]w …[/]")
+    return app, shown
+
+
+def test_prefix_timeout_does_not_blank_newer_confirmation():
+    app, shown = _prefix_app()
+    _log(app, "Auto-start: removed pr-y (1 remaining)", force=True, hold=3)
+    ProjectManagerApp._cancel_w_mode(app)  # the 2s w timer fires
+    assert app._w_mode is False
+    assert shown[-1] == " Auto-start: removed pr-y (1 remaining)"
+
+
+def test_prefix_timeout_clears_its_own_hint():
+    app, shown = _prefix_app()
+    ProjectManagerApp._cancel_w_mode(app)
+    assert shown[-1] == ""
