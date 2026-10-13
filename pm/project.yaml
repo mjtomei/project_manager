@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T06:30:17.540428+00:00'
+  updated_at: '2026-10-13T06:44:42.252258+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3335,6 +3335,15 @@ prs:
       module, PM_HOST_HOME).'
     created_at: '2026-10-13T06:30:17Z'
     last_edited: '2026-10-13T06:30:17Z'
+  - id: note-056c2b4
+    text: 'Review i2 (384f3c95): known limit — when pm itself runs from a host dir
+      named /workspace (nested dev setup), a container dialog showing /workspace is
+      read as a host path, so the R5 fallback auto-accept does not fire for pre-fix
+      reused containers. Those sessions still fail within the grace with a message
+      that tells the user what to do. Newly created containers are seeded, so they
+      are unaffected.'
+    created_at: '2026-10-13T06:44:42Z'
+    last_edited: '2026-10-13T06:44:42Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
