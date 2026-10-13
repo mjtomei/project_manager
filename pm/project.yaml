@@ -25877,7 +25877,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-13T07:18:48.713487+00:00'
+  updated_at: '2026-10-13T13:37:00.185424+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25958,6 +25958,17 @@ prs:
       A merge lines).'
     created_at: '2026-10-13T07:18:48Z'
     last_edited: '2026-10-13T07:18:48Z'
+  - id: note-1e891a2
+    text: 'QA s6 Group C (adc6d89d): C-a1/a2/a3, C-c, C-d (2 race orders), C-e, C-f,
+      C-g held live. C-b found + fixed c762e3d5: a CLI qa-run-bg run retired by a
+      SIGNOFF_REQA bounce finished late, left qa_resume.json, and the TUI resume scan
+      "Recovered completed QA" -> stale "QA PASS for <pr> — press i" after the bounce.
+      qa-run-bg now clears its snapshot after finishing (killed-mid-run keeps it,
+      C-g still recovers). Post-fix rerun on SP1 clean; CLI tick shapes identical
+      to master 6cfd047e. C-d: fake router writes no report.html, so the manual-record
+      path needed a stand-in report (qa.md R8 style). Captures scenarios/6.'
+    created_at: '2026-10-13T13:37:00Z'
+    last_edited: '2026-10-13T13:37:00Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
