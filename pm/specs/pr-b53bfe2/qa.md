@@ -15,20 +15,25 @@ This spec is grounded in `git diff master...HEAD`:
 - `tui/review_loop_ui.py` + `claude_launcher.pane_transcript_path` +
   `tmux.pane_start_command`: the orphan trust watch for Claude panes the
   TUI's idle tracker cannot register (`5a293bf1`, revised in review 80f0
-  i1/i2, `af1a3fd4` and `ac7522e0`)
+  i1/i2, `af1a3fd4` and `ac7522e0`; duplicate-report guard `211cfb95`,
+  reviewed in review 1317 i1)
 - `pm/specs/pr-b53bfe2/impl.md`
 
-The current QA round (round 4, after review 80f0 i2) has exactly three
+The current QA round (round 5, after review 1317 i1) has exactly three
 scenarios. Each one executes one of the named sections below **in full**,
 together with the shared **Setup** and **Harness notes**. The planner output
 only names the section; the concretizer and worker must read the whole
 section here, every H/W/M story:
 
-- **SCENARIO 6: Host trust policy and configuration** → section
+- **SCENARIO 9: Host trust policy and configuration** → section
   "Host trust policy and configuration" (H1–H7)
-- **SCENARIO 7: Workflow and container trust** → section
+- **SCENARIO 10: Workflow and container trust** → section
   "Workflow and container trust" (W1–W6)
-- **SCENARIO 8: Local merge trust** → section "Local merge trust" (M1–M5)
+- **SCENARIO 11: Local merge trust** → section "Local merge trust"
+  (M1–M5, incl. M2a/M2b/M2c and M4b)
+
+Scenario numbers before round 5 map to the same sections: 6/3 = host,
+7/4 = workflow/container, 8/5 = local merge.
 
 The runner must launch exactly as many scenarios as were planned (3).
 A planned/launched mismatch is itself a FAIL to report.
@@ -51,10 +56,32 @@ A planned/launched mismatch is itself a FAIL to report.
     pre-existing, out-of-scope merge bugs (`pr-c50d365`, `pr-ea04ba8`).
     Resolved in Ambiguity 7: the spec was wrong, M2 and M5 are corrected
     below, and both bugs stay tracked.
-- The head changed after round 3 (orphan watch), and that code runs on every
-  TUI poll for every impl/review pane the tracker cannot register, so
-  **no earlier coverage counts as PASS for this round**. All three sections
-  run again in full on the current head.
+- Round 4 on `5e372554` (run `pr-b53bfe2-2cc2adbed8e7c053`):
+  - S6 host trust: **NEEDS_WORK** only because it made an app fix. Every
+    H Then held, including the first live test of the orphan watch. Live
+    bug fixed in `211cfb95`: after a review loop ended in the trust ERROR,
+    the orphan watch re-posted the same red line about 35s later. Now
+    reviewed (review 1317 i1). Filed `pr-c9e69fb`: shell `pm pr start`
+    panes have no `--session-id` and are never trust-watched, so the
+    round-4 H7.1 text and the "Shell launches" note were wrong (corrected
+    below).
+  - S7 workflow/container: **INPUT_REQUIRED**. Every trust Then W1–W6 held
+    live, including real container QA workers (W6.7) and the W3.5
+    hard-kill orphan watch. Only W3.3 "resume" failed, on pre-existing
+    `pr-9f97a8f` (TUI `s` never resumes). That also makes `pr-d76385d`
+    unreachable. Filed `pr-f8acf21`. Resolved in Ambiguity 10: W3.3 is
+    corrected below.
+  - S8 local merge: **INPUT_REQUIRED**. Every trust Then held. Two M2a/M3
+    Thens did not match as written: an "Updating master in the PR workdir
+    … CONFLICT" line the concretizer expected in M2a cannot appear there,
+    and real Claude asked for input on genuinely ambiguous same-line
+    conflicts. Resolved in Ambiguity 9: both were spec errors, and M2–M4
+    are corrected below.
+- The head changed after round 4 (`211cfb95`, the orphan-watch report
+  guard), and that code runs on every TUI poll for every impl/review pane
+  the tracker cannot register. So **no earlier coverage counts as PASS for
+  this round**. All three sections run again in full on the current
+  head.
 
 ## Run disclosures (read first)
 
@@ -72,9 +99,11 @@ A planned/launched mismatch is itself a FAIL to report.
   live in round 3. The local merge change (`bca1d21a`, `d1b791f9`) was
   reviewed in 356c i3 (`3c7df387`) and its trust Thens passed live in
   round 3. The round-3 QA fix `5a293bf1` (orphan trust watch) was reviewed
-  and revised in review 80f0 i1/i2 (`af1a3fd4`, `ac7522e0`). **This round
-  is the first live test of the revised orphan watch**, so H7 and W3.5 must
-  exercise it.
+  and revised in review 80f0 i1/i2 (`af1a3fd4`, `ac7522e0`), and passed
+  live in round 4. The round-4 QA fix `211cfb95` (orphan watch does not
+  re-report a pane this TUI already reported) was reviewed in review
+  1317 i1. **This round is its first live test after review**, so H7.6
+  must exercise it.
 - **Any app edit made in this round is unreviewed.** Commit it with a
   fail-before/pass-after regression test, name the commit in the report, and
   state that it needs another review pass before fresh sign-off. An all-PASS
@@ -110,6 +139,15 @@ A planned/launched mismatch is itself a FAIL to report.
   - `pr-d76385d`: a resumed session's existing transcript ends every trust
     watch at once, so a dialog after a trust reset is never accepted or
     reported (review 80f0 i3; tracker, orphan and loop watches).
+    Unreachable until `pr-9f97a8f` is fixed (round 4 S7).
+  - `pr-9f97a8f`: TUI `s` on a PR whose impl window was closed starts a
+    fresh session instead of resuming. Only the terminal fall-through
+    path (`pm pr start` with no tmux) resumes.
+  - `pr-c9e69fb`: shell `pm pr start` impl panes have no `--session-id`,
+    so they are never trust-watched.
+  - `pr-f8acf21`: stopping a QA run still launches queued workers and a
+    finalizer, then records QA PASS with unrun scenarios. Watch for it in
+    W3.4, and never count such a PASS as coverage.
 
 ## Background facts (verified with claude 2.1.296)
 
@@ -222,10 +260,10 @@ Steps:
   and logs written by the scenario itself (e.g. `scenarios/4/W3-*`,
   `scenarios/5/*`, `impl/{pre,post}-fix/*`).
 - **Capture isolation for this round.** Each scenario writes only under
-  its own `scenarios/<n>/` (6, 7 or 8) and never deletes or rewrites
+  its own `scenarios/<n>/` (9, 10 or 11) and never deletes or rewrites
   another scenario's files or earlier rounds' files. At the end, list
   your directory with sizes and mtimes in the report and confirm that
-  `scenarios/1`–`5` were not modified during your run (compare a listing
+  `scenarios/1`–`8` were not modified during your run (compare a listing
   taken at start with one taken at the end).
 - **Captures (round-3 incident).** Never unset `PM_CAPTURES_PR`. In round 3
   a nested throwaway QA run inside S4 wrote its own `prompt.md`,
@@ -279,9 +317,32 @@ Steps:
 - **`pm meta`** sets the session override to a GitHub-master clone and
   removes `~/.pm/sessions/<tag>` on exit, which wipes a fake-claude config,
   so run it last.
-- **Shell launches.** `pm pr start` from a shell without `--transcript` is
-  not registered by the TUI idle tracker; on the current head it is still
-  trust-watched by the orphan watch (H7).
+- **Shell launches.** `pm pr start` from a shell without `--transcript`
+  has no `--session-id` in its pane command. It is not registered by the
+  TUI idle tracker and is **not** trust-watched by the orphan watch either
+  (`pr-c9e69fb`, design limit in impl.md R6). The orphan watch is reachable
+  only for panes whose start command carries a session id that the current
+  TUI cannot register: TUI-launched impl/review panes after a hard TUI kill
+  and `pm session`, or a hand-made window whose command has
+  `--session-id`.
+- **Accept key pattern.** The first accept attempt is Down then Enter. A
+  second attempt is Enter only, because the cursor is already on "Yes". A
+  stand-in key log therefore reads `DOWN@no, ENTER@yes[, ENTER@yes]`. The
+  failure condition is any `ENTER@no`.
+- **Resume route.** TUI `s` never resumes (`pr-9f97a8f`). The path that
+  resumes is the terminal fall-through: `pm pr start <pr>` from a shell
+  with no tmux on PATH (e.g. `env PATH=<PATH without tmux> pm pr start`),
+  which runs `launch_claude --resume` via the `pr:start:<pr>` session key.
+- **Auto-start merge route (M2b).** `_attempt_merge` runs `pr merge`
+  without `--no-signoff-check`, and `pm autostart add` defaults to
+  `--stop-before-merge`. Reaching `_maybe_auto_merge` needs all of:
+  `pm autostart add --auto-merge <pr>`; `pm project set skip-qa on`; a
+  SIGNOFF_MERGE at the workdir HEAD (a `report.html` with
+  `<meta name="pm-signoff-verdict" content="SIGNOFF_MERGE">` under
+  `~/.pm/sessions/<tag>/captures/<pr>/`, then `pm pr signoff record
+  <pr>`); and a fake review PASS while the merge stays real Claude. MERGED
+  detection then needs pm hooks in `$CFG/settings.json` and
+  `$CFG/projects` symlinked to `~/.claude/projects`.
 
 ## Host trust policy and configuration
 
@@ -414,12 +475,11 @@ refusal. All of it runs on the host path, with no pm containers.
    - no lock or temp leftovers remain.
 3. **Authorization list.** After (c), `pm trust list` must contain **all 10**
    authorized dirs.
-   - `~/.pm/settings/trusted-workspaces` is a plain read-modify-write with
-     no lock, so lost updates are a **suspected bug**.
+   - `~/.pm/settings/trusted-workspaces` is written under a flock with an
+     atomic replace since `f650a308`, so 10/10 is expected.
    - If any are missing, reproduce it at least twice. Then either fix it
-     through the normal flow (commit on this PR with a regression test,
-     flagged for review) or file it with `pm pr add … --plan bugs` and
-     reference the PR id.
+     (commit on this PR with a regression test, flagged unreviewed) or file
+     it with `pm pr add … --plan bugs` and reference the PR id.
    - Do not leave it untracked.
 
 ### H6. Bounded, actionable refusal on the host
@@ -437,8 +497,9 @@ Uses the stand-in and `trust-prompt-grace-seconds` 30.
        the path, `pm trust add <path>`, and "not QA coverage";
      - no scenario windows and **no finalizer** window are launched;
      - the planner pane stays open showing the dialog;
-     - the stand-in key log shows at most 2 accept attempts, each Down then
-       Enter, and never an Enter sent while the cursor was on "No, exit".
+     - the stand-in key log shows at most 2 accept attempts (see the
+       accept key pattern in Harness notes), and never an Enter sent while
+       the cursor was on "No, exit".
    - Compare the wall-clock time with the pre-fix behaviour of a 1-hour
      wait, quoted from impl.md.
 2. **TUI "needs you".**
@@ -454,50 +515,69 @@ Uses the stand-in and `trust-prompt-grace-seconds` 30.
    ends in ERROR with the trust message (path plus remedy) instead of
    polling forever.
 
-### H7. Orphan trust watch for panes the TUI did not launch (first live test)
+### H7. Orphan trust watch for panes the current TUI cannot register
 
-The TUI now trust-watches every impl/review pane it finds but cannot
-register with its idle tracker: panes an earlier TUI launched, and impl
-panes started from a shell without `--transcript`. It recovers the Claude
-session from the pane's own start command. Uses the stand-in, grace 30s,
-and the stand-in key log.
+The TUI trust-watches every impl/review pane it finds but cannot register
+with its idle tracker, as long as the pane's start command carries a Claude
+`--session-id`. In practice that means panes an earlier TUI launched (after
+a hard kill). It recovers the Claude session from the pane's start
+command. Shell `pm pr start` panes have no session id and are not watched
+(`pr-c9e69fb`). Uses the stand-in, grace 30s, and the stand-in key log.
 
-1. **Shell-started impl at a stuck dialog.**
+1. **Shell-started impl at a stuck dialog (design limit).**
    - Given: the TUI is running; the stand-in `claude` is on PATH for the
      shell; a PR with an approved workdir.
    - When: the user starts that PR's implementation from a separate shell
      (`pm pr start <pr>`, not the TUI).
    - Then:
-     - the stand-in key log shows at most 2 accept attempts, each Down then
-       Enter, and never Enter while the cursor is on "No, exit";
-     - after about grace + 15s the TUI log shows **one** red message naming
-       the path and the remedy; it is not repeated on later polls;
-     - the TUI stays responsive (navigate, open the PR) while it happens.
-2. **Same with real Claude: the fallback actually unblocks.**
-   - Given: the TUI is running, bootstrap is defeated for a fresh approved
-     workdir (hold a fresh `<config>.lock` as in H4.4, or delete its entry
-     right after launch), real Claude.
-   - When: the user starts the PR from a shell.
-   - Then: the dialog is visible briefly, pm accepts it by cursor, the
-     session reaches its first real output, and the config gains the entry.
+     - the pane command has no `--session-id`;
+     - the stand-in key log stays empty and the TUI posts no trust message
+       for the pane, even after grace + 30s;
+     - the TUI stays responsive.
+   - This is the known limit tracked in `pr-c9e69fb`. Record it; it is not
+     a FAIL of this round. If keys or a message do appear, report that the
+     limit no longer holds and add a note on `pr-c9e69fb`.
+2. **Hard TUI kill with real Claude: the fallback actually unblocks.**
+   - Given: a TUI-launched impl pane with real Claude at the dialog for a
+     fresh approved workdir. Defeat bootstrap by holding a fresh
+     `<config>.lock` as in H4.4, and kill the TUI before its own watch
+     accepts (or delete the entry right after launch).
+   - When: the user hard-kills the TUI process (not `pm tui restart`),
+     releases the lock and runs `pm session` again.
+   - Then: the dialog is visible briefly, the new TUI accepts it by cursor
+     within a few seconds, the session reaches its first real output, and
+     the config gains the entry.
 3. **Hard TUI restart, budget across restarts.**
    - Given: a TUI-launched impl pane at the stand-in dialog that already
      received its accept attempts.
-   - When: the user hard-kills the TUI process (not `pm tui restart`) and
-     starts `pm session` again.
+   - When: the user hard-kills the TUI process and starts `pm session`
+     again.
    - Then: the pane gets **no** further Enter (the per-pane budget spans
      restarts; total stays at most 2), and the new TUI reports the blocked
-     pane once.
+     pane once (one red line naming the path and the remedy, not repeated
+     on later polls).
 4. **No false fires.**
    - Panes with no Claude session id in their start command (e.g. a plain
      shell window named like an impl window) get no keys and no message.
    - A pane past the dialog that later prints dialog-like text (`cat` the
      `TRUST_SCREEN` fixture in a real session) gets no keys and no message.
    - Once the pane is gone (window killed), nothing more is logged for it.
-5. **Unapproved cwd stays explicit.** A shell-started Claude pane whose
-   start command `cd`s into an unapproved dir (e.g. the throwaway project
-   root, launched with a PR window name) gets no keys, and pm writes no
-   trust for that dir.
+5. **Unapproved cwd stays explicit.** A hand-made Claude window named like
+   a PR window, whose start command has `--session-id` and `cd`s into an
+   unapproved dir (e.g. the throwaway project root), gets no keys, and pm
+   writes no trust for that dir.
+6. **No duplicate report after a trust-blocked review loop (`211cfb95`,
+   first live test after review).**
+   - Given: the stand-in on PATH for `review`, grace 30s.
+   - When: the user starts a review loop from the TUI and waits until it
+     ends in ERROR with the trust message (H6.3), then waits another 90s.
+   - Then: the TUI log shows the red trust line for that pane **once**;
+     the orphan watch does not post it again on later polls.
+   - Then: the user hard-kills the TUI and runs `pm session` again. The
+     restarted TUI reports the still-blocked review pane exactly once, and
+     sends no further Enter.
+   - Record the pre-fix comparison from round 4 (duplicate red line about
+     35s later; captures `scenarios/6`).
 
 ## Workflow and container trust
 
@@ -552,10 +632,15 @@ This was the live R9 finding.
    - Then: the entry is re-written, there is no dialog, and the review
      reaches a verdict.
 3. **Resume:**
-   - When: the user kills the impl window and starts the PR again, which
-     resumes the earlier session.
-   - Then: the resumed Claude session shows no dialog and continues the
+   - When: the user kills the impl window and starts the PR again through
+     the route that resumes: the terminal fall-through (see Resume route in
+     Harness notes).
+   - Then: the resumed Claude session (`--resume`) shows no dialog, the
+     config entry is re-written first, and the session continues the
      earlier conversation.
+   - Also press TUI `s` on that PR once and record what happens. A fresh
+     session instead of a resume is pre-existing `pr-9f97a8f`, not a FAIL
+     here; the fresh session must still start with no dialog.
 4. **Interrupted QA:**
    - When: QA is stopped mid-run (quit and restart the TUI / `pm session`)
      and QA is started again.
@@ -594,6 +679,11 @@ This was the live R9 finding.
      after the grace. Expected per the bug: the dialog sits unaccepted and
      unreported. Record the outcome against `pr-d76385d`, and add a pm
      note on that PR if the scope differs (e.g. also review/QA resumes).
+     In round 4 TUI `s` never resumed (`pr-9f97a8f`), so this was
+     unreachable. Try the terminal fall-through resume too: it bootstraps
+     trust but has no trust watch, so with bootstrap defeated record
+     whether the dialog sits there. Record "unreachable via TUI, tracked in
+     `pr-d76385d`/`pr-9f97a8f`" if nothing new shows up.
    - **Transient start-command read failure (`pr-9e37213`).** Only a code
      path for an injected failure reaches this; do not patch the app to
      simulate it. If a user-level route exists (e.g. briefly making the tmux
@@ -726,42 +816,69 @@ Python (real git; all must pass) and record the output.
 
 ### M2. A real conflict is resolved in the PR workdir (pr-e835d8f)
 
-- Given two PRs that edit the same lines; the first is merged.
-- When the user merges the second from the TUI.
+Give every conflict PR a description that names the winning side (e.g.
+"on conflict keep this PR's line"), so a real Claude window can resolve it
+without asking. M2c covers the ambiguous case on purpose.
+
+**M2a. Manual merge (command bar).**
+
+- Given two PRs that edit the same lines; the first is merged. The second
+  PR's description names the winning side.
+- When the user merges the second from the TUI command bar
+  (`pr merge --resolve-window --no-signoff-check <pr>`).
 - Then:
+  - the TUI shows "Opened merge resolution window". It does **not** show
+    an "Updating master in the PR workdir … CONFLICT" line here: with this
+    Given the base sync is a clean fast-forward and the conflict is at the
+    PR-branch merge. That line only appears in M3;
   - a `merge-<pr>` window opens and its `#{pane_current_path}` is the
     **PR workdir**, not the project root (record it);
   - the pane shows no trust dialog (continuous capture from launch) and no
     manual keys are sent;
+  - Claude resolves it without asking and reports MERGED in the window;
   - the PR workdir has `hasTrustDialogAccepted: true`; the project root has
     no entry;
-  - after Claude resolves and reports MERGED in the window, propagation
-    fast-forwards the main repo with no second window and the PR shows
-    `merged`. Propagation route:
-    - auto-start merge (`_maybe_auto_merge`): the TUI runs
-      `pm pr merge --propagation-only` itself; drive at least one M2 merge
-      this way if the auto-start setup allows it, and show it;
-    - manual command-bar/`g` merge: the TUI does not follow up
-      (`pr-c50d365`, pre-existing); the user runs
-      `pm pr merge --propagation-only <pr>` and that completes it. This is
-      expected, not a failure of this PR.
+  - the TUI does not follow up (`pr-c50d365`, pre-existing); the user runs
+    `pm pr merge --propagation-only <pr>`, which fast-forwards the main
+    repo with no second window, and the PR shows `merged`. This is
+    expected, not a failure of this PR.
+
+**M2b. Auto-start merge.**
+
+- Given a third conflicting PR (description names the winning side) set
+  up for the auto-start merge route in Harness notes.
+- When auto-start reaches the merge.
+- Then the window opens in the PR workdir with no dialog, Claude reports
+  MERGED without input, and the TUI runs `pm pr merge --propagation-only`
+  itself ("Step 1 merged" / "✓ Merged … conflict resolved by Claude"). The
+  PR shows `merged`, with no second window.
+
+**M2c. Ambiguous conflict asks, explicitly.**
+
+- Given a conflicting PR with **no** stated intent and a genuinely
+  ambiguous same-line edit.
+- When the user merges it from the command bar.
+- Then the window opens in the PR workdir with no dialog, and Claude asks
+  which side to keep (INPUT_REQUIRED) instead of guessing. This is the
+  expected outcome. The tester answers once after the first output; then
+  MERGED and propagation follow as in M2a.
 
 ### M3. The main repo's base moves during the merge
 
 - Given a PR whose workdir merge has finished but not propagated (e.g.
-  answer the M2 window slowly, or stop after the workdir merge), and a new
+  answer an M2c window slowly, or stop after the workdir merge), and a new
   commit is then made on the main repo's base.
 - When propagation runs.
 - Then the new commit is integrated in the PR workdir and the fast-forward
-  retried. A non-conflicting commit propagates with no window; a
-  conflicting one opens the window in the PR workdir again. The main repo
-  is never reset and keeps both histories.
+  retried. A non-conflicting commit propagates with no window. A
+  conflicting one shows "Updating master in the PR workdir … CONFLICT" and
+  opens the window in the PR workdir again. The main repo is never reset
+  and keeps both histories.
 
 ### M4. A main-repo-side failure exits without a window
 
-- Given a main-repo state that blocks the fast-forward, e.g. a
-  `.git/index.lock` in the main repo, or uncommitted changes that conflict
-  with the incoming files.
+- Given a `.git/index.lock` in the main repo, which blocks the
+  fast-forward.
 - When the user merges a PR.
 - Then `pm pr merge` exits non-zero with a message that names
   `pm pr merge --propagation-only <pr>`; no Claude window opens in the
@@ -769,6 +886,17 @@ Python (real git; all must pass) and record the output.
   blocker is cleared, the printed command completes the merge.
 - Note in the report whether the TUI leaves the PR pending until the user
   runs the command (known benign behaviour from review i3).
+
+### M4b. Dirty main-repo files that overlap the merge are kept
+
+- Given uncommitted changes in the main repo to a file that the incoming
+  PR also changes.
+- When the user merges the PR.
+- Then the merge does not fail: propagation stashes the main-repo changes
+  (including untracked files), fast-forwards, restores them ("Restored N
+  stashed file(s).") and exits 0. The user's edits are still there
+  afterwards. If the restore conflicts, pm prints "stash pop had
+  conflicts" and the stash still exists; nothing is lost.
 
 ### M5. Unapproved merge window stays explicit
 
@@ -787,7 +915,7 @@ Python (real git; all must pass) and record the output.
 
 ### Concurrency
 
-While M2's window is open, start a review loop on a third PR and run
+While an M2 window is open, start a review loop on another PR and run
 `pm trust add` on a scratch dir from another shell. The config stays valid
 JSON with all three trust entries and no lock or temp leftovers.
 
@@ -864,4 +992,23 @@ surfaces are:
    this PR.
 8. **Orphan watch scope.** The orphan watch only trust-watches; it does not
    adopt idle tracking or loops (`pr-5d66709`). H7 and W3.5 test only the
-   trust behaviour plus what the user sees in the pane.
+   trust behaviour plus what the user sees in the pane. Shell
+   `pm pr start` panes are outside it (`pr-c9e69fb`).
+9. **Round-4 S8 INPUT_REQUIRED items.** Both were spec errors, not product
+   bugs. (1) The "Updating master in the PR workdir … CONFLICT" line
+   belongs to a base-sync conflict (M3), not to a PR-branch conflict
+   (M2a); surfacing the PR-branch conflict text in the TUI is not
+   required. (2) A merge window that asks on a genuinely ambiguous
+   conflict is correct behaviour. So M2a/M2b give conflict PRs a stated
+   intent, and M2c expects the question. M4 was split into M4 (index.lock)
+   and M4b (dirty overlap is stashed and restored), as the round-4
+   concretizer found in the code. The supervisor may still ask for TUI
+   conflict text as a separate change.
+10. **Round-4 S7 W3.3 resume.** TUI `s` not resuming is pre-existing
+    (`pr-9f97a8f`, on master too) and is not a trust bug. Acceptance asks
+    that resumed work starts without the dialog; W3.3 now drives the
+    terminal fall-through resume, which does resume, and W3.2/W3.4/W3.5
+    cover review restart, QA restart and TUI restart handoff. TUI `s` is
+    still exercised and its fresh session must still start with no
+    dialog. The supervisor may still choose to fix `pr-9f97a8f` here;
+    then `pr-d76385d` must be tested with it.
