@@ -277,6 +277,50 @@ class TestKeys:
         added = [kw for m, kw in shown if "targets += b" in m]
         assert added and added[0].get("force") is True
 
+    def test_second_O_inside_first_hold_keeps_its_armed_line(self):
+        """QA s31 (pr-0b87a97): O on B 2.8s after O on A painted "armed for
+        B" for 0.1s — it was forced but unheld, so when A's hold ended the
+        deferred "starting B" replaced it.  Each armed line now holds."""
+        import time
+        from types import SimpleNamespace
+        from pm_core.tui.app import ProjectManagerApp
+        app = FakeApp([_pr("a"), _pr("b")])
+        shown, timers = [], []
+        app._log_sticky_until = app._log_hold_until = 0.0
+        app._log_held = None
+        app.query_one = lambda *a, **k: SimpleNamespace(update=shown.append)
+        app.call_after_refresh = lambda *a, **k: None
+        app._capture_frame = None
+        app.set_timer = lambda delay, cb: timers.append(cb)
+        app.log_message = lambda msg, **kw: ProjectManagerApp.log_message(
+            app, msg, **kw)
+        app._flush_held_log_message = (
+            lambda: ProjectManagerApp._flush_held_log_message(app))
+
+        def starting(pr_id):  # as check_and_start logs it
+            held = time.monotonic() < app._log_hold_until
+            app.log_message(f"Auto-start: starting {pr_id}", force=not held)
+
+        def expire_hold():
+            app._log_hold_until = 0.0
+            cbs = timers[:]
+            timers.clear()
+            for cb in cbs:
+                cb()
+
+        asyncio.run(auto_start.auto_sequence_for_pr(app, "a"))
+        starting("a")
+        assert shown[-1] == " Auto-sequence armed for a (will stop before merge)"
+        asyncio.run(auto_start.auto_sequence_for_pr(app, "b"))  # inside A's hold
+        starting("b")
+        assert shown[-1] == " Auto-sequence armed for a (will stop before merge)"
+        expire_hold()  # A's hold ends: B's armed line, with its own hold
+        assert shown[-1] == " Auto-sequence armed for b (will stop before merge)"
+        assert app._log_hold_until > time.monotonic()
+        expire_hold()
+        assert shown[-1] == " Auto-start: starting b"
+        assert not any("targets +=" in m for m in shown)
+
     def test_readd_confirmation_marks_unchanged(self):
         """QA s8: re-adding an existing target replied ``unchanged`` but the
         TUI logged a plain "targets += b" as if it had been added."""

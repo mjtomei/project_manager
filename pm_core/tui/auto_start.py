@@ -446,7 +446,7 @@ def _resolve_ids(app, ids: list[str]) -> tuple[list[dict], list[str]]:
 
 def add_targets(app, ids: list[str], policy: str | None = None,
                 default_policy: str | None = POLICY_STOP,
-                source: str = "command") -> dict:
+                source: str = "command", confirm: str | None = None) -> dict:
     """Add targets (additive, idempotent, all-or-nothing validation).
 
     *policy*: ``stop_before_merge`` / ``auto_merge`` to set explicitly,
@@ -454,6 +454,9 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     *default_policy* (None = leave the stop set untouched, i.e. the
     ``A``-key semantics).  Never touches other targets and never enables
     all-mode.  Kicks ``check_and_start`` on success.
+
+    *confirm* replaces the "targets +=" log-line confirmation (e.g. the
+    ``O`` key's "Auto-sequence armed …"); it gets the same hold.
     """
     if not ids:
         return {"ok": False, "error": "usage", "message": "no PR ids given",
@@ -512,9 +515,9 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     summary = ", ".join(_label(c) for c in changes)
     # hold: check_and_start's "starting <pr>" / review-loop messages land
     # in the same frame and would overwrite this before it ever paints.
-    app.log_message(f"Auto-start: targets += {summary} "
-                    f"({len(targets)} total)", force=True,
-                    hold=CONFIRM_HOLD_SECONDS)
+    if confirm is None:
+        confirm = f"Auto-start: targets += {summary} ({len(targets)} total)"
+    app.log_message(confirm, force=True, hold=CONFIRM_HOLD_SECONDS)
     app.run_worker(check_and_start(app))
     return {"ok": True, "changes": changes}
 
@@ -618,12 +621,15 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
     Additive: other targets (and their policies) are untouched.  Repeating
     ``O`` on the same PR re-arms the stop mark and re-runs the scheduler.
     """
-    result = add_targets(app, [pr_id], policy=POLICY_STOP, source="key:O")
+    # The armed line is the held confirmation itself: logged separately
+    # after "targets +=" (forced, unheld) it only lasted as long as some
+    # earlier hold, so a second O inside the first O's hold had it
+    # replaced by its own deferred "starting <pr>" ~0.1s later.
+    result = add_targets(
+        app, [pr_id], policy=POLICY_STOP, source="key:O",
+        confirm=f"Auto-sequence armed for {pr_id} (will stop before merge)")
     if not result["ok"]:
         app.log_message(f"Auto-sequence: {result['message']}")
-        return
-    app.log_message(f"Auto-sequence armed for {pr_id} (will stop before merge)",
-                    force=True)
 
 
 def on_state_loaded(app, old_statuses: dict) -> None:
