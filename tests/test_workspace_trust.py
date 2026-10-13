@@ -578,6 +578,49 @@ def test_zero_scenarios_skip_finalizer(tmp_path):
     assert state.latest_verdict == "INPUT_REQUIRED"
 
 
+def test_trust_blocked_worker_marked_input_required(tmp_path):
+    """A scenario worker that never gets past the dialog (no hook event)
+    is failed with a trust reason instead of being polled forever."""
+    import itertools
+    from pm_core.qa_loop import QALoopState, QAScenario, _poll_tmux_verdicts
+    scenario = QAScenario(index=1, title="T", focus="f")
+    scenario.window_name = "qa-s1"
+    scenario.session_id = "sid-trust-1"
+    scenario.worktree_path = str(tmp_path)
+    state = QALoopState(pr_id="pr-w")
+    state.scenarios = [scenario]
+    clock = itertools.count(0, 100)
+    with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+         patch("pm_core.qa_loop.time.sleep"), \
+         patch("pm_core.qa_loop.time.monotonic", lambda: next(clock)), \
+         patch("pm_core.hook_events.read_event", return_value=None), \
+         patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch.object(WorkspacePromptWatch, "check",
+                      return_value="Claude is waiting at the prompt"), \
+         patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+        _poll_tmux_verdicts(state, {}, {}, "sess", str(tmp_path),
+                            tmp_path / "status.json", lambda *a: None)
+    assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
+    assert state.scenario_verdict_reasons[1] == (
+        "blocked at workspace-trust prompt: Claude is waiting at the prompt")
+
+
+def test_trust_blocked_concretizer_reports_reason_not_reject(tmp_path):
+    from pm_core.qa_loop import (
+        QAScenario, _concretize_failure_label, _concretize_scenario,
+    )
+    scenario = QAScenario(index=2, title="T", focus="f")
+    with patch("pm_core.qa_loop.poll_for_verdict",
+               side_effect=WorkspaceTrustBlocked("stuck")) as poll:
+        refined, reason = _concretize_scenario(
+            scenario, {}, {}, "%7", "sid", str(tmp_path))
+    assert poll.call_args.kwargs["workdir"] == str(tmp_path)
+    assert refined is None
+    assert _concretize_failure_label(reason) == (
+        "blocked at workspace-trust prompt: stuck")
+    assert _concretize_failure_label("no UI") == "refiner rejected: no UI"
+
+
 # ---------------------------------------------------------------------------
 # pm trust CLI
 # ---------------------------------------------------------------------------
