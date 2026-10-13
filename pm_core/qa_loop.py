@@ -498,16 +498,17 @@ def _planner_code_changes(workdir_path: str, before: str | None,
 def qa_outcome_detail(state: QALoopState) -> str:
     """Per-scenario verdict summary, or why no scenario ran.
 
-    When planning ended without scenarios (an incomplete plan that was not
-    consumed, a failed handoff, ...) the reason lives in ``state._error``;
-    without it the completion line and the QA note would end in an empty
-    summary.
+    When no scenario ran (an incomplete plan that was not consumed, or a
+    failed handoff after a parsed plan) the reason lives in
+    ``state._error``; without it the completion line and the QA note would
+    end in an empty or all-"?" summary.
     """
+    if state._error and not any(s.index in state.scenario_verdicts
+                                for s in state.scenarios):
+        return " ".join(state._error.split())
     parts = [f"{s.title}: {state.scenario_verdicts.get(s.index, '?')}"
              for s in state.scenarios]
-    if parts:
-        return "; ".join(parts)
-    return " ".join(state._error.split()) if state._error else ""
+    return "; ".join(parts)
 
 
 def planner_code_changes_suffix(state: QALoopState) -> str:
