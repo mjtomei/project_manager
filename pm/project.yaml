@@ -25877,7 +25877,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-13T13:37:00.185424+00:00'
+  updated_at: '2026-10-13T14:09:46.430258+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25969,6 +25969,20 @@ prs:
       path needed a stand-in report (qa.md R8 style). Captures scenarios/6.'
     created_at: '2026-10-13T13:37:00Z'
     last_edited: '2026-10-13T13:37:00Z'
+  - id: note-d323084
+    text: 'QA s4 (Group A, adc6d89d): A0 102 passed; R1-R8, R11 late-enable + Ctrl+R
+      qa-PASS restart, E3 held live. FAILED then fixed b8e97482: A6 Ctrl+R mid-sign_off
+      -> re-arm creates a new transcripts/autostart-* dir, so the adopted router (same
+      window, stamp=HEAD) showed "sign-off review running" forever and its verdict
+      was never recorded (pr-5410ae4 mechanism). signoff_ui._adopt_orphaned_run moves
+      the newest stamped run launched since signed_off_at into the current run dir
+      when the window is alive and the dir has no run; step_signoff then records (stamp==HEAD)
+      or retires stale. Tests: test_restart_with_new_run_dir_* (3 fail pre-fix), test_run_from_earlier_signoff_episode_is_not_adopted.
+      Live post-fix: fresh project adopt+record once+ready once; pre-fix stuck PR
+      rescued after Ctrl+R. Captures /pm-captures/scenarios/4. Filed pr-328cfd0 (zz
+      t on in_review skips the qa transition).'
+    created_at: '2026-10-13T14:09:46Z'
+    last_edited: '2026-10-13T14:09:46Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
@@ -27383,7 +27397,41 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:17:29.491425+00:00'
-  updated_at: '2026-10-13T06:17:29.491425+00:00'
+  updated_at: '2026-10-13T14:09:47.168904+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-1b32640
+    text: 'pr-488ac6d b8e97482 (QA s4) adds signoff_ui._adopt_orphaned_run: when the
+      current auto-start run dir has no sign-off run for a PR whose signoff-<pr> window
+      is alive, the TUI moves the newest stamped run (launched since signed_off_at,
+      non-manual dir) into the current dir, then step_signoff records or retires it
+      by the HEAD stamp. That covers Ctrl+R restart and auto-start off/on re-arm;
+      re-check this bug against it once pr-488ac6d merges (unstamped pre-stamp runs
+      are still not adopted).'
+    created_at: '2026-10-13T14:09:47Z'
+    last_edited: '2026-10-13T14:09:47Z'
+- id: pr-328cfd0
+  plan: bugs
+  title: 'Bug: zz t on an in_review PR runs QA without moving it to qa; arming auto-start
+    then starts a redundant review loop'
+  branch: pm/pr-328cfd0-bug-zz-t-on-an-in-review-pr-runs-qa-without-moving
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.start_or_stop_qa_loop (zz t) never applies
+    the in_review -> qa transition that start_qa (t) does. Repro (pr-488ac6d QA s4,
+    /scratch/pm-488-s4b): s, d (PR in_review), zz t -> ''QA loop started'', QA runs,
+    PR stays in_review (pm pr list). Then pm autostart add <pr> --stop-before-merge:
+    the scheduler sees an in_review target and starts ''Auto-start: review loop''
+    (an extra fake review), whose PASS then moves it to qa and logs ''QA already running''.
+    The zz t PASS still hands off correctly. Expected: zz t transitions in_review
+    -> qa like t, so no redundant review loop when armed mid-QA.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T14:01:30.872312+00:00'
+  updated_at: '2026-10-13T14:01:30.872312+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
