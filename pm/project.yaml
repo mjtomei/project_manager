@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T02:00:35.200629+00:00'
+  updated_at: '2026-10-13T02:04:07.605708+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26421,6 +26421,22 @@ prs:
       fake QA panes crashed QA resume (filed pr-ae66f59).'
     created_at: '2026-10-13T02:00:35Z'
     last_edited: '2026-10-13T02:00:35Z'
+  - id: note-918e9e5
+    text: 'QA S23 (round 5, shared dep under concurrent CLI/keys/merges): every Then
+      held on 81628e35 except one. `pm autostart remove Z` (not a target) racing a
+      `g` merge of target W painted "Z not a target" for only 0.1s, because W''s held
+      "merged — removed" line replaced it (a held message never waited for another
+      hold). Fixed in 1c4da9e1: held messages queue behind the active hold (max 3).
+      Also integrated S22 9caf9baf: messages now carry arrival seq numbers, so a replay
+      never paints over a newer message, and flushing an older queued confirmation
+      keeps a message deferred after it. log_error/Busy timeouts now clear only their
+      own message, so they can no longer blank a newer held confirmation. Live post-fix
+      run on 1c4da9e1: not-a-target 28 samples, then merged line 29, then the deferred
+      result line. Env: after a merge, the hidden-closed tree reorders, so re-locate
+      the cursor by the box id before g (my first P4 race landed on merged D). L has
+      only 500 lines of backlog, so open it right after the merge.'
+    created_at: '2026-10-13T02:04:07Z'
+    last_edited: '2026-10-13T02:04:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
