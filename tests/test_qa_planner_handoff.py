@@ -489,6 +489,21 @@ class TestPlannerHeadPublication:
         # Never force-pushed over someone else's commit.
         assert _git(s["remote"], "rev-parse", "pm/pr-001") != s["c"]
 
+    def test_push_that_never_reaches_upstream_fails_clearly(
+            self, remote_setup):
+        s = remote_setup
+        # origin pushes somewhere other than the real upstream.
+        elsewhere = s["tmp"] / "elsewhere.git"
+        _git(s["tmp"], "init", "--bare", str(elsewhere))
+        _git(s["workdir"], "remote", "set-url", "--push", "origin",
+             str(elsewhere))
+        with patch("pm_core.push_proxy.resolve_real_origin",
+                   return_value=s["real_url"]):
+            with pytest.raises(qa_loop.PlannerHandoffError) as ei:
+                qa_loop._publish_planner_head(str(s["workdir"]), "pm/pr-001")
+        assert "could not publish" in str(ei.value)
+        assert s["a"][:12] in str(ei.value)
+
     def test_local_only_returns_local_head(self, remote_setup):
         s = remote_setup
         with patch("pm_core.push_proxy.resolve_real_origin",

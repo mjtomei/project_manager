@@ -416,18 +416,21 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
 
     _log.info("planner handoff: publishing %s %s -> %s (upstream was %s)",
               branch, head[:12], real_url, (remote or "absent")[:12])
+    # The PR workdir's origin may push to several URLs (local source +
+    # upstream); what matters is that the upstream now has the head.
     push = _git_capture(workdir_path, "push", "origin",
                         f"refs/heads/{branch}:refs/heads/{branch}")
-    if push.returncode != 0:
-        raise PlannerHandoffError(
-            f"could not publish planner head {head[:12]} of {branch}: "
-            f"{(push.stderr or push.stdout).strip()}")
     published = _remote_branch_sha(workdir_path, real_url, branch)
     if published != head:
+        detail = (push.stderr or push.stdout).strip()
         raise PlannerHandoffError(
-            f"published {branch} at {real_url} is "
-            f"{(published or 'absent')[:12]}, expected planner head "
-            f"{head[:12]} — push did not reach the upstream")
+            f"could not publish planner head {head[:12]} of {branch} to "
+            f"{real_url} (upstream is {(published or 'absent')[:12]})"
+            + (f": {detail}" if detail else ""))
+    if push.returncode != 0:
+        _log.warning("planner handoff: push exited %d but %s has %s: %s",
+                     push.returncode, real_url, head[:12],
+                     (push.stderr or "").strip())
     return head
 
 
