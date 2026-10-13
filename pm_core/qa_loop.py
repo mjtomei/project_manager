@@ -495,6 +495,21 @@ def _planner_code_changes(workdir_path: str, before: str | None,
                   if p and not p.startswith("pm/"))
 
 
+def qa_outcome_detail(state: QALoopState) -> str:
+    """Per-scenario verdict summary, or why no scenario ran.
+
+    When planning ended without scenarios (an incomplete plan that was not
+    consumed, a failed handoff, ...) the reason lives in ``state._error``;
+    without it the completion line and the QA note would end in an empty
+    summary.
+    """
+    parts = [f"{s.title}: {state.scenario_verdicts.get(s.index, '?')}"
+             for s in state.scenarios]
+    if parts:
+        return "; ".join(parts)
+    return " ".join(state._error.split()) if state._error else ""
+
+
 def planner_code_changes_suffix(state: QALoopState) -> str:
     """Summary suffix explaining a planner-forced NEEDS_WORK (or ``""``)."""
     if not state.planner_code_changes:
@@ -3694,7 +3709,10 @@ def run_qa_sync(
                 sc.index = scenario_start + i
 
         state.planning_phase = False
-        state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
+        if state.scenarios:
+            # Otherwise keep the "not consumed" / "no parseable scenarios"
+            # explanation set above on screen.
+            state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
@@ -3849,7 +3867,8 @@ def run_qa_sync(
         )
     state.scenarios = all_scenarios
 
-    state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
+    if state.scenarios:
+        state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
     # --- Poll for verdicts, aggregate, and finalize ---
@@ -3952,16 +3971,12 @@ def _execute_and_finalize(
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
     state.running = False
-    summary_parts = []
-    for s in state.scenarios:
-        v = state.scenario_verdicts.get(s.index, "?")
-        summary_parts.append(f"{s.title}: {v}")
     finalize_suffix = ""
     if state.finalize_verdict:
         finalize_suffix = f" [finalize: {state.finalize_verdict}]"
     state.latest_output = (
         f"QA complete: {state.latest_verdict}{finalize_suffix} — "
-        + "; ".join(summary_parts) + planner_code_changes_suffix(state)
+        + qa_outcome_detail(state) + planner_code_changes_suffix(state)
     )
 
     _log.info("QA complete for %s: %s (finalize=%s)",

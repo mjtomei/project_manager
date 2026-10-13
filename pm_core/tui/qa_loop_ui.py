@@ -21,6 +21,7 @@ from pm_core.qa_loop import (
     start_qa_background,
     _compute_qa_window_name,
     planner_code_changes_suffix,
+    qa_outcome_detail,
 )
 from pm_core.loop_shared import get_pm_session
 
@@ -641,11 +642,7 @@ def _record_qa_note(app, state: QALoopState) -> None:
         return
     try:
         from datetime import datetime, timezone
-        summary_parts = []
-        for s in state.scenarios:
-            v = state.scenario_verdicts.get(s.index, "?")
-            summary_parts.append(f"{s.title}: {v}")
-        note_text = f"QA {state.latest_verdict}: " + "; ".join(summary_parts)
+        note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
         # Tell the next review session why QA bounced an all-PASS run.
         note_text += planner_code_changes_suffix(state)
         if state.qa_workdir:

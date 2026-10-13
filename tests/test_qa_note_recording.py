@@ -285,6 +285,25 @@ class TestEdgeCases:
         assert len(pr["notes"]) == 1
         assert pr["notes"][0]["text"] == "QA PASS: "
 
+    def test_no_scenarios_note_says_why(self, tmp_path):
+        """Planning ended without scenarios (incomplete plan not consumed):
+        the note carries the reason instead of an empty summary."""
+        app = _make_app(tmp_path)
+        state = _make_state(scenarios=[], verdicts={},
+                            verdict="INPUT_REQUIRED")
+        state._error = (
+            "The QA planner's plan was incomplete and was not consumed.\n\n"
+            "pane: no QA_PLAN_START line before QA_PLAN_END (plan truncated)"
+            "\n\nAsk the planner to re-emit the full QA_PLAN_START ... "
+            "QA_PLAN_END block, or restart QA from the TUI.")
+        _record_qa_note(app, state)
+
+        text = store.get_pr(store.load(tmp_path), "pr-001")["notes"][0]["text"]
+        assert text.startswith("QA INPUT_REQUIRED: The QA planner's plan was "
+                               "incomplete and was not consumed. pane: no "
+                               "QA_PLAN_START line")
+        assert "re-emit" in text and "\n" not in text
+
     def test_single_scenario(self, tmp_path):
         app = _make_app(tmp_path)
         state = _make_state(

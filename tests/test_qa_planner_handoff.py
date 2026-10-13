@@ -250,6 +250,20 @@ class TestPlannerReadsTranscript:
         assert state.scenarios == []
         assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
         assert "incomplete" in state._error.lower()
+        # The reason stays on screen (not replaced by "Plan: 0 scenario(s)").
+        assert state.latest_output.startswith(
+            "Planner plan incomplete — not consumed: pane:")
+
+    def test_outcome_detail_explains_no_scenarios(self):
+        state = QALoopState(pr_id="pr-001")
+        state._error = ("The QA planner's plan was incomplete and was not "
+                        "consumed.\n\npane: x\n\nAsk the planner to re-emit")
+        assert qa_loop.qa_outcome_detail(state) == (
+            "The QA planner's plan was incomplete and was not consumed. "
+            "pane: x Ask the planner to re-emit")
+        state.scenarios = [qa_loop.QAScenario(index=1, title="One", focus="f")]
+        state.scenario_verdicts = {1: "PASS"}
+        assert qa_loop.qa_outcome_detail(state) == "One: PASS"
 
     def test_stale_turn_not_reparsed_without_fresh_idle(
             self, tmp_path, monkeypatch):
