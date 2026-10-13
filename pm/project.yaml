@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T04:12:53.363839+00:00'
+  updated_at: '2026-10-13T04:17:27.300396+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26575,6 +26575,18 @@ prs:
       this is a contract question: add a footer, or drop it from R18. Captures: /pm-captures/scenarios/31.'
     created_at: '2026-10-13T04:12:53Z'
     last_edited: '2026-10-13T04:12:53Z'
+  - id: note-a8e2f70
+    text: 'QA S31 follow-up (supervisor-directed): R18 footer "Runs" was NOT met on
+      7e9d414a, because the TUI has no Footer widget. Fixed 3831cbba: CommandBar.UNFOCUSED_PLACEHOLDER
+      = "press / to type a command · a Runs" (bottom row, no extra row). Focused placeholder
+      and typing unchanged; impl §5 item 43 + qa.md R18 define footer = this hint;
+      verified live at 80x12 with L split (scenarios/31/r18-runs-hint); test_unfocused_hint_advertises_runs_popup
+      fails before, passes after. Popup r resolved: the ~1.85s was my poll-loop timeout;
+      real-state test (CLI add/remove with popup open) gives 16-27ms with r vs 0.39-1.12s
+      without. 7-file set 145 passed; full suite 3006 passed + baseline hook_events
+      installer failure. Final HEAD 3831cbba + this note.'
+    created_at: '2026-10-13T04:17:27Z'
+    last_edited: '2026-10-13T04:17:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
