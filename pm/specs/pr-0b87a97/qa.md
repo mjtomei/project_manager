@@ -498,6 +498,23 @@ targets/policies or relaunching finished/in-flight work; any traceback.
    further review changes touch other code, the plan must expand to
    cover them. Ambiguity 12 still governs scope.
 
+16. S32 restart/focus contract conflict resolved by the supervisor on
+   2026-10-13: concretization added a Then requiring the transient TUI
+   line `Focused existing log pane` to be visible immediately after
+   restart. That line can be suppressed by the existing sticky restart
+   summary even when pane focus works correctly. R39 and the published
+   S32 require actual focus/reuse, live resume output, stable targets and
+   windows, and a fresh recap after `z L`; they do not require a new
+   priority relationship between these transient messages. Check focus
+   using the active pane and preserved pane ID, plus the required log
+   output. The suppressed feedback is an informational incidental
+   finding, not an application change for #229. Preserve the original
+   failed extra assertion and this explicit resolution in the scenario
+   report; independent verification must check all the actual S32
+   requirements and identify which contract it assessed. This corrects
+   concretization's extra obligation under ambiguity 12; it does not
+   turn the original literal assertion into a pass.
+
 No unresolved ambiguities.
 
 ## 6. Shared setup and historical scenarios
