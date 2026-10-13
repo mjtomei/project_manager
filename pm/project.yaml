@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T06:50:34.904646+00:00'
+  updated_at: '2026-10-13T07:01:11.541319+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25928,6 +25928,17 @@ prs:
       this PR; never call unattended qualification complete.'
     created_at: '2026-10-13T06:38:08Z'
     last_edited: '2026-10-13T06:38:08Z'
+  - id: note-e596dd7
+    text: 'Review 78b2 i1 (4ffcd694): fixed the blocking R4 suffix/offset bug. qa_plan_problem
+      now requires the START to open the same block the last END closes (no END between
+      them, no template example headers inside), so echoed template + SCENARIO 2..4
+      suffix is rejected at any scenario_start. Untitled SCENARIO headers now reject
+      the plan instead of silently dropping that scenario. Tests go through the validator
+      and through _read_planner_plan/run_qa_sync with a missing or non-plan latest
+      assistant turn; a fresh complete plan at offset 2 is still accepted. QA must
+      still exercise R1-R7 live, and impl captures predate this change.'
+    created_at: '2026-10-13T07:01:11Z'
+    last_edited: '2026-10-13T07:01:11Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
