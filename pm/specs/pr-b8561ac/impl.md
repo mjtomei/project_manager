@@ -59,7 +59,9 @@ is accepted and the spec gate passes, before mock generation and fan-out:
 - `ls-remote real_url refs/heads/<branch>`: if it equals `head`, return it.
 - If remote is absent or is an ancestor of `head`: `git push origin
   <branch>:<branch>` (the workdir's dual push URL; never `--force`), then
-  re-verify with `ls-remote`.
+  re-verify with `ls-remote`. If the upstream still lags (origin doesn't
+  push there, e.g. origin is the local main repo that tracks the upstream),
+  push to `real_url` directly (still fast-forward only) and re-verify.
 - Otherwise (remote has commits that aren't in `head`, push failed, or the
   re-verify mismatched): raise `PlannerHandoffError` with a specific message.
 

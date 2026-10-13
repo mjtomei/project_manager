@@ -498,20 +498,40 @@ class TestPlannerHeadPublication:
         # Never force-pushed over someone else's commit.
         assert _git(s["remote"], "rev-parse", "pm/pr-001") != s["c"]
 
+    def test_origin_not_pushing_upstream_falls_back_to_direct_push(
+            self, remote_setup):
+        """origin = local main repo that itself tracks the upstream: the
+        origin push never reaches the upstream, so push there directly."""
+        s = remote_setup
+        main = s["tmp"] / "main.git"
+        _git(s["tmp"], "init", "--bare", str(main))
+        _git(s["workdir"], "remote", "set-url", "--push", "origin", str(main))
+        with patch("pm_core.push_proxy.resolve_real_origin",
+                   return_value=s["real_url"]):
+            head = qa_loop._publish_planner_head(str(s["workdir"]),
+                                                 "pm/pr-001")
+        assert head == s["c"]
+        assert _git(s["remote"], "rev-parse", "pm/pr-001") == s["c"]
+        assert _git(main, "rev-parse", "pm/pr-001") == s["c"]
+
     def test_push_that_never_reaches_upstream_fails_clearly(
             self, remote_setup):
         s = remote_setup
-        # origin pushes somewhere other than the real upstream.
+        # origin pushes elsewhere and the upstream rejects direct pushes.
         elsewhere = s["tmp"] / "elsewhere.git"
         _git(s["tmp"], "init", "--bare", str(elsewhere))
         _git(s["workdir"], "remote", "set-url", "--push", "origin",
              str(elsewhere))
+        hook = s["remote"] / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\necho 'denied by upstream' >&2\nexit 1\n")
+        hook.chmod(0o755)
         with patch("pm_core.push_proxy.resolve_real_origin",
                    return_value=s["real_url"]):
             with pytest.raises(qa_loop.PlannerHandoffError) as ei:
                 qa_loop._publish_planner_head(str(s["workdir"]), "pm/pr-001")
-        assert "could not publish" in str(ei.value)
-        assert s["a"][:12] in str(ei.value)
+        msg = str(ei.value)
+        assert "could not publish" in msg
+        assert s["a"][:12] in msg and "denied by upstream" in msg
 
     def test_local_only_returns_local_head(self, remote_setup):
         s = remote_setup

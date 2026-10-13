@@ -418,9 +418,19 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
               branch, head[:12], real_url, (remote or "absent")[:12])
     # The PR workdir's origin may push to several URLs (local source +
     # upstream); what matters is that the upstream now has the head.
-    push = _git_capture(workdir_path, "push", "origin",
-                        f"refs/heads/{branch}:refs/heads/{branch}")
+    refspec = f"refs/heads/{branch}:refs/heads/{branch}"
+    push = _git_capture(workdir_path, "push", "origin", refspec)
     published = _remote_branch_sha(workdir_path, real_url, branch)
+    if published != head:
+        # origin may not push to the upstream at all — e.g. a workdir whose
+        # origin is the local main repo, which in turn tracks the upstream
+        # (resolve_real_origin walks that chain).  Scenario clones pull from
+        # the upstream, so push there directly (still fast-forward only).
+        _log.info("planner handoff: origin push left %s at %s; pushing to "
+                  "%s directly", branch, (published or "absent")[:12],
+                  real_url)
+        push = _git_capture(workdir_path, "push", real_url, refspec)
+        published = _remote_branch_sha(workdir_path, real_url, branch)
     if published != head:
         detail = (push.stderr or push.stdout).strip()
         raise PlannerHandoffError(
