@@ -20,6 +20,12 @@ _log = configure_logger("pm.tui.pane_ops")
 
 # Lines of existing log history the L pane shows before following.
 LOG_PANE_BACKLOG_LINES = 500
+# Recent auto-start confirmations ("log: Auto-start: targets += X", "Auto-
+# sequence armed for X", "Auto-merge: ...") repeated below the backlog, so
+# they are on screen when L opens even after busy debug output (and other
+# status messages) pushed them hundreds of lines up into scrollback.
+LOG_PANE_RECAP_LINES = 8
+LOG_PANE_RECAP_PATTERN = r"\[tui\] log: Auto-(start|sequence|merge)"
 
 
 
@@ -263,11 +269,31 @@ def view_log(app) -> None:
     if not log_path.exists():
         app.log_message("No log file yet.")
         return
-    # Plain ``tail -f`` shows only the last 10 lines; the debug log is busy
-    # (pane layout, review-loop polling), so status-line messages mirrored as
-    # "log: ..." a few seconds earlier would already be gone when L opens.
-    launch_pane(app, f"tail -n {LOG_PANE_BACKLOG_LINES} -f {log_path}", "log",
-                fresh=fresh)
+    launch_pane(app, log_pane_command(log_path), "log", fresh=fresh)
+
+
+def log_pane_command(log_path) -> str:
+    """Shell command for the L pane: backlog, auto-start recap, then follow.
+
+    Plain ``tail -f`` shows only the last 10 lines; the debug log is busy
+    (pane layout, review-loop polling), so an "Auto-sequence armed" line
+    mirrored a minute earlier sits hundreds of lines up — in scrollback, not
+    on screen.  Show the backlog, repeat the last few auto-start
+    confirmations ("HH:MM:SS log: ...") at the bottom, then follow from the
+    line count taken first, so nothing written in between is lost.  No
+    ``exec``: launch_pane's EXIT trap must still run.
+    """
+    f = shlex.quote(str(log_path))
+    pattern = shlex.quote(LOG_PANE_RECAP_PATTERN)
+    return (
+        f'n=$(wc -l < {f}); '
+        f'head -n "$n" {f} | tail -n {LOG_PANE_BACKLOG_LINES}; '
+        f'echo "── recent auto-start messages ──"; '
+        f'head -n "$n" {f} | grep -E {pattern} | tail -n {LOG_PANE_RECAP_LINES}'
+        f' | sed "s/ [A-Z]* *\\[tui\\] log: / log: /"; '
+        f'echo "── following log ──"; '
+        f'tail -n "+$((n + 1))" -f {f}'
+    )
 
 
 def launch_meta(app) -> None:
