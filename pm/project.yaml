@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T04:49:21.176063+00:00'
+  updated_at: '2026-10-13T04:50:57.207995+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26626,6 +26626,30 @@ prs:
       grouped view. Captures: /pm-captures/scenarios/34.'
     created_at: '2026-10-13T04:49:21Z'
     last_edited: '2026-10-13T04:49:21Z'
+  - id: note-5b8cb5e
+    text: 'S33/S34 hint width boundary (supervisor, refiner r8): impl.md §5 item 43
+      allows the bottom hint "press / to type a command · a Runs" to clip in a narrow
+      unzoomed split, like the rest of that row. Assert the full hint only on an actual
+      TUI pane of 80+ columns. With an 80-col window split by L, zoom the TUI pane
+      (tmux resize-pane -Z) and unzoom afterwards, checking the L pane id survives.
+      In the unzoomed ~39-col split, clipping is not a failure; there, assert that
+      a opens the popup, / focus/typing/Enter/Esc work, the tree regains focus and
+      the L pane is preserved. Width requirements refer to the actual TUI pane.'
+    created_at: '2026-10-13T04:30:46Z'
+    last_edited: '2026-10-13T04:30:46Z'
+  - id: note-22694ae
+    text: 'QA S33 (round 8) PASS on b992ee47 (app = d6778d7f + 3831cbba, no app changes):
+      7-file pytest 145 passed + 4 named tests; second O at +2.709s inside the first
+      hold: A armed 29 samples, then B armed 28, both before the starting line; A
+      went in_progress->review->qa on its own; L recap on screen at the 60-col split
+      (pushed up at +2s by new QA concretize output) and at 80 cols (held 13s); popup==CLI;
+      add C repainted in 1.09s; popup r 19-21ms vs 1.4-1.8s; 80x12 nav/Enter/f/notice;
+      slow-merge prune line held 6.9s through r; full hint at 80/120/zoomed 80x12,
+      hint fits even in the 39-col split; typing exact; remove B,C turns auto-start
+      off. Harness: my own wait loop with an impossible head -0 condition was stopped
+      by the supervisor (pr-b19db15). Captures /pm-captures/scenarios/33.'
+    created_at: '2026-10-13T04:50:57Z'
+    last_edited: '2026-10-13T04:50:57Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
