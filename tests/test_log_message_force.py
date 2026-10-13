@@ -426,3 +426,82 @@ def test_refresh_clear_timer_clears_its_own_message():
     app.clear_log_message_later(1.0)
     app.timers[-1]()
     assert shown[-1] == ""
+
+
+# Review 4be9 i2: the sync clear timers captured "the latest" message when
+# scheduled — after an awaited check_and_start that is its held prune line,
+# so the sync's own 1s/2s clear cut that 3s line short.  They are now bound
+# to the sync's own message (log_message returns its arrival number).
+
+_PRUNE = "Auto-start: target pr-w merged — removed (1 remaining)"
+
+
+def _sync_app(tmp_path, backend):
+    app, shown = _stub_app()
+    app._root = tmp_path
+    app._data = {"project": {"name": "p", "backend": backend},
+                 "prs": [{"id": "pr-w", "status": "qa"}]}
+    app._update_display = lambda: None
+    app._update_status_bar = lambda **k: None
+    app.clear_log_message_later = (
+        lambda delay, **kw: ProjectManagerApp.clear_log_message_later(
+            app, delay, **kw))
+    app.delays = []
+
+    def set_timer(delay, cb):
+        app.delays.append(delay)
+        app.timers.append(cb)
+    app.set_timer = set_timer
+    return app, shown
+
+
+async def _prune_check_and_start(app):
+    _log(app, _PRUNE, force=True, hold=3)
+
+
+def _merge_all(root, fn):
+    data = {"project": {}, "prs": [{"id": "pr-w", "status": "qa"}]}
+    fn(data)
+    return data
+
+
+def test_github_sync_clear_does_not_cut_short_held_prune_line(tmp_path):
+    import asyncio
+    from pm_core import pr_sync
+    from pm_core.tui import sync
+    app, shown = _sync_app(tmp_path, "github")
+    result = SimpleNamespace(synced=True, updated_count=1, error=None,
+                             status_updates={"pr-w": "merged"})
+    with patch.object(pr_sync, "sync_from_github", lambda *a, **k: result), \
+            patch.object(sync.store, "locked_update", _merge_all), \
+            patch.object(sync, "_kill_merged_pr_windows"), \
+            patch.object(auto_start, "check_and_start",
+                         _prune_check_and_start):
+        asyncio.run(sync.startup_github_sync(app))
+    assert shown[-1] == f" {_PRUNE}"
+    assert app.delays == [3, 2.0]
+    app.timers[-1]()  # the sync's 2s clear fires inside the 3s hold
+    assert shown[-1] == f" {_PRUNE}"
+
+
+def test_manual_refresh_clear_does_not_cut_short_held_prune_line(tmp_path):
+    import asyncio
+    from pm_core import pr_sync
+    from pm_core.tui import sync
+    app, shown = _sync_app(tmp_path, "vanilla")
+    app.log_message("Refreshing...")
+    result = SimpleNamespace(merged_prs=["pr-w"], was_skipped=False,
+                             error="No workdirs", updated_count=0)
+    with patch.object(pr_sync, "sync_prs", lambda *a, **k: result), \
+            patch.object(sync.store, "locked_update", _merge_all), \
+            patch.object(sync, "_kill_merged_pr_windows"), \
+            patch.object(auto_start, "check_and_start",
+                         _prune_check_and_start):
+        asyncio.run(sync.do_normal_sync(app, is_manual=True))
+    assert shown[-1] == f" {_PRUNE}"  # "Refreshed" waits behind the hold
+    assert app.delays == [3, 1.0]
+    app.timers[-1]()  # the 1s refresh clear fires inside the hold
+    assert shown[-1] == f" {_PRUNE}"
+    app._log_hold_until = 0.0
+    app.timers[0]()  # hold ends: the expired "Refreshed" is not shown late
+    assert shown[-1] == f" {_PRUNE}"

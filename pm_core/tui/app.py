@@ -835,8 +835,8 @@ class ProjectManagerApp(App):
 
     def log_message(self, msg: str, capture: bool = True, sticky: float = 0,
                     force: bool = False, hold: float = 0,
-                    _seq: int | None = None) -> None:
-        """Show a message in the log line.
+                    _seq: int | None = None) -> int:
+        """Show a message in the log line; returns its arrival number.
 
         A non-sticky message is dropped while a sticky one is showing,
         unless *force* (used for confirmations the user must see, e.g. a
@@ -878,14 +878,14 @@ class ProjectManagerApp(App):
             if len(queue) >= _LOG_HELD_QUEUE_MAX:
                 queue.pop(0)  # still in the L log; keep the newest
             queue.append((msg, capture, sticky, force, hold, _seq))
-            return
+            return _seq
         if held:
             self._log_held = (msg, capture, sticky, _seq)
-            return
+            return _seq
         if sticky > 0:
             self._log_sticky_until = now + sticky
         elif suppressed:
-            return  # a sticky message is still showing
+            return _seq  # a sticky message is still showing
         # Anything deferred or queued before this message is older than it;
         # flushing it when the hold ends would overwrite this newer one.
         # Only those: a replayed older message keeps newer deferred ones.
@@ -907,6 +907,7 @@ class ProjectManagerApp(App):
         if capture:
             truncated = msg[:60].replace("\n", " ")
             self.call_after_refresh(self._capture_frame, f"log_message:{truncated}")
+        return _seq
 
     def _flush_held_log_message(self) -> None:
         """Show what a ``log_message`` hold kept back: queued held
@@ -935,13 +936,16 @@ class ProjectManagerApp(App):
         self.log_message(msg, sticky=timeout)
         self.clear_log_message_later(timeout)
 
-    def clear_log_message_later(self, delay: float) -> None:
-        """Clear the latest log-line message after *delay* seconds.
+    def clear_log_message_later(self, delay: float,
+                                seq: int | None = None) -> None:
+        """Clear a log-line message after *delay* seconds.
 
-        Only that message: if a newer one (e.g. a held auto-start
-        confirmation forced past it) has the line by then, it stays.
+        Only that message — *seq* (as returned by ``log_message``), else the
+        latest one: if a newer one (e.g. a held auto-start confirmation
+        forced past it) has the line by then, it stays.
         """
-        seq = getattr(self, "_log_seq", 0)
+        if seq is None:
+            seq = getattr(self, "_log_seq", 0)
         self.set_timer(delay, lambda: self._clear_log_message(seq=seq))
 
     def _clear_log_message(self, seq: int | None = None) -> None:

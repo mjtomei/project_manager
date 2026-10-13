@@ -449,6 +449,15 @@ QA round 5 fixes (reviewed in review-loop 4be9):
     GitHub-sync timers cleared unconditionally and blanked a held prune
     line logged by the refresh's own `check_and_start` after 1s (item 36
     had already scoped `log_error` and Busy this way).
+39. *(review 4be9 i2)* `log_message` returns the message's arrival
+    number and `clear_log_message_later(delay, seq=)` clears that
+    message. The manual-refresh and GitHub-sync clears are bound to the
+    sync's own line ("Refreshed", "GitHub sync: …"). Item 38's "latest
+    message" was still the held prune line whenever the awaited
+    `check_and_start` (or a concurrent worker) logged one last, so the 1s or
+    2s clear cut its 3s hold short. A manual refresh with no result line
+    (e.g. "No workdirs") now logs "Refreshed" so "Refreshing..." is
+    replaced and cleared.
 
 Out of scope and filed (see qa.md ambiguity 12): pr-7c32e44 (the
 post-sign-off "merge attempt failed" row) and pr-0a08055 (transient
