@@ -126,8 +126,14 @@ R6. **Bounded, actionable failure.**
   the cwd from its `cd` prefix (`/workspace` for a container exec, else the
   PR workdir), and the watch runs with the PR workdir. That gives the same
   R5 accept by cursor, the shared per-pane budget, and one sticky report
-  after the grace. Only the trust watch is added: idle tracking and
-  auto-advance for those panes are unchanged (pr-5d66709).
+  after the grace. That report is skipped when another watch in the same
+  TUI process already reported the pane, for example a review pane whose
+  loop ended in the trust ERROR. The reporter's pid is kept on the pane
+  (`@pm_trust_reported_by`), so a restarted TUI still reports the pane once
+  (QA S6, 211cfb95). Only the trust watch is added: idle tracking and
+  auto-advance for those panes are unchanged (pr-5d66709). Shell
+  `pm pr start` panes have no `--session-id` and are not watched
+  (pr-c9e69fb).
 
 R7. **Unknown/unapproved workspace behavior stays explicit.** For a cwd
 outside the approved roots nothing is written; the launcher logs
