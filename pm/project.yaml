@@ -26103,7 +26103,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T09:00:32.471115+00:00'
+  updated_at: '2026-10-13T18:57:51.873458+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26163,6 +26163,15 @@ prs:
       Reading the plan from the JSONL transcript fixes all of these.'
     created_at: '2026-10-13T09:00:32Z'
     last_edited: '2026-10-13T09:00:32Z'
+  - id: note-b4a1784
+    text: 'More evidence (QA pr-b53bfe2 r4 S7 W3.4, 2026-10-13): terminal capture
+      can also DUPLICATE a scenario. Planner JSONL had 4 scenarios (numbered SCENARIO
+      2..5); the pane capture rendered SCENARIO 2 and SCENARIO 4 twice, and pm parsed
+      5 scenarios ("QA plan parsed: 5 scenario(s)"), launching a duplicate scenario
+      3 with scenario 2 title. Planned != launched. Reading the plan from the transcript
+      would fix both truncation and duplication. Captures pr-b53bfe2/scenarios/7/W3-interrupted-QA/fresh-planner-pane.txt.'
+    created_at: '2026-10-13T18:57:51Z'
+    last_edited: '2026-10-13T18:57:51Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -27715,11 +27724,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:00:23.696476+00:00'
-  updated_at: '2026-10-13T09:00:23.696476+00:00'
+  updated_at: '2026-10-13T18:57:51.116747+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-4902404
+    text: 'Still present on pr-b53bfe2 5e372554 (QA r4 S7 W3.3): kill impl window,
+      TUI s -> new --session-id c848a20e (earlier 71b13bc3 not resumed). The terminal
+      fall-through path (pm pr start with no tmux on PATH -> launch_claude) DOES resume
+      via the pr:start:<pr> session key (--resume cb279642, earlier conversation shown
+      and continued). When fixing, add trust coverage for the resumed tmux path: pr-d76385d
+      (resumed transcript ends every trust watch) becomes reachable. Captures pr-b53bfe2/scenarios/7/W3-resume-impl
+      and W3-resume-terminal.'
+    created_at: '2026-10-13T18:57:51Z'
+    last_edited: '2026-10-13T18:57:51Z'
 - id: pr-7f90572
   plan: bugs
   title: 'Bug: closing the pm meta window (kill-window) leaves the session override
@@ -28044,7 +28063,57 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T17:10:44.065060+00:00'
-  updated_at: '2026-10-13T17:10:44.065060+00:00'
+  updated_at: '2026-10-13T18:57:50.380544+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-0859fd4
+    text: 'QA pr-b53bfe2 r4 S7 W3.6 (2026-10-13, 5e372554): not reachable via TUI
+      s. s always relaunches impl with a NEW --session-id (pr-9f97a8f), so there is
+      no resumed transcript; with entry deleted + lock held 25s, s on a PR whose impl
+      already ran gave a fresh session eb2f2775 and the tracker watch accepted by
+      cursor (Down+Enter, 1 attempt, 5s). The only resume path is pm pr start in a
+      terminal without tmux (launch_claude --resume), which has no trust watch at
+      all. So this bug becomes live once pr-9f97a8f is fixed; test both together.
+      Captures pr-b53bfe2/scenarios/7/W3-6-resume-trust-reset.'
+    created_at: '2026-10-13T18:57:50Z'
+    last_edited: '2026-10-13T18:57:50Z'
+- id: pr-f8acf21
+  plan: bugs
+  title: 'Bug: stopping a QA run (zz t, or z t superseding a resumed run) still launches
+    queued/relaunched workers and a finalizer, then records QA PASS with unrun scenarios'
+  branch: pm/pr-f8acf21-bug-stopping-a-qa-run-zz-t-or-z-t-superseding-a-re
+  status: pending
+  depends_on: []
+  description: 'Found in QA pr-b53bfe2 round 4 scenario 7 (2026-10-13, captures pr-b53bfe2/scenarios/7/W3-interrupted-QA/stale-run-bug).
+    Pre-existing on master (same code in pm_core/qa_loop.py). Repro A (fresh start
+    supersedes a resumed run): t on a PR with real Claude, kill the TUI while scenario
+    1 worker runs, pm session (TUI auto-resumes QA), then z t. The old resumed run
+    thread logs "Scenario 1 window died - retry 1/10", relaunches scenario 1 into
+    the OLD clone (_relaunch_scenario_window ignores state.stop_requested), launches
+    a qa-finalize Claude pane in the NEW run planner window (_run_qa_finalize_pane
+    is called even when stop_requested; pane is created before stop_check fires),
+    logs "QA finalize: pane vanished or stop_check fired" then "QA complete: PASS
+    (finalize=None)" with every scenario "?". Both orphan Claude panes keep running
+    (cost; finalizer runs git in the PR workdir). Repro B (plain stop): zz t on a
+    running QA with scenario 2 verified and scenario 3 concretizing -> TUI "QA loop
+    stopping (finishing current run)"; the concretizer completes and scenario 3 worker
+    is still launched, a finalizer pane is launched, then "QA complete for <pr>: PASS
+    (finalize=None)", qa_status.json overall=PASS with 1 of 5 scenarios run, TUI "QA
+    PASS for <pr> - merge manually or enable auto-start", and a project.yaml note
+    "QA PASS: ...: PASS; ...: ?; ...: ?" is persisted. Root cause: run_qa_sync/resume_qa_sync
+    aggregate an all-missing verdict set to PASS (else-branch) and do not check stop_requested
+    before finalize; _poll_tmux_verdicts retry/relaunch and concretizer->worker launch
+    do not check stop_requested. Fix: a stopped run must not launch workers/finalizer
+    and must not record PASS (record STOPPED/INPUT_REQUIRED or discard), and missing
+    scenario verdicts must never aggregate to PASS. With auto-start this could merge
+    on an unrun QA.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T18:57:33.967457+00:00'
+  updated_at: '2026-10-13T18:57:33.967457+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
