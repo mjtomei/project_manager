@@ -549,7 +549,6 @@ def test_qa_planner_blocked_fails_fast_without_finalizer(home, tmp_path):
         patch("pm_core.hook_events.wait_for_event", return_value=None),
         patch("pm_core.qa_loop.time.sleep"),
         patch("pm_core.tmux.new_window_get_pane", return_value="%6"),
-        patch("pm_core.tmux.split_pane_at", return_value="%7"),
         patch("pm_core.qa_loop._poll_tmux_verdicts"),
         patch("pm_core.qa_loop._persist_scenario_verdicts"),
         patch("pm_core.qa_loop._write_resume_file"),
@@ -559,6 +558,10 @@ def test_qa_planner_blocked_fails_fast_without_finalizer(home, tmp_path):
             stack.enter_context(p)
         finalize = stack.enter_context(patch("pm_core.qa_loop._run_qa_finalize_pane"))
         launch = stack.enter_context(patch("pm_core.qa_loop._launch_scenarios_in_tmux"))
+        split = stack.enter_context(
+            patch("pm_core.tmux.split_pane_at", return_value="%7"))
+        stack.enter_context(patch("pm_core.tmux.pane_window_id", return_value="@1"))
+        stack.enter_context(patch("pm_core.pane_layout.register_and_rebalance"))
         run_qa_sync(state, tmp_path / "pm", pr, lambda *a: None)
 
     assert time.monotonic() - started < 30
@@ -570,8 +573,14 @@ def test_qa_planner_blocked_fails_fast_without_finalizer(home, tmp_path):
     finalize.assert_not_called()
     launch.assert_not_called()
     assert pane.keys == []  # unapproved: never auto-accepted
-    status = json.loads((Path(state.qa_workdir) / "qa_status.json").read_text())
+    status_path = Path(state.qa_workdir) / "qa_status.json"
+    status = json.loads(status_path.read_text())
     assert "workspace-trust prompt" in status["error"]
+    # The error block is shown beside the planner, not only written to disk.
+    split.assert_called_once()
+    planner, _direction, cmd = split.call_args.args[:3]
+    assert planner == "%5"
+    assert "qa_status.py" in cmd and str(status_path) in cmd
 
 
 def test_zero_scenarios_skip_finalizer(tmp_path):

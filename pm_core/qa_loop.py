@@ -3005,6 +3005,30 @@ def _verify_single_scenario(
 # Core orchestration
 # ---------------------------------------------------------------------------
 
+def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
+    """Split the qa_status.py dashboard next to the planner pane."""
+    from pm_core import tmux as tmux_mod, pane_layout
+    try:
+        # Use the script path directly (avoids PYTHONPATH issues)
+        _qa_status_script = Path(__file__).parent / "qa_status.py"
+        status_cmd = (
+            f"python3 {_qa_status_script} {status_path} {session}"
+        )
+        status_pane = tmux_mod.split_pane_at(
+            planner_pane, "h", status_cmd, background=True,
+        )
+
+        # Register both panes and rebalance the main window only
+        qa_win_id = tmux_mod.pane_window_id(planner_pane)
+        if qa_win_id:
+            pane_layout.register_and_rebalance(session, qa_win_id, [
+                (planner_pane, "qa-planner", "planner"),
+                (status_pane, "qa-status", status_cmd),
+            ])
+    except Exception:
+        _log.exception("Failed to create status pane")
+
+
 def run_qa_sync(
     state: QALoopState,
     pm_root: Path,
@@ -3309,6 +3333,10 @@ def run_qa_sync(
                                overall=state.latest_verdict,
                                scenario_0=state.scenario_0,
                                error=state._error)
+            # Show the error block beside the dialog: the user looking at
+            # the QA window otherwise sees only the prompt, no explanation.
+            if planner_pane and tmux_mod.pane_exists(planner_pane):
+                _add_status_pane(session, planner_pane, status_path)
             _notify()
             state.running = False
             return state
@@ -3448,25 +3476,7 @@ def run_qa_sync(
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
-        try:
-            # Use the script path directly (avoids PYTHONPATH issues)
-            _qa_status_script = Path(__file__).parent / "qa_status.py"
-            status_cmd = (
-                f"python3 {_qa_status_script} {status_path} {session}"
-            )
-            status_pane = tmux_mod.split_pane_at(
-                planner_pane, "h", status_cmd, background=True,
-            )
-
-            # Register both panes and rebalance the main window only
-            qa_win_id = tmux_mod.pane_window_id(planner_pane)
-            if qa_win_id:
-                pane_layout.register_and_rebalance(session, qa_win_id, [
-                    (planner_pane, "qa-planner", "planner"),
-                    (status_pane, "qa-status", status_cmd),
-                ])
-        except Exception:
-            _log.exception("Failed to create status pane")
+        _add_status_pane(session, planner_pane, status_path)
 
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
