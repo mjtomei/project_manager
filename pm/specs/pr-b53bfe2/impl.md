@@ -105,8 +105,10 @@ R6. **Bounded, actionable failure.**
   "blocked at workspace-trust prompt …".
 - `pane_idle.PaneIdleTracker.poll` (TUI-tracked impl/sign-off/merge panes):
   before the first hook event, a trust-blocked pane is reported as
-  `waiting_for_input` (the TUI's existing "needs you" state), and approved
-  workdirs get the R5 auto-accept.
+  `waiting_for_input` (the TUI's existing "needs you" state).  The tracker
+  has no launch workdir, so the R5 auto-accept fires only when the dialog
+  names an approved host directory (a pre-fix container showing
+  `/workspace` stays "needs you"; new containers are seeded per R2).
 
 R7. **Unknown/unapproved workspace behavior stays explicit.** For a cwd
 outside the approved roots nothing is written; the launcher logs
