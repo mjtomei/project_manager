@@ -498,9 +498,14 @@ class TestPlannerHeadPublication:
         # Never force-pushed over someone else's commit.
         assert _git(s["remote"], "rev-parse", "pm/pr-001") != s["c"]
 
-    def test_behind_remote_says_behind_not_diverged(self, remote_setup):
+    @pytest.mark.parametrize("fetched", [True, False],
+                             ids=["fetched", "never-fetched"])
+    def test_behind_remote_says_behind_not_diverged(self, remote_setup,
+                                                    fetched):
         # The upstream already has the planner head plus a later commit
         # (e.g. a previous QA worker's pushed fix the workdir never pulled).
+        # Usually nobody fetched in the PR workdir, so the upstream commit
+        # is not even in its object store — still "behind", not diverged.
         s = remote_setup
         _git(s["workdir"], "push", "origin", "pm/pr-001")
         other = s["tmp"] / "other"
@@ -510,7 +515,8 @@ class TestPlannerHeadPublication:
         _git(other, "add", ".")
         _git(other, *s["env_git"], "commit", "-m", "qa: worker fix")
         _git(other, "push", "origin", "pm/pr-001")
-        _git(s["workdir"], "fetch", "origin")
+        if fetched:
+            _git(s["workdir"], "fetch", "origin")
         with patch("pm_core.push_proxy.resolve_real_origin",
                    return_value=s["real_url"]):
             with pytest.raises(qa_loop.PlannerHandoffError) as ei:
@@ -518,6 +524,8 @@ class TestPlannerHeadPublication:
         msg = str(ei.value)
         assert "is behind upstream" in msg and "diverged" not in msg
         assert "Pull the PR branch" in msg
+        # Classifying must not move the workdir's branch.
+        assert _git(s["workdir"], "rev-parse", "pm/pr-001") == s["c"]
 
     def test_origin_not_pushing_upstream_falls_back_to_direct_push(
             self, remote_setup):

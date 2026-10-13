@@ -404,6 +404,14 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
         # the local object store; absence means it cannot be an ancestor.
         known = _git_capture(workdir_path, "cat-file", "-e",
                              f"{remote}^{{commit}}").returncode == 0
+        if not known:
+            # Someone else pushed and the PR workdir never fetched.  Fetch
+            # the objects (FETCH_HEAD only, no local ref moves) so a
+            # workdir that is merely behind isn't reported as diverged.
+            _git_capture(workdir_path, "fetch", "--quiet", real_url,
+                         f"refs/heads/{branch}")
+            known = _git_capture(workdir_path, "cat-file", "-e",
+                                 f"{remote}^{{commit}}").returncode == 0
         if not known or _git_capture(
                 workdir_path, "merge-base", "--is-ancestor",
                 remote, head).returncode != 0:
