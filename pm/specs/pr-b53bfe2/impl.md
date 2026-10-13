@@ -38,7 +38,12 @@ QA planner/Scenario 0/concretizer/worker/verifier/finalizer in
 launched on the host with a `cwd`, the launcher calls a provider-level
 `prepare_workspace(cwd)` that writes the trust entry for that checkout
 before the command runs. Container launches (`write_dir` set and differing
-from `cwd`) are skipped here — see R2.
+from `cwd`) are skipped here — see R2. The TUI guide/assist pane
+(`pm guide` in a pm tmux pane) builds its command with no `cwd` and runs
+Claude in its own cwd, so it calls `prepare_workspace(os.getcwd())` itself
+(real Claude only, like `launch_claude`; QA S9, 911e75b7). The other TUI
+interactive panes (c, discuss, watcher review, QA author) have the same gap,
+tracked as pr-629c47e.
 
 R2. **Trust bootstrap for container sessions.**
 `container.create_container` copies the host `.claude.json` into the
@@ -100,6 +105,12 @@ R6. **Bounded, actionable failure.**
 - Zero scenarios after planning (any cause): the finalizer is skipped
   (`_execute_and_finalize`), since there are no scenario pushes to
   reconcile. This removes the second #229 hang.
+- Planned count must equal launched count. Found in QA S10 (4c3fb81c):
+  `parse_qa_plan` never starts the plan body before the last
+  `QA_PLAN_START` ahead of the final `QA_PLAN_END`. Before the fix, a plan
+  numbered from 2 reached back to a `SCENARIO 1:` line in the echoed prompt
+  (a committed qa.md). Transcript-based parsing and the completeness gate
+  are pr-b8561ac's.
 - `loop_shared.poll_for_verdict` (review loop, watchers, QA finalize,
   verifier, concretizer) raises `WorkspaceTrustBlocked` when the watch
   fires. The review loop already maps exceptions to `ERROR` + message; QA

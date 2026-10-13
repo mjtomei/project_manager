@@ -1050,6 +1050,11 @@ def test_tmux_guide_launch_goes_through_trust_boundary(home, tmp_path,
     assert str(proj) not in _projects()          # unapproved: prompt stays
 
     monkeypatch.chdir(wd)
+    with patch("pm_core.paths.fake_claude_config_for_type",
+               return_value={"verdicts": {}}):
+        guide_cli._run_guide()                  # fake guide: no dialog
+    assert str(wd) not in _projects()
+
     guide_cli._run_guide()
     assert _projects()[str(wd)]["hasTrustDialogAccepted"] is True
-    assert len(execs) == 2
+    assert len(execs) == 3

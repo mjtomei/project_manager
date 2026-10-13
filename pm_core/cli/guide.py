@@ -39,6 +39,16 @@ def guide(fresh):
     _run_guide(fresh=fresh)
 
 
+def _prepare_guide_workspace():
+    """Trust boundary for the tmux guide pane, which runs Claude in this
+    process's cwd.  Mirrors launch_claude (the non-tmux branch): real
+    Claude only — a fake guide has no dialog.  Not via ``cwd=``, which
+    would also write the prompt into ``<cwd>/pm/prompts``."""
+    from pm_core.paths import fake_claude_config_for_type
+    if fake_claude_config_for_type("guide") is None:
+        prepare_workspace(os.getcwd())
+
+
 def _run_guide(fresh=False):
     # Detect state
     try:
@@ -82,8 +92,7 @@ def _run_guide(fresh=False):
             return
 
         if _in_pm_tmux_session():
-            # Same trust boundary as launch_claude (the non-tmux branch).
-            prepare_workspace(os.getcwd())
+            _prepare_guide_workspace()
             cmd = build_claude_shell_cmd(prompt=prompt, session_type="guide")
             os.execvp("bash", ["bash", "-c", cmd])
         else:
@@ -106,7 +115,7 @@ def _run_guide(fresh=False):
         if _in_pm_tmux_session():
             import uuid as uuid_mod
 
-            prepare_workspace(os.getcwd())
+            _prepare_guide_workspace()
 
             # Get or create session ID for resume
             session_id = None
