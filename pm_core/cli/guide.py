@@ -13,7 +13,7 @@ from pm_core import tmux as tmux_mod
 from pm_core import guide as guide_mod
 from pm_core.claude_launcher import (
     find_claude, find_editor, launch_claude, load_session, save_session,
-    clear_session, build_claude_shell_cmd,
+    clear_session, build_claude_shell_cmd, prepare_workspace,
 )
 
 from pm_core.cli import cli
@@ -82,6 +82,8 @@ def _run_guide(fresh=False):
             return
 
         if _in_pm_tmux_session():
+            # Same trust boundary as launch_claude (the non-tmux branch).
+            prepare_workspace(os.getcwd())
             cmd = build_claude_shell_cmd(prompt=prompt, session_type="guide")
             os.execvp("bash", ["bash", "-c", cmd])
         else:
@@ -103,6 +105,8 @@ def _run_guide(fresh=False):
 
         if _in_pm_tmux_session():
             import uuid as uuid_mod
+
+            prepare_workspace(os.getcwd())
 
             # Get or create session ID for resume
             session_id = None

@@ -28230,3 +28230,30 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-629c47e
+  plan: bugs
+  title: 'Bug: TUI interactive Claude panes (c, discuss, watcher review, qa author)
+    skip the workspace-trust launch boundary'
+  branch: pm/pr-629c47e-bug-tui-interactive-claude-panes-c-discuss-watcher
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pane_ops.py launch_claude (TUI c), launch_discuss, launch_watcher_review
+    and the qa_author launch build the Claude command with build_claude_shell_cmd(prompt=...,
+    session_type=...) and no cwd, so prepare_workspace never runs: no "workspace trust:
+    <dir> not approved" log for the project root and no bootstrap for an approved
+    dir (e.g. after pm trust add). The dialog itself stays explicit, so this is diagnostics/consistency,
+    not a safety hole. Found in pr-b53bfe2 QA scenario 9 (round 5) H2; the guide/assist
+    (TUI H) route was fixed there by calling prepare_workspace(os.getcwd()) in pm_core/cli/guide.py.
+    Repro: in a pm session for a project whose root is not pm trust add-ed, press
+    c; the pane shows the trust dialog and pm.log has no "not approved" line. Passing
+    cwd= would also write the prompt to <cwd>/pm/prompts, so prefer a direct prepare_workspace(<pane
+    cwd>) call.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T20:37:23.930203+00:00'
+  updated_at: '2026-10-13T20:37:23.930203+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

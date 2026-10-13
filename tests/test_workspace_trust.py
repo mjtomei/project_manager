@@ -1019,3 +1019,37 @@ def test_merge_window_in_unapproved_dir_names_the_remedy(home, approved,
     out = capsys.readouterr().out
     assert "Opened merge resolution window" in out
     assert (f"pm trust add {root}" in out) is not approved
+
+
+def test_tmux_guide_launch_goes_through_trust_boundary(home, tmp_path,
+                                                       monkeypatch):
+    """TUI ``H`` runs ``pm guide`` in a pm tmux pane, which used to build
+    the Claude command with no cwd and so skipped the trust boundary: no
+    ``not approved`` log for the project root, no bootstrap for an approved
+    dir.  It must consult trust like the non-tmux ``launch_claude`` path."""
+    from pm_core.cli import guide as guide_cli
+
+    proj = _git_checkout(tmp_path / "proj")
+    wd = _pm_workdir(home)
+    _write_cfg({"projects": {}})
+    monkeypatch.setattr(guide_cli, "_in_pm_tmux_session", lambda: True)
+    monkeypatch.setattr(guide_cli, "find_claude", lambda: "claude")
+    monkeypatch.setattr(guide_cli, "_get_pm_session", lambda: None)
+    monkeypatch.setattr(guide_cli, "state_root", lambda: None)
+    monkeypatch.setattr(
+        guide_cli.guide_mod, "detect_state",
+        lambda root: ("ready", {"root": None, "data": {"prs": [{"id": "pr-1"}]}}))
+    monkeypatch.setattr(guide_cli.guide_mod, "build_assist_prompt",
+                        lambda *a, **k: "assist")
+    execs = []
+    monkeypatch.setattr(guide_cli.os, "execvp",
+                        lambda f, args: execs.append(args))
+
+    monkeypatch.chdir(proj)
+    guide_cli._run_guide()
+    assert str(proj) not in _projects()          # unapproved: prompt stays
+
+    monkeypatch.chdir(wd)
+    guide_cli._run_guide()
+    assert _projects()[str(wd)]["hasTrustDialogAccepted"] is True
+    assert len(execs) == 2
