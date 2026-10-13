@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T01:49:37.704736+00:00'
+  updated_at: '2026-10-13T02:00:35.200629+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26407,6 +26407,20 @@ prs:
       missing until next refresh after w s).'
     created_at: '2026-10-13T01:49:37Z'
     last_edited: '2026-10-13T01:49:37Z'
+  - id: note-ebc2bf0
+    text: 'QA S21 r5 (81628e35): every Then held except L. With a busy debug log,
+      both "log: Auto-sequence armed" lines (armed 01:29, L at 01:32, ~250 debug lines
+      + ~18 status msgs later) sat in L scrollback, not on screen (tail -n 500 -f).
+      Fixed bd754a14: L prints the backlog, then the last 8 "log: Auto-start/Auto-sequence/Auto-merge"
+      lines under "── recent auto-start messages ──", then follows (tests/test_log_pane_backlog.py);
+      verified live post-fix. Env: fake impl makes no commits so g merge is a 0.25s
+      no-op and C starts before the user can show the "No live window" notice; to
+      exercise notice→window→cleared, commit on the target branch + a reference-transaction
+      hook that sleeps 4s on refs/heads/master (captures post-fix). pm pr auto-sequence
+      needs a 2nd call to read the fake SIGNOFF_MERGE. pm tui restart with finished
+      fake QA panes crashed QA resume (filed pr-ae66f59).'
+    created_at: '2026-10-13T02:00:35Z'
+    last_edited: '2026-10-13T02:00:35Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
