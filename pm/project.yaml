@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-a75da60
+  active_pr: pr-2428766
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T03:43:12.306385+00:00'
+  updated_at: '2026-10-13T04:08:00.138126+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26535,6 +26535,32 @@ prs:
       pm checkout HEAD must be a092a1f9 or later before and after.'
     created_at: '2026-10-13T03:43:12Z'
     last_edited: '2026-10-13T03:43:12Z'
+  - id: note-7c9b538
+    text: 'S32 restart/reopen contract (refiner r7): launch_pane focuses an existing
+      live role=log pane when not fresh (heal_registry keeps live panes across pm
+      tui restart --breadcrumb). So plain L after the restart, with L still open,
+      reuses that pane: expect "Focused existing log pane", one log pane, and the
+      "Auto-start: resumed after merge restart" line arriving in its live follow below
+      the old divider. No new recap is generated. Check the fresh recap/burst/divider
+      order with z L, or by closing the pane (Ctrl+C) and pressing L. This is documented
+      launch_pane behavior, not a waiver of R39; do not change app code to turn plain
+      L focus into a fresh launch.'
+    created_at: '2026-10-13T03:46:48Z'
+    last_edited: '2026-10-13T03:46:48Z'
+  - id: note-7419d69
+    text: 'QA S32 (round 7) on app rev 7e9d414a (unmodified; fe6e195e spec-only):
+      every R39/S32 requirement held — L vs 13 concurrent CLI writers (all rc=0, burst/recap/follow
+      exact vs debug log, final {A,B,C}=serial), reopen/z L order + on-screen <=1.4s,
+      slowed-merge/remove/clear lines held ~3s and in recap, policy_changed + gate
+      merge + L changes no status, restart plain L reuses same pane id (active %0->%87,
+      resume line below original divider), z L fresh recap with resume line, 80x12
+      popup/Esc/L. The concretized extra Then "TUI line reads Focused existing log
+      pane" FAILED (hidden by the 5s sticky resume summary); per ambiguity 16 it is
+      out of scope, kept as failed, filed pr-2428766, candidate patch preserved (not
+      applied) in scenarios/32/pre-fix/t5. Gotcha: list-panes -a duplicates panes
+      of grouped sessions — sort -u pane ids.'
+    created_at: '2026-10-13T04:08:00Z'
+    last_edited: '2026-10-13T04:08:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -27021,6 +27047,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T02:58:29.741629+00:00'
   updated_at: '2026-10-13T02:58:29.741629+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2428766
+  plan: bugs
+  title: 'Bug: pane-launch key replies ("Focused existing log pane" / "Launched X
+    pane") dropped while a sticky log message shows'
+  branch: pm/pr-2428766-bug-pane-launch-key-replies-focused-existing-log-p
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pane_ops.py launch_pane logs "Focused existing {role}
+    pane" / "Launched {role} pane" unforced, so log_message drops them while any sticky
+    message is up (app.py log_message: non-sticky suppressed during _log_sticky_until).
+    Repro (QA pr-0b87a97 S32 t5): with L open and loops in flight, pm tui restart
+    --breadcrumb; press L ~1.3s after repaint. Focus moves to the log pane but the
+    TUI line keeps "Auto-start: resumed after merge restart -> ..." (sticky=5, e7e8abdc);
+    debug log: "log: Focused existing log pane (hidden by sticky message)". Pre-existing
+    on master for the 3s "Review loop resumed" sticky. Candidate fix (not applied
+    to #229 by scope decision): a user=True log_message flag that bypasses sticky
+    but still waits behind holds; patch preserved at pm-captures pr-0b87a97 scenarios/32/pre-fix/t5/preserved-patch/user-flag-not-applied.patch.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T04:06:05.797085+00:00'
+  updated_at: '2026-10-13T04:06:05.797085+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
