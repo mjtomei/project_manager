@@ -148,11 +148,13 @@ def _find_claude_pane(session: str, window_name: str) -> str | None:
 
 
 def _poll_for_verdict(pane_id: str, transcript_path: str,
-                      grace_period: float = 0) -> str | None:
+                      grace_period: float = 0,
+                      workdir: str | None = None) -> str | None:
     """Poll a pane for a verdict via Claude Code hook events."""
     return _poll_for_verdict_shared(
         pane_id, transcript_path, verdicts=ALL_VERDICTS,
         grace_period=grace_period, log_prefix="review_loop",
+        workdir=workdir,
     )
 
 
@@ -204,7 +206,8 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
               pane_id, window_name, transcript)
 
     content = _poll_for_verdict(pane_id, transcript,
-                                 grace_period=_VERDICT_GRACE_PERIOD)
+                                 grace_period=_VERDICT_GRACE_PERIOD,
+                                 workdir=pr_data.get("workdir"))
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content

@@ -58,6 +58,9 @@ class PaneIdleState:
     idle: bool = False
     waiting_for_input: bool = False
     gone: bool = False
+    # Watches for the workspace-trust dialog until the first hook event
+    # (a session stuck there never emits one).
+    trust_watch: object = None
     idle_notified: bool = False
 
 
@@ -130,9 +133,28 @@ class PaneIdleTracker:
 
         event = hook_events.read_event(session_id)
         if not event:
+            # No hook event yet: the session may be sitting at the
+            # workspace-trust dialog, which fires no hook.  Surface it as
+            # waiting-for-input (and let the watch accept it for approved
+            # workdirs) rather than leaving the pane silently "busy".
+            from pm_core.claude_launcher import WorkspacePromptWatch
             with self._lock:
                 state = self._states.get(key)
-                return bool(state and state.idle)
+                watch = state.trust_watch if state else None
+            if state and (watch is None or watch.pane_id != pane_id):
+                watch = WorkspacePromptWatch(pane_id)
+            if watch is not None:
+                watch.check()
+            with self._lock:
+                state = self._states.get(key)
+                if not state or state.pane_id != pane_id:
+                    return False
+                state.trust_watch = watch
+                if watch is not None and watch.visible:
+                    state.waiting_for_input = True
+                elif watch is not None and state.waiting_for_input:
+                    state.waiting_for_input = False
+                return state.idle
 
         ev_ts = float(event.get("timestamp") or 0)
         with self._lock:

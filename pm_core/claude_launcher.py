@@ -7,6 +7,7 @@ import random
 import shlex
 import shutil
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -388,6 +389,116 @@ def find_editor() -> str:
     return "vi"
 
 
+# ---------------------------------------------------------------------------
+# Workspace trust (runtime mechanics live in pm_core.workspace_trust)
+# ---------------------------------------------------------------------------
+
+class WorkspaceTrustBlocked(RuntimeError):
+    """A launched session stayed at the workspace-trust prompt past the grace."""
+
+
+def prepare_workspace(cwd: str | None):
+    """Establish workspace trust for a host *cwd* before launching into it.
+
+    Only pm-created or explicitly authorized workdirs are trusted (see
+    ``workspace_trust.approved_path``); anything else is left to the
+    runtime's own explicit prompt.  Never raises.
+    """
+    from pm_core import workspace_trust
+    if not cwd or not os.path.isdir(cwd):
+        return workspace_trust.TrustOutcome(
+            workspace_trust.UNSUPPORTED, str(cwd or ""), "no host cwd")
+    try:
+        outcome = workspace_trust.get_trust_runtime().bootstrap(cwd)
+    except Exception as e:  # never block a launch on bootstrap bugs
+        _log.warning("workspace trust: bootstrap crashed for %s", cwd,
+                     exc_info=True)
+        return workspace_trust.TrustOutcome(workspace_trust.ERROR, cwd, str(e))
+    if outcome.status == workspace_trust.UNAPPROVED:
+        _log.info("workspace trust: %s not approved; leaving the prompt "
+                  "explicit", cwd)
+    elif not outcome.ok:
+        _log.warning("workspace trust: %s", outcome.message)
+    return outcome
+
+
+class WorkspacePromptWatch:
+    """Bounded watchdog for a pane that may be stuck at the trust prompt.
+
+    ``check()`` is cheap to call from a poll loop: it captures the pane at
+    most every *interval* seconds.  When the dialog is visible and
+    *workdir* is approved, it selects the "trust" option by reading the
+    cursor off the screen (never a blind Enter — the dialog defaults to
+    "No, exit").  Returns an actionable message once the dialog has stayed
+    visible longer than *grace* seconds, else None.
+    """
+
+    MAX_ACCEPT_ATTEMPTS = 2
+
+    def __init__(self, pane_id: str, workdir: str | None = None,
+                 grace: float | None = None, interval: float = 5.0):
+        from pm_core import workspace_trust
+        self.pane_id = pane_id
+        self.workdir = workdir
+        self.grace = workspace_trust.prompt_grace_seconds() if grace is None else grace
+        self.interval = interval
+        self._runtime = workspace_trust.get_trust_runtime()
+        self._last_check = 0.0
+        self._first_seen: float | None = None
+        self._accept_attempts = 0
+        self.shown_path: str | None = None
+
+    @property
+    def visible(self) -> bool:
+        """Whether the last check saw the trust dialog on screen."""
+        return self._first_seen is not None
+
+    def _may_accept(self, shown: str) -> bool:
+        from pm_core import workspace_trust
+        if self.workdir and workspace_trust.approved_path(self.workdir):
+            return True
+        return bool(shown) and os.path.isdir(shown) and workspace_trust.approved_path(shown)
+
+    def check(self, force: bool = False) -> str | None:
+        from pm_core import tmux as tmux_mod, workspace_trust
+        now = time.monotonic()
+        if not force and now - self._last_check < self.interval:
+            return None
+        self._last_check = now
+        try:
+            screen = tmux_mod.capture_pane(self.pane_id)
+        except Exception:
+            return None
+        shown = self._runtime.detect_prompt(screen)
+        if shown is None:
+            self._first_seen = None
+            return None
+        self.shown_path = shown
+        if self._first_seen is None:
+            self._first_seen = now
+            _log.warning("workspace trust: pane %s is at the trust prompt "
+                         "(%s)", self.pane_id, shown or self.workdir)
+        if (self._accept_attempts < self.MAX_ACCEPT_ATTEMPTS
+                and self._may_accept(shown)):
+            keys = self._runtime.accept_keys(screen)
+            if keys:
+                self._accept_attempts += 1
+                _log.info("workspace trust: accepting prompt in pane %s for "
+                          "approved workdir %s (keys=%s)", self.pane_id,
+                          shown or self.workdir, keys)
+                if self.workdir:
+                    prepare_workspace(self.workdir)
+                for key in keys:
+                    tmux_mod.send_keys_literal(self.pane_id, key)
+                    time.sleep(0.2)
+                return None
+        waited = now - self._first_seen
+        if waited >= self.grace:
+            return workspace_trust.blocked_message(
+                shown or self.workdir or "", waited)
+        return None
+
+
 def launch_claude(prompt: str, session_key: str, pm_root: Path,
                   cwd: str | None = None, resume: bool = True,
                   provider: str | None = None,
@@ -438,6 +549,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
+        prepare_workspace(cwd or os.getcwd())
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
@@ -670,6 +782,14 @@ def build_claude_shell_cmd(
         log_shell_command(cmd, prefix="claude")
         return cmd
     else:
+        # Host launches establish workspace trust here, at the one boundary
+        # every workflow role goes through.  Container launches pass the
+        # host path as ``write_dir`` and a container-internal ``cwd``; their
+        # trust is seeded into the container's config copy at creation
+        # (container.create_container).
+        if cwd and (write_dir is None
+                    or os.path.realpath(write_dir) == os.path.realpath(cwd)):
+            prepare_workspace(cwd)
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
         cmd = f"{env_prefix}claude{skip}"
 
