@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-22c92ef
+  active_pr: pr-edc256b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -26812,3 +26812,25 @@ prs:
       are improvised worker commands, not a checked-in PM polling loop.'
     created_at: '2026-10-12T23:09:15Z'
     last_edited: '2026-10-12T23:09:15Z'
+- id: pr-edc256b
+  plan: bugs
+  title: 'Bug: TUI status bar omits WCH after starting a watcher (w s) until the next
+    status refresh'
+  branch: pm/pr-edc256b-bug-tui-status-bar-omits-wch-after-starting-a-watc
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/watcher_ui.py start_watcher() registers and starts the
+    watcher but never calls app._update_status_bar(), so the WCH indicator only appears
+    on the next unrelated status refresh (e.g. r). Repro (pr-0b87a97 QA S22, identical
+    code on master): pm session, press w then s -> log "Auto-Start Watcher started",
+    header still lacks WCH for 30s+; press r -> WCH appears. Fix: call app._update_status_bar()
+    after manager.start() (and in stop/complete paths).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T01:34:52.458271+00:00'
+  updated_at: '2026-10-13T01:34:52.458271+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
