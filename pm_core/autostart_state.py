@@ -316,7 +316,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
             if verdict:
                 return phase, "paused", f"QA ended {verdict}"
         if inp.get("skip_qa"):
-            return phase, "waiting", "skip_qa set; merge handled after review"
+            return (phase, "waiting",
+                    "skip_qa set; sign-off follows the review PASS")
         return phase, "queued", "QA starts on next scheduler pass"
 
     if status == "sign_off":

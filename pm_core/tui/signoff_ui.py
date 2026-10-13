@@ -172,7 +172,7 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
                         f"{err.splitlines()[-1] if err else proc.returncode}")
     else:
         _log.info("signoff_ui: pm pr signoff %s launched", pr_id)
-    app._load_state()
+    _reload(app)
 
 
 def step(app, pr_id: str, pr: dict | None = None) -> None:
