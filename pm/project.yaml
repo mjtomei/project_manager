@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T06:44:42.252258+00:00'
+  updated_at: '2026-10-13T07:34:58.439187+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3344,6 +3344,22 @@ prs:
       are unaffected.'
     created_at: '2026-10-13T06:44:42Z'
     last_edited: '2026-10-13T06:44:42Z'
+  - id: note-a52cacc
+    text: 'QA planning (2026-10-13, supervised run #230 — outer host planner/QA0 trust
+      prompts were accepted manually by the supervisor, so this is NOT an unattended
+      autostart qualification trial): the QA planner made an APPLICATION EDIT in commit
+      7d79fce1. trust-prompt-grace-seconds was documented as a global setting but
+      `pm set` rejected it as unknown; it is now registered in pm_core/cli/__init__.py
+      as an int setting (default 120), with fail-before/pass-after regression test_grace_setting_is_configurable_via_pm_set.
+      This edit is UNREVIEWED: it MUST go through another review pass before sign-off.
+      An all-PASS QA run does not make it reviewed (the host controller lacks the
+      planner-code-change guard). Bugs filed: pr-7e0eec4 (container copies $HOME/.claude.json,
+      ignoring CLAUDE_CONFIG_DIR) and pr-8c0d680 (known /workspace host-dir limit).
+      Suspected race on concurrent `pm trust add` (trusted-workspaces is plain read-modify-write)
+      is to be verified in QA scenario 1, then fixed or filed. Old terminal-intake
+      planner bug is tracked by pr-b8561ac.'
+    created_at: '2026-10-13T07:34:58Z'
+    last_edited: '2026-10-13T07:34:58Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -27302,6 +27318,53 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T05:08:46.426074+00:00'
   updated_at: '2026-10-13T05:08:46.426074+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7e0eec4
+  plan: bugs
+  title: 'Bug: container .claude.json copy ignores CLAUDE_CONFIG_DIR'
+  branch: pm/pr-7e0eec4-bug-container-claude-json-copy-ignores-claude-conf
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py create_container copies Path.home()/.claude.json
+    into new containers (_claude_json_src), while Claude and pm workspace-trust bootstrap
+    (workspace_trust.ClaudeWorkspaceTrust.config_path) honour CLAUDE_CONFIG_DIR. Repro:
+    export CLAUDE_CONFIG_DIR=/some/dir with a valid .claude.json, keep a different/missing
+    ~/.claude.json, enable container mode and start a PR session: the container gets
+    the ~/.claude.json copy (stale auth/settings, trust seeded from the wrong file)
+    or none. Found by pr-b53bfe2 QA planning (code reading; verify in QA).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T07:34:48.705122+00:00'
+  updated_at: '2026-10-13T07:34:48.705122+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8c0d680
+  plan: bugs
+  title: 'Bug: pre-fix container trust dialog not auto-accepted when pm runs from
+    a host dir named /workspace'
+  branch: pm/pr-8c0d680-bug-pre-fix-container-trust-dialog-not-auto-accept
+  status: pending
+  depends_on: []
+  description: 'Known limit from pr-b53bfe2 review i2. claude_launcher.WorkspacePromptWatch._accept_target
+    treats a dialog path that exists as a host dir as authoritative. When pm itself
+    runs from a host /workspace (nested dev setup), a reused container created before
+    pr-b53bfe2 (config not seeded) shows ''Accessing workspace: /workspace'', which
+    is read as the host path, so the R5 fallback auto-accept does not fire. The session
+    fails within trust-prompt-grace-seconds with a remedy message. Newly created containers
+    are seeded and unaffected. Repro: host checkout at /workspace, container created
+    by pre-fix pm (or strip projects[''/workspace''] from the container''s ~/.claude.json),
+    relaunch review in the reused container.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T07:34:49.309576+00:00'
+  updated_at: '2026-10-13T07:34:49.309576+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
