@@ -25877,7 +25877,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-13T07:17:52.915207+00:00'
+  updated_at: '2026-10-13T07:18:48.713487+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25939,6 +25939,25 @@ prs:
       Note: Ctrl+R user restart leaves auto-start off (re-add targets).'
     created_at: '2026-10-13T07:17:52Z'
     last_edited: '2026-10-13T07:17:52Z'
+  - id: note-cad67cc
+    text: 'QA refine s3 (R13/R14/C1-C4): autostart reason "skip_qa set; sign-off follows
+      the review PASS" is the qa-STATUS row reason under skip_qa (commit 210a2efa),
+      not an in_review row as qa.md R13 words it — observe it on a qa-status target.
+      fake-claude scripted cursors are per session type, shared by TUI and CLI drivers:
+      run R14 scripted ["SIGNOFF_REQA","SIGNOFF_MERGE"] alone, use single-verdict
+      configs for concurrent C1/C4.'
+    created_at: '2026-10-13T06:38:33Z'
+    last_edited: '2026-10-13T06:38:33Z'
+  - id: note-0c58ea4
+    text: 'QA s3 incidental fix 687bca6b: TUI _resume_incomplete_qa adopted in-flight
+      QA runs owned by a live `pm pr auto-sequence` QA child (duplicate verifier/finalize
+      panes, double QA complete, stale "QA PASS — press i" after a CLI re-qa). qa_resume.json
+      now carries owner_pid; scan skips snapshots whose owner is another live pid.
+      Also 6c81d3cb: O "signed off — ready to merge" line now force+hold (was swallowed
+      by the 10s "Review loop done" sticky under skip_qa and overwritten by concurrent
+      A merge lines).'
+    created_at: '2026-10-13T07:18:48Z'
+    last_edited: '2026-10-13T07:18:48Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
@@ -26818,11 +26837,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:42.844845+00:00'
-  updated_at: '2026-10-12T21:35:42.844845+00:00'
+  updated_at: '2026-10-13T07:18:49.936939+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-3419d81
+    text: 'Repro from pr-488ac6d QA s3: add a PR with `pm pr add` while the TUI runs,
+      then `pm autostart add <id>` without `pm push` + merging the sync branch. pr
+      start fails "not committed on master yet" — only a WARNING in ~/.pm/debug, no
+      TUI log line, and the target stays pending. pm push + remove/re-add recovered
+      it.'
+    created_at: '2026-10-13T07:18:49Z'
+    last_edited: '2026-10-13T07:18:49Z'
 - id: pr-f094946
   plan: bugs
   title: 'Bug: auto-started QA loop selects its new window, pulling attached clients
