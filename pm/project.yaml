@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T02:52:03.637468+00:00'
+  updated_at: '2026-10-13T02:59:26.061189+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26460,6 +26460,17 @@ prs:
       for bar focus, or the Then should tolerate pr-6412997. Captures: /pm-captures/scenarios/30.'
     created_at: '2026-10-13T02:52:03Z'
     last_edited: '2026-10-13T02:52:03Z'
+  - id: note-73ac620
+    text: 'QA S28 r6 (e17d5671): every Then in all 6 triples held, no app changes.
+      Env notes: (1) committing on a branch after pm pr auto-sequence makes SIGNOFF_MERGE
+      stale, and g is refused, so commit BEFORE signing off (S28 step order is reversed).
+      (2) On the local backend, the second g merge (W2 after W1) fails ff-only because
+      the workdir master is stale, and pm opens a merge-resolution window. Filed pr-a75da60.
+      Workaround: reset the workdir master to origin/master. (3) Sending Esc then
+      L back-to-back in tmux reads as Alt+L, so the popup stays open; sleep between
+      them.'
+    created_at: '2026-10-13T02:59:26Z'
+    last_edited: '2026-10-13T02:59:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
