@@ -1692,6 +1692,13 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                 switch=not background,
             )
         click.echo(f"Opened merge resolution window '{window_name}'")
+        # Merges that land in the main repo resolve in the project root,
+        # which pm does not auto-trust: say why the window is waiting.
+        from pm_core.workspace_trust import approved_path
+        if not approved_path(workdir):
+            click.echo(f"  {workdir} is not an approved workspace: answer "
+                       f"Claude's trust prompt in '{window_name}' (or run "
+                       f"`pm trust add {workdir}` before merging).")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)
         click.echo(f"Merge window error: {e}")

@@ -846,3 +846,27 @@ def test_grace_setting_is_configurable_via_pm_set(home):
     bad = CliRunner().invoke(cli, ["set", "trust-prompt-grace-seconds", "soon"])
     assert bad.exit_code != 0
     assert wt.prompt_grace_seconds() == 30.0
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_merge_window_in_unapproved_dir_names_the_remedy(home, approved,
+                                                         capsys):
+    """Main-repo merge resolution runs in the project root, which pm does
+    not auto-trust: the launch must say why the window is waiting and how
+    to fix it, and stay quiet for approved workdirs."""
+    from pm_core.cli import pr as pr_mod
+    from pm_core.paths import workdirs_base
+    base = workdirs_base() if approved else home / "project"
+    root = base / "repo"
+    root.mkdir(parents=True)
+    with patch.object(pr_mod, "tmux_mod") as tm, \
+         patch.object(pr_mod, "prompt_gen"), \
+         patch.object(pr_mod, "build_claude_shell_cmd", return_value="claude"), \
+         patch.object(pr_mod, "_get_pm_session", return_value="pm-s"), \
+         patch("pm_core.paths.get_global_setting", return_value=False):
+        tm.find_window_by_name.return_value = None
+        pr_mod._launch_merge_window({"project": {}}, {"id": "pr-001"},
+                                     "conflict", cwd=str(root))
+    out = capsys.readouterr().out
+    assert "Opened merge resolution window" in out
+    assert (f"pm trust add {root}" in out) is not approved

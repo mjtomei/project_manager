@@ -122,7 +122,10 @@ R6. **Bounded, actionable failure.**
 R7. **Unknown/unapproved workspace behavior stays explicit.** For a cwd
 outside the approved roots nothing is written; the launcher logs
 `workspace trust: <path> not approved`, the dialog appears as before, and
-the R6 failure path names `pm trust add <path>` as the remedy.
+the R6 failure path names `pm trust add <path>` as the remedy.  A merge
+resolution window opened in an unapproved directory (main-repo merges
+resolve in the project root, see pr-e835d8f) prints the same remedy when it
+opens, since nothing watches that pane for a bounded failure.
 
 R8. **CLI.** `pm trust status [PATH]`, `pm trust add PATH`,
 `pm trust remove PATH`, `pm trust list`. `add` records the authorization

@@ -21,6 +21,7 @@ import click
 
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
+from pm_core.workspace_trust import DEFAULT_PROMPT_GRACE_SECONDS
 
 # Import helpers used directly in this module.  Submodules import from
 # ``pm_core.cli.helpers`` directly rather than via re-export.
@@ -274,7 +275,7 @@ _SETTING_DEFAULTS = {
     "qa-max-scenarios": "(unset)",
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
-    "trust-prompt-grace-seconds": "120",
+    "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
     "spec-mode": "prompt",
 }
 _LIST_ALIASES = {"list", "ls", "l"}

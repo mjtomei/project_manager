@@ -438,14 +438,19 @@ def get_trust_runtime(name: str = "claude") -> TrustRuntime:
     return _RUNTIMES.get(name) or TrustRuntime()
 
 
+# ``trust-prompt-grace-seconds`` default: long enough for a watching human
+# to answer the dialog, far shorter than the 1h QA planner timeout.
+DEFAULT_PROMPT_GRACE_SECONDS = 120
+
+
 def prompt_grace_seconds() -> float:
     """How long a trust dialog may stay on screen before pm gives up."""
     from pm_core.paths import get_global_setting_value
     raw = get_global_setting_value("trust-prompt-grace-seconds", "")
     try:
-        return max(0.0, float(raw)) if raw else 120.0
+        return max(0.0, float(raw)) if raw else float(DEFAULT_PROMPT_GRACE_SECONDS)
     except ValueError:
-        return 120.0
+        return float(DEFAULT_PROMPT_GRACE_SECONDS)
 
 
 def blocked_message(path: str, waited: float) -> str:
@@ -465,5 +470,6 @@ __all__ = [
     "set_authorized_roots", "add_authorized_root", "remove_authorized_root",
     "trust_keys", "register_trust_runtime",
     "get_trust_runtime", "prompt_grace_seconds", "blocked_message",
+    "DEFAULT_PROMPT_GRACE_SECONDS",
     "TRUSTED", "ALREADY", "UNAPPROVED", "UNSUPPORTED", "ERROR",
 ]
