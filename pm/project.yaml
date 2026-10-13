@@ -25870,7 +25870,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-12T19:11:27.048214+00:00'
+  updated_at: '2026-10-13T05:58:33.769225+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25886,6 +25886,23 @@ prs:
       state from the recorded pr.signoff verdict + HEAD freshness.'
     created_at: '2026-10-12T19:11:26Z'
     last_edited: '2026-10-12T19:11:26Z'
+  - id: note-0d48c82
+    text: 'Impl done (7b3bda70 + 949b6082). signoff.step_signoff = shared sign_off
+      state machine (CLI auto-sequence refactored onto it, output unchanged). New
+      tui/signoff_ui: QA PASS (or skip_qa review PASS) -> sign_off + background `pm
+      pr signoff --transcript <run>/signoff-<pr>.jsonl`; advance_all runs from check_and_start
+      and every 5s poll; MERGE->_maybe_auto_merge (O stop line / A merge), REQA->TUI
+      QA, REVIEW->review loop, IMPL->pr start --fresh, BLOCKED->sticky log; once per
+      (verdict,sha,policy); restart catch-up for recorded QA PASS. _maybe_auto_merge
+      now gates on fresh SIGNOFF_MERGE before the O line or any merge, and a gate
+      refusal is no longer added to _pending_merge_prs. pm pr signoff accepts in_review
+      under skip_qa. Not changed: the CLI auto-sequence skip_qa branch still prints
+      "ready_to_merge (skip_qa)" without running sign-off (follow-up candidate). Tests:
+      tests/test_tui_signoff_handoff.py (16, fail on pre-fix). Live captures (fake-claude,
+      O+A, pre/post) in captures impl/{pre,post}-fix/*; helpers/run.sh reproduces
+      them. Pre-existing unrelated failure: test_hook_events::test_installer_writes_standalone_receiver.'
+    created_at: '2026-10-13T05:58:33Z'
+    last_edited: '2026-10-13T05:58:33Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
