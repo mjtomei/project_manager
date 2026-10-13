@@ -142,7 +142,8 @@ class PaneIdleTracker:
                 state = self._states.get(key)
                 watch = state.trust_watch if state else None
             if state and (watch is None or watch.pane_id != pane_id):
-                watch = WorkspacePromptWatch(pane_id)
+                watch = WorkspacePromptWatch(
+                    pane_id, transcript_path=state.transcript_path)
             if watch is not None:
                 watch.check()
             with self._lock:

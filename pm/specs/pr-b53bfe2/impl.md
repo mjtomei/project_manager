@@ -71,6 +71,14 @@ still seen for an approved workdir (e.g. a container created before this
 fix, a config-write race), the watchdog selects "Yes, I trust this folder"
 by reading the cursor position from the screen (Up/Down to that row, then
 Enter), never blind Enter. At most 2 attempts.
+When the dialog names a host directory, that directory decides (it must
+itself be approved — a session that started outside its intended approved
+workdir is never trusted by proxy); only an unreadable or container-internal
+path falls back to the launch workdir. Detection requires a line-anchored
+option row, and the watch ends for good once the session transcript JSONL
+exists (Claude writes it only after the dialog), so dialog-like text later in
+the first turn — e.g. a reviewer or QA worker displaying this module or a
+captured dialog — never sends keys or reports a false block.
 
 R6. **Bounded, actionable failure.**
 - `WorkspacePromptWatch(pane_id, workdir)` checks the pane at most every

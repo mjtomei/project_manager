@@ -160,7 +160,7 @@ def poll_for_verdict(
     poll_start = time.monotonic()
     hook_baseline = time.time()
     trust_watch: WorkspacePromptWatch | None = WorkspacePromptWatch(
-        pane_id, workdir)
+        pane_id, workdir, transcript_path=transcript_path)
 
     while True:
         if stop_check and stop_check():

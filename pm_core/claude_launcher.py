@@ -431,15 +431,23 @@ class WorkspacePromptWatch:
     cursor off the screen (never a blind Enter — the dialog defaults to
     "No, exit").  Returns an actionable message once the dialog has stayed
     visible longer than *grace* seconds, else None.
+
+    *transcript_path* (the session's JSONL, or a symlink to it) ends the
+    watch for good once it exists: Claude only writes it after the first
+    prompt is submitted, i.e. after the dialog.  Without it, text later in
+    the first turn that quotes the dialog could be mistaken for it.
     """
 
     MAX_ACCEPT_ATTEMPTS = 2
 
     def __init__(self, pane_id: str, workdir: str | None = None,
-                 grace: float | None = None, interval: float = 5.0):
+                 grace: float | None = None, interval: float = 5.0,
+                 transcript_path: str | Path | None = None):
         from pm_core import workspace_trust
         self.pane_id = pane_id
         self.workdir = workdir
+        self.transcript_path = transcript_path
+        self.started = False
         self.grace = workspace_trust.prompt_grace_seconds() if grace is None else grace
         self.interval = interval
         self._runtime = workspace_trust.get_trust_runtime()
@@ -455,12 +463,21 @@ class WorkspacePromptWatch:
 
     def _may_accept(self, shown: str) -> bool:
         from pm_core import workspace_trust
-        if self.workdir and workspace_trust.approved_path(self.workdir):
-            return True
-        return bool(shown) and os.path.isdir(shown) and workspace_trust.approved_path(shown)
+        # A host path on the dialog decides: the session may have started
+        # somewhere other than *workdir* (never trust that by proxy).  Only
+        # an unreadable or container-internal path falls back to *workdir*.
+        if shown and os.path.isdir(shown):
+            return workspace_trust.approved_path(shown)
+        return bool(self.workdir) and workspace_trust.approved_path(self.workdir)
 
     def check(self, force: bool = False) -> str | None:
         from pm_core import tmux as tmux_mod, workspace_trust
+        if self.started:
+            return None
+        if self.transcript_path and Path(self.transcript_path).exists():
+            self.started = True
+            self._first_seen = None
+            return None
         now = time.monotonic()
         if not force and now - self._last_check < self.interval:
             return None

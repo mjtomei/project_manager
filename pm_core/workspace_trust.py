@@ -175,7 +175,6 @@ _TRUST_PROMPT_RE = re.compile(
     r"Accessing workspace:|Do you trust the files in this folder\?"
     r"|Is this a project you created or one you trust\?"
 )
-_YES_OPTION_RE = re.compile(r"Yes, I trust this folder|Yes, proceed")
 _OPTION_RE = re.compile(r"^\s*(❯|>)?\s*(\d+\.\s*)?(Yes, I trust this folder|Yes, proceed|No, exit)\b")
 
 
@@ -335,9 +334,12 @@ class ClaudeWorkspaceTrust(TrustRuntime):
     def detect_prompt(self, screen: str) -> str | None:
         if not screen or not _TRUST_PROMPT_RE.search(screen):
             return None
-        if not _YES_OPTION_RE.search(screen):
-            return None
         lines = screen.splitlines()
+        # Require a real option row (line-anchored), not just the words
+        # somewhere on screen — conversation output can quote them.
+        if not any((m := _OPTION_RE.match(line)) and m.group(3) != "No, exit"
+                   for line in lines):
+            return None
         for i, line in enumerate(lines):
             if "Accessing workspace:" in line:
                 for nxt in lines[i + 1:i + 4]:

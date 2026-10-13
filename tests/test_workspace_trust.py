@@ -312,6 +312,13 @@ class TestPromptDetection:
         text = "The dialog says 'Accessing workspace:' but no options here"
         assert wt.get_trust_runtime().detect_prompt(text) is None
 
+    def test_quoted_dialog_text_is_not_a_prompt(self):
+        # Source/diff output naming the option strings mid-line (e.g. a
+        # reviewer viewing this module) must not look like the dialog.
+        text = ('_TRUST_PROMPT_RE = re.compile(r"Accessing workspace:")\n'
+                '_OPTION_RE = re.compile(r"(Yes, I trust this folder|No, exit)")')
+        assert wt.get_trust_runtime().detect_prompt(text) is None
+
     def test_accept_keys_never_blind_enter(self):
         rt = wt.get_trust_runtime()
         # Current layout defaults to "No, exit": must move down first.
@@ -363,6 +370,49 @@ class TestPromptWatch:
         assert pane.keys == []
         assert msg and f"pm trust add {foreign}" in msg
         assert "workspace-trust prompt" in msg
+
+    def test_shown_unapproved_dir_not_accepted_via_approved_workdir(
+            self, home, tmp_path):
+        """The session started outside the intended (approved) workdir, as
+        the pre-fix review pane did in the TUI's pm/ dir: never trust the
+        shown directory by proxy."""
+        wd = _pm_workdir(home)
+        foreign = _git_checkout(tmp_path / "pm-root")
+        pane = _FakePane(TRUST_SCREEN.format(path=foreign))
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", pane.send):
+            w = WorkspacePromptWatch("%1", str(wd), grace=0)
+            msg = w.check()
+        assert pane.keys == []
+        assert msg and f"pm trust add {foreign}" in msg
+
+    def test_container_path_falls_back_to_host_workdir(self, home):
+        wd = _pm_workdir(home)
+        pane = _FakePane(TRUST_SCREEN.format(path="/no-such-container-dir"))
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", pane.send), \
+             patch("pm_core.claude_launcher.time.sleep"):
+            w = WorkspacePromptWatch("%1", str(wd), grace=0)
+            assert w.check() is None
+        assert pane.keys == ["Down", "Enter"]
+
+    def test_watch_ends_once_transcript_exists(self, home, tmp_path):
+        """Claude writes the transcript only after the dialog; once it
+        exists, dialog-like text later in the turn is ignored (no keys, no
+        spurious block)."""
+        wd = _pm_workdir(home)
+        transcript = tmp_path / f"{uuid.uuid4()}.jsonl"
+        pane = _FakePane("Claude is working…")
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", pane.send):
+            w = WorkspacePromptWatch("%1", str(wd), grace=0,
+                                     transcript_path=transcript)
+            assert w.check() is None
+            transcript.write_text("{}\n")
+            pane.screen = TRUST_SCREEN.format(path=wd)
+            assert w.check(force=True) is None
+            assert w.started and not w.visible
+        assert pane.keys == []
 
     def test_grace_setting(self, home):
         assert wt.prompt_grace_seconds() == 120.0

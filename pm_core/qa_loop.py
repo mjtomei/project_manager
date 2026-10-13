@@ -2457,7 +2457,9 @@ def _poll_tmux_verdicts(
             if ev is None and pane_id:
                 watch = _trust_watches.get(scenario.index)
                 if watch is None or watch.pane_id != pane_id:
-                    watch = WorkspacePromptWatch(pane_id, scenario.worktree_path)
+                    watch = WorkspacePromptWatch(
+                        pane_id, scenario.worktree_path,
+                        transcript_path=scenario.transcript_path)
                     _trust_watches[scenario.index] = watch
                 blocked = watch.check()
                 if blocked:
@@ -3223,13 +3225,15 @@ def run_qa_sync(
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
         from pm_core import hook_events as _hook_events
-        from pm_core.claude_launcher import WorkspacePromptWatch
+        from pm_core.claude_launcher import WorkspacePromptWatch, transcript_path_for
         _hook_baseline = time.time()
         # Until the planner's first idle turn, watch for it sitting at the
         # workspace-trust prompt so a blocked planner fails in minutes with
         # an actionable error instead of burning the full planner timeout.
         trust_watch: WorkspacePromptWatch | None = WorkspacePromptWatch(
-            planner_pane, workdir_path)
+            planner_pane, workdir_path,
+            transcript_path=transcript_path_for(workdir_path,
+                                                planner_session_id))
         trust_blocked: str | None = None
         while time.monotonic() < deadline:
             if state.stop_requested:
