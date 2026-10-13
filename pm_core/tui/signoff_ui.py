@@ -214,15 +214,18 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         return
 
     hop = result.hop
-    _reload(app)
     if hop in ("ready_to_merge", "blocked"):
         key = (result.verdict, result.sha, _auto_start.policy_for(app, pr_id))
         if _acted(app).get(pr_id) == key:
+            # Already acted; the adopted record changed nothing on disk, so
+            # skip the full TUI reload this terminal state would otherwise
+            # repeat on every 5 s poll until the user presses g.
             return
         _acted(app)[pr_id] = key
     else:
         _acted(app).pop(pr_id, None)
         _launched_at(app).pop(pr_id, None)
+    _reload(app)  # verdict record / hop status written behind the TUI's back
     _log.info("signoff: %s routed %s -> %s", pr_id, result.verdict, hop)
 
     if hop == "ready_to_merge":

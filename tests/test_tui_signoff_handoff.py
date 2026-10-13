@@ -5,8 +5,9 @@ directly on a QA PASS, which logged "ready to merge" for O (registry still
 ``qa``, ``signoff=None``) or ran ``pm pr merge`` for A — refused by the #226
 sign-off gate and then mis-tracked as a merge conflict.  These tests drive a
 real project.yaml through the TUI callbacks with only the process / tmux
-edges faked (``pr_view.run_command`` — the sign-off launcher is routed
-through it as a command string — the sign-off window lookup, HEAD).
+edges faked (``pr_view.run_command`` for ``pm pr merge``, the sign-off
+launch worker — recorded as a command string — the sign-off window lookup,
+HEAD).
 """
 
 import asyncio
@@ -214,8 +215,12 @@ def test_O_stops_only_after_fresh_signoff_merge(world_factory):
     ready = [m for m in app.logs if "ready to merge" in m]
     assert len(ready) == 1 and "signed off" in ready[0]
 
+    reloads = []
+    app._load_state = lambda: reloads.append(1)
     _poll(app, 3)                          # no repeat of the ready line
     assert len([m for m in app.logs if "ready to merge" in m]) == 1
+    assert reloads == []                   # ...and no per-tick TUI reload
+    del app._load_state
 
     # Policy flip O -> A on the signed-off PR: now it merges.
     app._stop_before_merge.clear()
