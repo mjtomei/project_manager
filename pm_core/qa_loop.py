@@ -2755,6 +2755,10 @@ def _poll_tmux_verdicts(
                         scenario.index, retries + 1,
                         _SCENARIO_MAX_RETRIES, backoff)
                     time.sleep(backoff)
+                    if state.stop_requested:
+                        # A stop (e.g. ``z t`` fresh start) killed the
+                        # window; relaunching would orphan a worker.
+                        break
                     retry_counts[scenario.index] = retries + 1
                     if _relaunch_scenario_window(
                         scenario, state, data, pr_data,
@@ -3904,11 +3908,15 @@ def _execute_and_finalize(
 
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
+    # A stopped run can leave scenarios without a verdict; never call
+    # that coverage PASS.
+    unverdicted = [s.index for s in state.scenarios
+                   if s.index not in state.scenario_verdicts]
     if VERDICT_NEEDS_WORK in verdicts or state.planner_code_changes:
         # Application code the planner committed was never reviewed:
         # route back to review rather than on to sign-off.
         state.latest_verdict = VERDICT_NEEDS_WORK
-    elif VERDICT_INPUT_REQUIRED in verdicts or state._error:
+    elif VERDICT_INPUT_REQUIRED in verdicts or state._error or unverdicted:
         # Preserve INPUT_REQUIRED set before Phase 2 (e.g. no scenarios, spec gate)
         state.latest_verdict = VERDICT_INPUT_REQUIRED
     else:
