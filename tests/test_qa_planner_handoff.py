@@ -463,6 +463,143 @@ class TestReadPlannerPlanPaneFallback:
         assert qa_loop.qa_plan_problem(TEMPLATE_PROMPT, [], 1)
 
 
+def _bullet_pane(plan_text: str, bullet: str = "\u25cf") -> str:
+    """Render *plan_text* (START..END) the way a real Claude Code pane does:
+    the message's first line carries the display bullet and every following
+    line is indented two columns (shape of the live QA0 captures
+    qa-round-2-interactive-pane-qa-#231/#232)."""
+    lines = plan_text[plan_text.index("QA_PLAN_START"):].rstrip("\n").split("\n")
+    return "\n".join([f"{bullet} {lines[0]}"]
+                     + [f"  {line}" if line else "" for line in lines[1:]]) + "\n"
+
+
+def _renumbered(plan_text: str, offset: int) -> str:
+    for i in range(4, 0, -1):
+        plan_text = plan_text.replace(f"SCENARIO {i}:", f"SCENARIO {i + offset}:")
+    return plan_text
+
+
+# A real pane: an earlier block's END is still on screen above the fresh
+# bullet-prefixed plan (qa-#232).
+REAL_PANE_BULLET_PLAN = (
+    "  STEPS: Execute an earlier plan's last scenario.\n"
+    "  QA_PLAN_END\n\n" + _bullet_pane(FULL_PLAN)
+    + "\n\u273b Cooked for 4s\n\u276f \n")
+
+
+class TestDisplayBulletMarkers:
+    """Claude Code renders a message's first line with a "\u25cf"/"\u23fa"
+    bullet, so a planner message that opens with the marker shows
+    "\u25cf QA_PLAN_START" in the pane.  With no usable transcript the pane
+    fallback must still accept that complete plan (the original stall)."""
+
+    @pytest.mark.parametrize("bullet", ["\u25cf", "\u23fa"])
+    def test_bullet_start_and_end_are_markers(self, bullet):
+        assert qa_loop._marker_line_offsets(f"{bullet} QA_PLAN_START\n",
+                                            "QA_PLAN_START") == [0]
+        assert qa_loop._tail_has_marker_on_own_line(
+            f"x\n{bullet} QA_PLAN_END\n", "QA_PLAN_END")
+        # Still whole-line: a bullet line with other text is no marker.
+        assert not qa_loop._marker_line_offsets(
+            f"{bullet} QA_PLAN_START follows\n", "QA_PLAN_START")
+
+    @pytest.mark.parametrize("latest", [None, "Let me check one more thing."])
+    def test_reader_accepts_complete_bullet_pane_plan(self, tmp_path, latest):
+        transcript = None
+        if latest is not None:
+            transcript = tmp_path / "t.jsonl"
+            _write_transcript(transcript, [("user", TEMPLATE_PROMPT),
+                                           ("assistant", latest)])
+        plan = qa_loop._read_planner_plan(
+            str(transcript) if transcript else None,
+            lambda: REAL_PANE_BULLET_PLAN, None, 1)
+        assert [s.title for s in plan.scenarios] == TITLES
+        assert plan.source == "pane"
+
+    @pytest.mark.parametrize("bullet", ["\u25cf", "\u23fa"])
+    def test_bullet_plan_after_echoed_template_accepted(self, bullet):
+        """With the prompt still in scrollback the closed template START
+        must not be chosen over the bullet-prefixed real one."""
+        plan = qa_loop._read_planner_plan(
+            None, lambda: TEMPLATE_PROMPT + "\n" + _bullet_pane(FULL_PLAN,
+                                                                bullet),
+            None, 1)
+        assert [s.index for s in plan.scenarios] == [1, 2, 3, 4]
+
+    def test_bullet_plan_at_offset_accepted(self):
+        text = TEMPLATE_PROMPT + "\n" + _bullet_pane(_renumbered(FULL_PLAN, 1))
+        plan = qa_loop._read_planner_plan(None, lambda: text, None, 2)
+        assert [s.index for s in plan.scenarios] == [2, 3, 4, 5]
+
+    @pytest.mark.parametrize("scenario_start", [1, 2])
+    def test_bullet_template_plus_suffix_still_rejected(self, scenario_start):
+        text = (TEMPLATE_PROMPT.replace("\nQA_PLAN_START",
+                                        "\n\u25cf QA_PLAN_START")
+                + "\n...redraw...\n" + PANE_SUFFIX)
+        plan = qa_loop._read_planner_plan(None, lambda: text, None,
+                                          scenario_start)
+        assert plan.scenarios == []
+        assert "earlier" in plan.problems[0]
+
+    def test_run_qa_sync_accepts_bullet_pane_without_transcript(
+            self, tmp_path, monkeypatch):
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=REAL_PANE_BULLET_PLAN,
+            transcript_turns=None)
+        assert [s.title for s in state.scenarios] == TITLES
+
+
+# The template's START survived a redraw but its headers and END did not.
+BARE_STALE_START_PLUS_SUFFIX = (
+    "QA_PLAN_START\n\n...redraw wiped lines...\n" + PANE_SUFFIX)
+
+
+class TestBareStaleStart:
+    def test_bare_stale_start_plus_suffix_rejected_at_offset(self):
+        sc = parse_qa_plan(BARE_STALE_START_PLUS_SUFFIX)
+        assert [s.index for s in sc] == [2, 3, 4]
+        problem = qa_loop.qa_plan_problem(BARE_STALE_START_PLUS_SUFFIX, sc, 2)
+        assert problem and "earlier block" in problem
+
+    @pytest.mark.parametrize("latest", [None, "Let me check one more thing."])
+    def test_reader_rejects_bare_stale_start_plus_suffix(self, tmp_path,
+                                                         latest):
+        transcript = None
+        if latest is not None:
+            transcript = tmp_path / "t.jsonl"
+            _write_transcript(transcript, [("user", TEMPLATE_PROMPT),
+                                           ("assistant", latest)])
+        plan = qa_loop._read_planner_plan(
+            str(transcript) if transcript else None,
+            lambda: BARE_STALE_START_PLUS_SUFFIX, None, 2)
+        assert plan.scenarios == []
+        assert plan.problems and plan.problems[0].startswith("pane:")
+
+    @pytest.mark.parametrize("sep", ["\n", "\n\n", "\n**\n"])
+    def test_fresh_offset_plan_with_only_blank_lines_after_start_ok(self, sep):
+        text = "QA_PLAN_START" + sep + _renumbered(
+            FULL_PLAN[FULL_PLAN.index("SCENARIO 1:"):], 1)
+        sc = parse_qa_plan(text)
+        assert qa_loop.qa_plan_problem(text, sc, 2) is None
+
+
+class TestAngleBracketTitles:
+    def test_real_title_starting_with_angle_bracket_kept(self):
+        text = FULL_PLAN.replace("SCENARIO 3: All launch paths get fallback",
+                                 "SCENARIO 3: <Enter> key: all launch paths")
+        sc = parse_qa_plan(text)
+        assert [s.index for s in sc] == [1, 2, 3, 4]
+        assert sc[2].title == "<Enter> key: all launch paths"
+        assert qa_loop.qa_plan_problem(text, sc, 1) is None
+
+    @pytest.mark.parametrize("title", [
+        "<descriptive title for this scenario>",
+        "<descriptive title for next scenario>",
+        "Scenario Title", "..."])
+    def test_template_placeholders_still_detected(self, title):
+        assert qa_loop._is_placeholder_title(title)
+
+
 # ---------------------------------------------------------------------------
 # Planner head publication before remote-backed fan-out
 # ---------------------------------------------------------------------------

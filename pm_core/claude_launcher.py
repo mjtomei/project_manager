@@ -219,6 +219,7 @@ def _fake_claude_args(config: dict, session_id: str | None = None,
         ("body_batch", "--body-batch"),
         ("body_delay", "--body-delay"),
         ("hold", "--hold"),
+        ("display_bullet", "--display-bullet"),
     ):
         if cfg_key in effective:
             args.extend([flag, str(effective[cfg_key])])

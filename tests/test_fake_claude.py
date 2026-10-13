@@ -1078,6 +1078,11 @@ class TestFakeClaudeLauncher:
         idx = args.index("--verdict")
         assert args[idx + 1] == "NONE"
 
+    def test_fake_claude_args_passes_display_bullet(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"display_bullet": "\u25cf "})
+        assert args[args.index("--display-bullet") + 1] == "\u25cf "
+
     def test_fake_claude_args_passes_hold(self):
         from pm_core.claude_launcher import _fake_claude_args
         args = _fake_claude_args({"hold": 5})
@@ -1338,6 +1343,19 @@ class TestTranscriptAndHook:
     def test_transcript_file_written(self, tmp_path, monkeypatch):
         self._run(tmp_path, monkeypatch, verdict="PASS")
         assert self._transcript_path(tmp_path).exists()
+
+    def test_display_bullet_renders_pane_only(self, tmp_path, monkeypatch):
+        """display_bullet mimics Claude Code's pane ("\u25cf QA_PLAN_START",
+        indented continuation); the transcript keeps the raw text."""
+        out = self._run(tmp_path, monkeypatch, verdict="QA_PLAN", preamble=0,
+                        body="SCENARIO 1: One\nSTEPS: s",
+                        display_bullet="\u25cf ")
+        assert out.splitlines() == ["", "\u25cf QA_PLAN_START",
+                                    "  SCENARIO 1: One", "  STEPS: s",
+                                    "  QA_PLAN_END"]
+        text = self._transcript_path(tmp_path).read_text()
+        assert "\\nQA_PLAN_START\\nSCENARIO 1: One" in text
+        assert "\\u25cf" not in text
 
     def test_transcript_verdict_detectable(self, tmp_path, monkeypatch):
         """The written transcript must be readable by the real detector."""

@@ -110,19 +110,32 @@ def _is_verification_enabled() -> bool:
     return True
 
 
+# Claude Code renders the first line of each assistant text block with a
+# display bullet, so a planner message that opens with the marker shows
+# "● QA_PLAN_START" (or "⏺ ...") in the pane.  The bullet is display-only
+# (the JSONL transcript has the bare marker).
+_DISPLAY_BULLET_RE = re.compile(r'^\s*[●⏺]\s*')
+
+
+def _marker_line_text(line: str) -> str:
+    """*line* as compared against a whole-line marker: a leading display
+    bullet, markdown emphasis and surrounding whitespace removed."""
+    return re.sub(r'[*`]', '', _DISPLAY_BULLET_RE.sub('', line)).strip()
+
+
 def _tail_has_marker_on_own_line(content: str, marker: str,
                                  tail_lines: int = VERDICT_TAIL_LINES) -> bool:
     """Check if *marker* appears as the entire content of a line in the tail.
 
     Same whole-line matching strategy as the review loop's
     ``match_verdict()`` — the marker must be the full line (after
-    stripping whitespace and markdown formatting), not a substring.
+    stripping whitespace, markdown formatting and a display bullet), not a
+    substring.
     """
     lines = content.strip().splitlines()
     tail = lines[-tail_lines:] if len(lines) > tail_lines else lines
     for line in tail:
-        cleaned = re.sub(r'[*`]', '', line).strip()
-        if cleaned == marker:
+        if _marker_line_text(line) == marker:
             return True
     return False
 
@@ -916,16 +929,23 @@ _PLACEHOLDER_TITLES = {"Scenario Title", "..."}
 
 
 def _is_placeholder_title(title: str) -> bool:
-    """True for the prompt template's example scenario titles."""
-    return title in _PLACEHOLDER_TITLES or title.startswith("<")
+    """True for the prompt template's example scenario titles.
+
+    Template placeholders are a whole ``<multi word phrase>`` (e.g.
+    ``<descriptive title for this scenario>``); a real title that merely
+    starts with ``<`` (``<Enter> key submits``) is not one.
+    """
+    return (title in _PLACEHOLDER_TITLES
+            or re.fullmatch(r'<[^<>]*\s[^<>]*>', title) is not None)
 
 
 def _marker_line_offsets(text: str, marker: str) -> list[int]:
-    """Offsets of lines whose whole content (minus markdown) is *marker*."""
+    """Offsets of lines whose whole content (minus markdown and a display
+    bullet) is *marker*."""
     offsets: list[int] = []
     pos = 0
     for line in text.splitlines(keepends=True):
-        if re.sub(r'[*`]', '', line).strip() == marker:
+        if _marker_line_text(line) == marker:
             offsets.append(pos)
         pos += len(line)
     return offsets
@@ -972,6 +992,7 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
                 "(plan truncated)")
     body = text[start:end]
     headers: list[int] = []
+    first_header_pos = None
     # Single-line headers only: an untitled header must not borrow the
     # next line as its title.
     for m in re.finditer(r'^[ \t]*SCENARIO[ \t]+(\d+)[:.][ \t]*(.*)$',
@@ -979,6 +1000,8 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
         if _is_placeholder_title(m.group(2).strip()):
             return ("plan block holds prompt-template example headers "
                     "(QA_PLAN_START is from the echoed prompt; plan truncated)")
+        if first_header_pos is None:
+            first_header_pos = m.start()
         headers.append(int(m.group(1)))
     parsed = [s.index for s in scenarios]
     if headers != parsed:
@@ -988,6 +1011,15 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
     if first not in (1, scenario_start):
         return (f"plan starts at SCENARIO {first}, expected 1 or "
                 f"{scenario_start} (leading scenarios missing)")
+    # A plan numbered from a later offset can't show by its numbering that
+    # nothing was lost, so its START must directly precede the first
+    # header.  Other text in between means the START survived from an
+    # earlier block (e.g. the echoed template, its headers and END redrawn
+    # away) and only a suffix of this plan is left.
+    between = body[body.find("\n") + 1:first_header_pos]
+    if first != 1 and re.sub(r'[*`\s]', '', between):
+        return (f"text between QA_PLAN_START and SCENARIO {first} — the "
+                "START is from an earlier block (plan truncated)")
     if headers != list(range(first, first + len(headers))):
         return f"scenario numbers {headers} are not contiguous"
     return None
