@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T05:00:03.766849+00:00'
+  updated_at: '2026-10-13T05:09:40.257456+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26676,6 +26676,21 @@ prs:
       the historical statement rather than removing it.'
     created_at: '2026-10-13T05:00:03Z'
     last_edited: '2026-10-13T05:00:03Z'
+  - id: note-bf1c318
+    text: 'Sign-off (2026-10-13, head 9d560f62; app code = 3831cbba, unchanged since
+      review 4c37 PASS and QA8 b992ee47): SIGNOFF_MERGE. Report: $CAP/report.html.
+      Full suite in a fresh venv with markdown: 3019 passed, 1 failed (test_hook_events::test_installer_writes_standalone_receiver,
+      which also fails on an origin/master worktree). No exclusions. Coverage: QA8
+      S33/S34 VERIFIED on final code, plus S27-S30 (r6) and S32 (r7) VERIFIED and
+      carried forward; the only app delta since then is the O hold line, Runs hint
+      and L pane, all re-tested in S33/S34. Second-reviewer findings filed as follow-ups
+      rather than blocking: pr-adfdce3 (a pm autostart CLI call moves focus from the
+      plans/QA view to the hidden tree; confirmed with a Textual repro at signoff/probe_focus_plans_view.py;
+      non-destructive, partly pre-existing on master) and pr-291ed27 (low: an external
+      pm pr select of the last-followed PR is ignored after manual navigation). Supervised
+      run; the manual trust/handoff/wait recoveries are disclosed in the report.'
+    created_at: '2026-10-13T05:09:40Z'
+    last_edited: '2026-10-13T05:09:40Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
@@ -27188,6 +27203,68 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T04:06:05.797085+00:00'
   updated_at: '2026-10-13T04:06:05.797085+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-adfdce3
+  plan: bugs
+  title: 'Bug: pm autostart CLI commands move focus from the plans/QA view to the
+    hidden PR tree'
+  branch: pm/pr-adfdce3-bug-pm-autostart-cli-commands-move-focus-from-the-
+  status: pending
+  depends_on: []
+  description: 'Found in pr-0b87a97 sign-off (#229). Every `pm autostart ...` CLI
+    call (status/list polls included) is drained from the SIGUSR2 command queue into
+    pr_view.handle_command_submitted. Its autostart branch ends with an unconditional
+    app.query_one(''#tech-tree'').focus() (pm_core/tui/pr_view.py, autostart branch).
+    _drain_command_queue only restores focus when the command bar was in use (impl.md
+    section 5 item 27). If the user is in the plans view (p) or the QA view, focus
+    moves to the TechTree, which is hidden (its container has display:none, but Textual
+    still lets it take focus). PlansPane.on_key returns early when it isn''t focused,
+    so plans j/k/Enter/a/w/D/l/e/c stop working. j/k go to the hidden tree instead
+    and rewrite active_pr. Focus comes back only after a view toggle or the next view
+    refresh. Repro (verified headless with Textual 8.2.8): a host app with TechTree
+    inside a display:none container, plus PlansPane and CommandBar, and _plans_visible=True.
+    Focus PlansPane, write ''autostart status --reply r1'' to the queue and call ProjectManagerApp._drain_command_queue.
+    app.focused becomes TechTree. Partly pre-existing: on master, typing autostart
+    in the command bar from the plans view had the same effect, but the new CLI makes
+    it routine. Fix: in the autostart branch (or in the drain), refocus the visible
+    view: the plans pane when _plans_visible, the QA pane when _qa_visible, else the
+    tree (like the other command branches and _focus_view_widget). Add a pilot test
+    for plans and QA views. Also check the guide view.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T05:08:39.944928+00:00'
+  updated_at: '2026-10-13T05:08:39.944928+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-291ed27
+  plan: bugs
+  title: 'Bug: TUI cursor ignores external pm pr select of the previously followed
+    PR after manual navigation'
+  branch: pm/pr-291ed27-bug-tui-cursor-ignores-external-pm-pr-select-of-th
+  status: pending
+  depends_on: []
+  description: 'Found in pr-0b87a97 sign-off (#229). The tree follows active_pr only
+    when it changes (_follow_active_pr in pm_core/tui/app.py, from QA s4 fix b336ee34).
+    _followed_active_pr is updated only inside _update_display. Tree navigation (pr_view.handle_pr_selected)
+    sets active_pr in memory and on disk but leaves _followed_active_pr unchanged.
+    Sequence: the cursor follows X, the user moves to Y (active_pr=Y is flushed, with
+    no reload), then an external pm pr select X (or another writer setting active_pr=X)
+    sends SIGUSR1. The reload sees active_pr == _followed_active_pr == X and leaves
+    the cursor on Y, although active_pr is X. Before b336ee34 it always snapped. The
+    window closes at the next _update_display. Fix: set app._followed_active_pr =
+    pr_id in handle_pr_selected (or compare against the tree''s current selection).
+    Add a unit test. Low impact.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T05:08:46.426074+00:00'
+  updated_at: '2026-10-13T05:08:46.426074+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
