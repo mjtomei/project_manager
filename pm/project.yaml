@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T23:16:58.067370+00:00'
+  updated_at: '2026-10-13T23:41:40.663200+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3815,6 +3815,22 @@ prs:
       Planned=launched=3.'
     created_at: '2026-10-13T23:16:58Z'
     last_edited: '2026-10-13T23:16:58Z'
+  - id: note-f3247f9
+    text: 'QA S14 local merge trust (round 6, supervised; worker accepted no outer
+      trust prompt; no app edits) on 17d4f39a: M1, M2a, M2b, M2c, concurrency, M3,
+      M4, M4b and M5 all held live with real claude 2.1.296 and an isolated CLAUDE_CONFIG_DIR.
+      Every local merge window (D, Z, Y, F) opened in the PR workdir with 0 dialogs.
+      D, Z and F resolved hands-off from their titles; Y (neutral) asked INPUT_REQUIRED
+      and merged after one answer. M2b ran via auto-start with no re-add (Z in_review
+      before add). The root was never trusted or reset, and user work survived; M4b
+      took the restore case. M5: the root window stayed on "No, exit" for 90s with
+      0 accept attempts, the remedy printed and no trust was written. Harness: pm
+      session needs PM_HOST_HOME kept, or it refuses on the bind-mounted settings.json
+      hooks; system python3 lacks pytest. Captures: /pm-captures/scenarios/14 (manifest.md);
+      scenarios/1-11 untouched except the known external scenarios/8 pm-home.22.log
+      appender.'
+    created_at: '2026-10-13T23:41:40Z'
+    last_edited: '2026-10-13T23:41:40Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
