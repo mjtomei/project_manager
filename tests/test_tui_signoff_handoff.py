@@ -5,7 +5,8 @@ directly on a QA PASS, which logged "ready to merge" for O (registry still
 ``qa``, ``signoff=None``) or ran ``pm pr merge`` for A — refused by the #226
 sign-off gate and then mis-tracked as a merge conflict.  These tests drive a
 real project.yaml through the TUI callbacks with only the process / tmux
-edges faked (``pr_view.run_command``, the sign-off window lookup, HEAD).
+edges faked (``pr_view.run_command`` — the sign-off launcher is routed
+through it as a command string — the sign-off window lookup, HEAD).
 """
 
 import asyncio
@@ -94,12 +95,19 @@ class World:
         elif cmd.startswith("pr merge"):
             from pm_core import signoff as so
             pr = self.app.pr()
-            if so.fresh_recorded_verdict(pr, self.head) != so.SIGNOFF_MERGE:
+            if so.merge_gate_refusal(pr, self.head):
                 return  # gate refuses (exit 1); status unchanged
 
             def apply(d):
                 store.get_pr(d, PR)["status"] = "merged"
             store.locked_update(self.app._root, apply)
+
+    def launch_quiet(self, app, pr_id, transcript):
+        """Stand-in for ``signoff_ui._launch_quiet`` (a worker coroutine in
+        the TUI): records the command via the patchable ``run_command``."""
+        from pm_core.tui import pr_view
+        pr_view.run_command(
+            app, f"pr signoff --background --transcript {transcript} {pr_id}")
 
     def emit(self, verdict: str) -> None:
         """The router pane prints its verdict into the TUI's transcript."""
@@ -128,6 +136,7 @@ def world_factory(tmp_path):
         w = World(app)
         ps = [
             patch("pm_core.tui.pr_view.run_command", w.run_command),
+            patch("pm_core.tui.signoff_ui._launch_quiet", w.launch_quiet),
             patch("pm_core.signoff.head_sha", lambda wd: w.head),
             patch("pm_core.signoff.signoff_window_pane",
                   lambda s, pr: "%9" if w.window else None, create=True),
@@ -395,3 +404,54 @@ def test_dead_window_relaunch_is_throttled(world_factory):
 def signoff_backoff():
     from pm_core.tui import signoff_ui
     return signoff_ui.RELAUNCH_BACKOFF_SECONDS
+
+
+def test_manual_approval_with_changed_report_is_not_merged(world_factory,
+                                                           tmp_path):
+    """A manual approval pins report.html's hash; once the report changes the
+    real gate refuses, so A must not call ``pm pr merge`` (which would be
+    tracked as a conflict) and says why instead."""
+    import hashlib
+    app, w = world_factory(stop=False)
+    croot = tmp_path / "captures"
+    (croot / PR).mkdir(parents=True)
+    report = croot / PR / "report.html"
+    report.write_text("<html>v1</html>")
+    from pm_core import signoff as so
+    so.record_signoff_verdict(
+        app._root, PR, "SIGNOFF_MERGE", w.head, "manual",
+        report_hash=hashlib.sha256(report.read_bytes()).hexdigest())
+    report.write_text("<html>v2 edited</html>")
+    with patch("pm_core.paths.captures_root", return_value=croot):
+        _qa_pass(app)
+        _poll(app, 3)
+    assert w.merges() == []
+    assert app._pending_merge_prs == set()
+    refused = [m for m in app.logs if "report.html changed" in m]
+    assert len(refused) == 1                # once, not every poll
+
+
+def test_launch_quiet_runs_signoff_off_the_event_loop(tmp_path):
+    """The real launcher: argv list (no shlex of the transcript path), async
+    subprocess, failure surfaced in the log."""
+    from pm_core.tui import signoff_ui
+    app = App(tmp_path, stop=True)
+    seen = {}
+
+    class Proc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"boom\nPR pr-aaa1111 is merged"
+
+    async def fake_shell(cmd, **kw):
+        seen["cmd"] = cmd
+        return Proc()
+
+    transcript = tmp_path / "a dir" / f"signoff-{PR}.jsonl"
+    with patch("pm_core.tui._shell._run_shell_async", fake_shell):
+        asyncio.run(signoff_ui._launch_quiet(app, PR, transcript))
+    assert seen["cmd"][-5:] == ["signoff", "--background", "--transcript",
+                                str(transcript), PR]
+    assert any("Sign-off launch failed" in m and "is merged" in m
+               for m in app.logs)

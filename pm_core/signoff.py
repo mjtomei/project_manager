@@ -161,6 +161,49 @@ def latest_signoff_verdict(pr: dict) -> str | None:
     return ((pr or {}).get("signoff") or {}).get("verdict") or None
 
 
+def merge_gate_refusal(pr: dict, current_sha: str | None) -> str | None:
+    """Why the ``pm pr merge`` sign-off gate (#226) refuses *pr*, or None.
+
+    Merge requires a recorded SIGNOFF_MERGE whose sha matches *current_sha*;
+    a manual approval (``pm pr signoff record``) additionally pins the
+    approved ``report.html`` content hash, so an edited report re-blocks.
+    Auto-sequence records carry no hash (the transcript verdict is the
+    approval) and skip that check.  Shared by the CLI gate and the TUI
+    auto-merge so the TUI never attempts a merge the gate would refuse.
+    """
+    pr_id = pr.get("id")
+    fresh = fresh_recorded_verdict(pr, current_sha)
+    if fresh != SIGNOFF_MERGE:
+        recorded = latest_signoff_verdict(pr)
+        if recorded == SIGNOFF_MERGE and fresh is None:
+            return (f"PR {pr_id}: recorded sign-off verdict {recorded} is "
+                    f"stale (HEAD moved since). Re-run `pm pr signoff "
+                    f"{pr_id}` against current HEAD, or pass "
+                    f"--no-signoff-check to override.")
+        if recorded:
+            return (f"PR {pr_id}: sign-off verdict is {recorded}, not "
+                    f"{SIGNOFF_MERGE}. Run `pm pr signoff {pr_id}` to "
+                    f"re-route, or pass --no-signoff-check to override.")
+        return (f"PR {pr_id}: no sign-off verdict recorded yet. Run "
+                f"`pm pr signoff {pr_id}` first, or pass "
+                f"--no-signoff-check to override.")
+    recorded_hash = (pr.get("signoff") or {}).get("report_hash")
+    if recorded_hash:
+        import hashlib
+        from pm_core.paths import captures_root
+        croot = captures_root()
+        report = croot / pr_id / "report.html" if croot else None
+        current_hash = (
+            hashlib.sha256(report.read_bytes()).hexdigest()
+            if report is not None and report.is_file() else None)
+        if current_hash != recorded_hash:
+            return (f"PR {pr_id}: report.html changed since the recorded "
+                    f"approval; re-run `pm pr signoff record {pr_id}` "
+                    f"after reviewing it, or pass --no-signoff-check to "
+                    f"override.")
+    return None
+
+
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                           background: bool = False,
                           transcript: str | None = None,

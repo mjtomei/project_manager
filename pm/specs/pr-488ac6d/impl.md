@@ -53,7 +53,11 @@ R2. **TUI sign-off driver** — new `pm_core/tui/signoff_ui.py`:
     (`auto_start.get_transcript_dir(app)`, file `signoff-<pr>.jsonl`) and
     act:
       - `launch` → `pm pr signoff --background --transcript <tdir>/signoff-<pr>.jsonl <pr>`
-        (background: never steals focus).
+        (background: never steals focus).  Run as an async worker
+        subprocess (argv list, like `auto_start._start_pr_quiet`), never the
+        synchronous `pr_view.run_command` — that blocks the event loop and
+        kills launches slower than 30 s (container start).  Failures are
+        logged; the 60 s relaunch backoff covers the window not being up yet.
       - `running` → nothing.
       - hop `ready_to_merge` (fresh SIGNOFF_MERGE on current HEAD) →
         `_maybe_auto_merge` (O: stop with the ready line; A: merge).
@@ -81,8 +85,12 @@ scope) calls `_trigger_signoff` → `signoff_ui.start_signoff` and logs
 Out of scope: message says "press i to sign off".
 
 R4. **Merge gate in `_maybe_auto_merge`.**  Before the stop-before-merge
-check and before any `pm pr merge`, require a fresh SIGNOFF_MERGE
-(`fresh_recorded_verdict(pr, head_sha(workdir)) == SIGNOFF_MERGE`).  If
+check and before any `pm pr merge`, require that the exact `pm pr merge`
+gate passes — `signoff.merge_gate_refusal(pr, head_sha(workdir))` is None
+(fresh SIGNOFF_MERGE, plus the report.html hash of a manual approval).  The
+CLI merge gate calls the same helper.  A signed-off `sign_off` PR the gate
+still refuses (report changed since a manual approval) gets a one-time
+yellow log with the gate's reason, never a merge attempt.  If
 absent: PR in `qa`/`in_review` → `signoff_ui.start_signoff` (covers
 skip_qa's review-PASS call); PR in `sign_off` → no-op (driver owns it).  O
 then reports "✓ <pr> signed off (SIGNOFF_MERGE @ <sha>) — ready to merge

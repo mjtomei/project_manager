@@ -2012,53 +2012,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     # earlier HEAD) don't count — a code change after sign-off invalidates it.
     # --no-signoff-check overrides for propagation / recovery flows.
     if not no_signoff_check and not propagation_only:
-        from pm_core.signoff import (
-            SIGNOFF_MERGE, head_sha, fresh_recorded_verdict,
-            latest_signoff_verdict,
-        )
+        from pm_core.signoff import head_sha, merge_gate_refusal
         workdir = pr_entry.get("workdir")
         current_sha = head_sha(workdir) if workdir else None
-        fresh = fresh_recorded_verdict(pr_entry, current_sha)
-        if fresh != SIGNOFF_MERGE:
-            recorded = latest_signoff_verdict(pr_entry)
-            if recorded == SIGNOFF_MERGE and fresh is None:
-                click.echo(
-                    f"PR {pr_id}: recorded sign-off verdict {recorded} is "
-                    f"stale (HEAD moved since). Re-run `pm pr signoff "
-                    f"{pr_id}` against current HEAD, or pass "
-                    f"--no-signoff-check to override.", err=True)
-            elif recorded:
-                click.echo(
-                    f"PR {pr_id}: sign-off verdict is {recorded}, not "
-                    f"{SIGNOFF_MERGE}. Run `pm pr signoff {pr_id}` to "
-                    f"re-route, or pass --no-signoff-check to override.",
-                    err=True)
-            else:
-                click.echo(
-                    f"PR {pr_id}: no sign-off verdict recorded yet. Run "
-                    f"`pm pr signoff {pr_id}` first, or pass "
-                    f"--no-signoff-check to override.", err=True)
+        refusal = merge_gate_refusal(pr_entry, current_sha)
+        if refusal:
+            click.echo(refusal, err=True)
             raise SystemExit(1)
-        # Manual approvals (pm pr signoff record) carry the approved
-        # report.html's content hash; refuse when the on-disk report changed
-        # since the reviewer read it. Auto-sequence records carry no hash
-        # (the transcript verdict is the approval) and skip this check.
-        recorded_hash = (pr_entry.get("signoff") or {}).get("report_hash")
-        if recorded_hash:
-            import hashlib
-            from pm_core.paths import captures_root
-            croot = captures_root()
-            report = croot / pr_id / "report.html" if croot else None
-            current_hash = (
-                hashlib.sha256(report.read_bytes()).hexdigest()
-                if report is not None and report.is_file() else None)
-            if current_hash != recorded_hash:
-                click.echo(
-                    f"PR {pr_id}: report.html changed since the recorded "
-                    f"approval; re-run `pm pr signoff record {pr_id}` "
-                    f"after reviewing it, or pass --no-signoff-check to "
-                    f"override.", err=True)
-                raise SystemExit(1)
 
     backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")

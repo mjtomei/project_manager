@@ -107,7 +107,6 @@ def _launched_at(app) -> dict:
 
 def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
     import time
-    from pm_core.tui import pr_view
     from pm_core import signoff as signoff_mod
     launched = _launched_at(app)
     now = time.monotonic()
@@ -123,12 +122,48 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
         app.log_message(f"[red]Cannot create transcript dir[/] {tdir}: {e}")
         return
     transcript = signoff_mod.signoff_transcript(tdir, pr_id)
-    pr_view.run_command(
-        app, f"pr signoff --background --transcript {transcript} {pr_id}")
+    app.run_worker(_launch_quiet(app, pr_id, transcript))
 
 
-def step(app, pr_id: str) -> None:
-    """Advance one in-scope ``sign_off`` PR through the shared state machine."""
+async def _launch_quiet(app, pr_id: str, transcript) -> None:
+    """``pm pr signoff --background --transcript <t> <pr>`` off the event loop.
+
+    Like ``auto_start._start_pr_quiet``: the launch can take a while (prompt
+    build, container start), so it must not run synchronously in the 5 s
+    poll.  The relaunch backoff covers the window that is not up yet.
+    """
+    import asyncio
+    import sys
+    from pm_core.tui._shell import _run_shell_async
+
+    cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "signoff",
+           "--background", "--transcript", str(transcript), pr_id]
+    try:
+        proc = await _run_shell_async(
+            cmd, cwd=str(app._root) if app._root else None,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    except Exception as e:
+        _log.exception("signoff_ui: launch failed for %s", pr_id)
+        app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: {e}")
+        return
+    if proc.returncode != 0:
+        err = (stderr.decode(errors="replace") if stderr else "").strip()
+        _log.warning("signoff_ui: pm pr signoff %s exit=%s: %s",
+                     pr_id, proc.returncode, err[:200])
+        app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: "
+                        f"{err.splitlines()[-1] if err else proc.returncode}")
+    else:
+        _log.info("signoff_ui: pm pr signoff %s launched", pr_id)
+    app._load_state()
+
+
+def step(app, pr_id: str, pr: dict | None = None) -> None:
+    """Advance one in-scope ``sign_off`` PR through the shared state machine.
+
+    *pr* is the PR's entry freshly read from disk (``advance_all`` loads
+    project.yaml once per pass); None re-reads it.
+    """
     from pm_core.tui import auto_start as _auto_start
     from pm_core import signoff as signoff_mod
 
@@ -139,7 +174,8 @@ def step(app, pr_id: str) -> None:
     session = getattr(app, "_session_name", None)
     if not session:
         return
-    pr = _load_pr(app, pr_id)
+    if pr is None:
+        pr = _load_pr(app, pr_id)
     if not pr or pr.get("status") != "sign_off":
         return
 
@@ -229,6 +265,7 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
         return
     if prs is None:
         prs = (app._data or {}).get("prs") or []
+    disk = None  # project.yaml read at most once per pass (it can be large)
     for pr in list(prs):
         pr_id = pr.get("id")
         if not pr_id or not _auto_start.in_scope(app, pr_id, prs):
@@ -236,7 +273,9 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
         status = pr.get("status")
         try:
             if status == "sign_off":
-                step(app, pr_id)
+                if disk is None:
+                    disk = store.load(app._root)
+                step(app, pr_id, store.get_pr(disk, pr_id))
             elif (status == "qa" and pr_id not in app._qa_loops
                   and _auto_start.recorded_qa_verdict(pr_id) == "PASS"):
                 start_signoff(app, pr_id)

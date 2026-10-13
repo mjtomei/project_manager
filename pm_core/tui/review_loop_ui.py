@@ -558,12 +558,13 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 # Auto-merge passing reviews
 # ---------------------------------------------------------------------------
 
-def _fresh_signoff_sha(app, pr_id: str) -> tuple[str | None, dict]:
-    """``(sha, pr)``: *sha* is the HEAD when *pr_id* (re-read from disk)
-    carries a fresh SIGNOFF_MERGE record, else None.
+def _signoff_gate(app, pr_id: str) -> tuple[str | None, str | None, dict]:
+    """``(sha, refusal, pr)`` for *pr_id* re-read from disk.
 
-    Mirrors the ``pm pr merge`` sign-off gate (#226) so auto-start never
-    calls a merge that gate would refuse.
+    *refusal* is :func:`pm_core.signoff.merge_gate_refusal` — the exact
+    ``pm pr merge`` sign-off gate (#226) — so auto-start never calls a merge
+    that gate would refuse; None means a fresh, still-valid SIGNOFF_MERGE
+    at *sha* (the current HEAD).
     """
     from pm_core import signoff as signoff_mod
     try:
@@ -572,9 +573,7 @@ def _fresh_signoff_sha(app, pr_id: str) -> tuple[str | None, dict]:
         data = app._data
     pr = store.get_pr(data or {}, pr_id) or {}
     sha = signoff_mod.head_sha(pr.get("workdir"))
-    if signoff_mod.fresh_recorded_verdict(pr, sha) == signoff_mod.SIGNOFF_MERGE:
-        return sha, pr
-    return None, pr
+    return sha, signoff_mod.merge_gate_refusal(pr, sha), pr
 
 
 def _maybe_auto_merge(app, pr_id: str) -> None:
@@ -605,14 +604,24 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     if not _auto_start.in_scope(app, pr_id):
         return
 
-    sha, pr = _fresh_signoff_sha(app, pr_id)
-    if not sha:
-        if pr.get("status") in ("qa", "in_review"):
+    sha, refusal, pr = _signoff_gate(app, pr_id)
+    if refusal:
+        status = pr.get("status")
+        if status in ("qa", "in_review"):
             from pm_core.tui import signoff_ui
             signoff_ui.start_signoff(app, pr_id)
+        elif status == "sign_off" and (pr.get("signoff") or {}).get(
+                "verdict") == "SIGNOFF_MERGE":
+            # Signed off, yet the gate refuses (a manual approval whose
+            # report.html changed since): only a human can re-approve.
+            # The sign-off driver calls here once per (verdict, sha, policy).
+            _log.info("auto_merge: %s refused by sign-off gate: %s",
+                      pr_id, refusal)
+            app.log_message(f"[yellow]Not merging {pr_id}:[/] {refusal}",
+                            sticky=30)
         else:
             _log.info("auto_merge: %s has no fresh SIGNOFF_MERGE (status=%s) "
-                      "— not merging", pr_id, pr.get("status"))
+                      "— not merging", pr_id, status)
         return
 
     # Per-PR stop-before-merge policy (O / CLI default).  Explicit stop
@@ -631,14 +640,15 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     if _attempt_merge(app, pr_id, resolve_window=True):
         _log.info("auto_merge: %s merged, starting dependents", pr_id)
         app.run_worker(_auto_start.check_and_start(app))
-    elif not _fresh_signoff_sha(app, pr_id)[0]:
+    elif refusal := _signoff_gate(app, pr_id)[1]:
         # The sign-off gate refused (HEAD / report changed since approval):
         # that is not a conflict — no resolve window opened, so don't track
-        # one.  The sign-off driver re-runs against the new HEAD.
-        _log.info("auto_merge: %s refused by sign-off gate", pr_id)
+        # one.  A moved HEAD makes the sign-off driver re-run against it.
+        _log.info("auto_merge: %s refused by sign-off gate: %s",
+                  pr_id, refusal)
         app.log_message(
-            f"[yellow]Merge of {pr_id} refused by the sign-off gate[/] "
-            f"(approval no longer matches) — sign-off will re-run")
+            f"[yellow]Merge of {pr_id} refused by the sign-off gate:[/] "
+            f"{refusal}")
     else:
         # Merge failed (conflict) — a resolve window was launched.
         # Mark for idle tracking so _poll_impl_idle discovers the pane
