@@ -118,6 +118,16 @@ R6. **Bounded, actionable failure.**
   has no launch workdir, so the R5 auto-accept fires only when the dialog
   names an approved host directory (a pre-fix container showing
   `/workspace` stays "needs you"; new containers are seeded per R2).
+- Panes an earlier TUI launched (found by QA S4 after a hard TUI kill): the
+  tracker can't register them, because their transcript symlinks live in
+  the old TUI's run dir. `_poll_impl_idle` still trust-watches such an
+  impl/review pane. `claude_launcher.pane_transcript_path` recovers the
+  session id from the pane's start command (`--session-id`/`--resume`) and
+  the cwd from its `cd` prefix (`/workspace` for a container exec, else the
+  PR workdir), and the watch runs with the PR workdir. That gives the same
+  R5 accept by cursor, the shared per-pane budget, and one sticky report
+  after the grace. Only the trust watch is added: idle tracking and
+  auto-advance for those panes are unchanged (pr-5d66709).
 
 R7. **Unknown/unapproved workspace behavior stays explicit.** For a cwd
 outside the approved roots nothing is written; the launcher logs

@@ -809,10 +809,12 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
     from pm_core.claude_launcher import (
         WorkspacePromptWatch, pane_transcript_path,
     )
-    watches = getattr(app, "_untracked_trust_watches", None)
-    if watches is None:
-        watches = {}
-        app._untracked_trust_watches = watches
+    # Kept on the app across polls; created lazily so tests and callers
+    # that never hit an orphan pane need no setup.
+    if not hasattr(app, "_untracked_trust_watches"):
+        app._untracked_trust_watches = {}
+        app._untracked_trust_reported = set()
+    watches = app._untracked_trust_watches
     seen.add(pane_id)
     watch = watches.get(pane_id)
     if watch is None:
@@ -823,12 +825,8 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
                                      transcript_path=transcript)
         watches[pane_id] = watch
     msg = watch.check()
-    if msg and pane_id not in getattr(app, "_untracked_trust_reported", set()):
-        reported = getattr(app, "_untracked_trust_reported", None)
-        if reported is None:
-            reported = set()
-            app._untracked_trust_reported = reported
-        reported.add(pane_id)
+    if msg and pane_id not in app._untracked_trust_reported:
+        app._untracked_trust_reported.add(pane_id)
         app.log_message(f"[red]{msg}[/]", sticky=30)
 
 

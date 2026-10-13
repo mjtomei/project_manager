@@ -776,7 +776,7 @@ def test_impl_idle_sweep_accepts_orphan_review_pane_after_restart(
     monkeypatch.setattr(
         "pm_core.tmux.pane_start_command",
         lambda pane: f'"cd {wd} && claude --session-id {sid} \\"x\\""'
-        if pane == "%4" else "", raising=False)
+        if pane == "%4" else "")
     monkeypatch.setattr("pm_core.tmux.capture_pane",
                         lambda pane, *a, **k: TRUST_SCREEN.format(path=wd))
     monkeypatch.setattr("pm_core.tmux.pane_exists", lambda pane: True)
