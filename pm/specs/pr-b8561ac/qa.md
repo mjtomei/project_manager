@@ -43,10 +43,14 @@ note-455012c; shepherd-20261013/qa-fallback-coverage-gap.json).
 - When the planner idles after the grace period.
 - Then the plan is rejected as incomplete. A START that is separated from the
   final END by an intervening END must never pair with it. No scenarios
-  launch. On HEAD cd0432c0 this case is wrongly accepted (repro:
+  launch. The status says "Planner plan incomplete (QA_PLAN_START belongs to
+  an earlier, already-closed block …)" or "(… prompt-template example
+  headers …)". History: HEAD cd0432c0 wrongly accepted this case (repro:
   `qa_plan_problem(TEMPLATE_PROMPT+"\n...redraw...\n"+PANE_SUFFIX, [2,3,4],
-  2) is None`), so the code must be fixed. Regressions must cover both the
-  validator and `_read_planner_plan` with a missing or non-plan transcript.
+  2) is None`). It was fixed in 4ffcd694 (review 78b2 i1). QA must show it
+  live on HEAD and keep the failed repro (check out cd0432c0 → accepted;
+  HEAD → rejected). An untitled `SCENARIO N:` header inside the block also
+  rejects the plan.
 
 R5. Legitimate offset-numbered plans still work.
 - Given QA round 2 (scenario_start = 2).
@@ -134,9 +138,99 @@ missing leading scenarios that is consumed, any scenario testing a tree other
 than the published head, or an all-PASS sign-off after planner app edits.
 
 ## Ambiguities (resolved)
-1. R4 requires a code fix. Per the supervisor, fix it in this PR through a QA
-   scenario, not in planning. Narrow fix: the START used must be the last
-   START after the previous END (structural provenance). Older-transcript-turn
-   reading stays in pr-8efa789. Any fix is application code and must get
-   review afterwards. The fixing scenario reports NEEDS_WORK.
+1. R4 is fixed in 4ffcd694 (structural START/END provenance). That is
+   application code edited after the last review, so it must be reviewed
+   again before sign-off. QA re-exercises it live (S4). Reading older
+   transcript turns stays in pr-8efa789.
 2. The planner makes no application edits during this planning pass.
+3. The host controller is still 6cfd047e, which reads the plan from the pane
+   and loses leading scenarios when the plan is long (note-111b7bb). So the
+   emitted plan is a 10-line index: START, four SCENARIO/STEPS pairs, END.
+   It carries no INSTRUCTION/ARTIFACT lines, so the runner will not copy
+   recipes. Each worker reads its section below and opens the instruction and
+   recipes in its clone at `pm/qa/instructions/` and `pm/qa/artifacts/`.
+4. Round 1 used s-1 and s-2: it covered R8–R10 (S1) and R11 (S2) and found
+   two incidental fixes (e8e6b5ea, ae077932). That round never ran R1–R7, so
+   this round has to cover R1–R7 and re-verify R8–R11 at HEAD. This is still
+   a supervised workaround and does not count as unattended qualification.
+
+## Scenario index (round 2: S3–S6)
+
+Every scenario: install this branch per `pm/qa/instructions/tui-manual-test.md`
+(`./install.sh --local` if pm is missing), throwaway project, fake-claude.
+Capture with `pm/qa/artifacts/tmux-screen-recording.md` for TUI runs and
+`pm/qa/artifacts/cli-recording.md` for CLI/pytest runs. Save the debug log,
+qa_status, planner pane capture and planner JSONL for each story under the
+per-PR captures dir. When a story needs a host git, use note-51506a2's tips:
+a file:// bare upstream, PATH symlink to /usr/bin/git, and a seeded/pushed
+qa.md.
+
+S3 — Bug repro: a complete plan in the transcript survives a truncated pane
+(R1, R2, R6, R7).
+- First run `pytest tests/test_qa_planner_handoff.py` on HEAD, then the
+  pane-truncation regression tests on master's qa_loop.py: they must fail
+  pre-fix and pass on HEAD.
+- Live, with history-limit 0 and an 80x24 pane, the fake planner emits a long
+  4-scenario plan (scenario 1 is large). Start QA from the TUI. On the first
+  idle all 4 scenarios launch with their original titles and order, the log
+  says "accepted 4 scenario(s) from transcript", and the run reaches a
+  verdict without a second idle.
+- Variant: the pane tail shows only SCENARIO 2..4 + END. Scenario 1 still
+  launches.
+- Template-only echo (R6): the planner pane shows the prompt template with
+  placeholders and no real plan. Nothing launches and the loop keeps waiting.
+- Freshness (R7): after a rejection with no new idle, nothing is consumed.
+  When the planner re-emits a complete plan and goes idle again, that plan is
+  accepted.
+- Concurrent: a second terminal attaches to the same pm session and watches
+  or refreshes the planner window while it emits. Extraction still comes from
+  the JSONL.
+
+S4 — Fallback is gated: incomplete or provenance-less plans are reported,
+never consumed (R3, R4, R5).
+- Missing transcript plus a truncated pane (R3): status shows "Planner plan
+  incomplete (…)". When the planner exits, QA ends INPUT_REQUIRED with a
+  "not consumed … re-emit" message.
+- R4 live on HEAD: run round 1 with one scenario, then round 2
+  (scenario_start=2). The transcript is missing or holds non-plan text, and
+  the pane shows a template block (START, placeholder SCENARIO 1, END) then
+  real SCENARIO 2..4 + END. The plan is rejected and nothing launches. Repeat
+  on cd0432c0 to keep the failed repro (2..4 accepted).
+- Untitled header inside the block: rejected.
+- Gap 1,2,4: rejected.
+- R5: in round 2, a complete transcript plan numbered 2..4 is accepted as-is
+  and one numbered 1..3 is renumbered to 2..4. All scenarios launch.
+- Markdown-wrapped markers are accepted.
+- A plan followed by a tool call falls back to the gated pane.
+
+S5 — Planner handoff publication and worker tree consistency under a
+concurrent pusher (R8, R9, R10).
+- file:// bare upstream. The planner commits pm/ docs without pushing. When
+  the plan is accepted, the branch is fast-forward pushed (never forced)
+  before fan-out. Every s-N clone HEAD equals the published sha, and
+  `git pull --rebase` inside a scenario keeps the planner commits.
+- Concurrent: a second actor (another clone) pushes to the PR branch while
+  the planner works.
+  - If the workdir is behind and never fetched, the message says "is behind …
+    Pull" (re-verify e8e6b5ea).
+  - If it has diverged, the message says "diverged … Reconcile" and names
+    both shas.
+  - In both cases no scenario launches, QA is INPUT_REQUIRED, and the
+    upstream is unchanged (no force push).
+- R10: move the PR workdir head while a scenario is queued (concurrency cap
+  1). The dequeued scenario is INPUT_REQUIRED with "refusing to test a
+  different tree". The other scenarios are unaffected.
+- Local-only project: publishing is a no-op. Dirty tracked changes produce a
+  warning and QA proceeds.
+
+S6 — Planner app-code edits force review, with two PRs QA'd concurrently
+(R11 + transcript isolation).
+- One pm session, two PRs, both QA loops started together.
+  - PR A's planner commits a change outside pm/ and all scenarios PASS. The
+    verdict is NEEDS_WORK, the latest output and PR A's note say "planner
+    edited application code (…); review required before sign-off", and PR A
+    returns to review. The NEEDS_WORK survives a QA resume.
+  - PR B's planner edits only pm/. PR B reaches PASS.
+- Each loop accepts its own planner's transcript plan (distinct titles, no
+  cross-talk). Both PRs' notes land intact in project.yaml (no lost writes),
+  and the TUI QA log lines keep the "[pr-id]" prefix (re-verify ae077932).
