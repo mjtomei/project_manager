@@ -145,8 +145,12 @@ review/QA.
   view when rows overflow the popup height; a failed refresh shows plain text
   (no markup error); Esc from a popup opened via the command bar returns focus
   to the tree.
-- **R29 outside a project.** `pm autostart add/remove/status --json` run
-  outside any pm project exit 1 with a JSON `no_project` error.
+- **R29 outside a project.** `pm autostart add/remove --json` run outside
+  any pm project exit 1 with a JSON `no_project` error (the ids are
+  validated against the project before anything is sent). `status`,
+  `list` and `clear` do not read the project: they resolve the owner by
+  tmux session, so from a pane inside a pm session they exit 0, and with
+  no session they exit 2 `owner_unavailable` (S17 refine, impl §5 item 12).
 
 ### Added from QA round 2 fixes and review 9448 (verify on the final revision)
 - **R30 command bar keeps focus.** While the user is typing in the command
@@ -261,6 +265,22 @@ Environment notes learned in QA round 3:
   lines of `tmux capture-pane`.
 - Scripts launched through `timeout` need `#!/bin/bash` (EPOCHREALTIME).
 
+Environment notes learned in QA round 4:
+- The `L` pane opens in whichever window the attached client is on, and
+  auto-QA `select_window` (pr-f094946) can move the client. Press prefix+0
+  (back to the TUI window) before `L`.
+- CLI helper panes keep the environment they sourced when created. After
+  exporting new variables (e.g. `$TUIP`, PR ids), re-source `env.sh` in
+  every pane before using them.
+- `pm push` is needed only when it prints a sync branch; committing `pm/`
+  on master directly also works.
+- `pm tui restart` under concurrent pytest load took ~30 s (CLI got
+  `owner_timeout`, drained on mount). Run the pytest step before or after
+  live restarts, not during them.
+- To see transient paints (spinner vs confirmation), sample the TUI pane
+  every 0.1 s with `tmux capture-pane` into a log, in addition to the
+  asciinema recording.
+
 ## 3. Edge cases
 - E1 Target that depends on another target: dependency's own policy governs
   its merge; the dependent shows waiting on it.
@@ -371,6 +391,16 @@ targets/policies or relaunching finished/in-flight work; any traceback.
      - A literal Then that fails is never waived as a harness or wording
        issue. Fix it (NEEDS_WORK), or return INPUT_REQUIRED and name the
        contract conflict.
+
+13. Round 5 (S21–S25) runs on the commit that adds §10 of this spec or a
+   later commit of this branch (it includes review 6ad2's 1224d3f1). Round
+   4 S20 passed, and no restart code changed since, but S25 re-runs it on
+   the final revision because the remove/clear confirmations (79575dcc)
+   and the popup notice (d1885432, 1224d3f1) are on paths a restart
+   replays. R29 was corrected this round (see the R-item): `status`/`list`
+   outside a project is not a `no_project` error. Round 5 S24 follows
+   ambiguity 12 exactly; its post-sign-off Thens are written in the
+   pr-7c32e44-tolerant form.
 
 No unresolved ambiguities.
 
@@ -807,7 +837,7 @@ Covers R19, R20, R26, R27, R33, ambiguities 7–8.
   --breadcrumb`), WHEN the new build consumes it, THEN that PR is the only
   target, stop-before-merge, with no duplicate windows.
 
-## 9. QA round 4 scenarios (S16–S20, full detail — authoritative)
+## 9. QA round 4 scenarios (S16–S20, full detail)
 
 Same transport workaround and setup as §6–§8, including the round 2 and
 round 3 environment notes in §2. Run against the PR branch head: verify
@@ -999,6 +1029,267 @@ Covers R19, R20, R26, R27, R33, R34, ambiguities 7–8.
     before and after;
   - A's QA continues without re-planning, and B's review keeps its window;
   - the resume summary is readable, and the popup shows the same runs.
+- WHEN, during the restart, one shell runs `status --json` and another `add
+  Z`, followed later by an unrelated `status`, THEN:
+  - each initial command succeeds or exits 2 within `--timeout`;
+  - Z is applied exactly once, right after startup, and not by the later
+    unrelated command;
+  - the TUI pane survives.
+- GIVEN the user starts typing a command (for example `autostart li`) in
+  the command bar right after the restart, WHEN the deferred startup queue
+  (Z) drains and the user types the rest (`st`) and presses Enter, THEN:
+  - the bar kept focus and text, with nothing selected;
+  - the submitted command is the full `autostart list`, and its output
+    includes Z.
+- GIVEN a queue left by a TUI that died more than 60 s ago, WHEN a new TUI
+  starts, THEN that command is not applied.
+- GIVEN the popup open, WHEN the user presses Ctrl+R, and separately runs
+  `pm tui restart`, THEN the TUI restarts (the popup does not swallow it),
+  and the targets are dropped by design.
+- GIVEN a legacy single-target breadcrumb produced by the master build
+  (override → /opt/pm-src, `O`, override back, `pm tui restart
+  --breadcrumb`), WHEN the new build consumes it, THEN:
+  - that PR is the only target, with stop-before-merge;
+  - no windows are duplicated.
+
+## 10. QA round 5 scenarios (S21–S25, full detail — authoritative)
+
+Same transport workaround and setup as §6–§9, including every environment
+note in §2 (rounds 1–4). Run against the PR branch head: verify `git -C <pm
+checkout> log -1` before and after the run. It must be the commit that adds
+this section or a later commit of this branch (never 51507548 or earlier).
+Every scenario records the TUI (tmux screen recording through a grouped
+view session, plus a 0.1 s `capture-pane` sampler where a Then is about a
+transient paint) and every `pm` command (CLI recording). Ambiguity 12 governs
+what is in and out of scope; mark extra observations informational.
+
+Round 4 ended NEEDS_WORK on S16–S19, each with one display fix (R37);
+S20 passed. Round 5 re-runs every user story end to end on the final
+revision and adds the interleavings behind the round-4 fixes.
+
+Shared resources this PR touches and where round 5 drives them
+concurrently:
+- The owner's command queue `~/.pm/tui-<session>.cmd-queue`, its SIGUSR2
+  wake-up and per-command reply files: S22 (CLI while the user types), S23
+  (parallel CLI from several shells plus TUI keys and a `g` merge), S25
+  (CLI during the restart exec gap, stale queue).
+- The TUI pidfile: S22 (stale, zombie, suspended owners), S25 (restart).
+- The in-memory target set and the merge breadcrumb: S23, S25.
+- `project.yaml` (statuses, sign-off records): S23/S24 (merges and sign-off
+  from another pane while the scheduler runs).
+- tmux windows (one per impl/review/QA run): S21, S23, S25 (no duplicates).
+- The single TUI status/log line and the status bar: S21–S24 (confirmation
+  lines against spinners, sticky lines and pulls).
+
+### S21 — Bug repro: two targets advance; popup and CLI agree; popup notice
+Covers bug §0, R1, R10, R14–R18, R23–R25, R28, R31, R35, R36, R37 (popup).
+- GIVEN the branch checkout, WHEN the user runs `pytest
+  tests/test_autostart_retarget_regression.py
+  tests/test_autostart_multi_target.py tests/test_view_focus_command_bar.py
+  tests/test_status_bar_narrow.py tests/test_log_pane_backlog.py
+  tests/test_log_message_force.py tests/test_sync_status_bar_pulling.py`,
+  THEN all pass.
+- GIVEN independent pending PRs A and B, a PR C that depends on A, auto-start
+  off, fake review NEEDS_WORK→PASS and QA PASS, WHEN the user presses `O` on
+  A, moves to B and presses `O`, with a refresh or A's background start
+  happening in between, THEN:
+  - the cursor stays on the PR the user picked;
+  - both PRs show ◎ and the status bar shows `AUTO ×2`;
+  - A's impl going idle moves A to review and then QA. A never stays stuck
+    in_progress (the original bug).
+  - B advances independently, and each review iteration has exactly one
+    review window.
+- GIVEN both "armed" confirmations happened a minute or more ago, while the
+  debug log stayed busy, WHEN the user opens `L` for the first time, THEN
+  both `log: Auto-sequence armed …` lines are on screen without waiting.
+- GIVEN A in QA and B in review iteration 2, WHEN the user opens the runs
+  popup and at the same moment runs `pm autostart status --json`, THEN they
+  agree on targets, policies, phase, state, reason, review iteration / QA
+  progress and window names. A shows "qa planning" or scenario counts,
+  never a stale "review #N". Both headers show `[stop-before-merge]`.
+- GIVEN the popup open, WHEN a phase transition happens and the user runs
+  `pm autostart add C` from another pane, THEN the popup updates on its own
+  and shows C (waiting, blocked on A; A listed under C without an "also
+  needed by" pointing at itself). `r` refreshes immediately.
+- GIVEN an 80x12 terminal with `L` split and the popup open with more rows
+  than fit, WHEN the user moves with ↑/↓ and j/k, presses Enter / `f` on a
+  run with a window, and Enter on C's window-less row, THEN:
+  - `AUTO ×N` is visible on the status bar;
+  - the selected row stays in view;
+  - Enter / `f` switch to the selected run's window;
+  - on C the popup stays open and C's row shows "No live window for C";
+    moving the selection away clears it; nothing crashes.
+- GIVEN A and C targets and the notice showing on C's row, WHEN the user
+  merges A with `g` (from the TUI, popup closed and reopened on C, Enter
+  again to show the notice) and C then starts, THEN:
+  - "target A merged — removed (N remaining)" is readable after the merge
+    spinner and is in `L`;
+  - C starts without user action, and once the popup refreshes and finds
+    C's window the stale notice disappears; Enter then switches to C's
+    window.
+- GIVEN the popup, WHEN it is dismissed with Esc, `q` and `a`, and also
+  opened through the command bar `autostart status` and then closed with
+  Esc, THEN the tree has focus and normal keys work. `?`, the footer
+  "Runs", `pm tui keys` and `pm autostart --help` document `a`/`O`/`A`
+  and the verbs/policies.
+- GIVEN B and C remain, WHEN the user removes both from the CLI, THEN the
+  mode is off, the popup shows the empty "auto-start off" message, and no
+  backlog PR is listed or started.
+
+### S22 — CLI/command-bar management, validation, owners, typing, pulls
+Covers R2, R8, R9, R11–R13, R23, R29 (corrected), R30, R32 (policy flip),
+R33, R34, R37 (pulling status bar).
+- GIVEN PRs A, B, C pending and M merged before the session started (with
+  `gh_pr_number` set for the `#N` forms), WHEN the user runs `pm autostart
+  add A B` and then re-adds A as `pr-…`, `#N` and `N`, THEN:
+  - every command exits 0;
+  - `list` and `list --json` show exactly A and B, stop-before-merge, with
+    added_at and source;
+  - the re-adds report "already a target", and A gets no second window;
+  - the TUI shows ◎ on both with a readable confirmation.
+- WHEN the user runs `add A --auto-merge` and then `add A` with no flag,
+  THEN the first reports policy_changed (was stop-before-merge). The second
+  leaves A on auto-merge.
+- WHEN the user runs `add A nosuch`, `add M`, `add`, `remove nosuch` and
+  `remove C`, each with and without `--json`, THEN:
+  - the first four exit 1 with `unknown_pr` / `terminal_pr` / usage, and
+    the list is unchanged;
+  - `remove C` is ok, reported as `not_target`.
+- GIVEN A and B targets and a filter active in the tree, WHEN the user
+  presses `r` and also lets a background sync run, THEN during the
+  "pulling" state the status bar still shows `AUTO ×2`, the filter segment
+  and WCH (if watchers run); none of them blink out.
+- WHEN the user runs `remove A` and then `clear`, THEN:
+  - A's window is kept;
+  - "removed A (1 remaining)" is readable even under a sticky message;
+  - the mode is off;
+  - C is never started afterwards.
+- GIVEN the TUI, WHEN the user drives the command bar (`autostart target
+  C`, `add B`, `list`, `remove C`, bare `autostart` on and off, `autostart
+  all`) and presses `A` on a never-stop-marked non-target, on a target, and
+  with nothing selected, THEN:
+  - `target` is additive;
+  - bare `autostart` while off prints usage;
+  - only `all` enables backlog mode, with a readable "ON (all…)" line;
+  - `A` adds auto-merge / removes only that PR / says "No PR selected".
+- GIVEN the user has typed half of `autostart add B` in the command bar,
+  WHEN another pane runs `pm autostart status --json`, then `pm autostart
+  add C`, then an external `pm pr edit` triggers a reload, and the user
+  types the rest and presses Enter after each interruption (repeat with
+  the interruption landing after one typed character), THEN:
+  - the bar keeps focus and its text, with the cursor at the end and
+    nothing selected;
+  - the submitted command is exactly the full text typed, and B is added;
+  - no keystroke acted as a tree hotkey (no QA started, no stray refresh
+    or selection change).
+- GIVEN each of these owners: no session; a killed TUI with a stale
+  pidfile; a killed-but-unreaped (zombie) TUI; `-s nonexistent`, WHEN the
+  user runs `status --json` and `add A`, THEN each exits 2
+  `owner_unavailable` immediately, and a command refused for a zombie owner
+  is not applied by the next TUI.
+- GIVEN a directory outside any pm project, WHEN the user runs `add A
+  --json` and `remove A --json`, THEN each exits 1 with a `no_project` JSON
+  error; `status --json` there exits 0 from a pane inside a running pm
+  session and exits 2 `owner_unavailable` with no session.
+- GIVEN the TUI held suspended, WHEN the user runs a command with
+  `--timeout 2`, THEN:
+  - it exits 2 `owner_timeout`, saying the command may still be applied;
+  - after the TUI resumes, the state is consistent and the command was
+    applied at most once.
+
+### S23 — Shared dependency under concurrent CLI, keys and merges
+Covers R3–R6, R22, R24, R36, R37 (confirmations vs merge spinner), E1, E3,
+E4, E6, E9.
+- GIVEN a diamond X→D←Y, an independent Z and a chain T2→T1, all pending,
+  WHEN two shells add X and Y at the same instant, THEN:
+  - both exit 0 with their own replies;
+  - D is launched exactly once (one D window ever), and Z never starts;
+  - status lists D once with needed_by [X, Y], X/Y show "blocked on D",
+    and the popup lists D under both with "also needed by" the other.
+- GIVEN D running, WHEN, at the same moment, one shell removes X, another
+  re-adds Y and adds T2, a third fires 10 parallel `status --json`, and the
+  user presses `O` on T1, THEN:
+  - every command gets its own valid reply, with no timeouts;
+  - the target set is {Y, T2, T1};
+  - D keeps running, with needed_by [Y];
+  - T1 runs once, and T2 waits on T1;
+  - the ◎ marks and the popup match the CLI, and no PR has two windows;
+  - the cursor stays where the user put it.
+- GIVEN D finished, WHEN the user merges D with `g` while a CLI `remove Y`
+  races the merge (repeat with `add Y`), THEN:
+  - the outcome is consistent: Y is removed, or pruned and then started
+    exactly once;
+  - "Auto-start: removed Y (N remaining)" (and, on the add repeat, the
+    "targets +=" line) is readable after the merge spinner, and is in `L`;
+  - X is not started, and there is no traceback.
+- GIVEN a `g` merge spinner running for a target, WHEN the user runs `pm
+  autostart remove` on a PR that is not a target, and separately `pm
+  autostart clear` while another `g` merge spins, THEN "… not a target"
+  and "Auto-start: OFF" are each readable after the spinner and in `L`
+  (re-add the remaining targets afterwards to continue).
+- GIVEN Y advancing, WHEN Y is merged by hand (a stop target), THEN:
+  - the TUI shows "target Y merged — removed (N remaining)" readably after
+    the merge spinner/result line, and the same line is in `L`;
+  - T1/T2 keep advancing.
+- WHEN T1 and then T2 merge (the last one completing the set), THEN:
+  - the last prune line says "all targets complete — auto-start OFF";
+  - the mode is off, and the popup is empty;
+  - no backlog PR (Z) starts.
+
+### S24 — Merge policies, sign-off gate, finished QA, skip-QA (scoped)
+Covers R7, R14/R37 (policy tags), R21, R32, R36, E2, E8, ambiguities 4 and
+12. Thens follow ambiguity 12: pr-7c32e44 and pr-0a08055 behaviour is
+asserted in its tolerant form, never required to paint.
+- GIVEN independent S and U, WHEN S is added with the default policy (and
+  with `O`) and U with `--auto-merge` (and with `A` on a never-stop-marked
+  PR), THEN list and status show stop_before_merge for S and auto_merge for
+  U, and the popup headers read `[stop-before-merge]` for S and
+  `[auto-merge]` for U.
+- WHEN both pass review and QA, THEN:
+  - S is held with a "sign off / press g" reason;
+  - U's merge is refused by the sign-off gate (no SIGNOFF_MERGE), and the
+    status says merge blocked by sign-off gate / awaiting sign-off;
+  - `pm pr list` shows neither merged, and nothing passes
+    `--no-signoff-check` (check the debug log and the merge commands).
+- WHEN the user signs U off through `pm pr auto-sequence` from another
+  pane, THEN:
+  - `status --json` shows `signoff.fresh` true for U at once, and no row in
+    the TUI, `status --json` or the open popup still says "awaiting
+    sign-off";
+  - U then merges through `pm pr merge` with the gate passing: either the
+    scheduler merges it, or (pr-7c32e44, row "merge attempt failed") the
+    user's `g` merges it;
+  - U leaves the target set with a readable "target U merged — removed"
+    line that is also in `L`.
+- WHEN several scheduler passes and a sync/reload happen, THEN no new QA
+  run starts for S or U.
+- WHEN the user runs `add S` (no flag), `add S --auto-merge`, and then
+  `remove S` + `add S`, THEN:
+  - policies change only as flagged;
+  - `policy_changed` is reported with the previous policy;
+  - the stop mark survives the remove and re-add.
+- GIVEN a stop-before-merge D needed by an auto-merge Q, WHEN D is
+  merge-ready, THEN D is not auto-merged, Q waits on D, Q's popup header
+  says `[auto-merge]` and D's row carries only the stop mark.
+- GIVEN skip-QA enabled, WHEN an auto-merge target and a stop-before-merge
+  target pass review, THEN (through `status --json`, the popup, `L` and
+  `pm pr list`, not the transient log line):
+  - the status says "QA skipped (skip_qa); awaiting sign-off";
+  - the gate still applies (the auto-merge target is not merged without a
+    fresh SIGNOFF_MERGE);
+  - the stop target stops.
+
+### S25 — Restart adoption, CLI during restart, typing after restart
+Covers R19, R20, R26, R27, R33, R34, ambiguities 7–8, 13.
+- GIVEN A (stop policy, QA in flight), B (auto-merge, review iteration
+  running) and C (waiting on D, D impl running), WHEN the user runs `pm tui
+  restart --breadcrumb`, THEN:
+  - `list --json` shows A, B and C with the same policies;
+  - `tmux list-windows -F '#{window_id} #{window_name}'` is identical
+    before and after;
+  - A's QA continues without re-planning, and B's review keeps its window;
+  - the resume summary is readable, and the popup shows the same runs
+    with the same policy tags.
 - WHEN, during the restart, one shell runs `status --json` and another `add
   Z`, followed later by an unrelated `status`, THEN:
   - each initial command succeeds or exits 2 within `--timeout`;
