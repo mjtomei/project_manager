@@ -96,18 +96,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
     Args:
         is_manual: True if triggered by user (r key), False for periodic background sync
     """
-    from pm_core.tui.widgets import StatusBar
-
     if not app._root:
         return
     try:
-        status_bar = app.query_one("#status-bar", StatusBar)
-        project = app._data.get("project", {})
-        prs = app._data.get("prs") or []
         # Don't clobber a mode-specific status bar (QA/Plans) with project info.
         mode_owns_status = getattr(app, "_qa_visible", False) or getattr(app, "_plans_visible", False)
         if not mode_owns_status:
-            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
+            # Through _update_status_bar so AUTO ×N / WCH / filter stay up
+            # while pulling (a bare update_status() blanked them per refresh).
+            app._update_status_bar(sync_state="pulling")
 
         # Use shorter interval for manual refresh, longer for background
         min_interval = (
