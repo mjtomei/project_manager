@@ -195,6 +195,9 @@ class ClaudeWorkspaceTrust(TrustRuntime):
     # --- config IO ---------------------------------------------------------
 
     def _acquire_lock(self, cfg: Path) -> Path:
+        # The lock dir sits beside the config, so a not-yet-created
+        # CLAUDE_CONFIG_DIR must exist before mkdir can take the lock.
+        cfg.parent.mkdir(parents=True, exist_ok=True)
         lock = Path(str(cfg) + ".lock")
         deadline = time.monotonic() + self.LOCK_TIMEOUT_SECONDS
         while True:

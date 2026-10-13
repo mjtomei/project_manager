@@ -126,6 +126,14 @@ class TestBootstrap:
         assert wt.get_trust_runtime().bootstrap(wd).status == wt.TRUSTED
         assert _projects()[str(wd)]["hasTrustDialogAccepted"] is True
 
+    def test_missing_config_dir_is_created(self, home, tmp_path, monkeypatch):
+        # A CLAUDE_CONFIG_DIR that Claude has not created yet: the lock
+        # lives inside it, so the dir must exist before locking.
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "fresh-cfg"))
+        wd = _pm_workdir(home)
+        assert wt.get_trust_runtime().bootstrap(wd).status == wt.TRUSTED
+        assert _projects()[str(wd)]["hasTrustDialogAccepted"] is True
+
     def test_never_trusts_parent_of_checkout(self, home):
         wd = _pm_workdir(home)
         wt.get_trust_runtime().bootstrap(wd)
