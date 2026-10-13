@@ -372,14 +372,92 @@ class TestQAPlanProblem:
         sc = parse_qa_plan(text)
         assert qa_loop.qa_plan_problem(text, sc, 1) is None
 
-    def test_titleless_header_not_counted_across_lines(self):
-        """A bare ``SCENARIO N:`` line is skipped by parse_qa_plan; the
-        completeness check must not borrow the next line as its title."""
+    def test_titleless_header_is_a_dropped_scenario(self):
+        """A bare ``SCENARIO N:`` line is skipped by parse_qa_plan; that is a
+        lost scenario, so the plan is rejected (and the check must not
+        borrow the next line as the header's title)."""
         text = FULL_PLAN.replace("SCENARIO 4: Concurrent review launches",
                                  "SCENARIO 4:")
         scenarios = parse_qa_plan(text)
         assert [s.index for s in scenarios] == [1, 2, 3]
-        assert qa_loop.qa_plan_problem(text, scenarios) is None
+        problem = qa_loop.qa_plan_problem(text, scenarios)
+        assert problem and "[1, 2, 3, 4]" in problem
+
+    @pytest.mark.parametrize("scenario_start", [1, 2, 3])
+    def test_template_start_plus_suffix_rejected_at_any_offset(
+            self, scenario_start):
+        """Supervisor repro: template START..END, redraw, then a SCENARIO
+        2..4 suffix + END.  With scenario_start=2 the numbering looks like
+        a whole plan, so provenance (not numbering) must reject it."""
+        text = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX
+        sc = parse_qa_plan(text)
+        assert [s.index for s in sc] == [2, 3, 4]
+        assert "earlier" in qa_loop.qa_plan_problem(text, sc, scenario_start)
+
+    def test_template_start_with_clipped_end_plus_suffix_rejected(self):
+        """Even if the template's own END was lost, a block that holds the
+        template's example headers is not this plan's START."""
+        clipped = TEMPLATE_PROMPT[:TEMPLATE_PROMPT.rindex("QA_PLAN_END")]
+        text = clipped + "\n...redraw...\n" + PANE_SUFFIX
+        sc = parse_qa_plan(text)
+        assert [s.index for s in sc] == [2, 3, 4]
+        assert "template" in qa_loop.qa_plan_problem(text, sc, 2)
+
+    def test_fresh_plan_at_offset_after_template_ok(self):
+        """A whole plan numbered from scenario_start=2, after the echoed
+        template, is still accepted."""
+        plan = FULL_PLAN
+        for i in range(4, 0, -1):
+            plan = plan.replace(f"SCENARIO {i}:", f"SCENARIO {i + 1}:")
+        text = TEMPLATE_PROMPT + "\n" + plan
+        sc = parse_qa_plan(text)
+        assert [s.index for s in sc] == [2, 3, 4, 5]
+        assert qa_loop.qa_plan_problem(text, sc, 2) is None
+
+
+TEMPLATE_PLUS_SUFFIX = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX
+
+
+class TestReadPlannerPlanPaneFallback:
+    """_read_planner_plan when the latest assistant turn has no plan and the
+    pane holds the echoed template followed by a truncated suffix."""
+
+    @pytest.mark.parametrize("latest", [None, "Let me check one more thing."])
+    @pytest.mark.parametrize("scenario_start", [1, 2])
+    def test_template_start_plus_suffix_not_accepted(
+            self, tmp_path, latest, scenario_start):
+        transcript = None
+        if latest is not None:
+            transcript = tmp_path / "t.jsonl"
+            _write_transcript(transcript, [("user", TEMPLATE_PROMPT),
+                                           ("assistant", latest)])
+        plan = qa_loop._read_planner_plan(
+            str(transcript) if transcript else None,
+            lambda: TEMPLATE_PLUS_SUFFIX, None, scenario_start)
+        assert plan.scenarios == []
+        assert plan.problems and plan.problems[0].startswith("pane:")
+
+    def test_complete_pane_plan_at_offset_accepted(self, tmp_path):
+        plan_text = FULL_PLAN
+        for i in range(4, 0, -1):
+            plan_text = plan_text.replace(f"SCENARIO {i}:",
+                                          f"SCENARIO {i + 1}:")
+        plan = qa_loop._read_planner_plan(
+            None, lambda: TEMPLATE_PROMPT + "\n" + plan_text, None, 2)
+        assert [s.index for s in plan.scenarios] == [2, 3, 4, 5]
+        assert plan.source == "pane"
+
+    def test_run_qa_sync_does_not_consume_template_plus_suffix(
+            self, tmp_path, monkeypatch):
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PLUS_SUFFIX,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            extra_patches=(patch("pm_core.qa_loop._next_scenario_offset",
+                                 return_value=1),))
+        assert state.scenarios == []
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert "incomplete" in state._error.lower()
 
     def test_no_scenarios(self):
         assert qa_loop.qa_plan_problem(TEMPLATE_PROMPT, [], 1)

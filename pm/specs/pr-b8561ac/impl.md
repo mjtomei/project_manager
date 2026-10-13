@@ -34,9 +34,16 @@ PR note: a pane capture holding SCENARIO 2–4 was accepted by `parse_qa_plan`
 without noticing SCENARIO 1 was missing. Add
 `qa_plan_problem(text, scenarios, scenario_start) -> str | None` that the driver
 applies to any plan before accepting it:
-1. A `QA_PLAN_START` line must precede the last `QA_PLAN_END` line.
-2. The real (non-placeholder) `SCENARIO N:` headers between that last
-   START/END pair must be the parsed scenarios, in the same order.
+1. A `QA_PLAN_START` line must open the block that the last `QA_PLAN_END`
+   closes. No other `QA_PLAN_END` may sit between them, and the block may not
+   contain prompt-template example headers (`<…>`, `Scenario Title`, `...`).
+   Otherwise the START belongs to an earlier block (the echoed template, or an
+   older plan in scrollback) and only a truncated suffix survived. Numbering
+   alone can't catch this: on a later round, a SCENARIO 2..4 suffix looks like
+   a whole plan numbered from `scenario_start=2` (supervisor note 2026-10-13).
+2. The `SCENARIO N:` headers inside that block must be the parsed scenarios,
+   in the same order. A header that `parse_qa_plan` skipped (e.g. one with no
+   title) counts as a dropped scenario and rejects the plan.
 3. Indices must be contiguous ascending and start at `1` or `scenario_start`
    (the driver already renumbers a plan that started at 1).
 An incomplete plan is not consumed. The driver logs the reason, sets

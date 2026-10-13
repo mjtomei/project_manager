@@ -940,11 +940,20 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
     (SCENARIO 2..4), silently dropping the leading ones.  Before the
     driver consumes a plan it must be whole:
 
-    * a ``QA_PLAN_START`` line precedes the last ``QA_PLAN_END`` line;
-    * the real (non-placeholder) ``SCENARIO N:`` headers inside that block
-      are exactly the parsed scenarios, in order;
+    * a ``QA_PLAN_START`` line opens the block the last ``QA_PLAN_END``
+      closes — no other ``QA_PLAN_END`` between them, and no prompt-template
+      example headers inside.  Otherwise the START belongs to an earlier
+      block (typically the echoed prompt template) and only a truncated
+      suffix of this plan survived;
+    * the ``SCENARIO N:`` headers inside that block are exactly the parsed
+      scenarios, in order (a header ``parse_qa_plan`` skipped, e.g. one
+      with no title, is a dropped scenario);
     * numbering is contiguous and starts at 1 or *scenario_start* (the
       driver renumbers a plan that started at 1).
+
+    Numbering alone can't prove completeness: on a later round a
+    truncated SCENARIO 2..4 suffix is indistinguishable from a whole plan
+    numbered from ``scenario_start=2``, so START/END provenance decides.
 
     Returns ``None`` when the plan is complete.
     """
@@ -957,14 +966,20 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
     starts = [o for o in _marker_line_offsets(text, "QA_PLAN_START") if o < end]
     if not starts:
         return "no QA_PLAN_START line before QA_PLAN_END (plan truncated)"
-    body = text[starts[-1]:end]
-    headers = [
-        int(m.group(1))
-        # Single-line headers with a title, as parse_qa_plan requires.
-        for m in re.finditer(r'^[ \t]*SCENARIO[ \t]+(\d+)[:.][ \t]*(\S.*)$',
-                             body, re.MULTILINE)
-        if not _is_placeholder_title(m.group(2).strip())
-    ]
+    start = starts[-1]
+    if any(start < o < end for o in ends):
+        return ("QA_PLAN_START belongs to an earlier, already-closed block "
+                "(plan truncated)")
+    body = text[start:end]
+    headers: list[int] = []
+    # Single-line headers only: an untitled header must not borrow the
+    # next line as its title.
+    for m in re.finditer(r'^[ \t]*SCENARIO[ \t]+(\d+)[:.][ \t]*(.*)$',
+                         body, re.MULTILINE):
+        if _is_placeholder_title(m.group(2).strip()):
+            return ("plan block holds prompt-template example headers "
+                    "(QA_PLAN_START is from the echoed prompt; plan truncated)")
+        headers.append(int(m.group(1)))
     parsed = [s.index for s in scenarios]
     if headers != parsed:
         return (f"parsed scenarios {parsed} differ from the plan block's "
