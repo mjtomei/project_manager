@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-12T23:54:13.985162+00:00'
+  updated_at: '2026-10-13T00:10:25.823458+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26198,6 +26198,15 @@ prs:
       within ~30us. Read the log line from tail -3 of capture-pane.'
     created_at: '2026-10-12T23:54:13Z'
     last_edited: '2026-10-12T23:54:13Z'
+  - id: note-70da765
+    text: 'QA plan round 4 (S16-S20) is in qa.md section 9, committed and pushed as
+      8162fbb0 (verified on GitHub before QA_PLAN_END). Planning changed no application
+      code, so review 472d still applies to 85ba8955. Added R34 (half-typed text kept
+      on refocus), R35 (L backlog), R36 (merge-prune line), the round-3 env notes
+      and ambiguity 11 (pr-22c92ef and pr-6412997 are out of scope). Workers: check
+      that the pm checkout HEAD is 8162fbb0 or later before and after the run.'
+    created_at: '2026-10-13T00:10:25Z'
+    last_edited: '2026-10-13T00:10:25Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
