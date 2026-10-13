@@ -752,6 +752,12 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
             r'^[ \t]*SCENARIO\s+1:', output[:end_pos], re.MULTILINE,
         ))
         start_pos = s1_matches[-1].start() if s1_matches else 0
+        # Never start before the last QA_PLAN_START ahead of that END: a
+        # plan numbered from 2 would otherwise reach back to an earlier
+        # "SCENARIO 1:" in the prompt (e.g. a committed qa.md spec).
+        start_m = list(re.finditer(r'QA_PLAN_START', output[:end_pos]))
+        if start_m:
+            start_pos = max(start_pos, start_m[-1].end())
         body = output[start_pos:end_pos]
     else:
         body = output
