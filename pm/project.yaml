@@ -25811,7 +25811,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T07:01:11.541319+00:00'
+  updated_at: '2026-10-13T07:47:20.715808+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25939,6 +25939,17 @@ prs:
       still exercise R1-R7 live, and impl captures predate this change.'
     created_at: '2026-10-13T07:01:11Z'
     last_edited: '2026-10-13T07:01:11Z'
+  - id: note-2542419
+    text: 'QA S4 (R8-R11+edges) all Thens held live on a file:// upstream (captures
+      scenarios/4/*). Incidental fixes: 254402e8 — z t fresh start: stopped loop relaunched
+      a killed scenario window after its retry backoff (orphan worker) and aggregated
+      unverdicted scenarios as PASS; now rechecks stop_requested and treats missing
+      verdicts as INPUT_REQUIRED. 264f6d01 — R9 handoff-failure QA note read "Alpha:
+      ?; Beta: ?" (qa_outcome_detail only used _error with zero scenarios); now carries
+      the reason. R11 "returns to in_review" needs the PR in_review before QA (transition
+      is qa->in_review only; QA on an in_progress PR stays in_progress).'
+    created_at: '2026-10-13T07:47:20Z'
+    last_edited: '2026-10-13T07:47:20Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
