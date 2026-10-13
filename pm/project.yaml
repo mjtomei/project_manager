@@ -26843,6 +26843,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T01:34:52.458271+00:00'
   updated_at: '2026-10-13T01:34:52.458271+00:00'
+- id: pr-ae66f59
+  plan: bugs
+  title: 'Bug: QA resume after TUI restart crashes (QA ERROR) when a scenario/verifier
+    pane recorded on disk no longer exists'
+  branch: pm/pr-ae66f59-bug-qa-resume-after-tui-restart-crashes-qa-error-w
+  status: pending
+  depends_on: []
+  description: 'qa_loop resume_qa_sync -> _poll_tmux_verdicts / _verify_single_scenario
+    call tmux_mod.send_keys(pane_id, "") on pane ids restored from disk without checking
+    the pane is alive; tmux send-keys exits 1 and CalledProcessError kills the resume
+    thread ("QA resume thread crashed", PR shows "QA ended ERROR"). Repro (pr-0b87a97
+    QA S21 r5, 2026-10-13 01:47): fake-claude QA, scenario delay 60 so the scenario
+    PASS and VERIFIED fake panes exit, then pm tui restart within ~10s: both PRs resumed,
+    read Scenario 1 PASS, verification thread crashed on send-keys -t %21, resume
+    crashed on send-keys -t %19. Real Claude panes rarely exit by themselves, but
+    a user closing the pane hits the same path. Fix: treat a missing pane as finished/needs
+    relaunch (tmux pane_exists check or catch CalledProcessError) instead of crashing.
+    Log: ~/.pm/debug/s21b-1791855868-cef735e9.log lines ~400-500.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T01:50:20.375427+00:00'
+  updated_at: '2026-10-13T01:50:20.375427+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
