@@ -465,6 +465,16 @@ QA round 5 fixes (reviewed in review-loop 4be9):
     CLI command that landed during the 2s prefix window was blanked when
     the timer fired.
 
+QA round 6 fixes (reviewed in review-loop 66f9):
+
+41. *(QA s26, 5ef79e37)* `L` waits `LOG_PANE_SETTLE_SECONDS` (1s) after
+    the backlog, prints the lines the pane's own launch wrote meanwhile
+    (split, pane-opened hook, rebalance, "launched pane"), then the item-37
+    recap, then follows from that later line count. Before, that burst
+    wrapped to ~16 rows in a 60-col split right after the recap and pushed
+    its header off screen. `pm autostart --help` names `--stop-before-merge`
+    as a flag next to `--auto-merge`.
+
 Out of scope and filed (see qa.md ambiguity 12): pr-7c32e44 (the
 post-sign-off "merge attempt failed" row) and pr-0a08055 (transient
 skip-QA / "Auto-merge … merging" log paints hidden by a sticky line;
