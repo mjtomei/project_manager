@@ -807,8 +807,11 @@ revision. Every S26 and S31 Then still applies unchanged. In addition:
 - The `L` recap story runs at both the default half-width split (~60
   columns) and a full-width 80-column terminal, as in S31.
 - The hint story: GIVEN the TUI with the command bar unfocused, at full
-  width and at 80x12 with `L` split, THEN the bottom row reads "press /
+  width and at an actual 80x12 TUI pane with `L` available in a split
+  (zoom the TUI pane for the full-width assertion), THEN the bottom row reads "press /
   to type a command · a Runs" and pressing `a` opens the runs popup.
+  The hint may clip in the narrower unzoomed split, as documented by
+  impl §5 item 43; this does not add a full-hint requirement at ~39 columns.
   WHEN the user presses `/`, THEN the bar shows the typing placeholder;
   the user types `autostart list` and presses Enter, and separately types
   part of a command and presses Esc; THEN the command runs as typed (no
@@ -849,8 +852,12 @@ target W whose `g` merge is slowed (§2 round 5 notes), fake Claude as in
   instant as two CLI panes run `pm autostart remove P1` and `add P4` and
   a third fires 10 `status --json` polls, THEN every CLI command exits 0
   with its own reply; the final set equals the serial result
-  {P2, P3, P4}; P3 is stop-before-merge; every confirmation is in `L`
-  exactly once; no PR has two windows; the cursor stays on P3.
+  {P2, P3, P4}; P3 is stop-before-merge; every confirmation is represented
+  in `L`, with each actual source debug-log record copied once into its
+  appropriate backlog/burst/follow region (R39); the recap intentionally
+  repeats up to the last 8 matching source records. Do not infer duplicate
+  actions from recap repetition or separately logged enqueue/display
+  records. No PR has two windows; the cursor stays on P3.
 - GIVEN the bar unfocused and empty, WHEN another pane runs `pm
   autostart status --json` and `add` (drained from the queue), THEN the
   bottom row still reads "… · a Runs" and the tree keeps focus. GIVEN
