@@ -225,6 +225,19 @@ review/QA.
     line logged by the refresh's own scheduler pass) keeps its full hold
     (a140e22f, 64d44b9b, 8a222466).
 
+### Added from QA round 6 fix and review 66f9 (verify on the final revision)
+- **R39 L opens with the recap on screen.** Opening `L` waits ~1 s for
+  the pane's own launch lines (split, pane-opened hook, rebalance,
+  "launched pane"), prints them above the recap, then prints the "recent
+  auto-start messages" header with the last few `log: Auto-…` lines and
+  the "following log" divider, then follows. In a half-width split
+  (60 columns) the header, the recap lines and the divider are all on
+  screen together when `L` opens and stay there until new log output
+  pushes them up. Lines written while the pane settles appear once
+  above the recap and are not repeated below the divider, and nothing
+  written after that is lost (5ef79e37). `pm autostart --help` names
+  `--stop-before-merge` next to `--auto-merge` in its policy list.
+
 ## 2. Setup
 Per `pm/qa/instructions/tui-manual-test.md`: install pm from this branch
 (`./install.sh --local` or editable venv with `PYTHONPATH` pointing at the
@@ -319,6 +332,21 @@ Environment notes learned in QA round 5:
   the event being checked.
 - Plain `pm tui restart` with finished fake QA panes can crash the QA
   resume (pr-ae66f59, filed, out of scope).
+
+Environment notes learned in QA round 6:
+- The spec PATH that puts the real git first can drop `~/.local/bin`,
+  which holds the fake-claude shim; then impl windows die at once.
+  Append a directory that contains only `fake-claude`.
+- Committing on a branch after `pm pr auto-sequence` makes its
+  SIGNOFF_MERGE stale, and `g` is refused. Commit before signing off.
+- On the local backend a second `g` merge (W2 after W1) can fail
+  ff-only because the workdir master is stale, and pm opens a
+  merge-resolution window (pr-a75da60, out of scope). Workaround: reset
+  the workdir master to origin/master.
+- Esc followed at once by `L` in tmux reads as Alt+L; sleep ~0.3 s
+  between them.
+- After `/`, wait for "CommandBar: got focus" in the debug log before
+  typing (otherwise pr-6412997 eats h/j/k/l).
 
 ## 3. Edge cases
 - E1 Target that depends on another target: dependency's own policy governs
@@ -451,6 +479,25 @@ targets/policies or relaunching finished/in-flight work; any traceback.
    next refresh after `w s`), pr-ae66f59 (QA resume crash on a vanished
    pane after plain restart). Ambiguity 12 still governs scope.
 
+15. Round 7 (S31–S32) runs on the commit that adds §12 of this spec or
+   a later commit of this branch. Round 6 S27–S30 PASS and were
+   independently VERIFIED on e17d5671 (evidence index
+   `shepherd-20261012/qa-round-6-evidence-index.json`; run
+   pr-0b87a97-1528f33320623871). The application changes since then are
+   one commit: 5ef79e37, the `L` pane command in `pane_ops.log_pane_command`
+   and the help text. Scheduling, target ownership, sign-off gates,
+   restart and log-line hold/clear logic are unchanged. By the
+   impact-based scope guidance (PR note, 03:09Z), round 7 re-runs S26
+   in full as S31 because it ended NEEDS_WORK. S32 covers the places
+   where 5ef79e37 meets other workflows: `L` read at the same time as
+   concurrent writers, `L` used as evidence after merges, policy
+   changes and restarts, reopening and `z L`, and the help. The
+   S27–S30 evidence is carried forward for e17d5671 and is not
+   reclassified. The first round-7 launch (pr-0b87a97-1c4694f0e44f9c4c)
+   failed before planning with zero scenarios. It is not evidence. If
+   further review changes touch other code, the plan must expand to
+   cover them. Ambiguity 12 still governs scope.
+
 No unresolved ambiguities.
 
 ## 6. Shared setup and historical scenarios
@@ -461,6 +508,8 @@ prompt within the launcher's command-line argument limit (pr-ace66e5);
 no requirement, scope decision, scenario, or evidence is discarded.
 Use the current definitions below for new execution, and consult the history
 file when tracing an earlier run. Preserve the original run IDs and verdicts.
+Round 6 (§11) stays here as the carried-forward definition of S27–S30
+(see ambiguity 15); round 7 (§12) is the current execution.
 
 The machine-readable QA_PLAN block for this run is deliberately compact (PR
 transport workaround: ≤22 lines × ≤60 cols, pending pr-b8561ac). Each
@@ -703,3 +752,94 @@ Covers R19, R20, R26, R27, R33, R34, ambiguities 7–8, 14.
   (override → /opt/pm-src, `O`, override back, `pm tui restart
   --breadcrumb`), WHEN the new build consumes it, THEN that PR is the only
   target with stop-before-merge, and no windows are duplicated.
+
+## 12. QA round 7 scenarios (S31–S32, full detail — authoritative)
+
+Use the setup in §6 and every environment note in §2 (rounds 1–6). Run
+against the PR branch head: check `git -C <pm checkout> log -1` before and
+after the run. It must be the commit that adds this section or a later
+commit of this branch (it contains 5ef79e37). Record the TUI (tmux screen recording through a grouped
+view session plus a 0.1 s `capture-pane` sampler of the TUI pane and,
+when `L` is open, of the log pane) and every `pm` command (CLI
+recording). Ambiguities 12 and 15 govern scope. Mark extra observations
+informational. A literal Then that fails is fixed (NEEDS_WORK) or
+returned INPUT_REQUIRED with the contract conflict named. It is never
+waived. Each verdict names the revision it covers.
+
+Shared resources driven concurrently in round 7:
+- The TUI debug/command log file (`command_log_file()`). The TUI and
+  CLI-triggered commands write to it while the `L` pane counts and
+  reads it at open and then follows it: S31, S32.
+- The command queue, SIGUSR2 and reply files: parallel CLI adds, removes
+  and status polls while `L` opens (S32), and a CLI add while the popup
+  is open (S31).
+- tmux panes/windows: one log pane per window (reopen, `z L`), one window
+  per run (S31, S32).
+- The in-memory target set and merge breadcrumb (S32 restart).
+
+### S31 — Bug repro: two targets advance; popup == CLI; L recap on screen
+Re-runs S26 (§11) end to end on the final revision. Every S26 Then still
+applies unchanged. In addition:
+- The pytest step adds `tests/test_log_pane_backlog.py` (already listed)
+  and must include `test_log_pane_prints_launch_burst_above_recap`; all
+  pass.
+- The `L` story becomes: GIVEN both "armed" confirmations happened a
+  minute or more ago with a busy debug log, WHEN the user opens `L` in
+  the default half-width split (about 60 columns), THEN in the first
+  capture after the pane settles (≤2 s) the "recent auto-start
+  messages" header, both `log: Auto-sequence armed …` lines and the
+  "following log" divider are all on screen at once. The pane's own
+  launch lines are above the header, not between the recap and the
+  divider. They stay on screen for at least 10 s unless new log
+  output pushes them up. Repeat once with a full-width 80-column
+  terminal.
+- The help story adds: `pm autostart --help` shows `--stop-before-merge`
+  and `--auto-merge` in the policy list.
+- Bug assertion (§0): after `O` on A then `O` on B, A leaves
+  `in_progress` for review and then QA without any user action, as
+  shown in the TUI, `pm pr list` and `status --json`.
+
+### S32 — L pane with concurrent writers and as evidence across workflows
+Covers R39 together with the R23, R35, R36, R37 and R38 checks that use
+`L` as their evidence, and R19 (restart) only as far as `L` reaches it.
+- GIVEN a session with targets A and B and a busy debug log, WHEN the
+  user opens `L` while, inside the same ~1 s, several shells fire in
+  parallel `pm autostart add C`, `remove C`, `add C` and 10 `status
+  --json` polls, THEN:
+  - every CLI command exits 0 with its own reply;
+  - each auto-start line logged during the settle appears exactly once
+    above the header and again in the recap. It is not repeated after
+    the "following log" divider;
+  - lines logged after the pane settles appear after the divider, with
+    no gap: count them against the debug log file;
+  - the final targets match the serial result;
+  - one log pane exists.
+- GIVEN `L` open, WHEN the user closes it and reopens it with `L`, and
+  then uses `z L` (fresh), THEN each open shows the backlog, the burst,
+  the header with the latest auto-start lines, and the divider. Only one
+  log pane exists afterwards, and the TUI keys still work.
+- GIVEN a target W whose merge is slowed (§2 round 5), WHEN the user
+  merges W with `g` and opens `L` within a few seconds, THEN "target W
+  merged — removed (N remaining)" is in the recap on screen when `L`
+  opens. The TUI log line showed it readably after the spinner (R36).
+  The same holds for a CLI `remove` and for `clear` ("Auto-start: OFF")
+  that race a slowed merge.
+- GIVEN an auto-merge target U held by the sign-off gate, WHEN the user
+  flips a stop-before-merge target to auto-merge with `pm autostart add
+  S --auto-merge`, signs U off with `pm pr auto-sequence`, and opens `L`,
+  THEN the recap shows the "targets += S (now auto-merge)" line, the
+  TUI, popup and `status --json` drop "awaiting sign-off" for U at once
+  (R32), and U merges only through the gate (ambiguity 12 tolerant
+  form); its "target U merged — removed" line is in the next `L`
+  recap. `L` only reports what the TUI logged; opening it changes no
+  status.
+- GIVEN targets with in-flight review/QA and `L` open, WHEN the user runs
+  `pm tui restart --breadcrumb` and opens `L` again after the TUI comes
+  back, THEN the recap shows "Auto-start: resumed after merge restart"
+  (or the resume summary), targets and windows are unchanged
+  (`tmux list-windows` before and after), and there is at most one log
+  pane.
+- GIVEN the TUI at 80x12 with `L` split, WHEN the user opens the runs
+  popup and dismisses it, THEN `AUTO ×N` is still shown, the popup works
+  as in S26, and Esc followed by `L` (with a short pause) opens `L`, not
+  Alt+L.
