@@ -25931,7 +25931,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T00:43:22.044092+00:00'
+  updated_at: '2026-10-13T01:01:33.452025+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26283,6 +26283,17 @@ prs:
       on master (pr-0a08055). Assert those via status/L, or bring the bugs into scope.'
     created_at: '2026-10-13T00:43:21Z'
     last_edited: '2026-10-13T00:43:21Z'
+  - id: note-434bb96
+    text: 'QA S18 (round 4, shared dep under concurrent CLI/keys/merges) on 51507548:
+      every Then in all 5 triples held. Fixed 79575dcc: CLI `pm autostart remove`
+      racing a TUI `g` merge painted "Auto-start: removed Y2" for ~0.1s before the
+      unforced Merging spinner overwrote it. remove/not-target/clear confirmations
+      now hold=CONFIRM_HOLD_SECONDS like targets +=/merged — removed; tests in test_log_message_force.py.
+      Harness gotcha: cli panes keep the env they sourced at creation, so re-source
+      env.sh after exporting new vars ($TUIP/$Y3 were empty twice; failed attempts
+      kept in evidence).'
+    created_at: '2026-10-13T01:01:33Z'
+    last_edited: '2026-10-13T01:01:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
