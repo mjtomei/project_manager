@@ -26007,7 +26007,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T04:18:07.190321+00:00'
+  updated_at: '2026-10-13T04:49:21.176063+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26601,6 +26601,31 @@ prs:
       rests on the two real fixes, d6778d7f (O armed hold) and 3831cbba (R18 hint).'
     created_at: '2026-10-13T04:18:07Z'
     last_edited: '2026-10-13T04:18:07Z'
+  - id: note-986b70a
+    text: 'S34 refine (r8): command-bar bare `autostart` while targets exist turns
+      auto-start OFF and clears every target (handle_command/_dispatch, by design;
+      R13 only defines bare-when-off). The S34 bare-autostart sub-story therefore
+      checks that the "Auto-start: OFF" answer stays on screen after the armed hold.
+      It does not check that the targets survive. Restore the targets afterwards (the
+      next triple starts with clear + add anyway). The "L exactly once" Then follows
+      the b992ee47 wording: one copy per source record per region, recap repeats up
+      to 8 by design.'
+    created_at: '2026-10-13T04:31:20Z'
+    last_edited: '2026-10-13T04:31:20Z'
+  - id: note-13df5dd
+    text: 'QA S34 (round 8, b992ee47, no app changes): all 10 triples held — CLI add
+      + two O inside its hold each readable ~3s (29/29/28 samples), O on auto-merge
+      P4 flips to stop + re-arm, CLI policy_changed back, slowed g merge prune line
+      then O armed line (28/29), cmd-bar list/bare autostart answers survive O hold,
+      O racing remove/add/10 status = serial {P2,P3,P4} with 116 source records once
+      in L, half-typed bar kept through drain (cursor 15->27), popup Esc/q/a/cmd-bar
+      keep "· a Runs" hint, breadcrumb restart identical targets/headers/windows then
+      O on Q4. Harness gotcha: an extra grouped tmux session not named $SESS~N makes
+      pm resolve the TUI session as that name (review loop ERROR "Not in a pm tmux
+      session", L opens in its window) — record helpers via pipe-pane, not a second
+      grouped view. Captures: /pm-captures/scenarios/34.'
+    created_at: '2026-10-13T04:49:21Z'
+    last_edited: '2026-10-13T04:49:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
