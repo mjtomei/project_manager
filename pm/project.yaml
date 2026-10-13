@@ -25992,7 +25992,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/229
   gh_pr_number: 229
   created_at: '2026-10-12T18:22:44.139556+00:00'
-  updated_at: '2026-10-13T01:01:33.452025+00:00'
+  updated_at: '2026-10-13T01:21:48.733758+00:00'
   started_at: '2026-10-12T18:23:30.711242+00:00'
   reviewed_at: null
   merged_at: null
@@ -26381,6 +26381,19 @@ prs:
       rather than trusting arbitrary scenario sidecars.'
     created_at: '2026-10-12T22:32:07Z'
     last_edited: '2026-10-12T22:32:07Z'
+  - id: note-8e93a8c
+    text: 'QA plan round 5 (S21-S25) is in qa.md section 10, committed and pushed
+      as dd0f6ca8 (verified on the remote before QA_PLAN_END). Planning changed no
+      application code, so review 6ad2 (1224d3f1) still applies. R29 corrected: only
+      add/remove give no_project outside a project; status/list resolve the owner
+      by tmux session. Added ambiguity 13, round-4 env notes in section 2, and a shared-resource
+      inventory in section 10. New Thens: popup notice cleared once C gets a window
+      (1224d3f1), status bar during r/background pull keeps AUTO xN/filter/WCH (b68801b8),
+      remove/not-target/clear readable vs g spinner (79575dcc), [auto-merge] header
+      tags. S24 post-sign-off Thens use the pr-7c32e44-tolerant form from ambiguity
+      12. Workers: pm checkout HEAD must be dd0f6ca8 or later before and after.'
+    created_at: '2026-10-13T01:21:48Z'
+    last_edited: '2026-10-13T01:21:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b87a97-support-multiple-autostart-targets-w-c9420398
 - id: pr-92041d7
   plan: bugs
