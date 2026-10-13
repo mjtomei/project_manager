@@ -62,9 +62,12 @@ def trust_add(path):
                                              os.path.realpath(p)):
         raise click.ClickException(
             f"refusing to authorize {p}: pick a specific project directory")
-    wt.set_authorized_roots(wt.authorized_roots() + [p])
+    added = wt.add_authorized_root(p)
     outcome = wt.get_trust_runtime().bootstrap(p)
     if not outcome.ok:
+        # Don't leave a root authorized when the command reports failure.
+        if added:
+            wt.remove_authorized_root(p)
         raise click.ClickException(outcome.message)
     click.echo(f"Authorized {p} ({outcome.status})")
 
@@ -78,8 +81,6 @@ def trust_remove(path):
     """
     from pm_core import workspace_trust as wt
     p = _abs(path)
-    roots = wt.authorized_roots()
-    if p not in roots:
+    if not wt.remove_authorized_root(p):
         raise click.ClickException(f"{p} is not an authorized root")
-    wt.set_authorized_roots([r for r in roots if r != p])
     click.echo(f"Removed {p}")

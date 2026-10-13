@@ -675,6 +675,37 @@ class TestTrustCli:
         assert _projects()[str(repo)]["hasTrustDialogAccepted"] is True
         assert self._run("remove", str(repo)).exit_code != 0
 
+    def test_failed_add_leaves_no_authorization(self, home, tmp_path):
+        """A failing bootstrap must not leave the root authorized."""
+        kept = _git_checkout(tmp_path / "kept")
+        assert self._run("add", str(kept)).exit_code == 0
+        _cfg().write_text("{broken")
+        repo = _git_checkout(tmp_path / "mine")
+        r = self._run("add", str(repo))
+        assert r.exit_code != 0
+        assert "could not read" in r.output
+        assert _cfg().read_text() == "{broken"
+        # Re-adding an existing root that then fails keeps that root.
+        assert self._run("add", str(kept)).exit_code != 0
+        assert wt.authorized_roots() == [str(kept)]
+
+    def test_concurrent_adds_keep_every_root(self, home, tmp_path):
+        """Parallel ``pm trust add`` runs must not drop each other's roots."""
+        import sys
+        repos = [_git_checkout(tmp_path / f"c{i}") for i in range(12)]
+        env = dict(os.environ,
+                   PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+        procs = [subprocess.Popen(
+            [sys.executable, "-m", "pm_core.wrapper", "trust", "add", str(r)],
+            env=env, cwd=str(tmp_path),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for r in repos]
+        outs = [p.communicate(timeout=120)[0] for p in procs]
+        assert all(p.returncode == 0 for p in procs), outs
+        assert sorted(wt.authorized_roots()) == sorted(map(str, repos))
+        projects = _projects()
+        assert all(projects[str(r)]["hasTrustDialogAccepted"] for r in repos)
+
     def test_status_unapproved_names_remedy(self, home, tmp_path):
         repo = _git_checkout(tmp_path / "other")
         r = self._run("status", str(repo))

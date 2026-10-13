@@ -31,6 +31,7 @@ import re
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,13 +81,68 @@ def authorized_roots() -> list[str]:
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
+def _settings_dir() -> Path:
+    from pm_core.paths import pm_home
+    d = pm_home() / "settings"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@contextmanager
+def _roots_lock():
+    """Serialize read-modify-write of the authorized-roots setting.
+
+    Concurrent ``pm trust add``/``remove`` runs otherwise lose each other's
+    roots: each reads the list, appends, and rewrites the whole file.
+    """
+    import fcntl
+    with open(_settings_dir() / f".{TRUSTED_WORKSPACES_SETTING}.lock", "a") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
 def set_authorized_roots(roots: list[str]) -> None:
-    from pm_core.paths import set_global_setting_value
     seen: list[str] = []
     for r in roots:
         if r not in seen:
             seen.append(r)
-    set_global_setting_value(TRUSTED_WORKSPACES_SETTING, "\n".join(seen))
+    # Atomic replace: a reader racing a plain truncate-and-write sees an
+    # empty list and refuses to trust an authorized path.
+    d = _settings_dir()
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=f".{TRUSTED_WORKSPACES_SETTING}.")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("\n".join(seen) + "\n")
+        os.replace(tmp, d / TRUSTED_WORKSPACES_SETTING)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def add_authorized_root(root: str) -> bool:
+    """Append *root* to the authorized roots; False if already present."""
+    with _roots_lock():
+        roots = authorized_roots()
+        if root in roots:
+            return False
+        set_authorized_roots(roots + [root])
+        return True
+
+
+def remove_authorized_root(root: str) -> bool:
+    """Drop *root* from the authorized roots; False if it was not present."""
+    with _roots_lock():
+        roots = authorized_roots()
+        if root not in roots:
+            return False
+        set_authorized_roots([r for r in roots if r != root])
+        return True
 
 
 def approved_roots() -> list[str]:
@@ -406,7 +462,8 @@ def blocked_message(path: str, waited: float) -> str:
 __all__ = [
     "TrustOutcome", "TrustRuntime", "ClaudeWorkspaceTrust",
     "approved_path", "approved_roots", "authorized_roots", "is_within",
-    "set_authorized_roots", "trust_keys", "register_trust_runtime",
+    "set_authorized_roots", "add_authorized_root", "remove_authorized_root",
+    "trust_keys", "register_trust_runtime",
     "get_trust_runtime", "prompt_grace_seconds", "blocked_message",
     "TRUSTED", "ALREADY", "UNAPPROVED", "UNSUPPORTED", "ERROR",
 ]
