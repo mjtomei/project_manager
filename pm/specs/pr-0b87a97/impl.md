@@ -393,6 +393,20 @@ review-loop 9448):
     `pm autostart status` poll can't turn a half-typed command into tree
     hotkeys. This is the queue-side counterpart of item 24.
 
+QA round 3 fixes (reviewed in review-loop 472d):
+
+28. *(QA s12/s15, b9b337d4)* `CommandBar` defaults `select_on_focus=False`.
+    Item 27's refocus (and the startup-drain refocus after a breadcrumb
+    restart) otherwise went through Textual `Input`'s select-on-focus, which
+    selected the half-typed command so the next keystroke replaced it.
+29. *(QA s11, 808c8583)* `L` opens the log pane with `tail -n 500 -f`
+    (`pane_ops.LOG_PANE_BACKLOG_LINES`), so the `log: …` lines mirrored by
+    item 18 are still on screen when the pane opens.
+30. *(QA s13, e0d891a7)* `_prune_completed_targets` logs one forced, held
+    line per pass ("target Y merged — removed (N remaining)", with "all
+    targets complete — auto-start OFF" folded in for the last target), so
+    the `g` merge spinner and result line don't overwrite it.
+
 Known, intentionally unchanged (out of scope):
 - QA PASS leaves the PR in `qa`; the automatic qa→sign_off hand-off is
   pr-488ac6d. Until then the status says "QA passed; awaiting sign-off (press i
