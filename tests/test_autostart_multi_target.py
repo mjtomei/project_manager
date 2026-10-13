@@ -913,6 +913,11 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
             assert "◎ a" in text and "◎ b" in text
             assert "scenario 1/2 done" in text
             assert "stop-before-merge" in text
+            # Every target header names its policy, auto-merge included
+            # (QA s19: U showed no policy); deps carry only a stop mark.
+            assert "◎ a [stop-before-merge]" in text
+            assert "◎ b [auto-merge]" in text
+            assert "d [auto-merge]" not in text
             # j moves selection; Enter on a run without window keeps popup open
             await pilot.press("j")
             await pilot.press("enter")

@@ -787,6 +787,10 @@ class AutoRunsScreen(ModalScreen):
                 line.append(f" {r['pr_id']}", style="dim")
             if r.get("policy") == POLICY_STOP:
                 line.append(" [stop-before-merge]", style="magenta")
+            elif row["kind"] == "target":
+                # Target headers always name their policy (R14); a dep's
+                # merge follows its targets, so only a stop mark is shown.
+                line.append(" [auto-merge]", style="green")
             state = r.get("state") or "?"
             line.append(f"  {state.upper()}",
                         style=self._STATE_STYLES.get(state, ""))
