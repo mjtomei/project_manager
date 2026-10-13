@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T13:03:18.982985+00:00'
+  updated_at: '2026-10-13T13:41:13.638514+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3475,6 +3475,33 @@ prs:
       standalone receiver).'
     created_at: '2026-10-13T13:03:18Z'
     last_edited: '2026-10-13T13:03:18Z'
+  - id: note-61cbf6f
+    text: 'QA S5 concretizer (2026-10-13): in throwaway projects TUI g is refused
+      by the sign-off gate (no fresh SIGNOFF_MERGE), so the TUI route is the command
+      bar "pr merge --resolve-window --no-signoff-check <pr>". Neither g nor the command
+      bar passes --transcript, so _poll_impl_idle cannot register the merge pane (session_id_from_transcript
+      returns None) and never detects MERGED: after a manual merge window the TUI
+      does NOT run --propagation-only; only _maybe_auto_merge (auto-start) does. qa.md
+      M2 "TUI follow-up" holds only for auto-start merges. Scenario containers have
+      ~/.local/bin/git as a push-proxy that forwards fetch, which breaks the local-path
+      fetches in _sync_workdir_base/_propagate_to_repo and the merge prompt; move
+      it aside for the run and restore it before pushing.'
+    created_at: '2026-10-13T13:20:42Z'
+    last_edited: '2026-10-13T13:20:42Z'
+  - id: note-6cb0156
+    text: 'QA S5 local merge trust (round 3, supervised; this worker accepted no outer
+      trust prompt; no app edits): M1-M4 + concurrency held live on 6f64e2c7 with
+      real claude 2.1.296 + isolated CLAUDE_CONFIG_DIR: no merge window for independent
+      PRs; D and F conflict windows opened in PR workdirs with no dialog and no keys;
+      root never trusted/reset; notes.txt/README edit intact; index.lock failure exit
+      1 with no window. M5 refusal held (root window, remedy printed, cursor on No,
+      exit 70s, no trust). Findings filed: pr-c50d365 (manual g/command-bar merges
+      get no TUI MERGED follow-up; qa.md M2 "TUI follow-up" is auto-start only), pr-ea04ba8
+      (vanilla merge always fails dual-pushurl push to checked-out main repo -> spurious
+      window; M5 root window only reachable via a second --propagation-only). Captures
+      pr-b53bfe2/scenarios/5.'
+    created_at: '2026-10-13T13:41:13Z'
+    last_edited: '2026-10-13T13:41:13Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -27630,7 +27657,77 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T12:53:17.331559+00:00'
-  updated_at: '2026-10-13T12:53:17.331559+00:00'
+  updated_at: '2026-10-13T13:38:21.574074+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-93f43be
+    text: 'QA S5 (pr-b53bfe2 round 3): the vanilla pull-from-origin root window (part
+      1) is only reachable after a first merge attempt fails on the dual-pushurl push
+      to the checked-out main repo (filed separately as the vanilla push bug from
+      the same run). Observed live: --propagation-only with a diverged main repo opened
+      merge-<pr> in the project root, printed the pm trust add remedy, sent no keys
+      and wrote no trust; dialog stayed on "No, exit" for 70s.'
+    created_at: '2026-10-13T13:38:21Z'
+    last_edited: '2026-10-13T13:38:21Z'
+- id: pr-c50d365
+  plan: bugs
+  title: 'Bug: manual merges (TUI g / command bar pr merge) never get the TUI MERGED
+    follow-up; PR stays un-merged after the resolution window reports MERGED'
+  branch: pm/pr-c50d365-bug-manual-merges-tui-g-command-bar-pr-merge-never
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA round 3 S5 (M2), pre-existing on master. pm_core/tui/pr_view.py
+    merge_pr runs "pr merge --resolve-window <pr>" without --transcript (same for
+    a typed command-bar pr merge), and review_loop_ui._poll_impl_idle only scans merge-<pr>
+    windows for in_review PRs or _pending_merge_prs, registering the tracker with
+    <transcript_dir>/merge-<pr>.jsonl, which a manual merge never writes. So after
+    a conflict window opened by g reports MERGED, the TUI never runs --propagation-only;
+    the PR stays in_progress/in_review until the user runs `pm pr merge --propagation-only
+    <pr>` by hand. Only _maybe_auto_merge (auto-start) gets the follow-up. Repro:
+    local backend, two PRs editing the same line, merge the first, then g/command-bar
+    merge the second; answer the window; Claude prints MERGED; after 2+ minutes the
+    PR is still not merged (qa run captures pr-b53bfe2/scenarios/5). Fix idea: have
+    merge_pr / command-bar pr merge pass --transcript <tdir>/merge-<pr>.jsonl and
+    add the PR to _pending_merge_prs when a window opens.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T13:38:11.755044+00:00'
+  updated_at: '2026-10-13T13:38:11.755044+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ea04ba8
+  plan: bugs
+  title: 'Bug: vanilla pm pr merge always opens a spurious resolution window: workdir
+    push fans out to the non-bare main repo with base checked out'
+  branch: pm/pr-ea04ba8-bug-vanilla-pm-pr-merge-always-opens-a-spurious-re
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 QA round 3 S5 (M5), pre-existing on master (git_ops.configure_dual_remote,
+    0ee19d5a). pr start sets the workdir origin pushurls to <main repo> AND <upstream>.
+    Vanilla pr_merge then runs `git push origin <base>` from the workdir; the push
+    to upstream succeeds but the push to the main repo is always refused (receive.denyCurrentBranch
+    "branch is currently checked out" for a fast-forward, "fetch first" when the main
+    repo diverged), so git exits 1 and pm prints "Push to origin failed" and opens
+    a merge-<pr> window even with no conflict. Claude then reports MERGED with nothing
+    to do. The pull-into-main-repo step (_pull_after_merge) is only reached via a
+    second --propagation-only run. Repro: bare origin, clone, pm init --backend vanilla,
+    pr start, commit on the PR branch, pm pr merge <pr> -> "Push to origin failed:
+    ... [remote rejected] / rejected" plus a window, while origin already has the
+    merge. Plain-git repro: clone with pushurls ../main (non-bare, master checked
+    out) + ../o.git; push master -> rc=1. Related: pr-19990de (vanilla base never
+    fast-forwarded / root resolution window). Fix idea: for the base branch push only
+    to upstream (or push the main repo via fetch-into, as the local backend does),
+    and treat a failed push to the local source as non-fatal.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T13:38:20.751436+00:00'
+  updated_at: '2026-10-13T13:38:20.751436+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
