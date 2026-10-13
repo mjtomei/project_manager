@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T09:21:38.651088+00:00'
+  updated_at: '2026-10-13T12:53:43.971744+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3423,6 +3423,45 @@ prs:
       PATH, not tmux global env.'
     created_at: '2026-10-13T09:21:38Z'
     last_edited: '2026-10-13T09:21:38Z'
+  - id: note-e7ed5f8
+    text: Review 356c i1 reviewed the QA-made app edits 7d79fce1, f650a308, 8cd40e87,
+      37ad95eb, 3130d141, 0c84b817 and c056b32a. All are correct and tested, with
+      no blocking issues. c66dd77e only aligns `pm set list` columns and syncs impl.md
+      with those fixes.
+    created_at: '2026-10-13T09:50:14Z'
+    last_edited: '2026-10-13T09:50:14Z'
+  - id: note-ffb13ba
+    text: 'Review 356c i2 (d1b791f9): _launch_merge_window now prints the `pm trust
+      add <dir>` remedy when it opens in an unapproved dir (main-repo merge resolution
+      runs in the project root), with a fail-before/pass-after test. The trust-prompt-grace
+      default is now one constant (DEFAULT_PROMPT_GRACE_SECONDS). Escalated INPUT_REQUIRED:
+      merge resolution is a role listed in acceptance, but local main-repo merges
+      still stop at the dialog (pr-e835d8f). That needs a user policy decision: defer
+      to pr-e835d8f, or fix here. Unrelated env failure: test_hook_events::test_installer_writes_standalone_receiver
+      also fails on the unmodified tree.'
+    created_at: '2026-10-13T09:59:48Z'
+    last_edited: '2026-10-13T09:59:48Z'
+  - id: note-3cc19b5
+    text: 'Review 356c i2, bca1d21a (supervisor decision: option a for pr-e835d8f):
+      local-backend merge resolution now happens in the PR workdir. _sync_workdir_base
+      refreshes the workdir base from the main repo before the merge (fast-forward
+      or merge, never reset). _propagate_to_repo integrates a moved main-repo base
+      in the workdir and retries. Main-repo-side failures exit non-zero and print
+      the --propagation-only next step, with no Claude in the root. The prompt variant
+      that resolved in the main repo was removed. Tests: tests/test_local_merge_sync.py
+      (real git; 5 fail before, all pass after) plus the updated mocked merge tests.
+      Live: real pm + claude 2.1.296 in an isolated fixture. Pre-fix, the window opened
+      in the root and stopped at the dialog. Post-fix, the window opened in the PR
+      workdir with no dialog, the conflict was answered once (a real semantic question),
+      Claude reported MERGED, propagation-only fast-forwarded the main repo, the user
+      notes.txt was kept, and the only trust entry was the workdir. Captures: impl/{pre,post}-fix/local-merge-*.
+      pr-e835d8f and pr-a75da60 are closed as fixed. Residual vanilla/GitHub issues
+      are tracked in pr-19990de. Note: pr-ca6981c (in_review) edits the same stash
+      code in _pull_from_workdir and will need a rebase. In review containers, tests
+      need PATH=/usr/bin first because ~/.local/bin/git proxies fetch (pr-8cdbe60).
+      The changed merge code needs another review pass.'
+    created_at: '2026-10-13T12:53:43Z'
+    last_edited: '2026-10-13T12:53:43Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -27293,7 +27332,7 @@ prs:
   title: 'Bug: local-backend pm pr merge of a second PR always falls to the merge-resolution
     window (workdir master not refreshed before merge)'
   branch: pm/pr-a75da60-bug-local-backend-pm-pr-merge-of-a-second-pr-alway
-  status: pending
+  status: closed
   depends_on: []
   description: 'pm_core/cli/pr.py local backend: the merge step runs `git checkout
     master; git merge --no-ff <branch>` in the PR workdir without first fetching the
@@ -27310,11 +27349,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T02:58:29.741629+00:00'
-  updated_at: '2026-10-13T02:58:29.741629+00:00'
+  updated_at: '2026-10-13T12:53:43.224282+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-2330622
+    text: 'Fixed in pr-b53bfe2 bca1d21a: pm pr merge (local backend) now fetches and
+      merges the main repo base into the workdir base before the --no-ff merge, so
+      a second independent PR merges with no resolution window (tests/test_local_merge_sync.py::test_second_independent_pr_merges_without_a_window;
+      live evidence impl/{pre,post}-fix/local-merge-independent). No local residual.
+      The vanilla twin (workdir base never fast-forwarded to origin/<base>, so a non-ff
+      push opens a spurious window) is tracked in pr-19990de.'
+    created_at: '2026-10-13T12:53:42Z'
+    last_edited: '2026-10-13T12:53:42Z'
 - id: pr-2428766
   plan: bugs
   title: 'Bug: pane-launch key replies ("Focused existing log pane" / "Launched X
@@ -27455,7 +27503,7 @@ prs:
   title: 'Bug: local-backend merge-resolution window runs in the unapproved project
     root and always stops at the workspace-trust dialog'
   branch: pm/pr-e835d8f-bug-local-backend-merge-resolution-window-runs-in-
-  status: pending
+  status: closed
   depends_on: []
   description: 'Found in QA pr-b53bfe2 scenario 2 (2026-10-13, captures pr-b53bfe2/scenarios/2/tui/t4-merge-resolve-prC).
     With backend local, pm pr merge merges the PR branch into the WORKDIR master,
@@ -27476,11 +27524,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:00:14.213613+00:00'
-  updated_at: '2026-10-13T09:00:14.213613+00:00'
+  updated_at: '2026-10-13T12:53:41.744632+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b734ff3
+    text: 'Fixed in pr-b53bfe2 bca1d21a (user decision 2026-10-13, option a): local-backend
+      merge resolution now runs in the PR workdir. The workdir base is refreshed from
+      the main repo before the merge, and a main-repo base that moved by propagation
+      time is integrated in the workdir; the project root is never trusted or used
+      for Claude. Live evidence: pr-b53bfe2 captures impl/{pre,post}-fix/local-merge-conflict.
+      The vanilla/GitHub pull-from-origin window still runs in the root and is tracked
+      in pr-19990de.'
+    created_at: '2026-10-13T12:53:40Z'
+    last_edited: '2026-10-13T12:53:40Z'
 - id: pr-9f97a8f
   plan: bugs
   title: 'Bug: TUI s on a PR whose impl window was closed starts a fresh Claude session
@@ -27528,6 +27586,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
   updated_at: '2026-10-13T09:20:01.185973+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-19990de
+  plan: bugs
+  title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
+    (trust dialog) and vanilla workdir base is never fast-forwarded to origin'
+  branch: pm/pr-19990de-bug-vanilla-github-merge-propagation-still-resolve
+  status: pending
+  depends_on: []
+  description: 'Found reviewing pr-b53bfe2 (review 356c i2), the follow-up to pr-e835d8f,
+    which fixed the local backend only. (1) cli/pr.py _pull_after_merge (vanilla +
+    GitHub): when the ff-only of origin/<base> into the main repo fails, _launch_merge_window(cwd=repo_dir,
+    pull_from_origin=True) runs Claude in the project root. pm does not auto-trust
+    that dir, so the session sits at the workspace-trust dialog. pr-b53bfe2 only prints
+    a `pm trust add <root>` hint. Unlike the local backend, the fix cannot move to
+    the PR workdir: origin already has the merge and the main repo has diverged (the
+    user committed on base locally) or has overlapping dirty work. Decide: report
+    and exit non-zero without a window (as local now does for main-repo-side failures),
+    or another policy. (2) vanilla pr_merge runs `git fetch origin` in the workdir,
+    but merges the PR onto the workdir local <base> without fast-forwarding it to
+    origin/<base>. Once another PR merged, `git push origin <base>` is rejected non-ff
+    and a spurious resolution window opens (in the workdir, so no trust stall). This
+    is the vanilla twin of pr-a75da60. Fix: reuse _sync_workdir_base(workdir, "origin",
+    base) after checkout. Repro pattern: tests/test_local_merge_sync.py with a bare
+    origin.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T12:53:17.331559+00:00'
+  updated_at: '2026-10-13T12:53:17.331559+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
