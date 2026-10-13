@@ -919,8 +919,9 @@ def qa_plan_problem(text: str, scenarios: list[QAScenario],
     body = text[starts[-1]:end]
     headers = [
         int(m.group(1))
-        for m in re.finditer(r'^[ \t]*SCENARIO\s+(\d+)[:.]\s*(.+)$', body,
-                             re.MULTILINE)
+        # Single-line headers with a title, as parse_qa_plan requires.
+        for m in re.finditer(r'^[ \t]*SCENARIO[ \t]+(\d+)[:.][ \t]*(\S.*)$',
+                             body, re.MULTILINE)
         if not _is_placeholder_title(m.group(2).strip())
     ]
     parsed = [s.index for s in scenarios]
@@ -2512,8 +2513,10 @@ def _poll_tmux_verdicts(
             _log.warning("Queued scenario %d window creation failed — "
                          "marking INPUT_REQUIRED", scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            state.scenario_verdict_reasons[scenario.index] = (
-                "worker window creation failed on dequeue; no verdict"
+            # Keep a specific launch failure (e.g. clone/revision mismatch).
+            state.scenario_verdict_reasons.setdefault(
+                scenario.index,
+                "worker window creation failed on dequeue; no verdict",
             )
 
     # Fill any open slots that were freed by initial workdir failures.

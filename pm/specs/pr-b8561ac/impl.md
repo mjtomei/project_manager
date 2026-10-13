@@ -73,7 +73,10 @@ shape as the spec gate).
 `_prepare_scenario` (tmux and container launchers) records the exception text
 as the scenario's verdict reason. `_poll_tmux_verdicts` keeps that specific
 reason instead of the generic "worker window never created" when it marks the
-scenario `INPUT_REQUIRED`.
+scenario `INPUT_REQUIRED`. This includes the queued-launch (dequeue) path, where
+a late clone is most likely to see a moved head. The check stays strict
+equality, not "contains the planner head". An unpublished commit on top of the
+published head would bring back the #229 `pull --rebase` loss.
 
 ### R6. Planner application-code edits invalidate review
 Record the PR workdir's `HEAD` before launching the planner. After publish,

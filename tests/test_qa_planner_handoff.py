@@ -254,7 +254,7 @@ class TestPlannerReadsTranscript:
     def test_stale_turn_not_reparsed_without_fresh_idle(
             self, tmp_path, monkeypatch):
         """Freshness: without an idle_prompt event nothing is read."""
-        with patch("pm_core.verdict_transcript.read_latest_assistant_text"
+        with patch("pm_core.qa_loop.read_latest_assistant_text"
                    ) as read_text:
             state = _run_planning(
                 tmp_path, monkeypatch, pane_content=PANE_TAIL_ONLY,
@@ -371,6 +371,15 @@ class TestQAPlanProblem:
         text = text.replace("QA_PLAN_END", "`QA_PLAN_END`")
         sc = parse_qa_plan(text)
         assert qa_loop.qa_plan_problem(text, sc, 1) is None
+
+    def test_titleless_header_not_counted_across_lines(self):
+        """A bare ``SCENARIO N:`` line is skipped by parse_qa_plan; the
+        completeness check must not borrow the next line as its title."""
+        text = FULL_PLAN.replace("SCENARIO 4: Concurrent review launches",
+                                 "SCENARIO 4:")
+        scenarios = parse_qa_plan(text)
+        assert [s.index for s in scenarios] == [1, 2, 3]
+        assert qa_loop.qa_plan_problem(text, scenarios) is None
 
     def test_no_scenarios(self):
         assert qa_loop.qa_plan_problem(TEMPLATE_PROMPT, [], 1)
@@ -527,6 +536,27 @@ class TestPlannerHeadPublication:
             str(s["workdir"]), s["b"], s["c"]) == []
         assert qa_loop._planner_code_changes(
             str(s["workdir"]), s["c"], s["c"]) == []
+
+
+class TestLaunchFailureReason:
+    def test_clone_mismatch_reason_reaches_scenario_verdict(self, tmp_path):
+        """A refused clone (head mismatch) is reported as the scenario's
+        reason, not hidden behind a generic launch failure."""
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path / "qa")
+        state.scenarios = parse_qa_plan(FULL_PLAN)[:1]
+        state.planner_head = "c" * 40
+        err = RuntimeError("scenario 1 clone of b is at aaaa but the "
+                           "published planner head is cccc")
+        with patch("pm_core.qa_loop._resolve_qa_model"), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   side_effect=err) as create:
+            qa_loop._launch_scenarios_in_tmux(
+                state, {}, {"branch": "b"}, "pm-test", tmp_path,
+                str(tmp_path))
+        assert create.call_args.kwargs["expected_head"] == "c" * 40
+        assert "published planner head" in state.scenario_verdict_reasons[1]
+        assert state.scenarios[0].window_name is None
 
 
 class TestPlannerCodeChangesForceReview:
