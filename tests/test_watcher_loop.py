@@ -532,7 +532,7 @@ class TestWatcherCLI:
         from pm_core.cli import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["watcher", "--iteration", "3"])
-        mock_create.assert_called_once_with(3, "", None, auto_start_target=None, meta_pm_root=None, watcher_type="auto-start")
+        mock_create.assert_called_once_with(3, "", None, auto_start_targets=[], meta_pm_root=None, watcher_type="auto-start")
 
     def test_list_subcommand(self):
         from click.testing import CliRunner

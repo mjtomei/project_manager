@@ -11,7 +11,7 @@ screen with '?', verify its contents, then systematically test each key.
 The TUI has a help modal (HelpScreen) that opens when the user presses '?'.
 It lists all available keybindings grouped by category:
 - Tree Navigation: arrow keys, hjkl, J/K, x, X, f, F
-- PR Actions: s, d, g, e/Enter, v, M, A, w
+- PR Actions: s, d, g, i, e/Enter, v, M, O, A, a, V, w
 - Panes & Views: c, H, /, n, m, L, p, t, q, b
 - Companion Pane: S, G
 - Other: z, r, C, Ctrl+R, ?, ctrl+b d
@@ -69,7 +69,10 @@ ctrl+b d to detach from the tmux session.
      * e / Enter - Edit selected PR
      * v - View plan file
      * M - Move to plan
-     * A - Auto-start to selected PR / off
+     * O - Auto-start target (stop before merge) — additive, re-press re-arms
+     * A - Toggle auto-merge target (adds/removes only the selected PR)
+     * a - Auto-start runs popup (Esc/q/a close; empty set says
+       "No auto-start targets (auto-start off)")
      * w - Focus watcher window
    - Panes & Views section:
      * c - Launch Claude session

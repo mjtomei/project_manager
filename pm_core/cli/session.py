@@ -142,9 +142,13 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Uses "window-resized" (fires on any window size change) not
     # "after-resize-window" (only fires after the resize-window command).
     # Note: window-resized is a window hook, so use -gw not -g.
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
+    # Capture stderr: this also runs from the TUI, whose stderr is the pane
+    # itself, and tmux < 3.3 rejects the hook ("invalid option").
+    r = subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
-            check=False)
+            check=False, capture_output=True, text=True)
+    if r.returncode != 0:
+        _log.warning("set-hook window-resized failed: %s", r.stderr.strip())
     # Clean up stale hooks from earlier versions:
     # - after-resize-window: never the right hook name; only fired after the
     #   resize-window command.

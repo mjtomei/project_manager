@@ -5,6 +5,20 @@ import pytest
 from pm_core.fake_github import FakeGitHubBackend
 
 
+@pytest.fixture(autouse=True)
+def _isolated_runtime_state(tmp_path_factory, monkeypatch):
+    """Keep runtime_state out of the real ``~/.pm/runtime``.
+
+    Auto-start scheduling reads recorded QA verdicts from runtime_state, so
+    entries leaked by one test (or a live pm session on the same machine)
+    must not steer another test.  Tests that patch ``_runtime_dir``
+    themselves still win (their monkeypatch is applied later).
+    """
+    from pm_core import runtime_state
+    d = tmp_path_factory.mktemp("runtime")
+    monkeypatch.setattr(runtime_state, "_runtime_dir", lambda: d)
+
+
 @pytest.fixture
 def fake_github():
     """Install a pure-metadata FakeGitHubBackend as the `gh` transport.

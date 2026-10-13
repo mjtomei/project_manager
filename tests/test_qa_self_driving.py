@@ -34,7 +34,7 @@ def _make_app(tmp_path, *, pr_status="qa", auto_start=True):
     app._root = pm_dir
     app._data = data
     app._auto_start = auto_start
-    app._auto_start_target = "pr-001"
+    app._auto_start_targets = {"pr-001": {}}
     app._qa_loops = {}
     app._review_loops = {}
     app._self_driving_qa = {}

@@ -659,6 +659,9 @@ COMMANDS
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)
   pm watcher                    Run autonomous watcher loop (blocking)
+  pm autostart add <id>...      Add auto-start targets in the running TUI
+  pm autostart remove <id>...   Remove auto-start targets (never kills windows)
+  pm autostart list|status      Targets / per-run progress (--json)
   pm rebalance                  Re-enable auto-balanced pane layout
   pm set <setting> <value>      Configure a global pm setting
   pm edit                       Open project.yaml in $EDITOR (with locking)
@@ -705,7 +708,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project, fake_claude, fake_github  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project, fake_claude, fake_github, autostart  # noqa: E402, F401
 
 
 def main():

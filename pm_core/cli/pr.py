@@ -1346,7 +1346,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 @click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
-def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None):
+@click.option("--no-window", is_flag=True, default=False, hidden=True,
+              help="Only transition to in_review; the caller's review loop "
+                   "launches the window itself (used by auto-start)")
+def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool):
     """Mark a PR as in_review and launch a review window.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
@@ -1377,6 +1380,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
+        if no_window:
+            return
         _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                               review_loop=review_loop,
                               review_iteration=review_iteration,
@@ -1412,6 +1417,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     store.locked_update(root, apply)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
+    if no_window:
+        return
     _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                           review_loop=review_loop,
                           review_iteration=review_iteration,
@@ -3120,6 +3127,7 @@ def pr_auto_sequence(pr_id: str):
                     p["status"] = "qa"
                     _record_status_timestamp(p, "qa")
             store.locked_update(root, _to_qa)
+            trigger_tui_refresh()
             _launch_qa_detached(root, pr_id)
             click.echo("advanced: qa")
             return
@@ -3168,6 +3176,7 @@ def pr_auto_sequence(pr_id: str):
                     p["status"] = "sign_off"
                     _record_status_timestamp(p, "sign_off")
             store.locked_update(root, _to_signoff)
+            trigger_tui_refresh()
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
@@ -3189,6 +3198,7 @@ def pr_auto_sequence(pr_id: str):
                     p["status"] = "in_review"
                     _record_status_timestamp(p, "in_review")
             store.locked_update(root, _to_review)
+            trigger_tui_refresh()
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
             iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
@@ -3246,6 +3256,7 @@ def pr_auto_sequence(pr_id: str):
                 if p:
                     p.pop("signoff", None)
             store.locked_update(root, _clear_signoff)
+            trigger_tui_refresh()
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
@@ -3280,6 +3291,9 @@ def pr_auto_sequence(pr_id: str):
         # verdict can only mutate state here, never from a manual signoff run.
         hop = signoff_mod.decide_signoff_hop(verdict)
         hop = signoff_mod.apply_signoff_hop(root, pr_id, hop)
+        # The verdict record / hop status was written behind the TUI's back;
+        # without a reload its rows keep saying "awaiting sign-off".
+        trigger_tui_refresh()
         if hop in ("qa", "review", "impl"):
             # A bounce moved the PR out of sign_off: retire the stale sign-off
             # window + transcript so re-entry runs a genuine fresh router

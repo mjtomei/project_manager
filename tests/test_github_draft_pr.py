@@ -431,6 +431,26 @@ class TestPrDoneUpgradesDraftPr:
         assert result.exit_code == 0
         mock_gh_ops["mark_pr_ready"].assert_not_called()
 
+    def test_no_window_transitions_without_launching(self, mock_review, tmp_project_with_pr, mock_gh_ops):
+        """--no-window (auto-review) marks in_review + upgrades the draft but
+        leaves the window to the review loop, so no throwaway session starts."""
+        data = store.load(tmp_project_with_pr["pm_dir"])
+        pr = store.get_pr(data, "pr-001")
+        pr["status"] = "in_progress"
+        pr["workdir"] = str(tmp_project_with_pr["workdir"])
+        store.save(data, tmp_project_with_pr["pm_dir"])
+
+        runner = CliRunner()
+
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["review", "--no-window", "pr-001"])
+
+        assert result.exit_code == 0
+        mock_review.assert_not_called()
+        mock_gh_ops["mark_pr_ready"].assert_called_once()
+        data = store.load(tmp_project_with_pr["pm_dir"])
+        assert store.get_pr(data, "pr-001")["status"] == "in_review"
+
 
 class TestBackendPrInstructions:
     """Tests for GitHubBackend.pr_instructions with draft PR URL."""

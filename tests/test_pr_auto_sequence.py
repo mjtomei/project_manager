@@ -499,6 +499,43 @@ class TestSignOff:
         assert mock_start.call_args.kwargs["fresh"] is True
 
 
+class TestTuiRefresh:
+    """QA s8 (pr-0b87a97): auto-sequence wrote ``sign_off`` + the SIGNOFF_MERGE
+    record without signalling the TUI, so its auto-start rows kept saying
+    "awaiting sign-off (press i …)" / "no fresh SIGNOFF_MERGE" until some
+    unrelated reload."""
+
+    def test_qa_pass_to_sign_off_refreshes_tui(self, runner, tmp_path):
+        pr = _pr("qa")
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=("PASS", Path("/tmp/qa.json"))), \
+             patch("pm_core.cli.pr.store.locked_update"), \
+             patch("pm_core.cli.pr.trigger_tui_refresh") as mock_refresh, \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        mock_refresh.assert_called()
+
+    def test_recorded_signoff_refreshes_tui(self, runner, tmp_path):
+        pr = _pr("sign_off")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_signoff_verdict",
+                   return_value="SIGNOFF_MERGE"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr.trigger_tui_refresh") as mock_refresh:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert "ready_to_merge" in result.output
+        mock_refresh.assert_called()
+
+
 class TestQaRunBgGuard:
     """The detached QA driver must not run against an out-of-band merged PR.
 

@@ -30,7 +30,7 @@ def guard_pr_action(app, action_desc: str) -> bool:
     if app._inflight_pr_action:
         _log.info("action blocked: %s (busy: %s)", action_desc, app._inflight_pr_action)
         app.log_message(f"Busy: {app._inflight_pr_action}", sticky=1.0)
-        app.set_timer(1.0, app._clear_log_message)
+        app.clear_log_message_later(1.0)
         return False
     return True
 
@@ -705,16 +705,25 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.query_one("#tech-tree", TechTree).focus()
         return
 
-    # Handle auto-start commands
-    if cmd in ("autostart", "auto-start", "auto start"):
-        from pm_core.tui.auto_start import toggle
-        app.run_worker(toggle(app))
-        app.query_one("#tech-tree", TechTree).focus()
-        return
-    if cmd.startswith("autostart target") or cmd.startswith("auto-start target") or cmd.startswith("auto start target"):
-        from pm_core.tui.auto_start import set_target
-        target_pr = cmd.split("target", 1)[1].strip()
-        set_target(app, target_pr if target_pr else None)
+    # Handle auto-start commands: ``autostart [verb] [ids…] [flags]``
+    # (also reached by ``pm autostart …`` via the SIGUSR2 command queue).
+    _as_cmd = cmd
+    for _alias in ("auto-start", "auto start"):
+        if _as_cmd == _alias or _as_cmd.startswith(_alias + " "):
+            _as_cmd = "autostart" + _as_cmd[len(_alias):]
+            break
+    if _as_cmd == "autostart" or _as_cmd.startswith("autostart "):
+        from pm_core.tui import auto_start as _auto_start
+        try:
+            _as_args = shlex.split(_as_cmd)[1:]
+        except ValueError as e:
+            app.log_message(f"Auto-start: bad command: {e}")
+        else:
+            _auto_start.handle_command(app, _as_args)
+        # Unconditional: focus() targets the tree's own (base) screen, so
+        # when ``autostart status`` pushed the runs popup this doesn't
+        # steal focus from it — it makes Esc return to the tree instead
+        # of the command bar the popup was opened from.
         app.query_one("#tech-tree", TechTree).focus()
         return
 

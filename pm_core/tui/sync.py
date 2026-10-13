@@ -96,18 +96,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
     Args:
         is_manual: True if triggered by user (r key), False for periodic background sync
     """
-    from pm_core.tui.widgets import StatusBar
-
     if not app._root:
         return
     try:
-        status_bar = app.query_one("#status-bar", StatusBar)
-        project = app._data.get("project", {})
-        prs = app._data.get("prs") or []
         # Don't clobber a mode-specific status bar (QA/Plans) with project info.
         mode_owns_status = getattr(app, "_qa_visible", False) or getattr(app, "_plans_visible", False)
         if not mode_owns_status:
-            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
+            # Through _update_status_bar so AUTO ×N / WCH / filter stay up
+            # while pulling (a bare update_status() blanked them per refresh).
+            app._update_status_bar(sync_state="pulling")
 
         # Use shorter interval for manual refresh, longer for background
         min_interval = (
@@ -188,11 +185,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         prs = app._data.get("prs") or []
 
-        # Determine sync status message
+        # Determine sync status message.  The manual-refresh clear below is
+        # bound to this message (own_seq), never to a held line logged by
+        # check_and_start above or a concurrent worker (e.g. "target W
+        # merged — removed"), which a clear of "the latest" would cut short.
+        own_seq = None
         if result.was_skipped:
             sync_status = "no-op"
             if is_manual:
-                app.log_message("Already up to date")
+                own_seq = app.log_message("Already up to date")
         elif result.error:
             # "No workdirs" is not really an error - just nothing to sync yet
             if "No workdirs" in result.error:
@@ -201,14 +202,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             else:
                 sync_status = "error"
                 _log.warning("PR sync error: %s", result.error)
-                app.log_message(f"Sync error: {result.error}")
+                own_seq = app.log_message(f"Sync error: {result.error}")
         elif result.updated_count > 0:
             sync_status = "synced"
-            app.log_message(f"Synced: {result.updated_count} PR(s) merged")
+            own_seq = app.log_message(
+                f"Synced: {result.updated_count} PR(s) merged")
         else:
             sync_status = "synced"
             if is_manual:
-                app.log_message("Refreshed")
+                own_seq = app.log_message("Refreshed")
 
         mode_owns_status = getattr(app, "_qa_visible", False) or getattr(app, "_plans_visible", False)
         if mode_owns_status:
@@ -221,7 +223,9 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # Clear log message after 1 second for manual refresh
         if is_manual:
-            app.set_timer(1.0, app._clear_log_message)
+            if own_seq is None:  # e.g. "No workdirs": replace "Refreshing..."
+                own_seq = app.log_message("Refreshed")
+            app.clear_log_message_later(1.0, seq=own_seq)
     except SystemExit as e:
         _log.error("Sync raised SystemExit(%s) — suppressing to prevent TUI crash", e.code)
     except Exception as e:
@@ -243,7 +247,7 @@ async def startup_github_sync(app) -> None:
         return
 
     try:
-        app.log_message("Syncing with GitHub...")
+        own_seq = app.log_message("Syncing with GitHub...")
         # Run blocking HTTP call in a thread so it doesn't freeze the UI.
         # Deep copy + save_state=False to avoid racing with user actions.
         data_copy = copy.deepcopy(app._data)
@@ -274,18 +278,20 @@ async def startup_github_sync(app) -> None:
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
-            app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
-            # Auto-start ready PRs if enabled
+            own_seq = app.log_message(
+                f"GitHub sync: {result.updated_count} PR(s) updated")
+            # Auto-start ready PRs if enabled; the clear below stays bound
+            # to the sync line, not a held line check_and_start logs.
             if newly_merged:
                 from pm_core.tui.auto_start import check_and_start
                 await check_and_start(app)
         elif result.error:
             _log.warning("GitHub sync error: %s", result.error)
         else:
-            app.log_message("GitHub sync: up to date")
+            own_seq = app.log_message("GitHub sync: up to date")
 
-        app.set_timer(2.0, app._clear_log_message)
+        app.clear_log_message_later(2.0, seq=own_seq)
     except Exception as e:
         _log.exception("GitHub sync error")
         app.log_message(f"GitHub sync error: {e}")
-        app.set_timer(3.0, app._clear_log_message)
+        app.clear_log_message_later(3.0)

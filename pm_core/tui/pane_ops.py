@@ -18,6 +18,21 @@ from pm_core.tui.screens import ConnectScreen
 
 _log = configure_logger("pm.tui.pane_ops")
 
+# Lines of existing log history the L pane shows before following.
+LOG_PANE_BACKLOG_LINES = 500
+# Recent auto-start confirmations ("log: Auto-start: targets += X", "Auto-
+# sequence armed for X", "Auto-merge: ...") repeated below the backlog, so
+# they are on screen when L opens even after busy debug output (and other
+# status messages) pushed them hundreds of lines up into scrollback.
+LOG_PANE_RECAP_LINES = 8
+LOG_PANE_RECAP_PATTERN = r"\[tui\] log: Auto-(start|sequence|merge)"
+# Opening L writes its own burst of debug lines (split, pane-opened hook,
+# rebalance, "launched pane") right after the pane starts; in a half-width
+# split each wraps to two rows, so following immediately pushed the recap
+# header off the top before the user saw it.  Let that burst land first and
+# print it above the recap.
+LOG_PANE_SETTLE_SECONDS = 1.0
+
 
 
 
@@ -260,7 +275,35 @@ def view_log(app) -> None:
     if not log_path.exists():
         app.log_message("No log file yet.")
         return
-    launch_pane(app, f"tail -f {log_path}", "log", fresh=fresh)
+    launch_pane(app, log_pane_command(log_path), "log", fresh=fresh)
+
+
+def log_pane_command(log_path) -> str:
+    """Shell command for the L pane: backlog, auto-start recap, then follow.
+
+    Plain ``tail -f`` shows only the last 10 lines; the debug log is busy
+    (pane layout, review-loop polling), so an "Auto-sequence armed" line
+    mirrored a minute earlier sits hundreds of lines up — in scrollback, not
+    on screen.  Show the backlog, wait for the pane's own launch lines and
+    print them, repeat the last few auto-start confirmations ("HH:MM:SS log:
+    ...") at the bottom, then follow from the line count taken last, so
+    nothing written in between is lost.  No ``exec``: launch_pane's EXIT
+    trap must still run.
+    """
+    f = shlex.quote(str(log_path))
+    pattern = shlex.quote(LOG_PANE_RECAP_PATTERN)
+    return (
+        f'n=$(wc -l < {f}); '
+        f'head -n "$n" {f} | tail -n {LOG_PANE_BACKLOG_LINES}; '
+        f'sleep {LOG_PANE_SETTLE_SECONDS}; '
+        f'm=$(wc -l < {f}); '
+        f'head -n "$m" {f} | tail -n "+$((n + 1))"; '
+        f'echo "── recent auto-start messages ──"; '
+        f'head -n "$m" {f} | grep -E {pattern} | tail -n {LOG_PANE_RECAP_LINES}'
+        f' | sed "s/ [A-Z]* *\\[tui\\] log: / log: /"; '
+        f'echo "── following log ──"; '
+        f'tail -n "+$((m + 1))" -f {f}'
+    )
 
 
 def launch_meta(app) -> None:
@@ -677,7 +720,7 @@ def show_connect(app) -> None:
         app.push_screen(ConnectScreen(command))
     else:
         app.log_message("Not a shared session")
-        app.set_timer(2, app._clear_log_message)
+        app.clear_log_message_later(2)
 
 
 def quit_app(app) -> None:
@@ -712,6 +755,16 @@ def restart_app(app) -> None:
         app._driver.stop_application_mode()
     except Exception:
         pass  # new Textual app will reinitialize the terminal
+    # The pidfile keeps naming this pid across the exec, so CLI helpers
+    # keep sending SIGUSR1/SIGUSR2; until the new TUI installs its
+    # handlers the default action would kill it.  SIG_IGN survives exec;
+    # queued commands are dispatched by the new TUI's startup drain.
+    import signal
+    for sig in (signal.SIGUSR1, signal.SIGUSR2):
+        try:
+            signal.signal(sig, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
     pm = shutil.which("pm")
     if pm:
         os.execvp(pm, [pm, "_tui"])

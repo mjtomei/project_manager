@@ -3,7 +3,8 @@
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Label
+from textual.geometry import Region
+from textual.widgets import Label, Static
 from textual.screen import ModalScreen
 
 
@@ -248,7 +249,9 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
-                yield Label("  [bold]A[/]  Auto-start to selected PR / off", classes="help-row")
+                yield Label("  [bold]O[/]  Auto-start target (stop before merge)", classes="help-row")
+                yield Label("  [bold]A[/]  Toggle auto-merge target", classes="help-row")
+                yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
                 yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
@@ -614,3 +617,268 @@ class ConfirmCleanupScreen(ModalScreen):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class AutoRunsScreen(ModalScreen):
+    """Live view of the auto-start target set and its runs (key ``a``).
+
+    Renders ``auto_start.build_status(app)`` — the same
+    ``pm.autostart.status/1`` dict that ``pm autostart status --json``
+    returns — flattened by ``autostart_state.status_rows``.  Refreshes every
+    2s while open; Enter/f focuses the selected run's tmux window.
+    """
+
+    REFRESH_SECONDS = 2.0
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+        Binding("a", "close", "Close", show=False),
+        Binding("j", "move(1)", "Down", show=False),
+        Binding("k", "move(-1)", "Up", show=False),
+        Binding("down", "move(1)", "Down", show=False),
+        Binding("up", "move(-1)", "Up", show=False),
+        Binding("enter", "focus_run", "Focus window"),
+        Binding("f", "focus_run", "Focus window", show=False),
+        Binding("r", "refresh_runs", "Refresh"),
+        # The popup may stay open indefinitely; it must not swallow the
+        # Ctrl+R that `pm tui restart` / merge-triggered restarts send.
+        Binding("ctrl+r", "restart_app", "Restart", show=False),
+    ]
+
+    CSS = """
+    AutoRunsScreen {
+        align: center middle;
+    }
+    #runs-container {
+        width: 110;
+        max-width: 95%;
+        height: auto;
+        max-height: 85%;
+        background: $surface;
+        border: solid $primary;
+        padding: 0 1;
+    }
+    #runs-title {
+        text-style: bold;
+    }
+    #runs-body {
+        width: 100%;
+    }
+    #runs-footer {
+        color: $text-muted;
+    }
+    """
+
+    _STATE_STYLES = {
+        "running": "bold green",
+        "waiting": "bold yellow",
+        "paused": "bold magenta",
+        "failed": "bold red",
+        "queued": "cyan",
+        "completed": "green",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: list[dict] = []
+        self._status: dict = {}
+        self._selected = 0
+        self._selected_key: tuple | None = None
+        self._timer = None
+        # (row key, message) shown on the selected row's detail line.
+        self._notice: tuple | None = None
+
+    def compose(self) -> ComposeResult:
+        container = VerticalScroll(id="runs-container")
+        # Not focusable: a focused scroll container claims ↑/↓ for
+        # scrolling once the rows overflow, so they would stop moving the
+        # selection.  The selected row is scrolled into view instead.
+        container.can_focus = False
+        with container:
+            yield Label("Auto-start runs", id="runs-title")
+            yield Static("", id="runs-body")
+            yield Label(
+                "j/k select · Enter/f focus window · r refresh · "
+                "Esc/q/a close · refreshes every 2s",
+                id="runs-footer")
+
+    def on_mount(self) -> None:
+        self.action_refresh_runs()
+        self._timer = self.set_interval(self.REFRESH_SECONDS,
+                                        self.action_refresh_runs)
+
+    def on_unmount(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+
+    @staticmethod
+    def _row_key(rows: list[dict], idx: int) -> tuple | None:
+        """(owning target, pr_id) — a shared dep appears once per target."""
+        if not (0 <= idx < len(rows)):
+            return None
+        owner = None
+        for r in rows[:idx + 1]:
+            if r["kind"] in ("target", "run"):
+                owner = r["pr_id"]
+        return (owner, rows[idx]["pr_id"])
+
+    def action_refresh_runs(self) -> None:
+        from pm_core.tui import auto_start as _auto_start
+        from pm_core.autostart_state import status_rows
+        try:
+            self._status = _auto_start.build_status(self.app)
+        except Exception as e:  # never let a refresh tick kill the popup
+            # Text, not markup: the exception text may contain brackets.
+            from rich.text import Text
+            self.query_one("#runs-body", Static).update(
+                Text(f"status failed: {e}", style="red"))
+            return
+        self._rows = status_rows(self._status)
+        # Keep the same run selected across refreshes when it still exists.
+        if self._selected_key is not None:
+            for i in range(len(self._rows)):
+                if self._row_key(self._rows, i) == self._selected_key:
+                    self._selected = i
+                    break
+        self._selected = max(0, min(self._selected, len(self._rows) - 1))
+        self._selected_key = self._row_key(self._rows, self._selected)
+        self._render_rows()
+
+    def _render_rows(self) -> None:
+        from rich.text import Text
+        from pm_core.autostart_state import POLICY_STOP
+        st = self._status
+        mode = st.get("mode", "off")
+        title = "Auto-start runs"
+        if mode == "targets":
+            title += f" — {len(st.get('targets') or [])} target(s)"
+        elif mode == "all":
+            title += " — all ready PRs (backlog mode)"
+        if st.get("run_id"):
+            title += f"  [dim]{st['run_id']}[/]"
+        self.query_one("#runs-title", Label).update(title)
+
+        body = Text()
+        body_widget = self.query_one("#runs-body", Static)
+        row_texts: list[tuple[Text, Text]] = []
+        if mode == "off" or not self._rows:
+            if mode == "off":
+                body.append("No auto-start targets (auto-start off).\n", style="bold")
+            else:
+                body.append("No active runs.\n", style="bold")
+            body.append("Add a target with O (stop before merge) or A on a PR,\n"
+                        "or `pm autostart add PR_ID`.", style="dim")
+            body_widget.update(body)
+            return
+        for i, row in enumerate(self._rows):
+            r = row["run"]
+            sel = i == self._selected
+            indent = "  " * row["depth"]
+            prefix = "▶ " if sel else "  "
+            line = Text(prefix + indent, style="reverse" if sel else "")
+            if row["kind"] == "target":
+                line.append("◎ ", style="bold yellow")
+            elif row["kind"] == "dep":
+                line.append("└ ", style="dim")
+            line.append(str(r.get("display_id") or r["pr_id"]), style="bold")
+            if r.get("display_id") and r.get("display_id") != r["pr_id"]:
+                line.append(f" {r['pr_id']}", style="dim")
+            if r.get("policy") == POLICY_STOP:
+                line.append(" [stop-before-merge]", style="magenta")
+            elif row["kind"] == "target":
+                # Target headers always name their policy (R14); a dep's
+                # merge follows its targets, so only a stop mark is shown.
+                line.append(" [auto-merge]", style="green")
+            state = r.get("state") or "?"
+            line.append(f"  {state.upper()}",
+                        style=self._STATE_STYLES.get(state, ""))
+            line.append(f"  {r.get('phase') or ''}", style="bold cyan")
+            if row.get("progress"):
+                line.append(f"  {row['progress']}")
+            win = r.get("window")
+            if win:
+                line.append(f"  ⧉ {win['name']}", style="blue")
+            body.append_text(line)
+            body.append("\n")
+            detail = Text("    " + indent)
+            detail.append((r.get("title") or "")[:60], style="italic")
+            if r.get("reason"):
+                detail.append(f" — {r['reason']}", style="dim")
+            if row.get("also"):
+                detail.append(f" (also needed by {', '.join(row['also'])})",
+                              style="dim yellow")
+            if sel and self._notice and self._notice[0] == self._selected_key:
+                if r.get("window"):
+                    # A refresh found a window since: the notice is stale.
+                    self._notice = None
+                else:
+                    detail.append(f"  ⚠ {self._notice[1]}", style="bold red")
+            body.append_text(detail)
+            body.append("\n")
+            row_texts.append((line, detail))
+        body_widget.update(body)
+        # After the refresh: the body's width and the container's scrollable
+        # height are only known once the new content has been laid out.
+        self.call_after_refresh(self._scroll_selected_into_view, row_texts,
+                                self._selected)
+
+    def _scroll_selected_into_view(self, row_texts: list[tuple], selected: int
+                                   ) -> None:
+        """Scroll the container so row *selected* (two Texts, either of
+        which may wrap) is visible."""
+        if not (0 <= selected < len(row_texts)):
+            return
+        body = self.query_one("#runs-body", Static)
+        width = body.content_region.width
+        if width <= 0:
+            return
+
+        def height(t) -> int:
+            return len(t.wrap(self.app.console, width))
+
+        top = body.virtual_region.y + sum(
+            height(a) + height(b) for a, b in row_texts[:selected])
+        h = sum(height(t) for t in row_texts[selected])
+        if selected == 0:  # keep the title in view at the top
+            top, h = 0, top + h
+        self.query_one("#runs-container", VerticalScroll).scroll_to_region(
+            Region(0, top, 1, h), animate=False, immediate=True)
+
+    def action_move(self, delta: int) -> None:
+        if not self._rows:
+            return
+        self._selected = max(0, min(len(self._rows) - 1, self._selected + delta))
+        self._selected_key = self._row_key(self._rows, self._selected)
+        self._notice = None
+        self._render_rows()
+
+    def action_focus_run(self) -> None:
+        if not (0 <= self._selected < len(self._rows)):
+            return
+        run = self._rows[self._selected]["run"]
+        win = run.get("window")
+        if not win:
+            msg = f"No live window for {run['pr_id']}"
+            self.app.log_message(msg)
+            # On a short terminal the popup covers the app's log line, so
+            # also show the notice on the selected row (always in view).
+            self._notice = (self._selected_key, msg)
+            self._render_rows()
+            return
+        session = getattr(self.app, "_session_name", None)
+        self.action_close()
+        if session:
+            from pm_core import tmux as tmux_mod
+            tmux_mod.select_window(session, win["id"])
+
+    def action_restart_app(self) -> None:
+        self.action_close()
+        self.app.action_restart()
+
+    def action_close(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.app.pop_screen()
