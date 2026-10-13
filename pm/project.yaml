@@ -25893,6 +25893,41 @@ prs:
       3 queued-dequeue clone refusal all held. Captures: scenarios/1/{story1,pre-fix,post-fix}.'
     created_at: '2026-10-13T06:50:34Z'
     last_edited: '2026-10-13T06:50:34Z'
+  - id: note-455012c
+    text: 'Supervisor finding before QA (2026-10-13): review i5 disclosed a pane-fallback
+      corner case as minor, but it is the original silent-coverage-loss bug and must
+      be fixed in this PR. Reproduced on the reviewed branch with the existing test
+      fixtures: text = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX; parse_qa_plan
+      gives [2,3,4]; qa_plan_problem(text, scenes, scenario_start=1) rejects, but
+      scenario_start=2 returns None (accepted as complete). When the latest assistant
+      text has no complete plan, _read_planner_plan can therefore combine an old template
+      START with a later truncated suffix on a later QA round and silently lose scenario
+      1. Include this exact case in QA and regression coverage (through _read_planner_plan
+      with missing/non-plan latest assistant text as well as the validator). A fresh
+      complete plan starting at the legitimate offset must still work. Do not waive
+      this as pr-8efa789: reading older assistant turns can remain separate, but an
+      unproven partial pane must not be accepted. Preserve the failed repro; fix through
+      the QA/review flow and ensure the code change is re-reviewed before sign-off.
+      Structural START/END provenance is a possible narrow solution; choose a robust
+      implementation rather than over-expanding scope.'
+    created_at: '2026-10-13T06:17:23Z'
+    last_edited: '2026-10-13T06:17:23Z'
+  - id: note-111b7bb
+    text: 'Supervised QA round1 intake audit (2026-10-13): host controller is still
+      6cfd047e and silently consumed only original planner scenarios3&4, renumbered
+      actuals1&2. Planned4/launched2 evidence: captures/pr-b8561ac/shepherd-20261013/qa-round-1-partial-intake.json
+      and qa-round-1-planned-plan.txt. This round can provide genuine publication/pinning
+      and planner-app-edit/review evidence, but it DID NOT execute original extraction
+      scenarios1&2 (qa.md R1-R7). Do not count it as full PR QA or allow fresh signoff
+      yet. R4 suffix/offset bug in note-455012c remains a blocking in-PR fix. Any
+      new review should fix that as well as reviewing actual QA app fixes; then later
+      genuine QA must exercise R1-R7 and carry valid verified evidence for R8-R11.
+      The next planner must emit ONLY a tiny final index: max10 lines total (four
+      SCENARIO/STEPS pairs+START/END), no extra commentary; all detailed instructions/artifacts
+      go in committed/pushed qa.md. This is a supervised workaround until host adopts
+      this PR; never call unattended qualification complete.'
+    created_at: '2026-10-13T06:38:08Z'
+    last_edited: '2026-10-13T06:38:08Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -27340,6 +27375,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T06:08:05.900366+00:00'
   updated_at: '2026-10-13T06:08:05.900366+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7b085a9
+  plan: bugs
+  title: 'Bug: permission-wait state remains stale after Claude resumes work'
+  branch: pm/pr-7b085a9-bug-permission-wait-state-remains-stale-after-clau
+  status: pending
+  depends_on: []
+  description: 'Observed during the supervised parallel #230/#232 runs on 2026-10-13,
+    controller 6cfd047e (#229), session pm-project_manager-c5a1006b. Claude Code emitted
+    a tool permission prompt, automatically denied the unsafe compound command, and
+    the agent rewrote it and continued working. For several minutes pm autostart status
+    --json still reported state=waiting, reason="permission prompt in implementation
+    window" even though the pane showed fresh tools/results and no approval dialog.
+    Seen on pr-488ac6d and pr-b53bfe2 at 05:55-05:57Z. This misrepresents forward
+    progress and can mislead supervisors. pane_idle.PaneIdleTracker currently sets
+    waiting_for_input on permission_prompt and only clears it on idle_prompt or an
+    explicit reset; investigate reliable resumed-activity signals (approval, denial/timeout,
+    cancellation, next tool start) without mistaking real unresolved prompts for active
+    work. Add a regression that emits permission_prompt then resumes actual work without
+    ending the turn, and verify TUI/CLI status returns to running. Preserve the distinct
+    idle vs blocked semantics and avoid broad blind prompt acceptance. Evidence: captures/overnight-20261013/native-approval-stale-state.json.
+    Backlog follow-up only; do not add to the three active prerequisite targets.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T05:59:42.051758+00:00'
+  updated_at: '2026-10-13T05:59:42.051758+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
