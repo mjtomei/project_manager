@@ -26417,7 +26417,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-14T16:49:53.800129+00:00'
+  updated_at: '2026-10-14T16:58:05.460133+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26689,6 +26689,26 @@ prs:
       signoff required at resulting head.'
     created_at: '2026-10-14T16:49:53Z'
     last_edited: '2026-10-14T16:49:53Z'
+  - id: note-79328f2
+    text: 'Integration sign-off on 3c369a0f (2026-10-14) -> SIGNOFF_REVIEW. The merge
+      resolution itself is correct: the #230 trust-blocked early return sits before
+      the #231 final gated read; the qa_loop.py combined delta equals #230 exactly
+      except for one redundant import that was dropped; project.yaml is a clean union;
+      the TestLaunchClaude prepare_workspace fixture is test-only. The integration
+      did create a semantic regression, though. #230 4c3fb81c bounds parse_qa_plan
+      by the last QA_PLAN_START *substring*. A scenario whose text mentions the marker
+      cut off the earlier scenarios, and #231 qa_plan_problem then rejected the complete
+      transcript plan, so QA stalls. This PR own real round-1 plan (shepherd-20261013/qa-round-1-planned-plan.txt)
+      parses [3,4] and is rejected at 3c369a0f; 1ca6b657 gives [1..4]; master bdbff78b
+      silently consumes [3,4]. Fixed in 005856d9 (sign-off): only whole-line marker
+      lines count (_marker_line_offsets), with a failing-then-passing regression test.
+      Full suite 3172 passed (PATH=/usr/bin first; tests/test_local_merge_sync.py
+      fails 7/8 under the ~/.local/bin git proxy identically on master). Needs re-review
+      of 005856d9, plus a focused re-QA: complete transcript plan whose scenario text
+      mentions QA_PLAN_START is accepted with all scenarios; the template-suffix/offset
+      rejections and the qa.md SCENARIO 1 echo case still hold. Evidence: /pm-captures/merge-20261014/signoff/.'
+    created_at: '2026-10-14T16:58:05Z'
+    last_edited: '2026-10-14T16:58:05Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
