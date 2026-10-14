@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-13T23:41:40.663200+00:00'
+  updated_at: '2026-10-14T00:12:10.208791+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3831,6 +3831,22 @@ prs:
       appender.'
     created_at: '2026-10-13T23:41:40Z'
     last_edited: '2026-10-13T23:41:40Z'
+  - id: note-a198211
+    text: 'QA S12 round 6 (host trust H1-H7, supervised; worker accepted no outer
+      trust prompt by hand; NO app edits; captures /pm-captures/scenarios/12, REPORT.md)
+      on 17d4f39a: every H Then held live with real claude 2.1.296 + TRUST_SCREEN
+      stand-in. First post-review live tests passed: H2.5 guide 911e75b7+24796646
+      (unapproved root: dialog on No 65s, no keys/entry, log "workspace trust: <root>
+      not approved"; after pm trust add the guide bootstraps the root before Claude
+      draws, 0 dialog frames; fake guide writes no entry and logs no trust line) and
+      H7.6 211cfb95 (one red line per TUI process, @pm_trust_reported_by = TUI pid,
+      no Enter after restart). H5 10/10, H6a INPUT_REQUIRED 34s vs 1h pre-fix, H7.2
+      orphan accept 5s after pm session. Known/recorded only: pr-629c47e (c pane,
+      same scope), pr-c9e69fb (H7.1), pr-dc4dd45, pr-f2f9ef8. Full suite 3090 pass
+      + known test_hook_events env failure. scenarios/1-11 untouched except the known
+      external scenarios/8/panes/pm-home.22.log append.'
+    created_at: '2026-10-14T00:12:10Z'
+    last_edited: '2026-10-14T00:12:10Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
