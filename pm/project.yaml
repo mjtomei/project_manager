@@ -3869,6 +3869,17 @@ prs:
       is supervised, not qualification.'
     created_at: '2026-10-14T14:08:29Z'
     last_edited: '2026-10-14T14:08:29Z'
+  - id: note-5dbc9a2
+    text: 'QA planning round 7 (8d4f8c11, pushed; supervised; no app edits): qa.md
+      maps only SCENARIO 15 = workflow/container W1-W6 in full. S12 host and S14 local
+      merge carried forward as PASS+VERIFIED on 17d4f39a (head changes no app code).
+      S13 recorded as no coverage (pr-2111fa0 PID exhaustion). New Harness note "Process
+      hygiene (round 7, do this first)": bounded pollers, no per-iteration process
+      substitution/background children, record zombie/pids counts per W story, end
+      with a concrete finding before the cap. New Fail item for harness exhaustion.
+      Captures only under scenarios/15; scenarios/1-14 untouched. Planned=launched=1.'
+    created_at: '2026-10-14T14:10:20Z'
+    last_edited: '2026-10-14T14:10:20Z'
   - id: note-2f28a96
     text: 'QA S15 round 7 (workflow/container W1-W6, supervised; no outer trust prompt
       accepted by hand; NO app edits) on 8d4f8c11, real claude 2.1.299: every W Then
