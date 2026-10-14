@@ -939,8 +939,33 @@ def create_container(
 
     # Copy .claude.json into the container (not bind-mounted — see note above)
     if _claude_json_src.exists():
+        # Seed workspace trust for the container's workdir when the mounted
+        # host workdir is pm-created or explicitly authorized; otherwise
+        # copy the config verbatim and leave the prompt explicit.  The host
+        # file is never modified for the container-internal path.
+        _cfg_copy_src = _claude_json_src
+        _seeded_tmp: Path | None = None
         try:
-            _run_runtime("cp", str(_claude_json_src),
+            from pm_core import workspace_trust
+            if workspace_trust.approved_path(workdir):
+                import tempfile
+                fd, _tmp = tempfile.mkstemp(prefix="pm-claude-json-")
+                os.close(fd)
+                _seeded_tmp = Path(_tmp)
+                if workspace_trust.get_trust_runtime().seed_config(
+                        _claude_json_src, _seeded_tmp, [_CONTAINER_WORKDIR]):
+                    _cfg_copy_src = _seeded_tmp
+                    _log.info("workspace trust: seeded %s trust for "
+                              "container %s (host workdir %s)",
+                              _CONTAINER_WORKDIR, name, workdir)
+            else:
+                _log.info("workspace trust: %s not approved; container %s "
+                          "keeps the explicit trust prompt", workdir, name)
+        except Exception:
+            _log.warning("workspace trust: could not seed config for "
+                         "container %s", name, exc_info=True)
+        try:
+            _run_runtime("cp", str(_cfg_copy_src),
                         f"{name}:{_CONTAINER_HOME}/.claude.json",
                         timeout=10)
             # Under Docker (root), fix ownership so the pm user can read it.
@@ -955,6 +980,9 @@ def create_container(
         except Exception:
             _log.warning("Failed to copy .claude.json into container %s",
                          name, exc_info=True)
+        finally:
+            if _seeded_tmp is not None:
+                _seeded_tmp.unlink(missing_ok=True)
 
     _log.info("Created container %s (id=%s)", name, container_id[:12])
     return container_id

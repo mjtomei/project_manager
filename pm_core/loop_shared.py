@@ -114,6 +114,7 @@ def poll_for_verdict(
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
+    workdir: str | None = None,
 ) -> str | None:
     """Block until Claude signals idle, then extract a verdict from the
     JSONL transcript.
@@ -127,11 +128,18 @@ def poll_for_verdict(
 
     Hook-driven only — requires *transcript_path* so we can recover the
     Claude ``session_id`` via the symlink target and read the assistant
-    output from the JSONL.  No pane-capture fallback.
+    output from the JSONL.  No pane-capture fallback for verdicts; the
+    pane is only captured, until the first idle event, to catch a session
+    stuck at the workspace-trust prompt (*workdir* is the host workdir the
+    session was launched for).  Raises
+    :class:`~pm_core.claude_launcher.WorkspaceTrustBlocked` when it stays
+    there past the grace period.
     """
     from pm_core import tmux as tmux_mod
     from pm_core import hook_events
-    from pm_core.claude_launcher import session_id_from_transcript
+    from pm_core.claude_launcher import (
+        WorkspacePromptWatch, WorkspaceTrustBlocked, session_id_from_transcript,
+    )
     from pm_core.verdict_transcript import (
         extract_verdict_from_transcript,
         read_latest_assistant_text,
@@ -151,6 +159,8 @@ def poll_for_verdict(
 
     poll_start = time.monotonic()
     hook_baseline = time.time()
+    trust_watch: WorkspacePromptWatch | None = WorkspacePromptWatch(
+        pane_id, workdir, transcript_path=transcript_path)
 
     while True:
         if stop_check and stop_check():
@@ -159,6 +169,12 @@ def poll_for_verdict(
         if not tmux_mod.pane_exists(pane_id):
             _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
             return None
+
+        if trust_watch is not None:
+            blocked = trust_watch.check()
+            if blocked:
+                _log.warning("%s: %s", log_prefix, blocked)
+                raise WorkspaceTrustBlocked(blocked)
 
         # Stop fires every turn, not only at session exit — listening to
         # it caused false "session gone" returns.  pane_exists is the
@@ -175,6 +191,8 @@ def poll_for_verdict(
         if ev is None:
             continue
 
+        # An idle turn means the session is past any startup dialog.
+        trust_watch = None
         hook_baseline = float(ev.get("timestamp") or hook_baseline)
         if grace_period > 0 and (time.monotonic() - poll_start) < grace_period:
             continue

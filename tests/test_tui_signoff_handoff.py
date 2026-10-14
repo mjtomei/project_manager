@@ -589,7 +589,7 @@ def test_dead_window_relaunch_is_throttled(world_factory):
     assert len(w.launches()) == 2
 
 
-def test_throttled_polls_do_not_log_a_launch(world_factory, caplog):
+def test_throttled_polls_do_not_log_a_launch(world_factory, caplog, monkeypatch):
     """The L log names a launch only when one happens: a poll skipped by the
     relaunch backoff used to log "launching router" every 5 s (QA s5 B4/B6)."""
     import logging
@@ -599,6 +599,9 @@ def test_throttled_polls_do_not_log_a_launch(world_factory, caplog):
         w.commands.append(cmd)
 
     caplog.set_level(logging.INFO, logger="pm.tui.signoff_ui")
+    # PM's configured loggers normally write only to their own file handler.
+    # Let this test's records reach pytest's root capture handler as well.
+    monkeypatch.setattr(logging.getLogger("pm.tui.signoff_ui"), "propagate", True)
     with patch("pm_core.tui.pr_view.run_command", no_window):
         _qa_pass(app)
         _poll(app, 6)

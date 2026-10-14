@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -38,7 +39,9 @@ from pm_core.loop_shared import (
 from pm_core.verdict_transcript import (
     extract_verdict_from_transcript,
     extract_verdict_reason_from_transcript,
+    read_latest_assistant_text,
 )
+from pm_core.claude_launcher import WorkspaceTrustBlocked
 
 _log = configure_logger("pm.qa_loop")
 
@@ -109,19 +112,32 @@ def _is_verification_enabled() -> bool:
     return True
 
 
+# Claude Code renders the first line of each assistant text block with a
+# display bullet, so a planner message that opens with the marker shows
+# "● QA_PLAN_START" (or "⏺ ...") in the pane.  The bullet is display-only
+# (the JSONL transcript has the bare marker).
+_DISPLAY_BULLET_RE = re.compile(r'^\s*[●⏺]\s*')
+
+
+def _marker_line_text(line: str) -> str:
+    """*line* as compared against a whole-line marker: a leading display
+    bullet, markdown emphasis and surrounding whitespace removed."""
+    return re.sub(r'[*`]', '', _DISPLAY_BULLET_RE.sub('', line)).strip()
+
+
 def _tail_has_marker_on_own_line(content: str, marker: str,
                                  tail_lines: int = VERDICT_TAIL_LINES) -> bool:
     """Check if *marker* appears as the entire content of a line in the tail.
 
     Same whole-line matching strategy as the review loop's
     ``match_verdict()`` — the marker must be the full line (after
-    stripping whitespace and markdown formatting), not a substring.
+    stripping whitespace, markdown formatting and a display bullet), not a
+    substring.
     """
     lines = content.strip().splitlines()
     tail = lines[-tail_lines:] if len(lines) > tail_lines else lines
     for line in tail:
-        cleaned = re.sub(r'[*`]', '', line).strip()
-        if cleaned == marker:
+        if _marker_line_text(line) == marker:
             return True
     return False
 
@@ -194,6 +210,13 @@ class QALoopState:
     verified_scenarios: set[int] = field(default_factory=set)
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
+    # PR-branch commit the planner handed off (published before fan-out);
+    # every scenario clone must start at exactly this revision.
+    planner_head: str | None = None
+    # Application-code paths (outside pm/) the planner changed while
+    # planning.  Non-empty forces the overall verdict to NEEDS_WORK so the
+    # change gets reviewed before sign-off.
+    planner_code_changes: list[str] = field(default_factory=list)
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
@@ -241,7 +264,9 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             repo_root: Path | None = None,
                             pr_id: str = "",
                             loop_id: str = "",
-                            branch: str = "") -> tuple[Path, Path]:
+                            branch: str = "",
+                            expected_head: str | None = None,
+                            ) -> tuple[Path, Path]:
     """Create an isolated working area for one QA scenario.
 
     Everything for a single scenario lives under one directory::
@@ -252,6 +277,11 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
 
     The clone checks out *branch* (the PR branch) so the scenario can
     commit and push fixes directly.
+
+    When *expected_head* is given (the planner head published by
+    :func:`_publish_planner_head`), the clone must be at exactly that
+    commit; otherwise a ``RuntimeError`` is raised rather than letting the
+    worker silently test a different tree.
 
     Falls back to a plain empty directory when *repo_root* is None (legacy).
 
@@ -298,7 +328,201 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
         git_ops.run_git("-C", str(clone_path), "remote", "set-url",
                         "origin", real_url)
 
+    if expected_head:
+        actual = git_ops.run_git(
+            "-C", str(clone_path), "rev-parse", "HEAD").stdout.strip()
+        if actual != expected_head:
+            raise RuntimeError(
+                f"scenario {scenario_index} clone of {branch or 'HEAD'} is at "
+                f"{actual[:12]} but the published planner head is "
+                f"{expected_head[:12]} — refusing to test a different tree")
+
     return clone_path, scratch
+
+
+class PlannerHandoffError(RuntimeError):
+    """The planner's committed head cannot be handed to scenario workers."""
+
+
+def _git_capture(workdir: str | Path, *args: str,
+                 timeout: float = 120) -> subprocess.CompletedProcess:
+    """Run git in *workdir* without raising; network ops get a timeout."""
+    try:
+        return subprocess.run(["git", *args], cwd=str(workdir),
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            exc.cmd, 124, "", f"timed out after {timeout:.0f}s")
+
+
+def _rev_parse(workdir: str | Path, ref: str) -> str | None:
+    r = _git_capture(workdir, "rev-parse", "--verify", "--quiet",
+                     f"{ref}^{{commit}}")
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def _remote_branch_sha(workdir: str | Path, url: str, branch: str) -> str | None:
+    """Return the sha of *branch* at *url* (``None`` if absent)."""
+    r = _git_capture(workdir, "ls-remote", url, f"refs/heads/{branch}")
+    if r.returncode != 0:
+        raise PlannerHandoffError(
+            f"could not query {url} for {branch}: "
+            f"{(r.stderr or r.stdout).strip()}")
+    for line in r.stdout.splitlines():
+        sha, _, ref = line.partition("\t")
+        if ref.strip() == f"refs/heads/{branch}":
+            return sha.strip()
+    return None
+
+
+def _publish_planner_head(workdir_path: str, branch: str) -> str:
+    """Make sure the planner's committed PR head is on the real upstream.
+
+    Scenario workdirs are ``git clone --local`` copies of the PR workdir
+    whose ``origin`` is then swapped to the real upstream.  If the planner
+    committed (fixes, QA specs, instructions) without pushing, the clone
+    starts at the unpublished head, and a worker's later ``git pull
+    --rebase origin <branch>`` treats it as the old upstream fork point and
+    drops those commits — the worker silently tests a different tree.
+
+    Fast-forward pushes the PR branch when the upstream lags (never
+    forces) and verifies the upstream now matches.  Returns the head sha
+    every scenario clone must start at.  Raises
+    :class:`PlannerHandoffError` when the upstream has diverged, the push
+    fails, or verification does not match.  Local-only repos (no real
+    upstream) need no publishing: clones track the PR workdir directly.
+    """
+    head = _rev_parse(workdir_path, f"refs/heads/{branch}")
+    if not head:
+        raise PlannerHandoffError(
+            f"PR branch {branch} not found in workdir {workdir_path}")
+
+    dirty = _git_capture(workdir_path, "status", "--porcelain",
+                         "--untracked-files=no")
+    if dirty.returncode == 0 and dirty.stdout.strip():
+        _log.warning("planner handoff: %s has uncommitted tracked changes; "
+                     "only committed work reaches scenario workers",
+                     workdir_path)
+
+    from pm_core.push_proxy import resolve_real_origin
+    real_url = resolve_real_origin(workdir_path)
+    if not real_url:
+        return head
+
+    remote = _remote_branch_sha(workdir_path, real_url, branch)
+    if remote == head:
+        return head
+    if remote:
+        # An upstream commit that is an ancestor of head is necessarily in
+        # the local object store; absence means it cannot be an ancestor.
+        known = _git_capture(workdir_path, "cat-file", "-e",
+                             f"{remote}^{{commit}}").returncode == 0
+        if not known:
+            # Someone else pushed and the PR workdir never fetched.  Fetch
+            # the objects (FETCH_HEAD only, no local ref moves) so a
+            # workdir that is merely behind isn't reported as diverged.
+            _git_capture(workdir_path, "fetch", "--quiet", real_url,
+                         f"refs/heads/{branch}")
+            known = _git_capture(workdir_path, "cat-file", "-e",
+                                 f"{remote}^{{commit}}").returncode == 0
+        if not known or _git_capture(
+                workdir_path, "merge-base", "--is-ancestor",
+                remote, head).returncode != 0:
+            # Behind (e.g. an earlier QA worker pushed a fix the PR workdir
+            # never pulled) needs only a pull; diverged needs reconciling.
+            behind = known and _git_capture(
+                workdir_path, "merge-base", "--is-ancestor",
+                head, remote).returncode == 0
+            if behind:
+                problem, action = "is behind", "Pull the PR branch in the PR workdir"
+            else:
+                problem, action = ("diverged from",
+                                   "Reconcile the PR workdir with the "
+                                   "upstream (pull, then push)")
+            raise PlannerHandoffError(
+                f"PR branch {branch} {problem} upstream: planner head "
+                f"{head[:12]} in {workdir_path} does not contain {real_url} "
+                f"{branch} at {remote[:12]}. {action} and restart QA — "
+                f"scenarios were not launched so none tested a different "
+                f"tree.")
+
+    _log.info("planner handoff: publishing %s %s -> %s (upstream was %s)",
+              branch, head[:12], real_url, (remote or "absent")[:12])
+    # The PR workdir's origin may push to several URLs (local source +
+    # upstream); what matters is that the upstream now has the head.
+    refspec = f"refs/heads/{branch}:refs/heads/{branch}"
+    push = _git_capture(workdir_path, "push", "origin", refspec)
+    published = _remote_branch_sha(workdir_path, real_url, branch)
+    if published != head:
+        # origin may not push to the upstream at all — e.g. a workdir whose
+        # origin is the local main repo, which in turn tracks the upstream
+        # (resolve_real_origin walks that chain).  Scenario clones pull from
+        # the upstream, so push there directly (still fast-forward only).
+        _log.info("planner handoff: origin push left %s at %s; pushing to "
+                  "%s directly", branch, (published or "absent")[:12],
+                  real_url)
+        push = _git_capture(workdir_path, "push", real_url, refspec)
+        published = _remote_branch_sha(workdir_path, real_url, branch)
+    if published != head:
+        detail = (push.stderr or push.stdout).strip()
+        raise PlannerHandoffError(
+            f"could not publish planner head {head[:12]} of {branch} to "
+            f"{real_url} (upstream is {(published or 'absent')[:12]})"
+            + (f": {detail}" if detail else ""))
+    if push.returncode != 0:
+        _log.warning("planner handoff: push exited %d but %s has %s: %s",
+                     push.returncode, real_url, head[:12],
+                     (push.stderr or "").strip())
+    return head
+
+
+def _planner_code_changes(workdir_path: str, before: str | None,
+                          after: str | None) -> list[str]:
+    """Application-code paths changed between *before* and *after*.
+
+    Paths under ``pm/`` (specs, QA instructions, project.yaml) are pm
+    metadata the planner is expected to write; anything else is
+    application code that needs review before sign-off.
+    """
+    if not before or not after or before == after:
+        return []
+    r = _git_capture(workdir_path, "diff", "--name-only", before, after)
+    if r.returncode != 0:
+        _log.warning("planner handoff: could not diff %s..%s: %s",
+                     before[:12], after[:12], r.stderr.strip())
+        return []
+    return sorted(p for p in r.stdout.splitlines()
+                  if p and not p.startswith("pm/"))
+
+
+def qa_outcome_detail(state: QALoopState) -> str:
+    """Per-scenario verdict summary, or why no scenario ran.
+
+    When no scenario ran (an incomplete plan that was not consumed, or a
+    failed handoff after a parsed plan) the reason lives in
+    ``state._error``; without it the completion line and the QA note would
+    end in an empty or all-"?" summary.
+    """
+    if state._error and not any(s.index in state.scenario_verdicts
+                                for s in state.scenarios):
+        return " ".join(state._error.split())
+    parts = [f"{s.title}: {state.scenario_verdicts.get(s.index, '?')}"
+             for s in state.scenarios]
+    return "; ".join(parts)
+
+
+def planner_code_changes_suffix(state: QALoopState) -> str:
+    """Summary suffix explaining a planner-forced NEEDS_WORK (or ``""``)."""
+    if not state.planner_code_changes:
+        return ""
+    shown = ", ".join(state.planner_code_changes[:5])
+    more = len(state.planner_code_changes) - 5
+    if more > 0:
+        shown += f" (+{more} more)"
+    return (f" — planner edited application code ({shown}); "
+            "review required before sign-off")
 
 
 def _setup_clone_override(clone_path: Path) -> None:
@@ -488,7 +712,11 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
             grace_period=_VERDICT_GRACE_PERIOD,
             stop_check=stop_check,
             log_prefix="qa-finalize",
+            workdir=workdir_path,
         )
+    except WorkspaceTrustBlocked as e:
+        _log.warning("QA finalize: %s", e)
+        return None
     except Exception:
         _log.warning("QA finalize: polling failed", exc_info=True)
         return None
@@ -651,6 +879,8 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
             str(k): v for k, v in state.scenario_verdict_reasons.items()
         },
         "verified_scenarios": sorted(state.verified_scenarios),
+        "planner_head": state.planner_head,
+        "planner_code_changes": list(state.planner_code_changes),
         "queued_indices": sorted(queued_indices or set()),
         "scenarios": [_scenario_to_resume_dict(s) for s in state.scenarios],
         "scenario_0": (
@@ -759,12 +989,176 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     }
     state.verified_scenarios = set(resume_data.get("verified_scenarios") or [])
     state.finalize_verdict = resume_data.get("finalize_verdict")
+    state.planner_head = resume_data.get("planner_head")
+    state.planner_code_changes = list(
+        resume_data.get("planner_code_changes") or [])
     return state
 
 
 # ---------------------------------------------------------------------------
 # Plan parsing
 # ---------------------------------------------------------------------------
+
+_PLACEHOLDER_TITLES = {"Scenario Title", "..."}
+
+
+def _is_placeholder_title(title: str) -> bool:
+    """True for the prompt template's example scenario titles.
+
+    Template placeholders are a whole ``<multi word phrase>`` (e.g.
+    ``<descriptive title for this scenario>``), or its unclosed start when
+    a narrow pane wrapped the line (``<descriptive title for``, or just
+    ``<descriptive``); a real title that merely starts with ``<``
+    (``<Enter> key submits``) is not one.
+    """
+    return (title in _PLACEHOLDER_TITLES
+            or re.fullmatch(r'<[^<>]*\s[^<>]*>?', title) is not None
+            or re.fullmatch(r'<[^<>\s]+', title) is not None)
+
+
+def _marker_line_offsets(text: str, marker: str) -> list[int]:
+    """Offsets of lines whose whole content (minus markdown and a display
+    bullet) is *marker*."""
+    offsets: list[int] = []
+    pos = 0
+    for line in text.splitlines(keepends=True):
+        if _marker_line_text(line) == marker:
+            offsets.append(pos)
+        pos += len(line)
+    return offsets
+
+
+def qa_plan_problem(text: str, scenarios: list[QAScenario],
+                    scenario_start: int = 1,
+                    start_may_be_stale: bool = True) -> str | None:
+    """Return why *scenarios* (parsed from *text*) is not a complete plan.
+
+    ``parse_qa_plan`` is deliberately lenient — it happily parses a
+    truncated capture that still holds a valid suffix of scenario headers
+    (SCENARIO 2..4), silently dropping the leading ones.  Before the
+    driver consumes a plan it must be whole:
+
+    * a ``QA_PLAN_START`` line opens the block the last ``QA_PLAN_END``
+      closes — no other ``QA_PLAN_END`` between them, and no prompt-template
+      example headers inside.  Otherwise the START belongs to an earlier
+      block (typically the echoed prompt template) and only a truncated
+      suffix of this plan survived;
+    * the ``SCENARIO N:`` headers inside that block are exactly the parsed
+      scenarios, in order (a header ``parse_qa_plan`` skipped, e.g. one
+      with no title, is a dropped scenario);
+    * numbering is contiguous and starts at 1 or *scenario_start* (the
+      driver renumbers a plan that started at 1).
+
+    Numbering alone can't prove completeness: on a later round a
+    truncated SCENARIO 2..4 suffix is indistinguishable from a whole plan
+    numbered from ``scenario_start=2``, so START/END provenance decides.
+    For the same reason a plan numbered from a later offset must have
+    nothing but blank lines between its START and first header, unless
+    *start_may_be_stale* is False (transcript text: every START in the
+    planner's latest turn is its own, so prose there is harmless).
+
+    Returns ``None`` when the plan is complete.
+    """
+    if not scenarios:
+        return "no non-placeholder scenarios parsed"
+    ends = _marker_line_offsets(text, "QA_PLAN_END")
+    if not ends:
+        return "no QA_PLAN_END line"
+    end = ends[-1]
+    starts = [o for o in _marker_line_offsets(text, "QA_PLAN_START") if o < end]
+    if not starts:
+        return "no QA_PLAN_START line before QA_PLAN_END (plan truncated)"
+    start = starts[-1]
+    if any(start < o < end for o in ends):
+        return ("QA_PLAN_START belongs to an earlier, already-closed block "
+                "(plan truncated)")
+    body = text[start:end]
+    headers: list[int] = []
+    first_header_pos = None
+    # Single-line headers only: an untitled header must not borrow the
+    # next line as its title.
+    for m in re.finditer(r'^[ \t]*SCENARIO[ \t]+(\d+)[:.][ \t]*(.*)$',
+                         body, re.MULTILINE):
+        if _is_placeholder_title(m.group(2).strip()):
+            return ("plan block holds prompt-template example headers "
+                    "(QA_PLAN_START is from the echoed prompt; plan truncated)")
+        if first_header_pos is None:
+            first_header_pos = m.start()
+        headers.append(int(m.group(1)))
+    parsed = [s.index for s in scenarios]
+    if headers != parsed:
+        return (f"parsed scenarios {parsed} differ from the plan block's "
+                f"headers {headers}")
+    first = headers[0]
+    if first not in (1, scenario_start):
+        return (f"plan starts at SCENARIO {first}, expected 1 or "
+                f"{scenario_start} (leading scenarios missing)")
+    # A plan numbered from a later offset can't show by its numbering that
+    # nothing was lost, so its START must directly precede the first
+    # header.  Other text in between means the START survived from an
+    # earlier block (e.g. the echoed template, its headers and END redrawn
+    # away) and only a suffix of this plan is left.
+    between = body[body.find("\n") + 1:first_header_pos]
+    if (start_may_be_stale and first != 1
+            and re.sub(r'[*`\s]', '', between)):
+        return (f"text between QA_PLAN_START and SCENARIO {first} — the "
+                "START is from an earlier block (plan truncated)")
+    if headers != list(range(first, first + len(headers))):
+        return f"scenario numbers {headers} are not contiguous"
+    return None
+
+
+@dataclass
+class _PlannerPlan:
+    """Result of one attempt to read the planner's plan."""
+    text: str = ""
+    scenarios: list[QAScenario] = field(default_factory=list)
+    source: str = ""
+    problems: list[str] = field(default_factory=list)
+
+
+def _read_planner_plan(transcript_path: str | None,
+                       capture_pane: Callable[[], str] | None,
+                       pm_root: Path | None,
+                       scenario_start: int) -> _PlannerPlan:
+    """Read and validate the planner's plan, transcript first.
+
+    The planner's latest assistant turn in its JSONL transcript is the
+    authoritative source: tmux scrollback can hold only the tail of a long
+    plan (Claude Code redraws its final message), and the prompt template's
+    example markers never appear there because the prompt is a *user*
+    record.  *capture_pane* is a fallback for when the transcript yields no
+    complete plan (e.g. unreadable); pass ``None`` to skip it.  Both
+    sources go through :func:`qa_plan_problem`, so a truncated plan is
+    reported rather than accepted.
+    """
+    result = _PlannerPlan()
+    # The whole latest turn is the planner's own output, so QA_PLAN_END
+    # may sit anywhere in it.  In the pane only an END near the bottom is
+    # fresh output — an earlier one can be the echoed prompt template.
+    # Only the pane can hold a START left over from an earlier block.
+    sources: list[tuple[str, Callable[[], str], Callable[[str], bool],
+                        bool]] = [
+        ("transcript", lambda: read_latest_assistant_text(transcript_path),
+         lambda t: bool(_marker_line_offsets(t, "QA_PLAN_END")), False),
+    ]
+    if capture_pane is not None:
+        sources.append(("pane", capture_pane,
+                        lambda t: _tail_has_marker_on_own_line(t, "QA_PLAN_END"),
+                        True))
+    for name, read, has_end, start_may_be_stale in sources:
+        text = read() or ""
+        if not has_end(text):
+            continue
+        scenarios = parse_qa_plan(text, pm_root=pm_root)
+        problem = qa_plan_problem(text, scenarios, scenario_start,
+                                  start_may_be_stale=start_may_be_stale)
+        if problem is None:
+            result.text, result.scenarios, result.source = text, scenarios, name
+            return result
+        result.problems.append(f"{name}: {problem}")
+    return result
+
 
 def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
     """Parse planner output into a list of QAScenarios.
@@ -787,7 +1181,6 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
     is a relative path like ``instructions/foo.md`` (relative to ``pm/qa/``).
     """
     scenarios: list[QAScenario] = []
-    placeholder_titles = {"Scenario Title", "..."}
 
     # The prompt template also contains example markers, so we can't
     # rely on matching START/END pairs.  Instead, find the last
@@ -800,6 +1193,12 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
             r'^[ \t]*SCENARIO\s+1:', output[:end_pos], re.MULTILINE,
         ))
         start_pos = s1_matches[-1].start() if s1_matches else 0
+        # Never start before the last QA_PLAN_START ahead of that END: a
+        # plan numbered from 2 would otherwise reach back to an earlier
+        # "SCENARIO 1:" in the prompt (e.g. a committed qa.md spec).
+        start_m = list(re.finditer(r'QA_PLAN_START', output[:end_pos]))
+        if start_m:
+            start_pos = max(start_pos, start_m[-1].end())
         body = output[start_pos:end_pos]
     else:
         body = output
@@ -905,7 +1304,7 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
             steps = steps_m.group(1).strip()
 
         # Reject placeholder/example scenarios (e.g. from prompt template)
-        if title in placeholder_titles or title.startswith("<"):
+        if _is_placeholder_title(title):
             _log.warning("Skipping placeholder scenario %d: %r", index, title)
             continue
 
@@ -1248,6 +1647,16 @@ def _build_concretize_cmd(
     return claude_cmd
 
 
+_TRUST_BLOCKED_PREFIX = "blocked at workspace-trust prompt: "
+
+
+def _concretize_failure_label(reason: str) -> str:
+    """Verdict reason for a scenario whose concretizer did not produce steps."""
+    if reason.startswith(_TRUST_BLOCKED_PREFIX):
+        return reason
+    return f"refiner rejected: {reason}"
+
+
 def _concretize_scenario(
     scenario: QAScenario,
     pr_data: dict,
@@ -1275,12 +1684,16 @@ def _concretize_scenario(
               scenario.index, pane_id)
 
     transcript_path = str(transcript_path_for(scenario_cwd, session_id))
-    content = poll_for_verdict(
-        pane_id, transcript_path,
-        verdicts=_CONCRETIZE_VERDICTS,
-        grace_period=_CONCRETIZE_GRACE,
-        log_prefix=f"qa-concretize-{scenario.index}",
-    )
+    try:
+        content = poll_for_verdict(
+            pane_id, transcript_path,
+            verdicts=_CONCRETIZE_VERDICTS,
+            grace_period=_CONCRETIZE_GRACE,
+            log_prefix=f"qa-concretize-{scenario.index}",
+            workdir=scenario_cwd,
+        )
+    except WorkspaceTrustBlocked as e:
+        return None, _TRUST_BLOCKED_PREFIX + str(e)
 
     if not content:
         _log.warning("Concretization timed out or pane died for scenario %d",
@@ -1587,10 +2000,13 @@ def _launch_scenarios_in_tmux(
                 pr_id=state.pr_id,
                 loop_id=state.loop_id,
                 branch=branch,
+                expected_head=state.planner_head,
             )
-        except Exception:
-            _log.warning("Failed to create workdir for scenario %d, skipping",
-                         scenario.index)
+        except Exception as exc:
+            _log.warning("Failed to create workdir for scenario %d, "
+                         "skipping: %s", scenario.index, exc)
+            state.scenario_verdict_reasons[scenario.index] = (
+                f"workdir setup failed: {exc}")
             return
         scenario.worktree_path = str(clone_path)
 
@@ -1689,11 +2105,11 @@ def _launch_scenarios_in_tmux(
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
-                f"refiner rejected: {reject_reason}"
+                _concretize_failure_label(reject_reason)
             )
             state.latest_output = (
                 f"Scenario {scenario.index} ({scenario.title}): "
-                f"{VERDICT_INPUT_REQUIRED} — refiner rejected: {reject_reason}"
+                f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
             )
             _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
                       scenario.index, reject_reason)
@@ -1810,10 +2226,13 @@ def _launch_scenarios_in_containers(
                 pr_id=state.pr_id,
                 loop_id=state.loop_id,
                 branch=branch,
+                expected_head=state.planner_head,
             )
-        except Exception:
-            _log.warning("Failed to create workdir for scenario %d, skipping",
-                         scenario.index)
+        except Exception as exc:
+            _log.warning("Failed to create workdir for scenario %d, "
+                         "skipping: %s", scenario.index, exc)
+            state.scenario_verdict_reasons[scenario.index] = (
+                f"workdir setup failed: {exc}")
             return
         scenario.worktree_path = str(clone_path)
 
@@ -1928,11 +2347,11 @@ def _launch_scenarios_in_containers(
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
-                f"refiner rejected: {reject_reason}"
+                _concretize_failure_label(reject_reason)
             )
             state.latest_output = (
                 f"Scenario {scenario.index} ({scenario.title}): "
-                f"{VERDICT_INPUT_REQUIRED} — refiner rejected: {reject_reason}"
+                f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
             )
             _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
                       scenario.index, reject_reason)
@@ -2194,6 +2613,10 @@ def _poll_tmux_verdicts(
     # without a session_id cannot be polled and are marked INPUT_REQUIRED.
     from pm_core import hook_events as _hook_events
     _last_scenario_hook_ts: dict[int, float] = {}
+    # Workers that have not produced any hook event yet are watched for the
+    # workspace-trust prompt so a blocked worker fails in bounded time.
+    from pm_core.claude_launcher import WorkspacePromptWatch
+    _trust_watches: dict[int, WorkspacePromptWatch] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     # (but skip queued scenarios — they don't have windows yet by design)
@@ -2203,8 +2626,10 @@ def _poll_tmux_verdicts(
             _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
                          scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            state.scenario_verdict_reasons[scenario.index] = (
-                "worker window never created (launch failed); no verdict"
+            # Keep a specific launch failure (e.g. clone/revision mismatch).
+            state.scenario_verdict_reasons.setdefault(
+                scenario.index,
+                "worker window never created (launch failed); no verdict",
             )
             has_failed_creation = True
     if has_failed_creation:
@@ -2287,8 +2712,10 @@ def _poll_tmux_verdicts(
             _log.warning("Queued scenario %d window creation failed — "
                          "marking INPUT_REQUIRED", scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            state.scenario_verdict_reasons[scenario.index] = (
-                "worker window creation failed on dequeue; no verdict"
+            # Keep a specific launch failure (e.g. clone/revision mismatch).
+            state.scenario_verdict_reasons.setdefault(
+                scenario.index,
+                "worker window creation failed on dequeue; no verdict",
             )
 
     # Fill any open slots that were freed by initial workdir failures.
@@ -2425,6 +2852,17 @@ def _poll_tmux_verdicts(
             if scenario.index not in pending or not scenario.window_name:
                 continue
 
+            # The concretizer already settled this scenario (rejected, or
+            # blocked at the workspace-trust prompt) and no worker was
+            # launched: keep its recorded reason instead of overwriting it
+            # with "no session id" below.
+            if (not scenario.session_id
+                    and scenario.index in state.scenario_verdicts):
+                pending.discard(scenario.index)
+                verdicts_changed = True
+                _launch_next_queued()
+                continue
+
             pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
             if pane_id and not tmux_mod.pane_exists(pane_id):
                 pane_id = None
@@ -2439,6 +2877,10 @@ def _poll_tmux_verdicts(
                         scenario.index, retries + 1,
                         _SCENARIO_MAX_RETRIES, backoff)
                     time.sleep(backoff)
+                    if state.stop_requested:
+                        # A stop (e.g. ``z t`` fresh start) killed the
+                        # window; relaunching would orphan a worker.
+                        break
                     retry_counts[scenario.index] = retries + 1
                     if _relaunch_scenario_window(
                         scenario, state, data, pr_data,
@@ -2462,6 +2904,31 @@ def _poll_tmux_verdicts(
                 verdicts_changed = True
                 _launch_next_queued()
                 continue
+
+            # Workers with no hook event yet may be sitting at the
+            # workspace-trust prompt.  Watch them before the verdict grace
+            # check: the grace only delays verdict polling, and gating the
+            # watch on it would push a blocked worker's failure out to
+            # verdict grace + trust grace after launch.
+            if (pane_id and scenario.session_id
+                    and _hook_events.read_event(scenario.session_id) is None):
+                watch = _trust_watches.get(scenario.index)
+                if watch is None or watch.pane_id != pane_id:
+                    watch = WorkspacePromptWatch(
+                        pane_id, scenario.worktree_path,
+                        transcript_path=scenario.transcript_path)
+                    _trust_watches[scenario.index] = watch
+                blocked = watch.check()
+                if blocked:
+                    _log.warning("Scenario %d worker blocked: %s",
+                                 scenario.index, blocked)
+                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                    state.scenario_verdict_reasons[scenario.index] = (
+                        _TRUST_BLOCKED_PREFIX + blocked)
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
+                    _launch_next_queued()
+                    continue
 
             if in_grace:
                 continue
@@ -2936,7 +3403,11 @@ def _verify_single_scenario(
                 grace_period=_VERDICT_GRACE_PERIOD,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
+                workdir=verify_cwd,
             )
+        except WorkspaceTrustBlocked as e:
+            return (False, _TRUST_BLOCKED_PREFIX + str(e),
+                    scenario.verifier_pane_id)
         except Exception:
             _log.warning("Verification: initial polling failed for scenario %d",
                          scenario.index, exc_info=True)
@@ -3012,6 +3483,30 @@ def _verify_single_scenario(
 # ---------------------------------------------------------------------------
 # Core orchestration
 # ---------------------------------------------------------------------------
+
+def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
+    """Split the qa_status.py dashboard next to the planner pane."""
+    from pm_core import tmux as tmux_mod, pane_layout
+    try:
+        # Use the script path directly (avoids PYTHONPATH issues)
+        _qa_status_script = Path(__file__).parent / "qa_status.py"
+        status_cmd = (
+            f"python3 {_qa_status_script} {status_path} {session}"
+        )
+        status_pane = tmux_mod.split_pane_at(
+            planner_pane, "h", status_cmd, background=True,
+        )
+
+        # Register both panes and rebalance the main window only
+        qa_win_id = tmux_mod.pane_window_id(planner_pane)
+        if qa_win_id:
+            pane_layout.register_and_rebalance(session, qa_win_id, [
+                (planner_pane, "qa-planner", "planner"),
+                (status_pane, "qa-status", status_cmd),
+            ])
+    except Exception:
+        _log.exception("Failed to create status pane")
+
 
 def run_qa_sync(
     state: QALoopState,
@@ -3112,6 +3607,11 @@ def run_qa_sync(
         if on_update:
             on_update(state)
 
+    # PR-branch head before the planner runs, to detect application code
+    # the planner commits while planning (see _planner_code_changes).
+    branch = pr_data.get("branch", "")
+    pre_plan_head: str | None = None
+
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
@@ -3182,6 +3682,9 @@ def run_qa_sync(
                                    scenario_0=state.scenario_0,
                                    verdict_reasons=state.scenario_verdict_reasons)
 
+        if branch:
+            pre_plan_head = _rev_parse(workdir_path, f"refs/heads/{branch}")
+
         # Create QA window with planner pane (switch=False; we handle
         # session switching explicitly below to preserve focus)
         tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path,
@@ -3224,22 +3727,45 @@ def run_qa_sync(
             return state
 
         # Poll until the planner produces a QA Plan or exits.
-        # Strategy: capture pane content, look for QA_PLAN_END, then
-        # try parsing.  The prompt template also contains QA_PLAN_END
-        # with placeholder scenarios, so we only accept when parsing
-        # yields real (non-placeholder) scenarios.  This avoids the
-        # false-positive from the prompt's own markers.
+        # Each fresh idle_prompt event triggers one read of the planner's
+        # latest assistant turn from its JSONL transcript (the pane is a
+        # gated fallback — its scrollback can hold only the tail of a long
+        # plan).  A plan is consumed only when it is complete; an
+        # incomplete one is reported and we wait for the next idle.
+        from pm_core.claude_launcher import transcript_path_for
+        planner_transcript = str(
+            transcript_path_for(workdir_path, planner_session_id))
+
+        def _capture_planner_pane() -> str:
+            return tmux_mod.capture_pane(planner_pane, full_scrollback=True)
+
         plan_found = False
+        plan_problem = ""
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
         from pm_core import hook_events as _hook_events
+        from pm_core.claude_launcher import WorkspacePromptWatch
         _hook_baseline = time.time()
+        # Until the planner's first idle turn, watch for it sitting at the
+        # workspace-trust prompt so a blocked planner fails in minutes with
+        # an actionable error instead of burning the full planner timeout.
+        trust_watch: WorkspacePromptWatch | None = WorkspacePromptWatch(
+            planner_pane, workdir_path,
+            transcript_path=transcript_path_for(workdir_path,
+                                                planner_session_id))
+        trust_blocked: str | None = None
         while time.monotonic() < deadline:
             if state.stop_requested:
                 break
             if not tmux_mod.pane_exists(planner_pane):
                 _log.info("Planner pane exited")
                 break
+            if trust_watch is not None:
+                trust_blocked = trust_watch.check()
+                if trust_blocked:
+                    _log.warning("QA planner for %s blocked: %s",
+                                 state.pr_id, trust_blocked)
+                    break
 
             # Late out-of-band merge guard: catch a merge that lands while the
             # planner is still running (after the pre/post-creation checks) and
@@ -3264,48 +3790,107 @@ def run_qa_sync(
             if ev is None:
                 # No idle_prompt yet — loop so we re-check deadline/stop.
                 continue
+            trust_watch = None
             _hook_baseline = float(ev.get("timestamp") or _hook_baseline)
 
-            content = tmux_mod.capture_pane(planner_pane, full_scrollback=True)
+            # The pane may still show the echoed prompt template early on,
+            # so the pane fallback waits out the grace period; the
+            # transcript never contains the template and needs no grace.
             elapsed = time.monotonic() - poll_start
-            has_end = _tail_has_marker_on_own_line(content, "QA_PLAN_END")
-            _log.info("planner poll: has_end=%s content_len=%d elapsed=%.0fs",
-                      has_end, len(content), elapsed)
+            plan = _read_planner_plan(
+                planner_transcript,
+                _capture_planner_pane if elapsed >= _PLANNER_GRACE else None,
+                pm_root, scenario_start,
+            )
+            if plan.scenarios:
+                _log.info("planner poll: accepted %d scenario(s) from %s "
+                          "(%d chars, elapsed=%.0fs)", len(plan.scenarios),
+                          plan.source, len(plan.text), elapsed)
+                state.plan_output = plan.text
+                state.scenarios = plan.scenarios
+                plan_found = True
+                break
+            if plan.problems:
+                plan_problem = "; ".join(plan.problems)
+                _log.warning("planner poll: incomplete plan not consumed "
+                             "(%s) — waiting for next idle", plan_problem)
+                state.latest_output = (
+                    f"Planner plan incomplete ({plan_problem}) — waiting "
+                    "for the planner to emit the full plan")
+                _notify()
+            else:
+                _log.info("planner poll: no QA_PLAN_END in latest turn "
+                          "(elapsed=%.0fs) — continuing", elapsed)
 
-            if has_end and elapsed >= _PLANNER_GRACE:
-                trial = parse_qa_plan(content, pm_root=pm_root)
-                if trial:
-                    _log.info("planner poll: parsed %d scenario(s), accepting",
-                              len(trial))
-                    state.plan_output = content
-                    plan_found = True
-                    break
-                _log.info("planner poll: has_end but 0 scenarios, "
-                          "likely prompt template — continuing")
-
-        if not plan_found and not state.plan_output:
-            # Try capturing whatever the planner produced
+        if trust_blocked:
+            # Planning never started.  Stop here: no execution phase and no
+            # finalizer (which would block at the same prompt).  The planner
+            # pane is left open so a human can see / answer the prompt.
+            state.latest_verdict = VERDICT_INPUT_REQUIRED
+            state.latest_output = (
+                "QA planner blocked at the workspace-trust prompt — "
+                "no scenarios planned")
+            state._error = (
+                "QA planning did not start.\n\n" + trust_blocked +
+                "\n\nThis run produced no scenarios and is not QA coverage."
+            )
+            state.planning_phase = False
+            _write_status_file(status_path, state.pr_id, [],
+                               state.scenario_verdicts,
+                               overall=state.latest_verdict,
+                               scenario_0=state.scenario_0,
+                               error=state._error)
+            # Show the error block beside the dialog: the user looking at
+            # the QA window otherwise sees only the prompt, no explanation.
             if planner_pane and tmux_mod.pane_exists(planner_pane):
-                state.plan_output = tmux_mod.capture_pane(
-                    planner_pane, full_scrollback=True
-                )
+                _add_status_pane(session, planner_pane, status_path)
+            _notify()
+            state.running = False
+            return state
 
-        # Parse the plan
-        if state.plan_output:
-            state.scenarios = parse_qa_plan(state.plan_output, pm_root=pm_root)
+        if not plan_found and not state.stop_requested:
+            # Planner exited or timed out: one last gated read.
+            plan = _read_planner_plan(
+                planner_transcript,
+                (_capture_planner_pane
+                 if planner_pane and tmux_mod.pane_exists(planner_pane)
+                 else None),
+                pm_root, scenario_start,
+            )
+            if plan.scenarios:
+                _log.info("planner final read: accepted %d scenario(s) "
+                          "from %s", len(plan.scenarios), plan.source)
+                state.plan_output = plan.text
+                state.scenarios = plan.scenarios
+                plan_found = True
+            elif plan.problems:
+                plan_problem = "; ".join(plan.problems)
+
+        if plan_found:
             _log.info("QA plan parsed: %d scenario(s) for %s",
                       len(state.scenarios), state.pr_id)
 
         if not state.scenarios:
             _log.warning("Planner produced no scenarios for %s", state.pr_id)
             state.latest_verdict = VERDICT_INPUT_REQUIRED
-            state.latest_output = "Planner produced no parseable scenarios — needs human review"
-            state._error = (
-                "No parseable scenarios found in planner output.\n\n"
-                "The QA planner session did not produce a valid test plan.\n"
-                "Check the planner pane (left) for errors.\n\n"
-                "To retry: restart QA from the TUI."
-            )
+            if plan_problem:
+                state.latest_output = (
+                    f"Planner plan incomplete — not consumed: {plan_problem}")
+                state._error = (
+                    "The QA planner's plan was incomplete and was not "
+                    "consumed.\n\n"
+                    f"{plan_problem}\n\n"
+                    "Ask the planner to re-emit the full QA_PLAN_START ... "
+                    "QA_PLAN_END block, or restart QA from the TUI."
+                )
+            else:
+                state.latest_output = "Planner produced no parseable scenarios — needs human review"
+                state._error = (
+                    "No parseable scenarios found in planner output.\n\n"
+                    "The QA planner session did not produce a valid test plan.\n"
+                    "Check the planner pane (left) for errors.\n\n"
+                    "To retry: restart QA from the TUI."
+                )
             _notify()
 
         # Verify scenario numbering starts at scenario_start.
@@ -3326,7 +3911,10 @@ def run_qa_sync(
                 sc.index = scenario_start + i
 
         state.planning_phase = False
-        state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
+        if state.scenarios:
+            # Otherwise keep the "not consumed" / "no parseable scenarios"
+            # explanation set above on screen.
+            state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
@@ -3355,6 +3943,33 @@ def run_qa_sync(
         _notify()
         state.running = False
         return state  # Do not launch scenarios without a QA spec
+
+    # --- Phase 1.25: Planner handoff ---
+    # Scenario clones start from the PR workdir's branch head but pull from
+    # the real upstream; publish anything the planner committed first and
+    # pin the revision every worker must start at.
+    if state.scenarios and not state._error and branch:
+        try:
+            state.planner_head = _publish_planner_head(workdir_path, branch)
+        except PlannerHandoffError as exc:
+            _log.error("QA planner handoff failed for %s: %s",
+                       state.pr_id, exc)
+            state.latest_verdict = VERDICT_INPUT_REQUIRED
+            state.latest_output = f"Planner handoff failed: {exc}"
+            state._error = (
+                "The planner's committed work could not be handed to the "
+                "scenario workers, so no scenarios were launched.\n\n"
+                f"{exc}"
+            )
+            _notify()
+            state.running = False
+            return state
+        state.planner_code_changes = _planner_code_changes(
+            workdir_path, pre_plan_head, state.planner_head)
+        if state.planner_code_changes:
+            _log.warning("QA planner for %s changed application code %s; "
+                         "QA will require review before sign-off",
+                         state.pr_id, state.planner_code_changes)
 
     # --- Phase 1.5: Mock generation ---
     # Generate any new mock definitions the planner requested before
@@ -3418,25 +4033,7 @@ def run_qa_sync(
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
-        try:
-            # Use the script path directly (avoids PYTHONPATH issues)
-            _qa_status_script = Path(__file__).parent / "qa_status.py"
-            status_cmd = (
-                f"python3 {_qa_status_script} {status_path} {session}"
-            )
-            status_pane = tmux_mod.split_pane_at(
-                planner_pane, "h", status_cmd, background=True,
-            )
-
-            # Register both panes and rebalance the main window only
-            qa_win_id = tmux_mod.pane_window_id(planner_pane)
-            if qa_win_id:
-                pane_layout.register_and_rebalance(session, qa_win_id, [
-                    (planner_pane, "qa-planner", "planner"),
-                    (status_pane, "qa-status", status_cmd),
-                ])
-        except Exception:
-            _log.exception("Failed to create status pane")
+        _add_status_pane(session, planner_pane, status_path)
 
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
@@ -3454,7 +4051,8 @@ def run_qa_sync(
         )
     state.scenarios = all_scenarios
 
-    state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
+    if state.scenarios:
+        state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
     # --- Poll for verdicts, aggregate, and finalize ---
@@ -3513,9 +4111,15 @@ def _execute_and_finalize(
 
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
-    if VERDICT_NEEDS_WORK in verdicts:
+    # A stopped run can leave scenarios without a verdict; never call
+    # that coverage PASS.
+    unverdicted = [s.index for s in state.scenarios
+                   if s.index not in state.scenario_verdicts]
+    if VERDICT_NEEDS_WORK in verdicts or state.planner_code_changes:
+        # Application code the planner committed was never reviewed:
+        # route back to review rather than on to sign-off.
         state.latest_verdict = VERDICT_NEEDS_WORK
-    elif VERDICT_INPUT_REQUIRED in verdicts or state._error:
+    elif VERDICT_INPUT_REQUIRED in verdicts or state._error or unverdicted:
         # Preserve INPUT_REQUIRED set before Phase 2 (e.g. no scenarios, spec gate)
         state.latest_verdict = VERDICT_INPUT_REQUIRED
     else:
@@ -3537,30 +4141,33 @@ def _execute_and_finalize(
     except Exception:
         _log.exception("Failed to persist scenario verdicts")
 
-    try:
-        state.finalize_verdict = _run_qa_finalize_pane(
-            state, pr_data, session, window_name, workdir_path,
-            stop_check=lambda: state.stop_requested,
-            project_data=data,
-        )
-    except Exception:
-        _log.exception("Failed to run QA finalize pane")
+    if not state.scenarios:
+        # Nothing ran, so there are no scenario pushes to reconcile.  A
+        # finalizer here only adds another session that can stall (#229:
+        # it blocked at the same trust prompt as the planner).
+        _log.warning("QA finalize: skipped for %s — no scenarios ran",
+                     state.pr_id)
+    else:
+        try:
+            state.finalize_verdict = _run_qa_finalize_pane(
+                state, pr_data, session, window_name, workdir_path,
+                stop_check=lambda: state.stop_requested,
+                project_data=data,
+            )
+        except Exception:
+            _log.exception("Failed to run QA finalize pane")
 
     # Refresh the snapshot with the overall + finalize verdict so a
     # restart between completion and TUI processing still carries them.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
     state.running = False
-    summary_parts = []
-    for s in state.scenarios:
-        v = state.scenario_verdicts.get(s.index, "?")
-        summary_parts.append(f"{s.title}: {v}")
     finalize_suffix = ""
     if state.finalize_verdict:
         finalize_suffix = f" [finalize: {state.finalize_verdict}]"
     state.latest_output = (
         f"QA complete: {state.latest_verdict}{finalize_suffix} — "
-        + "; ".join(summary_parts)
+        + qa_outcome_detail(state) + planner_code_changes_suffix(state)
     )
 
     _log.info("QA complete for %s: %s (finalize=%s)",

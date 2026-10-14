@@ -266,6 +266,41 @@ QA_PLAN_END
         assert scenarios[1].title == "CLI Integration"
         assert scenarios[1].instruction_path is None
 
+    def test_real_plan_not_numbered_from_one_ignores_prompt_spec(self):
+        """A committed qa.md echoed in the prompt can hold its own
+        "SCENARIO 1:" line.  When the planner numbers its plan from 2, the
+        body must still start at the planner's QA_PLAN_START, not at that
+        earlier spec line (pr-b53bfe2 QA r5 S10: planned 1, launched 2)."""
+        output = """You are a QA planner analyzing PR pr-001: "Add yellow.txt"
+
+## QA Spec
+
+SCENARIO 1: yellow.txt content
+- GIVEN a fresh clone of the PR branch
+- WHEN the user prints yellow.txt with cat
+- THEN the output is yellow
+
+## Output Format
+
+QA_PLAN_START
+SCENARIO 2: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+STEPS: <concrete test steps>
+QA_PLAN_END
+
+The spec asks for one scenario, so the plan has one.
+
+QA_PLAN_START
+SCENARIO 2: Fresh clone shows yellow.txt containing exactly "yellow"
+FOCUS: yellow.txt is a one-line file holding yellow
+INSTRUCTION: none
+STEPS: cat yellow.txt
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert [s.title for s in scenarios] == [
+            'Fresh clone shows yellow.txt containing exactly "yellow"']
+
     def test_pane_with_only_prompt_template(self):
         """When pane content only has the prompt template, placeholder
         scenarios are now rejected by parse_qa_plan itself, preventing
@@ -1675,6 +1710,34 @@ class TestScenarioRetryLogic:
         assert mock_relaunch.call_count == 2
         assert state.scenario_verdicts[1] == VERDICT_PASS
 
+    def test_stop_during_backoff_does_not_relaunch(self, tmp_path):
+        """A stop (``z t`` fresh start) kills the scenario windows; the
+        stopped loop must not relaunch them after its retry backoff."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        def sleep_side_effect(secs):
+            if secs >= 1:  # the retry backoff, not the poll interval
+                state.stop_requested = True
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep_side_effect), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=100), \
+             patch("pm_core.qa_loop._write_status_file"):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: None,
+            )
+
+        mock_relaunch.assert_not_called()
+        assert 1 not in state.scenario_verdicts
+
     def test_retries_exhausted_gives_input_required(self, tmp_path):
         """When all retries are used, scenario gets INPUT_REQUIRED."""
         from pm_core.qa_loop import (
@@ -1967,3 +2030,38 @@ STEPS: do something
 QA_PLAN_END"""
         scenarios = parse_qa_plan(output)
         assert scenarios[0].mock_ids == []
+
+
+class TestStoppedRunAggregation:
+    """A run stopped before every scenario has a verdict is not a PASS."""
+
+    def _finalize(self, state, tmp_path):
+        from pm_core import qa_loop
+        with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._write_status_file") as write_status, \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane", return_value=None):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+        return write_status.call_args.kwargs["overall"]
+
+    def test_missing_verdict_is_input_required(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.scenario_verdicts = {3: VERDICT_PASS}
+        state.stop_requested = True
+        overall = self._finalize(state, tmp_path)
+        assert state.latest_verdict == VERDICT_INPUT_REQUIRED
+        assert overall == VERDICT_INPUT_REQUIRED
+
+    def test_all_verdicts_pass(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.scenario_verdicts = {3: VERDICT_PASS, 4: VERDICT_PASS}
+        assert self._finalize(state, tmp_path) == VERDICT_PASS

@@ -856,6 +856,56 @@ def _find_impl_pane(session: str, window_name: str) -> str | None:
     return None
 
 
+def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
+                           seen: set[str]) -> None:
+    """Trust-watch a Claude pane the idle tracker could not register.
+
+    After a TUI restart, the transcript symlinks of panes an earlier TUI
+    launched live in that TUI's run dir, so the tracker (and the trust
+    watch it runs) skips them.  A pane left at the workspace-trust dialog
+    would then sit there forever.  Recover the session's transcript from
+    the pane's start command and run a bounded watch on it: accept an
+    approved workdir by cursor (the per-pane attempt budget spans
+    restarts), else report once after the grace.
+    """
+    from pm_core.claude_launcher import (
+        WorkspacePromptWatch, pane_transcript_path,
+    )
+    # Kept on the app across polls; created lazily so tests and callers
+    # that never hit an orphan pane need no setup.
+    if not hasattr(app, "_untracked_trust_watches"):
+        app._untracked_trust_watches = {}
+        app._untracked_trust_reported = set()
+    watches = app._untracked_trust_watches
+    seen.add(pane_id)
+    if pane_id not in watches:
+        # Resolved once per pane: None (no session id in its command)
+        # and finished watches stay cached, so the steady state after a
+        # restart costs no tmux call per tick.
+        transcript = pane_transcript_path(pane_id, workdir)
+        watches[pane_id] = transcript and WorkspacePromptWatch(
+            pane_id, workdir=workdir, transcript_path=transcript)
+    watch = watches[pane_id]
+    if watch is None:
+        return
+    msg = watch.check()
+    if msg and pane_id not in app._untracked_trust_reported:
+        app._untracked_trust_reported.add(pane_id)
+        # Skip a pane another watch in this TUI already reported (e.g. a
+        # review pane whose loop ended in the trust ERROR).
+        if not watch.reported_elsewhere:
+            app.log_message(f"[red]{msg}[/]", sticky=30)
+
+
+def _prune_untracked_trust(app, seen: set[str]) -> None:
+    """Drop orphan trust watches for panes that are gone or now tracked."""
+    watches = getattr(app, "_untracked_trust_watches", None) or {}
+    for pane_id in list(watches):
+        if pane_id not in seen:
+            watches.pop(pane_id, None)
+            app._untracked_trust_reported.discard(pane_id)
+
+
 def _poll_impl_idle(app) -> None:
     """Poll implementation panes for idle detection.
 
@@ -876,6 +926,7 @@ def _poll_impl_idle(app) -> None:
     tracker = app._pane_idle_tracker
     active_pr_ids: set[str] = set()
     newly_idle: list[tuple[str, dict]] = []  # (pr_id, pr) pairs
+    untracked_seen: set[str] = set()
 
     for pr in (app._data.get("prs") or []):
         pr_id = pr.get("id", "")
@@ -908,7 +959,11 @@ def _poll_impl_idle(app) -> None:
             try:
                 tracker.register(pr_id, pane_id, impl_transcript)
             except ValueError:
-                # Symlink not yet created — try again next tick.
+                # Symlink not yet created — try again next tick.  It never
+                # will be for a pane an earlier TUI launched: still watch
+                # that one for the trust dialog.
+                _watch_untracked_trust(app, pane_id, pr.get("workdir"),
+                                       untracked_seen)
                 continue
 
         tracker.poll(pr_id)
@@ -1033,6 +1088,11 @@ def _poll_impl_idle(app) -> None:
             try:
                 tracker.register(review_key, pane_id, review_transcript)
             except ValueError:
+                # e.g. a review-loop pane left in flight across a TUI
+                # restart: the loop is gone but the pane may be at the
+                # trust dialog.
+                _watch_untracked_trust(app, pane_id, pr.get("workdir"),
+                                       untracked_seen)
                 continue
 
         active_review_keys.add(review_key)
@@ -1067,12 +1127,18 @@ def _poll_impl_idle(app) -> None:
         if key.startswith("review:") and key not in active_review_keys:
             tracker.unregister(key)
 
-    # Unregister PRs no longer active
+    # Unregister PRs no longer active.  ``qa:`` keys belong to
+    # qa_loop_ui.poll_qa_state, which unregisters them when the run ends;
+    # dropping them here would re-register a fresh state (and a fresh
+    # workspace-trust watch with a reset accept budget) on every QA poll.
     for key in tracker.tracked_keys():
         if (not key.startswith("merge:")
                 and not key.startswith("review:")
+                and not key.startswith("qa:")
                 and key not in active_pr_ids):
             tracker.unregister(key)
+
+    _prune_untracked_trust(app, untracked_seen)
 
     # Auto-start review for newly-idle implementation PRs
     if newly_idle and _auto_start.is_enabled(app):

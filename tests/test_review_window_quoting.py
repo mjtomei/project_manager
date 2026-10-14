@@ -261,3 +261,21 @@ def test_diff_pane_still_uses_less_when_present(fake_tmux, diff_repo, tmp_path):
 
     assert result.stdout.startswith("FAKE_LESS -R\n"), result.stdout
     assert "+REVIEW_DIFF_MARKER" in result.stdout
+
+
+def test_review_claude_pane_starts_in_pr_workdir(fake_tmux, monkeypatch):
+    """pr-b53bfe2: the review Claude pane must start in the PR workdir.
+
+    Without ``cwd`` tmux starts a split in the *calling* process's cwd (the
+    TUI's pm dir), so host-mode reviewers ran outside the checkout pm had
+    just trusted and sat at Claude's workspace-trust prompt.
+    """
+    calls = []
+    monkeypatch.setattr(pr_mod.tmux_mod, "split_pane_at",
+                        lambda *a, **k: calls.append((a, k)) or "%fake-claude-pane")
+    pr_mod._launch_review_window(_make_data(),
+                                 _make_pr("t", fake_tmux["workdir"]))
+    assert calls, "claude pane was never split"
+    args, kwargs = calls[0]
+    assert args[2] == "fake-claude-cmd"
+    assert kwargs.get("cwd") == fake_tmux["workdir"]

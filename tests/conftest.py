@@ -19,6 +19,17 @@ def _isolated_runtime_state(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(runtime_state, "_runtime_dir", lambda: d)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_claude_config(tmp_path_factory, monkeypatch):
+    """Point Claude's global config at a temp dir.
+
+    Launch helpers bootstrap workspace trust into ``.claude.json``; tests
+    must never write the real one.
+    """
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR",
+                       str(tmp_path_factory.mktemp("claude-config")))
+
+
 @pytest.fixture
 def fake_github():
     """Install a pure-metadata FakeGitHubBackend as the `gh` transport.

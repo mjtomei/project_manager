@@ -9,6 +9,8 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zz t   — start/stop QA loop
 """
 
+from rich.markup import escape
+
 from pm_core.paths import configure_logger, get_global_setting_value
 from pm_core import store
 from pm_core.qa_loop import (
@@ -18,6 +20,8 @@ from pm_core.qa_loop import (
     VERDICT_INPUT_REQUIRED,
     start_qa_background,
     _compute_qa_window_name,
+    planner_code_changes_suffix,
+    qa_outcome_detail,
 )
 from pm_core.loop_shared import get_pm_session
 
@@ -467,7 +471,9 @@ def _resume_incomplete_qa(app) -> None:
 def _on_qa_update(app, state: QALoopState) -> None:
     """Handle QA progress update — log to TUI."""
     if state.latest_output:
-        app.log_message(f"QA [{state.pr_id}]: {state.latest_output}")
+        # Escape: the log line renders markup, which would swallow the
+        # "[pr-…]" prefix and bracketed parts like "[finalize: …]".
+        app.log_message(escape(f"QA [{state.pr_id}]: {state.latest_output}"))
 
 
 def _on_qa_complete(app, state: QALoopState) -> None:
@@ -643,11 +649,9 @@ def _record_qa_note(app, state: QALoopState) -> None:
         return
     try:
         from datetime import datetime, timezone
-        summary_parts = []
-        for s in state.scenarios:
-            v = state.scenario_verdicts.get(s.index, "?")
-            summary_parts.append(f"{s.title}: {v}")
-        note_text = f"QA {state.latest_verdict}: " + "; ".join(summary_parts)
+        note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
+        # Tell the next review session why QA bounced an all-PASS run.
+        note_text += planner_code_changes_suffix(state)
         if state.qa_workdir:
             note_text += f" (workdir: {state.qa_workdir})"
 
