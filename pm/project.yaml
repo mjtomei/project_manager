@@ -26417,7 +26417,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-14T16:58:05.460133+00:00'
+  updated_at: '2026-10-14T17:04:37.281070+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26709,6 +26709,22 @@ prs:
       rejections and the qa.md SCENARIO 1 echo case still hold. Evidence: /pm-captures/merge-20261014/signoff/.'
     created_at: '2026-10-14T16:58:05Z'
     last_edited: '2026-10-14T16:58:05Z'
+  - id: note-9865139
+    text: 'Review 4faa i1 (db261fae), focused re-review after integration: 005856d9
+      marker-line START bound is correct (real round-1 plan [1..4], gate None; #230
+      qa.md SCENARIO 1 echo test still passes). The trust-blocked early return sits
+      before the final gated read, with no finalizer: correct. The TestLaunchClaude
+      prepare_workspace stub is sound. One fix of the same class: parse_qa_plan END
+      was still the last QA_PLAN_END *substring*, so trailing prose mentioning it
+      leaked the END line and prose into the last scenario STEPS sent to the worker.
+      It now uses the last END marker line, with a failing-then-passing test. Added
+      a positive test that launch_claude prepares trust for its cwd, since the stub
+      otherwise hides it. Full suite 3174 passed (PATH=/usr/bin first, PM_HOST_HOME
+      unset). Residual pr-c59597f unchanged. Focused re-QA: START/END mentions in
+      scenario text and trailing prose, R1-R4 and the #230 echoed qa.md header; S6
+      publishing carried forward.'
+    created_at: '2026-10-14T17:04:37Z'
+    last_edited: '2026-10-14T17:04:37Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
