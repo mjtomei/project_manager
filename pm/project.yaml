@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-14T00:12:10.208791+00:00'
+  updated_at: '2026-10-14T14:08:29.344217+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3847,6 +3847,28 @@ prs:
       external scenarios/8/panes/pm-home.22.log append.'
     created_at: '2026-10-14T00:12:10Z'
     last_edited: '2026-10-14T00:12:10Z'
+  - id: note-d0d35d6
+    text: 'Supervisor recovery 2026-10-14: QA round6 S12 host trust and S14 local
+      merge are PASS + independently VERIFIED on app code 17d4f39a; current HEAD 1afead9a
+      differs only in pm/project.yaml. Carry those exact verified results into the
+      next round; do not rerun them without new app changes. S13 has NO verdict/coverage
+      qualification: it died and 10 retries failed because container PID1 sleep infinity
+      did not reap 1951 zombies, hitting its 2048 PID cap (pids.events max=134, oom_kill=0).
+      Filed pr-2111fa0; evidence shepherd-20261014/s13-exhaustion.json. Failed container
+      stopped, scratch/repo/captures preserved. NEXT QA PLAN: ONLY one new group,
+      SCENARIO 15 workflow/container W1-W6, with all original acceptance requirements
+      and real CLI+TUI evidence. Keep final plan FOUR short physical lines (START,
+      SCENARIO, STEPS referring full qa.md group, END), no commentary after. Update/publish
+      qa.md as needed, but do not change app code during planning. New worker must
+      fix the TEST HARNESS polling first: avoid repeated shell process substitution/background
+      children left un-waited; use a bounded Python poller or explicitly wait/reap
+      child processes; monitor PID/zombie count and end with a concrete finding rather
+      than resource exhaustion. Do not treat the unfinished S13 videos as fresh successful
+      coverage. Fix/file incidental bugs; if any app edits occur, route NEEDS_WORK
+      back through review. Preserve existing capture dirs and PM_CAPTURES_PR. This
+      is supervised, not qualification.'
+    created_at: '2026-10-14T14:08:29Z'
+    last_edited: '2026-10-14T14:08:29Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -28448,6 +28470,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T20:37:23.930203+00:00'
   updated_at: '2026-10-13T20:37:23.930203+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2111fa0
+  plan: bugs
+  title: 'Bug: container PID 1 does not reap children; zombie exhaustion kills QA
+    workers'
+  branch: pm/pr-2111fa0-bug-container-pid-1-does-not-reap-children-zombie-
+  status: pending
+  depends_on: []
+  description: 'Observed in #230 QA round6, scenario13, run pr-b53bfe2-9aa25d894ed5e3ca
+    on 2026-10-14: workflow/container worker exited without a verdict and all 10 relaunches
+    died. The scenario container had 2027 processes, including 1951 zombies parented
+    to PID 1; pids.current=2033, pids.max=2048, pids.events max=134; memory.events
+    oom_kill=0. PID1 is sleep infinity (pm_core/container.py create_container), so
+    orphaned descendants from stress/polling scripts are never reaped. Most zombie
+    comm names were w35c.sh (1682) and w35.sh (150); those test scripts use repeated
+    shell process substitution. Fix container child reaping (e.g. an actual init/subreaper),
+    verify under orphan-producing workload that children are reaped and a new real
+    worker still launches, and surface PID exhaustion in retry diagnostics rather
+    than ten generic killed/crashed retries. Keep resource limits. Evidence: captures/pr-b53bfe2/shepherd-20261014/s13-exhaustion.json
+    and s13-process-table.txt. Distinct from pr-1139060 (whole-container cleanup).
+    Temporary supervised recovery: preserve bind-mounted evidence/scratch, stop exhausted
+    container, retry only missing workflow group with polling scripts that explicitly
+    wait/reap children; no coverage credit for S13.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-14T14:08:28.137551+00:00'
+  updated_at: '2026-10-14T14:08:28.137551+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
