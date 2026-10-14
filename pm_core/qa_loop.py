@@ -38,6 +38,7 @@ from pm_core.verdict_transcript import (
     extract_verdict_from_transcript,
     extract_verdict_reason_from_transcript,
 )
+from pm_core.claude_launcher import WorkspaceTrustBlocked
 
 _log = configure_logger("pm.qa_loop")
 
@@ -487,7 +488,11 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
             grace_period=_VERDICT_GRACE_PERIOD,
             stop_check=stop_check,
             log_prefix="qa-finalize",
+            workdir=workdir_path,
         )
+    except WorkspaceTrustBlocked as e:
+        _log.warning("QA finalize: %s", e)
+        return None
     except Exception:
         _log.warning("QA finalize: polling failed", exc_info=True)
         return None
@@ -747,6 +752,12 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
             r'^[ \t]*SCENARIO\s+1:', output[:end_pos], re.MULTILINE,
         ))
         start_pos = s1_matches[-1].start() if s1_matches else 0
+        # Never start before the last QA_PLAN_START ahead of that END: a
+        # plan numbered from 2 would otherwise reach back to an earlier
+        # "SCENARIO 1:" in the prompt (e.g. a committed qa.md spec).
+        start_m = list(re.finditer(r'QA_PLAN_START', output[:end_pos]))
+        if start_m:
+            start_pos = max(start_pos, start_m[-1].end())
         body = output[start_pos:end_pos]
     else:
         body = output
@@ -1195,6 +1206,16 @@ def _build_concretize_cmd(
     return claude_cmd
 
 
+_TRUST_BLOCKED_PREFIX = "blocked at workspace-trust prompt: "
+
+
+def _concretize_failure_label(reason: str) -> str:
+    """Verdict reason for a scenario whose concretizer did not produce steps."""
+    if reason.startswith(_TRUST_BLOCKED_PREFIX):
+        return reason
+    return f"refiner rejected: {reason}"
+
+
 def _concretize_scenario(
     scenario: QAScenario,
     pr_data: dict,
@@ -1222,12 +1243,16 @@ def _concretize_scenario(
               scenario.index, pane_id)
 
     transcript_path = str(transcript_path_for(scenario_cwd, session_id))
-    content = poll_for_verdict(
-        pane_id, transcript_path,
-        verdicts=_CONCRETIZE_VERDICTS,
-        grace_period=_CONCRETIZE_GRACE,
-        log_prefix=f"qa-concretize-{scenario.index}",
-    )
+    try:
+        content = poll_for_verdict(
+            pane_id, transcript_path,
+            verdicts=_CONCRETIZE_VERDICTS,
+            grace_period=_CONCRETIZE_GRACE,
+            log_prefix=f"qa-concretize-{scenario.index}",
+            workdir=scenario_cwd,
+        )
+    except WorkspaceTrustBlocked as e:
+        return None, _TRUST_BLOCKED_PREFIX + str(e)
 
     if not content:
         _log.warning("Concretization timed out or pane died for scenario %d",
@@ -1636,11 +1661,11 @@ def _launch_scenarios_in_tmux(
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
-                f"refiner rejected: {reject_reason}"
+                _concretize_failure_label(reject_reason)
             )
             state.latest_output = (
                 f"Scenario {scenario.index} ({scenario.title}): "
-                f"{VERDICT_INPUT_REQUIRED} — refiner rejected: {reject_reason}"
+                f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
             )
             _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
                       scenario.index, reject_reason)
@@ -1875,11 +1900,11 @@ def _launch_scenarios_in_containers(
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
-                f"refiner rejected: {reject_reason}"
+                _concretize_failure_label(reject_reason)
             )
             state.latest_output = (
                 f"Scenario {scenario.index} ({scenario.title}): "
-                f"{VERDICT_INPUT_REQUIRED} — refiner rejected: {reject_reason}"
+                f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
             )
             _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
                       scenario.index, reject_reason)
@@ -2141,6 +2166,10 @@ def _poll_tmux_verdicts(
     # without a session_id cannot be polled and are marked INPUT_REQUIRED.
     from pm_core import hook_events as _hook_events
     _last_scenario_hook_ts: dict[int, float] = {}
+    # Workers that have not produced any hook event yet are watched for the
+    # workspace-trust prompt so a blocked worker fails in bounded time.
+    from pm_core.claude_launcher import WorkspacePromptWatch
+    _trust_watches: dict[int, WorkspacePromptWatch] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     # (but skip queued scenarios — they don't have windows yet by design)
@@ -2372,6 +2401,17 @@ def _poll_tmux_verdicts(
             if scenario.index not in pending or not scenario.window_name:
                 continue
 
+            # The concretizer already settled this scenario (rejected, or
+            # blocked at the workspace-trust prompt) and no worker was
+            # launched: keep its recorded reason instead of overwriting it
+            # with "no session id" below.
+            if (not scenario.session_id
+                    and scenario.index in state.scenario_verdicts):
+                pending.discard(scenario.index)
+                verdicts_changed = True
+                _launch_next_queued()
+                continue
+
             pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
             if pane_id and not tmux_mod.pane_exists(pane_id):
                 pane_id = None
@@ -2409,6 +2449,31 @@ def _poll_tmux_verdicts(
                 verdicts_changed = True
                 _launch_next_queued()
                 continue
+
+            # Workers with no hook event yet may be sitting at the
+            # workspace-trust prompt.  Watch them before the verdict grace
+            # check: the grace only delays verdict polling, and gating the
+            # watch on it would push a blocked worker's failure out to
+            # verdict grace + trust grace after launch.
+            if (pane_id and scenario.session_id
+                    and _hook_events.read_event(scenario.session_id) is None):
+                watch = _trust_watches.get(scenario.index)
+                if watch is None or watch.pane_id != pane_id:
+                    watch = WorkspacePromptWatch(
+                        pane_id, scenario.worktree_path,
+                        transcript_path=scenario.transcript_path)
+                    _trust_watches[scenario.index] = watch
+                blocked = watch.check()
+                if blocked:
+                    _log.warning("Scenario %d worker blocked: %s",
+                                 scenario.index, blocked)
+                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                    state.scenario_verdict_reasons[scenario.index] = (
+                        _TRUST_BLOCKED_PREFIX + blocked)
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
+                    _launch_next_queued()
+                    continue
 
             if in_grace:
                 continue
@@ -2883,7 +2948,11 @@ def _verify_single_scenario(
                 grace_period=_VERDICT_GRACE_PERIOD,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
+                workdir=verify_cwd,
             )
+        except WorkspaceTrustBlocked as e:
+            return (False, _TRUST_BLOCKED_PREFIX + str(e),
+                    scenario.verifier_pane_id)
         except Exception:
             _log.warning("Verification: initial polling failed for scenario %d",
                          scenario.index, exc_info=True)
@@ -2959,6 +3028,30 @@ def _verify_single_scenario(
 # ---------------------------------------------------------------------------
 # Core orchestration
 # ---------------------------------------------------------------------------
+
+def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
+    """Split the qa_status.py dashboard next to the planner pane."""
+    from pm_core import tmux as tmux_mod, pane_layout
+    try:
+        # Use the script path directly (avoids PYTHONPATH issues)
+        _qa_status_script = Path(__file__).parent / "qa_status.py"
+        status_cmd = (
+            f"python3 {_qa_status_script} {status_path} {session}"
+        )
+        status_pane = tmux_mod.split_pane_at(
+            planner_pane, "h", status_cmd, background=True,
+        )
+
+        # Register both panes and rebalance the main window only
+        qa_win_id = tmux_mod.pane_window_id(planner_pane)
+        if qa_win_id:
+            pane_layout.register_and_rebalance(session, qa_win_id, [
+                (planner_pane, "qa-planner", "planner"),
+                (status_pane, "qa-status", status_cmd),
+            ])
+    except Exception:
+        _log.exception("Failed to create status pane")
+
 
 def run_qa_sync(
     state: QALoopState,
@@ -3180,13 +3273,28 @@ def run_qa_sync(
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
         from pm_core import hook_events as _hook_events
+        from pm_core.claude_launcher import WorkspacePromptWatch, transcript_path_for
         _hook_baseline = time.time()
+        # Until the planner's first idle turn, watch for it sitting at the
+        # workspace-trust prompt so a blocked planner fails in minutes with
+        # an actionable error instead of burning the full planner timeout.
+        trust_watch: WorkspacePromptWatch | None = WorkspacePromptWatch(
+            planner_pane, workdir_path,
+            transcript_path=transcript_path_for(workdir_path,
+                                                planner_session_id))
+        trust_blocked: str | None = None
         while time.monotonic() < deadline:
             if state.stop_requested:
                 break
             if not tmux_mod.pane_exists(planner_pane):
                 _log.info("Planner pane exited")
                 break
+            if trust_watch is not None:
+                trust_blocked = trust_watch.check()
+                if trust_blocked:
+                    _log.warning("QA planner for %s blocked: %s",
+                                 state.pr_id, trust_blocked)
+                    break
 
             # Late out-of-band merge guard: catch a merge that lands while the
             # planner is still running (after the pre/post-creation checks) and
@@ -3211,6 +3319,7 @@ def run_qa_sync(
             if ev is None:
                 # No idle_prompt yet — loop so we re-check deadline/stop.
                 continue
+            trust_watch = None
             _hook_baseline = float(ev.get("timestamp") or _hook_baseline)
 
             content = tmux_mod.capture_pane(planner_pane, full_scrollback=True)
@@ -3229,6 +3338,32 @@ def run_qa_sync(
                     break
                 _log.info("planner poll: has_end but 0 scenarios, "
                           "likely prompt template — continuing")
+
+        if trust_blocked:
+            # Planning never started.  Stop here: no execution phase and no
+            # finalizer (which would block at the same prompt).  The planner
+            # pane is left open so a human can see / answer the prompt.
+            state.latest_verdict = VERDICT_INPUT_REQUIRED
+            state.latest_output = (
+                "QA planner blocked at the workspace-trust prompt — "
+                "no scenarios planned")
+            state._error = (
+                "QA planning did not start.\n\n" + trust_blocked +
+                "\n\nThis run produced no scenarios and is not QA coverage."
+            )
+            state.planning_phase = False
+            _write_status_file(status_path, state.pr_id, [],
+                               state.scenario_verdicts,
+                               overall=state.latest_verdict,
+                               scenario_0=state.scenario_0,
+                               error=state._error)
+            # Show the error block beside the dialog: the user looking at
+            # the QA window otherwise sees only the prompt, no explanation.
+            if planner_pane and tmux_mod.pane_exists(planner_pane):
+                _add_status_pane(session, planner_pane, status_path)
+            _notify()
+            state.running = False
+            return state
 
         if not plan_found and not state.plan_output:
             # Try capturing whatever the planner produced
@@ -3365,25 +3500,7 @@ def run_qa_sync(
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
-        try:
-            # Use the script path directly (avoids PYTHONPATH issues)
-            _qa_status_script = Path(__file__).parent / "qa_status.py"
-            status_cmd = (
-                f"python3 {_qa_status_script} {status_path} {session}"
-            )
-            status_pane = tmux_mod.split_pane_at(
-                planner_pane, "h", status_cmd, background=True,
-            )
-
-            # Register both panes and rebalance the main window only
-            qa_win_id = tmux_mod.pane_window_id(planner_pane)
-            if qa_win_id:
-                pane_layout.register_and_rebalance(session, qa_win_id, [
-                    (planner_pane, "qa-planner", "planner"),
-                    (status_pane, "qa-status", status_cmd),
-                ])
-        except Exception:
-            _log.exception("Failed to create status pane")
+        _add_status_pane(session, planner_pane, status_path)
 
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
@@ -3484,14 +3601,21 @@ def _execute_and_finalize(
     except Exception:
         _log.exception("Failed to persist scenario verdicts")
 
-    try:
-        state.finalize_verdict = _run_qa_finalize_pane(
-            state, pr_data, session, window_name, workdir_path,
-            stop_check=lambda: state.stop_requested,
-            project_data=data,
-        )
-    except Exception:
-        _log.exception("Failed to run QA finalize pane")
+    if not state.scenarios:
+        # Nothing ran, so there are no scenario pushes to reconcile.  A
+        # finalizer here only adds another session that can stall (#229:
+        # it blocked at the same trust prompt as the planner).
+        _log.warning("QA finalize: skipped for %s — no scenarios ran",
+                     state.pr_id)
+    else:
+        try:
+            state.finalize_verdict = _run_qa_finalize_pane(
+                state, pr_data, session, window_name, workdir_path,
+                stop_check=lambda: state.stop_requested,
+                project_data=data,
+            )
+        except Exception:
+            _log.exception("Failed to run QA finalize pane")
 
     # Refresh the snapshot with the overall + finalize verdict so a
     # restart between completion and TUI processing still carries them.

@@ -832,8 +832,8 @@ Auto-cleanup is enabled. After finishing your main work:
 
 def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
                           session_name: str | None = None,
-                          pull_from_workdir: str | None = None,
-                          pull_from_origin: bool = False) -> str:
+                          pull_from_origin: bool = False,
+                          main_repo: str | None = None) -> str:
     """Generate a Claude Code prompt for resolving a merge failure.
 
     Args:
@@ -841,13 +841,11 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
         pr_id: The PR identifier.
         error_output: Verbatim error output from the failed merge attempt.
         session_name: If provided, include TUI interaction instructions.
-        pull_from_workdir: When set, this is a pull-from-workdir failure
-            (local backend).  The value is the workdir path that contains
-            the already-merged base branch.  The merge window runs in the
-            *repo dir* and needs to pull/integrate from the workdir.
         pull_from_origin: When True, this is a pull-from-origin failure
             (vanilla/github backend).  The merge window runs in the
             *repo dir* and needs to pull origin into the local checkout.
+        main_repo: Local backend: the main repo directory pm fast-forwards
+            to the workdir's resolved base branch (defaults to the repo URL).
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -872,39 +870,6 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
         general_notes_block, merge_specific_block = notes.notes_for_prompt(root, "merge")
     except FileNotFoundError:
         pass
-
-    # --- Pull-from-workdir variant ---
-    # When this is set, the merge window is running in the *repo dir* and
-    # needs to integrate the already-merged base branch from the workdir.
-    if pull_from_workdir:
-        prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
-
-The PR branch `{branch}` has already been merged into `{base_branch}` in the workdir,
-but pulling that result into the main repo directory failed:
-
-```
-{error_output}
-```
-
-## Context
-
-You are running in the **main repo directory** (not the PR workdir).
-The workdir at `{pull_from_workdir}` has the correct merged `{base_branch}`.
-This repo directory needs its `{base_branch}` updated to match the workdir's.
-
-## Steps
-1. Investigate the error above and fix whatever is blocking the update
-   (e.g. stash uncommitted changes, resolve diverged branches)
-2. Fetch and integrate `{base_branch}` from the workdir into this repo directory
-3. Restore any stashed changes
-4. Verify that `{base_branch}` now contains the merge commit from the workdir
-5. End with a verdict on its own line — one of:
-   - **MERGED** — The repo directory is updated. Everything is done.
-   - **INPUT_REQUIRED** — You need human help to resolve this.
-
-IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
-        return prompt.strip()
 
     # --- Pull-from-origin variant (vanilla/github) ---
     if pull_from_origin:
@@ -947,6 +912,10 @@ not a remote server.  The origin repo is non-bare with `{base_branch}` checked o
 pushing to origin will be rejected.
 
 Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
+pm then fast-forwards the main repo's `{base_branch}` to this one, so it must
+contain the main repo's current `{base_branch}` as well as `{branch}`:
+`git fetch {main_repo or repo_url} {base_branch} && git merge FETCH_HEAD` (if it is not
+already merged), then merge `{branch}`.  Do not change the main repo directory.
 """
     elif backend == "github":
         backend_block = f"""

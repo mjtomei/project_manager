@@ -316,3 +316,20 @@ class TestEdgeCases:
             "(workdir: /home/user/.pm/workdirs/qa/pr-001-deadbeef)"
         )
         assert text == expected
+
+
+class TestProgressLogLine:
+    def test_bracketed_text_survives_log_markup(self):
+        """The log line renders markup; the "[pr-…]" prefix and the
+        "[finalize: …]" part must reach it as literal text."""
+        from rich.text import Text
+        from pm_core.tui.qa_loop_ui import _on_qa_update
+        app = MagicMock()
+        state = QALoopState(pr_id="pr-001")
+        state.latest_output = ("QA complete: NEEDS_WORK [finalize: "
+                               "FINALIZE_DONE] — Login flow: PASS")
+        _on_qa_update(app, state)
+        msg = app.log_message.call_args[0][0]
+        assert Text.from_markup(msg).plain == (
+            "QA [pr-001]: QA complete: NEEDS_WORK [finalize: FINALIZE_DONE]"
+            " — Login flow: PASS")

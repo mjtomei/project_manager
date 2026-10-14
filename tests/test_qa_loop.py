@@ -266,6 +266,41 @@ QA_PLAN_END
         assert scenarios[1].title == "CLI Integration"
         assert scenarios[1].instruction_path is None
 
+    def test_real_plan_not_numbered_from_one_ignores_prompt_spec(self):
+        """A committed qa.md echoed in the prompt can hold its own
+        "SCENARIO 1:" line.  When the planner numbers its plan from 2, the
+        body must still start at the planner's QA_PLAN_START, not at that
+        earlier spec line (pr-b53bfe2 QA r5 S10: planned 1, launched 2)."""
+        output = """You are a QA planner analyzing PR pr-001: "Add yellow.txt"
+
+## QA Spec
+
+SCENARIO 1: yellow.txt content
+- GIVEN a fresh clone of the PR branch
+- WHEN the user prints yellow.txt with cat
+- THEN the output is yellow
+
+## Output Format
+
+QA_PLAN_START
+SCENARIO 2: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+STEPS: <concrete test steps>
+QA_PLAN_END
+
+The spec asks for one scenario, so the plan has one.
+
+QA_PLAN_START
+SCENARIO 2: Fresh clone shows yellow.txt containing exactly "yellow"
+FOCUS: yellow.txt is a one-line file holding yellow
+INSTRUCTION: none
+STEPS: cat yellow.txt
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert [s.title for s in scenarios] == [
+            'Fresh clone shows yellow.txt containing exactly "yellow"']
+
     def test_pane_with_only_prompt_template(self):
         """When pane content only has the prompt template, placeholder
         scenarios are now rejected by parse_qa_plan itself, preventing

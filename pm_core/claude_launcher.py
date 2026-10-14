@@ -4,9 +4,11 @@ import json
 import logging
 import os
 import random
+import re
 import shlex
 import shutil
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -388,6 +390,177 @@ def find_editor() -> str:
     return "vi"
 
 
+# ---------------------------------------------------------------------------
+# Workspace trust (runtime mechanics live in pm_core.workspace_trust)
+# ---------------------------------------------------------------------------
+
+class WorkspaceTrustBlocked(RuntimeError):
+    """A launched session stayed at the workspace-trust prompt past the grace."""
+
+
+def prepare_workspace(cwd: str | None):
+    """Establish workspace trust for a host *cwd* before launching into it.
+
+    Only pm-created or explicitly authorized workdirs are trusted (see
+    ``workspace_trust.approved_path``); anything else is left to the
+    runtime's own explicit prompt.  Never raises.
+    """
+    from pm_core import workspace_trust
+    if not cwd or not os.path.isdir(cwd):
+        return workspace_trust.TrustOutcome(
+            workspace_trust.UNSUPPORTED, str(cwd or ""), "no host cwd")
+    try:
+        outcome = workspace_trust.get_trust_runtime().bootstrap(cwd)
+    except Exception as e:  # never block a launch on bootstrap bugs
+        _log.warning("workspace trust: bootstrap crashed for %s", cwd,
+                     exc_info=True)
+        return workspace_trust.TrustOutcome(workspace_trust.ERROR, cwd, str(e))
+    if outcome.status == workspace_trust.UNAPPROVED:
+        _log.info("workspace trust: %s not approved; leaving the prompt "
+                  "explicit", cwd)
+    elif not outcome.ok:
+        _log.warning("workspace trust: %s", outcome.message)
+    return outcome
+
+
+class WorkspacePromptWatch:
+    """Bounded watchdog for a pane that may be stuck at the trust prompt.
+
+    ``check()`` is cheap to call from a poll loop: it captures the pane at
+    most every *interval* seconds.  When the dialog is visible and
+    *workdir* is approved, it selects the "trust" option by reading the
+    cursor off the screen (never a blind Enter — the dialog defaults to
+    "No, exit").  Returns an actionable message once the dialog has stayed
+    visible longer than *grace* seconds, else None.
+
+    *transcript_path* (the session's JSONL, or a symlink to it) ends the
+    watch for good once it exists: Claude only writes it after the first
+    prompt is submitted, i.e. after the dialog.  Without it, text later in
+    the first turn that quotes the dialog could be mistaken for it.
+    """
+
+    MAX_ACCEPT_ATTEMPTS = 2
+    # The cap is per pane, not per watch: one pane can be watched by
+    # several watches (the QA loop's worker watch and the TUI idle
+    # tracker's, and CLI pollers build a fresh tracker per call), so the
+    # attempts already spent are also kept on the tmux pane itself.
+    _ATTEMPTS_OPTION = "@pm_trust_accept_attempts"
+    # The pid of the process that last reported this pane as blocked, so a
+    # second watch in the same TUI (e.g. the orphan watch taking over a
+    # review pane after its loop already failed on the dialog) does not
+    # report it again.  A restarted TUI (new pid) still reports it once.
+    _REPORTED_OPTION = "@pm_trust_reported_by"
+
+    def __init__(self, pane_id: str, workdir: str | None = None,
+                 grace: float | None = None, interval: float = 5.0,
+                 transcript_path: str | Path | None = None):
+        from pm_core import workspace_trust
+        self.pane_id = pane_id
+        self.workdir = workdir
+        self.transcript_path = transcript_path
+        self.started = False
+        self.grace = workspace_trust.prompt_grace_seconds() if grace is None else grace
+        self.interval = interval
+        self._runtime = workspace_trust.get_trust_runtime()
+        self._last_check = 0.0
+        self._first_seen: float | None = None
+        self._accept_attempts = 0
+        self._reported = False
+        # Set when the grace first runs out: another watch in this process
+        # had already reported this pane.
+        self.reported_elsewhere = False
+        self.shown_path: str | None = None
+
+    @property
+    def visible(self) -> bool:
+        """Whether the last check saw the trust dialog on screen."""
+        return self._first_seen is not None
+
+    def _accept_target(self, shown: str) -> str | None:
+        """The approved directory the dialog may be accepted for, else None.
+
+        A host path on the dialog decides: the session may have started
+        somewhere other than *workdir* (never trust that by proxy).  Only an
+        unreadable or container-internal path falls back to *workdir*; any
+        other path that isn't a host directory (e.g. mis-parsed) is refused.
+        """
+        from pm_core import workspace_trust
+        from pm_core.container import _CONTAINER_WORKDIR
+        if shown and os.path.isdir(shown):
+            target = shown
+        elif not shown or workspace_trust.is_within(shown, _CONTAINER_WORKDIR):
+            target = self.workdir
+        else:
+            return None
+        if target and workspace_trust.approved_path(target):
+            return target
+        return None
+
+    def _pane_attempts(self) -> int:
+        """Accept attempts any watch has already made on this pane."""
+        from pm_core import tmux as tmux_mod
+        try:
+            return int(tmux_mod.get_pane_option(
+                self.pane_id, self._ATTEMPTS_OPTION) or 0)
+        except ValueError:
+            return 0
+
+    def check(self, force: bool = False) -> str | None:
+        from pm_core import tmux as tmux_mod, workspace_trust
+        if self.started:
+            return None
+        if self.transcript_path and Path(self.transcript_path).exists():
+            self.started = True
+            self._first_seen = None
+            return None
+        now = time.monotonic()
+        if not force and now - self._last_check < self.interval:
+            return None
+        self._last_check = now
+        try:
+            screen = tmux_mod.capture_pane(self.pane_id)
+        except Exception:
+            return None
+        shown = self._runtime.detect_prompt(screen)
+        if shown is None:
+            self._first_seen = None
+            return None
+        self.shown_path = shown
+        if self._first_seen is None:
+            self._first_seen = now
+            _log.warning("workspace trust: pane %s is at the trust prompt "
+                         "(%s)", self.pane_id, shown or self.workdir)
+        used = max(self._accept_attempts, self._pane_attempts())
+        target = (self._accept_target(shown)
+                  if used < self.MAX_ACCEPT_ATTEMPTS else None)
+        if target:
+            keys = self._runtime.accept_keys(screen)
+            if keys:
+                self._accept_attempts = used + 1
+                tmux_mod.set_pane_option(self.pane_id, self._ATTEMPTS_OPTION,
+                                         str(self._accept_attempts))
+                _log.info("workspace trust: accepting prompt in pane %s for "
+                          "approved workdir %s (keys=%s)", self.pane_id,
+                          target, keys)
+                prepare_workspace(target)
+                for key in keys:
+                    tmux_mod.send_keys_literal(self.pane_id, key)
+                    time.sleep(0.2)
+                return None
+        waited = now - self._first_seen
+        if waited >= self.grace:
+            if not self._reported:
+                self._reported = True
+                pid = str(os.getpid())
+                self.reported_elsewhere = tmux_mod.get_pane_option(
+                    self.pane_id, self._REPORTED_OPTION) == pid
+                tmux_mod.set_pane_option(self.pane_id, self._REPORTED_OPTION,
+                                         pid)
+            return workspace_trust.blocked_message(
+                shown or self.workdir or "", waited)
+        return None
+
+
 def launch_claude(prompt: str, session_key: str, pm_root: Path,
                   cwd: str | None = None, resume: bool = True,
                   provider: str | None = None,
@@ -438,6 +611,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
+        prepare_workspace(cwd or os.getcwd())
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
@@ -670,8 +844,23 @@ def build_claude_shell_cmd(
         log_shell_command(cmd, prefix="claude")
         return cmd
     else:
+        # Host launches establish workspace trust here, at the one boundary
+        # every workflow role goes through.  Container launches pass the
+        # host path as ``write_dir`` and a container-internal ``cwd``; their
+        # trust is seeded into the container's config copy at creation
+        # (container.create_container).
+        cd_prefix = ""
+        if cwd and (write_dir is None
+                    or os.path.realpath(write_dir) == os.path.realpath(cwd)):
+            prepare_workspace(cwd)
+            # Run Claude in the directory that was just bootstrapped, not
+            # wherever the pane happens to start (a tmux split without -c
+            # starts in the *caller's* cwd — the review pane once launched
+            # in the TUI's pm/ dir and sat at the trust prompt there).
+            if os.path.isdir(cwd):
+                cd_prefix = f"cd {shlex.quote(cwd)} && "
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-        cmd = f"{env_prefix}claude{skip}"
+        cmd = f"{cd_prefix}{env_prefix}claude{skip}"
 
     # Explicit model param overrides provider's model_flag
     effective_model = model or model_flag
@@ -756,6 +945,45 @@ def transcript_path_for(cwd: str, session_id: str) -> Path:
     letting ``build_claude_shell_cmd(transcript=...)`` create one.
     """
     return _claude_project_dir(cwd) / f"{session_id}.jsonl"
+
+
+_PANE_SESSION_RE = re.compile(
+    r"--(?:session-id|resume)[ =]"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+# shlex.quote() output: a bare word, or a single-quoted one (spaces).
+_PANE_CD_RE = re.compile(r'^"?cd ((?:\'[^\']*\'|[^\s\'])+) && ')
+_PANE_CONTAINER_RE = re.compile(r"\b(?:podman|docker) exec\b")
+
+
+def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
+    """Claude's native transcript for the session a pane was launched with.
+
+    A restarted TUI can't find the transcript symlinks an earlier TUI made
+    (they live in that TUI's run dir), so it would never track, idle-detect
+    or trust-watch those panes again.  The session id is in the pane's own
+    start command (``--session-id``/``--resume``), and the directory Claude
+    runs in is the ``cd`` prefix of a host launch, ``/workspace`` for a
+    container exec, else *workdir*.  Returns None when no session id shows.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.container import _CONTAINER_WORKDIR
+    cmd = tmux_mod.pane_start_command(pane_id)
+    m = _PANE_SESSION_RE.search(cmd)
+    if not m:
+        return None
+    cd = _PANE_CD_RE.match(cmd)
+    if cd:
+        try:
+            cwd = shlex.split(cd.group(1))[0]
+        except (ValueError, IndexError):
+            return None
+    elif _PANE_CONTAINER_RE.search(cmd):
+        cwd = _CONTAINER_WORKDIR
+    elif workdir:
+        cwd = workdir
+    else:
+        return None
+    return transcript_path_for(cwd, m.group(1))
 
 
 def finalize_transcript(transcript_path: Path) -> None:

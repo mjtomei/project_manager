@@ -425,11 +425,16 @@ class TestPrMerge:
 
         assert result.exit_code == 0
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        # Workdir: capture tip, checkout, merge, post-merge verify (no pre-dirty check)
+        # Workdir: capture tip, checkout, sync master from the main repo,
+        # merge, post-merge verify (no pre-dirty check)
         assert ("rev-parse", "pm/pr-001") == git_calls[0][:2]
         assert ("checkout", "master") == git_calls[1][:2]
-        assert git_calls[2][0] == "merge"
-        assert ("merge-base", "--is-ancestor") == git_calls[3][:2]
+        repo = str(tmp_merge_project["pm_dir"].parent)
+        sync_fetch = git_calls.index(("fetch", repo, "master"))
+        assert git_calls[sync_fetch + 1][-1] == "FETCH_HEAD"
+        pr_merge = git_calls.index(next(c for c in git_calls if c[:2] == ("merge", "--no-ff")))
+        assert sync_fetch < pr_merge
+        assert ("merge-base", "--is-ancestor") == git_calls[pr_merge + 1][:2]
         # Repo dir: check branch, fetch from workdir, ff-only merge
         assert ("rev-parse", "--abbrev-ref", "HEAD") in git_calls
         assert any(c[0] == "fetch" for c in git_calls)
@@ -440,10 +445,12 @@ class TestPrMerge:
 
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
-    def test_local_merge_pull_failure_launches_merge_window(
+    def test_local_merge_main_repo_failure_reports_without_window(
         self, mock_git_ops, mock_finalize, tmp_merge_project
     ):
-        """When pull into repo dir fails, launch merge window if --resolve-window."""
+        """A fast-forward blocked by the main repo itself (not divergence)
+        is reported for the user to fix; no Claude window is opened in the
+        main repo (pr-e835d8f), even with --resolve-window."""
         def run_git_side_effect(*args, **kwargs):
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout="", stderr="")
@@ -464,8 +471,10 @@ class TestPrMerge:
                                                "--resolve-window",
                                                "--no-signoff-check"])
 
-        assert result.exit_code == 0
-        mock_launch.assert_called_once()
+        assert result.exit_code != 0
+        assert "Not possible to fast-forward" in result.output
+        assert "--propagation-only pr-001" in result.output
+        mock_launch.assert_not_called()
         mock_finalize.assert_not_called()
 
     @mock.patch.object(pr_mod, "_finalize_merge")
@@ -541,7 +550,7 @@ class TestPrMerge:
                 return MagicMock(returncode=0, stdout="master\n", stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args[:2] == ("merge-base", "--is-ancestor"):
+            if args[:3] == ("merge-base", "--is-ancestor", "abc1234"):
                 return MagicMock(returncode=1, stdout="", stderr="")  # verification fails
             return MagicMock(returncode=0, stdout="", stderr="")
         mock_git_ops.run_git.side_effect = run_git_side_effect
@@ -666,7 +675,7 @@ class TestPrMerge:
                                                "--no-signoff-check"])
 
         assert result.exit_code != 0
-        assert "Pull manually" in result.output or "Fetch" in result.output
+        assert "fetch failed" in result.output
         mock_finalize.assert_not_called()
 
 

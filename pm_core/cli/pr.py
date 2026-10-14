@@ -1288,7 +1288,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
 
-        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd, background=True)
+        # Explicit cwd: without -c tmux starts the split in the calling
+        # process's cwd (the TUI's pm dir), not the PR workdir.
+        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd,
+                                             background=True, cwd=workdir)
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
@@ -1598,7 +1601,6 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          transcript: str | None = None,
                          cwd: str | None = None,
                          companion: bool = False,
-                         pull_from_workdir: str | None = None,
                          pull_from_origin: bool = False) -> None:
     """Launch a tmux window with Claude to resolve a merge conflict.
 
@@ -1608,9 +1610,6 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         companion: If True (or the ``companion-pane`` global setting is
                    enabled), a companion shell pane is opened alongside
                    the Claude pane.
-        pull_from_workdir: When set, this is a pull-from-workdir failure
-             (local backend).  The value is the workdir path containing
-             the merged branch.
         pull_from_origin: When True, this is a pull-from-origin failure
              (vanilla/github backend).
     """
@@ -1650,8 +1649,10 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session,
-        pull_from_workdir=pull_from_workdir,
         pull_from_origin=pull_from_origin,
+        main_repo=(str(_resolve_repo_dir(state_root(), data))
+                   if data.get("project", {}).get("backend") == "local"
+                   else None),
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir,
@@ -1689,6 +1690,14 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                 switch=not background,
             )
         click.echo(f"Opened merge resolution window '{window_name}'")
+        # The vanilla/GitHub pull-from-origin window resolves in the project
+        # root, which pm does not auto-trust (pr-19990de): say why the
+        # window is waiting.
+        from pm_core.workspace_trust import approved_path
+        if not approved_path(workdir):
+            click.echo(f"  {workdir} is not an approved workspace: answer "
+                       f"Claude's trust prompt in '{window_name}' (or run "
+                       f"`pm trust add {workdir}` before merging).")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)
         click.echo(f"Merge window error: {e}")
@@ -1763,6 +1772,111 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
     return True
 
 
+# Sentinel from _propagate_to_repo: the main repo's base_branch has commits
+# the workdir's lacks, so it can't be fast-forwarded to the workdir's.
+_DIVERGED = object()
+
+
+def _is_ancestor(cwd: str, ancestor: str, descendant: str) -> bool:
+    return git_ops.run_git("merge-base", "--is-ancestor", ancestor, descendant,
+                           cwd=cwd, check=False).returncode == 0
+
+
+def _sync_workdir_base(workdir: str, repo_dir: str, base_branch: str) -> str | None:
+    """Bring *base_branch* in the PR workdir up to date with the main repo's.
+
+    Local backend: merges land in the main repo, so the workdir's
+    *base_branch* is stale as soon as another PR merges (pr-a75da60) and
+    any conflict would only surface at the fast-forward into the main
+    repo — whose checkout holds the user's own work and is not a
+    workspace pm trusts for unattended sessions (pr-e835d8f).  Integrating
+    here keeps conflicts in the PR workdir.  Fast-forwards when it can and
+    merges otherwise; never resets, so an earlier merge commit on the
+    workdir's *base_branch* that was not yet propagated is kept.
+
+    Returns None on success, else an error message (any failed merge is
+    aborted, leaving the workdir on *base_branch* with a clean index).
+    """
+    head = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
+                           cwd=workdir, check=False).stdout.strip()
+    if head != base_branch:
+        co = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+        if co.returncode != 0:
+            return (f"Could not check out {base_branch} in {workdir}: "
+                    f"{co.stderr.strip()}")
+    fetch = git_ops.run_git("fetch", repo_dir, base_branch, cwd=workdir,
+                            check=False)
+    if fetch.returncode != 0:
+        return (f"Could not fetch {base_branch} from the main repo "
+                f"({repo_dir}): {fetch.stderr.strip()}")
+    merge = git_ops.run_git("merge", "--no-edit", "-m",
+                            f"Merge {base_branch} from {repo_dir}",
+                            "FETCH_HEAD", cwd=workdir, check=False)
+    if merge.returncode == 0:
+        return None
+    git_ops.run_git("merge", "--abort", cwd=workdir, check=False)
+    detail = (merge.stdout.strip() + "\n" + merge.stderr.strip()).strip()
+    return (f"Updating {base_branch} in the PR workdir from the main repo "
+            f"({repo_dir}) failed:\n{detail}\n\n"
+            f"In {workdir}, run `git fetch {repo_dir} {base_branch} && "
+            f"git merge FETCH_HEAD`, resolve the conflicts and commit.")
+
+
+def _propagate_to_repo(repo_dir: str, workdir: str, base_branch: str,
+                       pr_display: str):
+    """Fast-forward the main repo's *base_branch* to the workdir's.
+
+    Returns None on success, :data:`_DIVERGED` when the main repo's
+    *base_branch* has commits the workdir's lacks, else an error message.
+    Uncommitted work in the main repo is tolerated (stashed around an
+    overlapping fast-forward and restored); it is never reset.
+    """
+    repo_path = Path(repo_dir)
+    current = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
+                              cwd=repo_dir, check=False).stdout.strip()
+
+    fetch_r = git_ops.run_git("fetch", workdir, base_branch,
+                              cwd=repo_dir, check=False)
+    if fetch_r.returncode != 0:
+        return f"Fetch from workdir failed: {fetch_r.stderr.strip()}"
+    if not _is_ancestor(repo_dir, f"refs/heads/{base_branch}", "FETCH_HEAD"):
+        return _DIVERGED
+
+    if current != base_branch:
+        # Not on base branch — update just the ref (no working-tree changes)
+        click.echo(f"Repo is on '{current}', updating {base_branch} ref...")
+        fetch_r = git_ops.run_git(
+            "fetch", workdir, f"{base_branch}:{base_branch}",
+            cwd=repo_dir, check=False,
+        )
+        if fetch_r.returncode != 0:
+            return (f"Could not update {base_branch} ref: "
+                    f"{fetch_r.stderr.strip()}")
+        return None
+
+    # On base branch — need to update the working tree too.
+    # Dirty files are tolerated; git merge --ff-only succeeds when they
+    # don't overlap with the incoming changes.
+    merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
+                              cwd=repo_dir, check=False)
+
+    # If merge failed due to dirty-file overlap, stash and retry
+    stash_info = None
+    if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
+        stash_info = _stash_for_merge(repo_path, pr_display)
+        if stash_info:
+            merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
+                                      cwd=repo_dir, check=False)
+    if stash_info:
+        _unstash_after_merge(repo_path, stash_info)
+
+    if merge_r.returncode != 0:
+        error_detail = (merge_r.stdout.strip() + "\n"
+                        + merge_r.stderr.strip()).strip()
+        return f"Fast-forward of {base_branch} failed:\n{error_detail}"
+    return None
+
+
 def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
                        workdir: str, base_branch: str,
                        resolve_window: bool, background: bool,
@@ -1774,89 +1888,46 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
     checked out, ``git push`` fails.  Instead we fetch from the workdir and
     fast-forward the base branch in the main repo.
 
+    If the main repo's base branch moved since the workdir merge, it is
+    integrated into the workdir's (:func:`_sync_workdir_base`) and the
+    fast-forward retried; a conflict there opens the resolution window in
+    the PR workdir.  Resolution never runs in the main repo.
+
     Returns True if successful (caller should finalize), False if a merge
-    window was launched or the update failed.
+    window was launched or the update needs resolving in the workdir.
+    Exits non-zero when the main repo itself blocks the update (e.g.
+    uncommitted work in the way), which only the user can sort out.
     """
-    repo_path = Path(repo_dir)
-
-    # Check what branch is checked out in the repo
-    head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
-                                  cwd=repo_dir, check=False)
-    current = head_result.stdout.strip() if head_result.returncode == 0 else ""
-
-    if current != base_branch:
-        # Not on base branch — update just the ref (no working-tree changes)
-        click.echo(f"Repo is on '{current}', updating {base_branch} ref...")
-        fetch_r = git_ops.run_git(
-            "fetch", workdir, f"{base_branch}:{base_branch}",
-            cwd=repo_dir, check=False,
-        )
-        if fetch_r.returncode == 0:
-            click.echo(f"Updated {base_branch} in repo.")
-            return True
-        error_msg = (f"Could not update {base_branch} ref: "
-                     f"{fetch_r.stderr.strip()}")
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_workdir=workdir)
-            return False
-        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
-        return False
-
-    # On base branch — need to update the working tree too.
-    # Dirty files are tolerated; git merge --ff-only succeeds when they
-    # don't overlap with the incoming changes.
+    pr_id = pr_entry["id"]
     pr_display = _pr_display_id(pr_entry)
 
-    fetch_r = git_ops.run_git("fetch", workdir, base_branch,
-                              cwd=repo_dir, check=False)
-    if fetch_r.returncode != 0:
-        error_msg = f"Fetch from workdir failed: {fetch_r.stderr.strip()}"
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_workdir=workdir)
+    err = _propagate_to_repo(repo_dir, workdir, base_branch, pr_display)
+    if err is _DIVERGED:
+        click.echo(f"{base_branch} in {repo_dir} has moved since the workdir "
+                   f"merge; updating the workdir's {base_branch} first...")
+        sync_err = _sync_workdir_base(workdir, repo_dir, base_branch)
+        if sync_err:
+            click.echo(sync_err, err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, sync_err,
+                                     background=background, transcript=transcript,
+                                     cwd=workdir, companion=companion)
+            else:
+                click.echo(f"Resolve it in {workdir}, then run "
+                           f"'pm pr merge --propagation-only {pr_id}'.", err=True)
             return False
-        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
-        return False
+        err = _propagate_to_repo(repo_dir, workdir, base_branch, pr_display)
+        if err is _DIVERGED:
+            err = f"{base_branch} in {repo_dir} moved again during the update."
 
-    merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
-                              cwd=repo_dir, check=False)
+    if err is None:
+        click.echo(f"Updated {base_branch} in repo.")
+        return True
 
-    # If merge failed due to dirty-file overlap, stash and retry
-    stash_info = None
-    if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
-        stash_info = _stash_for_merge(repo_path, pr_display)
-        if stash_info:
-            merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
-                                      cwd=repo_dir, check=False)
-
-    if merge_r.returncode != 0:
-        if stash_info:
-            _unstash_after_merge(repo_path, stash_info)
-        error_detail = (merge_r.stdout.strip() + "\n"
-                        + merge_r.stderr.strip()).strip()
-        error_msg = f"Fast-forward of {base_branch} failed:\n{error_detail}"
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_workdir=workdir)
-            return False
-        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
-        return False
-
-    if stash_info:
-        _unstash_after_merge(repo_path, stash_info)
-    click.echo(f"Updated {base_branch} in repo.")
-
-    return True
+    click.echo(f"{err}\nNothing in {repo_dir} was reset or discarded. Fix "
+               f"this there, then run 'pm pr merge --propagation-only "
+               f"{pr_id}'.", err=True)
+    raise SystemExit(1)
 
 
 @pr.command("qa")
@@ -2177,6 +2248,23 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
                                      transcript=transcript, companion=companion)
                 return
             raise SystemExit(1)
+
+        if backend_name == "local":
+            # Merge onto the main repo's current base, not the workdir's
+            # stale copy, so conflicts surface here in the PR workdir.
+            sync_err = _sync_workdir_base(
+                workdir, str(_resolve_repo_dir(root, data)), base_branch)
+            if sync_err:
+                if stash_info:
+                    _unstash_after_merge(work_path, stash_info)
+                click.echo(sync_err, err=True)
+                if resolve_window:
+                    _launch_merge_window(data, pr_entry, sync_err,
+                                         background=background,
+                                         transcript=transcript,
+                                         companion=companion)
+                    return
+                raise SystemExit(1)
 
         result = git_ops.run_git("merge", "--no-ff", branch, "-m",
                                  f"Merge {branch}: {pr_entry.get('title', pr_id)}",
