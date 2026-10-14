@@ -211,6 +211,11 @@ than the published head, or an all-PASS sign-off after planner app edits.
    QA on an in_progress PR leaves it in_progress (note from QA S4). Set the
    throwaway PR to in_review first.
 
+6. Round 4 (2026-10-14) is the integration re-QA after #230 was merged in.
+   The supervisor's qa-integration-scope.txt sets its scope: one compact
+   scenario (7), and S6 is carried forward from round 3. No application
+   edits were made during this planning pass. Nothing is unresolved.
+
 ## Scenarios (QA round 3; the driver numbers them 5/6)
 
 Scenario 5 — Extraction and complete coverage (R1–R7 + edge cases).
@@ -293,3 +298,89 @@ git checks with CLI recording.
   - TUI log lines keep the "[pr-id]" / "[finalize: …]" prefixes (ae077932).
 - Edge: on a local-only project publishing is a no-op. Dirty tracked changes
   produce a warning and QA proceeds.
+
+## QA round 4 — integration re-QA (the driver numbers it 7)
+
+Why: #230 (pr-b53bfe2, master bdbff78b) was merged into this branch
+(3c369a0f). Integration sign-off found that #230's parse_qa_plan start bound
+(the last QA_PLAN_START *substring*) cut off the leading scenarios when
+scenario text mentioned the marker. #231 qa_plan_problem then rejected the
+complete transcript plan, so QA stalled. Fixes: 005856d9 makes only whole
+marker lines count for the START bound. db261fae (review 4faa i1) does the
+same for the END bound, so trailing prose that mentions QA_PLAN_END no
+longer leaks into the last scenario's STEPS. 8be44998 (4faa i2) is
+test-only. Review 4faa i3 PASSed at e4102bde. Scope file (authoritative):
+`/pm-captures/merge-20261014/qa-integration-scope.txt`. On the host it is
+`~/.pm/sessions/project_manager-c5a1006b/captures/pr-b8561ac/merge-20261014/`.
+
+This is focused supervised integration QA. It is not a whole-PR campaign
+and not unattended qualification. Round 3 (run pr-b8561ac-226a9766…, app
+code 6ac3a4f2) PASSed S5 R1–R7 and S6 R8–R11, and both were independently
+VERIFIED. S6 (publishing/pinning, R8–R11) is not touched by
+005856d9/db261fae, so it is carried forward from round 3 without a re-run.
+Say so explicitly in the verdict. Do not re-run it just to regenerate
+evidence. The host controller has #230 but not #231, so the outer planner
+index is kept physically tiny (one scenario). All detail is here.
+
+Scenario 7 — Integration: whole-line START/END bounds through the live
+planner (R1–R4, R6 + the #230 echo).
+Setup is the round-3 S5 harness: `tui-manual-test.md`, fake-claude,
+history-limit 0, 80x23/24 planner pane, and a throwaway project with the PR
+set in_review. See `scenarios/5` and `scenarios/3` READMEs in the captures
+dir for harness recipes and gotchas. Record the tested HEAD sha. It must be
+≥ e4102bde, and the app code must be db261fae. Save captures under
+`scenarios/7/integration-20261014/` and keep the existing files. The old
+synthetic fixture 7 was copied to
+`scenarios/attempts/synthetic-fixture-7-preserved-20261014/`. Every story
+runs a real TUI QA run. Unit tests are supporting evidence only. In each
+story, record the planned count, the launched count and the window titles.
+- A (marker words in steps + trailing END prose). The fake planner's
+  transcript holds a complete 4-scenario plan. Scenario 3's STEPS mention
+  QA_PLAN_START mid-sentence, and scenario 4's STEPS mention QA_PLAN_END
+  mid-sentence. After the real QA_PLAN_END line comes a prose line that
+  mentions QA_PLAN_END. The pane is truncated.
+  - The log says "accepted 4 scenario(s) from transcript".
+  - Four windows open with their original titles and order.
+  - Scenario 4's worker prompt / scenario.json STEPS end at its own last
+    step. They contain no END line and no trailing prose.
+  - Pre-fix contrast (CLI, scratch worktree): at 3c369a0f the same
+    transcript stalls or is rejected ([3,4] parsed). At 005856d9 the
+    trailing prose leaks into scenario 4's STEPS. At HEAD it is clean.
+- B (real archived plan). Feed
+  `/pm-captures/shepherd-20261013/qa-round-1-planned-plan.txt` (the
+  4-scenario plan that parsed as [3,4] at 3c369a0f) as the fake planner's
+  transcript plan, with a truncated pane.
+  - All 4 scenarios launch, and scenarios 1–2 are not lost.
+- C (transcript beats suffix pane, R1/R2). The pane keeps only SCENARIO
+  2..4 + END, and the transcript is complete.
+  - All 4 launch on the first idle.
+- D (stale template + offset suffix, R4). Second round (scenario_start=2).
+  The transcript is missing or holds no plan. The pane shows a template
+  START/placeholder/END, then a real SCENARIO 2..4 + END. Also run the bare
+  stale START + text + 2..4 suffix variant.
+  - Both are rejected: "Planner plan incomplete (…)".
+  - Zero launches.
+  - On planner exit, QA ends INPUT_REQUIRED and the note carries the
+    reason.
+  - Residual pr-c59597f (a stale bare START directly followed by an offset
+    suffix) is known. List it explicitly as residual, not as covered.
+- E (legitimate offset + bullet fallback, R3/R5).
+  - In a later round, a complete transcript plan numbered from
+    scenario_start is accepted and all of it launches.
+  - A complete pane plan with "●"/"⏺" marker bullets and no transcript plan
+    is accepted from the pane.
+- F (#230 echo safeguard). A committed `pm/specs/<pr>/qa.md` contains a line
+  `SCENARIO 1: yellow.txt content` (it is echoed into the planner prompt),
+  and the planner emits a one-scenario plan.
+  - Exactly 1 scenario launches.
+  - No qa.md scenario is parsed.
+  - Repeat with the planner's plan numbered from 2 on a later round.
+- Supporting CLI recording: `pytest tests/test_qa_planner_handoff.py
+  tests/test_qa_loop.py tests/test_qa_note_recording.py
+  tests/test_fake_claude.py` passes on HEAD (PATH=/usr/bin first,
+  PM_HOST_HOME unset).
+- Intake check: confirm the driver launched scenario 7 (planned 1 /
+  launched 1). If the intake differs, record it in a PR note.
+Pass: every story behaves as stated on HEAD, with fresh live captures that
+were independently verified. Any real bug is fixed in this PR (and then
+needs re-review) or filed concretely with a repro.
