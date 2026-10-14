@@ -26940,6 +26940,26 @@ prs:
       preserved. Main checkout merge recovery is recorded on existing pr-ca6981c (#222).'
     created_at: '2026-10-14T16:58:33Z'
     last_edited: '2026-10-14T16:58:33Z'
+  - id: note-c578488
+    text: 'Final integration validation 2026-10-14: combined application source at
+      c5629fb3 passed all 3217 tests. The signoff logging test now attaches caplog.handler
+      directly and disables propagation temporarily (dfc1f8a6); merely enabling propagation
+      was insufficient when parent PM loggers were loaded. It still detects the original
+      phantom-launch bug. Final test-only import isolation merge at 7c884215 passed
+      200 targeted planner/trust/launcher/handoff tests in leak-sensitive order; native
+      integration signoff independently passed 263 targeted tests and checked auto-merge
+      equality. Fresh #231 integration QA at 55d8d950: one planned/launched S7, worker
+      PASS, independent VERIFIED, FINALIZE_DONE; all A-F live stories held, supporting
+      447 tests passed. Parser/planner functions and trust code match this branch;
+      approved #232 resume-owner/handoff code retains original S7-S9 coverage. Supervisor
+      copied and hash-verified the fresh evidence under captures/pr-488ac6d/merge-20261014/231-qa-evidence.
+      Native signoff also reproduced a pre-existing sibling mock-parser bug, now filed
+      as pr-feae15d with controls and three-revision evidence; literal reserved marker
+      lines inside STEPS are invalid protocol input, correctly rejected loudly, not
+      a new regression. All runs remain supervised; an untouched qualification run
+      is still required.'
+    created_at: '2026-10-14T18:06:09Z'
+    last_edited: '2026-10-14T18:06:09Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
@@ -29322,6 +29342,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T17:11:18.902783+00:00'
   updated_at: '2026-10-13T17:11:18.902783+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-feae15d
+  plan: bugs
+  title: 'Bug: QA mock requests are silently dropped when scenario prose mentions
+    QA_PLAN_START'
+  branch: pm/pr-feae15d-bug-qa-mock-requests-are-silently-dropped-when-sce
+  status: pending
+  depends_on:
+  - pr-b8561ac
+  description: 'Found during #231 integration signoff on 2026-10-14; pre-existing
+    and unchanged on master bdbff78b, original signed #231 1ca6b657, and final #231
+    55d8d950. parse_new_mocks_from_plan in pm_core/qa_loop.py still bounds the plan
+    with the last START/END substrings. A valid plan that declares NEW_MOCK: fake-upstream
+    in scenario 1 and mentions QA_PLAN_START mid-line in a later scenario returns
+    no mock requests. The identical control without that prose mention returns fake-upstream
+    on all three revisions. Unlike reserved marker lines inside STEPS (invalid protocol
+    input, correctly rejected loudly), these mid-line mentions are valid input. Fix
+    the sibling mock parser to use the same whole-line marker boundaries as parse_qa_plan,
+    with failing-then-passing coverage for preserving NEW_MOCK requests and handling
+    trailing END mentions without leaking text. Preserve existing completeness rejection
+    and normal multiple mock requests. Nonblocking follow-up; #231/#232 code and fresh
+    QA pass independently. Repro, inputs 3/4 and revision outputs: captures/pr-b8561ac/merge-20261014/signoff/literal-marker-in-steps/;
+    an immutable copy is carried in #232 captures/merge-20261014/planner-mock-followup/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-14T18:05:08.219093+00:00'
+  updated_at: '2026-10-14T18:05:08.219093+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
