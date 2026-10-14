@@ -24,6 +24,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# run_qa_sync lazily imports pm_core.cli, whose modules bind
+# ``build_claude_shell_cmd`` by name.  Import it here, before
+# _run_planning patches that function, or pm_core.cli.guide would keep
+# the harness mock for every later test in the session.
+import pm_core.cli  # noqa: F401
 from pm_core import qa_loop
 from pm_core.claude_launcher import transcript_path_for
 from pm_core.qa_loop import QALoopState, parse_qa_plan
