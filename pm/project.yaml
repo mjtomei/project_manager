@@ -22346,6 +22346,19 @@ prs:
       This is the already-tracked pr-ca6981c scope, not a new duplicate bug.'
     created_at: '2026-10-14T16:53:55Z'
     last_edited: '2026-10-14T16:53:55Z'
+  - id: note-b450b23
+    text: 'Second live merge reproduction 2026-10-14: #231 GitHub merge completed
+      at 12edb6db (18:07:20Z); native main-checkout auto-stash/pop again left pm/project.yaml
+      unmerged/invalid and staged the two pre-existing dirty user docs. Supervisor
+      reconciled index stages by PR/plan/note ID (437 PRs, sole semantic conflict
+      active_pr kept local pr-488ac6d), restored original unstaged index, verified
+      all 30 non-metadata dirty/untracked files byte-identical to pre-merge backup,
+      retained recovery stash d18467022dd8e3f12def306d0034895277164344, and ran pr
+      merge --propagation-only. Same existing #222 bug as #230 recovery; no duplicate
+      issue. Evidence: captures/merge-230-232-20261014/231-root-stage1/2/3.yaml; backup
+      /tmp/pm230-232-main-before-merge-20261014T175913Z.'
+    created_at: '2026-10-14T18:09:10Z'
+    last_edited: '2026-10-14T18:09:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
