@@ -301,6 +301,19 @@ class TestPlannerReadsTranscript:
                               ("assistant", plan)])
         assert [s.title for s in state.scenarios] == TITLES
 
+    def test_trailing_end_mention_does_not_extend_last_scenario(self):
+        """Prose after the plan that mentions QA_PLAN_END must not move the
+        parse end past the real END line, or the last scenario's STEPS
+        (sent to its worker) swallow the END line and the prose."""
+        plan = (FULL_PLAN + "\nThat plan is wrapped in QA_PLAN_START and "
+                "QA_PLAN_END markers.\n")
+        scenarios = parse_qa_plan(plan)
+        assert [s.index for s in scenarios] == [1, 2, 3, 4]
+        assert scenarios[-1].steps == parse_qa_plan(FULL_PLAN)[-1].steps
+        assert "QA_PLAN_END" not in scenarios[-1].steps
+        assert qa_loop.qa_plan_problem(
+            plan, scenarios, 1, start_may_be_stale=False) is None
+
     def test_transcript_without_pane_capture(self, tmp_path, monkeypatch):
         """Pane capture empty (e.g. alternate screen): transcript suffices."""
         state = _run_planning(
