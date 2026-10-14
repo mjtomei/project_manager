@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-dc4dd45
+  active_pr: pr-19e8114
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-14T14:08:29.344217+00:00'
+  updated_at: '2026-10-14T15:36:29.505853+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3869,6 +3869,22 @@ prs:
       is supervised, not qualification.'
     created_at: '2026-10-14T14:08:29Z'
     last_edited: '2026-10-14T14:08:29Z'
+  - id: note-2f28a96
+    text: 'QA S15 round 7 (workflow/container W1-W6, supervised; no outer trust prompt
+      accepted by hand; NO app edits) on 8d4f8c11, real claude 2.1.299: every W Then
+      held live. 4c3fb81c first post-review workflow test: planned=parsed=launched
+      in W1 (numbered 1), W3.4 (planners numbered 2 and 3) and W6.7 container QA.
+      W3.5 orphan accept 5s/1 attempt; breadcrumb adoption; container hard-kill one
+      report/no keys/no repeat 117s (pr-8c0d680); W6.7 real container worker + hook-driven
+      VERIFIED/FINALIZE_DONE. Spec corrections for qa.md: W3.3 `env -u TMUX pm pr
+      start` does NOT fall through (pr start uses tmux whenever the pm session exists)
+      - use no-tmux PATH; W3.4 TUI ctrl+q only detaches the client (TUI/QA keep running)
+      - stop via kill -9 + pm session. Harness: claude 2.1.299 draws Accessing\e[12Gworkspace
+      (grep bare "Accessing"); disable its "Teach auto mode" prompt with skillOverrides.auto-mode-setup=off;
+      subreaper-hosted tmux servers kept zombies <=9 (conmon). Filed pr-0c3659d, pr-19e8114;
+      note on pr-be00809. Captures /pm-captures/scenarios/15 (REPORT.md).'
+    created_at: '2026-10-14T15:36:29Z'
+    last_edited: '2026-10-14T15:36:29Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -19469,11 +19485,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-11T10:42:16.762276+00:00'
-  updated_at: '2026-05-11T10:42:16.762276+00:00'
+  updated_at: '2026-10-14T15:34:15.207580+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5411b2c
+    text: 'Zero-scenario variant (pr-b53bfe2 QA r7 S15 W5.1): a QA run whose planner
+      yields 0 scenarios records "QA INPUT_REQUIRED:  (workdir: …)" and the TUI shows
+      "QA complete: INPUT_REQUIRED —" with an empty summary; the reason "Planner produced
+      no parseable scenarios" only flashes in the TUI log line for <1s and no qa-status
+      pane exists. When state.scenarios is empty, use state.latest_output as the summary.'
+    created_at: '2026-10-14T15:34:15Z'
+    last_edited: '2026-10-14T15:34:15Z'
 - id: pr-488b748
   plan: bugs
   title: Verdict polling stalls when transcript symlink slug differs from Claude pane
@@ -28501,6 +28525,55 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-14T14:08:28.137551+00:00'
   updated_at: '2026-10-14T14:08:28.137551+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0c3659d
+  plan: bugs
+  title: 'Bug: pm set list shows qa-verify-pass "off" when unset (effective default
+    is on)'
+  branch: pm/pr-0c3659d-bug-pm-set-list-shows-qa-verify-pass-off-when-unse
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/__init__.py _list_settings renders boolean settings with
+    get_global_setting(name), which is False when the settings file is missing. qa-verify-pass
+    defaults to ON (_SETTING_DEFAULTS["qa-verify-pass"]="on"; qa_loop._is_verification_enabled
+    returns True when unset), so a fresh install prints "qa-verify-pass off" with
+    no "(default)" marker while PASS verification is actually enabled (pm log: "PASS
+    verdict verification is enabled"). Repro: scratch HOME, pm set list -> "qa-verify-pass
+    off". Same code on master. Found in pr-b53bfe2 QA round 7 S15 setup (captures
+    scenarios/15/setup/setup-check.out). Fix: for booleans use get_global_setting_value(name,
+    "") and fall back to _SETTING_DEFAULTS when empty.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-14T15:34:13.670942+00:00'
+  updated_at: '2026-10-14T15:34:13.670942+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-19e8114
+  plan: bugs
+  title: 'Bug: pm/prompts/ session prompt files are untracked and not gitignored in
+    user project workdirs'
+  branch: pm/pr-19e8114-bug-pm-prompts-session-prompt-files-are-untracked-
+  status: pending
+  depends_on: []
+  description: 'pm writes session prompt files to <workdir>/pm/prompts/ (claude "$(cat
+    …/pm/prompts/pm_prompt_*.md)"), but pm init only adds notes.txt/.pm-sessions.json/etc.
+    to pm/.gitignore. In a user project (pm init --backend local) every PR workdir
+    shows "?? pm/prompts/" and a careless git add -A by Claude would commit the prompts.
+    Real Claude reviewers flagged it in 3 separate reviews in pr-b53bfe2 QA round
+    7 S15 (scenarios/15/W3.2-review-restart/review-pane-final.txt, W4-fallback/review-pane-final.txt).
+    Fix: add prompts/ to the ensured pm/.gitignore entries (pm_core/cli/__init__.py
+    ~L151).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-14T15:34:14.432857+00:00'
+  updated_at: '2026-10-14T15:34:14.432857+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
