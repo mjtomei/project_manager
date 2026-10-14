@@ -285,6 +285,42 @@ class TestEdgeCases:
         assert len(pr["notes"]) == 1
         assert pr["notes"][0]["text"] == "QA PASS: "
 
+    def test_no_scenarios_note_says_why(self, tmp_path):
+        """Planning ended without scenarios (incomplete plan not consumed):
+        the note carries the reason instead of an empty summary."""
+        app = _make_app(tmp_path)
+        state = _make_state(scenarios=[], verdicts={},
+                            verdict="INPUT_REQUIRED")
+        state._error = (
+            "The QA planner's plan was incomplete and was not consumed.\n\n"
+            "pane: no QA_PLAN_START line before QA_PLAN_END (plan truncated)"
+            "\n\nAsk the planner to re-emit the full QA_PLAN_START ... "
+            "QA_PLAN_END block, or restart QA from the TUI.")
+        _record_qa_note(app, state)
+
+        text = store.get_pr(store.load(tmp_path), "pr-001")["notes"][0]["text"]
+        assert text.startswith("QA INPUT_REQUIRED: The QA planner's plan was "
+                               "incomplete and was not consumed. pane: no "
+                               "QA_PLAN_START line")
+        assert "re-emit" in text and "\n" not in text
+
+    def test_failed_handoff_note_says_why(self, tmp_path):
+        """A handoff failure happens after the plan parsed, so scenarios
+        exist but none ran: the note carries the reason, not "?"s."""
+        app = _make_app(tmp_path)
+        state = _make_state(verdict="INPUT_REQUIRED")
+        state.scenario_verdicts = {}
+        state._error = (
+            "The planner's committed work could not be handed to the "
+            "scenario workers, so no scenarios were launched.\n\n"
+            "PR branch b is behind upstream: planner head aaaa does not "
+            "contain origin b at bbbb. Pull the PR branch")
+        _record_qa_note(app, state)
+
+        text = store.get_pr(store.load(tmp_path), "pr-001")["notes"][0]["text"]
+        assert text.startswith("QA INPUT_REQUIRED: The planner's committed")
+        assert "is behind upstream" in text and "?" not in text
+
     def test_single_scenario(self, tmp_path):
         app = _make_app(tmp_path)
         state = _make_state(

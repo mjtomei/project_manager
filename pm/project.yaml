@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3201ea8
+  active_pr: pr-62fdd54
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -26417,7 +26417,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-13T22:40:05.537174+00:00'
+  updated_at: '2026-10-14T17:10:03.197253+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26506,6 +26506,238 @@ prs:
       the transcript-based parse here is still needed.'
     created_at: '2026-10-13T22:38:49Z'
     last_edited: '2026-10-13T22:40:05Z'
+  - id: note-84fe757
+    text: 'Impl done (d67a8959, 05043b12). Planner plan now read from the planner
+      JSONL latest assistant turn (_read_planner_plan; pane only a gated fallback
+      with _PLANNER_GRACE). qa_plan_problem rejects truncated plans (needs QA_PLAN_START
+      before last END, headers == parsed, contiguous, starts at 1 or scenario_start);
+      incomplete plans are reported in latest_output/_error, not consumed. Handoff:
+      _publish_planner_head ff-pushes the PR branch before fan-out (never force; PlannerHandoffError
+      -> INPUT_REQUIRED on divergence/failed publish), create_scenario_workdir(expected_head=)
+      pins clones, planner app-code edits outside pm/ force QA NEEDS_WORK (persisted
+      in qa_resume.json). Tests: tests/test_qa_planner_handoff.py (incl. real-git
+      clone+origin swap+pull --rebase). Captures: impl/pre-fix/{stall,suffix} reproduce
+      stall + silent scenario-1 loss via TUI+fake-claude+history-limit 0; impl/post-fix/{stall,suffix}
+      reach QA PASS with all 4. Repro script recipe in pre-fix README (run from /tmp,
+      not /workspace).'
+    created_at: '2026-10-13T05:42:06Z'
+    last_edited: '2026-10-13T05:42:06Z'
+  - id: note-6ec5fb9
+    text: 'QA s2 incidental fix ae077932: QA progress log line now escapes markup
+      (pm_core/tui/qa_loop_ui._on_qa_update). Before, Textual dropped the "[pr-id]"
+      prefix ("QA : …") and the L/debug log mirror also dropped "[finalize: …]". Regression
+      test in tests/test_qa_note_recording.py. R11 planner-edit NEEDS_WORK, resume,
+      and the pm/-only PASS all held live; captures in scenarios/2/{pre,post}-fix.'
+    created_at: '2026-10-13T06:48:47Z'
+    last_edited: '2026-10-13T06:48:47Z'
+  - id: note-51506a2
+    text: 'QA S1 refine (2026-10-13): _publish_planner_head classifies "behind" only
+      when the upstream commit object is already in the PR workdir (cat-file -e).
+      The realistic case is that a second actor or an earlier QA worker pushes and
+      the PR workdir never fetched. That case is reported as "diverged" with the reconcile
+      hint, even though the workdir is strictly behind. Verified by calling the function
+      directly against a file:// bare upstream: no fetch gives diverged, git fetch
+      origin gives "is behind". A likely fix is to fetch the branch from real_url
+      (or check ancestry after fetching) before classifying. Setup tips for QA: a
+      file:// bare repo as origin counts as a real upstream (resolve_real_origin treats
+      "://" as non-local, and pm init auto-detects the vanilla backend). Prepend a
+      dir that symlinks git to /usr/bin/git to PATH, because the ~/.local/bin git
+      proxy forwards ls-remote/push to the host. Seed and push pm/specs/<pr>/qa.md
+      on the PR branch, or the spec gate stops QA before the handoff. Scenario 0 (s-0)
+      is cloned before planning, so it is not pinned to the planner head.'
+    created_at: '2026-10-13T06:29:14Z'
+    last_edited: '2026-10-13T06:29:14Z'
+  - id: note-84940eb
+    text: 'QA S1 (2026-10-13): all 3 stories driven live on a file:// upstream. Fixed
+      e8e6b5ea: _publish_planner_head now fetches the branch (FETCH_HEAD only) before
+      classifying, so a never-fetched strictly-behind PR workdir says "is behind …
+      Pull the PR branch" instead of "diverged … Reconcile" (regression: test_behind_remote_says_behind_not_diverged[never-fetched]).
+      Story 1 publish-before-fan-out, 2a/2a''/2b blocking + no force push, and story
+      3 queued-dequeue clone refusal all held. Captures: scenarios/1/{story1,pre-fix,post-fix}.'
+    created_at: '2026-10-13T06:50:34Z'
+    last_edited: '2026-10-13T06:50:34Z'
+  - id: note-455012c
+    text: 'Supervisor finding before QA (2026-10-13): review i5 disclosed a pane-fallback
+      corner case as minor, but it is the original silent-coverage-loss bug and must
+      be fixed in this PR. Reproduced on the reviewed branch with the existing test
+      fixtures: text = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX; parse_qa_plan
+      gives [2,3,4]; qa_plan_problem(text, scenes, scenario_start=1) rejects, but
+      scenario_start=2 returns None (accepted as complete). When the latest assistant
+      text has no complete plan, _read_planner_plan can therefore combine an old template
+      START with a later truncated suffix on a later QA round and silently lose scenario
+      1. Include this exact case in QA and regression coverage (through _read_planner_plan
+      with missing/non-plan latest assistant text as well as the validator). A fresh
+      complete plan starting at the legitimate offset must still work. Do not waive
+      this as pr-8efa789: reading older assistant turns can remain separate, but an
+      unproven partial pane must not be accepted. Preserve the failed repro; fix through
+      the QA/review flow and ensure the code change is re-reviewed before sign-off.
+      Structural START/END provenance is a possible narrow solution; choose a robust
+      implementation rather than over-expanding scope.'
+    created_at: '2026-10-13T06:17:23Z'
+    last_edited: '2026-10-13T06:17:23Z'
+  - id: note-111b7bb
+    text: 'Supervised QA round1 intake audit (2026-10-13): host controller is still
+      6cfd047e and silently consumed only original planner scenarios3&4, renumbered
+      actuals1&2. Planned4/launched2 evidence: captures/pr-b8561ac/shepherd-20261013/qa-round-1-partial-intake.json
+      and qa-round-1-planned-plan.txt. This round can provide genuine publication/pinning
+      and planner-app-edit/review evidence, but it DID NOT execute original extraction
+      scenarios1&2 (qa.md R1-R7). Do not count it as full PR QA or allow fresh signoff
+      yet. R4 suffix/offset bug in note-455012c remains a blocking in-PR fix. Any
+      new review should fix that as well as reviewing actual QA app fixes; then later
+      genuine QA must exercise R1-R7 and carry valid verified evidence for R8-R11.
+      The next planner must emit ONLY a tiny final index: max10 lines total (four
+      SCENARIO/STEPS pairs+START/END), no extra commentary; all detailed instructions/artifacts
+      go in committed/pushed qa.md. This is a supervised workaround until host adopts
+      this PR; never call unattended qualification complete.'
+    created_at: '2026-10-13T06:38:08Z'
+    last_edited: '2026-10-13T06:38:08Z'
+  - id: note-e596dd7
+    text: 'Review 78b2 i1 (4ffcd694): fixed the blocking R4 suffix/offset bug. qa_plan_problem
+      now requires the START to open the same block the last END closes (no END between
+      them, no template example headers inside), so echoed template + SCENARIO 2..4
+      suffix is rejected at any scenario_start. Untitled SCENARIO headers now reject
+      the plan instead of silently dropping that scenario. Tests go through the validator
+      and through _read_planner_plan/run_qa_sync with a missing or non-plan latest
+      assistant turn; a fresh complete plan at offset 2 is still accepted. QA must
+      still exercise R1-R7 live, and impl captures predate this change.'
+    created_at: '2026-10-13T07:01:11Z'
+    last_edited: '2026-10-13T07:01:11Z'
+  - id: note-2542419
+    text: 'QA S4 (R8-R11+edges) all Thens held live on a file:// upstream (captures
+      scenarios/4/*). Incidental fixes: 254402e8 — z t fresh start: stopped loop relaunched
+      a killed scenario window after its retry backoff (orphan worker) and aggregated
+      unverdicted scenarios as PASS; now rechecks stop_requested and treats missing
+      verdicts as INPUT_REQUIRED. 264f6d01 — R9 handoff-failure QA note read "Alpha:
+      ?; Beta: ?" (qa_outcome_detail only used _error with zero scenarios); now carries
+      the reason. R11 "returns to in_review" needs the PR in_review before QA (transition
+      is qa->in_review only; QA on an in_progress PR stays in_progress).'
+    created_at: '2026-10-13T07:47:20Z'
+    last_edited: '2026-10-13T07:47:20Z'
+  - id: note-8c9dd10
+    text: 'QA S3 (extraction, R1-R7 + edges) 2026-10-13: all stories driven live in
+      the TUI with fake-claude (80x23 planner, history-limit 0); captures scenarios/3
+      (README index). Fixes: 0d9c2969 per supervisor: pane fallback now accepts real
+      Claude Code "● QA_PLAN_START"/"⏺" bullet-prefixed markers (complete plan with
+      missing/non-plan transcript used to stall, or pick the closed template START);
+      a bare stale START (template headers+END redrawn away) + SCENARIO 2..4 suffix
+      at scenario_start=2 is now rejected ("text between QA_PLAN_START and SCENARIO
+      N") - pre-fix it was accepted live and QA PASSed over 3 of 4; real titles like
+      "<Enter> key" are no longer placeholders. fake-claude gains display_bullet (pane-only
+      bullet, transcript raw) to drive it live. da7eb85a/02805ddf: an incomplete plan
+      that is not consumed no longer ends with an empty "QA complete: INPUT_REQUIRED
+      — " / note "QA INPUT_REQUIRED:  " (reason kept via qa_outcome_detail; S4 extended
+      it in 264f6d01). Residual (inherent to the pane fallback, not waived): a stale
+      START directly followed by a 2..4 suffix with nothing in between is indistinguishable
+      from a fresh offset plan in the pane; the transcript stays authoritative and
+      reading older turns is pr-8efa789. R4 failed repro kept live: cd0432c0 accepted
+      3 from pane (R4-pre-cd0432c0-*), HEAD rejects. These are application-code changes
+      after review 78b2 i1 and need re-review before sign-off. Harness gotchas: blocking
+      the transcript dir also blocks verifier transcripts (same cwd) - unblock after
+      acceptance; kill -STOP cannot freeze a fake pane (tmux SIGCONTs; SIGTTIN discarded;
+      ptrace scope 1) - chmod 555 ~/.pm/hooks to suppress idle events instead.'
+    created_at: '2026-10-13T08:09:08Z'
+    last_edited: '2026-10-13T08:09:08Z'
+  - id: note-69c795c
+    text: 'Review a6b3 i1 (83f36913): re-reviewed the app-code changes made after
+      78b2 i1 (0d9c2969 bullet markers and stale START, 02805ddf/264f6d01 outcome
+      detail, 254402e8 stop and unverdicted, ae077932, e8e6b5ea). All sound. Two fixes:
+      (1) the START-to-first-header adjacency check for offset plans now runs only
+      on pane text, so a fresh transcript plan at scenario_start>1 with prose after
+      QA_PLAN_START is no longer rejected and stalled; (2) placeholder detection again
+      catches a template title wrapped by a narrow pane ("<descriptive title for",
+      no closing ">"), while "<Enter> key" stays a real title. Both have failing-then-passing
+      tests. Full suite: 3095 passed; 1 failure in tests/test_hook_events.py, which
+      this PR does not touch (environment). The impl captures predate 4ffcd694 and
+      later; the live evidence for those changes is under scenarios/3.'
+    created_at: '2026-10-13T08:17:12Z'
+    last_edited: '2026-10-13T08:17:12Z'
+  - id: note-42318fa
+    text: 'Review a6b3 i2: re-reviewed full diff; one fix — a lone unclosed "<descriptive"
+      title (template header wrapped right after its first word by a narrow pane)
+      is again a placeholder, so the echoed template cannot parse as a 2-scenario
+      plan; "<Enter>"/"<Enter> key"/"<Esc>/<q> …" stay real titles. Failing-then-passing
+      tests in TestAngleBracketTitles. Full suite 3100 passed, 1 pre-existing env
+      failure (tests/test_hook_events.py).'
+    created_at: '2026-10-13T08:22:56Z'
+    last_edited: '2026-10-13T08:22:56Z'
+  - id: note-7a8f6b3
+    text: 'Sign-off (2026-10-13, fresh, supervised launch; HEAD f1a96f25, app code
+      6ac3a4f2): routed SIGNOFF_MERGE as a recommendation only (stop-before-merge;
+      no merge, no manual approval recorded). No app-code change since review a6b3
+      i2 (5b74c7e2); QA round 3 (pr-b8561ac-226a9766c4ee3f96) S5 R1-R7 + S6 R8-R11
+      PASS, both independently VERIFIED, on 6ac3a4f2. Round 1 (partial intake by pre-fix
+      host 6cfd047e) is NOT counted. Residual pane-fallback case (stale START directly
+      followed by an offset SCENARIO 2..N suffix, transcript unavailable) was claimed
+      "tracked in pr-8efa789" but was not recorded there; filed as pr-c59597f with
+      repro. Remaining tracked bugs: pr-c59597f, pr-62fdd54, pr-31413e8, pr-1ae1d2d
+      (fixture scenarios 7-19 in captures are synthetic, not coverage), pr-ae66f59
+      (note), pr-8efa789. Baseline failure: tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      fails identically on master; full suite 3100 passed / 1 failed. Report: captures
+      report.html.'
+    created_at: '2026-10-13T12:44:46Z'
+    last_edited: '2026-10-13T12:44:46Z'
+  - id: note-d2e7d19
+    text: 'Merge integration 2026-10-14: merged approved #230 (master bdbff78b) into
+      #231. Preserved #230 trust-blocked early exit before #231 final gated plan read;
+      retained transcript-first completeness/intake, head publishing, code-change
+      routing, empty-QA handling, and all trust/zero-finalizer guards. Semantic project.yaml
+      union preserved all PR/note IDs. 562 targeted planner, trust, launcher, transcript,
+      fake-Claude and note tests pass. Two launcher mocks also failed on approved
+      #230 when run from a PM workdir; isolated prepare_workspace in TestLaunchClaude
+      (test-only) so Git bootstrap does not consume Claude retry mock results. No
+      product behavior changed beyond combining approved features. Fresh integration
+      signoff required at resulting head.'
+    created_at: '2026-10-14T16:49:53Z'
+    last_edited: '2026-10-14T16:49:53Z'
+  - id: note-79328f2
+    text: 'Integration sign-off on 3c369a0f (2026-10-14) -> SIGNOFF_REVIEW. The merge
+      resolution itself is correct: the #230 trust-blocked early return sits before
+      the #231 final gated read; the qa_loop.py combined delta equals #230 exactly
+      except for one redundant import that was dropped; project.yaml is a clean union;
+      the TestLaunchClaude prepare_workspace fixture is test-only. The integration
+      did create a semantic regression, though. #230 4c3fb81c bounds parse_qa_plan
+      by the last QA_PLAN_START *substring*. A scenario whose text mentions the marker
+      cut off the earlier scenarios, and #231 qa_plan_problem then rejected the complete
+      transcript plan, so QA stalls. This PR own real round-1 plan (shepherd-20261013/qa-round-1-planned-plan.txt)
+      parses [3,4] and is rejected at 3c369a0f; 1ca6b657 gives [1..4]; master bdbff78b
+      silently consumes [3,4]. Fixed in 005856d9 (sign-off): only whole-line marker
+      lines count (_marker_line_offsets), with a failing-then-passing regression test.
+      Full suite 3172 passed (PATH=/usr/bin first; tests/test_local_merge_sync.py
+      fails 7/8 under the ~/.local/bin git proxy identically on master). Needs re-review
+      of 005856d9, plus a focused re-QA: complete transcript plan whose scenario text
+      mentions QA_PLAN_START is accepted with all scenarios; the template-suffix/offset
+      rejections and the qa.md SCENARIO 1 echo case still hold. Evidence: /pm-captures/merge-20261014/signoff/.'
+    created_at: '2026-10-14T16:58:05Z'
+    last_edited: '2026-10-14T16:58:05Z'
+  - id: note-9865139
+    text: 'Review 4faa i1 (db261fae), focused re-review after integration: 005856d9
+      marker-line START bound is correct (real round-1 plan [1..4], gate None; #230
+      qa.md SCENARIO 1 echo test still passes). The trust-blocked early return sits
+      before the final gated read, with no finalizer: correct. The TestLaunchClaude
+      prepare_workspace stub is sound. One fix of the same class: parse_qa_plan END
+      was still the last QA_PLAN_END *substring*, so trailing prose mentioning it
+      leaked the END line and prose into the last scenario STEPS sent to the worker.
+      It now uses the last END marker line, with a failing-then-passing test. Added
+      a positive test that launch_claude prepares trust for its cwd, since the stub
+      otherwise hides it. Full suite 3174 passed (PATH=/usr/bin first, PM_HOST_HOME
+      unset). Residual pr-c59597f unchanged. Focused re-QA: START/END mentions in
+      scenario text and trailing prose, R1-R4 and the #230 echoed qa.md header; S6
+      publishing carried forward.'
+    created_at: '2026-10-14T17:04:37Z'
+    last_edited: '2026-10-14T17:04:37Z'
+  - id: note-dcbaba9
+    text: 'Review 4faa i2: re-reviewed db261fae (parse_qa_plan END bound now uses
+      marker lines, consistent with qa_plan_problem and the 005856d9 START bound;
+      launch_claude trust-target test) and 005856d9. Both are sound. The one fix is
+      test-only: test_qa_planner_handoff leaked a build_claude_shell_cmd mock into
+      pm_core.cli.guide, because run_qa_sync first-imports pm_core.cli while the harness
+      patch is active. That broke test_workspace_trust::test_tmux_guide_launch_goes_through_trust_boundary
+      when the two files ran alone. Fix: pre-import pm_core.cli in the test module.
+      Full suite 3174 passed (PATH=/usr/bin first, PM_HOST_HOME unset). No app-code
+      change in i2. The focused re-QA from i1 still applies; residual pr-c59597f is
+      unchanged.'
+    created_at: '2026-10-14T17:10:03Z'
+    last_edited: '2026-10-14T17:10:03Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
@@ -27812,11 +28044,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T01:50:20.375427+00:00'
-  updated_at: '2026-10-13T01:50:20.375427+00:00'
+  updated_at: '2026-10-13T08:09:09.251179+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-87c2bd5
+    text: 'Another trigger (pr-b8561ac QA S3, 2026-10-13, not a resume): a live run
+      whose verifier pane disappeared (verification FLAGGED "verifier pane disappeared")
+      sent the follow-up to the fake scenario pane, which exits on stdin input; the
+      second send_keys(pane_id, "") at qa_loop._poll_tmux_verdicts (~line 2713, the
+      follow-up Enter loop; same unguarded call at master line 2329) raised CalledProcessError
+      -> "QA thread crashed", verdict ERROR. The pane_exists check before the follow-up
+      is not enough; the Enter loop needs it too (or catch CalledProcessError). Log:
+      pm-s3-1791875844-0dc81d7c.log 07:44:27-28; capture scenarios/3/R3x-bullet-head-J-attempt1-verifier-blocked
+      in the pr-b8561ac captures.'
+    created_at: '2026-10-13T08:09:09Z'
+    last_edited: '2026-10-13T08:09:09Z'
 - id: pr-a75da60
   plan: bugs
   title: 'Bug: local-backend pm pr merge of a second PR always falls to the merge-resolution
@@ -28657,6 +28901,125 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
   updated_at: '2026-10-14T15:49:43.888654+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-62fdd54
+  plan: bugs
+  title: 'Bug: QA start does not refresh the PR workdir from upstream, so a worker
+    fix pushed in an earlier QA round blocks the next planner handoff'
+  branch: pm/pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-workdir-from-
+  status: pending
+  depends_on: []
+  description: 'QA scenario workers push fixes straight to the upstream (origin swapped
+    in create_scenario_workdir), but nothing pulls them back into the PR workdir.
+    If QA is restarted without a review-loop pull in between (e.g. after INPUT_REQUIRED),
+    the PR workdir is behind the upstream. pr-b8561ac _publish_planner_head then refuses
+    the fan-out with "is behind upstream ... Pull the PR branch in the PR workdir
+    and restart QA", and the planner has also planned against a stale tree. Consider
+    fast-forwarding the PR workdir (ff-only, clean tree) to the upstream branch before
+    launching the planner in run_qa_sync. Repro: QA round 1 worker pushes qa: fix
+    and ends INPUT_REQUIRED, then restart QA.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T06:08:05.900366+00:00'
+  updated_at: '2026-10-13T06:08:05.900366+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7b085a9
+  plan: bugs
+  title: 'Bug: permission-wait state remains stale after Claude resumes work'
+  branch: pm/pr-7b085a9-bug-permission-wait-state-remains-stale-after-clau
+  status: pending
+  depends_on: []
+  description: 'Observed during the supervised parallel #230/#232 runs on 2026-10-13,
+    controller 6cfd047e (#229), session pm-project_manager-c5a1006b. Claude Code emitted
+    a tool permission prompt, automatically denied the unsafe compound command, and
+    the agent rewrote it and continued working. For several minutes pm autostart status
+    --json still reported state=waiting, reason="permission prompt in implementation
+    window" even though the pane showed fresh tools/results and no approval dialog.
+    Seen on pr-488ac6d and pr-b53bfe2 at 05:55-05:57Z. This misrepresents forward
+    progress and can mislead supervisors. pane_idle.PaneIdleTracker currently sets
+    waiting_for_input on permission_prompt and only clears it on idle_prompt or an
+    explicit reset; investigate reliable resumed-activity signals (approval, denial/timeout,
+    cancellation, next tool start) without mistaking real unresolved prompts for active
+    work. Add a regression that emits permission_prompt then resumes actual work without
+    ending the turn, and verify TUI/CLI status returns to running. Preserve the distinct
+    idle vs blocked semantics and avoid broad blind prompt acceptance. Evidence: captures/overnight-20261013/native-approval-stale-state.json.
+    Backlog follow-up only; do not add to the three active prerequisite targets.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T05:59:42.051758+00:00'
+  updated_at: '2026-10-13T05:59:42.051758+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-31413e8
+  plan: bugs
+  title: 'Bug: fresh-start (z t) logs the superseded QA run as "QA complete: INPUT_REQUIRED
+    — <title>: ?" after the new run has started'
+  branch: pm/pr-31413e8-bug-fresh-start-z-t-logs-the-superseded-qa-run-as-
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py run_qa_sync completion + pm_core/tui/qa_loop_ui.py
+    _on_qa_update. Repro (pr-b8561ac QA S6 stop-fresh, captures scenarios/6/stop-fresh):
+    start QA on a PR (t), wait for Launched scenario N, then Esc z t on the same PR.
+    fresh_start_qa sets stop_requested on the old loop and starts a new one; about
+    5s later the old loop finishes its stop path and its completion still reaches
+    the TUI log as "QA [pr-x]: QA complete: INPUT_REQUIRED — Alpha check: ?; Beta
+    check: ?", printed after the new run has already logged "Planning QA scenarios...".
+    To a user it reads as if the fresh run ended INPUT_REQUIRED. Since 254402e8 it
+    is no longer a false PASS and no PR note is written, but the line should say the
+    run was stopped/superseded (e.g. "QA stopped (superseded by fresh start)") or
+    be suppressed for a loop whose stop_requested was set by fresh_start_qa.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T09:08:03.676136+00:00'
+  updated_at: '2026-10-13T09:08:03.676136+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c59597f
+  plan: bugs
+  title: 'Bug: QA planner pane fallback accepts a stale QA_PLAN_START directly followed
+    by a truncated offset suffix (SCENARIO 2..N) as a complete later-round plan'
+  branch: pm/pr-c59597f-bug-qa-planner-pane-fallback-accepts-a-stale-qa-pl
+  status: pending
+  depends_on: []
+  description: 'Residual from pr-b8561ac (disclosed in its QA S3 note and qa.md R4,
+    previously described as ''tracked in pr-8efa789'', but pr-8efa789 covers verdicts
+    after a /loop wakeup turn and has no record of this). When the planner''s JSONL
+    transcript is missing/unreadable or its latest assistant turn holds no plan, run_qa_sync
+    falls back to the tmux pane (after _PLANNER_GRACE). On a later QA round (scenario_start>1),
+    a pane whose surviving text is an earlier block''s QA_PLAN_START line, only blank
+    lines, then a truncated SCENARIO 2..4 suffix + QA_PLAN_END is byte-identical to
+    a fresh complete plan numbered from 2, so qa_plan_problem/_read_planner_plan accept
+    it and scenario 1 of the real plan is silently lost. Repro (pm_core/qa_loop.py
+    at pr-b8561ac HEAD f1a96f25): _read_planner_plan(None, lambda: ''> prompt echo\nQA_PLAN_START\n\nSCENARIO
+    2: Bravo\nSTEPS: b\nSCENARIO 3: Charlie\nSTEPS: c\nSCENARIO 4: Delta\nSTEPS: d\nQA_PLAN_END\n'',
+    None, 2) -> source=pane, scenarios [2,3,4], no problems. Pane text alone cannot
+    distinguish the two; options: (a) never accept an offset-numbered plan from the
+    pane fallback without corroboration (e.g. require the planner to also echo a per-run
+    nonce or scenario count line inside the block, e.g. ''QA_PLAN_START n=4 run=<loop_id>''),
+    (b) read the plan from older assistant turns of the transcript so the pane fallback
+    is rarely needed (overlaps pr-8efa789''s older-turn reading), (c) when falling
+    back to the pane at scenario_start>1, require the plan to be numbered from 1 so
+    the driver renumbers. Prefer (a): it makes completeness provable for both sources.
+    Keep the existing pr-b8561ac regression tests (tests/test_qa_planner_handoff.py)
+    passing.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T12:44:32.028018+00:00'
+  updated_at: '2026-10-13T12:44:32.028018+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

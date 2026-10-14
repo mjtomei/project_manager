@@ -456,6 +456,7 @@ def run_fake_claude(
     char_delay: float = 0.015,
     hold: float | None = None,
     session_id: str | None = None,
+    display_bullet: str | None = None,
 ) -> None:
     """Execute the fake Claude session.
 
@@ -493,6 +494,10 @@ def run_fake_claude(
             event — the inputs production verdict detection actually reads —
             and stays open afterwards so the poller can observe them.  When
             ``None`` the fake only writes to stdout (CLI / unit-test use).
+        display_bullet: Render stdout like Claude Code's pane: the first
+            non-blank line is prefixed with this bullet (e.g. ``"● "``) and
+            later non-blank lines are indented to match.  Display only — the
+            JSONL transcript keeps the raw text, as with real Claude.
     """
     no_verdict = verdict is None or verdict.upper() == NO_VERDICT
     upper = "" if no_verdict else verdict.upper()
@@ -500,9 +505,24 @@ def run_fake_claude(
     # into the JSONL transcript as the assistant turn's content.
     captured: list[str] = []
 
+    bullet_shown = False
+
+    def _display(text: str) -> str:
+        nonlocal bullet_shown
+        if not display_bullet:
+            return text
+        out = []
+        for line in text.splitlines(keepends=True):
+            if line.strip():
+                line = ((" " * len(display_bullet)) if bullet_shown
+                        else display_bullet) + line
+                bullet_shown = True
+            out.append(line)
+        return "".join(out)
+
     def _w(text: str) -> None:
         captured.append(text)
-        _write(text, stream=stream, char_delay=char_delay)
+        _write(_display(text), stream=stream, char_delay=char_delay)
 
     # 1. Preamble lines
     for i in range(preamble):

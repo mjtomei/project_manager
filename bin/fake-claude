@@ -121,6 +121,14 @@ def _build_parser() -> argparse.ArgumentParser:
              "event (what production verdict detection reads), and stays "
              "open afterwards. The launcher passes this for polled panes.",
     )
+    p.add_argument(
+        "--display-bullet",
+        default=None,
+        metavar="TEXT",
+        help="Render stdout like Claude Code's pane: prefix the first "
+             "non-blank line with TEXT (e.g. '\u25cf ') and indent later "
+             "lines to match. The JSONL transcript keeps the raw text.",
+    )
     return p
 
 
@@ -144,6 +152,7 @@ def main() -> None:
         char_delay=args.char_delay,
         hold=args.hold,
         session_id=args.session_id,
+        display_bullet=args.display_bullet,
     )
 
 
