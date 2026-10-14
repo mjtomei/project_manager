@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from pm_core.claude_launcher import (
     find_claude,
     find_editor,
@@ -199,6 +201,14 @@ class TestLaunchClaudeInTmux:
 # ---------------------------------------------------------------------------
 
 class TestLaunchClaude:
+    @pytest.fixture(autouse=True)
+    def _isolate_workspace_trust(self):
+        # These tests mock subprocess.run for Claude's retry sequence.
+        # Trust setup can also run Git when pytest's cwd is a PM workdir;
+        # its real behavior is covered by test_workspace_trust.py.
+        with patch("pm_core.claude_launcher.prepare_workspace"):
+            yield
+
     @patch("pm_core.claude_launcher.find_claude", return_value=None)
     def test_raises_when_no_claude(self, mock_fc, tmp_path):
         import pytest
