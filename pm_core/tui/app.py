@@ -372,6 +372,9 @@ class ProjectManagerApp(App):
         self._pane_idle_tracker = PaneIdleTracker()
         # PRs awaiting merge-conflict resolution (tracked by _poll_impl_idle)
         self._pending_merge_prs: set[str] = set()
+        # Sign-off outcomes already acted on: {pr_id: (verdict, sha, policy)}
+        # (signoff_ui — keeps the 5 s poll from repeating the ready line).
+        self._signoff_acted: dict[str, tuple] = {}
         # PRs whose merge window needs human input (INPUT_REQUIRED verdict)
         self._merge_input_required_prs: set[str] = set()
         # PRs currently in merge propagation phase (step 2 of two-step merge)

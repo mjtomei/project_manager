@@ -220,11 +220,13 @@ class TestPrListLine:
 
 
 class TestSignoffCommand:
-    def _invoke(self, tmp_path, pr):
+    def _invoke(self, tmp_path, pr, skip_qa=False):
         from click.testing import CliRunner
         from pm_core.cli.pr import pr_signoff
         data = {"project": {"active_pr": pr["id"], "base_branch": "master",
                             "backend": "local"}, "prs": [pr]}
+        if skip_qa:
+            data["project"]["skip_qa"] = True
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
              patch("pm_core.cli.pr.store.load", return_value=data), \
              patch("pm_core.cli.pr.store.locked_update",
@@ -246,6 +248,23 @@ class TestSignoffCommand:
         pr = {"id": "pr-001", "title": "T", "status": "qa",
               "branch": "pm/pr-001"}
         result, mock_launch, data = self._invoke(tmp_path, pr)
+        assert result.exit_code == 0, result.output
+        assert data["prs"][0]["status"] == "sign_off"
+        mock_launch.assert_called_once()
+
+    def test_in_review_rejected_without_skip_qa(self, tmp_path):
+        pr = {"id": "pr-001", "title": "T", "status": "in_review",
+              "branch": "pm/pr-001"}
+        result, mock_launch, data = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert data["prs"][0]["status"] == "in_review"
+        mock_launch.assert_not_called()
+
+    def test_in_review_enters_sign_off_with_skip_qa(self, tmp_path):
+        """skip_qa has no QA stage: sign-off follows review (pr-488ac6d)."""
+        pr = {"id": "pr-001", "title": "T", "status": "in_review",
+              "branch": "pm/pr-001"}
+        result, mock_launch, data = self._invoke(tmp_path, pr, skip_qa=True)
         assert result.exit_code == 0, result.output
         assert data["prs"][0]["status"] == "sign_off"
         mock_launch.assert_called_once()
@@ -545,15 +564,16 @@ class TestWindowLaunchWorkdir:
     workdir directly.
     """
 
-    def test_window_creation_uses_workdir_cwd(self, tmp_path):
+    def _launch(self, tmp_path, *, transcript=None, existing=None,
+                head="abc"):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
 
         workdir = tmp_path / "wd"
-        workdir.mkdir()
+        workdir.mkdir(exist_ok=True)
         wdirs = tmp_path / "workdirs"
-        wdirs.mkdir()
+        wdirs.mkdir(exist_ok=True)
 
         data = {"project": {"base_branch": "master", "backend": "local"},
                 "prs": []}
@@ -567,8 +587,10 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.tmux.in_tmux", return_value=True))
             p(patch("pm_core.cli.helpers._get_pm_session", return_value="pm-x"))
             p(patch("pm_core.tmux.session_exists", return_value=True))
-            p(patch("pm_core.tmux.find_window_by_name", return_value=None))
+            p(patch("pm_core.tmux.find_window_by_name", return_value=existing))
+            p(patch("pm_core.tmux.select_window"))
             p(patch("pm_core.paths.workdirs_base", return_value=wdirs))
+            p(patch("pm_core.signoff.head_sha", return_value=head))
             p(patch("pm_core.model_config.resolve_model_and_provider",
                     return_value=SimpleNamespace(model=None, provider=None,
                                                  effort=None)))
@@ -590,13 +612,44 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.pane_registry.locked_read_modify_write"))
 
             signoff.launch_signoff_window(
-                data, pr_entry, background=True, transcript=None)
+                data, pr_entry, background=True,
+                transcript=str(transcript) if transcript else None)
+        return new_window, workdir
 
+    def test_window_creation_uses_workdir_cwd(self, tmp_path):
+        new_window, workdir = self._launch(tmp_path)
         new_window.assert_called_once()
         # new_window_get_pane(session, name, cmd, workdir, switch=...): workdir is 4th positional arg.
         args = new_window.call_args
         # workdir lands as the 4th positional argument.
         assert args.args[3] == str(workdir)
+
+    def test_new_window_stamps_launched_head(self, tmp_path):
+        """The run is bound to the HEAD it was launched on (verdict binding)."""
+        tdir = tmp_path / "t"
+        transcript = signoff.signoff_transcript(tdir, "pr-001")
+        self._launch(tmp_path, transcript=transcript, head="abc")
+        assert signoff.signoff_launched_sha(tdir, "pr-001") == "abc"
+
+    def test_reused_window_keeps_its_launch_stamp(self, tmp_path):
+        """The existing-window fast path reuses a run launched earlier: HEAD
+        now is not what that run reviews, so the stamp must not move."""
+        tdir = tmp_path / "t"
+        transcript = signoff.signoff_transcript(tdir, "pr-001")
+        signoff.stamp_signoff_launch(transcript, "old")
+        new_window, _ = self._launch(
+            tmp_path, transcript=transcript, head="new",
+            existing={"id": "@9", "index": 9, "name": "signoff-pr-001"})
+        new_window.assert_not_called()
+        assert signoff.signoff_launched_sha(tdir, "pr-001") == "old"
+
+    def test_retire_removes_launch_stamp(self, tmp_path):
+        tdir = tmp_path / "t"
+        transcript = signoff.signoff_transcript(tdir, "pr-001")
+        signoff.stamp_signoff_launch(transcript, "abc")
+        with patch("pm_core.tmux.find_window_by_name", return_value=None):
+            signoff.retire_signoff_run("pm-x", {"id": "pr-001"}, tdir)
+        assert signoff.signoff_launched_sha(tdir, "pr-001") is None
 
 
 class TestLatestQaStatusPath:

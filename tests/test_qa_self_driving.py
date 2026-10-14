@@ -95,7 +95,7 @@ class TestPassCountAndAutoMerge:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_restart:
             _on_qa_complete(app, state)
@@ -117,7 +117,7 @@ class TestPassCountAndAutoMerge:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
@@ -137,7 +137,7 @@ class TestPassCountAndAutoMerge:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge"), \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff"), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
@@ -156,7 +156,7 @@ class TestPassCountAndAutoMerge:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_restart:
             _on_qa_complete(app, state)
@@ -468,7 +468,7 @@ class TestInputRequiredPause:
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_restart, \
-             patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge:
+             patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge:
             _on_qa_complete(app, state)
 
         # Self-driving should still be registered (not removed)
@@ -531,7 +531,7 @@ class TestInputRequiredPause:
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa"), \
-             patch("pm_core.tui.qa_loop_ui._trigger_auto_merge"):
+             patch("pm_core.tui.qa_loop_ui._trigger_signoff"):
             _on_qa_complete(app, state)
 
         assert "pr-001" in app._self_driving_qa
@@ -565,7 +565,7 @@ class TestInputRequiredPause:
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa"), \
-             patch("pm_core.tui.qa_loop_ui._trigger_auto_merge"):
+             patch("pm_core.tui.qa_loop_ui._trigger_signoff"):
             _on_qa_complete(app, state)
 
         # Stale loop state still in app._qa_loops (poll hasn't cleaned up)
@@ -692,17 +692,19 @@ class TestEdgeCases:
         with patch("pm_core.tui.qa_loop_ui.get_global_setting_value", return_value="abc"):
             assert _get_qa_pass_count() == 1
 
-    def test_trigger_auto_merge_calls_maybe_auto_merge(self, tmp_path):
-        """_trigger_auto_merge delegates to _maybe_auto_merge (which
-        itself checks auto-start state — merge is auto-start-only)."""
-        from pm_core.tui.qa_loop_ui import _trigger_auto_merge
+    def test_trigger_signoff_hands_off_never_merges(self, tmp_path):
+        """_trigger_signoff delegates to the sign-off step (which itself
+        checks auto-start state); it never calls the merge path directly."""
+        from pm_core.tui.qa_loop_ui import _trigger_signoff
 
         app = _make_app(tmp_path, auto_start=True)
 
-        with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
-            _trigger_auto_merge(app, "pr-001")
+        with patch("pm_core.tui.signoff_ui.start_signoff") as mock_so, \
+             patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
+            _trigger_signoff(app, "pr-001")
 
-        mock_merge.assert_called_once_with(app, "pr-001")
+        mock_so.assert_called_once_with(app, "pr-001")
+        mock_merge.assert_not_called()
 
     def test_manual_zz_t_pass_does_not_trigger_merge(self, tmp_path):
         """End-to-end: manual zz t reaching required_passes clears state

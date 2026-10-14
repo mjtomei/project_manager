@@ -236,6 +236,137 @@ def test_resume_skips_non_qa_pr(tmp_path):
     assert not _resume_file_path(qa_dir).exists()
 
 
+def test_resume_skips_run_owned_by_live_process(tmp_path):
+    """A run another live process drives (a `pm pr auto-sequence` QA child)
+    is not orphaned: adopting it would start a second orchestration loop —
+    duplicate verifier / finalize panes and a second completion.  Once that
+    process is gone the run is recovered as before."""
+    import subprocess
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="")
+    owner = subprocess.Popen(["sleep", "30"])
+    try:
+        rfile = _resume_file_path(qa_dir)
+        data = json.loads(rfile.read_text())
+        data["owner_pid"] = owner.pid
+        data["owner_start"] = qa_loop._proc_start_time(owner.pid)
+        rfile.write_text(json.dumps(data))
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+             patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+            qa_loop_ui._resume_incomplete_qa(app)
+        resume_bg.assert_not_called()
+        on_complete.assert_not_called()
+        assert "pr-001" not in app._qa_loops
+        assert "pr-001" not in app._resumed_qa_pr_ids   # re-checked later
+        assert rfile.is_file()
+    finally:
+        owner.kill()
+        owner.wait()
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_called_once()
+    assert "pr-001" in app._qa_loops
+
+
+def test_owner_pid_reused_by_unrelated_process_is_not_owner():
+    """The dead owner's pid now belongs to an unrelated process (different
+    start time): the run is orphaned and must stay resumable."""
+    import subprocess
+    other = subprocess.Popen(["sleep", "30"])
+    try:
+        start = qa_loop._proc_start_time(other.pid)
+        assert start
+        live = {"owner_pid": other.pid, "owner_start": start}
+        assert qa_loop.resume_owned_elsewhere(live)
+        reused = {"owner_pid": other.pid, "owner_start": str(int(start) + 1)}
+        assert not qa_loop.resume_owned_elsewhere(reused)
+        # Snapshots written before owner_start existed: pid liveness only.
+        assert qa_loop.resume_owned_elsewhere({"owner_pid": other.pid})
+    finally:
+        other.kill()
+        other.wait()
+
+
+def _run_cli_qa_driver(tmp_path, run_side_effect):
+    """Invoke the detached ``pm pr qa-run-bg`` driver with run_qa_sync faked."""
+    from click.testing import CliRunner
+    from pm_core.cli.pr import pr_qa_run_bg
+    data = store.load(tmp_path / "pm")
+    with patch("pm_core.cli.pr.state_root", return_value=tmp_path / "pm"), \
+         patch("pm_core.cli.pr.store.locked_update"), \
+         patch("pm_core.qa_loop.run_qa_sync", side_effect=run_side_effect):
+        return CliRunner().invoke(pr_qa_run_bg, ["pr-001"], obj=data)
+
+
+def test_cli_driver_drops_snapshot_of_run_it_completed(tmp_path):
+    """A run the `pm pr auto-sequence` QA child finished itself must not be
+    "recovered" by the TUI once that child exits.  Live repro: a sign-off
+    re-qa bounce retired the CLI's first QA run; its driver finished the run
+    late and the TUI then logged "QA PASS for <pr> — press i to sign off"
+    while the PR's new QA run was still going."""
+    app = _make_app(tmp_path)          # PR is back in qa (re-qa bounce)
+    qa_dir = tmp_path / ".pm" / "workdirs" / "qa" / "pr-001-old"
+    qa_dir.mkdir(parents=True)
+
+    def _completed_run(state, *a, **kw):
+        state.qa_workdir = str(qa_dir)
+        _write_resume_file(state, use_containers=False, concurrency_cap=0)
+        state.latest_verdict = VERDICT_PASS
+        state.running = False
+        (qa_dir / "qa_status.json").write_text(json.dumps(
+            {"pr_id": "pr-001", "scenarios": [], "overall": VERDICT_PASS,
+             "error": ""}))
+
+    result = _run_cli_qa_driver(tmp_path, _completed_run)
+    assert result.exit_code == 0, result.output
+    assert not _resume_file_path(qa_dir).exists()
+    assert (qa_dir / "qa_status.json").is_file()   # CLI reads this itself
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_not_called()
+    on_complete.assert_not_called()
+
+
+def test_cli_driver_keeps_snapshot_when_run_did_not_finish(tmp_path):
+    """A CLI driver that dies mid-run leaves its snapshot so the TUI can
+    still recover the run (R15: a dead CLI owner's run is not stranded)."""
+    app = _make_app(tmp_path)
+    qa_dir = tmp_path / ".pm" / "workdirs" / "qa" / "pr-001-dead"
+    qa_dir.mkdir(parents=True)
+
+    def _crashed_run(state, *a, **kw):
+        state.qa_workdir = str(qa_dir)
+        _write_resume_file(state, use_containers=False, concurrency_cap=0)
+        raise RuntimeError("driver died mid-run")
+
+    result = _run_cli_qa_driver(tmp_path, _crashed_run)
+    assert result.exit_code == 1
+    assert _resume_file_path(qa_dir).is_file()
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_called_once()
+
+
+def test_resume_snapshot_records_owner_pid(tmp_path):
+    import os
+    state = _make_state(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    loaded = _load_resume_file(tmp_path)
+    assert loaded["owner_pid"] == os.getpid()
+    assert loaded["owner_start"] == qa_loop._proc_start_time(os.getpid())
+    # Our own pid (a TUI restart execs in place) is never "elsewhere".
+    assert not qa_loop.resume_owned_elsewhere(loaded)
+
+
 def test_resume_skips_already_tracked(tmp_path):
     app = _make_app(tmp_path)
     app._qa_loops["pr-001"] = QALoopState(pr_id="pr-001")

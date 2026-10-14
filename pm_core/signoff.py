@@ -24,6 +24,7 @@ ambiguity the router emits ``SIGNOFF_BLOCKED`` and escalates rather than merging
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from pm_core import store
@@ -137,6 +138,39 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
     store.locked_update(root, _apply)
 
 
+def signoff_launch_stamp(transcript) -> Path:
+    """Sidecar of a router transcript holding the HEAD its run launched on.
+
+    ``signoff-<pr>.jsonl`` -> ``signoff-<pr>.head``.  A transcript verdict is
+    only bound to the revision the router was launched against: HEAD at
+    verdict-*read* time can be a later, unreviewed commit.
+    """
+    return Path(transcript).with_suffix(".head")
+
+
+def stamp_signoff_launch(transcript, sha: str | None) -> None:
+    """Record *sha* as the revision the run writing *transcript* reviews."""
+    stamp = signoff_launch_stamp(transcript)
+    try:
+        if sha:
+            stamp.parent.mkdir(parents=True, exist_ok=True)
+            stamp.write_text(sha + "\n")
+        elif stamp.exists():
+            stamp.unlink()
+    except OSError as e:
+        _log.warning("sign-off launch stamp %s: %s", stamp, e)
+
+
+def signoff_launched_sha(tdir: Path, pr_id: str) -> str | None:
+    """HEAD the driver's current sign-off run launched on, or None."""
+    try:
+        sha = signoff_launch_stamp(
+            signoff_transcript(tdir, pr_id)).read_text().strip()
+    except OSError:
+        return None
+    return sha or None
+
+
 def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
     """Return the recorded verdict if it is fresh (record sha == *current_sha*).
 
@@ -159,6 +193,49 @@ def latest_signoff_verdict(pr: dict) -> str | None:
     Used for display (icons / ``pm pr list``); does not consider staleness.
     """
     return ((pr or {}).get("signoff") or {}).get("verdict") or None
+
+
+def merge_gate_refusal(pr: dict, current_sha: str | None) -> str | None:
+    """Why the ``pm pr merge`` sign-off gate (#226) refuses *pr*, or None.
+
+    Merge requires a recorded SIGNOFF_MERGE whose sha matches *current_sha*;
+    a manual approval (``pm pr signoff record``) additionally pins the
+    approved ``report.html`` content hash, so an edited report re-blocks.
+    Auto-sequence records carry no hash (the transcript verdict is the
+    approval) and skip that check.  Shared by the CLI gate and the TUI
+    auto-merge so the TUI never attempts a merge the gate would refuse.
+    """
+    pr_id = pr.get("id")
+    fresh = fresh_recorded_verdict(pr, current_sha)
+    if fresh != SIGNOFF_MERGE:
+        recorded = latest_signoff_verdict(pr)
+        if recorded == SIGNOFF_MERGE and fresh is None:
+            return (f"PR {pr_id}: recorded sign-off verdict {recorded} is "
+                    f"stale (HEAD moved since). Re-run `pm pr signoff "
+                    f"{pr_id}` against current HEAD, or pass "
+                    f"--no-signoff-check to override.")
+        if recorded:
+            return (f"PR {pr_id}: sign-off verdict is {recorded}, not "
+                    f"{SIGNOFF_MERGE}. Run `pm pr signoff {pr_id}` to "
+                    f"re-route, or pass --no-signoff-check to override.")
+        return (f"PR {pr_id}: no sign-off verdict recorded yet. Run "
+                f"`pm pr signoff {pr_id}` first, or pass "
+                f"--no-signoff-check to override.")
+    recorded_hash = (pr.get("signoff") or {}).get("report_hash")
+    if recorded_hash:
+        import hashlib
+        from pm_core.paths import captures_root
+        croot = captures_root()
+        report = croot / pr_id / "report.html" if croot else None
+        current_hash = (
+            hashlib.sha256(report.read_bytes()).hexdigest()
+            if report is not None and report.is_file() else None)
+        if current_hash != recorded_hash:
+            return (f"PR {pr_id}: report.html changed since the recorded "
+                    f"approval; re-run `pm pr signoff record {pr_id}` "
+                    f"after reviewing it, or pass --no-signoff-check to "
+                    f"override.")
+    return None
 
 
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
@@ -229,6 +306,13 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 tmux_mod.select_window(pm_session, existing["id"])
                 print(f"Switched to existing sign-off window '{window_name}'")
                 return
+
+        # Bind this run to the revision it reviews: the driver only records
+        # its transcript verdict while HEAD still equals this stamp.  Only a
+        # newly created window stamps; the fast path above reuses a run whose
+        # stamp is already on disk.
+        if transcript:
+            stamp_signoff_launch(transcript, head_sha(workdir))
 
         _resolution = resolve_model_and_provider(
             "signoff",
@@ -399,3 +483,146 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
 
     store.locked_update(root, _apply)
     return hop if transitioned["ok"] else "unknown"
+
+
+# --- Driver step (shared by `pm pr auto-sequence` and the TUI scheduler) ---
+# Both auto-sequence drivers run the SAME sign-off state machine; only how they
+# launch windows (click invoke vs TUI subprocess / TUI loops) differs.  The
+# step below owns every sign-off state side effect; launching stays with the
+# caller.
+
+def signoff_transcript(tdir: Path, pr_id: str) -> Path:
+    """The sign-off router's transcript symlink under a driver's *tdir*."""
+    return tdir / f"signoff-{pr_id}.jsonl"
+
+
+def signoff_transcript_verdict(tdir: Path, pr_id: str) -> str | None:
+    """Return the routing verdict in *tdir*'s sign-off transcript, or None."""
+    from pm_core.verdict_transcript import extract_verdict_from_transcript
+
+    transcript = signoff_transcript(tdir, pr_id)
+    if not (transcript.is_file() or transcript.is_symlink()):
+        return None
+    return extract_verdict_from_transcript(str(transcript), SIGNOFF_VERDICTS)
+
+
+def signoff_window_pane(session: str, pr_entry: dict) -> str | None:
+    """Return the first pane id of the PR's sign-off tmux window, or None."""
+    win = tmux_mod.find_window_by_name(session, signoff_window_name(pr_entry))
+    if not win:
+        return None
+    panes = tmux_mod.get_pane_indices(session, win["index"])
+    return panes[0][0] if panes else None
+
+
+def retire_signoff_run(session: str, pr_entry: dict, tdir: Path) -> None:
+    """Tear down a PR's sign-off window + transcript when bouncing out of sign_off.
+
+    A bounce hop (re-qa / review / impl) moves the PR out of ``sign_off`` while
+    the router's window and its single ``signoff-<id>.jsonl`` transcript live on
+    (the QA loop only sweeps ``qa-*`` windows).  Unlike review's
+    iteration-numbered transcripts, sign-off reuses one transcript path, so on
+    re-entry the existing-window fast path would switch to the stale window and
+    the transcript check would replay the *old* verdict — re-bouncing forever
+    (a re-qa never changes HEAD, so the consumed record can't guard it).
+    Retiring both forces a genuine fresh router run on the next sign_off entry.
+    Captures / ``report.html`` are left alone.
+    """
+    from pm_core import home_window
+    win = tmux_mod.find_window_by_name(session, signoff_window_name(pr_entry))
+    if win:
+        home_window.park_if_on(session, win["id"])
+        tmux_mod.kill_window(session, win["id"])
+    transcript = signoff_transcript(tdir, pr_entry["id"])
+    for f in (transcript, signoff_launch_stamp(transcript)):
+        try:
+            if f.is_symlink() or f.exists():
+                f.unlink()
+        except OSError:
+            pass
+
+
+@dataclass(frozen=True)
+class SignoffStep:
+    """Outcome of one :func:`step_signoff` tick.
+
+    *action* is ``"launch"`` (caller must launch a fresh router window),
+    ``"running"`` (router still working — nothing to do) or ``"hop"`` (a
+    verdict was acted on; *hop* is :func:`apply_signoff_hop`'s result).
+    *stale* is True when a launch follows retiring an outdated run.
+    *sha* is the branch HEAD the step evaluated against.
+    """
+
+    action: str
+    hop: str | None = None
+    verdict: str | None = None
+    stale: bool = False
+    sha: str | None = None
+
+
+def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
+                 read_verdict=None, window_pane=None,
+                 retire=None) -> SignoffStep:
+    """Advance a ``sign_off`` PR one auto-sequence tick (state side only).
+
+    1. ADOPT a fresh recorded verdict (record sha == current HEAD) — picks up
+       a hand-recorded approval without a wasted re-run.
+    2. A STALE record (HEAD moved since it ran) is never trusted: retire that
+       run (window + transcript), clear the record -> ``launch``.
+    3. No record: a run launched on another revision than the current HEAD
+       (see :func:`stamp_signoff_launch`; unstamped counts as unknown) is
+       retired before its verdict can count -> ``launch`` (stale).  Otherwise
+       read this driver's transcript; a verdict there is recorded (origin
+       ``auto-sequence``, sha = the launched HEAD) so later ticks adopt it.
+    4. Still nothing: ``launch`` if the window is gone, else ``running``.
+    5. Verdict: pure :func:`decide_signoff_hop`, then the auto-sequence-only
+       :func:`apply_signoff_hop`; a bounce also retires the run so re-entry
+       starts a genuine fresh router.
+
+    *read_verdict* / *window_pane* / *retire* default to this module's
+    helpers; the CLI passes its own module-level names so existing patch
+    points keep working.
+    """
+    read_verdict = read_verdict or signoff_transcript_verdict
+    window_pane = window_pane or signoff_window_pane
+    retire = retire or retire_signoff_run
+    pr_id = pr_entry["id"]
+    current_sha = head_sha(pr_entry.get("workdir"))
+
+    verdict = fresh_recorded_verdict(pr_entry, current_sha)
+
+    if verdict is None and (pr_entry.get("signoff") or {}).get("verdict"):
+        retire(session, pr_entry, tdir)
+
+        def _clear(d):
+            p = store.get_pr(d, pr_id)
+            if p:
+                p.pop("signoff", None)
+        store.locked_update(root, _clear)
+        return SignoffStep("launch", stale=True, sha=current_sha)
+
+    if verdict is None:
+        tverdict = read_verdict(tdir, pr_id)
+        launched = signoff_launched_sha(tdir, pr_id)
+        if current_sha and (launched or tverdict is not None) \
+                and launched != current_sha:
+            # HEAD moved while the router ran (or the run carries no launch
+            # revision): its verdict reviewed other code.  Retire it before
+            # it is recorded against the new HEAD.
+            retire(session, pr_entry, tdir)
+            return SignoffStep("launch", stale=True, sha=current_sha)
+        if tverdict is not None:
+            # launched == current_sha here (or HEAD is unknown).
+            record_signoff_verdict(root, pr_id, tverdict, current_sha,
+                                   origin="auto-sequence")
+            verdict = tverdict
+
+    if verdict is None:
+        if window_pane(session, pr_entry) is None:
+            return SignoffStep("launch", sha=current_sha)
+        return SignoffStep("running", sha=current_sha)
+
+    hop = apply_signoff_hop(root, pr_id, decide_signoff_hop(verdict))
+    if hop in _BOUNCE_HOP_STATUS:
+        retire(session, pr_entry, tdir)
+    return SignoffStep("hop", hop=hop, verdict=verdict, sha=current_sha)

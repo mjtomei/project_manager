@@ -783,6 +783,10 @@ async def check_and_start(app) -> None:
     # Start QA for qa-status PRs without active QA loops
     _auto_start_qa_loops(app, prs)
 
+    # Drive sign-off: QA-passed PRs -> sign_off, sign_off PRs one step
+    from pm_core.tui import signoff_ui
+    signoff_ui.advance_all(app, prs)
+
 
 def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
     """Start review loops for in-scope in_review PRs without one."""
@@ -856,9 +860,10 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         if qa_loop and (qa_loop.running or qa_loop.latest_verdict):
             continue
         # A finished run leaves _qa_loops one tick after completion; its
-        # verdict is recorded in runtime_state.  PASS waits for sign-off and
-        # INPUT_REQUIRED for a human — re-running QA on every later
-        # scheduler pass (or restart) would only duplicate finished work.
+        # verdict is recorded in runtime_state.  PASS is handed to sign-off
+        # (signoff_ui.advance_all) and INPUT_REQUIRED waits for a human —
+        # re-running QA on every later scheduler pass (or restart) would
+        # only duplicate finished work.
         # Any real QA start (review→qa, ``t``) overwrites this record.
         recorded = recorded_qa_verdict(pr_id)
         if recorded in QA_HOLD_VERDICTS:
@@ -874,14 +879,15 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         qa_loop_ui.start_qa(app, pr_id)
 
 
-async def _start_pr_quiet(app, pr_id: str) -> None:
+async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
     """Start a PR without changing TUI focus.
 
     Runs ``pm pr start --background <pr_id>`` as a subprocess. The
     ``--background`` flag tells ``pr start`` to create the tmux window
     without switching focus.  Unlike the interactive start_pr in pr_view,
     this doesn't use the inflight guard or spinner since auto-start can
-    overlap with user actions.
+    overlap with user actions.  *fresh* adds ``--fresh`` (kill + relaunch
+    an existing impl window — used by the sign-off impl bounce).
     """
     import asyncio
 
@@ -892,6 +898,8 @@ async def _start_pr_quiet(app, pr_id: str) -> None:
         quiet[pr_id] = time.monotonic() + 120
 
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "start", "--background"]
+    if fresh:
+        cmd.append("--fresh")
     tdir = get_transcript_dir(app)
     if tdir:
         cmd.extend(["--transcript", str(tdir / f"impl-{pr_id}.jsonl")])

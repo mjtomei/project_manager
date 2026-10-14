@@ -189,8 +189,7 @@ def _policy(pr_id: str, stop: set) -> str:
 def _signed_off_reason(pr_id: str, stop: set) -> str:
     if pr_id in stop:
         return "signed off (fresh SIGNOFF_MERGE); stop-before-merge — press g"
-    return ("signed off (fresh SIGNOFF_MERGE); merge not automated from "
-            "sign-off — press g")
+    return "signed off (fresh SIGNOFF_MERGE); auto-merge pending"
 
 
 def _awaiting_signoff_reason(pr_id: str, inp: dict, stop: set,
@@ -200,8 +199,8 @@ def _awaiting_signoff_reason(pr_id: str, inp: dict, stop: set,
     signoff = (inp.get("signoff") or {}).get(pr_id) or {}
     if signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE":
         return _signed_off_reason(pr_id, stop)
-    return (f"{passed}; awaiting sign-off (press i — automatic "
-            "sign-off hand-off not yet implemented)")
+    return (f"{passed}; awaiting sign-off (hand-off on next scheduler "
+            "pass)")
 
 
 def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
@@ -317,7 +316,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
             if verdict:
                 return phase, "paused", f"QA ended {verdict}"
         if inp.get("skip_qa"):
-            return phase, "waiting", "skip_qa set; merge handled after review"
+            return (phase, "waiting",
+                    "skip_qa set; sign-off follows the review PASS")
         return phase, "queued", "QA starts on next scheduler pass"
 
     if status == "sign_off":
@@ -326,9 +326,11 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
         if not verdict:
             if win_live("sign_off"):
                 return phase, "running", "sign-off review running"
-            return phase, "paused", "no sign-off verdict; press i to run sign-off"
+            return (phase, "queued", "no sign-off window; relaunches on next "
+                    "scheduler pass")
         if not signoff.get("fresh"):
-            return phase, "waiting", f"{verdict} stale (HEAD moved); re-run sign-off"
+            return (phase, "waiting", f"{verdict} stale (HEAD moved); sign-off "
+                    "relaunches against current HEAD")
         if verdict == "SIGNOFF_MERGE":
             return phase, "waiting", _signed_off_reason(pr_id, stop)
         if verdict == "SIGNOFF_BLOCKED":

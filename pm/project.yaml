@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-62fdd54
+  active_pr: pr-488ac6d
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -22266,7 +22266,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-05-25T03:13:02.415469+00:00'
+  updated_at: '2026-10-14T16:53:55.963293+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -22333,6 +22333,32 @@ prs:
       contention: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-ca6981c-6468acca1746917c)'
     created_at: '2026-05-25T04:51:27Z'
     last_edited: '2026-05-25T04:51:27Z'
+  - id: note-5626823
+    text: 'Additional live reproduction during user-authorized merges 2026-10-14:
+      #230 GitHub merge succeeded at bdbff78b (16:44:28Z), but _pull_after_merge auto-stash
+      pop conflicted in pm/project.yaml. TUI displayed YAML parse error and PM status
+      remained sign_off. Supervisor recovered by semantic three-way union of PR/plan/note
+      IDs, preserved local active_pr, retained every source note, restored original
+      unstaged index, verified all 30 other local files byte-identical to backup,
+      then used pr merge --propagation-only to finalize/restart. New recovery stash
+      ae8ab5fe retained; existing stashes untouched. Evidence in captures/merge-230-232-20261014
+      (230-root-stage1/2/3.yaml); backup /tmp/pm230-232-main-before-merge-20261014T164351Z.
+      This is the already-tracked pr-ca6981c scope, not a new duplicate bug.'
+    created_at: '2026-10-14T16:53:55Z'
+    last_edited: '2026-10-14T16:53:55Z'
+  - id: note-b450b23
+    text: 'Second live merge reproduction 2026-10-14: #231 GitHub merge completed
+      at 12edb6db (18:07:20Z); native main-checkout auto-stash/pop again left pm/project.yaml
+      unmerged/invalid and staged the two pre-existing dirty user docs. Supervisor
+      reconciled index stages by PR/plan/note ID (437 PRs, sole semantic conflict
+      active_pr kept local pr-488ac6d), restored original unstaged index, verified
+      all 30 non-metadata dirty/untracked files byte-identical to pre-merge backup,
+      retained recovery stash d18467022dd8e3f12def306d0034895277164344, and ran pr
+      merge --propagation-only. Same existing #222 bug as #230 recovery; no duplicate
+      issue. Evidence: captures/merge-230-232-20261014/231-root-stage1/2/3.yaml; backup
+      /tmp/pm230-232-main-before-merge-20261014T175913Z.'
+    created_at: '2026-10-14T18:09:10Z'
+    last_edited: '2026-10-14T18:09:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -26184,7 +26210,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-06-20T20:26:14.099710+00:00'
-  updated_at: '2026-06-21T01:45:28.863711+00:00'
+  updated_at: '2026-10-13T06:33:14.362759+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26213,6 +26239,13 @@ prs:
       but sign_off never auto-launched; had to launch it manually.'
     created_at: '2026-06-21T01:45:28Z'
     last_edited: '2026-06-21T01:45:28Z'
+  - id: note-49511f0
+    text: 'pr-488ac6d fixes the TUI side of this bug: QA PASS (legacy + self-driving)
+      and skip_qa review PASS now go to sign_off, and _maybe_auto_merge waits for
+      a fresh SIGNOFF_MERGE. Still open here: the CLI `pm pr auto-sequence` skip_qa
+      branch still prints "ready_to_merge (skip_qa)" without running sign-off.'
+    created_at: '2026-10-13T06:33:14Z'
+    last_edited: '2026-10-13T06:33:14Z'
 - id: pr-e0b4515
   plan: bugs
   title: QA finalizer can route back to implementation when an oversight requires
@@ -26765,7 +26798,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:33:48.614099+00:00'
-  updated_at: '2026-10-12T19:11:27.048214+00:00'
+  updated_at: '2026-10-13T17:11:29.921538+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26781,6 +26814,165 @@ prs:
       state from the recorded pr.signoff verdict + HEAD freshness.'
     created_at: '2026-10-12T19:11:26Z'
     last_edited: '2026-10-12T19:11:26Z'
+  - id: note-0d48c82
+    text: 'Impl done (7b3bda70 + 949b6082). signoff.step_signoff = shared sign_off
+      state machine (CLI auto-sequence refactored onto it, output unchanged). New
+      tui/signoff_ui: QA PASS (or skip_qa review PASS) -> sign_off + background `pm
+      pr signoff --transcript <run>/signoff-<pr>.jsonl`; advance_all runs from check_and_start
+      and every 5s poll; MERGE->_maybe_auto_merge (O stop line / A merge), REQA->TUI
+      QA, REVIEW->review loop, IMPL->pr start --fresh, BLOCKED->sticky log; once per
+      (verdict,sha,policy); restart catch-up for recorded QA PASS. _maybe_auto_merge
+      now gates on fresh SIGNOFF_MERGE before the O line or any merge, and a gate
+      refusal is no longer added to _pending_merge_prs. pm pr signoff accepts in_review
+      under skip_qa. Not changed: the CLI auto-sequence skip_qa branch still prints
+      "ready_to_merge (skip_qa)" without running sign-off (follow-up candidate). Tests:
+      tests/test_tui_signoff_handoff.py (16, fail on pre-fix). Live captures (fake-claude,
+      O+A, pre/post) in captures impl/{pre,post}-fix/*; helpers/run.sh reproduces
+      them. Pre-existing unrelated failure: test_hook_events::test_installer_writes_standalone_receiver.'
+    created_at: '2026-10-13T05:58:33Z'
+    last_edited: '2026-10-13T05:58:33Z'
+  - id: note-8ce8b39
+    text: 'QA s2 refiner: E1 spec suggestions (remove workdir / no tmux) do NOT produce
+      the red "Sign-off launch failed" line - launch_signoff_window prints and returns
+      exit 0 on those paths (no-workdir/no-tmux/session-missing/ContainerError), so
+      the TUI logs it as launched and only the 60s window-gone relaunch follows. Refined
+      E1 forces a non-zero exit with chmod 0444 on ~/.pm/workdirs/.signoff-launch-<session>-<pr>.lock
+      instead. E2 is made deterministic by holding ~/.pm/workdirs/.merge-<repo_id>-<pr>.lock
+      with flock(1) while committing to the workdir; pm pr merge then reloads and
+      its gate refuses. The R9 "stale (HEAD moved)" autostart-status reason only lasts
+      <=5s, until the next scheduler pass clears the record, so it needs a status
+      poll loop started before the commit.'
+    created_at: '2026-10-13T06:38:21Z'
+    last_edited: '2026-10-13T06:38:21Z'
+  - id: note-1c19801
+    text: 'QA s2 (0ff2be65): fixed the in-flight sign-off HEAD race. step_signoff
+      stamped a transcript verdict with HEAD at READ time, so a commit landing while
+      the router still ran (before its first verdict) was recorded as reviewed: O
+      printed ready @B and A merged unreviewed B (reproduced live pre-fix). Now launch_signoff_window
+      writes <run>/signoff-<pr>.head (new windows only, inside the launch lock; the
+      reuse fast path keeps the old stamp). step_signoff retires the run and relaunches
+      it (stale) when the stamp != current HEAD or a transcript verdict has no stamp,
+      before recording. This covers the TUI and CLI drivers and restarts. New qa.md
+      R9b; impl.md section. Tests: test_verdict_from_run_launched_on_old_head_is_not_recorded[O|A],
+      test_head_moved_before_verdict_retires_running_run, test_restart_does_not_adopt_run_of_another_head,
+      CLI + launch-stamp tests (10 fail on 838d55f8). Live pre/post: captures scenarios/2/{pre,post}-fix.
+      Needs another reviewer pass. S2 triples R9/R10/R12/E1/E2 all held on 838d55f8.
+      Note: Ctrl+R user restart leaves auto-start off (re-add targets).'
+    created_at: '2026-10-13T07:17:52Z'
+    last_edited: '2026-10-13T07:17:52Z'
+  - id: note-cad67cc
+    text: 'QA refine s3 (R13/R14/C1-C4): autostart reason "skip_qa set; sign-off follows
+      the review PASS" is the qa-STATUS row reason under skip_qa (commit 210a2efa),
+      not an in_review row as qa.md R13 words it — observe it on a qa-status target.
+      fake-claude scripted cursors are per session type, shared by TUI and CLI drivers:
+      run R14 scripted ["SIGNOFF_REQA","SIGNOFF_MERGE"] alone, use single-verdict
+      configs for concurrent C1/C4.'
+    created_at: '2026-10-13T06:38:33Z'
+    last_edited: '2026-10-13T06:38:33Z'
+  - id: note-0c58ea4
+    text: 'QA s3 incidental fix 687bca6b: TUI _resume_incomplete_qa adopted in-flight
+      QA runs owned by a live `pm pr auto-sequence` QA child (duplicate verifier/finalize
+      panes, double QA complete, stale "QA PASS — press i" after a CLI re-qa). qa_resume.json
+      now carries owner_pid; scan skips snapshots whose owner is another live pid.
+      Also 6c81d3cb: O "signed off — ready to merge" line now force+hold (was swallowed
+      by the 10s "Review loop done" sticky under skip_qa and overwritten by concurrent
+      A merge lines).'
+    created_at: '2026-10-13T07:18:48Z'
+    last_edited: '2026-10-13T07:18:48Z'
+  - id: note-a414f41
+    text: 'Group B refine (QA run 2, 2026-10-13): R9b-restart must use `pm tui restart
+      --breadcrumb` (keeps auto-start targets + run_id, so the driver sees the old
+      run stamp signoff-<pr>.head=X vs HEAD Y and retires it with a "stale" line).
+      Plain Ctrl+R + re-arm mints a NEW autostart run dir (auto_start.py:385), so
+      the old window is found by name but its transcript/stamp are invisible -> step_signoff
+      returns "running" until that window dies; if the PR sticks there, that is known
+      pr-5410ae4 (orphan after run-dir change), not a new bug. To hit the restart
+      path deterministically, commit X->Y right after issuing the restart (while the
+      new TUI boots), not before. E1: lock file must be pre-created (touch+chmod 0444)
+      before the PR reaches sign_off; the user is non-root so open("w") fails. E2:
+      TUI merge is a synchronous `pm pr merge` with a 30 s timeout, so hold the .merge
+      lock only a few seconds.'
+    created_at: '2026-10-13T12:47:27Z'
+    last_edited: '2026-10-13T12:47:27Z'
+  - id: note-2a9ac6f
+    text: 'QA s5 (Group B) incidental fix a1d4324b: signoff_ui.step logged "signoff:
+      launching router" at INFO on every 5 s poll while the relaunch backoff skipped
+      the launch, so the L log showed phantom relaunches (11 lines in a 60 s B4 window-death
+      backoff, 36 in B6 launch-failure). Now logged inside _launch past the backoff/in-flight
+      gates. Regression: test_throttled_polls_do_not_log_a_launch (fails on 272ed914).
+      Post-fix live: exactly 2 lines, both real launches. B2 Ctrl+R variant stranded
+      behind the orphan window = pr-5410ae4 (noted there).'
+    created_at: '2026-10-13T13:35:05Z'
+    last_edited: '2026-10-13T13:35:05Z'
+  - id: note-1e891a2
+    text: 'QA s6 Group C (adc6d89d): C-a1/a2/a3, C-c, C-d (2 race orders), C-e, C-f,
+      C-g held live. C-b found + fixed c762e3d5: a CLI qa-run-bg run retired by a
+      SIGNOFF_REQA bounce finished late, left qa_resume.json, and the TUI resume scan
+      "Recovered completed QA" -> stale "QA PASS for <pr> — press i" after the bounce.
+      qa-run-bg now clears its snapshot after finishing (killed-mid-run keeps it,
+      C-g still recovers). Post-fix rerun on SP1 clean; CLI tick shapes identical
+      to master 6cfd047e. C-d: fake router writes no report.html, so the manual-record
+      path needed a stand-in report (qa.md R8 style). Captures scenarios/6.'
+    created_at: '2026-10-13T13:37:00Z'
+    last_edited: '2026-10-13T13:37:00Z'
+  - id: note-d323084
+    text: 'QA s4 (Group A, adc6d89d): A0 102 passed; R1-R8, R11 late-enable + Ctrl+R
+      qa-PASS restart, E3 held live. FAILED then fixed b8e97482: A6 Ctrl+R mid-sign_off
+      -> re-arm creates a new transcripts/autostart-* dir, so the adopted router (same
+      window, stamp=HEAD) showed "sign-off review running" forever and its verdict
+      was never recorded (pr-5410ae4 mechanism). signoff_ui._adopt_orphaned_run moves
+      the newest stamped run launched since signed_off_at into the current run dir
+      when the window is alive and the dir has no run; step_signoff then records (stamp==HEAD)
+      or retires stale. Tests: test_restart_with_new_run_dir_* (3 fail pre-fix), test_run_from_earlier_signoff_episode_is_not_adopted.
+      Live post-fix: fresh project adopt+record once+ready once; pre-fix stuck PR
+      rescued after Ctrl+R. Captures /pm-captures/scenarios/4. Filed pr-328cfd0 (zz
+      t on in_review skips the qa transition).'
+    created_at: '2026-10-13T14:09:46Z'
+    last_edited: '2026-10-13T14:09:46Z'
+  - id: note-6d88dde
+    text: 'Sign-off review 2026-10-13 (stop-before-merge, supervised). Report at <captures>/report.html.
+      Disposition audit: the unknown-HEAD edge that review i2 accepted (git rev-parse
+      HEAD keeps failing -> verdict recorded with sha=None -> next tick treats it
+      as stale -> retire + forced relaunch, a new router after every verdict, never
+      merges) is reproduced at unit level and pre-existing in the CLI on master. It
+      is NOT covered by pr-7c32e44 (that PR is only about the autostart row text)
+      and is now filed as pr-a9fa258. impl.md "cannot loop" claim corrected. Remaining
+      pr-5410ae4 scope (unstamped legacy orphans, mtime heuristic) noted on pr-5410ae4.
+      The CLI skip_qa sign-off bypass is still tracked by pr-dd4f07b.'
+    created_at: '2026-10-13T17:11:29Z'
+    last_edited: '2026-10-13T17:11:29Z'
+  - id: note-266f0b6
+    text: 'Merge integration 2026-10-14: combined #230 and #231 (3c369a0f) with #232;
+      application files merged automatically, project.yaml semantically merged by
+      PR/plan/note IDs. Initial combined full suite: 3213 passed, one logging assertion
+      failed. Failure reproduced in isolation at original approved #232 cc7ab244:
+      configure_logger disables propagation, so pytest caplog sees no launch event.
+      Test-only fix temporarily enables propagation with monkeypatch; all 30 signoff
+      handoff tests pass, including the one-launch/six-throttled-polls assertion.
+      Final #231 integration review and combined suite still pending. Untracked verify-s1-followup.md
+      preserved. Main checkout merge recovery is recorded on existing pr-ca6981c (#222).'
+    created_at: '2026-10-14T16:58:33Z'
+    last_edited: '2026-10-14T16:58:33Z'
+  - id: note-c578488
+    text: 'Final integration validation 2026-10-14: combined application source at
+      c5629fb3 passed all 3217 tests. The signoff logging test now attaches caplog.handler
+      directly and disables propagation temporarily (dfc1f8a6); merely enabling propagation
+      was insufficient when parent PM loggers were loaded. It still detects the original
+      phantom-launch bug. Final test-only import isolation merge at 7c884215 passed
+      200 targeted planner/trust/launcher/handoff tests in leak-sensitive order; native
+      integration signoff independently passed 263 targeted tests and checked auto-merge
+      equality. Fresh #231 integration QA at 55d8d950: one planned/launched S7, worker
+      PASS, independent VERIFIED, FINALIZE_DONE; all A-F live stories held, supporting
+      447 tests passed. Parser/planner functions and trust code match this branch;
+      approved #232 resume-owner/handoff code retains original S7-S9 coverage. Supervisor
+      copied and hash-verified the fresh evidence under captures/pr-488ac6d/merge-20261014/231-qa-evidence.
+      Native signoff also reproduced a pre-existing sibling mock-parser bug, now filed
+      as pr-feae15d with controls and three-revision evidence; literal reserved marker
+      lines inside STEPS are invalid protocol input, correctly rejected loudly, not
+      a new regression. All runs remain supervised; an untouched qualification run
+      is still required.'
+    created_at: '2026-10-14T18:06:09Z'
+    last_edited: '2026-10-14T18:06:09Z'
 - id: pr-40f49eb
   plan: bugs
   title: 'Bug: dashboard Last modified reflects report age instead of PR updates'
@@ -27660,11 +27852,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:42.844845+00:00'
-  updated_at: '2026-10-12T21:35:42.844845+00:00'
+  updated_at: '2026-10-13T07:18:49.936939+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-3419d81
+    text: 'Repro from pr-488ac6d QA s3: add a PR with `pm pr add` while the TUI runs,
+      then `pm autostart add <id>` without `pm push` + merging the sync branch. pr
+      start fails "not committed on master yet" — only a WARNING in ~/.pm/debug, no
+      TUI log line, and the target stays pending. pm push + remove/re-add recovered
+      it.'
+    created_at: '2026-10-13T07:18:49Z'
+    last_edited: '2026-10-13T07:18:49Z'
 - id: pr-f094946
   plan: bugs
   title: 'Bug: auto-started QA loop selects its new window, pulling attached clients
@@ -29020,6 +29220,172 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-13T12:44:32.028018+00:00'
   updated_at: '2026-10-13T12:44:32.028018+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5410ae4
+  plan: bugs
+  title: 'Bug: TUI sign-off driver shows an orphaned router window as "running" forever
+    after the auto-start run dir changes'
+  branch: pm/pr-5410ae4-bug-tui-sign-off-driver-shows-an-orphaned-router-w
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/signoff_ui.step reads the router verdict only from get_transcript_dir(app)/signoff-<pr>.jsonl.
+    The run id is kept across breadcrumb restarts, but turning auto-start off and
+    on again (or a TUI crash restart with no breadcrumb) creates a new autostart-<tag>-<hex>
+    dir. A sign-off window launched under the old run dir is then never read: step_signoff
+    sees no record, no transcript and a live window, so it returns "running" every
+    5 s, and autostart status says "sign-off review running" with no end. Repro: auto-start
+    a PR to sign_off, disable and re-enable auto-start before the router prints its
+    verdict, then let it print SIGNOFF_MERGE. The PR stays sign_off until a human
+    runs pm pr signoff record. Possible fixes: a stable per-PR sign-off transcript
+    path (like the CLI transcripts/auto-sequence/<pr>), or retire and relaunch a window
+    that has no transcript in the current run dir when the step first sees it. pr-488ac6d
+    documented manual i windows as "running until recorded"; this orphan case is different.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T06:17:29.491425+00:00'
+  updated_at: '2026-10-13T17:11:29.200939+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-22f3bc7
+    text: 'QA pr-488ac6d s5 B2 variant (2026-10-13): reproduced with a HEAD move.
+      O target router @33 launched on X (run autostart-<pr>-ae4fdd80, 120 s delay);
+      plain Ctrl+R, re-arm (new run dir a24ca70d), commit X->Y. The TUI showed "sign-off
+      review running" behind the orphan, which also escaped the R9b stale check because
+      the head stamp sits in the old run dir. The old X verdict printed and was correctly
+      never recorded. Recovery: kill the orphan window, then one relaunch on Y recorded
+      @Y. A fix here should also retire an orphan whose stamp != HEAD.'
+    created_at: '2026-10-13T13:35:05Z'
+    last_edited: '2026-10-13T13:35:05Z'
+  - id: note-1b32640
+    text: 'pr-488ac6d b8e97482 (QA s4) adds signoff_ui._adopt_orphaned_run: when the
+      current auto-start run dir has no sign-off run for a PR whose signoff-<pr> window
+      is alive, the TUI moves the newest stamped run (launched since signed_off_at,
+      non-manual dir) into the current dir, then step_signoff records or retires it
+      by the HEAD stamp. That covers Ctrl+R restart and auto-start off/on re-arm;
+      re-check this bug against it once pr-488ac6d merges (unstamped pre-stamp runs
+      are still not adopted).'
+    created_at: '2026-10-13T14:09:47Z'
+    last_edited: '2026-10-13T14:09:47Z'
+  - id: note-ef41152
+    text: 'Scope after pr-488ac6d (sign-off review, 2026-10-13). FIXED in pr-488ac6d
+      by b8e97482 (QA-verified live at 1c162a86: s7 A6 "Ctrl+R in sign_off" and s8
+      B2b): when the window is alive and the current auto-start run dir has no run
+      for the PR, signoff_ui._adopt_orphaned_run moves the newest *stamped* (.head)
+      router run of another non-manual run dir, launched since signed_off_at, into
+      the current dir. step_signoff then records the verdict (stamp == HEAD) or retires
+      it as stale (stamp != HEAD). That covers both Ctrl+R + re-arm and auto-start
+      off/on. STILL OPEN here: (1) an orphan run with no .head stamp (launched by
+      pm before 0ff2be65) is never adopted, so a live window from such a run still
+      reads "sign-off review running" until it dies or `pm pr signoff record` is run;
+      (2) adoption depends on a stamp-mtime heuristic (>= signed_off_at - 1 s) rather
+      than a stable per-PR transcript path; the more robust fix proposed in this PR
+      (a stable per-PR sign-off transcript path like the CLI transcripts/auto-sequence/<pr>)
+      was not done; (3) manual-* run dirs (TUI `i`) are excluded on purpose, which
+      is the documented "running until recorded" behaviour, not this bug. Re-verify
+      (1)/(2) and close or narrow this PR.'
+    created_at: '2026-10-13T17:11:29Z'
+    last_edited: '2026-10-13T17:11:29Z'
+- id: pr-328cfd0
+  plan: bugs
+  title: 'Bug: zz t on an in_review PR runs QA without moving it to qa; arming auto-start
+    then starts a redundant review loop'
+  branch: pm/pr-328cfd0-bug-zz-t-on-an-in-review-pr-runs-qa-without-moving
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.start_or_stop_qa_loop (zz t) never applies
+    the in_review -> qa transition that start_qa (t) does. Repro (pr-488ac6d QA s4,
+    /scratch/pm-488-s4b): s, d (PR in_review), zz t -> ''QA loop started'', QA runs,
+    PR stays in_review (pm pr list). Then pm autostart add <pr> --stop-before-merge:
+    the scheduler sees an in_review target and starts ''Auto-start: review loop''
+    (an extra fake review), whose PASS then moves it to qa and logs ''QA already running''.
+    The zz t PASS still hands off correctly. Expected: zz t transitions in_review
+    -> qa like t, so no redundant review loop when armed mid-QA.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T14:01:30.872312+00:00'
+  updated_at: '2026-10-13T14:01:30.872312+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a9fa258
+  plan: bugs
+  title: 'Bug: sign-off driver relaunches a new router after every verdict while the
+    PR''s HEAD can''t be read'
+  branch: pm/pr-a9fa258-bug-sign-off-driver-relaunches-a-new-router-after-
+  status: pending
+  depends_on: []
+  description: 'pm_core/signoff.py step_signoff (shared by the TUI scheduler, pm_core/tui/signoff_ui.step,
+    and pm pr auto-sequence). This was already true of the CLI auto-sequence on master
+    6cfd047e. pr-488ac6d makes the TUI scheduler drive the same path. When head_sha(workdir)
+    returns None (the workdir exists but `git rev-parse HEAD` keeps failing, e.g.
+    a corrupt or half-cloned repo), each tick does the following. (1) The transcript
+    verdict is recorded with sha=None (record_signoff_verdict, origin auto-sequence)
+    and the hop is applied. For SIGNOFF_MERGE the hop is ready_to_merge, and the merge
+    gate then refuses the merge (no fresh sha), so nothing merges. (2) On the next
+    tick, fresh_recorded_verdict(pr, None) is None but a recorded verdict exists.
+    So step_signoff takes the stale branch: it retires the window and transcript,
+    clears the record and returns launch(stale=True). The TUI _launch(force=True)
+    skips the 60 s relaunch backoff. Result: a brand-new router (a full Claude sign-off
+    session) is launched after every verdict, forever. Each cycle repeats the yellow
+    "Not merging" line, because _signoff_acted is cleared on every launch. Status
+    flips between "signed off" and "stale (HEAD moved)". Unit repro (sign-off review
+    of pr-488ac6d, 2026-10-13): patch pm_core.signoff.head_sha to return None, give
+    step_signoff a transcript verdict SIGNOFF_MERGE and a live window pane, and call
+    it 4 times. The results alternate hop(ready_to_merge, sha=None) / launch(stale=True),
+    with retire called twice. A missing workdir takes a separate path: launch_signoff_window
+    prints and exits 0 with no window, and the TUI then retries every 60 s. It is
+    cheaper but still endless. pr-488ac6d impl.md claimed the unknown-HEAD case "cannot
+    loop". Review iteration i2 of pr-488ac6d accepted this edge as existing CLI behaviour,
+    and the claim is wrong. Expected: when HEAD is unknown, do not record a verdict
+    (or record it and never treat a sha-less record as stale). Surface a blocked/error
+    state with the reason ("cannot read HEAD of <workdir>") in pm autostart status
+    and the TUI log, and launch no further routers until HEAD is readable. Add a regression
+    test for both drivers. Not covered by pr-7c32e44, which is only about the autostart
+    row text after a gate refusal.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-13T17:11:18.902783+00:00'
+  updated_at: '2026-10-13T17:11:18.902783+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-feae15d
+  plan: bugs
+  title: 'Bug: QA mock requests are silently dropped when scenario prose mentions
+    QA_PLAN_START'
+  branch: pm/pr-feae15d-bug-qa-mock-requests-are-silently-dropped-when-sce
+  status: pending
+  depends_on:
+  - pr-b8561ac
+  description: 'Found during #231 integration signoff on 2026-10-14; pre-existing
+    and unchanged on master bdbff78b, original signed #231 1ca6b657, and final #231
+    55d8d950. parse_new_mocks_from_plan in pm_core/qa_loop.py still bounds the plan
+    with the last START/END substrings. A valid plan that declares NEW_MOCK: fake-upstream
+    in scenario 1 and mentions QA_PLAN_START mid-line in a later scenario returns
+    no mock requests. The identical control without that prose mention returns fake-upstream
+    on all three revisions. Unlike reserved marker lines inside STEPS (invalid protocol
+    input, correctly rejected loudly), these mid-line mentions are valid input. Fix
+    the sibling mock parser to use the same whole-line marker boundaries as parse_qa_plan,
+    with failing-then-passing coverage for preserving NEW_MOCK requests and handling
+    trailing END mentions without leaking text. Preserve existing completeness rejection
+    and normal multiple mock requests. Nonblocking follow-up; #231/#232 code and fresh
+    QA pass independently. Repro, inputs 3/4 and revision outputs: captures/pr-b8561ac/merge-20261014/signoff/literal-marker-in-steps/;
+    an immutable copy is carried in #232 captures/merge-20261014/planner-mock-followup/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-14T18:05:08.219093+00:00'
+  updated_at: '2026-10-14T18:05:08.219093+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

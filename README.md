@@ -235,10 +235,17 @@ so you can continue working while reviews iterate.
 ## Auto-start targets
 
 Auto-start drives an explicit set of target PRs through implementation →
-review → QA inside the running TUI, starting each target's dependencies as they
-become ready (a dependency shared by several targets runs once). Targets are
-additive: pressing `O` (stop before merge) or `A` (auto-merge) on another PR
-adds it without dropping the others. An empty set means auto-start is off.
+review → QA → sign-off inside the running TUI, starting each target's
+dependencies as they become ready (a dependency shared by several targets runs
+once). Targets are additive: pressing `O` (stop before merge) or `A`
+(auto-merge) on another PR adds it without dropping the others. An empty set
+means auto-start is off.
+
+A QA PASS hands the PR to sign-off; the router's verdict is recorded against
+the branch HEAD and routed (re-QA, back to review, back to implementation, or
+blocked for a human). Only a fresh `SIGNOFF_MERGE` on the current HEAD
+finishes the sequence: `O` stops there ("ready to merge — press g"), `A`
+merges. With `skip_qa`, sign-off follows the review PASS.
 
 ```bash
 pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)

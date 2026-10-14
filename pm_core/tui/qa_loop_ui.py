@@ -409,6 +409,11 @@ def _resume_incomplete_qa(app) -> None:
             continue
         if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
             continue
+        # Not orphaned: another live process (a `pm pr auto-sequence` QA
+        # child) is driving it.  Re-checked each scan, so the run is still
+        # recovered if that process dies before finishing.
+        if qa_loop.resume_owned_elsewhere(rdata):
+            continue
 
         # Only resume PRs still in QA — skip (and forget) ones that have
         # already moved on.
@@ -476,15 +481,16 @@ def _on_qa_complete(app, state: QALoopState) -> None:
 
     Self-driving mode (zz t):
       - PASS (no changes): increment pass_count; if >= required_passes,
-        clear self-driving state and defer to auto-start (or the user)
-        for merge — manual ``zz t`` does NOT trigger a merge itself.
-        Otherwise restart QA.
+        clear self-driving state and defer to auto-start (sign-off, then
+        merge per policy) or the user — manual ``zz t`` does NOT trigger
+        sign-off or a merge itself.  Otherwise restart QA.
       - NEEDS_WORK / changes: reset pass_count, transition to in_review,
         and directly start a review loop (independent of auto-start).
       - INPUT_REQUIRED: pause self-driving loop for human input.
 
     Legacy mode (plain t or auto-start):
-      - PASS: trigger auto-merge when auto-start is enabled.
+      - PASS: hand off to the sign-off step when auto-start is enabled
+        (only a fresh SIGNOFF_MERGE then reaches the merge / O stop).
       - NEEDS_WORK: transition to in_review, rely on auto-start.
     """
     if state._ui_complete_notified:
@@ -510,14 +516,15 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                 if _auto_start.in_scope(app, pr_id):
                     app.log_message(
                         f"[green bold]QA PASS[/] for {pr_id} "
-                        f"({sd['pass_count']}/{required} consecutive) — ready to merge"
+                        f"({sd['pass_count']}/{required} consecutive) — "
+                        "handing off to sign-off"
                     )
-                    _trigger_auto_merge(app, pr_id)
+                    _trigger_signoff(app, pr_id)
                 else:
                     app.log_message(
                         f"[green bold]QA PASS[/] for {pr_id} "
                         f"({sd['pass_count']}/{required} consecutive) — "
-                        "merge manually or enable auto-start"
+                        "press i to sign off"
                     )
             else:
                 app.log_message(
@@ -528,15 +535,15 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                           sd["pass_count"], required)
                 start_qa(app, pr_id)
         else:
-            # Legacy path — only auto-merge when auto-start is active
+            # Legacy path — sign-off hand-off only when auto-start is active
             from pm_core.tui import auto_start as _auto_start
             if _auto_start.in_scope(app, pr_id):
-                app.log_message(f"[green bold]QA PASS[/] for {pr_id} — ready to merge")
-                _trigger_auto_merge(app, pr_id)
+                app.log_message(
+                    f"[green bold]QA PASS[/] for {pr_id} — handing off to sign-off")
+                _trigger_signoff(app, pr_id)
             else:
                 app.log_message(
-                    f"[green bold]QA PASS[/] for {pr_id} — "
-                    "merge manually or enable auto-start"
+                    f"[green bold]QA PASS[/] for {pr_id} — press i to sign off"
                 )
     elif verdict == VERDICT_NEEDS_WORK:
         # Issues found or changes committed → back to review
@@ -601,15 +608,15 @@ def _start_self_driving_review(app, pr_id: str) -> None:
     )
 
 
-def _trigger_auto_merge(app, pr_id: str) -> None:
-    """Trigger auto-merge after QA passes.
+def _trigger_signoff(app, pr_id: str) -> None:
+    """Hand a QA-passed PR to the sign-off step (auto-start only).
 
-    Only called when auto-start is active — merge is never triggered by
-    a manual ``zz t`` run.  Delegates to ``_maybe_auto_merge`` which
-    re-checks auto-start status and scope.
+    Never merges: the sign-off driver (``signoff_ui``) routes the router's
+    verdict, and only a fresh SIGNOFF_MERGE reaches ``_maybe_auto_merge``.
+    ``start_signoff`` re-checks auto-start status and scope.
     """
-    from pm_core.tui.review_loop_ui import _maybe_auto_merge
-    _maybe_auto_merge(app, pr_id)
+    from pm_core.tui import signoff_ui
+    signoff_ui.start_signoff(app, pr_id)
 
 
 def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> None:

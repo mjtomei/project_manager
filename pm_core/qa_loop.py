@@ -16,6 +16,7 @@ Verdicts (shared with review):
 """
 
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -863,6 +864,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     data = {
         "pr_id": state.pr_id,
         "loop_id": state.loop_id,
+        # The process running this orchestration loop: a TUI must not adopt
+        # a run another live driver (e.g. a `pm pr auto-sequence` QA child)
+        # is still collecting verdicts for (see resume_owned_elsewhere).
+        "owner_pid": os.getpid(),
+        "owner_start": _proc_start_time(os.getpid()),
         "qa_workdir": state.qa_workdir,
         "session_tag": state.session_tag,
         "use_containers": bool(use_containers),
@@ -898,6 +904,53 @@ def _load_resume_file(qa_workdir: str | Path) -> dict | None:
         return json.loads(_resume_file_path(qa_workdir).read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+
+
+def _proc_stat_fields(pid: int) -> list[str] | None:
+    """Fields of ``/proc/<pid>/stat`` from field 3 (state) on, or None."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat.rsplit(")", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+
+
+def _proc_start_time(pid: int) -> str | None:
+    """Boot-relative start time of *pid* (stat field 22), or None."""
+    fields = _proc_stat_fields(pid)
+    return fields[19] if fields and len(fields) > 19 else None
+
+
+def resume_owned_elsewhere(resume_data: dict) -> bool:
+    """True when another live process still drives the snapshot's run.
+
+    The snapshot exists so a TUI can pick up a run whose daemon thread died
+    with it.  A run written by a different process that is still alive (a
+    CLI auto-sequence QA child, another TUI) is not orphaned: resuming it
+    would start a second orchestration loop on the same scenarios —
+    duplicate verifier / finalize panes and a second completion.  A TUI
+    restart execs in place, so its own old runs carry its current pid.
+    A recorded start time guards against the dead owner's pid having been
+    reused by an unrelated process (which would strand the run forever).
+    """
+    pid = resume_data.get("owner_pid")
+    if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, owned by another user
+    fields = _proc_stat_fields(pid)
+    if fields is None:
+        return True
+    if fields[0] == "Z":
+        return False
+    started = resume_data.get("owner_start")
+    if started and len(fields) > 19 and fields[19] != started:
+        return False  # pid reused by an unrelated process
+    return True
 
 
 def clear_resume_file(qa_workdir: str | Path) -> None:

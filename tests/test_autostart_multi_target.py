@@ -445,28 +445,61 @@ class TestCheckAndStart:
         assert [c.args[1] for c in sq.call_args_list] == ["b"]
 
 
+_SIGNED = {"verdict": "SIGNOFF_MERGE", "sha": "head", "origin": "auto-sequence"}
+
+
+def _signed(pid, **kw):
+    return _pr(pid, status="sign_off", workdir=f"/w/{pid}",
+               signoff=dict(_SIGNED), **kw)
+
+
 class TestMergePolicy:
     def _run(self, app, pr_id):
-        from pm_core.tui import review_loop_ui
-        with patch.object(review_loop_ui, "_attempt_merge", return_value=True) as am:
+        from pm_core.tui import review_loop_ui, signoff_ui
+        with patch.object(review_loop_ui, "_attempt_merge", return_value=True) as am, \
+             patch("pm_core.signoff.head_sha", return_value="head"), \
+             patch.object(signoff_ui, "start_signoff") as ss:
             review_loop_ui._maybe_auto_merge(app, pr_id)
+        am.start_signoff = ss
         return am
 
     def test_stop_target_not_merged_auto_target_merged(self, tmp_path):
-        prs = [_pr("a", status="qa"), _pr("b", status="qa")]
+        prs = [_signed("a"), _signed("b")]
         app = _enabled_app(prs, ["a", "b"], tmp_path, stop={"a"})
         assert not self._run(app, "a").called
+        assert any("a signed off" in m and "ready to merge" in m
+                   for m in app.logs)
         assert self._run(app, "b").called
 
     def test_stop_dep_wins_over_auto_target(self, tmp_path):
-        prs = [_pr("d", status="qa"), _pr("t", deps=["d"])]
+        prs = [_signed("d"), _pr("t", deps=["d"])]
         app = _enabled_app(prs, ["t"], tmp_path, stop={"d"})
         assert not self._run(app, "d").called
 
     def test_out_of_scope_never_merged(self, tmp_path):
-        prs = [_pr("a", status="qa"), _pr("x", status="qa")]
+        prs = [_signed("a"), _signed("x")]
         app = _enabled_app(prs, ["a"], tmp_path)
         assert not self._run(app, "x").called
+
+    def test_qa_pr_without_signoff_hands_off_never_merges(self, tmp_path):
+        """#226 gate: a QA-passed PR is routed to sign-off, never merged and
+        never reported ready to merge (pr-488ac6d)."""
+        prs = [_pr("a", status="qa"), _pr("b", status="qa")]
+        app = _enabled_app(prs, ["a", "b"], tmp_path, stop={"a"})
+        for pid in ("a", "b"):
+            am = self._run(app, pid)
+            assert not am.called
+            am.start_signoff.assert_called_once_with(app, pid)
+        assert not any("ready to merge" in m for m in app.logs)
+        assert app._pending_merge_prs == set()
+
+    def test_stale_signoff_not_merged(self, tmp_path):
+        prs = [_signed("a")]
+        prs[0]["signoff"]["sha"] = "old"
+        app = _enabled_app(prs, ["a"], tmp_path)
+        am = self._run(app, "a")
+        assert not am.called
+        am.start_signoff.assert_not_called()  # sign_off: driver owns it
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +748,9 @@ class TestBuildStatus:
 
     def test_signoff_registry_status_alone_is_not_ready(self):
         r = _run(_status([_pr("a", status="sign_off")], ["a"]), "a")
-        assert r["state"] == "paused" and r["phase"] == "sign_off"
+        # Not ready: no verdict, no window -> the scheduler relaunches it.
+        assert r["state"] == "queued" and r["phase"] == "sign_off"
+        assert "relaunches" in r["reason"] and "ready" not in r["reason"]
 
     def test_signoff_fresh_merge_with_stop(self):
         r = _run(_status([_pr("a", status="sign_off")], ["a"],
