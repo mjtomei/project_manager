@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-19e8114
+  active_pr: pr-3201ea8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3299,7 +3299,7 @@ prs:
     a plan, restarting workers, editing phase state, or launching sign-off disqualifies
     the trial. See pm/plans/plan-delivery.md, autostart qualification update.'
   created_at: null
-  updated_at: '2026-10-14T15:36:29.505853+00:00'
+  updated_at: '2026-10-14T15:55:43.909528+00:00'
   notes:
   - id: note-52d2c3e
     text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
@@ -3896,6 +3896,25 @@ prs:
       note on pr-be00809. Captures /pm-captures/scenarios/15 (REPORT.md).'
     created_at: '2026-10-14T15:36:29Z'
     last_edited: '2026-10-14T15:36:29Z'
+  - id: note-2226638
+    text: 'Sign-off 2026-10-14 (fresh, supervised; not qualification): SIGNOFF_MERGE
+      recommendation only; nothing was merged or approved. App code is unchanged since
+      review 24796646 = 17d4f39a. Coverage: S12 + S14 r6 carried as VERIFIED on identical
+      app code; S15 r7 is fresh, PASS/VERIFIED/FINALIZE_DONE; S13 is no coverage (pr-2111fa0).
+      Limits audited in report.html. (1) The W3.5 container hard-kill used a QA-worker
+      pane; the exact container review-pane orphan route was last live in S10 r5 on
+      c86e1caf (not independently verified), and that code path is unchanged. (2)
+      The W5.1 reason is transient (pr-be00809). (3) W3.3 was resumed through a no-tmux
+      PATH; a resume after a failed bootstrap still sits silently at the dialog (pr-d76385d).
+      (4) W3.4 kill -9: the respawned TUI did not resume the killed run (filed pr-3201ea8).
+      Suite: 3090 pass, 1 baseline failure that also fails on master; root cause is
+      PM_HOST_HOME leaking into the fixture (filed pr-4bde874). Sign-off rendered
+      23 pane/cast replays into signoff/media from the QA streams. The H6c S12 cast
+      recorded the wrong window, so text evidence is used instead. Merge-order notes:
+      expect a qa_loop.run_qa_sync conflict with pr-b8561ac; pr-ca6981c needs a rebase
+      on _pull_from_workdir stash code.'
+    created_at: '2026-10-14T15:55:43Z'
+    last_edited: '2026-10-14T15:55:43Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -28585,6 +28604,59 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-14T15:34:14.432857+00:00'
   updated_at: '2026-10-14T15:34:14.432857+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4bde874
+  plan: bugs
+  title: 'Bug: test_installer_writes_standalone_receiver fails whenever PM_HOST_HOME
+    is set (fixture does not clear it)'
+  branch: pm/pr-4bde874-bug-test-installer-writes-standalone-receiver-fail
+  status: pending
+  depends_on: []
+  description: 'Found in pr-b53bfe2 sign-off (2026-10-14). tests/test_hook_events.py::test_installer_writes_standalone_receiver
+    fails in every pm review/QA container (and on master 6cfd047e): the tmp_hooks_home
+    fixture only sets HOME, but pm_core/hook_install._host_home() honours PM_HOST_HOME
+    (exported in containers, e.g. /home/matt), so ensure_hooks_installed writes the
+    standalone receiver to the host home and the assertion receiver.exists() under
+    the tmp HOME fails. With PM_HOST_HOME unset all 17 tests in the file pass. Fix:
+    monkeypatch.delenv(''PM_HOST_HOME'', raising=False) in tmp_hooks_home (or a conftest
+    autouse guard), so the full suite is green in containers instead of carrying a
+    ''known env failure'' in every review/QA report.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-14T15:49:22.925847+00:00'
+  updated_at: '2026-10-14T15:49:22.925847+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3201ea8
+  plan: bugs
+  title: 'Investigate: QA run in execution phase not resumed after kill -9 of the
+    TUI (S15 W3.4), though another hard-killed run was'
+  branch: pm/pr-3201ea8-investigate-qa-run-in-execution-phase-not-resumed-
+  status: pending
+  depends_on: []
+  description: Found in pr-b53bfe2 sign-off (2026-10-14) from QA r7 S15 W3.4 (captures
+    scenarios/15/W3.4-interrupted-QA, timeline.txt + pm-log-excerpt.txt). Run 1b on
+    pr-983dd4a was in the execution phase (worker s2 launched 14:37:30). The TUI was
+    killed with kill -9 at 14:38:00, and pm session respawned it at 14:38:02. Over
+    the next 22s the new TUI logged no 'Resuming incomplete QA from disk' line, though
+    _resume_incomplete_qa scans every ~5 ticks. The tester then pressed z t, which
+    killed the stale windows. In the same run, W3.5-hardkill-container (also kill
+    -9, then pm session) resumed within 1s ('Resuming QA for pr-9ca965b after restart').
+    Not trust-related, and the W3.4 Thens (fresh trust on restart, planned=launched)
+    held. Check whether qa_resume.json existed for run 1b, the PR status at kill time
+    (resume requires status==qa), and whether the respawned TUI's HOME/qa_root matched.
+    If it is by design, close with the reason.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-14T15:49:43.888654+00:00'
+  updated_at: '2026-10-14T15:49:43.888654+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
