@@ -279,6 +279,28 @@ class TestPlannerReadsTranscript:
         read_text.assert_not_called()
         assert state.scenarios == []
 
+    def test_inline_start_mention_in_scenario_does_not_cut_plan(
+            self, tmp_path, monkeypatch):
+        """A scenario that talks about the markers (this PR's own round-1
+        plan did: "The pane shows a template block (QA_PLAN_START, ...)")
+        must not move the plan start past scenarios 1..k.  Before the fix
+        the parse kept only the later scenarios and the completeness gate
+        rejected the complete plan, stalling QA."""
+        plan = FULL_PLAN.replace(
+            "  WHEN: the user acts 2\n",
+            "  WHEN: the pane shows a template block (QA_PLAN_START, a "
+            "placeholder SCENARIO 1, QA_PLAN_END)\n"
+            '  AND: the first line is "● QA_PLAN_START"\n')
+        assert plan != FULL_PLAN
+        scenarios = parse_qa_plan(plan)
+        assert [s.index for s in scenarios] == [1, 2, 3, 4]
+        assert qa_loop.qa_plan_problem(plan, scenarios, 1) is None
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=PANE_TAIL_ONLY,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", plan)])
+        assert [s.title for s in state.scenarios] == TITLES
+
     def test_transcript_without_pane_capture(self, tmp_path, monkeypatch):
         """Pane capture empty (e.g. alternate screen): transcript suffices."""
         state = _run_planning(

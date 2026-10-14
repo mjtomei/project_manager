@@ -1196,9 +1196,13 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
         # Never start before the last QA_PLAN_START ahead of that END: a
         # plan numbered from 2 would otherwise reach back to an earlier
         # "SCENARIO 1:" in the prompt (e.g. a committed qa.md spec).
-        start_m = list(re.finditer(r'QA_PLAN_START', output[:end_pos]))
-        if start_m:
-            start_pos = max(start_pos, start_m[-1].end())
+        # Only marker lines count: a scenario that mentions QA_PLAN_START
+        # in its text must not cut off the scenarios before it.
+        starts = _marker_line_offsets(output[:end_pos], "QA_PLAN_START")
+        if starts:
+            line_end = output.find("\n", starts[-1])
+            start_pos = max(start_pos, line_end + 1 if line_end >= 0
+                            else end_pos)
         body = output[start_pos:end_pos]
     else:
         body = output
