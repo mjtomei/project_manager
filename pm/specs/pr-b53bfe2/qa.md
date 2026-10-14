@@ -25,25 +25,29 @@ This spec is grounded in `git diff master...HEAD`:
   in review 5a14 i1)
 - `pm/specs/pr-b53bfe2/impl.md`
 
-The current QA round (round 6, after review 5a14 i1) has exactly three
-scenarios. Each one executes one of the named sections below **in full**,
-together with the shared **Setup** and **Harness notes**. The planner output
-only names the section; the concretizer and worker must read the whole
-section here, every H/W/M story:
+The current QA round (round 7, supervisor recovery 2026-10-14) has
+exactly **one** scenario. It executes the section below **in full**,
+together with the shared **Setup**, **Harness notes** and the new
+**Process hygiene (round 7, do this first)** note. The planner output only
+names the section; the concretizer and worker must read the whole section
+here, every W story:
 
-- **SCENARIO 12: Host trust policy and configuration** → section
-  "Host trust policy and configuration" (H1–H7)
-- **SCENARIO 13: Workflow and container trust** → section
+- **SCENARIO 15: Workflow and container trust** → section
   "Workflow and container trust" (W1–W6)
-- **SCENARIO 14: Local merge trust** → section "Local merge trust"
-  (M1–M5, incl. M2a/M2b/M2c and M4b)
 
-Scenario numbers before round 6 map to the same sections: 9/6/3 = host,
-10/7/4 = workflow/container, 11/8/5 = local merge. In the section texts
+The other two groups are **not** rerun this round. Round 6 S12 (host trust
+H1–H7) and S14 (local merge M1–M5) are PASS and independently VERIFIED on
+app code `17d4f39a`. The head since then differs only in `pm/project.yaml`
+and this spec (no app code), so those verified results carry forward as the
+host and local-merge coverage for this head. Rerun them only if app code
+changes.
+
+Scenario numbers map to sections as follows: host = 12/9/6/3, workflow/
+container = 15/13/10/7/4, local merge = 14/11/8/5. In the section texts
 below, "Scenario 6/7/8" means the host/workflow/merge scenario of the
-current round.
+current round (this round: only the workflow/container one, 15).
 
-The runner must launch exactly as many scenarios as were planned (3).
+The runner must launch exactly as many scenarios as were planned (1).
 A planned/launched mismatch is itself a FAIL to report.
 
 ### Earlier rounds
@@ -110,9 +114,27 @@ A planned/launched mismatch is itself a FAIL to report.
     below).
 - The head changed after round 5 (`911e75b7`, `4c3fb81c`, `24796646`).
   `4c3fb81c` touches the QA plan parse used by every QA run, and
-  `911e75b7` changes what the TUI guide pane does at launch. So **no
-  earlier coverage counts as PASS for this round**. All three sections run
-  again in full on the current head; S11's PASS is context, not coverage.
+  `911e75b7` changes what the TUI guide pane does at launch. So round 6
+  reran all three sections on `17d4f39a`.
+- Round 6 on `17d4f39a` (run `pr-b53bfe2-9aa25d894ed5e3ca`):
+  - S12 host trust: **PASS**, independently VERIFIED. Every H Then held,
+    including the first post-review live tests of `911e75b7`/`24796646`
+    (H2.5 guide pane, real and fake) and `211cfb95` (H7.6). Carried
+    forward as host coverage (see above).
+  - S14 local merge: **PASS**, independently VERIFIED. M1–M5 incl.
+    M2a/M2b/M2c, M4b and concurrency. Carried forward as local-merge
+    coverage.
+  - S13 workflow/container: **no verdict, no coverage.** The worker died
+    and all 10 relaunches failed because the scenario container's PID 1
+    (`sleep infinity`) never reaped orphaned children of the harness's own
+    polling scripts: 1951 zombies (mostly `w35c.sh`, `w35.sh`, which used
+    repeated shell process substitution) hit the 2048 PID cap
+    (`pids.events max=134`, `oom_kill=0`). Filed `pr-2111fa0`; evidence
+    `shepherd-20261014/s13-exhaustion.json`, `s13-process-table.txt`.
+    Its partial recordings under `scenarios/13` are **not** fresh coverage
+    and must not be cited as passing evidence. `4c3fb81c` (W1.5/W3.4
+    planned = launched) therefore still has no post-review live test in
+    the workflow path; S15 provides it.
 
 ## Run disclosures (read first)
 
@@ -137,9 +159,10 @@ A planned/launched mismatch is itself a FAIL to report.
   variant). The round-5 QA fixes `911e75b7` (guide/assist pane bootstrap)
   and `4c3fb81c` (plan parse never starts before the last
   `QA_PLAN_START`) were reviewed in review 5a14 i1, which also made the
-  guide skip bootstrap under a fake guide (`24796646`). **This round is
-  their first live test after review**: H2.5 must exercise the guide pane
-  (real and fake), and W1/W3.4 must show planned = launched.
+  guide skip bootstrap under a fake guide (`24796646`). Round 6 S12
+  live-tested the guide pane after review (H2.5 PASS, VERIFIED). **This
+  round is the first post-review live test of `4c3fb81c` in the workflow
+  path**: W1.5 and W3.4 must show planned = launched.
 - **Any app edit made in this round is unreviewed.** Commit it with a
   fail-before/pass-after regression test, name the commit in the report, and
   state that it needs another review pass before fresh sign-off. An all-PASS
@@ -184,6 +207,10 @@ A planned/launched mismatch is itself a FAIL to report.
   - `pr-f8acf21`: stopping a QA run still launches queued workers and a
     finalizer, then records QA PASS with unrun scenarios. Watch for it in
     W3.4, and never count such a PASS as coverage.
+  - `pr-2111fa0`: the scenario container's PID 1 (`sleep infinity`) does
+    not reap orphaned children; harness pollers exhausted the PID cap in
+    round 6 S13. Harness-side mitigation is in Harness notes ("Process
+    hygiene").
   - `pr-629c47e`: the TUI `c`, discuss, watcher-review and QA-author panes
     run Claude in the project root without consulting workspace trust (no
     "not approved" log line, no bootstrap). Only the guide/assist pane is
@@ -292,6 +319,32 @@ Steps:
 
 ## Harness notes (learned in earlier rounds; read before driving)
 
+- **Process hygiene (round 7, do this first).** Round 6 S13 died of PID
+  exhaustion caused by the test harness, not by pm (`pr-2111fa0`: the
+  scenario container's PID 1 does not reap orphans). Before driving any
+  story:
+  - Do not write pollers that spawn a background child or a shell process
+    substitution (`<(...)`, `>(...)`, `cmd &` without `wait`) on every
+    iteration. Prefer one bounded Python poller per wait
+    (`subprocess.run` with a timeout, a deadline, `time.sleep`), or a
+    shell loop that runs only foreground commands and `wait`s any child it
+    starts. Every poll loop must have a deadline and end with a concrete
+    finding (timeout → record what was observed), never loop forever.
+  - Long-lived helpers (pipe-pane writers, key loggers, lock holders) are
+    started once, their PIDs recorded, and killed and `wait`ed when the
+    story ends.
+  - Monitor the container's process budget: at start and after each W
+    story record `ps -eo stat= | grep -c '^Z'` (zombies), the total
+    process count, and `cat /sys/fs/cgroup/pids.current pids.max
+    pids.events` (if present). If zombies grow by more than ~50 within a
+    story, stop, find the leaking script, fix it, and note it in the
+    report. If the budget gets near the cap, end the scenario with a
+    concrete finding (counts, offending command names) instead of letting
+    the worker be killed.
+  - Include the start/end process and zombie counts in the report.
+  - Do not reuse round 6's `w35.sh`/`w35c.sh` scripts or anything else
+    under `scenarios/13`; write new ones under `scenarios/15`.
+
 - **Round-5 lessons.**
   - `tmux pipe-pane -o` toggles: starting a second pipe on a pane (e.g. a
     hook plus a poller) closes the first. Use one pipe per pane and verify
@@ -318,11 +371,12 @@ Steps:
   evidence. Round-3 evidence that may be cited is limited to recordings
   and logs written by the scenario itself (e.g. `scenarios/4/W3-*`,
   `scenarios/5/*`, `impl/{pre,post}-fix/*`).
-- **Capture isolation for this round.** Each scenario writes only under
-  its own `scenarios/<n>/` (12, 13 or 14) and never deletes or rewrites
-  another scenario's files or earlier rounds' files. At the end, list
-  your directory with sizes and mtimes in the report and confirm that
-  `scenarios/1`–`11` were not modified during your run (compare a listing
+- **Capture isolation for this round.** Scenario 15 writes only under
+  `scenarios/15/` and never deletes or rewrites another scenario's files
+  or earlier rounds' files (including round 6's `scenarios/12`–`14`,
+  which hold verified and preserved evidence). At the end, list your
+  directory with sizes and mtimes in the report and confirm that
+  `scenarios/1`–`14` were not modified during your run (compare a listing
   taken at start with one taken at the end).
 - **Captures (round-3 incident).** Never unset `PM_CAPTURES_PR`. In round 3
   a nested throwaway QA run inside S4 wrote its own `prompt.md`,
@@ -1039,6 +1093,8 @@ surfaces are:
   working;
 - the number of launched scenarios differs from the planned number;
 - evidence contains credentials;
+- the worker dies of harness resource exhaustion (PIDs/zombies) instead
+  of ending with a concrete finding (see "Process hygiene");
 - a scenario overwrites or deletes another scenario's or an earlier round's
   captures, or cites the contaminated round-3 `scenarios/1`–`3` metadata
   as evidence;
@@ -1114,3 +1170,12 @@ surfaces are:
     first post-review live tests in H2.5 and W1.5/W3.4. The other TUI
     interactive panes with the same guide gap stay tracked in
     `pr-629c47e`; the supervisor may still choose to fix them here.
+12. **Round 7 scope (supervisor recovery 2026-10-14).** Only the
+    workflow/container group runs (SCENARIO 15). Round 6 S12 and S14 are
+    PASS and independently VERIFIED on `17d4f39a`; the head since then
+    changes no app code, so they carry forward and are not rerun. S13
+    gets no credit: it died of harness-caused PID exhaustion
+    (`pr-2111fa0`), so S15 must follow "Process hygiene" before driving
+    anything. If S15 makes any app edit, the result is NEEDS_WORK and the
+    edit goes back through review; a rerun of S12/S14 is then needed only
+    if the edit touches their code paths.
