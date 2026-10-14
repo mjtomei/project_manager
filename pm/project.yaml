@@ -26437,7 +26437,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T16:41:09.231022+00:00'
-  updated_at: '2026-10-14T17:04:37.281070+00:00'
+  updated_at: '2026-10-14T17:10:03.197253+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26745,6 +26745,19 @@ prs:
       publishing carried forward.'
     created_at: '2026-10-14T17:04:37Z'
     last_edited: '2026-10-14T17:04:37Z'
+  - id: note-dcbaba9
+    text: 'Review 4faa i2: re-reviewed db261fae (parse_qa_plan END bound now uses
+      marker lines, consistent with qa_plan_problem and the 005856d9 START bound;
+      launch_claude trust-target test) and 005856d9. Both are sound. The one fix is
+      test-only: test_qa_planner_handoff leaked a build_claude_shell_cmd mock into
+      pm_core.cli.guide, because run_qa_sync first-imports pm_core.cli while the harness
+      patch is active. That broke test_workspace_trust::test_tmux_guide_launch_goes_through_trust_boundary
+      when the two files ran alone. Fix: pre-import pm_core.cli in the test module.
+      Full suite 3174 passed (PATH=/usr/bin first, PM_HOST_HOME unset). No app-code
+      change in i2. The focused re-QA from i1 still applies; residual pr-c59597f is
+      unchanged.'
+    created_at: '2026-10-14T17:10:03Z'
+    last_edited: '2026-10-14T17:10:03Z'
 - id: pr-488ac6d
   plan: bugs
   title: 'Bug: TUI auto-sequence skips sign-off after QA PASS and falsely reports
