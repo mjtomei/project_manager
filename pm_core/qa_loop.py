@@ -1185,9 +1185,13 @@ def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
     # The prompt template also contains example markers, so we can't
     # rely on matching START/END pairs.  Instead, find the last
     # QA_PLAN_END and scan backwards for the real SCENARIO 1: line.
+    # Prefer whole marker lines (the rule qa_plan_problem applies): prose
+    # after the plan that mentions QA_PLAN_END must not extend the last
+    # scenario's STEPS past the real END line.
+    end_lines = _marker_line_offsets(output, "QA_PLAN_END")
     end_m = list(re.finditer(r'QA_PLAN_END', output))
-    if end_m:
-        end_pos = end_m[-1].start()
+    if end_lines or end_m:
+        end_pos = end_lines[-1] if end_lines else end_m[-1].start()
         # Find the last "SCENARIO 1:" before that END marker
         s1_matches = list(re.finditer(
             r'^[ \t]*SCENARIO\s+1:', output[:end_pos], re.MULTILINE,

@@ -206,8 +206,25 @@ class TestLaunchClaude:
         # These tests mock subprocess.run for Claude's retry sequence.
         # Trust setup can also run Git when pytest's cwd is a PM workdir;
         # its real behavior is covered by test_workspace_trust.py.
-        with patch("pm_core.claude_launcher.prepare_workspace"):
+        with patch("pm_core.claude_launcher.prepare_workspace") as prep:
+            self.prepare_workspace = prep
             yield
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_prepares_workspace_trust(self, mock_fc, mock_sp, mock_run,
+                                      mock_log, tmp_path, monkeypatch):
+        """The fixture stubs trust setup; still check it targets the
+        launch directory (explicit cwd, else the process cwd)."""
+        mock_run.return_value = MagicMock(returncode=0)
+        launch_claude("hello", "key1", tmp_path, cwd="/some/workdir")
+        self.prepare_workspace.assert_called_once_with("/some/workdir")
+        self.prepare_workspace.reset_mock()
+        monkeypatch.chdir(tmp_path)
+        launch_claude("hello", "key2", tmp_path)
+        self.prepare_workspace.assert_called_once_with(os.getcwd())
 
     @patch("pm_core.claude_launcher.find_claude", return_value=None)
     def test_raises_when_no_claude(self, mock_fc, tmp_path):

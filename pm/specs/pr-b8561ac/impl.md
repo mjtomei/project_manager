@@ -52,7 +52,11 @@ applies to any plan before accepting it:
    transcript skips this check, since every START in the planner's own turn
    is fresh.
 Marker lines match after removing Claude Code's display bullet (`●`/`⏺`),
-markdown emphasis and whitespace. Placeholder titles are a whole
+markdown emphasis and whitespace. `parse_qa_plan` bounds its body by the
+same rule (last END marker line, last START marker line before it), so a
+scenario or trailing prose that merely mentions `QA_PLAN_START`/`QA_PLAN_END`
+neither cuts off earlier scenarios nor leaks into the last scenario's STEPS
+(integration with #230 4c3fb81c; 005856d9, review 4faa i1). Placeholder titles are a whole
 `<multi word phrase>`, or its unclosed start when a narrow pane wrapped it
 (`<descriptive title for`, or a lone `<descriptive`).
 A real title like `<Enter> key` is not a placeholder.
