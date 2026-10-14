@@ -599,9 +599,11 @@ def test_throttled_polls_do_not_log_a_launch(world_factory, caplog, monkeypatch)
         w.commands.append(cmd)
 
     caplog.set_level(logging.INFO, logger="pm.tui.signoff_ui")
-    # PM's configured loggers normally write only to their own file handler.
-    # Let this test's records reach pytest's root capture handler as well.
-    monkeypatch.setattr(logging.getLogger("pm.tui.signoff_ui"), "propagate", True)
+    # PM loggers (including parents loaded by other tests) stop propagation.
+    # Capture at this logger directly, independently of import/test order.
+    logger = logging.getLogger("pm.tui.signoff_ui")
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(logger, "propagate", False)
     with patch("pm_core.tui.pr_view.run_command", no_window):
         _qa_pass(app)
         _poll(app, 6)
