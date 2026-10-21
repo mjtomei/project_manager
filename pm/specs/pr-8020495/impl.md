@@ -94,9 +94,10 @@ existing flock* so concurrent writers agree on one attempt:
     loop_id change first ends the old attempt as `superseded`.
   - transition to `done`/`failed` → `attempt_end` (`outcome` = state, or an
     explicit `history_outcome=` keyword, e.g. `cancelled`), with `verdict`.
-  - clearing an in-flight entry → `attempt_end` `vanished` (pane gone) or
-    `interrupted` (sweep, reason in `detail`, via a new `history_reason=`
-    keyword).
+  - clearing an in-flight entry → `attempt_end` `vanished` (pane gone),
+    `untracked` (pane still open but PM stopped watching it, e.g. the impl
+    pane once a review loop owns the PR), or `interrupted` (sweep, reason
+    in `detail`, via a new `history_reason=` keyword).
   - `qa` is excluded (QA attempts are emitted by the QA loop itself, R5);
     its runtime entry is driven by per-pane registration and would
     otherwise produce attempts that start at the first scenario pane.
@@ -120,8 +121,11 @@ running, `_on_complete_from_thread` → done/failed, with
 R5. **QA** (`pm_core/qa_loop.py`):
   - `run_qa_sync` / `resume_qa_sync` wrapped: QA run attempt
     (`action="qa"`, `loop_id`, `resumed` for resume) ended in `finally`
-    with `state.latest_verdict` (`cancelled` when `stop_requested`,
-    `failed` for ERROR).
+    with `state.latest_verdict` (`cancelled` when `stop_requested` or no
+    verdict, `failed` for ERROR). Run-level phases: `planning`,
+    `launching` (spec gate + concretize + scenario launch), `agent`
+    (collecting scenario verdicts), `verdict` (aggregation + finalize
+    pane).
   - Planner child attempt (`label="planner"`) with the planner deadline as a
     `fires` timer (`due = start + _PLANNER_TIMEOUT`, expected "give up
     planning → INPUT_REQUIRED"), cleared when planning ends.
@@ -205,7 +209,8 @@ including merged/closed, `query` = `history_query.build_history`, `render`
 terminal PR shows only History instead of "No actions available"), binds
 `H`, and dispatches view actions in-process: render the same model and show
 it in `less -R` inside the popup (fallback: echo + `_wait_dismiss`). The
-badge for the History row is the `waiting_for` summary (truncated).
+badge for the History row is a compact summary (`hold: …`, `overdue: …`,
+`review-loop i3: turn done, 8s left`, `N runs`, `no history`).
 pr-72c8695 will move the session actions into this same module.
 
 R11. **Attribution** — events carry only `owner` (pid/start token) and an
@@ -222,9 +227,15 @@ supply `context` (session/window/task); leave a cross-PR note.
   (`secrets.token_hex(6)`); restarts never reuse an attempt.
 - I3. Reading tolerates torn/garbage lines (skip), unknown kinds, and
   events for unknown attempts (shown as orphan phase/ends are ignored).
-- I4. Liveness check: `/proc/<pid>/stat` start time must match the
-  recorded token; fallback `os.kill(pid, 0)` when `/proc` is unavailable
-  (token `None`). A pid reused by another process must not count as alive.
+- I4. Liveness check: the TUI restarts in place with `exec` (Ctrl+R),
+  keeping its pid and start time, so pid checks alone would call a
+  pre-restart owner alive. Each writing process image holds a shared flock
+  on `history/owners/{instance}.lock` (opened close-on-exec, so exec,
+  exit and crash all release it; a forked child takes its own instance).
+  Liveness = that lock is still held. Fallback when the lock file is
+  absent: `/proc/<pid>/stat` start token, then `os.kill(pid, 0)`. A pid
+  reused by another process must not count as alive. Released lock files
+  older than 30 days are pruned.
 - I5. Tests isolate `pm_home` (conftest autouse fixture for the history
   dir, like `_isolated_runtime_state`).
 - I6. Text output must be readable at 80 columns; times shown local

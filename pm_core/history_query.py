@@ -198,7 +198,8 @@ def _reconcile_attempts(attempts: dict[str, dict], t_now: float) -> None:
         if alive is False:
             pid = (a.get("owner") or {}).get("pid")
             a["outcome"] = "interrupted"
-            a["detail"] = f"owner process exited (pid {pid}); end time unknown"
+            a["detail"] = (f"owner process exited or restarted (pid {pid}); "
+                           "end time unknown")
             a["inferred"] = "owner-exited"
     # Close children of ended parents at the parent's end (start order, so
     # a closed parent propagates down the tree).
@@ -408,7 +409,7 @@ def _attempt_name(a: dict) -> str:
         return name
     if a.get("iteration") is not None and a.get("source") != "runtime":
         return f"{action} i{a['iteration']}"
-    if a.get("label") and a.get("label") not in ("QA run",):
+    if a.get("label") and a.get("label") not in ("QA run", "QA resume"):
         return f"{action} {a['label']}"
     if a.get("loop_id") and action in ("review-loop", "qa"):
         return f"{action} (loop {a['loop_id'][:8]})"
@@ -774,7 +775,7 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
         end = "unknown"
     if a.get("elapsed_s") is not None:
         dur = _dur(a["elapsed_s"])
-    elif a.get("elapsed_lower_bound_s") is not None:
+    elif (a.get("elapsed_lower_bound_s") or 0) >= 1:
         dur = f">{_dur(a['elapsed_lower_bound_s'])}"
     else:
         dur = "unknown"
@@ -800,7 +801,7 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
             f"{_dur(p['duration_s'])}" for p in a["phases"])
         out.append(f"{sub}{split}  [{parts}]")
     sc = a.get("scenarios")
-    if sc:
+    if sc and sc["sum_s"] >= 1:
         out.append(f"{sub}scenarios: {sc['count']} ({sc['attempts']} attempts), "
                    f"wall {_dur(sc['wall_s'])}, up to {sc['max_concurrency']} "
                    f"at once; summed scenario time {_dur(sc['sum_s'])} "
