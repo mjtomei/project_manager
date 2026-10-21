@@ -9,6 +9,7 @@ from pm_core.cli.session import (
     _build_picker_lines,
     _run_picker_command,
     _ALL_ACTIONS,
+    _wrap_picker_header,
 )
 
 
@@ -412,3 +413,28 @@ class TestPickerMergeDispatch:
              patch("pm_core.cli.session._wait_dismiss") as wait_mock:
             _run_picker_command("pr start pr-123", "sess")
         assert not wait_mock.called
+
+
+class TestWrapPickerHeader:
+    HINT = ("q/Esc: quit  s=start  e=edit  d=review  t=qa  i=signoff  "
+            "g=merge  H=history")
+
+    def _wrap(self, header, cols):
+        import os
+        with patch("shutil.get_terminal_size",
+                   return_value=os.terminal_size((cols, 30))):
+            return _wrap_picker_header(header)
+
+    def test_long_hint_wraps_between_items_at_popup_width(self):
+        """An 80-col client gives a ~74-col popup; fzf would truncate the
+        shortcut hint to ``H=h..`` instead of showing ``H=history``."""
+        out = self._wrap(f"PR Actions — pr-1\n{self.HINT}", 74)
+        lines = out.split("\n")
+        assert all(len(ln) <= 72 for ln in lines)
+        assert lines[-1].strip() == "H=history"
+        assert " ".join(out.split()) == " ".join(
+            f"PR Actions — pr-1 {self.HINT}".split())
+
+    def test_fitting_header_unchanged(self):
+        header = f"PR Actions — pr-1\n{self.HINT}"
+        assert self._wrap(header, 200) == header

@@ -1303,6 +1303,36 @@ def _fzf_supports_no_input() -> bool:
     return supported
 
 
+def _wrap_picker_header(header: str) -> str:
+    """Wrap fzf header lines to the popup width instead of letting fzf
+    truncate them with ``..``.
+
+    Hint lines are runs of ``key=label`` items separated by two or more
+    spaces; lines are broken only between items so each item stays
+    whole.  fzf draws the header after a 2-column gutter.
+    """
+    import re
+    import shutil
+    width = shutil.get_terminal_size((80, 24)).columns - 2
+    if width < 20:
+        return header
+    out: list[str] = []
+    for line in header.split("\n"):
+        if len(line) <= width:
+            out.append(line)
+            continue
+        parts = re.split(r"(\s{2,})", line)
+        cur = parts[0]
+        for sep, item in zip(parts[1::2], parts[2::2]):
+            if len(cur) + len(sep) + len(item) <= width:
+                cur += sep + item
+            else:
+                out.append(cur)
+                cur = "  " + item
+        out.append(cur)
+    return "\n".join(out)
+
+
 def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     """Best-effort: extract (pr_id, picker_action, fresh) from a tui: cmd.
 
@@ -1939,7 +1969,7 @@ def popup_picker_cmd(session: str, window_name: str):
                 if ch != "q" and ch not in expect_set:
                     binds.append(f"{ch}:ignore")
             cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
-                   f"--header={header}",
+                   f"--header={_wrap_picker_header(header)}",
                    "--header-first",
                    "--pointer=>",
                    "--no-info",
