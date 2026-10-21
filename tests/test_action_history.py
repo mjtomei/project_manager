@@ -1087,6 +1087,22 @@ class TestCliAndPane:
         assert max(len(ln) for ln in shown["text"].splitlines()) <= 50
         assert shown["text"].split() == cli_out.split()
 
+    def test_wrapped_phase_line_does_not_dedent(self):
+        # A ~74-col popup re-wraps an 8-space phase line; its continuation
+        # must stay deeper than 8, not drop to the 4-space default and
+        # read as the next child row.
+        from pm_core.cli.helpers import _wrap_record_to_width
+        line = ("        exec 22s, wait 2s  [launching 2s · agent 20s · "
+                "verdict processing 0s ·")
+        out = _wrap_record_to_width(line, 74, "    ").splitlines()
+        assert len(out) > 1 and out[0].startswith("        exec")
+        for cont in out[1:]:
+            assert cont.startswith(" " * 10) and len(cont) <= 74
+        # Shallow lines keep the caller's continuation indent.
+        top = "  review INPUT_REQUIRED hold (iteration 2): released at 23:25:17 (armed 23:25:15)"
+        cont = _wrap_record_to_width(top, 74, "    ").splitlines()[1]
+        assert cont.startswith("    (") and not cont.startswith("     ")
+
     def test_catalog_entry(self):
         from pm_core import action_catalog
         h = action_catalog.get("history")

@@ -71,6 +71,12 @@ def _wrap_record_to_width(line: str, width: int, indent: str) -> str:
     from rich.cells import cell_len
     if cell_len(line) <= width:
         return line
+    # A continuation must not dedent below the line it continues, or a
+    # wrapped sub-line (e.g. an 8-space phase line in ``pm pr history``)
+    # reads as a sibling record.
+    leading = line[:len(line) - len(line.lstrip())]
+    if len(leading) + 2 > len(indent):
+        indent = leading + "  "
     for tok in _RECORD_BREAK_TOKENS:
         idx = line.find(tok)
         if idx <= 0:
