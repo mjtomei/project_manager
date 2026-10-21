@@ -29599,6 +29599,11 @@ prs:
     it, including the style-continuity check for continuation cases and the separate
     human-rated writing check; save a report identifying useful and unreliable measures
     per rubric dimension. No manual corpus curation or code-task execution is required.
+    Extend the catalog with PM implementation and QA spec cases from their original
+    phase inputs, using current specs as production baselines. Reuse the existing
+    rubric and add spec examples that distinguish requirements, design proposals,
+    open questions and acceptance checks. Missing phase context is reported rather
+    than reconstructed from the finished spec.
 
 
     Tests: Verify split and duplicate isolation, identity masking, order reversal,
@@ -29606,16 +29611,20 @@ prs:
     evaluations. Use the rubric fixtures to check that results preserve distinct quality
     dimensions. Run a real sample at the chosen size through the selected evaluators
     and report observed agreement, uncertainty and the usage actually consumed against
-    the estimate; mocked responses alone do not establish evaluator quality.
+    the estimate; mocked responses alone do not establish evaluator quality. Verify
+    that implementation-spec inputs exclude subsequent implementation/review artifacts
+    and QA-spec inputs exclude later scenarios/results; record the source revisions
+    and report calibration separately by document family.
 
 
-    Files: experiments/plan-writing/, pm_core/cli/plan.py and narrowly extracted planning
-    prompt builders, relevant tests, calibration artifacts and report'
+    Files: experiments/plan-writing/, pm_core/cli/plan.py, pm_core/spec_gen.py and
+    narrowly extracted prompt builders, relevant tests, calibration artifacts and
+    report'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-21T00:15:38.677748+00:00'
+  updated_at: '2026-10-21T14:07:31.824043+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29648,7 +29657,9 @@ prs:
     regenerated PM plans against their original plan files on the rubric dimensions
     and on fidelity to the recovered conversations. Produce a reproducible candidate
     prompt diff and campaign evidence, or an explicit no-improvement result; the evaluator
-    stays fixed throughout.
+    stays fixed throughout. Include implementation and QA spec prompts in the campaign.
+    Keep candidates and baseline comparisons specific to each prompt family, and report
+    gains for plans and both spec types separately.
 
 
     Tests: Exercise resume without duplicate completed calls, plateau stopping, panel
@@ -29665,6 +29676,8 @@ prs:
     with the count recorded, and that the chosen population size and generation count
     end the run. Run an actual campaign and retain repeated baseline/candidate comparisons,
     the original-plan comparison, failed attempts and usage consumed against the estimate.
+    Verify prompt-family assignment and phase-context provenance, and retain real
+    baseline/candidate spec generations and their evaluations.
 
 
     Files: experiments/plan-writing/, reusable evaluation/optimization modules under
@@ -29673,7 +29686,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677755+00:00'
-  updated_at: '2026-10-21T00:16:14.380980+00:00'
+  updated_at: '2026-10-21T14:07:32.472699+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29712,7 +29725,10 @@ prs:
     variant. Estimate the share of weekly subscription limits for different round
     counts and case counts first, and keep every run under the twenty percent single-run
     ceiling. Deliver a recommendation on whether iteration beats one-shot generation
-    and at how many rounds.
+    and at how many rounds. Include implementation and QA specs in the one-shot versus
+    iterative comparison, using the same phase inputs as their production baselines
+    and preserving instructions about unresolved questions and approval. Report outcomes
+    by document family.
 
 
     Tests: Verify that the critic never sees the independent evaluation configuration
@@ -29720,6 +29736,8 @@ prs:
     and critic choice are configurable, and that one-shot and iterative outputs are
     produced from the same prompt and cases. Run a real sample and retain per-round
     independent scores alongside critic scores, with usage consumed against the estimate.
+    Include real comparisons for both spec types and check that revisions preserve
+    requirements and unresolved questions.
 
 
     Files: experiments/plan-writing/, iterative generation and critic modules under
@@ -29728,7 +29746,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677763+00:00'
-  updated_at: '2026-10-21T00:15:38.677763+00:00'
+  updated_at: '2026-10-21T14:08:43.823659+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29741,8 +29759,9 @@ prs:
   depends_on:
   - pr-09c4e8e
   - pr-eadd1b7
-  description: 'Apply campaign-supported improvements to the existing plan-development
-    and/or PR-breakdown prompts, following pm/plans/plan-doc-eval.md. Where iterative
+  description: 'Apply campaign-supported improvements to the plan-development, PR-breakdown,
+    implementation-spec and QA-spec prompt families in pm/plans/plan-doc-eval.md;
+    retain each family''s baseline when no improvement is supported. Where iterative
     generation beats one-shot generation on the independent measure, adopt it through
     the same entry point with its round count and critic fixed. Validate the exact
     rendered production prompt after integration, with held-out document comparisons
@@ -29759,16 +29778,76 @@ prs:
     dependency graph. Compare fidelity and document quality with the unchanged baseline
     and with the original plan files using the reserved evaluators; retain examples
     and failures. Run affected prompt/parser tests and verify existing project state
-    is untouched by the experiment.
+    is untouched by the experiment. Exercise both inline and standalone spec-generation
+    paths where applicable, verify that spec review/approval behavior is preserved,
+    and report measured gains or retention of the baseline for every in-scope family.
 
 
-    Files: pm_core/cli/plan.py, extracted planning prompt builders, tests/test_plan_parser.py
-    and affected planning tests, campaign evidence and adoption report'
+    Files: pm_core/cli/plan.py, pm_core/spec_gen.py, extracted prompt builders, tests/test_plan_parser.py
+    and affected planning/spec tests, campaign evidence and adoption report'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677768+00:00'
-  updated_at: '2026-10-21T00:15:38.677768+00:00'
+  updated_at: '2026-10-21T14:07:33.779965+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3ae2fc3
+  plan: improvements
+  title: Add spec-review pauses to autostart
+  branch: pm/pr-3ae2fc3-add-spec-review-pauses-to-autostart
+  status: pending
+  depends_on: []
+  description: 'Add `pm autostart add <final-pr> --review-specs` to pause for human
+    approval after the implementation spec and again after the QA spec. It composes
+    with the existing merge flags, for example `pm autostart add <final-pr> --review-specs
+    --wait-for-merge`.
+
+
+    Reuse the existing review-mode spec prompts and approval flow; this is one bounded
+    extension of auto-start, not a new spec workflow.
+
+
+    - Apply review mode to the target and its transitive prerequisites before their
+    next spec step, without changing the global spec-mode setting. Shared prerequisites
+    require review when any active target requests it. Preserve explicit per-PR review_spec
+    settings and the existing merge policies.
+
+    - Connect inline spec generation to the existing spec_pending state. An agent
+    waiting for approval must not be mistaken for completed implementation or completed
+    QA planning. Implementation work and QA scenario launch wait for explicit approval
+    through the existing controls; editing/rejecting keeps the phase paused, and approval
+    resumes the same flow. Cover already-present specs that have not been approved;
+    enabling the option does not rewind completed phases.
+
+    - Reuse the TUI S marker, V review action, and pm pr spec/spec-approve. Make pending
+    implementation versus QA spec review visible in the tree and auto-start popup,
+    and in pm autostart status (text and JSON), with the spec location and approval
+    action. Extend existing status output instead of adding a parallel listing command.
+
+    - Support the option in the CLI and TUI command bar, show it on target listings,
+    preserve it through the existing restart mechanism, and handle repeated adds and
+    target removal consistently with other target options. Removing inherited policy
+    must not silently approve a spec already waiting for review.
+
+
+    Verification: an auto-started dependency chain pauses at both spec steps, remains
+    paused across idle polling and restart, and advances after each explicit approval.
+    Exercise edit/reject, an already-present unapproved spec, shared dependencies,
+    CLI/TUI status agreement, and coexistence with manual merge holds. Existing default
+    auto-start behavior remains covered. Reuse current spec and auto-start tests plus
+    one end-to-end scenario.
+
+
+    Relevant code: pm_core/cli/autostart.py, pm_core/autostart_state.py, pm_core/tui/auto_start.py,
+    pm_core/spec_gen.py, existing spec approval and TUI status/phase-transition paths.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T14:05:49.183704+00:00'
+  updated_at: '2026-10-21T14:05:49.183704+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
