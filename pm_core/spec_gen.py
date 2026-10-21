@@ -73,11 +73,16 @@ def spec_file_path(root: Path, pr_id: str, phase: str) -> Path:
     return spec_dir(root, pr_id) / f"{phase}.md"
 
 
+def spec_relpath(pr_id: str, phase: str) -> str:
+    """A PR phase's spec path relative to the repo root (workdir)."""
+    return f"pm/specs/{pr_id}/{phase}.md"
+
+
 def _workdir_spec_path(pr: dict, phase: str) -> Path | None:
     workdir = pr.get("workdir")
     if not workdir:
         return None
-    return Path(workdir) / "pm" / "specs" / pr.get("id", "") / f"{phase}.md"
+    return Path(workdir) / spec_relpath(pr.get("id", ""), phase)
 
 
 def spec_location(pr: dict, phase: str) -> Path | None:
@@ -175,7 +180,7 @@ def seed_workdir_specs(root: Path, pr_id: str, workdir: Path) -> list[Path]:
         content = src.read_text()
         if not content.strip():
             continue
-        rel = f"pm/specs/{pr_id}/{phase}.md"
+        rel = spec_relpath(pr_id, phase)
         dst = Path(workdir) / rel
         if dst.exists():
             current = dst.read_text()
@@ -533,7 +538,7 @@ def approval_message(pr: dict, phase: str, edited: bool = False) -> str:
     """The message sent to the waiting agent once its spec is approved."""
     pr_id = pr.get("id", "???")
     label = PHASE_LABELS.get(phase, phase)
-    path = f"pm/specs/{pr_id}/{phase}.md"
+    path = spec_relpath(pr_id, phase)
     how = "approved with edits" if edited else "approved"
     msg = (f"The {label} spec ({path}) was {how} via pm. Re-read it and "
            f"proceed with the {label} work based on the approved spec.")

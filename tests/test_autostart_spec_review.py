@@ -887,7 +887,7 @@ def _plan_under_review(tmp_path, monkeypatch, *, edit_on_approval: bool):
     pending_seen: list[bool] = []
     real_set = qa_loop._set_spec_review_pending
 
-    def gate(state, pm_root):
+    def gate(state, pm_root, pr=None):
         return not flags["approved"]
 
     def spec_text(pr_id, pm_root):

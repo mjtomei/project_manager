@@ -3500,19 +3500,22 @@ def _verify_single_scenario(
 # Core orchestration
 # ---------------------------------------------------------------------------
 
-def _qa_spec_gate(state: QALoopState, pm_root: Path) -> bool:
+def _qa_spec_gate(state: QALoopState, pm_root: Path,
+                  pr: dict | None = None) -> bool:
     """True while scenario launch must wait for the QA spec's approval.
 
     Blocked by a pending QA spec (whoever set it — removing the auto-start
     option never releases one), or, under auto-start spec review, by a
-    present but never-approved QA spec, which this marks pending.
+    present but never-approved QA spec, which this marks pending.  *pr* is
+    the caller's freshly loaded entry (loaded here when omitted).
     """
     from pm_core import spec_gen, store
-    try:
-        pr = store.get_pr(store.load(pm_root), state.pr_id) or {}
-    except Exception:
-        _log.debug("QA spec gate: load failed", exc_info=True)
-        return state.spec_review_pending
+    if pr is None:
+        try:
+            pr = store.get_pr(store.load(pm_root), state.pr_id) or {}
+        except Exception:
+            _log.debug("QA spec gate: load failed", exc_info=True)
+            return state.spec_review_pending
     if spec_gen.get_pending_spec_phase(pr) == "qa":
         return True
     if state.spec_review and spec_gen.needs_spec_approval(pr, "qa"):
@@ -3555,16 +3558,18 @@ def _wait_for_qa_spec_approval(state: QALoopState, pm_root: Path,
                                interval: float = 5.0) -> bool:
     """Block until the QA spec is approved.  False when stopped/merged."""
     from pm_core import store
-    while _qa_spec_gate(state, pm_root):
-        _set_spec_review_pending(state, True, notify)
-        if state.stop_requested:
-            return False
+    while True:
         try:
             live = store.get_pr(store.load(pm_root), state.pr_id) or {}
         except Exception:
             _log.debug("QA spec wait: load failed", exc_info=True)
-            live = {}
-        if (live.get("status") or "") in ("merged", "closed"):
+            live = None
+        if not _qa_spec_gate(state, pm_root, live):
+            break
+        _set_spec_review_pending(state, True, notify)
+        if state.stop_requested:
+            return False
+        if ((live or {}).get("status") or "") in ("merged", "closed"):
             return False
         time.sleep(interval)
     _set_spec_review_pending(state, False, notify)
@@ -3875,7 +3880,7 @@ def run_qa_sync(
             # Spec review: waiting on a human must not time the planner
             # out; an approval releases a deferred plan.
             if state.spec_review or state.spec_review_pending:
-                if _qa_spec_gate(state, pm_root):
+                if _qa_spec_gate(state, pm_root, _live):
                     _set_spec_review_pending(state, True, _notify)
                     deadline = max(deadline,
                                    time.monotonic() + _PLANNER_TIMEOUT)
