@@ -29847,7 +29847,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T15:43:02.861981+00:00'
+  updated_at: '2026-10-21T16:48:19.639948+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29905,6 +29905,19 @@ prs:
       bug).'
     created_at: '2026-10-21T15:43:02Z'
     last_edited: '2026-10-21T15:43:02Z'
+  - id: note-acd933e
+    text: 'QA S11 (concurrency): fixed 48dc0e55 — racing pm pr spec-approve with pm
+      pr spec --regenerate left P3 re-held while its pane said "approved" (and a reverse
+      order could record approval of unseen text). Now approve_spec records only the
+      pending record+text the reviewer saw, generate_spec writes under the lock and
+      an approval landing mid-regeneration wins (regenerate/reject exit 1 "approved
+      while it was being regenerated"), and the approval message is sent under the
+      lock only while the approval stands; a losing concurrent approver prints "No
+      pending spec review for X.". Scenario fake config {"_all":{}} idles impl in
+      ~5 s, so add "impl": {"delay": 60} to play the agent; run unit tests with /usr/bin
+      before ~/.local/bin (test_local_merge_sync fails on the git proxy).'
+    created_at: '2026-10-21T16:48:19Z'
+    last_edited: '2026-10-21T16:48:19Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
