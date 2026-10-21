@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-21T03:15:15.826080+00:00'
+  updated_at: '2026-10-21T19:34:14.783438+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29563,6 +29563,19 @@ prs:
       never reads references or baselines.'
     created_at: '2026-10-21T03:15:15Z'
     last_edited: '2026-10-21T03:15:15Z'
+  - id: note-96e28f2
+    text: 'Review loop 5956 i1 (7806e068), at user direction: context written after
+      the target document is excluded from briefs. sources.json collectors carry written/written_note;
+      context.py writes data/context/<source>.dates.json and attaches template versions
+      committed on or before each document date via GitHub file-history pages (no
+      collect.py sparse step needed any more). Rebuild: python3 context.py (needs
+      bs4, pyyaml, pdftotext; about 4 min cached), then cases.py, then cases.py --check.
+      Coverage now 12415 briefs (4672 rich); rust-rfcs and rust-goals lose all rich
+      briefs, PEP threads mostly postdate Created. The report section "Context written
+      after the document" lists each excluded type and why. Also fixed: validator
+      substring checks ran on json.dumps output (never matched multi-line text).'
+    created_at: '2026-10-21T19:34:14Z'
+    last_edited: '2026-10-21T19:34:14Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
