@@ -1595,10 +1595,18 @@ def pr_signoff_record(pr_id: str):
                        err=True)
             raise SystemExit(1)
 
+    # Same earliest-step routing as the driver: a conflicted integration
+    # can only go back to implementation.
+    recorded, coerced = signoff_mod.effective_verdict(verdict, irec, sha)
     report_hash = hashlib.sha256(report.read_bytes()).hexdigest()
     signoff_mod.record_signoff_verdict(
-        root, pr_id, verdict, sha, "manual", report_hash=report_hash,
-        integration=bound)
+        root, pr_id, recorded, sha, "manual", report_hash=report_hash,
+        integration=bound,
+        extra={"original_verdict": verdict if coerced else None,
+               "coerced_reason": coerced})
+    if coerced:
+        click.echo(f"Note: {coerced}.")
+    verdict = recorded
     base_note = ""
     if bound:
         base_note = (f", base {bound.get('base_branch')}@"

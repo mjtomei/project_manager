@@ -513,3 +513,14 @@ def test_merge_refuses_clearly_without_workdir(w):
     assert r.exit_code == 1
     assert "workdir not found" in r.output
     assert "stale" not in r.output
+
+
+def test_head_equal_to_base_is_in_base_not_mergeable(w):
+    """A PR with no commits of its own has nothing to publish: without
+    this, commit-tree would drop the duplicate parent and publish an empty
+    single-parent commit onto the base."""
+    base_sha, err = integration.fetch_base(str(w.wd), str(w.repo), "master")
+    assert err is None
+    out = integration.compute_candidate(str(w.wd), base_sha, base_sha)
+    assert out["status"] == integration.IN_BASE
+    assert out["candidate_tree"] is None

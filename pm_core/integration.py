@@ -34,6 +34,7 @@ integrated code.  It never leaves a half-merge behind.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shutil
@@ -134,6 +135,7 @@ def _is_ancestor(cwd, a: str, b: str) -> bool:
     return _git("merge-base", "--is-ancestor", a, b, cwd=cwd).returncode == 0
 
 
+@functools.lru_cache(maxsize=1)
 def _git_version() -> tuple[int, ...]:
     r = git_ops.run_git("--version", check=False)
     m = re.search(r"(\d+)\.(\d+)", r.stdout or "")
@@ -194,13 +196,15 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
         out["pr_files"] = pr_files.splitlines() if pr_files else []
         out["overlap"] = sorted(set(out["base_files"]) & set(out["pr_files"]))
 
+    # In-base first: a HEAD equal to the base (a PR with no commits of its
+    # own) is "contained", not "up to date" — there is nothing to publish.
+    if _is_ancestor(workdir, head, base_sha):
+        out["status"] = IN_BASE
+        return out
     if _is_ancestor(workdir, base_sha, head):
         out["status"] = UP_TO_DATE
         out["candidate_tree"] = _out(_git("rev-parse", f"{head}^{{tree}}",
                                           cwd=workdir)) or None
-        return out
-    if _is_ancestor(workdir, head, base_sha):
-        out["status"] = IN_BASE
         return out
 
     if _git_version() >= (2, 38):

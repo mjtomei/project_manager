@@ -295,6 +295,11 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
 No [UNRESOLVED] ambiguities.
 
 ## 4. Edge cases
+- PR HEAD equal to the base (no commits of its own): `in_base`, checked
+  before `up_to_date` — nothing to publish (MERGE → BLOCKED; recovery
+  finalizes it).
+- `pm pr signoff record` applies the same `effective_verdict` routing as the
+  driver (a conflicted REVIEW/REQA report is recorded as IMPL).
 - Base unchanged since PR branched (`up_to_date`): candidate tree = HEAD
   tree; merge commit identical in content to the old `merge --no-ff`.
 - Base moved, clean, MERGE: approval bound to the separate candidate; merge

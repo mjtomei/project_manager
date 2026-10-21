@@ -502,6 +502,23 @@ class TestSignoffRecordCommand:
             assert text in result.output
             assert "signoff" not in data["prs"][0]
 
+    def test_record_routes_conflicted_review_to_impl(self, tmp_path):
+        """A manual record gets the driver's earliest-step routing: with a
+        conflicted integration a REVIEW verdict is recorded as IMPL."""
+        croot, _ = _write_captures_report(tmp_path, verdict=SIGNOFF_REVIEW)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "integration": dict(INTEG, status="conflict",
+                                  candidate_tree=None,
+                                  conflicts=["shared.txt"])}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code == 0, result.output
+        rec = data["prs"][0]["signoff"]
+        assert rec["verdict"] == SIGNOFF_IMPL
+        assert rec["original_verdict"] == SIGNOFF_REVIEW
+        assert "conflicts" in rec["coerced_reason"]
+        assert "coerced to SIGNOFF_IMPL" in result.output
+
     def test_refuses_without_report(self, tmp_path):
         croot = tmp_path / "caps"
         croot.mkdir()
