@@ -594,12 +594,15 @@ def timing_section(counts):
         sid = source["id"]
         for col in source.get("context", {}).get("collectors", []):
             written, notes = col.get("written"), col.get("written_note")
-            kinds = list(written) if isinstance(written, dict) else [col.get("kind") or COLLECTOR_KINDS.get(col["type"], col["type"])]
+            main_kind = col.get("kind") or COLLECTOR_KINDS.get(col["type"], col["type"])
+            kinds = list(written) if isinstance(written, dict) else [main_kind]
             for kind in kinds:
                 w = written[kind] if isinstance(written, dict) else written
                 note = notes[kind] if isinstance(notes, dict) else notes
                 c = counts.get(sid, {}).get(kind, {})
-                lines.append(f"| {sid} | {col.get('label') or kind} ({kind}) | {w} | {c.get('admitted', 0)} | "
+                # a collector's label names its main kind; the other kinds it emits get a generic label
+                label = (col.get("label") if kind == main_kind else None) or KIND_LABELS.get(kind, kind)
+                lines.append(f"| {sid} | {label} ({kind}) | {w} | {c.get('admitted', 0)} | "
                              f"{c.get('excluded', 0)} | {note or ''} |")
     return lines
 
@@ -607,6 +610,8 @@ def timing_section(counts):
 COLLECTOR_KINDS = {"header": "metadata", "kep_yaml": "metadata", "process": "process", "index": "index_entry",
                    "markdown_index": "index_entry", "discourse": "discussion_thread", "oxide": "index_entry",
                    "study_call": "study_call"}
+KIND_LABELS = {"index_entry": "index entry", "index_preamble": "index page introduction",
+               "charter": "working group charter", "milestone": "working group milestones"}
 
 
 def write_summary(coverage):
