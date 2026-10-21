@@ -910,16 +910,35 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
 QA_HOLD_VERDICTS = ("PASS", "INPUT_REQUIRED")
 
 
-def recorded_qa_verdict(pr_id: str) -> str | None:
-    """Verdict of the PR's last *finished* QA run (runtime_state), or None."""
+def recorded_qa_verdict(pr_id: str, pr: dict | None = None) -> str | None:
+    """Verdict of the PR's last *finished* QA run (runtime_state), or None.
+
+    With *pr*, a run that finished before the PR's open sign-off return is
+    ignored: it verified the code sign-off sent back, not the rework (whose
+    QA run records nothing until its first scenario launches).
+    """
     try:
         from pm_core import runtime_state as _rs
         rec = _rs.get_action_state(pr_id, "qa") or {}
     except Exception:
         return None
-    if rec.get("state") == "done":
-        return rec.get("verdict") or None
-    return None
+    if rec.get("state") != "done":
+        return None
+    if pr is not None and _predates_open_return(rec.get("updated_at"), pr):
+        return None
+    return rec.get("verdict") or None
+
+
+def _predates_open_return(at: str | None, pr: dict) -> bool:
+    from datetime import datetime
+    from pm_core.signoff import open_return
+    ts = (open_return(pr) or {}).get("ts")
+    if not ts:
+        return False
+    try:
+        return not at or datetime.fromisoformat(at) < datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return False
 
 
 def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
@@ -956,7 +975,7 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # re-running QA on every later scheduler pass (or restart) would
         # only duplicate finished work.
         # Any real QA start (review→qa, ``t``) overwrites this record.
-        recorded = recorded_qa_verdict(pr_id)
+        recorded = recorded_qa_verdict(pr_id, pr)
         from pm_core.signoff import return_awaiting
         if recorded in QA_HOLD_VERDICTS and return_awaiting(pr) != "qa":
             _log.debug("auto_start: %s QA already ended %s, not relaunching",
@@ -1064,7 +1083,7 @@ def collect_status_inputs(app) -> dict:
         pr_id = pr.get("id")
         if (pr.get("status") == "qa" and pr_id not in qa_loops
                 and pr_id and scoped(pr_id)):
-            verdict = recorded_qa_verdict(pr_id)
+            verdict = recorded_qa_verdict(pr_id, pr)
             if verdict:
                 qa_loops[pr_id] = {"running": False, "verdict": verdict,
                                    "recorded": True}

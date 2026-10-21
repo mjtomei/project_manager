@@ -381,7 +381,7 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
                     disk = store.load(app._root)
                 step(app, pr_id, store.get_pr(disk, pr_id))
             elif (status == "qa" and pr_id not in app._qa_loops
-                  and _auto_start.recorded_qa_verdict(pr_id) == "PASS"
+                  and _auto_start.recorded_qa_verdict(pr_id, pr) == "PASS"
                   and signoff_mod.return_awaiting(pr) != "qa"):
                 # (A sign-off REQA return still waiting for its QA run must
                 # not be handed back to sign-off on the old PASS.)

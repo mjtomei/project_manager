@@ -22,6 +22,8 @@ from pm_core import autostart_state as st
 from pm_core.qa_loop import QALoopState, VERDICT_PASS
 from pm_core.tui import auto_start, qa_loop_ui, review_loop_ui
 
+_real_recorded_qa_verdict = auto_start.recorded_qa_verdict
+
 PR = "pr-aaa1111"
 
 
@@ -172,7 +174,7 @@ def world_factory(tmp_path):
             patch("pm_core.home_window.park_if_on", lambda *a: None),
             patch("pm_core.tui.qa_loop_ui._record_qa_note"),
             patch("pm_core.tui.auto_start.recorded_qa_verdict",
-                  lambda pr_id: None),
+                  lambda pr_id, pr=None: None),
         ]
         for p in ps:
             p.start()
@@ -558,11 +560,40 @@ def test_restart_catch_up_hands_off_recorded_pass(world_factory):
     in runtime_state -> the scheduler pass hands it to sign-off."""
     app, w = world_factory(stop=True)
     with patch("pm_core.tui.auto_start.recorded_qa_verdict",
-               lambda pr_id: "PASS"), \
+               lambda pr_id, pr=None: "PASS"), \
          patch.object(auto_start, "_start_pr_quiet"):
         asyncio.run(auto_start.check_and_start(app))
     assert app.pr()["status"] == "sign_off"
     assert len(w.launches()) == 1
+
+
+@pytest.mark.parametrize("pass_at,hands_off", [
+    ("2026-10-21T23:38:04+00:00", False),   # pre-return run: ignored
+    ("2026-10-21T23:46:00+00:00", True),    # the rework's own QA PASS
+])
+def test_restart_catch_up_ignores_qa_pass_from_before_the_return(
+        world_factory, pass_at, hands_off):
+    """Restart mid-rework-QA (the new run has not recorded anything yet):
+    the PASS of the run sign-off already judged must not hand the rework
+    back to sign-off."""
+    app, w = world_factory(stop=True)
+
+    def ret(d):
+        store.get_pr(d, PR)["signoff_return"] = {
+            "verdict": "SIGNOFF_IMPL", "hop": "impl", "reviewed_head": "old",
+            "awaiting": None, "ts": "2026-10-21T23:42:23.517097+00:00"}
+    store.locked_update(app._root, ret)
+    app._load_state()
+    rec = {"state": "done", "verdict": "PASS", "updated_at": pass_at}
+    with patch("pm_core.tui.auto_start.recorded_qa_verdict",
+               _real_recorded_qa_verdict), \
+         patch("pm_core.runtime_state.get_action_state", return_value=rec), \
+         patch("pm_core.tui.qa_loop_ui.start_qa") as sq:
+        _poll(app)
+        auto_start._auto_start_qa_loops(app)
+    assert (app.pr()["status"] == "sign_off") is hands_off
+    assert len(w.launches()) == (1 if hands_off else 0)
+    assert sq.called is not hands_off      # interrupted rework QA re-runs
 
 
 def test_skip_qa_review_pass_goes_to_signoff(world_factory):
