@@ -30052,6 +30052,18 @@ prs:
       CLI record wrapper (b51784bb). All S1 history/timer/hold Thens otherwise held.'
     created_at: '2026-10-21T22:14:21Z'
     last_edited: '2026-10-21T22:14:21Z'
+  - id: note-0c3afa9
+    text: 'QA S4 (sign-off/holds/derived holds/merged history) PASS on b51784bb. Env
+      gaps in the S4 recipe: the env -i shim dir also needs fake-claude (ln -s /workspace/bin/fake-claude)
+      or every TUI-launched pane dies with status 127 (impl window vanishes, pipeline
+      stalls); tmux new-window from an outer shell inherits that shell PATH (real
+      claude + git proxy), so create windows via env -i and set default-command "bash
+      --noprofile --norc". Observation, not fixed: impl "start" attempts are opened
+      by the pane-idle mirror, not at launch — the row starts ~5 s after impl launch
+      and a phantom "start untracked (5s)" row appears again when each review loop
+      ends (seen at QA start), so a 1-PR auto-sequence shows 1-2 extra start rows.'
+    created_at: '2026-10-21T22:19:46Z'
+    last_edited: '2026-10-21T22:19:46Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
