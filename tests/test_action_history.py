@@ -600,6 +600,28 @@ class TestScenarioObserver:
             "attempts"][0]["children"]
         assert kids[1]["session_id"] == "sess-new"
 
+    def test_dequeued_launch_is_not_slot_wait(self, clock):
+        """The slow launch of a dequeued scenario is execution: the queued
+        wait ends when the slot frees, then agent starts once launched."""
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        scs = [_sc(1), _sc(2)]
+        obs.observe(scs, pending={1}, verifying=set(), queued={2},
+                    verdicts={})
+        clock.advance(50)
+        obs.observe(scs, pending=set(), verifying=set(), queued={2},
+                    verdicts={1: "PASS"})
+        obs.launching(scs[1])
+        clock.advance(17)  # concretizer runs
+        obs.observe(scs, pending={2}, verifying=set(), queued=set(),
+                    verdicts={1: "PASS"})
+        kids = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert kids[0]["elapsed_s"] == 50
+        assert [p["phase"] for p in kids[1]["phases"]] == [
+            "queued", "launching", "agent"]
+        assert kids[1]["wait_s"] == 50 and kids[1]["exec_s"] == 17
+
     def test_relaunched_without_backoff_attempt_tracks_status(self, clock):
         """If the backoff attempt was never opened, ``relaunched`` opens
         one and the observer keeps tracking it (no duplicate agent phase

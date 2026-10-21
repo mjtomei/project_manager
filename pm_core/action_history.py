@@ -558,6 +558,21 @@ class ScenarioObserver:
                 continue
             cur["status"] = status
 
+    def launching(self, scenario) -> None:
+        """A queued scenario got a slot and its worker is being prepared.
+
+        Concretizing and creating the window block the poll loop, so the
+        queued wait ends here rather than on the next tick.
+        """
+        try:
+            cur = self._open.get(scenario.index)
+            if cur and cur["status"] == "queued":
+                phase(self.pr_id, cur["attempt"], "launching",
+                      "slot free; preparing worker")
+                cur["status"] = "launching"
+        except Exception:
+            _log.debug("ScenarioObserver.launching failed", exc_info=True)
+
     def relaunching(self, scenario, retry: int, backoff: float) -> None:
         """A scenario window died; the loop sleeps *backoff* then relaunches.
 

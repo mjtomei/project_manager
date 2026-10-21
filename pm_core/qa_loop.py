@@ -2722,8 +2722,12 @@ def _poll_tmux_verdicts(
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
             return
+        # The launch below blocks (concretizer + window), so journal the
+        # scenarios that just finished now, not after it returns.
+        _observe()
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
+        observer.launching(scenario)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
         # Launch this single scenario by temporarily swapping state.scenarios
