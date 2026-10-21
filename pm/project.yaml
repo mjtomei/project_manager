@@ -29658,6 +29658,19 @@ prs:
       also fails, expected). Update qa spec counts.'
     created_at: '2026-10-21T03:44:41Z'
     last_edited: '2026-10-21T03:44:41Z'
+  - id: note-5190062
+    text: 'S9 refiner (542cde34): every triple reproduced in a scratch clone. The
+      baseline is 151 passed, and also passes under unshare -rn. Truncated dimensions.json
+      makes pytest stop at collection ("1 error during collection", rc 2, zero tests
+      run) because the module loads RUBRIC at import. The JSONDecodeError gives line,
+      column and char but not the filename; the traceback shows dimensions.json. Unknown
+      ref gives write-doc KeyError and pytest 4 failed/147 passed. Deleted heading
+      gives 2 failed/149 passed. A read-only dir gives PermissionError on .rubric.md.<pid>.<tid>,
+      rc 1. .gitignore now hides .rubric.md.*, so check for temp files with ls -a,
+      not git status. Edit dimensions.json in place (sed/editor): json.dumps reformats
+      the whole file.'
+    created_at: '2026-10-21T03:59:09Z'
+    last_edited: '2026-10-21T03:59:09Z'
   - id: note-c10d673
     text: 'QA S12 PASS on 542cde34 (captures /pm-captures/scenarios/12): 5 waves (170
       renders, 600 threaded, 60 write-doc, 20 pytest) clean; 3000 SIGINT 0 temp leftovers;
