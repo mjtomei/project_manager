@@ -646,7 +646,10 @@ class ProjectManagerApp(App):
                         for p in (self._data or {}).get("prs") or []}
         old_deps = {p.get("id"): list(p.get("depends_on") or [])
                     for p in (self._data or {}).get("prs") or []}
-        old_spec = {p.get("id"): bool(p.get("spec_pending"))
+        # pr id → pending spec phase (True if pending without one)
+        old_spec = {p.get("id"): ((p["spec_pending"].get("phase") or True)
+                                  if isinstance(p.get("spec_pending"), dict)
+                                  else bool(p.get("spec_pending")))
                     for p in (self._data or {}).get("prs") or []}
         try:
             # Only search for root on first load; reuse existing root for refreshes

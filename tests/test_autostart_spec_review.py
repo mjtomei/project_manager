@@ -50,7 +50,10 @@ class DiskApp(_DiskApp):
         prs = (self._data or {}).get("prs") or []
         old = {p.get("id"): p.get("status") for p in prs}
         old_deps = {p.get("id"): list(p.get("depends_on") or []) for p in prs}
-        old_spec = {p.get("id"): bool(p.get("spec_pending")) for p in prs}
+        old_spec = {p.get("id"): ((p["spec_pending"].get("phase") or True)
+                                  if isinstance(p.get("spec_pending"), dict)
+                                  else bool(p.get("spec_pending")))
+                    for p in prs}
         self._data = store.load(self._root)
         auto_start.on_state_loaded(self, old, old_deps, old_spec)
 
@@ -513,6 +516,32 @@ class TestTargets:
         spec_gen.approve_spec(store.load(root), "a", root=root)
         app._load_state()
         assert app.logs[-1] == "Auto-start: a spec approved — continuing"
+
+    def test_regenerate_while_held_is_not_logged_as_approval(self, tmp_path):
+        # ``pm pr spec --regenerate`` in prompt mode clears spec_pending
+        # without approving; the reload must not claim an approval (the
+        # pass then re-holds the regenerated spec).
+        wd = tmp_path / "wa"
+        root = _disk(tmp_path, [_pr("a", status="in_progress",
+                                    workdir=str(wd),
+                                    spec_approved={"qa": "t0"})])
+        app = DiskApp(root)
+        app._auto_start_targets = {"a": {REVIEW_KEY: True}}
+        app._auto_start = True
+        app._auto_start_run_id = "run"
+        _write_spec(wd, "a", "impl")
+        assert auto_start.hold_spec_if_due(app, store.get_pr(app._data, "a"))
+        app._load_state()
+        with patch("pm_core.spec_gen.launch_claude_print", return_value="v2"):
+            spec_gen.generate_spec(store.load(root), "a", "impl", root=root,
+                                   force=True)
+        assert not store.get_pr(store.load(root), "a").get("spec_pending")
+        app._load_state()
+        assert not any("spec approved" in m for m in app.logs)
+        assert "Auto-start: a spec regenerated — not approved" in app.logs
+        app.drain()  # the scheduled pass re-holds the new spec
+        assert store.get_pr(store.load(root), "a")["spec_pending"]["phase"] \
+            == "impl"
 
     def test_explicit_review_spec_pr_gated_without_option(self, tmp_path):
         app = _app([_pr("a", review_spec=True), _pr("x", review_spec=True)],

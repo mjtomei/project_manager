@@ -870,7 +870,7 @@ def on_state_loaded(app, old_statuses: dict,
     Likewise a graph edit that pulls a ready prerequisite into a target's
     closure would leave it "ready; starts on next scheduler pass" forever.
     And a spec approval (``pm pr spec-approve`` / ``V`` clears
-    ``spec_pending``; *old_spec* maps pr id → whether one was pending) must
+    ``spec_pending``; *old_spec* maps pr id → its pending phase) must
     start the PR or QA run that was waiting on it.
     """
     if not old_statuses or not is_enabled(app):
@@ -885,25 +885,51 @@ def on_state_loaded(app, old_statuses: dict,
         p["id"] for p in prs
         if p.get("id") in old_deps
         and list(p.get("depends_on") or []) != old_deps[p["id"]]]
-    approved = [] if old_spec is None else [
-        p["id"] for p in prs
+    # spec_pending is cleared by an approval or by a regeneration that
+    # needs no review (``pm pr spec --regenerate`` / reject in prompt
+    # mode); only the former records spec_approved for the pending phase.
+    cleared = [] if old_spec is None else [
+        p for p in prs
         if old_spec.get(p.get("id")) and not p.get("spec_pending")]
-    if not newly and not regraphed and not approved:
+    approved = [p["id"] for p in cleared
+                if _approved_since(p, old_spec[p["id"]])]
+    regenerated = [p["id"] for p in cleared if p["id"] not in approved]
+    if not newly and not regraphed and not cleared:
         return
     managed = managed_ids(app, prs)
-    if managed is not None and not any(i in managed
-                                       for i in newly + regraphed + approved):
+    if managed is not None and not any(
+            i in managed for i in newly + regraphed + approved + regenerated):
         return
     _log.info("auto_start: reload saw %s merged/closed, %s deps changed, "
-              "%s spec approved, scheduling pass", newly, regraphed, approved)
+              "%s spec approved, %s spec regenerated, scheduling pass",
+              newly, regraphed, approved, regenerated)
     # Replace the forced "spec awaiting approval" line: a PR approved
     # mid-implementation just resumes in its pane, so no "starting" line
-    # would follow to supersede it.
+    # would follow to supersede it.  A regenerated spec was not approved;
+    # the pass re-holds it if review still applies.
     shown = [i for i in approved if managed is None or i in managed]
     if shown:
         app.log_message(f"Auto-start: {', '.join(shown)} spec approved — "
                         f"continuing", force=True)
+    shown = [i for i in regenerated if managed is None or i in managed]
+    if shown:
+        app.log_message(f"Auto-start: {', '.join(shown)} spec regenerated — "
+                        f"not approved", force=True)
     app.run_worker(check_and_start(app))
+
+
+def _approved_since(pr: dict, old_pending) -> bool:
+    """Whether *pr*'s cleared spec_pending was cleared by an approval.
+
+    *old_pending* is the pending phase before the reload (``True`` when
+    only its presence is known).
+    """
+    rec = pr.get("spec_approved")
+    if not isinstance(rec, dict):
+        return False
+    if isinstance(old_pending, str):
+        return bool(rec.get(old_pending))
+    return any(rec.values())
 
 
 def _prune_completed_targets(app, prs: list[dict]) -> None:
