@@ -2230,6 +2230,11 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
         return
     log = git_ops.run_git("log", "--merges", "--format=%H %P %T",
                           f"{base_sha}..{tip}", cwd=workdir, check=False)
+    if log.returncode != 0:
+        # The signed-off base is not readable here: unknown, not a mismatch.
+        click.echo(f"WARNING: could not verify GitHub's merge of {pr_id}: "
+                   f"{_git_detail(log)}.", err=True)
+        return
     found = None
     for line in (log.stdout or "").splitlines():
         parts = line.split()
@@ -2239,9 +2244,25 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
     if found is None:
         # No merge commit of the approved head on the base: GitHub merged
         # another head (or squashed/rebased) — not the approved candidate.
-        problem = (f"no merge commit of the approved head {head[:12]} on "
-                   f"{base_branch} {tip[:12]}; GitHub did not publish the "
-                   f"signed-off candidate")
+        # Name the merge that published the branch when one contains it.
+        published = None
+        for line in (log.stdout or "").splitlines():
+            parts = line.split()
+            for parent in parts[2:-1]:
+                if git_ops.run_git("merge-base", "--is-ancestor", head,
+                                   parent, cwd=workdir,
+                                   check=False).returncode == 0:
+                    published = (parts[0], parent)
+        if published:
+            merge_sha = published[0]
+            problem = (f"GitHub merged {pr_id} at {published[1][:12]}, not "
+                       f"the approved head {head[:12]} (its branch had "
+                       f"commits that were not signed off); merge "
+                       f"{merge_sha[:12]} on {base_branch}")
+        else:
+            problem = (f"no merge commit of the approved head {head[:12]} on "
+                       f"{base_branch} {tip[:12]}; GitHub did not publish the "
+                       f"signed-off candidate")
     else:
         merge_sha, first_parent, tree = found[0], found[1], found[-1]
         if first_parent == base_sha and tree == bound.get("candidate_tree"):
@@ -2319,6 +2340,19 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
     if backend_name == "local":
         _after_publish(root, data, pr_entry, transcript)
         return
+    if backend_name == "github":
+        # A merge done on GitHub (by someone else) is checked against the
+        # signed-off candidate like one pm made: a different head or base is
+        # recorded on merge_integrity, not accepted silently.
+        from pm_core import signoff as signoff_mod
+        approved = pr_entry.get("signoff") or {}
+        bound = approved.get("integration") or {}
+        if (approved.get("verdict") == signoff_mod.SIGNOFF_MERGE
+                and approved.get("sha") and bound.get("base_sha")):
+            target_repo, _ = integration.target_for(data, pr_entry, root)
+            _verify_github_merge(root, pr_entry, cwd, target_repo,
+                                 base_branch, bound["base_sha"],
+                                 approved["sha"], bound)
     _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
                                  resolve_window=resolve_window,
                                  background=background,

@@ -514,6 +514,47 @@ def test_github_already_merged_elsewhere_is_still_verified(github):
     assert integrity["merge_sha"] is None
 
 
+def _merge_on_remote(github, extra: bool) -> None:
+    """Someone merges the PR on GitHub (optionally after pushing an
+    unreviewed commit to its branch)."""
+    if extra:
+        other = github.wd.parent / "teammate"
+        git(github.wd.parent, "clone", "-q", "-b", BRANCH, str(github.remote),
+            str(other))
+        commit(other, "unreviewed.txt", "u\n", "unreviewed")
+        git(other, "push", "-q", "origin", BRANCH)
+    git(github.remote, "merge", "-q", "--no-ff", "-m", "merged on GitHub",
+        BRANCH)
+
+
+def test_github_recovery_of_the_approved_merge_records_nothing(github):
+    approve(github)
+    _merge_on_remote(github, extra=False)
+    result, _, finalized = merge(github, "--no-signoff-check")
+    assert result.exit_code == 0, result.output
+    assert "already in master; recovering" in result.output and finalized
+    assert "WARNING" not in result.output
+    assert "merge_integrity" not in pr_entry(github)
+
+
+def test_github_recovery_of_an_unapproved_merge_is_recorded(github):
+    """``--no-signoff-check`` recovering a GitHub merge that published more
+    than the signed-off head warns and records ``merge_integrity`` + a note
+    instead of finalizing silently."""
+    approve(github)
+    _merge_on_remote(github, extra=True)
+    result, _, finalized = merge(github, "--no-signoff-check")
+    assert result.exit_code == 0, result.output
+    assert "already in master; recovering" in result.output and finalized
+    assert "WARNING: GitHub merged pr-001 at " in result.output
+    assert "commits that were not signed off" in result.output
+    integrity = pr_entry(github).get("merge_integrity")
+    assert integrity and github.head[:12] in integrity["problem"]
+    assert integrity["merge_sha"] == git(github.remote, "rev-parse", "master")
+    notes = [n["text"] for n in pr_entry(github).get("notes") or []]
+    assert any(t.startswith("Merge integrity:") for t in notes)
+
+
 def test_two_overlapping_prs_second_needs_integration(local, tmp_path):
     """Merging the first PR makes the second's approval stale; its fresh
     integration check finds the conflict (-> implementation), and after the
