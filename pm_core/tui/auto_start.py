@@ -1110,7 +1110,8 @@ def build_status(app) -> dict:
 USAGE = ("autostart add PR_ID... [--stop-before-merge|--auto-merge|"
          "--wait-for-merge] | remove PR_ID... | list | status | clear | all")
 
-_POLICY_FLAGS = {flag: p for p, flag in autostart_state.POLICY_FLAGS.items()}
+# Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS``).
+_FLAG_POLICIES = {flag: p for p, flag in autostart_state.POLICY_FLAGS.items()}
 
 
 def reply_dir() -> Path:
@@ -1156,9 +1157,9 @@ def handle_command(app, args: list[str]) -> dict:
     for tok in it:
         if tok == "--reply":
             reply_id = next(it, None)
-        elif tok in _POLICY_FLAGS:
-            if _POLICY_FLAGS[tok] not in policies:
-                policies.append(_POLICY_FLAGS[tok])
+        elif tok in _FLAG_POLICIES:
+            if _FLAG_POLICIES[tok] not in policies:
+                policies.append(_FLAG_POLICIES[tok])
         else:
             rest.append(tok)
     verb = rest[0] if rest else ""

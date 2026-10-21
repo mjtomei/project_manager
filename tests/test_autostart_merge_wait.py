@@ -478,10 +478,11 @@ class DiskApp(FakeApp):
         self.queue: list = []
 
     def _load_state(self):
-        old = {p.get("id"): p.get("status")
-               for p in (self._data or {}).get("prs") or []}
+        prs = (self._data or {}).get("prs") or []
+        old = {p.get("id"): p.get("status") for p in prs}
+        old_deps = {p.get("id"): list(p.get("depends_on") or []) for p in prs}
         self._data = store.load(self._root)
-        auto_start.on_state_loaded(self, old)
+        auto_start.on_state_loaded(self, old, old_deps)
 
     def run_worker(self, coro, *a, **kw):
         self.queue.append(coro)
