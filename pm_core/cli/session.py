@@ -1233,12 +1233,17 @@ def _view_action_badge(key: str, pr: dict) -> str:
         return ""
 
 
-def _show_view_action(cmd: str) -> None:
+def _show_view_action(cmd: str, session: str = "") -> None:
     """Render a ``view:<key> <pr_id>`` command inside the popup.
 
     The text is paged with ``less -R`` reading keys from the popup's tty
     (q closes it); without ``less`` it is printed and the popup waits for
     a dismiss key.
+
+    The PR record comes from the session's project root, like the picker
+    rows: the popup's cwd is usually a PR workdir whose committed
+    ``pm/project.yaml`` is stale, and ``state_root()`` ignores the
+    ``PM_PROJECT`` the picker exports in-process.
     """
     import shutil
     from pm_core import action_catalog
@@ -1249,7 +1254,8 @@ def _show_view_action(cmd: str) -> None:
         _wait_dismiss()
         return
     try:
-        pr = store.get_pr(store.load(state_root()), pr_id)
+        root = (_resolve_root_from_session(session) if session else None)
+        pr = store.get_pr(store.load(root or state_root()), pr_id)
     except Exception:
         pr = None
     try:
@@ -1700,7 +1706,7 @@ def _run_picker_command(cmd: str, session: str) -> None:
              else "view" if cmd.startswith(_VIEW_PREFIX) else "direct")
     _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
     if cmd.startswith(_VIEW_PREFIX):
-        _show_view_action(cmd)
+        _show_view_action(cmd, session)
     elif cmd.startswith("tui:"):
         # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
         # independent: doesn't depend on tmux send-keys timing, can't
