@@ -257,7 +257,9 @@ def headings(doc, text, raw):
     elif method == "rst":
         found = rst_headings(text)
     elif method == "numbered":
-        found = numbered_headings(text, unnumbered=bool(RFC_FILE.search(doc["identity"].lower())))
+        rfc = bool(RFC_FILE.search(doc["identity"].lower()))
+        # RFC headings start in column 0; indented numbered lines are TOC entries or lists.
+        found = numbered_headings(text, unnumbered=rfc, max_indent=0 if rfc else 8)
     else:
         found = html_headings(text, raw)
     return method, sorted(found, key=lambda h: h.start)

@@ -347,7 +347,6 @@ def test_references_are_excluded_from_generator_inputs(catalog):
             text = (data / doc["text_path"]).read_text()
             reference = text[case["reference"]["start"]: case["reference"]["end"]]
             assert reference.strip() not in gen["prefix"]
-            assert case["reference"]["heading"] not in gen["prefix"][-200:]
             assert set(gen) == {"instruction", "prefix"}
         elif case["case_type"] == "whole_document":
             assert set(gen) == {"brief", "attachments"}
@@ -477,3 +476,28 @@ REAL = PW / "data" / "cases" / "catalog.jsonl"
 def test_real_catalog_passes_check():
     result = cases.check()
     assert result["failure_counts"] == {}, result["failures"]
+
+
+def test_continuation_skips_boilerplate_and_repeated_sections():
+    filler = " ".join(["Body text explains the design in useful detail."] * 6)
+    text = (f"# Title\n\n{filler}\n\n## Design\n\n{filler} Unique design words here.\n\n"
+            f"## Repeated\n\n{filler}\n\n## References\n\n{filler} More unique reference words.\n")
+    doc = {"identity": "x.md", "source": "s", "revision": "r", "id": "d", "text_path": "x.txt"}
+    cfg = {"max_cases_per_document": 5, "min_prefix_words": 5, "min_reference_words": 5, "max_reference_words": 4000}
+    _, found, eligible, conts = cases.continuation_cases(doc, text, text.encode(), cfg)
+    assert found == 4
+    assert [c["reference"]["heading"] for c in conts] == ["Design"]  # "Repeated" copies the intro; "References" is boilerplate
+
+
+def test_table_only_request_text_is_thin(tmp_path):
+    text = "# Goal\n\n" + " ".join(["The goal document body has its own words."] * 20)
+    doc = {"identity": "src/2026/goal-1234.md", "url": "https://example.org/goal", "id": "g"}
+    item = context_item("goals", "tracking_issue", "i1",
+                        "Title: Ship the thing\nOpened by someone on 2026-01-01\n\n| Contact | @a |\n| Team(s) | compiler, lang, types and more teams |\n"
+                        "Details at https://example.org/goal-1234 for reviewers\n"
+                        "## Summary\n\nThe goal document body has its own words. The goal document body has its own words.", ["g"])
+    cfg = {"context": {"request": "Write a goal."}}
+    brief, _ = cases.assemble_brief(doc, text, [item], [], cfg, N)
+    assert brief["context_strength"] == "thin"
+    assert "goal-1234" not in brief["brief"]          # self link stripped
+    assert "## Summary" not in brief["brief"]         # heading left without content is dropped

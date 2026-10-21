@@ -19,6 +19,7 @@ reports/ is safe to commit.
 """
 
 import argparse
+import functools
 import hashlib
 import json
 import re
@@ -42,6 +43,12 @@ BRIEF_PREAMBLE = ("The following context was recovered from the project's own re
 URL = re.compile(r"https?://\S+")
 PASTE_FRACTION = 0.3   # share of an item's segments quoting the body that marks a pasted draft
 FRAGMENT_TOKENS = 6
+RICH_WORDS = 20         # prose words of request text that make a brief "rich"
+BOILERPLATE = re.compile(  # sections that are not authored content: never continuation targets
+    r"^(status of this memo|copyright( notice| statement)?|full copyright statement|intellectual property( rights)?|"
+    r"authors?'? addresses|author's address|authors' information|contributors' addresses|(table of )?contents|index|"
+    r"(normative |informative )?references|bibliography|licen[cs]e|footnotes|acknowledge?ments?|changelog|change log)$")
+NON_PROSE = re.compile(r"^\s*(\||#|Title:|Opened by |[-*]?\s*$)")
 
 
 # --- text utilities ---------------------------------------------------------
@@ -68,6 +75,24 @@ def segments(text):
             out.append(line)
         out.append("\n")
     return out[:-1]
+
+
+def drop_dangling_headings(text):
+    """Remove markdown headings left with no content after filtering."""
+    lines = text.splitlines()
+    keep = []
+    for i, line in enumerate(lines):
+        if re.match(r"^#{1,6}\s", line):
+            rest = next((l for l in lines[i + 1:] if l.strip()), None)
+            if rest is None or re.match(r"^#{1,6}\s", rest):
+                continue
+        keep.append(line)
+    return "\n".join(keep)
+
+
+def request_words(text):
+    """Words of prose in request text: not table rows, headings, bare URLs or the collector's header lines."""
+    return sum(len(URL.sub("", l).split()) for l in text.splitlines() if not NON_PROSE.match(l))
 
 
 def shared_ngrams(text, body_grams, n):
@@ -143,8 +168,15 @@ def split_groups(docs, by_doc, source_cfgs):
 # --- briefs ------------------------------------------------------------------
 
 def self_reference(doc):
-    name = Path(doc["identity"]).name
-    return lambda url: name in url or url.rstrip("/") == doc["url"].rstrip("/")
+    """Predicate for URLs that point at the document itself (its page, path or numbered name)."""
+    path = Path(doc["identity"])
+    marks = {doc["url"].rstrip("/")}
+    if "/" in doc["identity"] and not doc["identity"].startswith("http"):
+        marks.add(doc["identity"])
+    for name in (path.stem, path.parent.name):
+        if len(name) >= 6 and re.search(r"\d", name):
+            marks.add(name)
+    return lambda url: any(m in url for m in marks)
 
 
 def assemble_brief(doc, text, items, process_items, source_cfg, n):
@@ -197,9 +229,10 @@ def assemble_brief(doc, text, items, process_items, source_cfg, n):
                 provenance[bi - 2]["segments_dropped"] += 1
     kept_items = []
     for p, block in zip(provenance, blocks[2:]):
-        content = "\n".join(l.rstrip() for l in "".join(block[2:]).splitlines())
+        content = drop_dangling_headings("\n".join(l.rstrip() for l in "".join(block[2:]).splitlines()))
         content = re.sub(r"\n{3,}", "\n\n", content).strip()
         p["words_kept"] = len(content.split())
+        p["request_words_kept"] = request_words(content) if p["kind"] in REQUEST_KINDS else 0
         if p["words_kept"]:
             kept_items.append((p, block[0], content))
     qualifying = [p for p, _, c in kept_items if p["kind"] in REQUEST_KINDS or p["kind"] in ("index_entry", "index_preamble")
@@ -208,7 +241,7 @@ def assemble_brief(doc, text, items, process_items, source_cfg, n):
         return None, provenance
     parts = [blocks[0][0], blocks[1][0]] + [(head + "\n" if head else "") + content for _, head, content in kept_items]
     brief = "\n\n".join(x for x in parts if x.strip())
-    rich = any(p["kind"] in REQUEST_KINDS and p["words_kept"] >= 20 for p, _, _ in kept_items)
+    rich = any(p["request_words_kept"] >= RICH_WORDS for p, _, _ in kept_items)
     attachments = [{"context_id": i["id"], "label": i.get("label"), "url": i["url"], "sha256": i["sha256"],
                     "retrieved_at": i["retrieved_at"]}
                    for i in process_items if i.get("document_id") != doc["id"]]
@@ -222,12 +255,15 @@ def continuation_cases(doc, text, raw, cfg):
     method, found = sections.headings(doc, text, raw)
     eligible = []
     for i, h in enumerate(found):
-        if h.start == 0:
+        if h.start == 0 or BOILERPLATE.match(re.sub(r"^(appendix\s+[a-z](\.\d+)*\.?\s+|\d+(\.\d+)*\.?\s+)", "", h.title.lower()).strip(" :.")):
             continue
         end = sections.section_end(found, i, len(text))
         prefix_words = len(text[: h.start].split())
         ref_words = len(text[h.start: end].split())
         if prefix_words >= cfg["min_prefix_words"] and cfg["min_reference_words"] <= ref_words <= cfg["max_reference_words"]:
+            section_body = text[h.end: end].strip()
+            if len(section_body) >= 200 and section_body in text[: h.start]:
+                continue  # the document repeats this section verbatim earlier: copying is not continuing
             eligible.append((h, end, prefix_words, ref_words))
     k = cfg["max_cases_per_document"]
     if len(eligible) > k:
@@ -250,8 +286,13 @@ def continuation_cases(doc, text, raw, cfg):
 # --- generator inputs --------------------------------------------------------
 
 def _context_items(data_dir=None):
+    return _load_context_items(str(Path(data_dir or DATA)))
+
+
+@functools.lru_cache(maxsize=4)
+def _load_context_items(data_dir):
     items = {}
-    for path in (Path(data_dir or DATA) / "context").glob("*.jsonl"):
+    for path in (Path(data_dir) / "context").glob("*.jsonl"):
         for line in path.read_text().splitlines():
             item = json.loads(line)
             items[item["id"]] = item
@@ -411,6 +452,21 @@ def write_summary(coverage):
               "`case-coverage.json` under `dropped`.", "", "| Source | Reason | Count |", "|---|---|---|"]
     for (sid, reason), count in sorted(reasons.items()):
         lines.append(f"| {sid} | {reason} | {count} |")
+    prep = load_config()["case_preparation"]
+    cont = prep["continuation"]
+    lines += ["", "## Rules and limits", "",
+              f"- Briefs never share a run of {prep['brief_leak_ngram']} words with the document body (body excludes the "
+              "metadata header and title line). A context item that quotes the body for 30% or more of its segments is "
+              "cut where the quote starts. Process documents and templates are attachments, not brief text.",
+              f"- Continuation cases: up to {cont['max_cases_per_document']} per document, spread over eligible headings; "
+              f"prefix at least {cont['min_prefix_words']} words, reference {cont['min_reference_words']}–"
+              f"{cont['max_reference_words']} words. Boilerplate sections (copyright, IPR, references, addresses, contents) "
+              "and sections repeated verbatim earlier in the document are never references.",
+              "- Heading detection in PDF text (NASA, CERN, HS2) relies on numbered headings and is heuristic; "
+              "numbered list items can be mistaken for sections.",
+              "- PM cases carry `needs_review`: the session map locates candidate provenance, not assent. Reviewed windows "
+              "are in `pm_case_windows.json`. The Codex history behind plan-delivery is not mounted in this environment.",
+              "- Context fetch errors are listed per source in `data/context/<source>.status.json`."]
     if "check" in coverage:
         lines += ["", "## Validation", "", "```", json.dumps(coverage["check"], indent=1), "```"]
     (REPORTS / "case-coverage.md").write_text("\n".join(lines) + "\n")

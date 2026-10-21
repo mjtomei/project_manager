@@ -19,7 +19,6 @@ enters a brief.
 import argparse
 import concurrent.futures
 import hashlib
-import html
 import json
 import re
 import threading
@@ -156,7 +155,7 @@ def thread_numbers(doc, text, rules):
         else:
             raise ValueError("Unknown number rule: " + where)
         m = re.search(rule["pattern"], hay)
-        if m:
+        if m and int(m.group(1)):
             return m.group(1), where
     return None, None
 
@@ -213,7 +212,7 @@ def collect_kep_yaml(source, docs, cfg):
             continue
         try:
             data = yaml.safe_load(path.read_text()) or {}
-        except yaml.YAMLError as exc:
+        except Exception as exc:  # malformed YAML or invalid dates in some kep.yaml files
             errors.append({"collector": "kep_yaml", "path": str(path), "error": str(exc)})
             continue
         fields = {}
