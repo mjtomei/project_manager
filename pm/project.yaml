@@ -29868,7 +29868,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T20:00:22.835935+00:00'
+  updated_at: '2026-10-21T21:34:33.449911+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30064,6 +30064,15 @@ prs:
       failed start is not retried (pr-b977417) - re-add the targets.'
     created_at: '2026-10-21T20:00:22Z'
     last_edited: '2026-10-21T20:00:22Z'
+  - id: note-46fb5e1
+    text: 'QA S26 PASS on 885870ae, no edits: 648+916 churn calls (target add/remove/options
+      + spec-mode flips) across a breadcrumb restart all replied rc=0; holds 0.02-0.21
+      s after write and never lost; double approve, approve-vs-regenerate both orders,
+      V vs remove T1, QA-spec approve+remove+restart and re-add/approve of B all held.
+      Note: a post-breadcrumb auto-start reruns QA for an approved target and kills
+      the planner pane that got the approval notice (the new run launches -s1 fine).'
+    created_at: '2026-10-21T21:34:33Z'
+    last_edited: '2026-10-21T21:34:33Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
