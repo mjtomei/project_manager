@@ -108,6 +108,45 @@ class TestJournal:
         assert len({e["attempt"] for e in evs}) == 600
         assert len({e["owner"]["pid"] for e in evs}) == 4
 
+    def test_exec_restart_releases_owner(self):
+        """An in-place exec keeps pid + start time but not the owner lock."""
+        import os
+        import subprocess
+        import sys
+        code = ("import json, pathlib; "
+                "from pm_core import action_history as ah; "
+                "ah.history_dir = lambda: pathlib.Path(%r); "
+                "print(json.dumps(ah.owner_token()))")
+        d = str(ah.history_dir())
+        out = subprocess.run([sys.executable, "-c", code % d],
+                             capture_output=True, text=True,
+                             env={**os.environ, "PYTHONPATH": os.getcwd()})
+        token = json.loads(out.stdout)
+        # Same identity as a live process image (ours), different instance:
+        # its lock file exists but nobody holds it any more.
+        me = ah.owner_token()
+        ghost = {**me, "instance": token["instance"]}
+        assert ah.owner_alive(ghost) is False
+        assert ah.owner_alive(me) is True
+
+    def test_forked_child_owner_lock(self):
+        ctx = multiprocessing.get_context("fork")
+        q = ctx.Queue()
+        ev = ctx.Event()
+
+        def _child():
+            q.put(ah.owner_token())
+            ev.wait(10)
+
+        p = ctx.Process(target=_child)
+        p.start()
+        child = q.get(timeout=10)
+        assert child["instance"] != ah.owner_token()["instance"]
+        assert ah.owner_alive(child) is True
+        ev.set()
+        p.join(10)
+        assert ah.owner_alive(child) is False
+
     def test_owner_liveness(self):
         me = ah.owner_token()
         assert ah.owner_alive(me) is True

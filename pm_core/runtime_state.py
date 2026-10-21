@@ -118,6 +118,16 @@ IN_FLIGHT_STATES = {"queued", "launching", "running", "idle", "waiting"}
 _UNJOURNALED_ACTIONS = {"qa"}
 
 
+def _pane_alive(pane_id: str | None) -> bool:
+    if not pane_id:
+        return False
+    try:
+        from pm_core import tmux as tmux_mod
+        return bool(tmux_mod.pane_exists(pane_id))
+    except Exception:
+        return False
+
+
 def _journal_transition(pr_id: str, action: str, cur: dict,
                         state: str | None, extras: dict, clearing: bool,
                         history_outcome: str | None,
@@ -141,6 +151,12 @@ def _journal_transition(pr_id: str, action: str, cur: dict,
                 if history_reason:
                     _ah.end_attempt(pr_id, prior_attempt, "interrupted",
                                     detail=history_reason)
+                elif _pane_alive(cur.get("pane_id")):
+                    # The pane still exists; PM merely stopped watching it
+                    # (e.g. the PR moved on to review).
+                    _ah.end_attempt(
+                        pr_id, prior_attempt, "untracked",
+                        detail="pane still open; PM stopped tracking it")
                 else:
                     _ah.end_attempt(
                         pr_id, prior_attempt, "vanished",

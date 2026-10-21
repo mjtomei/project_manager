@@ -439,7 +439,14 @@ def _current_activity(attempts: dict[str, dict], timers: dict,
             ev = _hook_event_for(a) if live else None
             ev_t = float((ev or {}).get("timestamp") or 0)
             etype = (ev or {}).get("event_type")
-            if ev and ev_t >= since and etype == "idle_prompt":
+            # An event older than the current phase normally belongs to the
+            # previous turn (e.g. before a verification follow-up).  Panes
+            # PM merely started watching (runtime attempts) or adopted
+            # after a restart keep their session's latest state.
+            if not (ev_t >= since or a.get("source") == "runtime"
+                    or a.get("adopted")):
+                ev = None
+            if ev and etype == "idle_prompt":
                 grace = [r for r in active_by_owner.get(a["id"], [])
                          if r.get("effect") == "gate" and r.get("due_t")]
                 row["state"] = "turn_finished"
@@ -452,7 +459,7 @@ def _current_activity(attempts: dict[str, dict], timers: dict,
                 elif a.get("action") in ("review-loop", "qa"):
                     text += "; no verdict accepted yet — waiting for the next turn"
                 row["text"] = text
-            elif ev and ev_t >= since and etype == "permission_prompt":
+            elif ev and etype == "permission_prompt":
                 row["state"] = "blocked_on_permission"
                 row["text"] = (f"agent waiting on a permission prompt since "
                                f"{_clock(ev_t, t_now)} (needs a human)")
@@ -575,8 +582,9 @@ def _missing_notes(pr: dict, events: list[dict]) -> list[str]:
     first = float(events[0].get("t") or 0)
     started = _parse_iso(pr.get("started_at")) or _parse_iso(pr.get("created_at"))
     if started is not None and started < first - 60:
-        notes.append(f"Actions before {_ah.iso(first)} were not recorded; "
-                     "earlier milestones come from project.yaml only.")
+        notes.append(f"Actions before {_clock(first, first)} "
+                     f"({_ah.iso(first)}) were not recorded; earlier "
+                     "milestones come from project.yaml only.")
     return notes
 
 
@@ -802,14 +810,38 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     return out
 
 
-def summary_badge(model: dict, width: int = 40) -> str:
+_BADGE_STATES = {
+    "turn_finished": "turn done",
+    "agent_working": "working",
+    "processing_verdict": "verdict",
+    "launching": "launching",
+    "waiting_human": "needs human",
+    "blocked_on_permission": "permission prompt",
+    "queued": "queued",
+    "backoff": "backoff",
+    "between_iterations": "next launch",
+}
+
+
+def summary_badge(model: dict, width: int = 36) -> str:
     """Short status for the History row in the actions pane."""
-    text = model.get("waiting_for") or ""
-    if text in ("nothing recorded",):
+    if model.get("holds"):
+        text = "hold: " + (model["holds"][0].get("purpose") or "")
+    elif model["timers"].get("overdue"):
+        text = "overdue: " + (model["timers"]["overdue"][0].get("purpose") or "")
+    elif model.get("current"):
+        row = model["current"][-1]
+        text = f"{row['name']}: {_BADGE_STATES.get(row['state'], row['state'])}"
+        grace = [t for t in model["timers"]["active"]
+                 if t.get("owner_attempt") == row["attempt"]
+                 and t.get("remaining_s") is not None]
+        if grace:
+            text += f", {_dur(grace[0]['remaining_s'])} left"
+    elif model.get("attempts"):
+        n = len(model["attempts"])
+        return f" [{n} run{'s' if n != 1 else ''}]"
+    else:
         return " [no history]"
-    if text.startswith("nothing"):
-        n = len(model.get("attempts") or [])
-        return f" [{n} run{'s' if n != 1 else ''}]" if n else ""
     if len(text) > width:
         text = text[:width - 1] + "…"
     return f" [{text}]"

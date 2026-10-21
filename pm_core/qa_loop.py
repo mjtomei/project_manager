@@ -3714,6 +3714,7 @@ def _run_qa_sync(
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
         from pm_core import action_history as _ah
+        _ah.phase(state.pr_id, state.history_attempt or None, "planning")
         state._history_planner = _ah.start_attempt(
             state.pr_id, "qa", parent=state.history_attempt or None,
             loop_id=state.loop_id, label="planner")
@@ -4041,6 +4042,8 @@ def _run_qa_sync(
                 detail=(f"{len(state.scenarios)} scenario(s)"
                         if state.scenarios else state.latest_output[:300]))
         state._history_planner = ""
+        _ah.phase(state.pr_id, state.history_attempt or None, "launching",
+                  "spec gate, concretizing and launching scenarios")
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
@@ -4227,6 +4230,9 @@ def _execute_and_finalize(
     # restart can pick the run back up.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
+    from pm_core import action_history as _ah
+    _ah.phase(state.pr_id, state.history_attempt or None, "agent",
+              "collecting scenario verdicts")
     _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
                         status_path, notify,
                         queued_scenarios=queued_scenarios,
@@ -4235,6 +4241,8 @@ def _execute_and_finalize(
                         repo_root=repo_root,
                         pm_root=pm_root)
 
+    _ah.phase(state.pr_id, state.history_attempt or None, "verdict",
+              "aggregating verdicts and running the finalize pane")
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
     # A stopped run can leave scenarios without a verdict; never call

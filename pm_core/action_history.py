@@ -60,7 +60,7 @@ WAIT_PHASES = ("queued", "backoff", "waiting_human")
 EXEC_PHASES = ("launching", "planning", "agent", "verdict", "verifying")
 
 OUTCOMES = ("done", "failed", "cancelled", "superseded", "interrupted",
-            "vanished")
+            "vanished", "untracked")
 
 _clock: Callable[[], float] = time.time
 
@@ -133,26 +133,106 @@ def _start_token(pid: int) -> str | None:
     return f"{_boot_id() or '?'}:{start}"
 
 
+# Held (LOCK_SH) for the life of this process image.  Python opens files
+# close-on-exec, so an in-place ``exec`` restart (the TUI's Ctrl+R keeps its
+# pid and start time) releases it just like an exit or crash does.
+_owner_lock_fd: int | None = None
+
+
+def _owners_dir() -> Path:
+    d = history_dir() / "owners"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+# Released owner locks older than this are pruned (their attempts then fall
+# back to the pid/start-token liveness check).
+_OWNER_LOCK_RETENTION_S = 30 * 86400
+
+
+def _prune_owner_locks() -> None:
+    cutoff = time.time() - _OWNER_LOCK_RETENTION_S
+    for path in _owners_dir().glob("*.lock"):
+        try:
+            if path.stat().st_mtime > cutoff:
+                continue
+            fd = os.open(path, os.O_RDWR)
+        except OSError:
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            path.unlink()
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+
+
+def _hold_owner_lock(instance: str) -> None:
+    global _owner_lock_fd
+    try:
+        _prune_owner_locks()
+        fd = os.open(_owners_dir() / f"{instance}.lock",
+                     os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        if _owner_lock_fd is not None:
+            # Inherited from the parent across fork(): not ours to keep.
+            try:
+                os.close(_owner_lock_fd)
+            except OSError:
+                pass
+        _owner_lock_fd = fd
+    except Exception:
+        _log.debug("action_history: owner lock failed", exc_info=True)
+
+
 def owner_token() -> dict:
-    """Identity of the current process, used to judge owner liveness."""
+    """Identity of the current process image, used to judge liveness."""
     global _owner_cache
     pid = os.getpid()
     if _owner_cache is None or _owner_cache.get("pid") != pid:
+        instance = f"{pid}-{secrets.token_hex(4)}"
         _owner_cache = {"pid": pid, "start": _start_token(pid),
-                        "host": socket.gethostname()}
+                        "host": socket.gethostname(), "instance": instance}
+        _hold_owner_lock(instance)
     return dict(_owner_cache)
 
 
-def owner_alive(owner: dict | None) -> bool | None:
-    """Whether the process that wrote an event is still running.
+def _instance_alive(instance: str) -> bool | None:
+    path = _owners_dir() / f"{instance}.lock"
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return False
 
-    ``None`` when liveness cannot be judged (other host, no owner).  A
-    recycled pid is detected by comparing the recorded start token.
+
+def owner_alive(owner: dict | None) -> bool | None:
+    """Whether the process image that wrote an event is still running.
+
+    ``None`` when liveness cannot be judged (other host, no owner).  The
+    owner's lock file decides when present (exits, crashes and in-place
+    exec restarts all release it); otherwise a recycled pid is detected by
+    comparing the recorded start token.
     """
     if not isinstance(owner, dict) or not owner.get("pid"):
         return None
     if owner.get("host") and owner.get("host") != socket.gethostname():
         return None
+    if owner.get("instance"):
+        alive = _instance_alive(owner["instance"])
+        if alive is not None:
+            return alive
     pid = int(owner["pid"])
     token = owner.get("start")
     if token is not None:
