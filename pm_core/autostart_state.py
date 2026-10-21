@@ -34,6 +34,10 @@ POLICY_AUTO = "auto_merge"
 POLICY_WAIT = "wait_for_merge"
 WAIT_KEY = "wait_for_merge"
 POLICIES = (POLICY_STOP, POLICY_AUTO, POLICY_WAIT)
+# The command-line flag selecting each policy (CLI + command bar).
+POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
+                POLICY_AUTO: "--auto-merge",
+                POLICY_WAIT: "--wait-for-merge"}
 
 PHASES = ("pending", "implementation", "review", "qa", "sign_off", "merge", "done")
 STATES = ("queued", "running", "waiting", "paused", "failed", "completed")
@@ -128,7 +132,10 @@ def merge_holds(prs: list[dict], targets: dict, stop) -> dict[str, dict]:
     closure (target included) of an active ``wait_for_merge`` target.
     Derived on every call from the current graph, so newly added
     dependencies are held and removed targets/edges release theirs.
+    Merged/closed closure members are not held (nothing left to merge, and
+    they would otherwise show up as "released" when the target goes).
     """
+    status = {pr["id"]: pr.get("status") for pr in prs}
     holds: dict[str, dict] = {}
     for pr_id in stop or ():
         holds[pr_id] = {"explicit": True, "targets": []}
@@ -136,6 +143,8 @@ def merge_holds(prs: list[dict], targets: dict, stop) -> dict[str, dict]:
         if not is_wait_target(rec):
             continue
         for pr_id in sorted(closure(prs, t)):
+            if status.get(pr_id) in TERMINAL_STATUSES:
+                continue
             h = holds.setdefault(pr_id, {"explicit": False, "targets": []})
             h["targets"].append(t)
     return holds
@@ -654,8 +663,8 @@ def format_text(status: dict) -> str:
         mark = "◎ " if row["kind"] == "target" else "└ "
         if row["kind"] == "run":
             mark = ""
-        labels = [lbl for lbl, kind in policy_labels(row) if kind != "auto"
-                  or "held" in lbl]
+        # The default policy goes unlabelled in text (only holds show).
+        labels = [lbl for lbl, _ in policy_labels(row) if lbl != "auto-merge"]
         pol = f" [{'; '.join(labels)}]" if labels else ""
         prog = f" {row['progress']}" if row.get("progress") else ""
         win = f"  win={r['window']['name']}" if r.get("window") else ""

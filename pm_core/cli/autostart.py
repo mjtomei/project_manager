@@ -24,8 +24,8 @@ import click
 
 from pm_core import store
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_STOP, POLICY_WAIT, REPLY_DIR, TERMINAL_STATUSES,
-    format_text,
+    POLICY_AUTO, POLICY_FLAGS, POLICY_STOP, POLICY_WAIT, REPLY_DIR,
+    TERMINAL_STATUSES, format_text,
 )
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -248,11 +248,6 @@ def autostart():
     """
 
 
-_POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
-                 POLICY_AUTO: "--auto-merge",
-                 POLICY_WAIT: "--wait-for-merge"}
-
-
 @autostart.command("add")
 @click.argument("pr_ids", nargs=-1)
 @click.option("--stop-before-merge", "stop", is_flag=True,
@@ -285,13 +280,13 @@ def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
         chosen = [p for p, on in ((POLICY_STOP, stop), (POLICY_AUTO, auto),
                                   (POLICY_WAIT, wait)) if on]
         if len(chosen) > 1:
-            flags = ", ".join(_POLICY_FLAGS[p] for p in chosen)
+            flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
             raise _Fail(EXIT_INVALID, "conflicting_flags",
                         f"conflicting merge policies: {flags}")
         ids = _validate(pr_ids, for_add=True)
         args = ["add", *ids]
         if chosen:
-            args.append(_POLICY_FLAGS[chosen[0]])
+            args.append(POLICY_FLAGS[chosen[0]])
         payload = _request(session, args, timeout)
     except _Fail as f:
         _emit_fail(f, as_json)

@@ -108,6 +108,11 @@ class TestMergeHolds:
                                      "g": {st.WAIT_KEY: True}}, set())
         assert holds["a"]["targets"] == ["f", "g"]
 
+    def test_merged_closure_members_not_held(self):
+        holds = st.merge_holds(_diamond(a="merged", b="closed"),
+                               {"f": {st.WAIT_KEY: True}}, set())
+        assert set(holds) == {"c", "d", "f"}
+
     def test_target_policy(self):
         assert st.target_policy("f", {st.WAIT_KEY: True}, {"f"}) == POLICY_WAIT
         assert st.target_policy("f", {}, {"f"}) == POLICY_STOP
@@ -183,6 +188,11 @@ class TestLifecycle:
         holds = auto_start.merge_holds(app)
         assert holds["a"] == {"explicit": False, "targets": ["g"]}
         assert holds["d"] == {"explicit": True, "targets": []}
+
+    def test_remove_does_not_report_merged_deps_released(self, tmp_path):
+        app = _app(_diamond(a="merged", b="merged"), tmp_path, wait=["f"])
+        res = auto_start.remove_targets(app, ["f"])
+        assert res["released"] == ["c", "d", "f"]
 
     def test_remove_last_wait_target_releases_all(self, tmp_path):
         app = _app(_diamond(), tmp_path, wait=["f"])

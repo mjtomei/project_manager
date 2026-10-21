@@ -182,7 +182,8 @@ def save_breadcrumb(app) -> None:
 
     # Persist auto-start state if active: the full target collection
     # (records, in order), explicit all-mode, and the shared run id.
-    # Per-target policy rides on ``stop_before_merge`` below.
+    # A target's wait-for-merge flag rides on its record; explicit stop
+    # marks ride on ``stop_before_merge`` below.
     if is_enabled(app):
         data["auto_start"] = True
         data["targets"] = autostart_state.targets_to_breadcrumb(_targets(app))
@@ -1099,9 +1100,7 @@ def build_status(app) -> dict:
 USAGE = ("autostart add PR_ID... [--stop-before-merge|--auto-merge|"
          "--wait-for-merge] | remove PR_ID... | list | status | clear | all")
 
-_POLICY_FLAGS = {"--stop-before-merge": POLICY_STOP,
-                 "--auto-merge": POLICY_AUTO,
-                 "--wait-for-merge": POLICY_WAIT}
+_POLICY_FLAGS = {flag: p for p, flag in autostart_state.POLICY_FLAGS.items()}
 
 
 def reply_dir() -> Path:
@@ -1161,7 +1160,8 @@ def handle_command(app, args: list[str]) -> dict:
         if len(policies) > 1:
             result = {"ok": False, "error": "conflicting_flags",
                       "message": "conflicting merge policies: "
-                      + ", ".join("--" + p.replace("_", "-") for p in policies),
+                      + ", ".join(autostart_state.POLICY_FLAGS[p]
+                                  for p in policies),
                       "changes": []}
         elif policies and verb not in ("add", "target"):
             result = {"ok": False, "error": "usage",
