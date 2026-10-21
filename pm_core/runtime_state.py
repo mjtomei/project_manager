@@ -331,7 +331,6 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
     Returns the number of action entries that were cleared.
     """
     runtime_dir = _runtime_dir()
-    in_flight = {"queued", "launching", "running", "idle", "waiting"}
     swept = 0
     try:
         files = list(runtime_dir.iterdir())
@@ -348,7 +347,8 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
         if not isinstance(actions, dict):
             continue
         targets = [a for a, e in actions.items()
-                   if isinstance(e, dict) and e.get("state") in in_flight]
+                   if isinstance(e, dict)
+                   and e.get("state") in IN_FLIGHT_STATES]
         if not targets:
             continue
         pr_id = data.get("pr_id") or path.stem

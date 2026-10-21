@@ -255,7 +255,10 @@ supply `context` (session/window/task); leave a cross-PR note.
 - I7. The picker tests that assert the exact action label list / row count
   are updated for the History row.
 - I8. Journals are bounded: when a file exceeds 4 MB, the writer rotates it
-  to `{pr}.1.jsonl` (one generation) and the reader reads both.
+  to `{pr}.1.jsonl` (one generation) and the reader reads both. Only a
+  writer whose fd is still the current file (same inode) rotates, so a
+  writer that opened the file just before another rotated it cannot
+  replace the fresh journal over the previous generation.
 
 ## 3. Ambiguities (resolved)
 

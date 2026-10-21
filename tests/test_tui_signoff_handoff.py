@@ -789,3 +789,19 @@ def test_merge_input_required_hold_armed_once(world_factory):
             and e["timer"].startswith("merge-input-required")]
     assert len(arms) == 1
     assert arms[0]["indefinite"] is True  # a hold: no due time, no countdown
+
+
+def test_adopted_verdict_closes_only_newest_open_router_attempt():
+    """After a restart the routed verdict belongs to the newest router run;
+    older abandoned runs stay interrupted rather than being marked done."""
+    from types import SimpleNamespace
+    from pm_core import action_history
+    from pm_core.tui import signoff_ui
+    old = action_history.start_attempt(PR, "signoff", label="old")
+    new = action_history.start_attempt(PR, "signoff", label="new")
+    signoff_ui._end_attempt(SimpleNamespace(), PR, "done",
+                            verdict="SIGNOFF_MERGE")
+    assert action_history.open_attempts(PR, "signoff") == [old]
+    (end,) = [e for e in action_history.read_events(PR)
+              if e["kind"] == "attempt_end"]
+    assert (end["attempt"], end["adopted"]) == (new, True)

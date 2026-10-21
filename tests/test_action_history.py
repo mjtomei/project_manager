@@ -2,6 +2,7 @@
 
 import json
 import multiprocessing
+import os
 import socket
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -90,6 +91,41 @@ class TestJournal:
         labels = [e["label"] for e in ah.read_events(PR)]
         assert labels[-1] == "n39"
         assert len(labels) == len(set(labels))
+
+    def test_stale_writer_does_not_rotate_over_old_generation(
+            self, clock, monkeypatch):
+        """A writer whose fd points at an already-rotated file must not
+        rotate the fresh journal over the previous generation."""
+        path = ah.journal_path(PR)
+        rotated = path.with_name(f"{PR}.1.jsonl")
+        real_open = os.open
+        stale = {}
+
+        def _open(p, flags, *a):
+            # The first write past the limit opens the file, then another
+            # writer rotates it and starts a fresh journal before it locks.
+            fd = real_open(p, flags, *a)
+            if stale.get("arm") and str(p) == str(path):
+                stale["arm"] = False
+                os.replace(path, rotated)
+                path.write_text("")
+                ah.record(PR, "attempt_start", attempt="fresh",
+                          action="review")
+            return fd
+
+        for i in range(12):
+            ah.start_attempt(PR, "review", label=f"n{i}")
+        assert not rotated.exists()
+        # The next write crosses the limit.
+        monkeypatch.setattr(ah, "MAX_JOURNAL_BYTES", path.stat().st_size + 1)
+        stale["arm"] = True
+        monkeypatch.setattr(ah.os, "open", _open)
+        ah.start_attempt(PR, "review", label="late")
+        monkeypatch.setattr(ah.os, "open", real_open)
+        labels = [e.get("label") for e in ah.read_events(PR)]
+        assert [f"n{i}" for i in range(12)] == labels[:12]
+        assert "late" in labels and any(
+            e["attempt"] == "fresh" for e in ah.read_events(PR))
 
     def test_concurrent_writers_never_interleave(self, clock):
         ctx = multiprocessing.get_context("fork")

@@ -297,7 +297,12 @@ def record(pr_id: str, kind: str, **fields: Any) -> None:
             fcntl.flock(fd, fcntl.LOCK_EX)
             try:
                 os.write(fd, line.encode())
-                if os.fstat(fd).st_size > MAX_JOURNAL_BYTES:
+                st = os.fstat(fd)
+                # Only the writer holding the current file may rotate: one
+                # that opened it just before another rotated would
+                # otherwise replace the fresh generation over the old one.
+                if (st.st_size > MAX_JOURNAL_BYTES
+                        and os.stat(path).st_ino == st.st_ino):
                     os.replace(path, _rotated_path(path))
             finally:
                 fcntl.flock(fd, fcntl.LOCK_UN)
