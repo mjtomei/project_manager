@@ -29466,12 +29466,12 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-21T00:23:53.079868+00:00'
+  updated_at: '2026-10-21T00:35:10.362869+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes:
-  - id: note-bde2fbb
+  - id: note-39d5657
     text: 'Bootstrap inputs: the existing collector and sources manifest live in experiments/plan-writing/.
       The already collected corpus is local at /home/matt/claude-work/project-manager/experiments/plan-writing/data/
       (18,963 records; 25 source collections); data/ is intentionally gitignored.
@@ -29480,9 +29480,15 @@ prs:
       maps PM plans to local conversation records. Read those records to recover human
       task context; the map alone is not a task brief or proof of assent. If sandboxed
       sessions cannot access those local inputs, make a scoped input bundle available
-      rather than fabricating missing history.'
+      rather than fabricating missing history. Container paths verified on the normal
+      PM implementation launch: the main checkout is mounted read-only at /opt/pm-src,
+      so the corpus is available at /opt/pm-src/experiments/plan-writing/data/; copy
+      it into the working data/ directory before extending it. Host Claude histories
+      are mounted at $HOME/.claude/projects; translate the map''s /home/matt/.claude/projects
+      prefix accordingly. Codex histories are not mounted there; report missing histories
+      explicitly or request a scoped input bundle if needed.'
     created_at: '2026-10-21T00:23:53Z'
-    last_edited: '2026-10-21T00:23:53Z'
+    last_edited: '2026-10-21T00:35:10Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
