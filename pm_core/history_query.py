@@ -496,44 +496,41 @@ def _current_activity(attempts: dict[str, dict], timers: dict,
     return out
 
 
+def _derived_hold(timer: str, purpose: str, owner_action: str, armed,
+                  derived: str, expected: str) -> dict:
+    """A hold read from project.yaml / runtime state rather than journaled."""
+    return {
+        "timer": timer, "kind": "hold", "purpose": purpose,
+        "owner_action": owner_action, "armed_at": _iso_norm(armed),
+        "armed_t": _parse_iso(armed), "due_at": None, "due_t": None,
+        "remaining_s": None, "derived": derived, "expected": expected,
+    }
+
+
 def _derived_holds(pr_id: str, pr: dict, runtime: dict) -> list[dict]:
     holds = []
     sp = pr.get("spec_pending")
     if sp:
-        phase = sp.get("phase") if isinstance(sp, dict) else None
-        gen = sp.get("generated_at") if isinstance(sp, dict) else None
-        holds.append({
-            "timer": "spec-pending", "kind": "hold",
-            "purpose": f"{phase or 'spec'} spec awaiting approval",
-            "owner_action": "start", "armed_at": _iso_norm(gen),
-            "armed_t": _parse_iso(gen), "due_at": None, "due_t": None,
-            "remaining_s": None, "derived": "project.yaml spec_pending",
-            "expected": "pm pr spec-approve (or V in the TUI) resumes",
-        })
+        sp = sp if isinstance(sp, dict) else {}
+        holds.append(_derived_hold(
+            "spec-pending", f"{sp.get('phase') or 'spec'} spec awaiting approval",
+            "start", sp.get("generated_at"), "project.yaml spec_pending",
+            "pm pr spec-approve (or V in the TUI) resumes"))
     qa = runtime.get("qa") or {}
     if qa.get("state") == "done" and qa.get("verdict") == "INPUT_REQUIRED" \
             and pr.get("status") == "qa":
-        holds.append({
-            "timer": "qa-input-required", "kind": "hold",
-            "purpose": "QA INPUT_REQUIRED (auto-start will not relaunch QA)",
-            "owner_action": "qa", "armed_at": _iso_norm(qa.get("updated_at")),
-            "armed_t": _parse_iso(qa.get("updated_at")),
-            "due_at": None, "due_t": None, "remaining_s": None,
-            "derived": "runtime qa verdict",
-            "expected": "human resolves the QA scenarios and restarts QA",
-        })
+        holds.append(_derived_hold(
+            "qa-input-required",
+            "QA INPUT_REQUIRED (auto-start will not relaunch QA)",
+            "qa", qa.get("updated_at"), "runtime qa verdict",
+            "human resolves the QA scenarios and restarts QA"))
     so = pr.get("signoff") or {}
     if isinstance(so, dict) and so.get("verdict") == "SIGNOFF_BLOCKED" \
             and pr.get("status") == "sign_off":
-        holds.append({
-            "timer": "signoff-blocked", "kind": "hold",
-            "purpose": "sign-off BLOCKED (needs a human decision)",
-            "owner_action": "signoff", "armed_at": _iso_norm(so.get("ts")),
-            "armed_t": _parse_iso(so.get("ts")),
-            "due_at": None, "due_t": None, "remaining_s": None,
-            "derived": "project.yaml signoff record",
-            "expected": "human records a new sign-off decision",
-        })
+        holds.append(_derived_hold(
+            "signoff-blocked", "sign-off BLOCKED (needs a human decision)",
+            "signoff", so.get("ts"), "project.yaml signoff record",
+            "human records a new sign-off decision"))
     return holds
 
 

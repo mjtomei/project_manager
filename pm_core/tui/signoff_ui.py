@@ -157,6 +157,9 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
     _log.info("signoff: launching router for %s (stale=%s)", pr_id, force)
     launched[pr_id] = now
     from pm_core import action_history as _ah
+    # A new router run means the PR is no longer signed off at this HEAD,
+    # so any manual-merge hold from the previous SIGNOFF_MERGE is moot.
+    _ah.clear_timer(pr_id, f"merge-hold:{pr_id}", "superseded")
     _end_attempt(app, pr_id, "superseded",
                  detail=("stale run (HEAD moved) relaunched" if force
                          else "router window gone; relaunched"))
@@ -342,8 +345,6 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         return
 
     hop = result.hop
-    _end_attempt(app, pr_id, "done", verdict=result.verdict,
-                 detail=f"routed → {hop}" if hop else None)
     if hop in ("ready_to_merge", "blocked"):
         key = (result.verdict, result.sha, _auto_start.policy_for(app, pr_id))
         if _acted(app).get(pr_id) == key:
@@ -355,6 +356,10 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
     else:
         _acted(app).pop(pr_id, None)
         _release_throttle(app, pr_id)
+    # Past the dedupe: a terminal hop repeats on every poll, and the
+    # adopted-run fallback in _end_attempt reads the whole journal.
+    _end_attempt(app, pr_id, "done", verdict=result.verdict,
+                 detail=f"routed → {hop}" if hop else None)
     _reload(app)  # verdict record / hop status written behind the TUI's back
     _log.info("signoff: %s routed %s -> %s", pr_id, result.verdict, hop)
 

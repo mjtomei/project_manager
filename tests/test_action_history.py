@@ -342,6 +342,47 @@ class TestReviewLoopHistory:
                  if a.get("iteration") == 1 and a.get("source") is None]
         assert _ends()[it["attempt"]]["outcome"] == "vanished"
 
+    def test_grace_cleared_as_cancelled_when_pane_dies_early(self, clock):
+        from pm_core import review_loop as rl
+
+        def _killed(*a, **k):
+            clock.advance(5)  # inside the 20 s grace
+            return None
+
+        state = rl.ReviewLoopState(pr_id=PR)
+        with patch.object(rl, "_launch_review_window"), \
+                patch.object(rl, "_get_pm_session", return_value="pm-x"), \
+                patch("pm_core.tmux.session_exists", return_value=True), \
+                patch.object(rl.time, "sleep", side_effect=clock.advance), \
+                patch.object(rl, "_find_claude_pane", return_value="%9"), \
+                patch.object(rl, "_poll_for_verdict", side_effect=_killed):
+            with pytest.raises(rl.PaneKilledError):
+                rl._run_claude_review(PR, "/tmp", _PR_DATA, "/tmp/t.jsonl",
+                                      iteration=1, history_attempt="a1")
+        model = hq.build_history(PR, now=clock.t, live=False)
+        (row,) = model["timers"]["recent"]
+        assert row["resolution"] == "cancelled"
+        assert state.iteration == 0
+
+    def test_adopted_iteration_records_agent_phase(self, clock, tmp_path):
+        from pm_core import review_loop as rl
+        transcript = tmp_path / f"review-{PR}-i2.jsonl"
+        transcript.write_text("")
+        state = rl.ReviewLoopState(pr_id=PR)
+        state.iteration = 2
+        with patch.object(rl, "_get_pm_session", return_value="pm-x"), \
+                patch.object(rl, "_find_claude_pane", return_value="%9"), \
+                patch("pm_core.claude_launcher.session_id_from_transcript",
+                      return_value="sess-a"), \
+                patch("pm_core.hook_events.read_event", return_value=None), \
+                patch.object(rl, "_poll_for_verdict", return_value="ok\nPASS"):
+            out = rl._adopt_in_flight_review(state, _PR_DATA, str(tmp_path),
+                                             history_attempt="a2")
+        assert out == "ok\nPASS"
+        (ev,) = [e for e in ah.read_events(PR) if e["kind"] == "phase"]
+        assert (ev["attempt"], ev["phase"], ev["session_id"]) == (
+            "a2", "agent", "sess-a")
+
     def test_stop_requested_marks_loop_cancelled(self, clock):
         state = _drive_review_loop(clock, ["x\nNEEDS_WORK", "y\nNEEDS_WORK"],
                                    stop_after=1)

@@ -218,20 +218,25 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
                       owner_attempt=history_attempt,
                       duration=_VERDICT_GRACE_PERIOD, effect="gate",
                       expected="verdicts accepted on the next idle turn")
+    # Journal clock (not monotonic) so controlled-clock tests agree.
+    grace_end = _ah.now() + _VERDICT_GRACE_PERIOD
     try:
         content = _poll_for_verdict(pane_id, transcript,
                                      grace_period=_VERDICT_GRACE_PERIOD,
                                      workdir=pr_data.get("workdir"))
     finally:
         if history_attempt:
-            _ah.clear_timer(pr_id, grace_timer, "elapsed")
+            _ah.clear_timer(pr_id, grace_timer,
+                            "elapsed" if _ah.now() >= grace_end
+                            else "cancelled")
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
 
 
 def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
-                            transcript_dir: str | None) -> str | None:
+                            transcript_dir: str | None,
+                            history_attempt: str | None = None) -> str | None:
     """Collect the verdict of an iteration that was in flight at a TUI restart.
 
     A resumed loop (breadcrumb restore) whose counter was bumped but has
@@ -264,6 +269,8 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     _log.info("review_loop: adopting in-flight iteration %d for %s "
               "(pane %s, transcript=%s)", state.iteration, state.pr_id,
               pane_id, transcript)
+    _ah.phase(state.pr_id, history_attempt, "agent",
+              f"adopted review pane {pane_id}", session_id=session_id)
     # The verdict may have landed between the breadcrumb write and now;
     # the poller only wakes on idle events newer than its start.
     ev = hook_events.read_event(session_id)
@@ -374,7 +381,8 @@ def run_review_loop_sync(
                     attempt = _start_iteration_attempt(
                         state, saved_transcript_dir, adopted=True)
                     output = _adopt_in_flight_review(
-                        state, pr_data, saved_transcript_dir)
+                        state, pr_data, saved_transcript_dir,
+                        history_attempt=attempt)
                     if output is None:
                         # Nothing live to adopt — rerun the same iteration.
                         _ah.end_attempt(state.pr_id, attempt, "vanished",

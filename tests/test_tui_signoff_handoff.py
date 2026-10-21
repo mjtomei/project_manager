@@ -746,12 +746,36 @@ def test_signoff_history_attempts_throttle_and_merge_hold(world_factory):
     assert hold["remaining_s"] is None
     assert m["waiting_for"].startswith("human: manual merge hold")
 
-    # HEAD moves: the stale run is relaunched as a new, flagged attempt.
+    # HEAD moves: the stale run is relaunched as a new, flagged attempt,
+    # and the previous SIGNOFF_MERGE's manual-merge hold no longer applies.
     w.head = "f" * 40
     _poll(app)
     m = history_query.build_history(PR, pr=app.pr(), live=False)
     runs = [a for a in m["attempts"] if a["action"] == "signoff"]
     assert len(runs) == 2 and runs[0].get("stale") is True
+    assert m["holds"] == []
+    assert any(r["timer"] == f"merge-hold:{PR}"
+               and r["resolution"] == "superseded"
+               for r in m["timers"]["recent"])
+
+
+def test_terminal_signoff_hop_does_not_reread_journal_each_poll(
+        world_factory):
+    """ready_to_merge repeats on every 5 s poll; journaling the routed
+    attempt (and the adopted-run journal scan) happens once, not per poll."""
+    from pm_core import action_history
+    app, w = world_factory(stop=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_MERGE")
+    calls = []
+    real = action_history.open_attempts
+    with patch.object(action_history, "open_attempts",
+                      side_effect=lambda *a: calls.append(a) or real(*a)):
+        _poll(app, n=5)
+    ends = [e for e in action_history.read_events(PR)
+            if e["kind"] == "attempt_end"]
+    assert len(ends) == 1 and ends[0]["verdict"] == "SIGNOFF_MERGE"
+    assert calls == []
 
 
 def test_merge_input_required_hold_armed_once(world_factory):

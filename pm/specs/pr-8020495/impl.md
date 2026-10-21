@@ -155,15 +155,20 @@ R7. **Holds** (indefinite timers, `due_t = null`, no countdown):
   - review INPUT_REQUIRED (R4), merge-window INPUT_REQUIRED
     (`_handle_merge_input_required`, only on first detection; released in
     `_finalize_detected_merge`), auto-merge hold (`_maybe_auto_merge`
-    hold branch; released when a merge attempt runs or the PR merges).
+    hold branch; released when a merge attempt runs, the PR merges, or a
+    new sign-off router run starts — `superseded`, since the earlier
+    SIGNOFF_MERGE no longer covers HEAD).
   - Derived at query time, not journaled: `spec_pending` (project.yaml,
     armed at `generated_at`), QA INPUT_REQUIRED (runtime `qa` done +
     INPUT_REQUIRED), sign-off BLOCKED (`pr["signoff"].verdict ==
     SIGNOFF_BLOCKED`).
 
 R8. **One query/presentation model** — new `pm_core/history_query.py`:
-`build_history(pr_id, *, pr=None, now=None) -> dict` (schema
-`pm.pr.history/1`) and `render_text(model, *, width=None) -> list[str]`.
+`build_history(pr_id, *, pr=None, now=None, live=True) -> dict` (schema
+`pm.pr.history/1`; `live=False` skips runtime/hook reads) and
+`render_text(model, *, now=None) -> list[str]` (80-column layout; `now`
+defaults to the model's `generated_at`), plus `summary_badge(model)` for
+the pane row.
 The model contains:
   - `attempts`: tree (roots + `children`), each with `started_at`,
     `ended_at`, `elapsed_s`, `outcome`, `verdict`, identity
