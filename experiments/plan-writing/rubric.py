@@ -8,7 +8,9 @@ without collect.py's dependencies.
 """
 
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -162,7 +164,16 @@ def write_doc():
     text = path.read_text()
     head, rest = text.split(GENERATED_START, 1)
     tail = rest.split(GENERATED_END, 1)[1]
-    path.write_text(head + GENERATED_START + "\n" + reference_markdown() + GENERATED_END + tail)
+    # Replace by rename so a concurrent reader (a test, another --write-doc) never sees a partial file.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".rubric.md.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(head + GENERATED_START + "\n" + reference_markdown() + GENERATED_END + tail)
+        os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def validate_judgment(judgment, dimension_ids):

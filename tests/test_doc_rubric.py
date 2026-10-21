@@ -287,3 +287,18 @@ def test_validate_judgment():
 def test_render_fixture_rejects_bad_slot():
     with pytest.raises(ValueError):
         rubric.render_fixture(FIXTURES[0], strong_as="a")
+
+
+def test_write_doc_replaces_file_by_rename(tmp_path, monkeypatch):
+    # A rename never exposes a partial rubric.md to a concurrent reader or --write-doc.
+    for name in ("dimensions.json", "references.json", "rubric.md"):
+        (tmp_path / name).write_text((EXP / "rubric" / name).read_text())
+    (tmp_path / "fixtures").symlink_to(EXP / "rubric" / "fixtures")
+    doc = tmp_path / "rubric.md"
+    doc.chmod(0o640)
+    before = doc.stat().st_ino
+    monkeypatch.setattr(rubric, "RUBRIC", tmp_path)
+    rubric.write_doc()
+    assert doc.read_text() == (EXP / "rubric" / "rubric.md").read_text()
+    assert doc.stat().st_ino != before and doc.stat().st_mode & 0o777 == 0o640
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["dimensions.json", "fixtures", "references.json", "rubric.md"]
