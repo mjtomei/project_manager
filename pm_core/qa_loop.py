@@ -3907,10 +3907,15 @@ def run_qa_sync(
                         _hook_baseline = time.time()
 
             _remaining = max(0.0, deadline - time.monotonic())
+            # Under spec review, re-check the gate at the poll cadence so
+            # a QA spec written mid-planning is held within seconds.
+            _wait = (_POLL_INTERVAL
+                     if state.spec_review or state.spec_review_pending
+                     else 15.0)
             ev = _hook_events.wait_for_event(
                 planner_session_id,
                 event_types={"idle_prompt"},
-                timeout=min(15.0, _remaining),
+                timeout=min(_wait, _remaining),
                 newer_than=_hook_baseline,
                 stop_check=lambda: state.stop_requested,
             )

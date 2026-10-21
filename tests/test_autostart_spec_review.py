@@ -894,6 +894,7 @@ def _plan_under_review(tmp_path, monkeypatch, *, edit_on_approval: bool):
         return "edited" if (flags["approved"] and edit_on_approval) else "v1"
 
     def wait(session_id, **kw):
+        flags.setdefault("timeouts", []).append(kw.get("timeout"))
         flags["calls"] += 1
         if flags["calls"] > 6:
             raise AssertionError("planner poll never finished")
@@ -928,6 +929,16 @@ def test_planner_plan_deferred_until_approval(tmp_path, monkeypatch):
     # Approved unchanged: the deferred plan is consumed without a new idle.
     assert flags["calls"] == 2
     assert [s.index for s in state.scenarios] == [1, 2, 3, 4]
+
+
+def test_planner_rechecks_spec_gate_at_poll_cadence(tmp_path, monkeypatch):
+    # Once the QA spec is under review the planner wait is bounded by the
+    # poll interval, so a pause (or approval) surfaces within seconds
+    # instead of after the 15 s idle-event wait.
+    _, flags, _ = _plan_under_review(tmp_path, monkeypatch,
+                                     edit_on_approval=False)
+    assert flags["timeouts"][0] == 15.0
+    assert flags["timeouts"][1] <= qa_loop._POLL_INTERVAL
 
 
 def test_planner_replans_after_edited_approval(tmp_path, monkeypatch):
