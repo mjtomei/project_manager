@@ -445,9 +445,10 @@ class TestReviewLoopHistory:
         assert [p["phase"] for p in i1["phases"]] == [
             "launching", "agent", "verdict"]
         launching, agent, _ = i1["phases"]
-        assert launching["duration_s"] == 5   # 3 s launch + 2 s settle
+        # 3 s launch; no 2 s settle once the pane is found at once.
+        assert launching["duration_s"] == 3
         assert agent["duration_s"] == 100
-        assert i1["exec_s"] == i1["elapsed_s"] == 105
+        assert i1["exec_s"] == i1["elapsed_s"] == 103
         assert i1["wait_s"] == 0
         # Both grace timers were cleared when polling returned.
         assert model["timers"]["active"] == []

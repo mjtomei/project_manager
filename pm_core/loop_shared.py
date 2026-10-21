@@ -162,6 +162,24 @@ def poll_for_verdict(
     trust_watch: WorkspacePromptWatch | None = WorkspacePromptWatch(
         pane_id, workdir, transcript_path=transcript_path)
 
+    # A killed pane emits no further idle events, so without this the
+    # hook wait would sit out its full *wait_timeout* before the
+    # pane_exists check below noticed.  That delayed cancels (z d, pr
+    # cleanup) by up to wait_timeout, and the history journal booked the
+    # cancel that late (a grace timer cancelled by z d read "elapsed").
+    # Check the pane at most once a second while waiting.
+    pane_checked_at = time.monotonic()
+
+    def _stop_or_pane_gone() -> bool:
+        nonlocal pane_checked_at
+        if stop_check and stop_check():
+            return True
+        now = time.monotonic()
+        if now - pane_checked_at < 1.0:
+            return False
+        pane_checked_at = now
+        return not tmux_mod.pane_exists(pane_id)
+
     while True:
         if stop_check and stop_check():
             return None
@@ -184,7 +202,7 @@ def poll_for_verdict(
             event_types={"idle_prompt"},
             timeout=wait_timeout,
             newer_than=hook_baseline,
-            stop_check=stop_check,
+            stop_check=_stop_or_pane_gone,
         )
         if stop_check and stop_check():
             return None

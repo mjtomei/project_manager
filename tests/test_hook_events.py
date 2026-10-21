@@ -346,6 +346,38 @@ def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch, tmp_path):
     assert elapsed < 2.0, f"hook path was too slow ({elapsed}s)"
 
 
+def test_poll_for_verdict_notices_pane_death_mid_wait(tmp_hooks_home,
+                                                      monkeypatch, tmp_path):
+    """A pane killed during the hook wait (z d, pr cleanup) emits no more
+    idle events; the poll must notice within ~1 s rather than sitting out
+    the whole wait_timeout."""
+    _reload_hook_events()
+    from pm_core import loop_shared
+    import pm_core.tmux as tmux_mod
+
+    sid = "12345678-1234-1234-1234-123456789abd"
+    transcript_target = tmp_path / f"{sid}.jsonl"
+    transcript_target.write_text("{}\n")
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
+
+    killed_at = time.monotonic() + 0.3
+    monkeypatch.setattr(tmux_mod, "pane_exists",
+                        lambda pane_id: time.monotonic() < killed_at)
+
+    start = time.monotonic()
+    content = loop_shared.poll_for_verdict(
+        pane_id="%0",
+        transcript_path=str(transcript_link),
+        verdicts=("PASS", "FAIL"),
+        wait_timeout=15,
+        log_prefix="test",
+    )
+    elapsed = time.monotonic() - start
+    assert content is None
+    assert elapsed < 3.0, f"pane death noticed too late ({elapsed:.1f}s)"
+
+
 def test_session_id_from_transcript(tmp_path):
     from pm_core.claude_launcher import session_id_from_transcript
 

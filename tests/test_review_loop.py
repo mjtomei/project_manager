@@ -382,6 +382,47 @@ class TestStartReviewLoopBackground:
         complete_callback.assert_called_once_with(state)
 
 
+class TestRunClaudeReviewPaneLookup:
+    def test_pane_found_before_any_settle_wait(self):
+        """The iteration looks its pane up as soon as the launch returns.
+
+        Sleeping first let a z d that killed the window and opened a
+        same-named fresh review in the gap hand the stopped loop the
+        replacement's pane."""
+        from pm_core import review_loop as rl
+        events = []
+        with patch.object(rl, "_launch_review_window"), \
+                patch.object(rl, "_get_pm_session", return_value="pm-x"), \
+                patch("pm_core.tmux.session_exists", return_value=True), \
+                patch.object(rl.time, "sleep",
+                             side_effect=lambda s: events.append("sleep")), \
+                patch.object(rl, "_find_claude_pane",
+                             side_effect=lambda *a: events.append("find")
+                             or "%9"), \
+                patch.object(rl, "_poll_for_verdict",
+                             return_value="ok\nPASS") as poll:
+            rl._run_claude_review("pr-001", "/tmp", _PR_DATA, "/tmp/t.jsonl")
+        assert events == ["find"]
+        assert poll.call_args.args[0] == "%9"
+
+    def test_falls_back_to_settle_wait_when_window_is_late(self):
+        from pm_core import review_loop as rl
+        events = []
+        panes = iter([None, "%9"])
+        with patch.object(rl, "_launch_review_window"), \
+                patch.object(rl, "_get_pm_session", return_value="pm-x"), \
+                patch("pm_core.tmux.session_exists", return_value=True), \
+                patch.object(rl.time, "sleep",
+                             side_effect=lambda s: events.append("sleep")), \
+                patch.object(rl, "_find_claude_pane",
+                             side_effect=lambda *a: events.append("find")
+                             or next(panes)), \
+                patch.object(rl, "_poll_for_verdict",
+                             return_value="ok\nPASS"):
+            rl._run_claude_review("pr-001", "/tmp", _PR_DATA, "/tmp/t.jsonl")
+        assert events == ["find", "sleep", "find"]
+
+
 # --- generate_review_prompt with review_loop tests ---
 
 class TestGenerateReviewPrompt:

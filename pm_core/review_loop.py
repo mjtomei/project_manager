@@ -199,10 +199,16 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id,
                           transcript=transcript)
 
-    # Wait briefly for the window to appear
-    time.sleep(2)
-
+    # The launch subprocess has created the window by now, so look the
+    # pane up at once.  Waiting first let a z d / zz d that killed this
+    # window and opened a same-named one in the gap hand the stopped loop
+    # the replacement's pane, which it then polled as its own (the
+    # cancelled loop stayed "running" for as long as that pane lived).
     pane_id = _find_claude_pane(session, window_name)
+    if not pane_id:
+        # Wait briefly for the window to appear
+        time.sleep(2)
+        pane_id = _find_claude_pane(session, window_name)
     if not pane_id:
         raise RuntimeError(f"Review window '{window_name}' not found after launch")
 
