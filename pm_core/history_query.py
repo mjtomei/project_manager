@@ -93,6 +93,12 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     _release_terminal_holds(pr or {}, timer_rows)
 
     runtime = _runtime_actions(pr_id) if live else {}
+    for entry in runtime.values():
+        a = attempts.get(aliases.get(entry.get("attempt_id"),
+                                     entry.get("attempt_id")) or "")
+        if (a is not None and a.get("inferred") == "owner-exited"
+                and entry.get("state") in _rs.IN_FLIGHT_STATES):
+            entry["stale"] = "owner exited"
     current = _current_activity(attempts, timer_rows, t_now, live=live)
     holds = [t for t in timer_rows["active"] if t["due_at"] is None]
     holds += _derived_holds(pr_id, pr or {}, runtime)
@@ -254,12 +260,16 @@ def _reconcile_attempts(attempts: dict[str, dict],
     still shows in flight.  Those belong to the mirror, not to the process
     that happened to open them (e.g. a short-lived ``pm pr auto-sequence``
     CLI): whichever process clears the entry ends the attempt, so the
-    opener exiting does not interrupt it.
+    opener exiting does not interrupt it.  A loop's entry (``loop_id``) is
+    the exception: only the loop thread of the process that opened the
+    attempt advances or clears it, so a killed owner (e.g. a SIGKILLed
+    TUI, which leaves the entry ``running`` until the next TUI's mount
+    sweep) interrupts it like any other attempt.
     """
     for a in attempts.values():
         if a["ended_t"] is not None:
             continue
-        if a["id"] in tracked:
+        if a["id"] in tracked and not a.get("loop_id"):
             a["owner_alive"] = True
             continue
         alive = _ah.owner_alive(a.get("owner"))
@@ -828,6 +838,8 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
                 in_flight = e.get("state") in _rs.IN_FLIGHT_STATES
                 bit += (f" (last {e['verdict']})" if in_flight
                         else f" {e['verdict']}")
+            if e.get("stale"):
+                bit += f" (stale: {e['stale']})"
             bits.append(bit)
         lines.append("  runtime: " + ", ".join(bits))
 

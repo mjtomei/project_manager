@@ -4,6 +4,7 @@ import json
 import multiprocessing
 import os
 import socket
+import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -190,6 +191,23 @@ class TestJournal:
         assert ah.owner_alive(ghost) is False
         assert ah.owner_alive(me) is True
 
+    def test_concurrent_probes_of_dead_owner_agree(self):
+        # Readers polling history in parallel probe the same dead owner's
+        # lock; one probe's momentary lock must not read as a live owner.
+        (ah._owners_dir() / "1-dead.lock").touch()
+        seen: set = set()
+
+        def _probe():
+            for _ in range(500):
+                seen.add(ah._instance_alive("1-dead"))
+
+        threads = [threading.Thread(target=_probe) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        assert seen == {False}
+
     def test_forked_child_owner_lock(self):
         ctx = multiprocessing.get_context("fork")
         q = ctx.Queue()
@@ -329,6 +347,26 @@ class TestRuntimeCapture:
             with patch.object(rs, "get_pr_actions", return_value={}):
                 a = hq.build_history(PR, now=clock.t)["attempts"][0]
             assert a["outcome"] == "interrupted"
+
+    def test_loop_attempt_tracked_by_runtime_dies_with_its_owner(self, clock):
+        # A SIGKILLed TUI leaves its loop's entry "running" until the next
+        # TUI's mount sweep; only that loop thread could have ended it.
+        rs.set_action_state(PR, "review-loop", "running", loop_id="aaaa",
+                            iteration=1, verdict="NEEDS_WORK")
+        aid = rs.get_action_state(PR, "review-loop")["attempt_id"]
+        clock.advance(20)
+        assert hq.build_history(PR, now=clock.t)["attempts"][0]["open"]
+        with patch.object(ah, "owner_alive", return_value=False):
+            m = hq.build_history(PR, now=clock.t)
+        (a,) = m["attempts"]
+        assert a["id"] == aid and not a["open"]
+        assert a["outcome"] == "interrupted"
+        assert a["inferred"] == "owner-exited"
+        assert not any(r["state"] == "between_iterations"
+                       for r in m["current"])
+        assert m["runtime"]["review-loop"]["stale"] == "owner exited"
+        assert ("review-loop=running (last NEEDS_WORK) (stale: owner exited)"
+                in "\n".join(hq.render_text(m)))
 
     def test_retracked_pane_continues_its_attempt(self, clock):
         # Impl pane tracked, untracked while a review loop owns the PR,

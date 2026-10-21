@@ -171,6 +171,27 @@ def _owners_dir() -> Path:
 _OWNER_LOCK_RETENTION_S = 30 * 86400
 
 
+@contextlib.contextmanager
+def _probe_mutex() -> Iterator[None]:
+    """Serialize liveness probes across processes.
+
+    A probe takes an owner's lock exclusively for an instant, so two
+    concurrent probes of the same dead owner would see each other's lock
+    and report it alive.  Probes release that lock before leaving the
+    mutex.  Owners never take this mutex.
+    """
+    try:
+        fd = os.open(_owners_dir() / ".probe", os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        yield  # unserialized probe beats none
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def _prune_owner_locks() -> None:
     cutoff = time.time() - _OWNER_LOCK_RETENTION_S
     for path in _owners_dir().glob("*.lock"):
@@ -181,8 +202,10 @@ def _prune_owner_locks() -> None:
         except OSError:
             continue
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            path.unlink()
+            with _probe_mutex():
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                path.unlink()
+                fcntl.flock(fd, fcntl.LOCK_UN)
         except OSError:
             pass
         finally:
@@ -227,7 +250,9 @@ def _instance_alive(instance: str) -> bool | None:
     except OSError:
         return None
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with _probe_mutex():
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)
     except BlockingIOError:
         return True
     except OSError:
