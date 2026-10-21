@@ -385,7 +385,8 @@ class ProjectManagerApp(App):
         # breadcrumb).  ``_auto_start`` is derived: True iff there is at
         # least one target or the explicit whole-backlog mode is on.
         self._auto_start: bool = False
-        # Ordered {pr_id: {"added_at", "source"}} — see auto_start.add_targets
+        # Ordered {pr_id: {"added_at", "source"[, "wait_for_merge"]}} — see
+        # auto_start.add_targets (the flag holds the target's closure).
         self._auto_start_targets: dict[str, dict] = {}
         self._auto_start_all: bool = False
         self._auto_start_run_id: str | None = None
@@ -397,9 +398,10 @@ class ProjectManagerApp(App):
         # ``pr start`` activation must not move the user's cursor.
         self._followed_active_pr: str | None = None
         self._quiet_activations: dict[str, float] = {}
-        # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
+        # Explicit per-PR opt-out of auto-merge (O key / CLI default).
         # When a PR is in this set, _maybe_auto_merge stops at "ready to
-        # merge" instead of launching the merge window.
+        # merge" instead of launching the merge window.  Wait-for-merge
+        # holds are derived separately (auto_start.merge_holds).
         self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
