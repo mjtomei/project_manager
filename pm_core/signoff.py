@@ -890,7 +890,8 @@ class SignoffStep:
     coerced: str | None = None
 
 
-def _stale_reason(record: dict) -> str:
+def stale_reason(record: dict) -> str:
+    """Why a recorded sign-off verdict is not fresh (display / logs)."""
     if record.get("invalidated"):
         return str(record["invalidated"])
     if is_legacy_approval(record):
@@ -968,7 +969,7 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
         record.get("coerced_reason")
 
     if verdict is None and record.get("verdict"):
-        reason = _stale_reason(record)
+        reason = stale_reason(record)
         retire(session, pr_entry, tdir)
 
         def _clear(d):

@@ -405,8 +405,12 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             return (phase, "queued", "no sign-off window; relaunches on next "
                     "scheduler pass")
         if not signoff.get("fresh"):
-            return (phase, "waiting", f"{verdict} stale (HEAD moved); sign-off "
-                    "relaunches against current HEAD")
+            why = signoff.get("stale_reason") or "HEAD moved"
+            if why == "HEAD moved":
+                return (phase, "waiting", f"{verdict} stale (HEAD moved); "
+                        "sign-off relaunches against current HEAD")
+            return (phase, "waiting", f"{verdict} stale ({why}); sign-off "
+                    "re-runs against the current base")
         if verdict == "SIGNOFF_MERGE":
             return phase, "waiting", _signed_off_reason(pr_id, holds)
         if verdict == "SIGNOFF_BLOCKED":

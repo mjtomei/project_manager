@@ -1084,6 +1084,9 @@ def collect_status_inputs(app) -> dict:
             fresh = _signoff.fresh_recorded_verdict(pr, sha)
             signoff_info[pr_id] = {"verdict": rec.get("verdict"),
                                    "fresh": fresh is not None}
+            if fresh is None and rec.get("verdict"):
+                signoff_info[pr_id]["stale_reason"] = \
+                    _signoff.stale_reason(rec)
 
     project = (app._data or {}).get("project") or {}
     return {
