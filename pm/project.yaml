@@ -8113,11 +8113,33 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-21T21:03:39.290380+00:00'
+  updated_at: '2026-10-21T21:46:48.760707+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9a90e26
+    text: 'Impl done (ada2f8b3). Design: pm_core/integration.py does fetch + isolated
+      candidate (temp worktree on git<2.38, merge-tree otherwise); launch_signoff_window
+      records pr["integration"] and stamps HEAD+base; step_signoff binds the verdict
+      to it, coerces conflict->IMPL and MERGE-without-check->BLOCKED, merges a clean
+      moved base into the PR branch on bounces and writes pr["signoff_return"] (reason
+      from report meta pm-signoff-reason, awaiting=<hop> until the routed step launches).
+      pm pr merge = record gate + re-fetch + recompute + commit-tree + CAS publish
+      (local update-ref/ff, vanilla push --force-with-lease to the fetch URL, github
+      gh pr merge --match-head-commit + post-verify -> pr["merge_integrity"]); refusal
+      invalidates the record (driver re-runs sign-off). No conflict merge window anymore;
+      --no-signoff-check/--propagation-only only recover a merge already in base.
+      pm pr signoff integrate is read-only unless --record/--apply. Tests: tests/test_merge_publish.py,
+      tests/test_signoff_integration.py, new cases in test_tui_signoff_handoff.py.
+      Impl capture: $CAP/impl/signoff-integration-two-prs (real CLI, two overlapping
+      PRs). QA still owes the real TUI auto-start e2e run with the watcher off (real
+      router agent): two overlapping PRs, O hold across a return, restart after a
+      return decision. Known limit: GitHub has no base-revision precondition, a base
+      update between the ls-remote check and GitHub''s merge is detected afterwards,
+      not prevented.'
+    created_at: '2026-10-21T21:46:48Z'
+    last_edited: '2026-10-21T21:46:48Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
