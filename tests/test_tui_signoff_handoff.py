@@ -721,3 +721,47 @@ def test_slow_launch_in_flight_is_not_duplicated(world_factory):
         app._signoff_launched_at[k] -= signoff_backoff()
     _poll(app)
     assert len(w.launches()) == 1
+
+
+def test_signoff_history_attempts_throttle_and_merge_hold(world_factory):
+    """Router launches are journaled as sign-off attempts with the relaunch
+    throttle as a timer; an O-held PR shows an indefinite manual-merge hold."""
+    from pm_core import history_query
+    app, w = world_factory(stop=True)
+    _qa_pass(app)
+    m = history_query.build_history(PR, pr=app.pr(), live=False)
+    (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
+    assert att["open"] and att["phases"][0]["phase"] == "launching"
+    (thr,) = m["timers"]["active"]
+    assert thr["purpose"] == "sign-off relaunch throttle"
+    assert 0 < thr["remaining_s"] <= 60
+
+    w.emit("SIGNOFF_MERGE")
+    _poll(app)
+    m = history_query.build_history(PR, pr=app.pr(), live=False)
+    (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
+    assert (att["outcome"], att["verdict"]) == ("done", "SIGNOFF_MERGE")
+    (hold,) = m["holds"]
+    assert hold["purpose"].startswith("manual merge hold")
+    assert hold["remaining_s"] is None
+    assert m["waiting_for"].startswith("human: manual merge hold")
+
+    # HEAD moves: the stale run is relaunched as a new, flagged attempt.
+    w.head = "f" * 40
+    _poll(app)
+    m = history_query.build_history(PR, pr=app.pr(), live=False)
+    runs = [a for a in m["attempts"] if a["action"] == "signoff"]
+    assert len(runs) == 2 and runs[0].get("stale") is True
+
+
+def test_merge_input_required_hold_armed_once(world_factory):
+    from pm_core import action_history
+    from pm_core.tui import review_loop_ui
+    app, _w = world_factory(stop=True)
+    review_loop_ui._handle_merge_input_required(app, PR, f"merge:{PR}")
+    review_loop_ui._handle_merge_input_required(app, PR, f"merge:{PR}")
+    arms = [e for e in action_history.read_events(PR)
+            if e["kind"] == "timer_arm"
+            and e["timer"].startswith("merge-input-required")]
+    assert len(arms) == 1
+    assert arms[0]["indefinite"] is True  # a hold: no due time, no countdown

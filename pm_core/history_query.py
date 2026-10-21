@@ -62,8 +62,14 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     t_now = _ah.now() if now is None else float(now)
     events = _ah.read_events(pr_id)
     attempts, timers, timer_history = _replay(events)
-    _reconcile_attempts(attempts, t_now)
     _link_children(attempts)
+    # A parent was last seen no earlier than any of its descendants.
+    for a in sorted(attempts.values(), key=lambda a: a["started_t"],
+                    reverse=True):
+        p = a.get("_parent_obj")
+        if p is not None:
+            p["last_seen_t"] = max(p["last_seen_t"], a["last_seen_t"])
+    _reconcile_attempts(attempts, t_now)
     for a in attempts.values():
         _compute_spans(a, t_now)
     roots = [a for a in attempts.values() if not a.get("_parent_obj")]
@@ -271,11 +277,15 @@ def _compute_concurrency(a: dict) -> None:
     kids = [c for c in a["children"] if c.get("scenario") is not None]
     if len(kids) < 2:
         return
+    # Execution intervals: a scenario queued for a concurrency slot is not
+    # running yet, so its leading wait does not count as overlap.
     ivs = []
     for c in kids:
         end = c["started_t"] + (c.get("elapsed_s")
                                 or c.get("elapsed_lower_bound_s") or 0)
-        ivs.append((c["started_t"], end))
+        start = next((sp["start_t"] for sp in c.get("spans", [])
+                      if sp["phase"] not in _ah.WAIT_PHASES), end)
+        ivs.append((min(start, end), end))
     points = sorted([(s, 1) for s, _ in ivs] + [(e, -1) for _, e in ivs],
                     key=lambda p: (p[0], p[1]))
     depth = best = 0
@@ -577,6 +587,10 @@ def _export(a: dict) -> dict:
             "elapsed_s", "elapsed_lower_bound_s", "exec_s", "wait_s",
             "open", "scenarios")
     out = {k: a.get(k) for k in keep if a.get(k) is not None}
+    # Timing keys are always present: None means unknown, not omitted.
+    for k in ("outcome", "elapsed_s", "elapsed_lower_bound_s", "exec_s",
+              "wait_s"):
+        out.setdefault(k, None)
     out["name"] = _attempt_name(a)
     out["started_at"] = _ah.iso(a["started_t"])
     out["ended_at"] = _ah.iso(a["ended_t"])

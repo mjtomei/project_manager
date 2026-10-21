@@ -348,6 +348,8 @@ class ScenarioObserver:
         self._seen: set[int] = set()
         # Scenarios whose window died and are between relaunches.
         self._dead: set[int] = set()
+        # Scenarios that have had at least one journaled attempt.
+        self._had_attempt: set[int] = set()
 
     def _start(self, sc, status: str) -> None:
         idx = sc.index
@@ -360,6 +362,7 @@ class ScenarioObserver:
             transcript=getattr(sc, "transcript_path", None) or None,
         )
         self._open[idx] = {"attempt": attempt, "status": status}
+        self._had_attempt.add(idx)
         phase(self.pr_id, attempt, "queued" if status == "queued" else "agent",
               "waiting for a concurrency slot" if status == "queued" else None)
 
@@ -401,7 +404,8 @@ class ScenarioObserver:
                     if status == "verifying":
                         phase(self.pr_id, self._open[idx]["attempt"],
                               "verifying")
-                elif status == "done" and not first:
+                elif (status == "done" and not first
+                      and idx not in self._had_attempt):
                     # Settled without ever being observed running (e.g.
                     # launch failure) — record a zero-length attempt.
                     a = start_attempt(self.pr_id, "qa", parent=self.parent,
@@ -463,6 +467,7 @@ class ScenarioObserver:
                     label=getattr(scenario, "title", None) or None)
                 end_attempt(self.pr_id, a, "failed",
                             detail="scenario window relaunch failed")
+                self._had_attempt.add(idx)
         except Exception:
             _log.debug("ScenarioObserver.relaunched failed", exc_info=True)
 
