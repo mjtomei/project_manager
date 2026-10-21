@@ -2774,13 +2774,99 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
     return {"has_pm": has_pm, "count": len(dirty), "lock_tui": lock_tui}
 
 
+def _is_id_list(value) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(e, dict) and "id" in e for e in value)
+
+
+def _merge_yaml_3way(base, ours, theirs):
+    """Three-way merge of parsed project.yaml values.
+
+    *theirs* is the stashed working-tree state (pm's live state) and wins
+    true conflicts; *ours* is the merged base, whose changes (e.g. a note an
+    agent committed on its PR branch) are kept wherever the live state left
+    that value as it was in *base*.  Lists of ``id``-keyed entries (prs,
+    plans, notes) merge entry by entry.
+    """
+    if ours == theirs or ours == base:
+        return theirs
+    if theirs == base:
+        return ours
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        b = base if isinstance(base, dict) else {}
+        out = {}
+        for k in theirs:
+            if k in ours:
+                out[k] = _merge_yaml_3way(b.get(k), ours[k], theirs[k])
+            elif k not in b or b[k] != theirs[k]:
+                out[k] = theirs[k]          # else: removed by the merge
+        for k in ours:
+            if k not in theirs and k not in b:
+                out[k] = ours[k]            # added by the merge
+        return out
+    if (_is_id_list(ours) and _is_id_list(theirs)
+            and (base is None or _is_id_list(base))):
+        b = {e["id"]: e for e in base or []}
+        o = {e["id"]: e for e in ours}
+        t = {e["id"] for e in theirs}
+        out = []
+        for e in theirs:
+            if e["id"] in o:
+                out.append(_merge_yaml_3way(b.get(e["id"]), o[e["id"]], e))
+            elif b.get(e["id"]) != e:
+                out.append(e)
+        out.extend(e for e in ours if e["id"] not in t and e["id"] not in b)
+        return out
+    return theirs
+
+
+def _resolve_project_yaml_pop(cwd: Path) -> bool:
+    """Resolve a ``project.yaml`` conflict left by a failed ``stash pop``.
+
+    pm keeps its live state uncommitted in the main repo, so a merge that
+    brings committed ``project.yaml`` changes (an agent's cross-PR note on
+    its branch) makes the restoring pop conflict and leaves markers that
+    break every pm command.  Merges the file structurally instead; drops the
+    stash when nothing else conflicted.  Returns True when the pop is fully
+    resolved.
+    """
+    unmerged = git_ops.run_git("diff", "--name-only", "--diff-filter=U",
+                               cwd=cwd, check=False).stdout.split()
+    yaml_paths = [p for p in unmerged if Path(p).name == "project.yaml"]
+    if not yaml_paths:
+        return False
+    loader = store._yaml_loader()
+    for rel in yaml_paths:
+        texts = []
+        for rev in ("stash@{0}^1", "HEAD", "stash@{0}"):
+            r = git_ops.run_git("show", f"{rev}:{rel}", cwd=cwd, check=False)
+            if r.returncode != 0:
+                return False
+            texts.append(r.stdout)
+        try:
+            base, ours, theirs = (yaml.load(t, Loader=loader) or {}
+                                  for t in texts)
+        except yaml.YAMLError:
+            return False
+        root = (cwd / rel).parent
+        with store._lock(root):
+            store.save(_merge_yaml_3way(base, ours, theirs), root)
+        git_ops.run_git("reset", "-q", "--", rel, cwd=cwd, check=False)
+        click.echo(f"Merged {rel} (local pm state + merged changes).")
+    if len(yaml_paths) < len(unmerged):
+        return False
+    git_ops.run_git("reset", "-q", cwd=cwd, check=False)
+    git_ops.run_git("stash", "drop", "-q", cwd=cwd, check=False)
+    return True
+
+
 def _unstash_after_merge(cwd: Path, info: dict) -> bool:
     """Pop the stash and remove the TUI merge-lock if one was set.
 
     Returns True if the stash popped cleanly.
     """
     pop_r = git_ops.run_git("stash", "pop", cwd=cwd, check=False)
-    clean = pop_r.returncode == 0
+    clean = pop_r.returncode == 0 or _resolve_project_yaml_pop(cwd)
 
     if info.get("has_pm") and info.get("lock_tui"):
         trigger_tui_merge_unlock()

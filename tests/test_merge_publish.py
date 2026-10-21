@@ -572,3 +572,68 @@ def test_two_overlapping_prs_second_needs_integration(local, tmp_path):
     assert result.exit_code == 0, result.output
     assert windows == []
     assert (local.repo / "shared.txt").read_text() == "pr1\npr2\n"
+
+
+# --- live pm state in the main repo ------------------------------------------
+
+def test_local_merge_keeps_live_state_and_branch_project_yaml_changes(tmp_path):
+    """An agent's cross-PR note committed on the PR branch must not leave
+    conflict markers in the main repo's uncommitted (live) project.yaml."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "master")
+    commit(repo, "app.py", "x = 1\n", "init")
+    wd = tmp_path / "home" / ".pm" / "workdirs" / "proj" / PR
+    pm_dir = repo / "pm"
+    pm_dir.mkdir()
+    prs = [{"id": PR, "title": "PR one", "branch": BRANCH, "status": "pending"},
+           {"id": "pr-002", "title": "PR two", "branch": "pm/pr-002",
+            "status": "pending"}]
+    store.save({"project": {"name": "proj", "base_branch": "master",
+                            "repo": str(repo), "backend": "local"},
+                "prs": prs, "plans": []}, pm_dir)
+    git(repo, "add", "pm")
+    git(repo, "commit", "-q", "-m", "pm state")
+    git(tmp_path, "clone", "-q", str(repo), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    commit(wd, "app.py", "x = 2\n", "feature")
+    # The PR's agent leaves a note on the other PR (committed on its branch).
+    branch_data = store.load(wd / "pm")
+    store.get_pr(branch_data, "pr-002")["notes"] = [
+        {"id": "note-branch", "text": "conflicts with pr-001"}]
+    store.save(branch_data, wd / "pm")
+    git(wd, "commit", "-q", "-am", "note on pr-002")
+    head = git(wd, "rev-parse", "HEAD")
+    # Meanwhile pm's live (uncommitted) state in the main repo moves on.
+    live = store.load(pm_dir)
+    store.get_pr(live, PR).update(status="sign_off", workdir=str(wd))
+    store.get_pr(live, "pr-002").update(status="qa", workdir="/wd/pr-002")
+    store.save(live, pm_dir)
+    w = SimpleNamespace(repo=repo, wd=wd, pm_dir=pm_dir, head=head)
+
+    approve(w)
+    result, windows, finalized = merge(w)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert "<<<<<<<" not in (pm_dir / "project.yaml").read_text()
+    data = store.load(pm_dir)
+    one, two = store.get_pr(data, PR), store.get_pr(data, "pr-002")
+    assert one["status"] == "sign_off" and one["workdir"] == str(wd)
+    assert two["status"] == "qa" and two["workdir"] == "/wd/pr-002"
+    assert [n["id"] for n in two["notes"]] == ["note-branch"]
+    assert git(repo, "stash", "list") == ""
+    assert git(repo, "diff", "--name-only", "--diff-filter=U") == ""
+    assert (repo / "app.py").read_text() == "x = 2\n"
+
+
+def test_merge_yaml_3way_merges_id_lists_and_prefers_live_state():
+    base = {"prs": [{"id": "a", "status": "pending", "notes": [{"id": "n1"}]}]}
+    ours = {"prs": [{"id": "a", "status": "in_progress",
+                     "notes": [{"id": "n1"}, {"id": "n2"}]},
+                    {"id": "b", "status": "pending"}]}
+    theirs = {"prs": [{"id": "a", "status": "sign_off", "notes": [{"id": "n1"}],
+                       "workdir": "/w"}]}
+    assert pr_mod._merge_yaml_3way(base, ours, theirs) == {"prs": [
+        {"id": "a", "status": "sign_off", "notes": [{"id": "n1"}, {"id": "n2"}],
+         "workdir": "/w"},
+        {"id": "b", "status": "pending"}]}
