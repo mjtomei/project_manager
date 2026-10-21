@@ -560,6 +560,41 @@ class TestScenarioObserver:
             "attempts"][0]["children"]
         assert kids[1]["session_id"] == "sess-new"
 
+    def test_relaunched_without_backoff_attempt_tracks_status(self, clock):
+        """If the backoff attempt was never opened, ``relaunched`` opens
+        one and the observer keeps tracking it (no duplicate agent phase
+        on the next tick)."""
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        sc = _sc(1)
+        obs.relaunched(sc, True)
+        obs.observe([sc], pending={1}, verifying=set(), queued=set(),
+                    verdicts={})
+        (kid,) = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert [p["phase"] for p in kid["phases"]] == ["agent"]
+
+
+class TestQARunJournal:
+    @pytest.mark.parametrize("stop,verdict,run_out,planner_out", [
+        (False, "", "cancelled", "cancelled"),   # e.g. PR merged mid-plan
+        (True, "", "cancelled", "cancelled"),
+        (False, "INPUT_REQUIRED", "done", "failed"),
+    ])
+    def test_abandoned_planner_follows_run(self, clock, stop, verdict,
+                                           run_out, planner_out):
+        from pm_core import qa_loop
+        state = qa_loop.QALoopState(pr_id=PR)
+        state.loop_id = "L1"
+        with qa_loop._journal_qa_run(state, resumed=False):
+            state._history_planner = ah.start_attempt(
+                PR, "qa", parent=state.history_attempt, label="planner")
+            state.stop_requested = stop
+            state.latest_verdict = verdict
+        (run,) = hq.build_history(PR, now=clock.t, live=False)["attempts"]
+        assert run["outcome"] == run_out
+        assert run["children"][0]["outcome"] == planner_out
+
     @pytest.mark.parametrize("stop_after,reason", [(0, "cancelled"),
                                                    (31, "elapsed")])
     def test_poll_grace_clear_reason(self, clock, tmp_path, stop_after,

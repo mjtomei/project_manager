@@ -3587,8 +3587,10 @@ def _journal_qa_run(state: QALoopState, *, resumed: bool):
             outcome = "failed"
         else:
             outcome = "done"
+        # A planner still open here was abandoned with its run: cancelled
+        # with it (stop, PR merged mid-planning), otherwise failed.
         _ah.end_attempt(state.pr_id, state._history_planner,
-                        "cancelled" if state.stop_requested else "failed",
+                        "cancelled" if outcome == "cancelled" else "failed",
                         detail="planning did not finish")
         _ah.end_attempt(state.pr_id, state.history_attempt, outcome,
                         verdict=verdict,

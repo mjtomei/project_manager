@@ -563,10 +563,9 @@ class ScenarioObserver:
             idx = scenario.index
             clear_timer(self.pr_id, f"qa-backoff:{self.loop_id}:s{idx}",
                         "fired")
-            cur = self._open.get(idx)
-            if cur is None:
-                cur = {"attempt": self._start(scenario, "backoff"),
-                       "status": "backoff"}
+            if idx not in self._open:
+                self._start(scenario, "backoff")
+            cur = self._open[idx]
             if ok:
                 self._dead.discard(idx)
                 phase(self.pr_id, cur["attempt"], "agent", "relaunched",
