@@ -174,7 +174,7 @@ def test_genre_fixture_matches_pm_parser():
     assert parse_plan_prs(f["weak"]) == []
 
 
-def test_consistency_fixture_dependency_mismatch_is_in_prose_only():
+def test_consistency_fixture_blocks_disagree_with_prose():
     f = next(f for f in FIXTURES if f["id"] == "consistency_dependency_mismatch")
     strong_deps = {p["title"]: p["depends_on"] for p in parse_plan_prs(f["strong"])}
     weak_deps = {p["title"]: p["depends_on"] for p in parse_plan_prs(f["weak"])}

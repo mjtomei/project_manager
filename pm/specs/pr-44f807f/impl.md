@@ -125,3 +125,5 @@
   prefix is fidelity, repeating or restarting it is continuity (concision judges
   filler within the section only), so fixtures for one do not move the other.
 - No network or model calls in tests; reference URLs are not fetched in tests.
+- Internal-consistency fixtures contradict themselves only about choices the brief
+  leaves open; a contradiction of the brief would also move fidelity.
