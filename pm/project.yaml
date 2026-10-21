@@ -149,6 +149,11 @@ plans:
   file: plans/plan-b6aac3d.md
   status: draft
   parent: null
+- id: plan-doc-eval
+  name: Document evaluation and prompt improvement
+  file: plans/plan-doc-eval.md
+  status: draft
+  parent: plan-self-improve
 prs:
 - id: pr-001
   plan: plan-001
@@ -29453,6 +29458,282 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-21T00:20:58.983191+00:00'
   updated_at: '2026-10-21T00:20:58.983191+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9f111ef
+  plan: plan-doc-eval
+  title: Natural prompt suite and continuation cases
+  branch: pm/pr-9f111ef-natural-prompt-suite-and-continuation-cases
+  status: pending
+  depends_on: []
+  description: 'Build the case catalog for pm/plans/plan-doc-eval.md. Extend collection
+    in experiments/plan-writing/sources.json beyond the sparse document folders to
+    the context that states each document''s purpose: tracking issues and review threads
+    for Go, Rust and Kubernetes documents, PEP headers and process documents, KEP
+    metadata, RFC process files and templates, Oxide index entries, IETF working group
+    charters and milestones, Chromium index pages, and the study calls behind NASA
+    concept reports. Assemble a brief for every document with recoverable context,
+    recording provenance and never copying from the document body. Prepare continuation
+    cases for every document, cut at section boundaries with the original next section
+    withheld as reference, so documents with briefs carry both case types. Add the
+    recovered PM task conversations as natural-prompt cases with their existing plan
+    files attached as production baselines. Report coverage by source and case type;
+    documents with neither context nor usable section structure drop out and are listed.
+
+
+    Tests: Verify that no brief contains passages from its document body, that every
+    case records provenance and split group, that continuation prefixes end at section
+    boundaries and references are excluded from generator inputs, that PM cases link
+    to their conversation records, and that the coverage report accounts for every
+    collected document.
+
+
+    Files: experiments/plan-writing/sources.json, collector and case-preparation modules
+    under experiments/plan-writing/, case catalog and coverage report, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T00:15:38.677711+00:00'
+  updated_at: '2026-10-21T00:23:53.079868+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-bde2fbb
+    text: 'Bootstrap inputs: the existing collector and sources manifest live in experiments/plan-writing/.
+      The already collected corpus is local at /home/matt/claude-work/project-manager/experiments/plan-writing/data/
+      (18,963 records; 25 source collections); data/ is intentionally gitignored.
+      Reuse or copy that snapshot into the isolated workdir when available, or reconstruct
+      with collect.py; do not commit the downloaded corpus. pm/docs/plan-session-sources-2026-10-19.md
+      maps PM plans to local conversation records. Read those records to recover human
+      task context; the map alone is not a task brief or proof of assent. If sandboxed
+      sessions cannot access those local inputs, make a scoped input bundle available
+      rather than fabricating missing history.'
+    created_at: '2026-10-21T00:23:53Z'
+    last_edited: '2026-10-21T00:23:53Z'
+- id: pr-44f807f
+  plan: plan-doc-eval
+  title: Technical document quality rubric
+  branch: pm/pr-44f807f-technical-document-quality-rubric
+  status: pending
+  depends_on: []
+  description: 'Survey published rubrics and standards for technical, design and planning
+    documents and derive the general quality dimensions described in pm/plans/plan-doc-eval.md,
+    each with a definition, references, examples and detection guidance. Map padding,
+    premature implementation detail, poor progression, lost requirements and fidelity
+    onto those dimensions. Produce the rubric document, judge-instruction templates
+    for whole-document and continuation cases, and fixtures for each dimension. Mark
+    which dimensions have candidate automatic measures and which need calibration
+    evidence before use.
+
+
+    Tests: Check that every dimension cites at least one external source and carries
+    a definition, example and candidate measure, that fixtures exist for each dimension
+    including the four previously identified concerns, and that judge templates render
+    for both case types.
+
+
+    Files: rubric document and references under experiments/plan-writing/, judge templates,
+    fixtures, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T00:15:38.677739+00:00'
+  updated_at: '2026-10-21T00:15:38.677739+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8df6472
+  plan: plan-doc-eval
+  title: Document evaluation runner and evaluator calibration
+  branch: pm/pr-8df6472-document-evaluation-runner-and-evaluator-calibrati
+  status: pending
+  depends_on:
+  - pr-9f111ef
+  - pr-44f807f
+  description: 'Implement the catalog-to-draft-to-score workflow in pm/plans/plan-doc-eval.md
+    using the case catalog, the rubric and `claude-mixed` model access. Add project-separated
+    splits, blinded paired evaluation run as separate whole-document and continuation
+    tracks with the prefix shown to judges, frontier-model and JEV judge adapters
+    and comparable generation from the current planning prompts. Estimate the share
+    of weekly subscription limits taken by calibration runs of different sizes, pick
+    a size from that estimate under the twenty percent single-run ceiling, and run
+    it, including the style-continuity check for continuation cases and the separate
+    human-rated writing check; save a report identifying useful and unreliable measures
+    per rubric dimension. No manual corpus curation or code-task execution is required.
+
+
+    Tests: Verify split and duplicate isolation, identity masking, order reversal,
+    prefix delivery for continuation cases, and explicit handling of failed or malformed
+    evaluations. Use the rubric fixtures to check that results preserve distinct quality
+    dimensions. Run a real sample at the chosen size through the selected evaluators
+    and report observed agreement, uncertainty and the usage actually consumed against
+    the estimate; mocked responses alone do not establish evaluator quality.
+
+
+    Files: experiments/plan-writing/, pm_core/cli/plan.py and narrowly extracted planning
+    prompt builders, relevant tests, calibration artifacts and report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T00:15:38.677748+00:00'
+  updated_at: '2026-10-21T00:15:38.677748+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-09c4e8e
+  plan: plan-doc-eval
+  title: Automated planning prompt improvement campaign
+  branch: pm/pr-09c4e8e-automated-planning-prompt-improvement-campaign
+  status: pending
+  depends_on:
+  - pr-8df6472
+  description: 'Add the optimization loop described in pm/plans/plan-doc-eval.md and
+    run it against the production planning-prompt baseline on both case types. Design
+    and version the optimizer prompt that reads scores and judge rationales, separates
+    general guidance from case-specific fixes, names probable harms in the current
+    prompt and returns an edited prompt with reasoning. Maintain the two candidate
+    populations with the genetic scheme in the plan: one evaluated only on whole-document
+    cases, one evaluated on continuation cases as well, with cross-breeding allowed
+    and re-scoring on entry to the whole-document population; sparse cumulative evaluation
+    with stored scores reused, a few new case evaluations per candidate each generation
+    and fitness as the mean of all accumulated evaluations; selection with diversity,
+    mutation through optimizer edits, crossover between strong candidates, recorded
+    lineage. Report the best of each population on whole-document validation cases
+    as the measured benefit of continuations. Select using validation, and reserve
+    final cases and an independent evaluator for the chosen candidate. Include checkpoint/resume,
+    resource accounting and panel continuation or stop decisions. Estimate the share
+    of weekly subscription limits taken by campaigns of different population sizes
+    and generation counts, and pick the campaign shape from that estimate before running,
+    keeping every run under the twenty percent single-run ceiling. Report each campaign''s
+    regenerated PM plans against their original plan files on the rubric dimensions
+    and on fidelity to the recovered conversations. Produce a reproducible candidate
+    prompt diff and campaign evidence, or an explicit no-improvement result; the evaluator
+    stays fixed throughout.
+
+
+    Tests: Exercise resume without duplicate completed calls, plateau stopping, panel
+    failure and preservation of the baseline after rejected candidates. Verify the
+    optimizer cannot read final evaluation cases or edit the scoring configuration,
+    and that the two tracks are scored separately with final selection made on the
+    whole-document track. Verify that the whole-document population''s fitness never
+    includes continuation scores, including for candidates bred in from the other
+    population, and that the two-population comparison is reported. Check that every
+    candidate carries lineage and the optimizer reasoning that produced it, that selection
+    keeps the configured diversity, that no stored evaluation is repeated, that each
+    generation adds new case evaluations drawn from cases other than those an edit
+    was derived from, that fitness equals the mean of a candidate''s accumulated evaluations
+    with the count recorded, and that the chosen population size and generation count
+    end the run. Run an actual campaign and retain repeated baseline/candidate comparisons,
+    the original-plan comparison, failed attempts and usage consumed against the estimate.
+
+
+    Files: experiments/plan-writing/, reusable evaluation/optimization modules under
+    pm_core/ as needed, relevant tests, versioned campaign configuration and evidence'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T00:15:38.677755+00:00'
+  updated_at: '2026-10-21T00:16:14.380980+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-doc-eval-comparable-fitness
+    text: 'Evaluation review: candidates with sparse scores may have seen cases of
+      different difficulty. Preserve the required cumulative means and counts, keep
+      whole-document and continuation results separate, and compare promotion candidates
+      on shared whole-document validation cases. Report case coverage and uncertainty
+      so selection does not reward an easier sampled case set.'
+    created_at: '2026-10-21T00:16:14.380980+00:00'
+    last_edited: '2026-10-21T00:16:14.380980+00:00'
+  - id: note-doc-eval-population-transfer
+    text: 'Evaluation review: cross-breeding can transfer continuation-derived guidance
+      into the whole-document population even when its scores are whole-document-only.
+      Preserve that ancestry and report the two-population comparison with this qualification.
+      A causal claim about the benefit of continuation training needs a matched comparison
+      without that transfer; the difference between cross-bred population winners
+      alone does not establish it.'
+    created_at: '2026-10-21T00:16:14.380980+00:00'
+    last_edited: '2026-10-21T00:16:14.380980+00:00'
+- id: pr-eadd1b7
+  plan: plan-doc-eval
+  title: Iterative generation with in-loop quality feedback
+  branch: pm/pr-eadd1b7-iterative-generation-with-in-loop-quality-feedback
+  status: pending
+  depends_on:
+  - pr-8df6472
+  description: 'Implement the iterative generator described in pm/plans/plan-doc-eval.md:
+    draft, score with an in-loop critic, locate passages weak on particular rubric
+    dimensions, revise, repeat for a fixed round count. Run it on development and
+    validation cases with JEV as critic and with a frontier model as critic, against
+    one-shot generation from the same prompt. Score every round with the withheld
+    evaluation configuration and report quality by round and by critic, divergence
+    between critic and independent scores as the overfitting signal, and usage per
+    variant. Estimate the share of weekly subscription limits for different round
+    counts and case counts first, and keep every run under the twenty percent single-run
+    ceiling. Deliver a recommendation on whether iteration beats one-shot generation
+    and at how many rounds.
+
+
+    Tests: Verify that the critic never sees the independent evaluation configuration
+    or final cases, that per-round drafts and scores are retained, that round count
+    and critic choice are configurable, and that one-shot and iterative outputs are
+    produced from the same prompt and cases. Run a real sample and retain per-round
+    independent scores alongside critic scores, with usage consumed against the estimate.
+
+
+    Files: experiments/plan-writing/, iterative generation and critic modules under
+    pm_core/ as needed, relevant tests, comparison report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T00:15:38.677763+00:00'
+  updated_at: '2026-10-21T00:15:38.677763+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-86c2188
+  plan: plan-doc-eval
+  title: Adopt measured improvements in PM planning prompts
+  branch: pm/pr-86c2188-adopt-measured-improvements-in-pm-planning-prompts
+  status: pending
+  depends_on:
+  - pr-09c4e8e
+  - pr-eadd1b7
+  description: 'Apply campaign-supported improvements to the existing plan-development
+    and/or PR-breakdown prompts, following pm/plans/plan-doc-eval.md. Where iterative
+    generation beats one-shot generation on the independent measure, adopt it through
+    the same entry point with its round count and critic fixed. Validate the exact
+    rendered production prompt after integration, with held-out document comparisons
+    and fresh generation through normal PM commands in an isolated project. Carry
+    forward scope, user constraints, required fields and valid dependencies. Include
+    in the adoption report the comparison of regenerated plans against their originals.
+    Deliver the production prompt change and its evidence through the existing review
+    and acceptance flow; a standalone optimizer or demonstration rewrite does not
+    complete this PR.
+
+
+    Tests: Check that normal PM commands render the evaluated prompt version. Generate
+    plans from held-out task conversations, parse their PR entries and validate their
+    dependency graph. Compare fidelity and document quality with the unchanged baseline
+    and with the original plan files using the reserved evaluators; retain examples
+    and failures. Run affected prompt/parser tests and verify existing project state
+    is untouched by the experiment.
+
+
+    Files: pm_core/cli/plan.py, extracted planning prompt builders, tests/test_plan_parser.py
+    and affected planning tests, campaign evidence and adoption report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T00:15:38.677768+00:00'
+  updated_at: '2026-10-21T00:15:38.677768+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
