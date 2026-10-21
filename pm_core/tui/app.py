@@ -644,6 +644,8 @@ class ProjectManagerApp(App):
             wq.flush_sync()
         old_statuses = {p.get("id"): p.get("status")
                         for p in (self._data or {}).get("prs") or []}
+        old_deps = {p.get("id"): list(p.get("depends_on") or [])
+                    for p in (self._data or {}).get("prs") or []}
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
@@ -654,10 +656,11 @@ class ProjectManagerApp(App):
                        self._root, len(self._data.get("prs") or []))
             self._update_display()
             # A merge done outside the auto-merge path (``g``, CLI, another
-            # session) is only seen here; let the scheduler prune completed
-            # targets and start newly-unblocked dependents.
+            # session) or a ``pm pr edit --depends-on`` is only seen here;
+            # let the scheduler prune completed targets and start
+            # newly-unblocked or newly-in-scope PRs.
             from pm_core.tui import auto_start as _auto_start
-            _auto_start.on_state_loaded(self, old_statuses)
+            _auto_start.on_state_loaded(self, old_statuses, old_deps)
         except FileNotFoundError:
             _log.warning("no project.yaml found")
             self._root = None

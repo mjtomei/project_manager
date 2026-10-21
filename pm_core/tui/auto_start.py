@@ -703,13 +703,17 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
         app.log_message(f"Auto-sequence: {result['message']}")
 
 
-def on_state_loaded(app, old_statuses: dict) -> None:
+def on_state_loaded(app, old_statuses: dict,
+                    old_deps: dict | None = None) -> None:
     """Kick a scheduler pass when a reload shows an in-scope PR newly
-    merged/closed (manual ``g``, CLI merge, another session).
+    merged/closed (manual ``g``, CLI merge, another session), or an
+    in-scope PR's ``depends_on`` changed (``pm pr edit --depends-on``).
 
     The auto-merge path and sync already call ``check_and_start``; a merge
     seen only through a state reload would otherwise leave a completed
     target in the set and its dependents unstarted until some other event.
+    Likewise a graph edit that pulls a ready prerequisite into a target's
+    closure would leave it "ready; starts on next scheduler pass" forever.
     """
     if not old_statuses or not is_enabled(app):
         return
@@ -719,12 +723,18 @@ def on_state_loaded(app, old_statuses: dict) -> None:
              if p.get("id") in old_statuses
              and p.get("status") in terminal
              and old_statuses.get(p["id"]) not in terminal]
-    if not newly:
+    regraphed = [] if old_deps is None else [
+        p["id"] for p in prs
+        if p.get("id") in old_deps
+        and list(p.get("depends_on") or []) != old_deps[p["id"]]]
+    if not newly and not regraphed:
         return
     managed = managed_ids(app, prs)
-    if managed is not None and not any(i in managed for i in newly):
+    if managed is not None and not any(i in managed
+                                       for i in newly + regraphed):
         return
-    _log.info("auto_start: reload saw %s merged/closed, scheduling pass", newly)
+    _log.info("auto_start: reload saw %s merged/closed, %s deps changed, "
+              "scheduling pass", newly, regraphed)
     app.run_worker(check_and_start(app))
 
 
