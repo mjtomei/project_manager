@@ -790,3 +790,15 @@ def test_partial_build_and_check_leave_committed_report(catalog, monkeypatch, ca
         cases.main()
     assert report.read_text() == before
     assert "partial catalog" in capsys.readouterr().out
+    # coverage of a partial catalog is checked against the built sources only
+    assert not any("coverage" in k for k in cases.check(data_dir=catalog["data"])["failure_counts"])
+
+
+def test_check_reports_brief_item_missing_from_context(catalog):
+    data = catalog["data"]
+    case = next(c for c in catalog["cases"] if c["case_type"] == "whole_document" and c["source"] == "goprop")
+    ctx = data / "context" / "goprop.jsonl"
+    used = {p["context_id"] for p in case["provenance"]["brief_items"]}
+    ctx.write_text("".join(l + "\n" for l in ctx.read_text().splitlines() if json.loads(l)["id"] not in used))
+    cases._load_context_items.cache_clear()
+    assert cases.check(data_dir=data)["failure_counts"] == {"brief_item_missing_from_context": 1}

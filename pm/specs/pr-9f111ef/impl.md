@@ -109,7 +109,9 @@ exactly once.
 - Briefs and generator inputs are built only through one function per case type
   (`generator_input(case)`), which never reads reference spans; tests target it.
   It refuses stale inputs (document text or attachment sha256 changed since the
-  build), and `--check` reports those as `stale_generator_input`.
+  build), and `--check` reports those as `stale_generator_input`; brief items
+  missing from a rebuilt context store are reported as
+  `brief_item_missing_from_context`.
 - Leak filter: normalized lowercase word tokens; any context sentence sharing an
   8-gram with the body is dropped. Body = document text minus a recognised
   metadata header (PEP field list, Rust/Cockroach `- Field:` list, Go
@@ -194,8 +196,10 @@ exactly once.
   reference; the instruction only asks for the next section.
 - *Brief assembly by LLM?* No. This PR does not run models (no usage estimate
   is required by its description); briefs are deterministic assemblies.
-- *PM excerpt window.* From the session start (or the previous plan write event
-  in the same session) to the event line; human turns are user text messages
+- *PM excerpt window.* From the session start (or just after the previous
+  write to a different plan in the same session; earlier writes to the same
+  plan stay in the window) to the event line, unless a reviewed window in
+  `pm_case_windows.json` sets the start; human turns are user text messages
   that are not tool results, meta/command wrappers, compaction summaries or pm
   injected prompts. Each PM case records the window, counts, and
   `needs_review: true` because the map is not proof of assent.

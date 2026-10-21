@@ -684,6 +684,9 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                 failures["brief_without_item_provenance"].append(cid)
             doc_date = (dates.get(doc["id"]) or {}).get("date")
             used = [p["context_id"] for p in case["provenance"]["brief_items"]] + [a["context_id"] for a in case["inputs"]["attachments"]]
+            if any(i not in items for i in used):
+                # rebuilt context store: the timing rule can no longer be checked against these items
+                failures["brief_item_missing_from_context"].append(cid)
             if any(timing_exclusion(items[i], doc_date) for i in used if i in items):
                 failures["brief_uses_context_written_after_document"].append(cid)
             for a in case["inputs"]["attachments"]:
@@ -744,14 +747,16 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
             if baseline and baseline.strip() in _input_text(generator_input(case, data_dir)):
                 failures["baseline_in_generator_input"].append(cid)
     covered = coverage["documents"]
-    missing = sorted(set(docs) - set(covered))
-    extra = sorted(set(covered) - set(docs))
+    partial = coverage.get("partial_sources")
+    expected = {d for d, row in docs.items() if not partial or row["source"] in partial}
+    missing = sorted(expected - set(covered))
+    extra = sorted(set(covered) - expected)
     if missing:
         failures["documents_missing_from_coverage"] = missing
     if extra:
         failures["unknown_documents_in_coverage"] = extra
-    if coverage["totals"].get("documents") != len(docs):
-        failures["coverage_total_mismatch"].append(f"{coverage['totals'].get('documents')} != {len(docs)}")
+    if coverage["totals"].get("documents") != len(expected):
+        failures["coverage_total_mismatch"].append(f"{coverage['totals'].get('documents')} != {len(expected)}")
     return {"cases_checked": len(cases), "by_type": dict(Counter(c["case_type"] for c in cases)),
             "failures": {k: (v[:20] + ([f"... {len(v) - 20} more"] if len(v) > 20 else [])) for k, v in failures.items()},
             "failure_counts": {k: len(v) for k, v in failures.items()}}
