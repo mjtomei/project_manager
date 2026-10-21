@@ -663,10 +663,13 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
             text = (data_dir / doc["text_path"]).read_text(encoding="utf-8", errors="replace")
             if doc["id"] not in heading_cache:  # one entry: a document's cases are consecutive in the catalog
                 raw = (data_dir / doc["raw_path"]).read_bytes()
-                heading_cache = {doc["id"]: sections.headings(doc, text, raw)[1]}
-            found = heading_cache[doc["id"]]
+                heading_cache = {doc["id"]: sections.headings(doc, text, raw)}
+            method, found = heading_cache[doc["id"]]
             end = case["inputs"]["prefix_end"]
-            if not sections.is_boundary(found, end) or case["reference"]["start"] != end:
+            if method != case["provenance"]["boundary_method"]:
+                # e.g. built with the HTML replay, checked without bs4: offsets differ, so boundaries cannot be compared
+                failures["boundary_method_differs_from_build"].append(f"{cid} ({case['provenance']['boundary_method']} -> {method})")
+            elif not sections.is_boundary(found, end) or case["reference"]["start"] != end:
                 failures["prefix_not_at_section_boundary"].append(cid)
             gen = generator_input(case, data_dir)
             reference = text[case["reference"]["start"]: case["reference"]["end"]]
@@ -709,6 +712,9 @@ def main():
     parser.add_argument("--check", action="store_true", help="validate data/cases/catalog.jsonl")
     parser.add_argument("--sources", nargs="*", help="limit the build to these sources (for development)")
     args = parser.parse_args()
+    if not args.check and not sections.html_replay_available():
+        parser.error("building needs bs4: without collect.page_text, HTML heading offsets fall back to a text search "
+                     "that can land on inline text")
     if args.check:
         result = check()
         coverage = json.loads((CASES / "coverage.json").read_text())

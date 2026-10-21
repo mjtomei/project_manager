@@ -400,7 +400,8 @@ def test_html_headings_match_flattened_text():
     raw = (b"<html><body><main><h1>Design</h1><p>Intro words here.</p><h2>Goals <a href='#'>link</a></h2>"
            b"<p>Goal text.</p><h2>Non-goals</h2><p>More.</p></main></body></html>")
     text = collect.page_text(raw)[1]
-    found = sections.html_headings(text, raw)
+    method, found = sections.html_headings(text, raw)
+    assert method == "html"
     assert [h.title for h in found] == ["Design", "Goals link", "Non-goals"]
     for h in found:
         assert h.start == 0 or text[h.start - 1] == "\n"
@@ -430,6 +431,12 @@ def test_pm_default_window_and_roles(tmp_path):
     roles = [t["role"] for t in window["turns"]]
     assert roles[0] == "injected" and roles.count("human") == 3 and "assistant" in roles
     assert window["event_tools"] == ["Write"] and window["written_content"] == "# Draft plan\n"
+
+
+def test_pm_plan_targets_ignore_string_content():
+    assert pm_cases._plan_targets({"type": "user", "message": {"content": "edit pm/plans/plan-x.md"}}) == []
+    write = {"type": "tool_use", "name": "Write", "input": {"file_path": "/r/pm/plans/plan-x.md", "content": "x"}}
+    assert pm_cases._plan_targets({"message": {"content": ["text", write]}}) == [("Write", "plan-x.md", write["input"])]
 
 
 def test_pm_report_lists_unrecovered_plans(catalog):
@@ -477,6 +484,29 @@ def test_check_detects_violations(catalog):
     for key in ("brief_quotes_document_body", "prefix_not_at_section_boundary", "missing_split_group",
                 "documents_missing_from_coverage"):
         assert counts.get(key), key
+
+
+def test_check_reports_boundary_method_change(catalog):
+    """A catalog checked with a different heading method (HTML replay vs search) is reported as such."""
+    data = catalog["data"]
+    path = data / "cases" / "catalog.jsonl"
+    rows = [json.loads(l) for l in path.read_text().splitlines()]
+    changed = next(r for r in rows if r["case_type"] == "continuation")
+    changed["provenance"]["boundary_method"] = "html"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    result = cases.check(data_dir=data)
+    assert result["failure_counts"] == {"boundary_method_differs_from_build": 1}, result["failures"]
+    assert result["failures"]["boundary_method_differs_from_build"][0].startswith(changed["case_id"])
+
+
+def test_html_search_fallback_is_labelled(monkeypatch):
+    """Without the replay the search lands on inline text that repeats a heading, so it carries its own method name."""
+    monkeypatch.setattr(sections, "_page_text", lambda: None)
+    raw = b"<main><p>Intro words: <em>Focus Day</em>.</p><h2>Focus Day</h2><p>Body.</p></main>"
+    text = "Intro words:\nFocus Day\n.\nFocus Day\nBody."
+    method, found = sections.headings({"identity": "https://example.org/x", "revision": None}, text, raw)
+    assert method == "html-search" and not sections.html_replay_available()
+    assert found[0].start == text.index("Focus Day")  # the inline occurrence, not the heading
 
 
 REAL = PW / "data" / "cases" / "catalog.jsonl"

@@ -73,9 +73,9 @@ def _text_blocks(content):
 def _plan_targets(obj):
     """Plan files touched by tool calls in an assistant record."""
     out = []
-    msg = obj.get("message") or {}
-    for block in msg.get("content") or [] if isinstance(msg.get("content"), list) else []:
-        if block.get("type") != "tool_use":
+    content = (obj.get("message") or {}).get("content")
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
         inp = block.get("input") or {}
         path = inp.get("file_path") or inp.get("notebook_path") or ""

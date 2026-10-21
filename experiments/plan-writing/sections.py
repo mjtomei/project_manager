@@ -10,8 +10,12 @@ method depends on how collect.py produced the text:
 - numbered: IETF RFC plain text and pdftotext output, using numbered headings
   (`3.2.`, `Appendix B.1`) that must continue a plausible numbering sequence,
   rejecting table-of-contents lines, plus known unnumbered RFC headings;
-- html: headings recovered from the retained raw HTML and located in the
-  text, which collect.py flattened with get_text("\\n").
+- html: headings recovered from the retained raw HTML by replaying
+  collect.page_text (needs bs4) with markers around each heading;
+- html-search: fallback when the replay is unavailable or does not reproduce
+  the text: heading texts searched for in the flattened text. It can land on
+  an earlier inline occurrence of the same words, so catalogs are built with
+  the replay (cases.py refuses to build without it).
 """
 
 import re
@@ -189,12 +193,24 @@ MARK, MARK_END = "\ue000", "\ue001"
 MARKERS = re.compile(MARK + r"H(\d)" + MARK + r"\s*|\n?" + MARK_END)
 
 
-def html_headings(text, raw):
-    """Exact offsets by replaying collect.page_text with markers around each heading."""
+def _page_text():
+    """collect.page_text, or None when bs4 (which collect.py needs) is missing."""
     try:
         from collect import page_text
     except ImportError:
-        return html_headings_by_search(text, raw.decode("utf-8", "replace"))
+        return None
+    return page_text
+
+
+def html_replay_available():
+    return _page_text() is not None
+
+
+def html_headings(text, raw):
+    """(method, headings): exact offsets by replaying collect.page_text with markers around each heading."""
+    page_text = _page_text()
+    if page_text is None:
+        return "html-search", html_headings_by_search(text, raw.decode("utf-8", "replace"))
     marked = re.sub(rb"(<h([1-6])\b[^>]*>)", lambda m: m.group(1) + (MARK + "H" + m.group(2).decode() + MARK).encode(), raw, flags=re.I)
     marked = re.sub(rb"(</h[1-6]\s*>)", lambda m: MARK_END.encode() + m.group(1), marked, flags=re.I)
     replay = page_text(marked)[1]
@@ -210,9 +226,9 @@ def html_headings(text, raw):
     pieces.append(replay[last:])
     cleaned = "".join(pieces)
     if cleaned != text:
-        return html_headings_by_search(text, raw.decode("utf-8", "replace"))
-    return [Heading(a, b, lvl, " ".join(text[a:b].split())) for a, lvl, b in sorted(out)
-            if text[a:b].strip() and (a == 0 or text[a - 1] == "\n")]
+        return "html-search", html_headings_by_search(text, raw.decode("utf-8", "replace"))
+    return "html", [Heading(a, b, lvl, " ".join(text[a:b].split())) for a, lvl, b in sorted(out)
+                    if text[a:b].strip() and (a == 0 or text[a - 1] == "\n")]
 
 
 def html_headings_by_search(text, raw_html):
@@ -261,7 +277,7 @@ def headings(doc, text, raw):
         # RFC headings start in column 0; indented numbered lines are TOC entries or lists.
         found = numbered_headings(text, unnumbered=rfc, max_indent=0 if rfc else 8)
     else:
-        found = html_headings(text, raw)
+        method, found = html_headings(text, raw)
     return method, sorted(found, key=lambda h: h.start)
 
 

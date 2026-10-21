@@ -127,8 +127,12 @@ exactly once.
 - Catalog and briefs live under gitignored `data/`; only the code, manifest,
   tests and coverage summary are committed. PM conversation excerpts are private
   and stay in `data/pm/`.
-- Case modules are stdlib-only (HTML headings via `html.parser`) so tests run
-  without bs4; `context.py` may use bs4 like `collect.py`.
+- Case modules import without bs4 so tests run without it; `context.py` may
+  use bs4 like `collect.py`. Exact HTML heading offsets come from replaying
+  `collect.page_text` (bs4), so building the real catalog requires bs4; the
+  `html.parser` text-search fallback (`html-search`) can land on inline text
+  and is recorded as its own boundary method. `cases.py --check` reports a
+  method that differs from the build instead of false boundary failures.
 
 ## 3. Ambiguities and resolutions
 
