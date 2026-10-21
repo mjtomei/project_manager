@@ -971,6 +971,7 @@ def _view_actions_for_status(status: str) -> list[tuple[str, str]]:
     return [(a.key, f"{_VIEW_PREFIX}{a.key} {{pr_id}}")
             for a in action_catalog.view_actions(status)]
 
+
 # Map status to the action label representing the current phase.
 _STATUS_PHASE: dict[str, str] = {
     "in_progress": "start",

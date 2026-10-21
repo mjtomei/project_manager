@@ -612,6 +612,19 @@ class TestReconciliation:
         assert kid["id"] == c and kid["outcome"] == "cancelled"
         assert kid["elapsed_s"] == 40
 
+    def test_open_child_of_superseded_parent(self, clock):
+        p = ah.start_attempt(PR, "review-loop", source="runtime",
+                             loop_id="L1")
+        # Journaled without a parent id: linked to the loop by loop_id.
+        c = ah.start_attempt(PR, "review-loop", loop_id="L1", iteration=1)
+        clock.advance(30)
+        ah.end_attempt(PR, p, "superseded")
+        m = hq.build_history(PR, now=clock.t + 100, live=False)
+        (kid,) = m["attempts"][0]["children"]
+        assert kid["id"] == c and kid["outcome"] == "superseded"
+        assert kid["elapsed_s"] == 30 and not kid.get("open")
+        assert m["current"] == []
+
     def test_derived_holds(self, clock):
         pr = {"id": PR, "status": "in_progress",
               "spec_pending": {"phase": "impl",

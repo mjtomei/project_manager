@@ -203,16 +203,18 @@ def _reconcile_attempts(attempts: dict[str, dict], t_now: float) -> None:
                            "end time unknown")
             a["inferred"] = "owner-exited"
     # Close children of ended parents at the parent's end (start order, so
-    # a closed parent propagates down the tree).
+    # a closed parent propagates down the tree).  The linked parent also
+    # covers iterations attached by loop_id in _link_children.
     for a in sorted(attempts.values(), key=lambda a: a["started_t"]):
-        parent = attempts.get(a.get("parent") or "")
+        parent = a.get("_parent_obj")
         if not parent or a["ended_t"] is not None:
             continue
         if a.get("inferred") == "owner-exited":
             continue
         if parent["ended_t"] is not None:
             a["ended_t"] = max(parent["ended_t"], a["started_t"])
-            a["outcome"] = ("cancelled" if parent["outcome"] == "cancelled"
+            a["outcome"] = (parent["outcome"]
+                            if parent["outcome"] in ("cancelled", "superseded")
                             else "interrupted")
             a["detail"] = "parent run ended first"
             a["inferred"] = "parent-ended"
