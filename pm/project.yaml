@@ -12605,11 +12605,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T21:55:42.232512+00:00'
-  updated_at: '2026-05-01T21:55:42.232512+00:00'
+  updated_at: '2026-10-21T17:00:56.885557+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-12b594c
+    text: 'QA pr-3ae2fc3 S9 (2026-10-21): variant inside one TUI. Auto-start launches
+      P (dep of the only target T), then `pm autostart remove T` before the idle tracker
+      registers P (~4 s), then re-add T. _disable drops the run id, so re-enable creates
+      a new autostart-* run dir with no impl-P.jsonl symlink (pm pr start --background
+      no-ops on the live window). P is never tracked: status says "implementing" forever
+      and P never reaches review (capture in /pm-captures/scenarios/9/offon-orphan
+      on pr-3ae2fc3). Fix idea: on register ValueError, fall back to claude_launcher.pane_transcript_path(pane,
+      workdir), as _watch_untracked_trust already does. The tracked same-run case
+      (remove/re-add while another target keeps auto-start ON) was fixed in 76bc4ba3.'
+    created_at: '2026-10-21T17:00:56Z'
+    last_edited: '2026-10-21T17:00:56Z'
 - id: pr-10fd776
   plan: plan-ambient
   title: TTS audio surface — pm tts (folded in from plan-ff4f1a7)
@@ -29847,7 +29859,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T16:53:46.656132+00:00'
+  updated_at: '2026-10-21T17:00:57.689795+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29926,6 +29938,17 @@ prs:
       right after approving, so its output only shows up in a recorder cast.'
     created_at: '2026-10-21T16:53:46Z'
     last_edited: '2026-10-21T16:53:46Z'
+  - id: note-50e8204
+    text: 'QA S9 (76bc4ba3, incidental, pre-existing on master): _poll_impl_idle consumed
+      the one-shot idle edge for out-of-scope PRs, so a prerequisite whose impl went
+      idle while its target was removed sat at "impl idle; review transition pending"
+      forever after the re-add. The edge is now consumed only for in-scope PRs; regression
+      test is in tests/test_autostart_retarget_regression.py. The OFF→ON (new run
+      dir) variant is noted on pr-41be77d. All six S9 stories held. tests/test_local_merge_sync.py
+      fails under the container ~/.local/bin/git proxy and passes with /usr/bin/git
+      first on PATH.'
+    created_at: '2026-10-21T17:00:57Z'
+    last_edited: '2026-10-21T17:00:57Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
