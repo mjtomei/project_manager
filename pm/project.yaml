@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8c1dd15
+  active_pr: pr-2935ce2
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -29847,7 +29847,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T15:27:53.217292+00:00'
+  updated_at: '2026-10-21T15:40:23.237208+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29868,3 +29868,36 @@ prs:
       a restart.'
     created_at: '2026-10-21T15:27:53Z'
     last_edited: '2026-10-21T15:27:53Z'
+  - id: note-d18cf0c
+    text: 'QA S2: fixed e0ddd6b6 (approved local spec was shadowed by the fresh clone
+      committed copy on pm pr start → seed_workdir_specs) and 8260d774 (pm pr spec
+      --regenerate never refreshed the TUI, so an in_progress review-specs PR was
+      not re-held until manual reload). Filed pr-2935ce2: notify send_keys lost when
+      the agent pane is in copy/view mode.'
+    created_at: '2026-10-21T15:40:23Z'
+    last_edited: '2026-10-21T15:40:23Z'
+- id: pr-2935ce2
+  plan: bugs
+  title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
+    mode'
+  branch: pm/pr-2935ce2-bug-tmux-send-keys-messages-are-swallowed-when-the
+  status: pending
+  depends_on: []
+  description: 'pm_core/tmux.py send_keys (and every caller: spec_gen.notify_spec_approved,
+    qa_loop follow-ups, verdict reminders) sends literal text + Enter with no #{pane_in_mode}
+    check. If the agent pane is in copy-mode (user scrolled back) or view-mode (tmux
+    shows run-shell output there, e.g. a failed prefix+P popup), the keystrokes are
+    run as copy-mode commands and the message never reaches Claude, while the sender
+    still reports success (pm pr spec-approve prints "Notified the waiting session.").
+    Repro (pr-3ae2fc3 QA S2): pane %6 in view-mode → pm pr spec-approve <id> → pane
+    shows nothing; tmux display -p -t %6 "#{pane_in_mode}" = 1. Fix idea: send-keys
+    -X cancel when pane_in_mode=1 before sending.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T15:40:17.074279+00:00'
+  updated_at: '2026-10-21T15:40:17.074279+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
