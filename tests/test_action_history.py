@@ -455,6 +455,7 @@ class TestScenarioObserver:
         assert sc["wall_s"] <= run["elapsed_s"] < sc["sum_s"]
         text = "\n".join(hq.render_text(model))
         assert "(not wall-clock)" in text
+        assert max(len(line) for line in text.splitlines()) <= 80
 
     def test_scenario_outcomes_retry_and_queue_wait(self, clock):
         self._run(clock)
@@ -481,6 +482,31 @@ class TestScenarioObserver:
         (t,) = m["timers"]["active"]
         assert t["remaining_s"] == 25 and t["effect"] == "fires"
         assert "relaunch backoff" in m["waiting_for"]
+
+    @pytest.mark.parametrize("stop_after,reason", [(0, "cancelled"),
+                                                   (31, "elapsed")])
+    def test_poll_grace_clear_reason(self, clock, tmp_path, stop_after,
+                                     reason):
+        """The shared QA grace is cleared as ``elapsed`` only once it ran
+        out; a stop inside the grace window reads ``cancelled``."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=1, title="T", focus="t")
+        sc.window_name = "qa-s1"
+        state = qa_loop.QALoopState(pr_id=PR)
+        state.loop_id = "L1"
+        state.scenarios = [sc]
+
+        def _sleep(_s):
+            clock.advance(stop_after)
+            state.stop_requested = True
+
+        with patch.object(qa_loop.time, "sleep", side_effect=_sleep), \
+                patch.object(qa_loop, "_write_status_file"):
+            qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/w",
+                                        tmp_path / "s.json", lambda *a: None)
+        (row,) = [r for r in hq.build_history(PR, now=clock.t, live=False)
+                  ["timers"]["recent"] if r["timer"] == "qa-grace:L1"]
+        assert row["resolution"] == reason
 
 
 # ---------------------------------------------------------------------------
@@ -596,6 +622,29 @@ class TestReconciliation:
         ah.phase(PR, a, "verdict")
         m = hq.build_history(PR, now=clock.t)
         assert m["current"][0]["state"] == "processing_verdict"
+
+    def test_badge_and_waiting_for_headline_the_human_blocked_row(
+            self, clock, monkeypatch):
+        """A permission prompt on an older scenario outranks a newer
+        scenario that is merely working, in both the badge and summary."""
+        run = ah.start_attempt(PR, "qa", label="QA run")
+        s1 = ah.start_attempt(PR, "qa", parent=run, scenario=1,
+                              session_id="sess-1")
+        ah.phase(PR, s1, "agent")
+        clock.advance(5)
+        s2 = ah.start_attempt(PR, "qa", parent=run, scenario=2,
+                              session_id="sess-2")
+        ah.phase(PR, s2, "agent")
+        clock.advance(5)
+        from pm_core import hook_events
+        events = {"sess-1": {"event_type": "permission_prompt",
+                             "timestamp": clock.t}}
+        monkeypatch.setattr(hook_events, "read_event",
+                            lambda sid: events.get(sid))
+        m = hq.build_history(PR, now=clock.t)
+        assert m["waiting_for"].startswith("qa s1: agent waiting on a "
+                                           "permission prompt")
+        assert hq.summary_badge(m) == " [qa s1: permission prompt]"
 
 
 # ---------------------------------------------------------------------------

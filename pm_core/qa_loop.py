@@ -2655,8 +2655,12 @@ def _poll_tmux_verdicts(
     observer = _ah.ScenarioObserver(state.pr_id, state.history_attempt or None,
                                     state.loop_id)
     _grace_timer = f"qa-grace:{state.loop_id}"
+    # Journal clock (not monotonic) so the clear reason costs no extra
+    # monotonic reads and agrees with controlled-clock tests.
+    _grace_due = [0.0]
 
     def _arm_grace() -> None:
+        _grace_due[0] = _ah.now() + _VERDICT_GRACE_PERIOD
         _ah.arm_timer(state.pr_id, _grace_timer,
                       purpose="QA scenario verdict grace (all scenarios)",
                       owner_action="qa",
@@ -3096,7 +3100,8 @@ def _poll_tmux_verdicts(
 
     _observe()
     observer.finish(stopped=state.stop_requested)
-    _ah.clear_timer(state.pr_id, _grace_timer, "elapsed")
+    _ah.clear_timer(state.pr_id, _grace_timer,
+                    "elapsed" if _ah.now() >= _grace_due[0] else "cancelled")
 
 
 # ---------------------------------------------------------------------------

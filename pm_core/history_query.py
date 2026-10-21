@@ -534,23 +534,33 @@ def _derived_holds(pr_id: str, pr: dict, runtime: dict) -> list[dict]:
     return holds
 
 
+_NEEDS_HUMAN_STATES = ("waiting_human", "blocked_on_permission")
+
+
+def _focus_row(current: list[dict]) -> dict | None:
+    """The activity row to headline: one needing a human, else the newest."""
+    for row in current:
+        if row["state"] in _NEEDS_HUMAN_STATES:
+            return row
+    return current[-1] if current else None
+
+
 def _waiting_for(holds, timer_rows, current, attempts) -> str:
     if holds:
         return f"human: {holds[0]['purpose']}"
     for row in timer_rows["overdue"]:
         return (f"{row['purpose']} overdue by {_dur(row['overdue_s'])} "
                 f"(owner has not acted)")
-    for row in current:
-        if row["state"] in ("waiting_human", "blocked_on_permission"):
-            return f"{row['name']}: {row['text']}"
+    row = _focus_row(current)
+    if row is not None and row["state"] in _NEEDS_HUMAN_STATES:
+        return f"{row['name']}: {row['text']}"
     fires = [r for r in timer_rows["active"]
              if r.get("effect") == "fires" and r.get("due_t")]
     if fires:
         r = fires[0]
         return (f"{r['purpose']} — {_dur(r['remaining_s'])} left "
                 f"→ {r.get('expected') or 'owner acts'}")
-    if current:
-        row = current[-1]
+    if row is not None:
         return f"{row['name']}: {row['text']}"
     if not attempts:
         return "nothing recorded"
@@ -801,7 +811,8 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     if sc and sc["sum_s"] >= 1:
         out.append(f"{sub}scenarios: {sc['count']} ({sc['attempts']} attempts), "
                    f"wall {_dur(sc['wall_s'])}, up to {sc['max_concurrency']} "
-                   f"at once; summed scenario time {_dur(sc['sum_s'])} "
+                   f"at once")
+        out.append(f"{sub}  summed scenario time {_dur(sc['sum_s'])} "
                    f"(not wall-clock)")
     for c in a.get("children", []):
         out.extend(_render_attempt(c, t_now, depth + 1))
@@ -828,7 +839,7 @@ def summary_badge(model: dict, width: int = 36) -> str:
     elif model["timers"].get("overdue"):
         text = "overdue: " + (model["timers"]["overdue"][0].get("purpose") or "")
     elif model.get("current"):
-        row = model["current"][-1]
+        row = _focus_row(model["current"])
         text = f"{row['name']}: {_BADGE_STATES.get(row['state'], row['state'])}"
         grace = [t for t in model["timers"]["active"]
                  if t.get("owner_attempt") == row["attempt"]

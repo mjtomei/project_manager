@@ -177,9 +177,12 @@ The model contains:
     phases; exec = the rest), `open` flag, and `status` for open attempts
     (`running`, or `interrupted (owner exited)` when the owner process is
     gone).
-  - For parents with concurrent children: `children_wall_s` (union of child
-    intervals), `children_sum_s` (explicitly labelled sum) and
-    `max_concurrency` — the parent's own elapsed time is never the sum.
+  - For parents with two or more scenario children: a `scenarios` dict
+    with `count` (distinct scenarios), `attempts` (incl. retries),
+    `wall_s` (union of child execution intervals — a scenario's leading
+    `queued` wait is excluded), `sum_s` (explicitly labelled "not
+    wall-clock") and `max_concurrency` — the parent's own elapsed time is
+    never the sum.
   - `timers`: `active` (owner alive, not cleared, due in future or
     indefinite) with `armed_at`, `due_at`, `remaining_s` (null for holds),
     `expected`; `overdue` (`fires` timers past due, owner alive); and
@@ -193,7 +196,11 @@ The model contains:
     hook event → distinguishes "agent working", "agent turn finished at T
     (waiting for verdict / in grace)", "processing verdict", "launching
     next iteration", "waiting on human".
-  - `waiting_for`: one-line summary (what PM is waiting for now).
+  - `waiting_for`: one-line summary (what PM is waiting for now). Priority:
+    holds, overdue `fires` timers, an activity row needing a human
+    (permission prompt / INPUT_REQUIRED wait), the soonest `fires` timer,
+    then the newest activity row. The pane badge uses the same
+    human-first activity row.
   - `milestones`: project.yaml timestamps (`created_at`, `started_at`,
     `reviewed_at`, `signed_off_at`, `merged_at`) as pre-journal evidence.
   - `missing`: honest notes (no journal file; journal starts after
