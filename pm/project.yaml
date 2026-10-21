@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-21T19:52:47.545623+00:00'
+  updated_at: '2026-10-21T21:39:29.556360+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29584,6 +29584,16 @@ prs:
       python lacks bs4).'
     created_at: '2026-10-21T19:52:47Z'
     last_edited: '2026-10-21T19:52:47Z'
+  - id: note-8fb10e4
+    text: 'Review loop 5956 i10 (d85e253a), user decision on PM inputs: PM excerpts
+      now carry source_file turns (the session''s own Read snapshots of files named
+      by human/pm prompt, plus earlier plan versions) with path/sha256/record line/read
+      time/line range; gaps listed as provenance.source_gaps; task_kind new/edit/reformat
+      (plan-3119574 reformat via pm_case_windows.json task_kind); human_turn_fidelity.applicable
+      false for reformat/no-human cases. Rebuild: cases.py then cases.py --check (clean,
+      55204 cases). Manual merge hold unchanged.'
+    created_at: '2026-10-21T21:39:29Z'
+    last_edited: '2026-10-21T21:39:29Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
@@ -29651,7 +29661,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-21T20:43:09.316606+00:00'
+  updated_at: '2026-10-21T21:39:30.404269+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29679,6 +29689,14 @@ prs:
       reading pm/plans directly. Copy the whole data/ dir from the pr-9f111ef workdir.'
     created_at: '2026-10-21T20:43:09Z'
     last_edited: '2026-10-21T20:43:09Z'
+  - id: note-43920d5
+    text: 'From pr-9f111ef i10 (d85e253a): PM cases now have task_kind (new/edit/reformat)
+      and provenance.human_turn_fidelity.applicable; keep edit/reformat scores apart
+      from new plans (inputs contain earlier text the output may copy) and leave fidelity-n/a
+      cases out of fidelity aggregates. generator_input conversation may include role=source_file
+      turns (path, relation, lines, partial, text) to show the generator.'
+    created_at: '2026-10-21T21:39:30Z'
+    last_edited: '2026-10-21T21:39:30Z'
 - id: pr-09c4e8e
   plan: plan-doc-eval
   title: Automated planning prompt improvement campaign
