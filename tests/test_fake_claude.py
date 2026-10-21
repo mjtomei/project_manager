@@ -1447,6 +1447,28 @@ class TestTranscriptHookCLI:
 
     SID = "11112222-3333-4444-5555-666677778888"
 
+    def test_held_session_survives_input_and_exits_on_eof(self, tmp_path):
+        """Text typed into a held session (e.g. a spec-approval notice) is
+        a new turn, not the end of the session: only stdin EOF exits."""
+        import os
+        import time
+        env = {**os.environ, "HOME": str(tmp_path)}
+        proc = subprocess.Popen(
+            [sys.executable, str(BIN_FAKE_CLAUDE), "--verdict", "NONE",
+             "--session-id", self.SID],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, cwd=str(tmp_path), env=env)
+        try:
+            proc.stdin.write(b"spec approved, continue\n")
+            proc.stdin.flush()
+            time.sleep(1.0)
+            assert proc.poll() is None
+            proc.stdin.close()
+            assert proc.wait(timeout=10) == 0
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
     def test_executable_writes_transcript_and_hook(self, tmp_path):
         import os
         env = {**os.environ, "HOME": str(tmp_path)}
