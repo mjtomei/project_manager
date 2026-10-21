@@ -29859,7 +29859,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T18:16:07.836409+00:00'
+  updated_at: '2026-10-21T18:59:06.456824+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29999,6 +29999,20 @@ prs:
       the TUI log-bar pause line.'
     created_at: '2026-10-21T18:04:42Z'
     last_edited: '2026-10-21T18:04:42Z'
+  - id: note-9faf64d
+    text: 'Review i3: command-bar `pr start <id>` now adds --review-spec like s/auto-start
+      (pr_view._with_review_spec). Remaining gap: the PR Actions picker start row
+      runs `pm pr start` as a plain CLI command, so its agent gets the normal spec
+      prompt and does not wait. The gate still holds the spec (S impl) and blocks
+      the review transition until approval.'
+    created_at: '2026-10-21T18:54:34Z'
+    last_edited: '2026-10-21T18:54:34Z'
+  - id: note-f739f23
+    text: 'Review i4: filed pr-74c4182 for the picker start row / shell pm pr start
+      gap (plain spec prompt for a review-specs PR; gate still holds S impl). QA spec-approval
+      wait now uses _POLL_INTERVAL.'
+    created_at: '2026-10-21T18:59:06Z'
+    last_edited: '2026-10-21T18:59:06Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
@@ -30074,6 +30088,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-21T15:43:01.895129+00:00'
   updated_at: '2026-10-21T15:43:01.895129+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-74c4182
+  plan: bugs
+  title: 'Bug: PR Actions picker start row / plain pm pr start of a review-specs auto-start
+    PR uses the normal spec prompt'
+  branch: pm/pr-74c4182-bug-pr-actions-picker-start-row-plain-pm-pr-start-
+  status: pending
+  depends_on: []
+  description: 'After pr-3ae2fc3, the TUI s key, command-bar `pr start`, and auto-start
+    launches add the hidden `--review-spec` flag when auto-start spec review covers
+    a PR, so the agent writes the impl spec in review mode and waits for pm-recorded
+    approval. The PR Actions picker start row (cli/session.py _ALL_ACTIONS "pr start
+    {pr_id}") and a shell `pm pr start` cannot see the TUI-held auto-start targets,
+    so they launch with the plain prompt: the agent writes the spec and proceeds to
+    implement before approval. The gate still marks the spec pending (S impl) and
+    blocks the review transition, so nothing advances unapproved, but implementation
+    work starts early. Repro: pm autostart add X --review-specs, kill the X window
+    before its impl spec exists, start X from prefix+P start row. Fix idea: have pm
+    pr start ask the TUI owner (autostart status IPC, runs[].review_specs) when inside
+    a pm session and --review-spec was not passed, guarding against the TUI-synchronous
+    caller deadlock; or persist review-specs scope to runtime state the CLI can read.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T18:58:58.777083+00:00'
+  updated_at: '2026-10-21T18:58:58.777083+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

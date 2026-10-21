@@ -3555,7 +3555,7 @@ def _set_spec_review_pending(state: QALoopState, pending: bool,
 
 def _wait_for_qa_spec_approval(state: QALoopState, pm_root: Path,
                                notify: Callable[[], None],
-                               interval: float = 5.0) -> bool:
+                               interval: float = _POLL_INTERVAL) -> bool:
     """Block until the QA spec is approved.  False when stopped/merged."""
     from pm_core import store
     while True:
