@@ -486,8 +486,7 @@ def _clear_approval(pr: dict, phase: str) -> None:
 
 def is_spec_approved(pr: dict, phase: str) -> bool:
     """Whether *phase*'s spec was approved through ``approve_spec``."""
-    rec = pr.get("spec_approved")
-    return isinstance(rec, dict) and bool(rec.get(phase))
+    return bool(_approval_stamp(pr, phase))
 
 
 def needs_spec_approval(pr: dict, phase: str) -> bool:
