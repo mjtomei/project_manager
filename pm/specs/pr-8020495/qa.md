@@ -1,0 +1,174 @@
+# pr-8020495 — QA spec: PR action history and active timers
+
+Surfaces under test: `pm pr history <pr> [--json]` (CLI), the History row /
+`H` shortcut in the PR actions popup (`prefix+P`, `pm _popup-picker`), and the
+durable per-PR journal `~/.pm/history/<pr>.jsonl` that review loops, QA runs,
+sign-off, merge and the runtime mirror write to. Implementation details are in
+`pm/specs/pr-8020495/impl.md`.
+
+## 1. Requirements
+
+### Nominal history
+
+- **R1 — review loop history.** Given a PR whose review loop ran
+  NEEDS_WORK → PASS (fake-claude), when the user runs `pm pr history <pr>`,
+  then the "Attempts (newest first)" section shows a review-loop attempt with
+  one child per iteration (`i1`, `i2`), each with start/end clock times,
+  elapsed duration, outcome `done` and its verdict; the loop attempt ends
+  `done` with verdict PASS.
+- **R2 — JSON parity.** Given the same PR, when the user runs
+  `pm pr history <pr> --json`, then the output is valid JSON with schema
+  `pm.pr.history/1` whose `attempts`, `timers`, `holds`, `waiting_for` and
+  `milestones` contain the same facts (attempt count, outcomes, verdicts,
+  iteration numbers, durations) as the text output.
+- **R3 — live "what is PM waiting for".** Given a review iteration whose
+  fake agent has emitted its verdict and the loop is inside the 20 s verdict
+  grace, when the user runs `pm pr history`, then the "Now" section / the
+  `Waiting for:` line distinguishes the state (agent working / agent turn
+  finished, in grace with N s left / processing verdict / launching next
+  iteration) and "Timers and holds" lists the verdict-grace timer with armed
+  time, due time, remaining time and expected transition; a second invocation
+  a few seconds later shows a smaller remaining time.
+- **R4 — human hold has no countdown.** Given a review iteration returned
+  INPUT_REQUIRED, when the user runs `pm pr history`, then a
+  "review input required" hold is listed with no due time / no remaining
+  countdown, the iteration shows a `waiting_human` phase counted as waiting
+  (not execution) time, and `Waiting for:` begins with `human:`.
+- **R5 — QA run with overlapping scenarios.** Given a QA run with 3
+  scenarios launched together, when the user views history, then the QA run
+  attempt has a planner child (label `planner`) and three scenario children
+  (`s1`..`s3`) with their verdicts, and the run shows a scenario summary with
+  scenario count, a wall-clock figure (union of execution intervals) and a
+  sum labelled "not wall-clock"; the run's elapsed time is never the sum of
+  scenario times.
+- **R6 — queued and retried scenarios.** Given a QA concurrency cap lower
+  than the scenario count, when history is viewed, then waiting scenarios show
+  a `queued` phase counted as wait. Given a scenario window that dies mid-run,
+  when PM relaunches it, then the original scenario attempt ends `vanished`,
+  a new attempt for the same scenario with `retry=1` appears whose leading
+  `backoff` phase owns a "relaunch backoff" timer (armed/due/remaining while
+  active, then listed under "Recent timers" as `fired`).
+- **R7 — planner deadline.** Given the QA planner is still running, when the
+  user views history, then an active planner-deadline timer is shown with a
+  due time ~60 min after planning started and expected transition
+  "give up planning → INPUT_REQUIRED"; once planning finishes it moves to
+  "Recent timers" as cleared.
+- **R8 — actions pane History row.** Given any PR, when the user opens the
+  PR actions popup, then a `history` row is listed with a compact badge
+  (`no history`, `N runs`, `hold: …`, `review-loop i2: turn done, 8s left`…);
+  when the user selects it (or presses `H`), then the same text as
+  `pm pr history` for that PR is shown in a pager inside the popup and `q`
+  dismisses it.
+- **R9 — merged / closed PRs.** Given a PR that ran actions and was then
+  merged (runtime state cleaned up, panes closed), when the user opens the
+  actions popup, then only the History row is offered (not "No actions
+  available"), and `pm pr history` still shows every attempt; any journaled
+  hold still open shows as `released (PR merged)`.
+- **R10 — sign-off router and throttle.** Given auto-start drives a PR into
+  sign-off, when the router launches, then history shows a `signoff`
+  attempt and a 60 s relaunch-throttle timer (gate); when the router's
+  verdict is routed the attempt ends with that verdict.
+- **R11 — merge holds.** Given a merge whose fake session reports
+  INPUT_REQUIRED, or an auto-start merge hold, then an indefinite hold is
+  listed (no countdown) and `Waiting for: human: …`; when the merge
+  completes, the hold is released.
+- **R12 — derived holds.** Given a PR with a spec awaiting approval, QA
+  ended INPUT_REQUIRED while status is `qa`, or sign-off BLOCKED, then a
+  corresponding hold is shown without countdown even though nothing was
+  journaled.
+
+### Cancellation / restart
+
+- **R13 — cancel.** Given a running review loop, when the user stops it
+  from the TUI, then the loop attempt (and its open iteration) end
+  `cancelled`, and any grace timer it owned is shown resolved
+  (`cancelled`/`cancelled (owner ended)`), not active.
+- **R14 — TUI restart.** Given a review loop or QA run in progress, when the
+  user restarts the TUI in place (Ctrl+R / `pm tui restart`), then
+  pre-restart open attempts are shown `interrupted` (owner exited / tui-mount),
+  their timers `lost (owner exited)`; the resumed loop/QA run creates *new*
+  attempts flagged `resumed`/`adopted`; no attempt id is reused and no
+  pre-restart attempt is shown as still running.
+
+## 2. Setup
+
+- Follow `pm/qa/instructions/tui-manual-test.md`: venv + editable install
+  (`./install.sh --local` if `pm` is missing), `PYTHONPATH` pointing at the
+  clone, a throwaway git project with `pm init --backend local --no-import`,
+  `pm session` in tmux.
+- Use fake-claude for every Claude-backed session (`pm fake-claude config
+  set …`). Use per-iteration `delay` entries to stretch a phase long enough
+  to observe live timers (e.g. 20–40 s on a review iteration, on
+  `qa_planning`, on `qa_scenario`).
+- Use a scratch `HOME` (and `env -i`-style clean environment so
+  `CLAUDECODE` / `PM_HOST_HOME` from the outer session do not leak) so
+  `~/.pm/history/` starts empty. A dummy `claude` on PATH may be needed.
+- `pm pr history` is run from a separate tmux pane/window of the test
+  session (or from the shell with the test project as cwd).
+- Controlled clocks: production timing has no clock override at the user
+  surface; timing assertions are made by comparing the JSON's
+  `generated_at` with `armed_at`/`due_at`/`remaining_s` across repeated
+  invocations, with tolerances of a few seconds. Deterministic clock tests
+  live in `tests/test_action_history.py` (run them as a smoke check).
+
+## 3. Edge cases
+
+- **E1 — no history.** Given a freshly added PR with no actions, when the
+  user runs `pm pr history`, then the output says "No recorded action
+  history…", lists milestones from project.yaml if any, `--json` has
+  `attempts: []` and a `missing` note; the popup badge says `no history`.
+- **E2 — unknown PR.** Given an id that is neither in project.yaml nor has a
+  journal, the command prints the standard not-found error and exits
+  non-zero. Given a PR removed from project.yaml whose journal survives, the
+  command still shows its history. `#N` display ids resolve.
+- **E3 — corrupted journal.** Given a journal with a truncated last line or
+  garbage lines, history still renders the valid events (no traceback).
+- **E4 — instrumentation must not change execution.** Given the history
+  directory is unwritable (or the journal file is a directory), when the
+  user runs a review loop / QA run, then the loop reaches the same verdicts
+  and status transitions as normal; only history is missing.
+- **E5 — 80 columns.** Text output and the pager view do not exceed 80
+  columns at an 80-column terminal (phase breakdowns and timer lines wrap).
+- **E6 — overdue.** A `fires` timer past due whose owner is alive shows
+  `overdue by Xs`, never negative remaining.
+- **E7 — concurrent writers.** Two or more processes (TUI loop threads, a
+  `qa-run-bg` process, CLI-launched actions, two loops on the same PR or on
+  different PRs) appending to journals at once never interleave/torn lines,
+  every attempt started is present with its own id, and concurrent
+  `pm pr history --json` readers always get valid JSON.
+- **E8 — rotation.** Given a journal near 4 MB, further writes rotate it to
+  `<pr>.1.jsonl`; history still shows attempts from both generations.
+- **E9 — superseded loop.** Given a review loop restarted while one is
+  running, the old loop attempt ends `superseded`, not `done`.
+
+## 4. Pass / fail criteria
+
+Pass: every Then above is observable on the CLI text, `--json`, and popup
+pager, and the three agree for the same PR at the same moment (modulo the
+seconds elapsed between invocations). Timers show armed/due/remaining with
+remaining decreasing over time; holds show no countdown; concurrent
+scenarios are never summed into the run's elapsed time; cancelled/
+interrupted/vanished/superseded outcomes are distinct and correct; loops
+behave identically with history broken.
+
+Fail: tracebacks from `pm pr history` or the popup; missing/duplicated
+attempts; an attempt shown "running" after its owner process exited or was
+cancelled; active timers after their owner ended; negative remaining time;
+history lost after merge; the popup showing different numbers from the CLI;
+a loop whose verdict/status sequence changes when history is unwritable;
+invalid JSON lines in the journal after concurrent writes.
+
+## 5. Ambiguities (resolved)
+
+- *Controlled clocks* — not user-reachable; covered by unit tests and by
+  tolerance-based comparisons of live JSON output (see Setup).
+- *"Retries"* — QA scenario relaunches, sign-off relaunches, superseded
+  review loops and repeated runs of the same action (impl spec A1). There is
+  no review-loop retry/backoff in production code.
+- *Approval waits* — spec approval, review/merge INPUT_REQUIRED, QA
+  INPUT_REQUIRED, sign-off BLOCKED, auto-merge hold (impl spec R7/A2). Past
+  spec-approval durations are not journaled and are not expected.
+- *Even Realities interface* — not built yet; exposure is verified only via
+  the shared action catalog driving the terminal popup.
+- *Agent idle vs execution* — idle time inside an agent turn counts as
+  execution (impl spec A3); only queued/backoff/human-hold phases are wait.
