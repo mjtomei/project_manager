@@ -819,6 +819,25 @@ def test_check_reports_missing_pm_conversation(catalog):
     assert cases.check(data_dir=data)["failure_counts"] == {"pm_conversation_missing": 1}
 
 
+def test_pm_conversation_edit_is_stale_generator_input(catalog):
+    data = catalog["data"]
+    pm = next(c for c in catalog["cases"] if c["case_type"] == "pm_plan")
+    convo = data / pm["inputs"]["conversation_path"]
+    convo.write_text(convo.read_text().replace("keep the API stable", "drop the API"))
+    with pytest.raises(ValueError, match="changed since"):
+        cases.generator_input(pm, data)
+    assert cases.check(data_dir=data)["failure_counts"] == {"stale_generator_input": 1}
+
+
+def test_check_finds_records_under_a_relocated_history_root(catalog, tmp_path, monkeypatch):
+    # another environment mounts the same histories elsewhere: the stored absolute path is gone
+    moved = tmp_path / "elsewhere"
+    shutil.move(str(tmp_path / "claude-projects"), moved)
+    assert cases.check(data_dir=catalog["data"])["failure_counts"] == {"pm_record_missing": 1}
+    monkeypatch.setenv("PM_CLAUDE_PROJECTS", str(moved))
+    assert cases.check(data_dir=catalog["data"])["failure_counts"] == {}
+
+
 def test_partial_build_and_check_leave_committed_report(catalog, monkeypatch, capsys):
     report = cases.REPORTS / "case-coverage.md"
     before = report.read_text()

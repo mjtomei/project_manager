@@ -61,6 +61,19 @@ def translate(record_path, roots):
     return None
 
 
+def resolve_record(rec, roots=None):
+    """Local path of a catalogued conversation record, re-translated when its stored path is gone.
+
+    Stored paths are absolute under the history root mounted at build time
+    ($HOME/.claude/projects or PM_CLAUDE_PROJECTS); another environment may
+    mount the same histories elsewhere.
+    """
+    path = Path(rec["path"])
+    if path.exists():
+        return path
+    return translate(rec["map_path"], roots or default_roots()) or path
+
+
 def default_roots():
     home = Path(os.environ.get("HOME", "~")).expanduser()
     return {"claude_projects": os.environ.get("PM_CLAUDE_PROJECTS", str(home / ".claude" / "projects")),
@@ -202,7 +215,8 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
                                  "request_line": review.get("request_line"), "draft_sha256": draft_sha, **window})
             excerpts.sort(key=lambda e: e["event_timestamp"] or "")
             convo_path = out_dir / "conversations" / (plan.removesuffix(".md") + ".json")
-            convo_path.write_text(json.dumps({"plan": plan, "excerpts": excerpts}, indent=1))
+            convo = json.dumps({"plan": plan, "excerpts": excerpts}, indent=1)
+            convo_path.write_text(convo)
             humans = sum(1 for e in excerpts for t in e["turns"] if t["role"] == "human")
             baseline = plan_path.read_text()
             baseline_sha = hashlib.sha256(baseline.encode()).hexdigest()
@@ -212,6 +226,7 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
                 "case_id": "pm:" + plan.removesuffix(".md"), "case_type": "pm_plan", "source": "pm-plans",
                 "document_id": None, "split_group": "pm-plans",
                 "inputs": {"conversation_path": str(convo_path.relative_to(out_dir.parent)),
+                           "conversation_sha256": hashlib.sha256(convo.encode()).hexdigest(),
                            "instruction": "Write the plan file this conversation asks for."},
                 "baseline": {"path": str(plan_path.relative_to(REPO)) if plan_path.is_relative_to(REPO) else str(plan_path),
                              "snapshot": str(snapshot.relative_to(out_dir.parent)), "sha256": baseline_sha,

@@ -111,8 +111,8 @@ exactly once.
 
 - Briefs and generator inputs are built only through one function per case type
   (`generator_input(case)`), which never reads reference spans; tests target it.
-  It refuses stale inputs (document text or attachment sha256 changed since the
-  build), and `--check` reports those as `stale_generator_input`; brief items
+  It refuses stale inputs (document text, attachment or PM conversation excerpt
+  sha256 changed since the build), and `--check` reports those as `stale_generator_input`; brief items
   missing from a rebuilt context store are reported as
   `brief_item_missing_from_context`. References (whole document, next section,
   plan baseline) come only from `reference_text(case)`, which likewise refuses

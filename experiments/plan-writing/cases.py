@@ -436,7 +436,10 @@ def generator_input(case, data_dir=None, context_items=None):
             raise ValueError(f"{case['case_id']}: document text changed since the catalog was built")
         return {"instruction": case["inputs"]["instruction"], "prefix": text[: case["inputs"]["prefix_end"]]}
     if kind == "pm_plan":
-        convo = json.loads((data_dir / case["inputs"]["conversation_path"]).read_text())
+        raw = (data_dir / case["inputs"]["conversation_path"]).read_text()
+        if hashlib.sha256(raw.encode()).hexdigest() != case["inputs"]["conversation_sha256"]:
+            raise ValueError(f"{case['case_id']}: conversation excerpt changed since the catalog was built")
+        convo = json.loads(raw)
         # excerpts come from separate sessions (oldest first); `session` keeps them apart once flattened
         turns = [{"session": n, "role": t["role"], "text": t["text"]}
                  for n, e in enumerate(convo["excerpts"], 1) for t in e["turns"]]
@@ -759,7 +762,7 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                 failures["prefix_length_mismatch"].append(cid)
         elif case["case_type"] == "pm_plan":
             for rec in case["provenance"]["records"]:
-                path = Path(rec["path"])
+                path = pm_cases.resolve_record(rec)
                 if not path.exists():
                     failures["pm_record_missing"].append(cid)
                     continue
@@ -777,7 +780,12 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
             except ValueError as exc:
                 failures["stale_reference"].append(str(exc))
                 continue
-            if baseline.strip() and baseline.strip() in _input_text(generator_input(case, data_dir)):
+            try:
+                gen = generator_input(case, data_dir)
+            except ValueError as exc:
+                failures["stale_generator_input"].append(str(exc))
+                continue
+            if baseline.strip() and baseline.strip() in _input_text(gen):
                 failures["baseline_in_generator_input"].append(cid)
     covered = coverage["documents"]
     partial = coverage.get("partial_sources")

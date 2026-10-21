@@ -14,7 +14,7 @@ GO_FIELD = re.compile(r"^(Authors?(?:\(s\))?|Last updated|Updated|Status|Discuss
 TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
 
 
-def _lines(text):
+def line_offsets(text):
     """Yield (start_offset, line_without_newline)."""
     pos = 0
     for line in text.splitlines(keepends=True):
@@ -25,7 +25,7 @@ def _lines(text):
 def parse_rfc822(text):
     """PEP-style `Field: value` block at the very top, ended by a blank line."""
     fields, key, end = {}, None, 0
-    for start, line in _lines(text):
+    for start, line in line_offsets(text):
         if not line.strip():
             if fields:
                 end = start
@@ -46,7 +46,7 @@ def parse_rfc822(text):
 def parse_dash_list(text, max_lines=40):
     """Rust/Cockroach RFC `- Field: value` list before the first heading."""
     fields, end, seen = {}, 0, 0
-    for start, line in _lines(text):
+    for start, line in line_offsets(text):
         seen += 1
         if seen > max_lines or line.startswith("#"):
             break
@@ -62,7 +62,7 @@ def parse_dash_list(text, max_lines=40):
 def parse_go(text, max_lines=30):
     """Go design doc Author/Last updated/Discussion lines after the title."""
     fields, end, seen = {}, 0, 0
-    for start, line in _lines(text):
+    for start, line in line_offsets(text):
         seen += 1
         if seen > max_lines or (line.startswith("## ")):
             break
@@ -76,7 +76,7 @@ def parse_go(text, max_lines=30):
 def parse_md_table(text, max_lines=40):
     """rust-goals `| Metadata | |` table directly under the title."""
     fields, end, seen, started = {}, 0, 0, False
-    for start, line in _lines(text):
+    for start, line in line_offsets(text):
         seen += 1
         if seen > max_lines:
             break

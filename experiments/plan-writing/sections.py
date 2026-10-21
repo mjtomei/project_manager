@@ -22,6 +22,8 @@ import re
 from collections import namedtuple
 from html.parser import HTMLParser
 
+from docmeta import line_offsets
+
 Heading = namedtuple("Heading", "start end level title")
 RFC_FILE = re.compile(r"(^|/)rfc\d+\.txt$")
 
@@ -41,16 +43,9 @@ RFC_UNNUMBERED = {
 }
 
 
-def _lines(text):
-    pos = 0
-    for line in text.splitlines(keepends=True):
-        yield pos, line.rstrip("\r\n")
-        pos += len(line)
-
-
 def markdown_headings(text):
     out, fenced, prev = [], False, None
-    for start, line in _lines(text):
+    for start, line in line_offsets(text):
         if FENCE.match(line):
             fenced = not fenced
             prev = None
@@ -74,7 +69,7 @@ def markdown_headings(text):
 
 
 def rst_headings(text):
-    lines = list(_lines(text))
+    lines = list(line_offsets(text))
     styles, out, i = [], [], 0
     while i < len(lines):
         start, line = lines[i]
@@ -127,7 +122,7 @@ def _follows(prev, cur):
 def numbered_headings(text, unnumbered=True, max_indent=8):
     """Numbered headings forming the longest plausible numbering sequence."""
     cands, extra = [], []
-    for start, full in _lines(text):
+    for start, full in line_offsets(text):
         head = re.match(r"^(\s*(?:Appendix\s+|APPENDIX\s+)?\S+\s+)(.*)$", full)
         line = head.group(1) + COLUMN_GAP.split(head.group(2), 1)[0] if head else full
         if not line.strip() or len(line) > 100 or TOC_LINE.search(line):
