@@ -29852,3 +29852,116 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-8020495
+  plan: improvements
+  title: PR action history and active timers in CLI and actions pane
+  branch: pm/pr-8020495-pr-action-history-and-active-timers-in-cli-and-act
+  status: pending
+  depends_on: []
+  description: 'Add `pm pr history <pr>` (text and `--json`) and a History entry in
+    the PR actions pane, so a user can tell what happened, how long it took, and what
+    PM is waiting for. The motivating case is an apparently stalled review: the display
+    should distinguish a finished agent turn, verdict processing, the next launch,
+    and a real wait.
+
+
+    - Show past action attempts with start/end times, elapsed duration, outcome, and
+    review/QA iteration or scenario identity. Include retries, failures, cancellations,
+    and approval waits. Separate waiting time from execution where the evidence permits;
+    concurrent QA scenarios must not be summed into a misleading wall-clock total.
+
+    - Show current PR-owned timers and scheduled checks: purpose, owning action, time
+    armed, next due time, remaining time, and expected transition. Cover the existing
+    idle/verdict grace periods, retry backoffs, planner deadlines, and relaunch throttles.
+    An indefinite human-review hold has no countdown; unavailable timing is shown
+    as unknown.
+
+    - Reuse runtime state, hook events, and loop records. Add durable action/timer
+    events only where needed: the current runtime mirror overwrites attempts and removes
+    vanished panes, so it cannot alone provide history. Preserve distinct attempts
+    across concurrent writers and restarts, and reconcile expired/cancelled timers
+    with their actual owners. This observes the existing scheduler rather than creating
+    another one.
+
+    - Use one history query/presentation model for the CLI and pane. Keep it available
+    after merge or pane removal, and expose it through the shared action catalog used
+    by the planned mobile pane. Reuse action-source context from pr-291e891 where
+    available; do not introduce a competing attribution model.
+
+
+    Verify a real review/retry/QA sequence, overlapping scenarios, approval holds,
+    cancellation and restart. Check CLI/pane agreement, honest missing-history output,
+    and that timing instrumentation does not alter execution. Use controlled clocks
+    for timing tests.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T19:14:50.410487+00:00'
+  updated_at: '2026-10-21T19:14:50.410487+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-72c8695
+  plan: tui-ux
+  title: Mobile PR actions pane with shared dispatch and app session links
+  branch: pm/pr-72c8695-mobile-pr-actions-pane-with-shared-dispatch-and-ap
+  status: pending
+  depends_on:
+  - pr-3ae2fc3
+  description: 'Add a phone-friendly web version of the PR actions pane to the existing
+    PM dashboard/report service. A user should be able to select a PR, see its action
+    state, start or resume an action, and open that action''s session in ChatGPT or
+    Claude on their phone. Existing remote-control connections are already working;
+    build on them.
+
+
+    - Extract the action definitions, availability/status, variants, and launch-or-attach
+    dispatch from `pm_core/cli/session.py` and the current TUI handlers into a shared
+    layer. Terminal and web render that layer, so adding or changing an action happens
+    in one place. Include current fresh/loop options and #236''s spec-review visibility
+    and approval controls. Non-session actions such as editing metadata, reading history,
+    or approving a spec use their appropriate UI rather than a fabricated session
+    link.
+
+    - Reuse a live action session or launch through the existing PM flow, then resolve
+    its actual provider-issued link. Preserve project, host, PR, action and pane identity,
+    including QA scenario sessions. Repeated taps, slow launches and reconnects must
+    not create duplicate workers or dispatch against a newly selected PR. Keep existing
+    spec-approval and merge gates authoritative.
+
+    - Enable Claude Remote Control centrally on new session startup, or enable it
+    on demand in an existing session at a safe prompt without interrupting work. Capture/reuse
+    the actual remote URL; a local Claude session UUID is not necessarily a remote
+    session identifier. Use existing ChatGPT/Codex host pairing and supported session
+    links. Keep provider link resolution separate from PM action behavior so other
+    backends can supply it later; this does not require the full planned backend migration.
+
+    - Keep report/evidence links and the current localhost/Tailscale deployment. Use
+    validated action requests through existing dispatch, with normal request-origin
+    protection, rather than GET mutations or a shell-command endpoint. Show startup/link
+    availability and actionable failures, with browser/status fallback when an app
+    cannot open. Refresh state after returning from the mobile app.
+
+
+    Verify action parity against the terminal pane, narrow-screen use, existing-session
+    reuse and new-session launch, spec holds/manual merge holds, duplicate requests,
+    reconnects and stale links. Exercise a real phone handoff for each configured
+    provider and record the supported app/platform behavior; mocks alone do not establish
+    that an app link works.
+
+
+    Coordinate with pr-8020495 for the shared History action, pr-3a8111d for Claude
+    session names, and pr-291e891/pr-c41f029 for action-source context. Keep pr-4702a11''s
+    document/voice editor a separate surface. Starting points: `pm_core/cli/session.py`,
+    TUI action dispatch, `runtime_state.py`, `pane_registry.py`, `claude_launcher.py`,
+    and `dashboard_server.py`.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T19:14:51.114484+00:00'
+  updated_at: '2026-10-21T19:14:51.114484+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
