@@ -754,8 +754,12 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
         for r in recent[:10]:
             when = (_clock(r["resolved_t"], t_now)
                     if r.get("resolved_t") else "unknown")
-            lines.append(f"  {r['purpose']}: {r['resolution']} at {when} "
-                         f"(armed {_clock(r['armed_t'], t_now)})")
+            line = f"  {r['purpose']}: {r['resolution']} at {when}"
+            armed = f"(armed {_clock(r['armed_t'], t_now)})"
+            if len(line) + 1 + len(armed) <= 80:
+                lines.append(f"{line} {armed}")
+            else:
+                lines.extend([line, f"      {armed}"])
 
     if model["milestones"]:
         lines.append("")
@@ -821,17 +825,16 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     line = f"{ind}{start} → {end}  {dur:>7}  {name}  {outcome}"
     out = [line]
     sub = ind + "    "
-    if a.get("detail") and outcome.split()[0] not in ("done",):
+    if a.get("detail") and outcome.split()[0] != "done":
         out.append(f"{sub}{a['detail']}")
     phases = [p for p in a.get("phases", []) if p["phase"] != "start"]
     if phases and a.get("exec_s") is not None:
         split = f"exec {_dur(a['exec_s'])}"
         if a.get("wait_s"):
             split += f", wait {_dur(a['wait_s'])}"
-        parts = " · ".join(
-            f"{_PHASE_LABELS.get(p['phase'], p['phase'])} "
-            f"{_dur(p['duration_s'])}" for p in a["phases"])
-        out.append(f"{sub}{split}  [{parts}]")
+        parts = [f"{_PHASE_LABELS.get(p['phase'], p['phase'])} "
+                 f"{_dur(p['duration_s'])}" for p in a["phases"]]
+        out.extend(_wrap_phases(f"{sub}{split}  [", parts, sub + "  "))
     sc = a.get("scenarios")
     if sc and sc["sum_s"] >= 1:
         out.append(f"{sub}scenarios: {sc['count']} ({sc['attempts']} attempts), "
@@ -842,6 +845,23 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     for c in a.get("children", []):
         out.extend(_render_attempt(c, t_now, depth + 1))
     return out
+
+
+def _wrap_phases(head: str, parts: list[str], cont: str,
+                 width: int = 80) -> list[str]:
+    """``head`` + ``parts`` joined by `` · `` and closed with ``]``,
+    wrapped at *width* with continuation lines indented by *cont*."""
+    lines: list[str] = []
+    cur = head
+    for i, part in enumerate(parts):
+        piece = part + ("]" if i == len(parts) - 1 else " ·")
+        sep = "" if cur in (head, cont) else " "
+        if cur not in (head, cont) and len(cur) + 1 + len(piece) > width:
+            lines.append(cur)
+            cur, sep = cont, ""
+        cur += sep + piece
+    lines.append(cur)
+    return lines
 
 
 _BADGE_STATES = {

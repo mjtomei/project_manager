@@ -344,6 +344,13 @@ class TestReviewLoopHistory:
         holds = [r for r in model["timers"]["recent"]
                  if r["timer"].startswith("review-input-required")]
         assert holds and holds[0]["resolution"] == "released"
+        # The phase breakdown (launching · agent · verdict · waiting on
+        # human · verdict) wraps instead of overflowing 80 columns.
+        lines = hq.render_text(model)
+        assert max(len(line) for line in lines) <= 80, "\n".join(
+            line for line in lines if len(line) > 80)
+        text = "\n".join(lines)
+        assert "waiting on human 10m00s" in text and text.count("]") >= 1
 
     def test_input_required_hold_is_active_while_waiting(self, clock):
         from pm_core import review_loop as rl
