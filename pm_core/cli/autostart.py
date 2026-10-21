@@ -24,7 +24,8 @@ import click
 
 from pm_core import store
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_STOP, REPLY_DIR, TERMINAL_STATUSES, format_text,
+    POLICY_AUTO, POLICY_STOP, POLICY_WAIT, REPLY_DIR, TERMINAL_STATUSES,
+    format_text,
 )
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -196,6 +197,8 @@ def _print_changes(payload: dict) -> None:
         if prev:
             pol_s = f" ({pol.replace('_', '-')}; was {prev.replace('_', '-')})"
         click.echo(f"{c.get('action')}: {c.get('pr_id')}{pol_s}")
+    if payload.get("released"):
+        click.echo("released merge hold: " + ", ".join(payload["released"]))
     st = payload.get("status") or {}
     targets = [t["pr_id"] for t in st.get("targets") or []]
     click.echo(f"auto-start {st.get('mode', '?')}; targets: "
@@ -215,17 +218,27 @@ def autostart():
     the explicit command-bar `autostart all`).
 
     \b
-    Policies (per PR, also set by the O / A keys):
+    Policies (per target, also set by the O / A keys):
       stop-before-merge  (--stop-before-merge, the default for new CLI
-                         targets, and O) — stop when ready to merge;
-                         press g after sign-off
+                         targets, and O) — stop the target when ready to
+                         merge; press g after sign-off
       auto-merge         (--auto-merge, and A) — merge via `pm pr merge`,
                          which still enforces the sign-off gate
+      wait-for-merge     (--wait-for-merge) — hold the target AND every
+                         transitive prerequisite for a manual merge; each
+                         PR runs impl → review → QA → sign-off, then waits
+                         for g / `pm pr merge`; that merge starts the
+                         newly unblocked dependents automatically
+
+    A dependency shared by several targets is held if any active
+    wait-for-merge target needs it or it has its own stop mark; removing
+    the target (or changing its policy) releases only the holds it caused.
 
     \b
     Examples:
       pm autostart add pr-abc123 pr-def456
       pm autostart add 229 --auto-merge
+      pm autostart add pr-final --wait-for-merge   # whole chain, manual merges
       pm autostart remove pr-abc123
       pm autostart list --json
       pm autostart status --json
@@ -235,27 +248,50 @@ def autostart():
     """
 
 
+_POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
+                 POLICY_AUTO: "--auto-merge",
+                 POLICY_WAIT: "--wait-for-merge"}
+
+
 @autostart.command("add")
 @click.argument("pr_ids", nargs=-1)
-@click.option("--stop-before-merge", "policy", flag_value=POLICY_STOP,
-              help="Stop before merge (default for new targets)")
-@click.option("--auto-merge", "policy", flag_value=POLICY_AUTO,
+@click.option("--stop-before-merge", "stop", is_flag=True,
+              help="Stop the target before merge (default for new targets)")
+@click.option("--auto-merge", "auto", is_flag=True,
               help="Merge automatically when ready (sign-off gate still applies)")
+@click.option("--wait-for-merge", "wait", is_flag=True,
+              help="Hold the target and all its transitive prerequisites "
+                   "for a manual merge (g / pm pr merge); merging one "
+                   "starts its newly ready dependents")
 @_session_opt
 @_timeout_opt
 @_json_opt
-def autostart_add(pr_ids, policy, session, timeout, as_json):
+def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
     """Add PR_IDS as auto-start targets (additive, idempotent).
 
-    Re-adding a target without a policy flag keeps its current policy.
+    Re-adding a target without a policy flag keeps its current policy; a
+    flag replaces it.  At most one policy flag may be given.
+
+    \b
+    Run a whole dependency chain with manual merges:
+      pm autostart add pr-final --wait-for-merge
+    Every unmerged prerequisite of pr-final starts as soon as its own
+    dependencies are merged, runs implementation → review → QA → fresh
+    sign-off, then shows "waiting for manual merge".  Merge it (g in the
+    TUI, or `pm pr merge`) and the scheduler starts whatever that merge
+    unblocked — no further autostart command needed.
     """
     try:
+        chosen = [p for p, on in ((POLICY_STOP, stop), (POLICY_AUTO, auto),
+                                  (POLICY_WAIT, wait)) if on]
+        if len(chosen) > 1:
+            flags = ", ".join(_POLICY_FLAGS[p] for p in chosen)
+            raise _Fail(EXIT_INVALID, "conflicting_flags",
+                        f"conflicting merge policies: {flags}")
         ids = _validate(pr_ids, for_add=True)
         args = ["add", *ids]
-        if policy == POLICY_STOP:
-            args.append("--stop-before-merge")
-        elif policy == POLICY_AUTO:
-            args.append("--auto-merge")
+        if chosen:
+            args.append(_POLICY_FLAGS[chosen[0]])
         payload = _request(session, args, timeout)
     except _Fail as f:
         _emit_fail(f, as_json)
@@ -309,7 +345,8 @@ def autostart_list(session, timeout, as_json):
     out = {"ok": payload.get("ok", False), "schema": st.get("schema"),
            "owner": st.get("owner"), "mode": st.get("mode"),
            "targets": [{k: t.get(k) for k in
-                        ("pr_id", "title", "policy", "added_at", "source")}
+                        ("pr_id", "title", "policy", "effective_policy",
+                         "held_by", "added_at", "source")}
                        for t in st.get("targets") or []]}
     if not out["ok"]:
         out["error"] = payload.get("error")
@@ -320,8 +357,11 @@ def autostart_list(session, timeout, as_json):
         if not out["targets"]:
             click.echo("No auto-start targets.")
         for t in out["targets"]:
-            click.echo(f"  {t['pr_id']}  {t['policy'].replace('_', '-')}  "
-                       f"{t.get('title') or ''}")
+            held = (f" (held by {', '.join(t['held_by'])})"
+                    if t.get("held_by") and t["held_by"] != [t["pr_id"]]
+                    else "")
+            click.echo(f"  {t['pr_id']}  {t['policy'].replace('_', '-')}"
+                       f"{held}  {t.get('title') or ''}")
     _finish(out if as_json else payload, as_json, text)
 
 
