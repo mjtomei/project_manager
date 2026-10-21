@@ -29990,12 +29990,25 @@ prs:
     documented constraints. Screenshots come from a runnable mockup or simulator and
     identify simulated behavior. Keep the proposal and screenshots easy to inspect
     from PM''s report. Manual merge of this PR is the design checkpoint before refactoring
-    starts. No production Pageborne or PM refactor is part of this PR.'
+    starts. No production Pageborne or PM refactor is part of this PR.
+
+
+    Session access must cover every session exposed by the current PM actions panel
+    and its related windows, not only the conversation attached to a document. Audit
+    that session list and mock selection/switching for implementation, review, sign-off,
+    any existing merge/recovery session, the QA planner and interactive session, each
+    individual QA scenario, and its refinement/execution/verifier sessions where present.
+    Show role, PR/scenario identity and current state so parallel sessions are distinguishable.
+    The demo must include opening a specific QA scenario and its verifier, inspecting
+    or discussing the ongoing work, and returning to the originating document or session
+    list without starting duplicates. Include other existing plan/project sessions
+    where the current panel exposes them. Keep this as a behavior requirement; do
+    not predetermine the navigation layout or refactoring.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-21T21:41:43.185486+00:00'
+  updated_at: '2026-10-21T23:22:18.897387+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30033,12 +30046,18 @@ prs:
     relevant Pageborne document-reading and session behavior still works on its existing
     surfaces, and provide a clear, tested handoff for the implementation PR. Choose
     the specific refactoring and checks after reviewing the mockups, not from this
-    placeholder description.'
+    placeholder description.
+
+
+    The approved mockups must also support access to all PM session roles, including
+    individual QA scenarios and their helper sessions. Determine any Pageborne sharing
+    needed for that experience after mockup review; do not restrict reuse analysis
+    to document-linked chats or preselect an implementation.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:28.531325+00:00'
-  updated_at: '2026-10-21T21:41:43.881377+00:00'
+  updated_at: '2026-10-21T23:22:19.573627+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30079,12 +30098,20 @@ prs:
     targeting and applicable approval/merge gates. An interface action must not approve
     the wrong document version or require a human to shepherd ordinary implementation
     after approval. Choose the concrete refactoring and tests after reviewing the
-    mockups.'
+    mockups.
+
+
+    Use the reviewed mockups to preserve access to all sessions available through
+    the current actions panel and related windows, including every QA scenario and
+    its refinement/execution/verifier sessions. Preserve role and PR/scenario/session
+    identity when selecting a running session; a single aggregate QA entry or document-linked
+    chat is not sufficient. Determine any required shared functionality only after
+    mockup review.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:29.331751+00:00'
-  updated_at: '2026-10-21T21:41:44.572431+00:00'
+  updated_at: '2026-10-21T23:22:20.243762+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30136,12 +30163,24 @@ prs:
     evidence for shared behavior. Use the simulator for reproducible checks and record
     actual-device results or an explicit remaining hardware-validation gap; do not
     present mockups as proof of working integration. This PR depends on both refactoring
-    PRs.'
+    PRs.
+
+
+    Deliver full session-access parity with the current PM actions panel and related
+    windows alongside document review. Make implementation, review, sign-off, existing
+    recovery, QA planner/interactive, individual QA scenarios and their refinement/execution/verifier
+    sessions accessible where present, plus other plan/project sessions exposed by
+    the panel. Show enough role, PR/scenario identity and state to distinguish concurrent
+    sessions, open the selected existing session without duplicate launches, and retain
+    navigation context when returning. Demonstrate selecting a particular live QA
+    scenario and its verifier, accessing the ongoing session, and switching back to
+    a document or the session list; an aggregate QA status page alone does not satisfy
+    this requirement.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:30.108250+00:00'
-  updated_at: '2026-10-21T21:41:45.286773+00:00'
+  updated_at: '2026-10-21T23:22:20.916518+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
