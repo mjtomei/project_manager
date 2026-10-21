@@ -29847,7 +29847,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T15:41:21.767951+00:00'
+  updated_at: '2026-10-21T15:43:02.861981+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29884,6 +29884,27 @@ prs:
       is keyed by PR id only, filed pr-6176ec6).'
     created_at: '2026-10-21T15:41:21Z'
     last_edited: '2026-10-21T15:41:21Z'
+  - id: note-0590fe8
+    text: 'S3 refiner: CLI `pm autostart add Y --review-specs --no-review-specs` is
+      not rejected (click boolean flag pair = last wins -> Y added without review-specs);
+      only the TUI command-bar handler returns conflicting_flags. R4 needs a CLI-side
+      check (e.g. separate --review-specs/--no-review-specs is_flag options + conflicting_flags
+      _Fail). Auto-start targets survive restart only via the breadcrumb (`pm tui
+      restart --breadcrumb` / merge restart); plain Ctrl+R or session relaunch starts
+      auto-start OFF by design.'
+    created_at: '2026-10-21T15:14:49Z'
+    last_edited: '2026-10-21T15:14:49Z'
+  - id: note-71de1af
+    text: 'QA S3 (a0622d82): CLI `pm autostart add X --review-specs --no-review-specs`
+      now fails with conflicting_flags like the command bar (was: click flag pair,
+      last wins). Incidental test-infra fix 94e75297: fake-claude held sessions exited
+      on ANY typed input, so `pm pr spec-approve` notifying the waiting impl pane
+      killed the fake and auto-start relaunched a fresh impl session; now input is
+      consumed and only EOF exits. Recorder gotcha: name recorder grouped sessions
+      $S~N; a foreign grouped name hijacks the TUI pidfile after restart (filed as
+      bug).'
+    created_at: '2026-10-21T15:43:02Z'
+    last_edited: '2026-10-21T15:43:02Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
@@ -29931,6 +29952,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-21T15:41:20.902710+00:00'
   updated_at: '2026-10-21T15:41:20.902710+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-095c51d
+  plan: bugs
+  title: 'Bug: TUI re-keys its pidfile/cmd-queue to a foreign grouped tmux session
+    after Ctrl+R, so pm autostart CLI times out'
+  branch: pm/pr-095c51d-bug-tui-re-keys-its-pidfile-cmd-queue-to-a-foreign
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/app.py _reload_pidfile/_session_name: the TUI keys tui-<session>.pid
+    and .cmd-queue by its resolved tmux session name, stripping only the pm "~N" group
+    suffix. Repro (pr-3ae2fc3 QA S3): with the pm session running, create a grouped
+    session with a non-pm name (`tmux new-session -d -t pm-foo -s recview`) and attach
+    a client to it, then `pm tui restart --breadcrumb`. The restarted TUI (same pid)
+    writes ~/.pm/tui-recview.pid and drains tui-recview.cmd-queue, while `pm autostart
+    list/status/add` keep appending to tui-pm-foo.cmd-queue and signal the pid: every
+    CLI call fails with "owner_timeout ... did not reply within 10s". The debug frames
+    file also moves to recview-frames.json, and launches risk using the wrong session
+    tag (fake-claude config / real Claude). Fix idea: resolve the canonical name via
+    #{session_group} (or the session that owns the pane at first launch) rather than
+    the most-recently-active session holding pane %0.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T15:43:01.895129+00:00'
+  updated_at: '2026-10-21T15:43:01.895129+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
