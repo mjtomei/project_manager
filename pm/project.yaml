@@ -8039,49 +8039,72 @@ prs:
     last_edited: '2026-04-07T22:57:31Z'
 - id: pr-ac10f03
   plan: improvements
-  title: Merge abort verdict when master changes are too large for auto-merge
+  title: Sign-off integrates latest base and routes rework before gated merge
   branch: pm/pr-ac10f03-merge-abort-verdict-when-master-changes-are-too-la
   status: pending
   depends_on: []
-  description: 'Add an ABORT_MERGE verdict to the merge/conflict resolution flow.
-    When the merge prompt detects that changes on master since the PR branched are
-    too significant for a safe auto-merge, the agent should return ABORT_MERGE instead
-    of attempting to resolve conflicts it doesn''t fully understand.
+  description: 'Before expanding parallel PR execution, move integration checking
+    into sign-off. Sign-off can fetch/integrate the latest configured base (normally
+    master), assess conflicts and semantic changes, and send work back to the appropriate
+    step. Merge only publishes a conflict-free result with fresh sign-off. Deliver
+    this existing PR through the current auto-start/auto-sequence flow; it does not
+    depend on the future D3 watcher.
 
 
-    Current behavior: the merge agent always tries to complete the merge, even when
-    master has diverged substantially. This leads to subtle integration bugs where
-    conflicts are ''resolved'' by picking one side without understanding the implications.
+    - Give sign-off an integrate-latest-base action and require an integration check
+    before SIGNOFF_MERGE. Work in the PR branch or an isolated candidate, never the
+    shared base. Preserve the reviewed HEAD, fetched target revision, candidate and
+    conflict/decision context for the next agent; do not lose existing work or strand
+    an unexplained half-merge.
+
+    - Reuse SIGNOFF_IMPL for implementation needed to reconcile changes, SIGNOFF_REVIEW
+    for unreviewed changes, SIGNOFF_REQA for verification gaps, and SIGNOFF_BLOCKED
+    only for genuinely blocked decisions. Choose the earliest affected step, revalidate
+    affected evidence and return to sign-off. Preserve valid evidence with provenance;
+    code changes cannot be approved using stale review/QA results. Persist the routing
+    reason and resume automatically without a merge agent making new implementation
+    changes.
+
+    - Bind approval to the actual approved PR HEAD, target repository/branch and fetched
+    base revision, plus the candidate revision/tree when separate. If sign-off changes
+    HEAD, its earlier launch stamp or approval cannot certify the new candidate. Legacy
+    HEAD-only approvals need a fresh integration-aware sign-off.
+
+    - Gate all merge entry points and backends on matching revisions, conflict-free
+    integration and valid sign-off. If the PR or base changes after validation, including
+    during the final publish operation, refuse the stale merge and return to sign-off.
+    No conflict-resolution session may bypass this gate by pushing the base or invoking
+    the backend merge directly. Restrict --no-signoff-check/recovery paths to recovery
+    of an already-completed merge; they must not publish new unapproved code.
+
+    - Keep CLI/TUI status and automatic routing consistent across restarts and duplicate/idle
+    events. Preserve --wait-for-merge and stop-before-merge policies through every
+    return; re-signing does not release a manual merge hold. Coordinate with #219
+    (pr-8d8b360): reuse correct base-into-PR/backend handling, but replace its resolve-and-immediately-merge
+    path with this sign-off boundary. Post-merge metadata/checkout recovery remains
+    separate.
 
 
-    Desired behavior: the merge prompt evaluates the scope of changes (number of files,
-    lines changed, semantic overlap with the PR''s changes) and returns ABORT_MERGE
-    with an explanation when:
+    Verification: use two overlapping PRs so merging the first makes the second require
+    integration. Sign-off detects the conflict, returns to implementation, and the
+    revised candidate completes review, affected QA and fresh sign-off before merge
+    is permitted. Also exercise review-only and QA-only return decisions, a clean
+    integration, unchanged PR HEAD with a moved base, movement during publication,
+    legacy approvals, and restart after a return decision. Assert no unauthorized
+    base publication, duplicate workers, merge-time conflict resolution or loss of
+    manual holds across CLI/TUI and supported backends. Record a real end-to-end run
+    with the watcher off.
 
-    - Master changes touch the same subsystems as the PR in non-trivial ways
 
-    - Conflict resolution requires understanding architectural decisions made on master
-
-    - The combined diff is large enough that the merge result should go through review/QA
-    again
-
-
-    When ABORT_MERGE is returned:
-
-    - The merge loop stops cleanly (like PASS stops the review loop)
-
-    - The PR status is set back to in_review or a new ''merge_blocked'' status
-
-    - A note is added to the PR explaining what changed on master and why auto-merge
-    was unsafe
-
-    - The TUI shows the blocked state so the user can decide next steps (rebase manually,
-    re-review, etc.)'
+    Relevant code: pm_core/signoff.py, sign-off prompts/report verdicts, pm_core/cli/pr.py,
+    pm_core/tui/signoff_ui.py, pm_core/tui/review_loop_ui.py, pm_core/tui/auto_start.py,
+    backend merge operations and existing sign-off/merge tests. See pm/plans/plan-delivery.md
+    and pm/plans/plan-regression.md.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-03-14T04:21:40.677685+00:00'
+  updated_at: '2026-10-21T21:03:39.290380+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
