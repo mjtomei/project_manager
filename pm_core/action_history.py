@@ -440,20 +440,28 @@ class ScenarioObserver:
         # Scenarios that have had at least one journaled attempt.
         self._had_attempt: set[int] = set()
 
-    def _start(self, sc, status: str) -> None:
+    def _start(self, sc, status: str) -> str:
         idx = sc.index
         retry = self._retries.get(idx, 0)
+        # A backoff attempt starts before its window exists: the scenario's
+        # session is still the dead one, so the relaunch phase carries the
+        # new session instead.
+        live = status != "backoff"
         attempt = start_attempt(
             self.pr_id, "qa", parent=self.parent, loop_id=self.loop_id,
             scenario=idx, label=getattr(sc, "title", None) or None,
             retry=retry or None,
-            session_id=getattr(sc, "session_id", None) or None,
-            transcript=getattr(sc, "transcript_path", None) or None,
+            session_id=(getattr(sc, "session_id", None) or None)
+            if live else None,
+            transcript=(getattr(sc, "transcript_path", None) or None)
+            if live else None,
         )
         self._open[idx] = {"attempt": attempt, "status": status}
         self._had_attempt.add(idx)
-        phase(self.pr_id, attempt, "queued" if status == "queued" else "agent",
-              "waiting for a concurrency slot" if status == "queued" else None)
+        if status in ("queued", "backoff"):
+            return attempt  # the caller records the wait phase
+        phase(self.pr_id, attempt, "agent")
+        return attempt
 
     def observe(self, scenarios, *, pending, verifying, queued,
                 verdicts: dict) -> None:
@@ -489,7 +497,10 @@ class ScenarioObserver:
             cur = self._open.get(idx)
             if cur is None:
                 if status in ("running", "verifying", "queued"):
-                    self._start(sc, status)
+                    attempt = self._start(sc, status)
+                    if status == "queued":
+                        phase(self.pr_id, attempt, "queued",
+                              "waiting for a concurrency slot")
                     if status == "verifying":
                         phase(self.pr_id, self._open[idx]["attempt"],
                               "verifying")
@@ -522,7 +533,11 @@ class ScenarioObserver:
             cur["status"] = status
 
     def relaunching(self, scenario, retry: int, backoff: float) -> None:
-        """A scenario window died; the loop sleeps *backoff* then relaunches."""
+        """A scenario window died; the loop sleeps *backoff* then relaunches.
+
+        The retry attempt starts now in a ``backoff`` phase, so the sleep
+        counts as that attempt's wait rather than falling between attempts.
+        """
         try:
             idx = scenario.index
             cur = self._open.pop(idx, None)
@@ -531,10 +546,13 @@ class ScenarioObserver:
                             detail="scenario window died before a verdict")
             self._retries[idx] = retry
             self._dead.add(idx)
+            attempt = self._start(scenario, "backoff")
+            phase(self.pr_id, attempt, "backoff",
+                  f"relaunch in {backoff:.0f}s (retry {retry})")
             arm_timer(self.pr_id, f"qa-backoff:{self.loop_id}:s{idx}",
                       purpose=f"scenario {idx} relaunch backoff "
                               f"(retry {retry})",
-                      owner_action="qa", owner_attempt=self.parent,
+                      owner_action="qa", owner_attempt=attempt,
                       duration=backoff, effect="fires",
                       expected=f"relaunch scenario {idx} window")
         except Exception:
@@ -545,18 +563,20 @@ class ScenarioObserver:
             idx = scenario.index
             clear_timer(self.pr_id, f"qa-backoff:{self.loop_id}:s{idx}",
                         "fired")
+            cur = self._open.get(idx)
+            if cur is None:
+                cur = {"attempt": self._start(scenario, "backoff"),
+                       "status": "backoff"}
             if ok:
                 self._dead.discard(idx)
-                self._start(scenario, "running")
+                phase(self.pr_id, cur["attempt"], "agent", "relaunched",
+                      session_id=getattr(scenario, "session_id", None)
+                      or None)
+                cur["status"] = "running"
             else:
-                a = start_attempt(
-                    self.pr_id, "qa", parent=self.parent,
-                    loop_id=self.loop_id, scenario=idx,
-                    retry=self._retries.get(idx) or None,
-                    label=getattr(scenario, "title", None) or None)
-                end_attempt(self.pr_id, a, "failed",
+                self._open.pop(idx, None)
+                end_attempt(self.pr_id, cur["attempt"], "failed",
                             detail="scenario window relaunch failed")
-                self._had_attempt.add(idx)
         except Exception:
             _log.debug("ScenarioObserver.relaunched failed", exc_info=True)
 

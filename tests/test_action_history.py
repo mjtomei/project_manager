@@ -509,6 +509,10 @@ class TestScenarioObserver:
         assert "verifying" in [p["phase"] for p in by[(1, 0)]["phases"]]
         assert by[(2, 0)]["outcome"] == "vanished"
         assert by[(2, 1)]["verdict"] == "NEEDS_WORK"
+        # The relaunch backoff is the retry attempt's leading wait.
+        assert [p["phase"] for p in by[(2, 1)]["phases"]] == ["backoff",
+                                                              "agent"]
+        assert by[(2, 1)]["wait_s"] == 5
         assert by[(3, 0)]["wait_s"] == 125   # queued until s2's relaunch
         backoff = [r for r in model["timers"]["recent"]
                    if r["timer"].startswith("qa-backoff")]
@@ -525,6 +529,36 @@ class TestScenarioObserver:
         (t,) = m["timers"]["active"]
         assert t["remaining_s"] == 25 and t["effect"] == "fires"
         assert "relaunch backoff" in m["waiting_for"]
+        (row,) = m["current"]
+        assert row["name"] == "qa s1 retry 3" and row["state"] == "backoff"
+        assert hq.summary_badge(m) == " [qa s1 retry 3: backoff, 25s left]"
+
+    def test_failed_relaunch_ends_backoff_attempt(self, clock):
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        obs.observe([_sc(1)], pending={1}, verifying=set(), queued=set(),
+                    verdicts={})
+        obs.relaunching(_sc(1), 1, 4)
+        clock.advance(4)
+        obs.relaunched(_sc(1), False)
+        kids = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert [(k.get("retry"), k["outcome"]) for k in kids] == [
+            (None, "vanished"), (1, "failed")]
+        assert kids[1]["wait_s"] == 4
+
+    def test_relaunched_window_uses_new_session(self, clock):
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        sc = _sc(1)
+        obs.observe([sc], pending={1}, verifying=set(), queued=set(),
+                    verdicts={})
+        obs.relaunching(sc, 1, 4)
+        sc.session_id = "sess-new"
+        obs.relaunched(sc, True)
+        kids = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert kids[1]["session_id"] == "sess-new"
 
     @pytest.mark.parametrize("stop_after,reason", [(0, "cancelled"),
                                                    (31, "elapsed")])

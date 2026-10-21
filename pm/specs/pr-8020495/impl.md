@@ -138,7 +138,11 @@ R5. **QA** (`pm_core/qa_loop.py`):
     `agent` after a verification follow-up, attempt end with verdict, and
     end `vanished` + new attempt `retry=k+1` on relaunch.
   - Relaunch backoff: `fires` timer armed before `time.sleep(backoff)`,
-    cleared (`fired`) after; scenario phase `backoff`.
+    cleared (`fired`) after.  The retry attempt (`retry=k+1`) starts when
+    the window is found dead, in a `backoff` phase that owns the timer, so
+    the sleep is that attempt's leading wait; a successful relaunch moves
+    it to `agent` (carrying the new session id), a failed one ends it
+    `failed`.
   - Shared scenario verdict grace: `gate` timer armed at every
     `grace_start` assignment (id `qa-grace:<loop_id>`, re-arm replaces).
   - The observer only reads values; it never mutates loop state.
