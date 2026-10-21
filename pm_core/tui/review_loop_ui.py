@@ -986,8 +986,13 @@ def _poll_impl_idle(app) -> None:
         if status == "in_progress":
             _auto_start.hold_spec_if_due(app, pr)
 
-        # Detect newly-idle in_progress PRs for auto-review
-        if status == "in_progress" and tracker.became_idle(pr_id):
+        # Detect newly-idle in_progress PRs for auto-review.  The idle edge
+        # is consumed only for PRs auto-start acts on: an impl that went
+        # idle while out of scope (its target removed, or auto-start off)
+        # must still advance once it is brought back into scope.
+        if (status == "in_progress"
+                and _auto_start.in_scope(app, pr_id)
+                and tracker.became_idle(pr_id)):
             if pr.get("spec_pending"):
                 # Spec generation paused for user input (ambiguity
                 # resolution).  The session is waiting, not done.
