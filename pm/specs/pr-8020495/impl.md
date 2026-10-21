@@ -178,7 +178,7 @@ The model contains:
     `ended_at`, `elapsed_s`, `outcome`, `verdict`, identity
     (`iteration`/`scenario`/`retry`/`label`), `phases` (ordered spans),
     `exec_s` / `wait_s` split (wait = `queued`, `waiting_human`, `backoff`
-    phases; exec = the rest), `open` flag, and `status` for open attempts
+    phases; exec = the rest except `untracked` spans, E8), `open` flag, and `status` for open attempts
     (`running`, or `interrupted (owner exited)` when the owner process is
     gone).  A runtime-derived attempt (R3) that the live runtime mirror
     still shows in flight (`attempt_id` on an in-flight entry) is
@@ -322,3 +322,12 @@ supply `context` (session/window/task); leave a cross-PR note.
 - E7. Pane removal of a `done` review (runtime keeps verdict, drops pane)
   is a pane cleanup, not an attempt end; only clearing an in-flight entry
   ends an attempt.
+- E8. Re-tracked pane: PM stops watching the impl pane while a review
+  loop owns the PR (the `start` attempt ends `untracked`) and
+  re-registers the same session when the loop ends.  The query folds a
+  runtime attempt that re-tracks the previous same-action attempt's
+  session (which ended `untracked`) into that attempt, with the gap as an
+  `untracked` ("not tracked") span counted as neither exec nor wait; the
+  runtime mirror's attempt id for the re-opened attempt maps to the kept
+  one.  A different session is a new attempt.  This removes the phantom
+  "start untracked (5s)" rows seen in QA S4 without a runtime tombstone.

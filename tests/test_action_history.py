@@ -330,6 +330,40 @@ class TestRuntimeCapture:
                 a = hq.build_history(PR, now=clock.t)["attempts"][0]
             assert a["outcome"] == "interrupted"
 
+    def test_retracked_pane_continues_its_attempt(self, clock):
+        # Impl pane tracked, untracked while a review loop owns the PR,
+        # then re-registered (same session) when the loop ends.
+        with patch.object(rs, "_pane_alive", return_value=True):
+            rs.set_action_state(PR, "start", "running", pane_id="%1",
+                                session_id="s1")
+            first = rs.get_action_state(PR, "start")["attempt_id"]
+            clock.advance(60)
+            rs.clear_action(PR, "start")
+            clock.advance(600)
+            rs.set_action_state(PR, "start", "running", pane_id="%1",
+                                session_id="s1")
+            clock.advance(5)
+            # The mirror tracks the re-opened id; it maps to the kept one.
+            with patch.object(ah, "owner_alive", return_value=False):
+                (a,) = hq.build_history(PR, now=clock.t)["attempts"]
+            assert a["id"] == first and a["open"]
+            rs.clear_action(PR, "start")
+            # A different session is a new attempt.
+            clock.advance(10)
+            rs.set_action_state(PR, "start", "running", pane_id="%2",
+                                session_id="s2")
+        assert len(_attempts()) == 3
+        m = hq.build_history(PR, now=clock.t + 1, live=False)
+        new, folded = m["attempts"]
+        assert folded["id"] == first and folded["outcome"] == "untracked"
+        assert folded["elapsed_s"] == 665
+        assert folded["exec_s"] == 65 and folded["wait_s"] == 0
+        assert [p["phase"] for p in folded["phases"]] == [
+            "start", "untracked", "start"]
+        assert new["open"] and new["session_id"] == "s2"
+        text = "\n".join(hq.render_text(m))
+        assert "not tracked 10m00s" in text
+
     def test_pr_cleanup_ends_in_flight_attempts(self, clock):
         from pm_core import pr_cleanup
         rs.set_action_state(PR, "merge", "running", pane_id="%1",

@@ -15,6 +15,9 @@ Reconciliation rules (the journal only says what writers *said*):
   event seen for it).  A runtime-derived attempt the runtime mirror still
   shows in flight is running whoever opened it.
 * An attempt with no end whose parent ended is closed at the parent's end.
+* A runtime attempt that re-tracks the pane of the previous attempt, which
+  ended ``untracked``, is folded into it (the gap is an ``untracked``
+  span): PM merely lost and regained sight of the same run.
 * A timer is resolved by its own clear, by its owner attempt ending, or
   by its owner process exiting (``lost``); a ``gate`` timer past its due
   time has simply elapsed, while a ``fires`` timer past due with a live
@@ -30,7 +33,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pm_core import action_history as _ah
-from pm_core.runtime_state import IN_FLIGHT_STATES
+from pm_core import runtime_state as _rs
 
 SCHEMA = "pm.pr.history/1"
 
@@ -44,7 +47,12 @@ _PHASE_LABELS = {
     "queued": "queued",
     "backoff": "backoff",
     "waiting_human": "waiting on human",
+    "untracked": "not tracked",
 }
+
+# Spans where PM was not watching the attempt at all: neither execution
+# nor waiting as far as PM can tell.
+_UNOBSERVED_PHASES = ("untracked",)
 
 _ACTION_ORDER = ("start", "review", "review-loop", "qa", "signoff", "merge")
 
@@ -64,6 +72,7 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     t_now = _ah.now() if now is None else float(now)
     events = _ah.read_events(pr_id)
     attempts, timers, timer_history = _replay(events)
+    aliases = _fold_retracked(attempts, timers)
     _link_children(attempts)
     # A parent was last seen no earlier than any of its descendants.
     for a in sorted(attempts.values(), key=lambda a: a["started_t"],
@@ -71,8 +80,8 @@ def build_history(pr_id: str, *, pr: dict | None = None,
         p = a.get("_parent_obj")
         if p is not None:
             p["last_seen_t"] = max(p["last_seen_t"], a["last_seen_t"])
-    _reconcile_attempts(attempts,
-                        _runtime_tracked_attempts(pr_id) if live else set())
+    tracked = _runtime_tracked_attempts(pr_id) if live else set()
+    _reconcile_attempts(attempts, {aliases.get(i, i) for i in tracked})
     for a in attempts.values():
         _compute_spans(a, t_now)
     roots = [a for a in attempts.values() if not a.get("_parent_obj")]
@@ -84,8 +93,7 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     _release_terminal_holds(pr or {}, timer_rows)
 
     runtime = _runtime_actions(pr_id) if live else {}
-    current = _current_activity(attempts, timers, timer_rows, t_now,
-                                live=live)
+    current = _current_activity(attempts, timer_rows, t_now, live=live)
     holds = [t for t in timer_rows["active"] if t["due_at"] is None]
     holds += _derived_holds(pr_id, pr or {}, runtime)
     waiting_for = _waiting_for(holds, timer_rows, current, attempts)
@@ -193,6 +201,51 @@ def _replay(events: list[dict]):
     return attempts, timers, timer_history
 
 
+def _fold_retracked(attempts: dict[str, dict],
+                    timers: dict[str, dict]) -> dict[str, str]:
+    """Fold runtime attempts that re-track a pane into the earlier attempt.
+
+    PM stops watching e.g. the impl pane while a review loop owns the PR
+    (that attempt ends ``untracked``) and re-registers the same session
+    when the loop ends.  That is the same run seen again, not a new
+    attempt, so the later attempt continues the earlier one after an
+    ``untracked`` span.  Returns ``{folded id: kept id}``.
+    """
+    aliases: dict[str, str] = {}
+    last: dict[str, dict] = {}  # action -> newest runtime attempt
+    for a in sorted(attempts.values(), key=lambda a: a["started_t"]):
+        if a.get("source") != "runtime" or a.get("loop_id"):
+            continue
+        action = a.get("action") or ""
+        prev = last.get(action)
+        last[action] = a
+        if (prev is None or prev["outcome"] != "untracked"
+                or not a.get("session_id")
+                or a.get("session_id") != prev.get("session_id")
+                or a["started_t"] < prev["ended_t"]):
+            continue
+        prev["phases"] += [
+            {"phase": "untracked", "t": prev["ended_t"],
+             "detail": "PM not watching the pane"},
+            {"phase": "start", "t": a["started_t"],
+             "detail": "PM watching the pane again"},
+        ] + a["phases"]
+        for k in ("ended_t", "outcome", "verdict", "detail", "owner"):
+            prev[k] = a.get(k)
+        prev["last_seen_t"] = max(prev["last_seen_t"], a["last_seen_t"])
+        last[action] = prev
+        aliases[a["id"]] = prev["id"]
+        del attempts[a["id"]]
+    if aliases:
+        for a in attempts.values():
+            if a.get("parent") in aliases:
+                a["parent"] = aliases[a["parent"]]
+        for tm in timers.values():
+            if tm.get("owner_attempt") in aliases:
+                tm["owner_attempt"] = aliases[tm["owner_attempt"]]
+    return aliases
+
+
 def _reconcile_attempts(attempts: dict[str, dict],
                         tracked: set[str]) -> None:
     """Infer the fate of open attempts.
@@ -283,7 +336,8 @@ def _compute_spans(a: dict, t_now: float) -> None:
     wait = sum(s["end_t"] - s["start_t"] for s in spans
                if s["phase"] in _ah.WAIT_PHASES)
     exe = sum(s["end_t"] - s["start_t"] for s in spans
-              if s["phase"] not in _ah.WAIT_PHASES)
+              if s["phase"] not in _ah.WAIT_PHASES
+              and s["phase"] not in _UNOBSERVED_PHASES)
     a["spans"] = spans
     a["elapsed_s"] = (end - a["started_t"]) if known else None
     a["elapsed_lower_bound_s"] = None if known else end - a["started_t"]
@@ -411,17 +465,15 @@ def _runtime_tracked_attempts(pr_id: str) -> set[str]:
     """Attempt ids of the runtime mirror's in-flight entries (raw state:
     the hook-derived status can relabel an entry but not end it)."""
     try:
-        from pm_core import runtime_state as _rs
         return {e["attempt_id"] for e in _rs.get_pr_actions(pr_id).values()
                 if isinstance(e, dict) and e.get("attempt_id")
-                and e.get("state") in IN_FLIGHT_STATES}
+                and e.get("state") in _rs.IN_FLIGHT_STATES}
     except Exception:
         return set()
 
 
 def _runtime_actions(pr_id: str) -> dict:
     try:
-        from pm_core import runtime_state as _rs
         out = {}
         for action in _rs.get_pr_actions(pr_id):
             entry = _rs.derive_action_status(pr_id, action)
@@ -468,8 +520,8 @@ def _attempt_name(a: dict) -> str:
     return action
 
 
-def _current_activity(attempts: dict[str, dict], timers: dict,
-                      timer_rows: dict, t_now: float, *,
+def _current_activity(attempts: dict[str, dict], timer_rows: dict,
+                      t_now: float, *,
                       live: bool) -> list[dict]:
     """One row per open leaf attempt: what is happening right now."""
     out = []
@@ -773,7 +825,7 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
                 # An in-flight entry keeps the previous iteration's/run's
                 # verdict until the next one lands; don't pair it with
                 # "running" as if it were this run's outcome.
-                in_flight = e.get("state") in IN_FLIGHT_STATES
+                in_flight = e.get("state") in _rs.IN_FLIGHT_STATES
                 bit += (f" (last {e['verdict']})" if in_flight
                         else f" {e['verdict']}")
             bits.append(bit)
