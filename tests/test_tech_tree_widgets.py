@@ -515,3 +515,53 @@ async def test_reorder_keeps_cursor_on_same_pr():
         await pilot.pause()
         assert tree._ordered_ids != before, "precondition: order changed"
         assert tree.selected_pr_id == "pr-a"
+
+
+# ---------------------------------------------------------------------------
+# Sign-off marker vs a finished review loop
+# ---------------------------------------------------------------------------
+
+
+def _status_row(app, pr_id):
+    node = next(n for n in app.query(PRNode) if n.pr_id == pr_id)
+    return node.render().plain.splitlines()[3]
+
+
+def _finished_loop(pr_id, verdict="PASS"):
+    from pm_core.review_loop import ReviewLoopState
+    st = ReviewLoopState(pr_id=pr_id, iteration=1, latest_verdict=verdict)
+    st.running = False
+    return st
+
+
+@async_test
+async def test_sign_off_verdict_icon_not_masked_by_finished_review_loop():
+    pr = _pr("pr-a", status="sign_off", workdir="/w",
+             signoff={"verdict": "SIGNOFF_MERGE", "head": "abc"})
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "▲" in row and "⟳" not in row
+
+
+@async_test
+async def test_sign_off_rerun_spinner_not_masked_by_finished_review_loop():
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    pr = _pr("pr-a", status="sign_off", workdir="/w")  # no verdict: running
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert any(f in row for f in SPINNER_FRAMES) and "⟳" not in row
+
+
+@async_test
+async def test_in_review_keeps_finished_loop_marker():
+    app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert "⟳1" in _status_row(app, "pr-a")

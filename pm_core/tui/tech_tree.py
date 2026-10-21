@@ -502,7 +502,9 @@ class PRNode(Widget):
                     if state.stop_requested:
                         return (f"⏹{state.iteration}{spinner}", "bold red")
                     return (f"⟳{state.iteration}{spinner}", "bold cyan")
-                if state.latest_verdict:
+                # A finished review loop's verdict must not mask the sign-off
+                # marker (▲ / re-run spinner) once the PR has moved on.
+                if state.latest_verdict and self._pr.get("status") != "sign_off":
                     v = state.latest_verdict
                     marker = VERDICT_MARKERS.get(v, v[:4])
                     style = VERDICT_STYLES.get(v, "")
