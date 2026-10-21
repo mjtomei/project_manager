@@ -110,12 +110,18 @@ _owner_cache: dict | None = None
 _owner_mutex = threading.Lock()
 
 
-def _reset_owner_mutex() -> None:
-    global _owner_mutex
+def _after_fork_in_child() -> None:
+    global _owner_mutex, _owner_lock_fd
     _owner_mutex = threading.Lock()  # a thread may have held it at fork()
-
-
-os.register_at_fork(after_in_child=_reset_owner_mutex)
+    # The inherited fd shares the parent's owner lock: holding it would keep
+    # the parent looking alive after it exits.  The child takes its own
+    # instance on its first write.
+    if _owner_lock_fd is not None:
+        try:
+            os.close(_owner_lock_fd)
+        except OSError:
+            pass
+        _owner_lock_fd = None
 
 
 def _boot_id() -> str | None:
@@ -150,6 +156,8 @@ def _start_token(pid: int) -> str | None:
 # close-on-exec, so an in-place ``exec`` restart (the TUI's Ctrl+R keeps its
 # pid and start time) releases it just like an exit or crash does.
 _owner_lock_fd: int | None = None
+
+os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
 def _owners_dir() -> Path:
@@ -188,12 +196,6 @@ def _hold_owner_lock(instance: str) -> None:
         fd = os.open(_owners_dir() / f"{instance}.lock",
                      os.O_RDWR | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_SH)
-        if _owner_lock_fd is not None:
-            # Inherited from the parent across fork(): not ours to keep.
-            try:
-                os.close(_owner_lock_fd)
-            except OSError:
-                pass
         _owner_lock_fd = fd
     except Exception:
         _log.debug("action_history: owner lock failed", exc_info=True)

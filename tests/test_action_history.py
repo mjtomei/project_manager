@@ -183,6 +183,17 @@ class TestJournal:
         p.join(10)
         assert ah.owner_alive(child) is False
 
+    def test_forked_child_drops_parent_owner_lock(self):
+        """A child that never journals must not keep the parent alive."""
+        ah.owner_token()
+        assert ah._owner_lock_fd is not None
+        ctx = multiprocessing.get_context("fork")
+        q = ctx.Queue()
+        p = ctx.Process(target=lambda: q.put(ah._owner_lock_fd))
+        p.start()
+        assert q.get(timeout=10) is None
+        p.join(10)
+
     def test_concurrent_first_owner_token(self, monkeypatch):
         """Threads racing on the first write share one live instance."""
         import threading
