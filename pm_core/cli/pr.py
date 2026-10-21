@@ -877,6 +877,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             )
         raise SystemExit(1)
 
+    fresh_clone = False
     if workdir:
         work_path = Path(workdir).resolve()
     else:
@@ -885,6 +886,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if existing_workdir and Path(existing_workdir).exists():
             work_path = Path(existing_workdir)
         else:
+            fresh_clone = True
             # Need to clone first, then figure out the final path
             # Clone to a temp location under the project dir
             project_dir = _workdirs_dir(data)
@@ -934,6 +936,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
         click.echo(f"Checking out branch {branch}...")
         git_ops.checkout_branch(work_path, branch, create=True)
+
+    if fresh_clone:
+        # A spec approved/edited before the workdir existed lives only in
+        # the local pm/specs; the clone's committed copy would shadow it.
+        spec_gen.seed_workdir_specs(root, pr_id, work_path)
 
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")

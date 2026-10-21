@@ -23,7 +23,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store
+from pm_core import git_ops, store
 from pm_core.autostart_state import pending_spec_phase
 from pm_core.claude_launcher import launch_claude_print
 from pm_core.paths import configure_logger, get_global_setting_value
@@ -151,6 +151,45 @@ def set_spec(pr: dict, phase: str, spec: str,
     path.write_text(spec)
     _log.info("spec_gen: wrote %s spec to %s (%d chars)", phase, path, len(spec))
     return path
+
+
+def seed_workdir_specs(root: Path, pr_id: str, workdir: Path) -> list[Path]:
+    """Carry *pr_id*'s local spec edits into a freshly cloned workdir.
+
+    A spec approved (or edited / regenerated) before the PR has a workdir
+    is written under ``<root>/specs`` and usually not committed, so the
+    clone holds the committed copy — which :func:`spec_location` then
+    prefers, shadowing the approved text.  A workdir copy is replaced only
+    when it is absent or still identical to the committed base version, so
+    branch-specific spec content is never overwritten.
+
+    Returns the workdir paths written.
+    """
+    if not store.is_internal_pm_dir(root):
+        return []
+    written = []
+    for phase in PHASES:
+        src = root / "specs" / pr_id / f"{phase}.md"
+        if not src.exists():
+            continue
+        content = src.read_text()
+        if not content.strip():
+            continue
+        rel = f"pm/specs/{pr_id}/{phase}.md"
+        dst = Path(workdir) / rel
+        if dst.exists():
+            current = dst.read_text()
+            if current == content:
+                continue
+            committed = git_ops.run_git("show", f"HEAD:{rel}",
+                                        cwd=str(root.parent), check=False)
+            if committed.returncode != 0 or committed.stdout != current:
+                continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(content)
+        _log.info("spec_gen: seeded %s spec into workdir %s", phase, dst)
+        written.append(dst)
+    return written
 
 
 def _build_spec_prompt(data: dict, pr: dict, phase: str,

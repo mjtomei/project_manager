@@ -206,6 +206,40 @@ class TestSpecGen:
         assert path.read_text() == "edited"
         assert spec_gen.get_spec(store.get_pr(data, "a"), "impl") == "edited"
 
+    def test_fresh_workdir_gets_spec_approved_before_start(self, tmp_path):
+        """A spec approved with edits while the PR had no workdir lives in
+        the uncommitted local pm/specs; seeding the fresh clone keeps the
+        clone's committed copy from shadowing it.  A workdir copy that
+        already differs from the committed one (branch content) is kept."""
+        import subprocess
+
+        def git(*args, cwd):
+            subprocess.run(["git", *args], cwd=cwd, check=True,
+                           capture_output=True)
+
+        repo = tmp_path / "repo"
+        root = repo / "pm"
+        for pr_id in ("a", "b"):
+            _write_spec(repo, pr_id, "impl", "committed")
+        git("init", "-q", "-b", "master", cwd=repo)
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+            "--allow-empty", "-m", "init", cwd=repo)
+        git("add", "-A", cwd=repo)
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+            "-m", "specs", cwd=repo)
+        for pr_id in ("a", "b"):
+            (root / "specs" / pr_id / "impl.md").write_text("approved")
+        wd = tmp_path / "wd"
+        git("clone", "-q", str(repo), str(wd), cwd=tmp_path)
+        (wd / "pm/specs/b/impl.md").write_text("branch")
+
+        assert spec_gen.seed_workdir_specs(root, "a", wd) == [
+            wd / "pm/specs/a/impl.md"]
+        assert spec_gen.seed_workdir_specs(root, "b", wd) == []
+        assert spec_gen.get_spec({"id": "a", "workdir": str(wd)},
+                                 "impl") == "approved"
+        assert (wd / "pm/specs/b/impl.md").read_text() == "branch"
+
     def test_reject_keeps_gate_held_spec_pending(self, tmp_path):
         """Rejecting regenerates in review mode: the phase stays paused even
         though the PR's own mode (prompt) would clear it."""
