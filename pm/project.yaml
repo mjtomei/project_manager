@@ -29592,18 +29592,20 @@ prs:
   description: 'Implement the catalog-to-draft-to-score workflow in pm/plans/plan-doc-eval.md
     using the case catalog, the rubric and `claude-mixed` model access. Add project-separated
     splits, blinded paired evaluation run as separate whole-document and continuation
-    tracks with the prefix shown to judges, frontier-model and JEV judge adapters
-    and comparable generation from the current planning prompts. Estimate the share
-    of weekly subscription limits taken by calibration runs of different sizes, pick
-    a size from that estimate under the twenty percent single-run ceiling, and run
-    it, including the style-continuity check for continuation cases and the separate
-    human-rated writing check; save a report identifying useful and unreliable measures
-    per rubric dimension. No manual corpus curation or code-task execution is required.
-    Extend the catalog with PM implementation and QA spec cases from their original
-    phase inputs, using current specs as production baselines. Reuse the existing
-    rubric and add spec examples that distinguish requirements, design proposals,
-    open questions and acceptance checks. Missing phase context is reported rather
-    than reconstructed from the finished spec.
+    tracks with the prefix shown to judges, individual frontier, cross-lab panel,
+    open-model and JEV judge adapters and comparable generation from the current planning
+    prompts. Run the frozen-document scoring comparison and configured-open-model
+    coverage specified above; version model roles, panel membership and aggregation
+    rules. Estimate the share of weekly subscription limits taken by calibration runs
+    of different sizes, pick a size from that estimate under the twenty percent single-run
+    ceiling, and run it, including the style-continuity check for continuation cases
+    and the separate human-rated writing check; save a report identifying useful and
+    unreliable measures per rubric dimension. No manual corpus curation or code-task
+    execution is required. Extend the catalog with PM implementation and QA spec cases
+    from their original phase inputs, using current specs as production baselines.
+    Reuse the existing rubric and add spec examples that distinguish requirements,
+    design proposals, open questions and acceptance checks. Missing phase context
+    is reported rather than reconstructed from the finished spec.
 
 
     Tests: Verify split and duplicate isolation, identity masking, order reversal,
@@ -29614,7 +29616,10 @@ prs:
     the estimate; mocked responses alone do not establish evaluator quality. Verify
     that implementation-spec inputs exclude subsequent implementation/review artifacts
     and QA-spec inputs exclude later scenarios/results; record the source revisions
-    and report calibration separately by document family.
+    and report calibration separately by document family. Verify independent panel
+    judgments, the equal-count repeated-single-model control, model/route provenance,
+    and explicit failures instead of silent model substitution. Retain real open-model
+    generations and judgments and a model-by-role coverage report.
 
 
     Files: experiments/plan-writing/, pm_core/cli/plan.py, pm_core/spec_gen.py and
@@ -29624,7 +29629,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-21T14:07:31.824043+00:00'
+  updated_at: '2026-10-21T19:18:18.101700+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29658,8 +29663,11 @@ prs:
     and on fidelity to the recovered conversations. Produce a reproducible candidate
     prompt diff and campaign evidence, or an explicit no-improvement result; the evaluator
     stays fixed throughout. Include implementation and QA spec prompts in the campaign.
-    Keep candidates and baseline comparisons specific to each prompt family, and report
-    gains for plans and both spec types separately.
+    Keep candidates and baseline comparisons specific to each prompt family and writer
+    model, and report gains for plans and both spec types separately. Include representative
+    configured open models and measure prompt transfer. Run a bounded comparison of
+    single-judge versus cross-lab-panel feedback with the evaluator fixed within each
+    campaign and the same withheld measure for both winners.
 
 
     Tests: Exercise resume without duplicate completed calls, plateau stopping, panel
@@ -29677,7 +29685,10 @@ prs:
     end the run. Run an actual campaign and retain repeated baseline/candidate comparisons,
     the original-plan comparison, failed attempts and usage consumed against the estimate.
     Verify prompt-family assignment and phase-context provenance, and retain real
-    baseline/candidate spec generations and their evaluations.
+    baseline/candidate spec generations and their evaluations. Verify that cached
+    evaluations distinguish writer and evaluator versions, including panel membership/aggregation,
+    and that fitness never pools incompatible scoring configurations. Retain real
+    open-model baseline/candidate comparisons and the panel-feedback comparison.
 
 
     Files: experiments/plan-writing/, reusable evaluation/optimization modules under
@@ -29686,7 +29697,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677755+00:00'
-  updated_at: '2026-10-21T14:07:32.472699+00:00'
+  updated_at: '2026-10-21T19:18:18.796438+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29717,27 +29728,35 @@ prs:
   - pr-8df6472
   description: 'Implement the iterative generator described in pm/plans/plan-doc-eval.md:
     draft, score with an in-loop critic, locate passages weak on particular rubric
-    dimensions, revise, repeat for a fixed round count. Run it on development and
-    validation cases with JEV as critic and with a frontier model as critic, against
-    one-shot generation from the same prompt. Score every round with the withheld
-    evaluation configuration and report quality by round and by critic, divergence
-    between critic and independent scores as the overfitting signal, and usage per
-    variant. Estimate the share of weekly subscription limits for different round
-    counts and case counts first, and keep every run under the twenty percent single-run
-    ceiling. Deliver a recommendation on whether iteration beats one-shot generation
-    and at how many rounds. Include implementation and QA specs in the one-shot versus
-    iterative comparison, using the same phase inputs as their production baselines
-    and preserving instructions about unresolved questions and approval. Report outcomes
-    by document family.
+    dimensions, revise, repeat for a fixed round count. Run the critic comparison
+    specified above: JEV, individual frontier models, repeated-single-model judgments,
+    cross-lab frontier panels and open models, against one-shot generation. Use the
+    same initial draft within each writer-model comparison, including open writers
+    with frontier-panel feedback and with open-model feedback. Score every round with
+    the fixed withheld evaluator outside the critic panel and report quality by round,
+    writer and critic, divergence between critic and independent scores as the overfitting
+    signal, and usage and latency per variant. Compare equal-round and comparable-budget
+    conditions so extra calls alone do not explain a panel advantage. Estimate the
+    share of weekly subscription limits for different round counts and case counts
+    first, and keep every run under the twenty percent single-run ceiling. Deliver
+    evidence on whether iteration beats one-shot generation, whether cross-lab feedback
+    improves independently judged quality over its single-model controls, and at how
+    many rounds. Include implementation and QA specs in the one-shot versus iterative
+    comparison, using the same phase inputs as their production baselines and preserving
+    instructions about unresolved questions and approval. Report outcomes by document
+    family.
 
 
     Tests: Verify that the critic never sees the independent evaluation configuration
     or final cases, that per-round drafts and scores are retained, that round count
-    and critic choice are configurable, and that one-shot and iterative outputs are
-    produced from the same prompt and cases. Run a real sample and retain per-round
-    independent scores alongside critic scores, with usage consumed against the estimate.
-    Include real comparisons for both spec types and check that revisions preserve
-    requirements and unresolved questions.
+    and critic choice are configurable, and that comparisons share the same prompt,
+    cases, writer and initial draft. Check that no critic is the withheld evaluator
+    and that independent scores never feed revisions; preserve individual panel feedback
+    and aggregation provenance. Run a real sample and retain per-round independent
+    scores alongside critic scores, with usage consumed against the estimate. Include
+    real comparisons for both spec types, cross-lab and repeated-single-model critics,
+    and the required open/local writer and critic combinations; check that revisions
+    preserve requirements and unresolved questions.
 
 
     Files: experiments/plan-writing/, iterative generation and critic modules under
@@ -29746,7 +29765,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677763+00:00'
-  updated_at: '2026-10-21T14:08:43.823659+00:00'
+  updated_at: '2026-10-21T19:18:19.513654+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29763,14 +29782,16 @@ prs:
     implementation-spec and QA-spec prompt families in pm/plans/plan-doc-eval.md;
     retain each family''s baseline when no improvement is supported. Where iterative
     generation beats one-shot generation on the independent measure, adopt it through
-    the same entry point with its round count and critic fixed. Validate the exact
-    rendered production prompt after integration, with held-out document comparisons
-    and fresh generation through normal PM commands in an isolated project. Carry
-    forward scope, user constraints, required fields and valid dependencies. Include
-    in the adoption report the comparison of regenerated plans against their originals.
-    Deliver the production prompt change and its evidence through the existing review
-    and acceptance flow; a standalone optimizer or demonstration rewrite does not
-    complete this PR.
+    the same entry point with its round count and critic or panel configuration fixed.
+    Report supported writer-model configurations, including open/local models, and
+    retain the baseline for unvalidated configurations; do not make a closed-model
+    panel mandatory for every backend. Validate the exact rendered production prompt
+    after integration, with held-out document comparisons and fresh generation through
+    normal PM commands in an isolated project. Carry forward scope, user constraints,
+    required fields and valid dependencies. Include in the adoption report the comparison
+    of regenerated plans against their originals. Deliver the production prompt change
+    and its evidence through the existing review and acceptance flow; a standalone
+    optimizer or demonstration rewrite does not complete this PR.
 
 
     Tests: Check that normal PM commands render the evaluated prompt version. Generate
@@ -29780,7 +29801,9 @@ prs:
     and failures. Run affected prompt/parser tests and verify existing project state
     is untouched by the experiment. Exercise both inline and standalone spec-generation
     paths where applicable, verify that spec review/approval behavior is preserved,
-    and report measured gains or retention of the baseline for every in-scope family.
+    and report measured gains or retention of the baseline for every in-scope family
+    and evaluated writer model. Include production-entry-point checks with a configured
+    open/local model and preserve access to the baseline when panel routing is unavailable.
 
 
     Files: pm_core/cli/plan.py, pm_core/spec_gen.py, extracted prompt builders, tests/test_plan_parser.py
@@ -29789,7 +29812,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677768+00:00'
-  updated_at: '2026-10-21T14:07:33.779965+00:00'
+  updated_at: '2026-10-21T19:18:20.218999+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
