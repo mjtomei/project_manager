@@ -144,6 +144,31 @@ def spec_review_holds(app, prs: list[dict] | None = None) -> dict[str, list[str]
     return autostart_state.spec_review_holds(prs, _targets(app))
 
 
+def spec_review_checker(app, prs: list[dict] | None = None):
+    """A ``pr_id -> bool`` predicate for :func:`spec_review_required`.
+
+    The scope and the review closures are computed once, so a pass over
+    many PRs (scheduler, poll tick) doesn't recompute them per PR.
+    """
+    if not is_enabled(app):
+        return lambda pr_id: False
+    if prs is None:
+        prs = (app._data or {}).get("prs") or []
+    managed = managed_ids(app, prs)
+    holds = autostart_state.spec_review_holds(prs, _targets(app))
+    by_id = {p.get("id"): p for p in prs}
+    from pm_core import spec_gen
+
+    def required(pr_id: str) -> bool:
+        if managed is not None and pr_id not in managed:
+            return False
+        if pr_id in holds:
+            return True
+        pr = by_id.get(pr_id)
+        return bool(pr) and spec_gen.pr_spec_mode(pr) == "review"
+    return required
+
+
 def spec_review_required(app, pr_id: str, prs: list[dict] | None = None) -> bool:
     """Whether auto-start must pause *pr_id* for spec approval.
 
@@ -152,17 +177,7 @@ def spec_review_required(app, pr_id: str, prs: list[dict] | None = None) -> bool
     ``spec-mode``) — without the gate such an agent, idle while it waits
     for approval, would be taken for finished implementation.
     """
-    if not is_enabled(app):
-        return False
-    if prs is None:
-        prs = (app._data or {}).get("prs") or []
-    if not in_scope(app, pr_id, prs):
-        return False
-    if pr_id in spec_review_holds(app, prs):
-        return True
-    from pm_core import spec_gen
-    pr = next((p for p in prs if p.get("id") == pr_id), None)
-    return bool(pr) and spec_gen.pr_spec_mode(pr) == "review"
+    return spec_review_checker(app, prs)(pr_id)
 
 
 def _spec_phase_due(app, pr: dict) -> str | None:
@@ -193,12 +208,17 @@ def _spec_phase_due(app, pr: dict) -> str | None:
     return phase if spec_gen.needs_spec_approval(pr, phase) else None
 
 
-def hold_spec_if_due(app, pr: dict, prs: list[dict] | None = None) -> bool:
+def hold_spec_if_due(app, pr: dict, prs: list[dict] | None = None,
+                     required: bool | None = None) -> bool:
     """Mark *pr*'s present-but-unapproved spec pending when auto-start's
-    spec review applies.  Returns True when it set ``spec_pending``."""
+    spec review applies (*required*: a precomputed
+    :func:`spec_review_required`).  Returns True when it set
+    ``spec_pending``."""
     if not app._root or pr.get("spec_pending"):
         return False
-    if not spec_review_required(app, pr["id"], prs):
+    if required is None:
+        required = spec_review_required(app, pr["id"], prs)
+    if not required:
         return False
     phase = _spec_phase_due(app, pr)
     if not phase:
@@ -226,9 +246,10 @@ def sync_spec_reviews(app, prs: list[dict] | None = None) -> None:
         return
     if prs is None:
         prs = (app._data or {}).get("prs") or []
+    required = spec_review_checker(app, prs)
     for pr in prs:
         if pr.get("id") and pr.get("status") in ("pending", "in_progress", "qa"):
-            hold_spec_if_due(app, pr, prs)
+            hold_spec_if_due(app, pr, prs, required=required(pr["id"]))
 
 
 def _launching(app) -> set:
@@ -837,10 +858,10 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
 def _refresh_qa_spec_review(app) -> None:
     """Push the current spec-review requirement into running QA loops
     (read by the QA thread's scenario-launch gate)."""
-    prs = (app._data or {}).get("prs") or []
+    required = spec_review_checker(app)
     for pr_id, state in list((getattr(app, "_qa_loops", None) or {}).items()):
         if hasattr(state, "spec_review"):
-            state.spec_review = spec_review_required(app, pr_id, prs)
+            state.spec_review = required(pr_id)
 
 
 def on_state_loaded(app, old_statuses: dict,

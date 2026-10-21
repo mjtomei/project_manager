@@ -290,10 +290,11 @@ def poll_qa_state(app) -> None:
     """Called from the shared poll timer to update QA state in the TUI."""
     tracker = app._pane_idle_tracker
     from pm_core.tui import auto_start as _auto_start
+    spec_review_required = _auto_start.spec_review_checker(app)
     for pr_id, state in list(app._qa_loops.items()):
         # Track target-set changes (add/remove --review-specs, restart).
         if state.running:
-            state.spec_review = _auto_start.spec_review_required(app, pr_id)
+            state.spec_review = spec_review_required(pr_id)
         # Wire each scenario pane into the idle tracker so the tech tree
         # can animate a spinner while QA is active.  Mirrors the lazy
         # registration used by review_loop_ui._poll_impl_idle.
