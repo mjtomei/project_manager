@@ -520,6 +520,15 @@ class TestTargets:
         fresh = store.load(root)
         assert store.get_pr(fresh, "a")["spec_pending"]["phase"] == "impl"
         assert "spec_pending" not in store.get_pr(fresh, "b")  # plain prompt
+        # Approval releases the gate: a later regeneration (auto-start
+        # off) is not held on behalf of an agent that no longer waits.
+        spec_gen.approve_spec(fresh, "a", root=root)
+        fresh = store.load(root)
+        assert spec_gen.IMPL_GATE_KEY not in store.get_pr(fresh, "a")
+        app._load_state()
+        pr_a = store.get_pr(app._data, "a")
+        spec_gen._clear_approval(pr_a, "impl")
+        assert not auto_start.hold_spec_if_due(app, pr_a)
 
     def test_mid_impl_approval_replaces_awaiting_line(self, tmp_path):
         # An in_progress PR resumes in its pane on approval — no "starting"

@@ -37,6 +37,7 @@ PHASES = ("impl", "qa")
 # told to wait for pm-recorded approval of the spec it writes.  That spec is
 # held for review even if auto-start spec review stops applying before the
 # file appears (target or option removed), since the agent waits regardless.
+# Cleared by the impl approval (or a start without the flag).
 IMPL_GATE_KEY = "impl_spec_gate"
 
 
@@ -480,6 +481,10 @@ def _record_approval(pr: dict, phase: str, approved_at: str) -> None:
         rec = {}
     rec[phase] = approved_at
     pr["spec_approved"] = rec
+    if phase == "impl":
+        # The gated agent got its approval and no longer waits: a later
+        # regeneration must not be held on its account.
+        pr.pop(IMPL_GATE_KEY, None)
 
 
 def _clear_approval(pr: dict, phase: str) -> None:

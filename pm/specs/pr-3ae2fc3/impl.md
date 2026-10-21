@@ -91,7 +91,7 @@
   the "don't rewind" rule.
 - An agent launched with the gate prompt waits for approval whatever happens to the option, so its spec
   is held even if review stops applying before the file appears: `pm pr start --review-spec` sets
-  `impl_spec_gate` on the PR (cleared by a start without the flag), which `hold_spec_if_due` honours
+  `impl_spec_gate` on the PR (cleared by the impl approval or a start without the flag), which `hold_spec_if_due` honours
   for in_progress PRs; the QA run keeps `planner_spec_gate` (the planner's launch-time `spec_review`).
 - Gates check `spec_pending` itself, not the derived flag. Removing the target (or the option) therefore leaves a
   waiting spec waiting, and it still needs explicit approval.
