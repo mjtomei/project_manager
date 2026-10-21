@@ -125,6 +125,15 @@ links, the genre fixture's claim not holding in pm.
   the new file. Concurrent regeneration must now produce zero crashes (the earlier ~1-in-40
   "not enough values to unpack" crash is a regression if seen), a final `rubric.md` identical to
   committed, and no leftover `.rubric.md.*` temp files; the file mode of `rubric.md` is kept.
+- *Interrupted `--write-doc` (6324448d, c56b4403).* The temp file is named
+  `.rubric.md.<pid>.<tid>` before it is created, so Ctrl-C (SIGINT) at any point must leave no
+  temp file and `rubric.md` either the old or new content (a 0-byte leftover is a regression).
+  SIGKILL can still, rarely, leave one; `experiments/plan-writing/.gitignore` ignores
+  `rubric/.rubric.md.*`, so `git status` must stay clean even then, and a later `--write-doc`
+  still succeeds. SIGINT during CPython startup exits before rubric.py runs; not a defect.
+- *Test count.* `tests/test_doc_rubric.py` collects 151 tests at 6324448d/c56b4403 (22 test
+  functions, some parametrized); counts in older notes (148-150) are stale. Run pytest from the
+  clone root with `PYTHONPATH=<clone root>` (the container may set `PYTHONPATH=/opt/pm-src`).
 - *Marker errors (577d343d).* Missing, duplicated or reversed GENERATED markers raise a
   ValueError naming `rubric.md` and saying it needs exactly one start marker followed by one end
   marker; the file is left byte-identical.
