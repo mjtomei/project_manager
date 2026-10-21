@@ -1219,6 +1219,25 @@ class TestReloadTrigger:
         auto_start.on_state_loaded(app, {"x": "qa", "a": "pending"})
         assert app.workers == []
 
+    def test_in_scope_dep_edit_seen_on_reload_kicks_scheduler(self, tmp_path):
+        # ``pm pr edit b --depends-on a,n`` pulls ready n into f's closure.
+        prs = [_pr("a", status="in_progress"), _pr("n"),
+               _pr("b", deps=["a", "n"]), _pr("f", deps=["b"])]
+        app = _enabled_app(prs, ["f"], tmp_path)
+        statuses = {p["id"]: p["status"] for p in prs}
+        auto_start.on_state_loaded(app, statuses,
+                                   {"a": [], "n": [], "b": ["a"], "f": ["b"]})
+        assert len(app.workers) == 1
+
+    def test_out_of_scope_or_unchanged_deps_ignored(self, tmp_path):
+        prs = [_pr("x", deps=["y"]), _pr("y"), _pr("a")]
+        app = _enabled_app(prs, ["a"], tmp_path)
+        statuses = {p["id"]: p["status"] for p in prs}
+        auto_start.on_state_loaded(app, statuses, {"x": [], "y": [], "a": []})
+        auto_start.on_state_loaded(app, statuses,
+                                   {"x": ["y"], "y": [], "a": []})
+        assert app.workers == []
+
     def test_no_change_or_first_load_ignored(self, tmp_path):
         prs = [_pr("a", status="merged")]
         app = _enabled_app(prs, ["a"], tmp_path)

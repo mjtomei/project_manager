@@ -670,6 +670,9 @@ class AutoRunsScreen(ModalScreen):
     }
     """
 
+    _POLICY_STYLES = {"stop": "magenta", "wait": "bold magenta",
+                      "auto": "green"}
+
     _STATE_STYLES = {
         "running": "bold green",
         "waiting": "bold yellow",
@@ -748,7 +751,7 @@ class AutoRunsScreen(ModalScreen):
 
     def _render_rows(self) -> None:
         from rich.text import Text
-        from pm_core.autostart_state import POLICY_STOP
+        from pm_core.autostart_state import policy_labels
         st = self._status
         mode = st.get("mode", "off")
         title = "Auto-start runs"
@@ -785,12 +788,10 @@ class AutoRunsScreen(ModalScreen):
             line.append(str(r.get("display_id") or r["pr_id"]), style="bold")
             if r.get("display_id") and r.get("display_id") != r["pr_id"]:
                 line.append(f" {r['pr_id']}", style="dim")
-            if r.get("policy") == POLICY_STOP:
-                line.append(" [stop-before-merge]", style="magenta")
-            elif row["kind"] == "target":
-                # Target headers always name their policy (R14); a dep's
-                # merge follows its targets, so only a stop mark is shown.
-                line.append(" [auto-merge]", style="green")
+            # Target headers always name their policy (R14); a dep shows
+            # only a hold — a stop mark or the wait target(s) holding it.
+            for label, kind in policy_labels(row):
+                line.append(f" [{label}]", style=self._POLICY_STYLES[kind])
             state = r.get("state") or "?"
             line.append(f"  {state.upper()}",
                         style=self._STATE_STYLES.get(state, ""))

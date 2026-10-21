@@ -385,7 +385,8 @@ class ProjectManagerApp(App):
         # breadcrumb).  ``_auto_start`` is derived: True iff there is at
         # least one target or the explicit whole-backlog mode is on.
         self._auto_start: bool = False
-        # Ordered {pr_id: {"added_at", "source"}} — see auto_start.add_targets
+        # Ordered {pr_id: {"added_at", "source"[, "wait_for_merge"]}} — see
+        # auto_start.add_targets (the flag holds the target's closure).
         self._auto_start_targets: dict[str, dict] = {}
         self._auto_start_all: bool = False
         self._auto_start_run_id: str | None = None
@@ -397,9 +398,10 @@ class ProjectManagerApp(App):
         # ``pr start`` activation must not move the user's cursor.
         self._followed_active_pr: str | None = None
         self._quiet_activations: dict[str, float] = {}
-        # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
+        # Explicit per-PR opt-out of auto-merge (O key / CLI default).
         # When a PR is in this set, _maybe_auto_merge stops at "ready to
-        # merge" instead of launching the merge window.
+        # merge" instead of launching the merge window.  Wait-for-merge
+        # holds are derived separately (auto_start.merge_holds).
         self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
@@ -642,6 +644,8 @@ class ProjectManagerApp(App):
             wq.flush_sync()
         old_statuses = {p.get("id"): p.get("status")
                         for p in (self._data or {}).get("prs") or []}
+        old_deps = {p.get("id"): list(p.get("depends_on") or [])
+                    for p in (self._data or {}).get("prs") or []}
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
@@ -652,10 +656,11 @@ class ProjectManagerApp(App):
                        self._root, len(self._data.get("prs") or []))
             self._update_display()
             # A merge done outside the auto-merge path (``g``, CLI, another
-            # session) is only seen here; let the scheduler prune completed
-            # targets and start newly-unblocked dependents.
+            # session) or a ``pm pr edit --depends-on`` is only seen here;
+            # let the scheduler prune completed targets and start
+            # newly-unblocked or newly-in-scope PRs.
             from pm_core.tui import auto_start as _auto_start
-            _auto_start.on_state_loaded(self, old_statuses)
+            _auto_start.on_state_loaded(self, old_statuses, old_deps)
         except FileNotFoundError:
             _log.warning("no project.yaml found")
             self._root = None

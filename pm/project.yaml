@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-488ac6d
+  active_pr: pr-8c1dd15
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -26393,11 +26393,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T17:25:41.895887+00:00'
-  updated_at: '2026-10-12T17:25:41.895887+00:00'
+  updated_at: '2026-10-21T01:25:53.911262+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ff4d9b7
+    text: 'Worse variant seen in pr-e69afc4 QA s1 (2026-10-21): a grouped viewer named
+      pm-rec-view (pm- prefix, no ~N) passes the name check, so qa_loop.run_qa_sync
+      sets state.session_tag="rec-view" (session.removeprefix("pm-")). fake_claude_config_for_type(type,
+      "rec-view") then misses ~/.pm/sessions/<real-tag>/fake-claude and the QA planner/concretize/scenario
+      panes launch REAL /usr/local/bin/claude while impl/review (tag from git cwd)
+      stay fake; captures also split into ~/.pm/sessions/rec-view/captures. Silent:
+      no error. Fix via #{session_group} should also cover this; consider having the
+      QA loop take its tag from the same source as the launcher (get_session_tag)
+      or warn when a fake config exists for the repo tag but not the resolved tag.
+      Evidence: /pm-captures/scenarios/1/real-claude-incident + pm-debug.log (pr-e69afc4).'
+    created_at: '2026-10-21T01:25:53Z'
+    last_edited: '2026-10-21T01:25:53Z'
 - id: pr-b8561ac
   plan: bugs
   title: 'Bug: QA planner stalls when terminal capture truncates a complete transcript
@@ -28582,11 +28595,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T13:38:11.755044+00:00'
-  updated_at: '2026-10-13T13:38:11.755044+00:00'
+  updated_at: '2026-10-21T00:34:32.732379+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6c9b875
+    text: 'From pr-e69afc4 (autostart --wait-for-merge): wait-held PRs are merged
+      by hand with g, so a conflicting manual merge hits this bug directly. pr-e69afc4
+      deliberately does NOT treat a resolution window MERGED message as completion;
+      its scheduler advances only when project.yaml shows status merged and the reload
+      runs auto_start.on_state_loaded -> check_and_start. Once this fix finalizes
+      manual conflict merges (status merged + trigger_tui_refresh), dependents of
+      wait-held PRs will start automatically with no extra wiring. Please add an e2e
+      check: wait target with a conflicting prerequisite, g merge, answer the window,
+      dependents start.'
+    created_at: '2026-10-21T00:34:32Z'
+    last_edited: '2026-10-21T00:34:32Z'
 - id: pr-ea04ba8
   plan: bugs
   title: 'Bug: vanilla pm pr merge always opens a spurious resolution window: workdir
@@ -29427,7 +29452,41 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:20:58.983191+00:00'
-  updated_at: '2026-10-21T00:20:58.983191+00:00'
+  updated_at: '2026-10-21T01:15:17.160135+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-36dd307
+    text: 'QA s4: incidental fix 8029f04e — pm pr merge now prints ''PR X marked as
+      merged (newly ready: …)'' as its LAST line (TUI g log line showed only the ''Newly
+      ready'' entry). Scope fix 255d2b24: reload kicks scheduler pass on in-scope
+      depends_on change (R11 graph edit start).'
+    created_at: '2026-10-21T01:15:17Z'
+    last_edited: '2026-10-21T01:15:17Z'
+- id: pr-8c1dd15
+  plan: bugs
+  title: 'Bug: TUI log line keeps a released PR''s ''waiting for manual merge (wait-for-merge:
+    F)'' line after a graph edit drops it from scope'
+  branch: pm/pr-8c1dd15-bug-tui-log-line-keeps-a-released-pr-s-waiting-for
+  status: pending
+  depends_on: []
+  description: 'Found in pr-e69afc4 QA s6 (2026-10-21). When a wait-for-merge target
+    F holds signed-off prereq N, the TUI log line reads ''✓ N signed off (SIGNOFF_MERGE
+    @ sha) — waiting for manual merge (wait-for-merge: F) — press g to merge''. A
+    CLI ''pm pr edit <C> --depends-on <A>'' then drops N from F''s closure. Status
+    and the runs popup drop N right away, as they should, but the reload logs nothing.
+    The stale waiting/press-g line stays on the TUI log line until some unrelated
+    message replaces it (minutes, in s6). Suggested fix: in auto_start.on_state_loaded,
+    when a deps change takes a held signed-off PR out of every wait target''s closure,
+    log a short line such as ''N no longer held (left wait-for-merge scope of F)''.
+    Code: pm_core/tui/review_loop_ui.py _maybe_auto_merge hold line; pm_core/tui/auto_start.py
+    on_state_loaded. Captures: /pm-captures/scenarios/6 (tui/popup-t3.txt bottom line).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T02:01:29.162905+00:00'
+  updated_at: '2026-10-21T02:01:29.162905+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

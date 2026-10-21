@@ -27,6 +27,17 @@ SCHEMA = "pm.autostart.status/1"
 
 POLICY_STOP = "stop_before_merge"
 POLICY_AUTO = "auto_merge"
+# Target-level: hold the target *and its whole dependency closure* for a
+# manual merge.  Stored on the target record (``WAIT_KEY``), never copied
+# into the explicit per-PR stop set, so removing the target or changing its
+# policy releases exactly the holds it caused.
+POLICY_WAIT = "wait_for_merge"
+WAIT_KEY = "wait_for_merge"
+POLICIES = (POLICY_STOP, POLICY_AUTO, POLICY_WAIT)
+# The command-line flag selecting each policy (CLI + command bar).
+POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
+                POLICY_AUTO: "--auto-merge",
+                POLICY_WAIT: "--wait-for-merge"}
 
 PHASES = ("pending", "implementation", "review", "qa", "sign_off", "merge", "done")
 STATES = ("queued", "running", "waiting", "paused", "failed", "completed")
@@ -96,6 +107,69 @@ def needed_by(prs: list[dict], targets) -> dict[str, list[str]]:
         for pr_id in sorted(closure(prs, t)):
             out.setdefault(pr_id, []).append(t)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Merge holds (the single policy path)
+# ---------------------------------------------------------------------------
+
+def is_wait_target(record) -> bool:
+    return isinstance(record, dict) and bool(record.get(WAIT_KEY))
+
+
+def target_policy(pr_id: str, record, stop) -> str:
+    """A target's own configured policy (not what holds it)."""
+    if is_wait_target(record):
+        return POLICY_WAIT
+    return POLICY_STOP if pr_id in (stop or ()) else POLICY_AUTO
+
+
+def merge_holds(prs: list[dict], targets: dict, stop) -> dict[str, dict]:
+    """Every held PR → ``{"explicit": bool, "targets": [wait target ids]}``.
+
+    A PR is held for a manual merge when it carries an explicit per-PR mark
+    (*stop*, the ``_stop_before_merge`` set) or lies in the dependency
+    closure (target included) of an active ``wait_for_merge`` target.
+    Derived on every call from the current graph, so newly added
+    dependencies are held and removed targets/edges release theirs.
+    Merged/closed closure members are not held (nothing left to merge, and
+    they would otherwise show up as "released" when the target goes).
+    """
+    status = {pr["id"]: pr.get("status") for pr in prs}
+    holds: dict[str, dict] = {}
+    for pr_id in stop or ():
+        holds[pr_id] = {"explicit": True, "targets": []}
+    for t, rec in (targets or {}).items():
+        if not is_wait_target(rec):
+            continue
+        for pr_id in sorted(closure(prs, t)):
+            if status.get(pr_id) in TERMINAL_STATUSES:
+                continue
+            h = holds.setdefault(pr_id, {"explicit": False, "targets": []})
+            h["targets"].append(t)
+    return holds
+
+
+def effective_policy(pr_id: str, holds: dict) -> str:
+    """Merge policy actually applied to *pr_id* (an explicit stop names it
+    first; a wait-target hold next; otherwise auto-merge)."""
+    h = holds.get(pr_id)
+    if not h:
+        return POLICY_AUTO
+    return POLICY_STOP if h.get("explicit") else POLICY_WAIT
+
+
+def held_by_text(h: dict | None) -> str:
+    """Short cause of a hold, e.g. ``"stop-before-merge"`` or
+    ``"wait-for-merge ← pr-final"``."""
+    if not h:
+        return ""
+    parts = []
+    if h.get("explicit"):
+        parts.append("stop-before-merge")
+    if h.get("targets"):
+        parts.append("wait-for-merge ← " + ", ".join(h["targets"]))
+    return "; ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -182,33 +256,35 @@ def _find_window(windows: dict[str, str], pr: dict, phase: str) -> dict | None:
     return None
 
 
-def _policy(pr_id: str, stop: set) -> str:
-    return POLICY_STOP if pr_id in stop else POLICY_AUTO
-
-
-def _signed_off_reason(pr_id: str, stop: set) -> str:
-    if pr_id in stop:
+def _signed_off_reason(pr_id: str, holds: dict) -> str:
+    h = holds.get(pr_id)
+    if h and h.get("explicit"):
         return "signed off (fresh SIGNOFF_MERGE); stop-before-merge — press g"
+    if h:
+        return ("signed off (fresh SIGNOFF_MERGE); waiting for manual merge "
+                f"(held by {', '.join(h['targets'])}) — press g")
     return "signed off (fresh SIGNOFF_MERGE); auto-merge pending"
 
 
-def _awaiting_signoff_reason(pr_id: str, inp: dict, stop: set,
+def _awaiting_signoff_reason(pr_id: str, inp: dict, holds: dict,
                              passed: str) -> str:
     """Reason for a PR whose last gate (*passed*) is done and that now
     needs sign-off before it can merge."""
     signoff = (inp.get("signoff") or {}).get(pr_id) or {}
     if signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE":
-        return _signed_off_reason(pr_id, stop)
+        return _signed_off_reason(pr_id, holds)
     return (f"{passed}; awaiting sign-off (hand-off on next scheduler "
             "pass)")
 
 
-def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
-    """Return ``(phase, state, reason)`` for one PR from live evidence."""
+def _derive(pr: dict, inp: dict, pr_map: dict,
+            holds: dict) -> tuple[str, str, str]:
+    """Return ``(phase, state, reason)`` for one PR from live evidence.
+
+    *holds* is :func:`merge_holds` for the active targets."""
     pr_id = pr["id"]
     status = pr.get("status") or "pending"
     phase = _STATUS_PHASE.get(status, "pending")
-    stop = inp.get("stop_before_merge") or set()
     review = (inp.get("review_loops") or {}).get(pr_id)
     qa = (inp.get("qa_loops") or {}).get(pr_id)
     windows = inp.get("windows") or {}
@@ -243,8 +319,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
             if dstatus == "merged":
                 continue
             tag = f"{d} ({dstatus}"
-            if d in stop:
-                tag += ", stop-before-merge"
+            if d in holds:
+                tag += ", " + held_by_text(holds[d])
             blocking.append(tag + ")")
         if blocking:
             return "pending", "waiting", "blocked on " + ", ".join(blocking)
@@ -281,7 +357,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
                 if inp.get("skip_qa"):
                     # No QA will run: the next step is sign-off/merge.
                     return (phase, "waiting", _awaiting_signoff_reason(
-                        pr_id, inp, stop, "review passed; QA skipped (skip_qa)"))
+                        pr_id, inp, holds, "review passed; QA skipped (skip_qa)"))
                 return phase, "waiting", "review passed; QA transition pending"
             if last in ("KILLED", "ERROR"):
                 return phase, "failed", f"review loop ended {last}"
@@ -310,7 +386,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
                 return phase, "waiting", "QA INPUT_REQUIRED — answer in QA window"
             if verdict == "PASS":
                 return (phase, "waiting",
-                        _awaiting_signoff_reason(pr_id, inp, stop, "QA passed"))
+                        _awaiting_signoff_reason(pr_id, inp, holds, "QA passed"))
             if verdict == "NEEDS_WORK":
                 return phase, "waiting", "QA NEEDS_WORK; returning to review"
             if verdict:
@@ -332,7 +408,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict) -> tuple[str, str, str]:
             return (phase, "waiting", f"{verdict} stale (HEAD moved); sign-off "
                     "relaunches against current HEAD")
         if verdict == "SIGNOFF_MERGE":
-            return phase, "waiting", _signed_off_reason(pr_id, stop)
+            return phase, "waiting", _signed_off_reason(pr_id, holds)
         if verdict == "SIGNOFF_BLOCKED":
             return phase, "paused", "sign-off BLOCKED — needs human decision"
         return phase, "waiting", f"routed {verdict}"
@@ -357,6 +433,8 @@ def build_status(inp: dict) -> dict:
     enabled = bool(inp.get("enabled", bool(targets) or all_mode))
     stop = set(inp.get("stop_before_merge") or ())
     windows = inp.get("windows") or {}
+    # Only active targets hold their closures (off → explicit marks only).
+    holds = merge_holds(prs, targets if enabled else {}, stop)
 
     if not enabled:
         mode = "off"
@@ -370,7 +448,7 @@ def build_status(inp: dict) -> dict:
 
     def run_entry(pr: dict) -> dict:
         pr_id = pr["id"]
-        phase, state, reason = _derive(pr, inp, pr_map)
+        phase, state, reason = _derive(pr, inp, pr_map, holds)
         win = _find_window(windows, pr, phase)
         review = (inp.get("review_loops") or {}).get(pr_id)
         qa = (inp.get("qa_loops") or {}).get(pr_id)
@@ -386,7 +464,9 @@ def build_status(inp: dict) -> dict:
             "is_target": pr_id in targets,
             "needed_by": nb.get(pr_id, []),
             "depends_on": list(pr.get("depends_on") or []),
-            "policy": _policy(pr_id, stop),
+            "policy": effective_policy(pr_id, holds),
+            "held_by": list((holds.get(pr_id) or {}).get("targets") or []),
+            "explicit_hold": bool((holds.get(pr_id) or {}).get("explicit")),
             "window": ({"name": win["name"], "id": win["id"]} if win else None),
             "review": ({
                 "iteration": review.get("iteration") or 0,
@@ -451,7 +531,9 @@ def build_status(inp: dict) -> dict:
         targets_out.append({
             "pr_id": t,
             "title": (pr or {}).get("title", ""),
-            "policy": _policy(t, stop),
+            "policy": target_policy(t, rec, stop),
+            "effective_policy": effective_policy(t, holds),
+            "held_by": list((holds.get(t) or {}).get("targets") or []),
             "added_at": rec.get("added_at"),
             "source": rec.get("source"),
             "state": run["state"] if run else ("failed" if pr is None else "completed"),
@@ -516,7 +598,9 @@ def status_rows(status: dict) -> list[dict]:
         run = runs.get(tid) or {
             "pr_id": tid, "display_id": tid, "title": t.get("title", ""),
             "phase": t.get("phase"), "state": t.get("state"),
-            "reason": t.get("reason"), "policy": t.get("policy"),
+            "reason": t.get("reason"),
+            "policy": t.get("effective_policy") or t.get("policy"),
+            "held_by": list(t.get("held_by") or []),
             "window": None, "needed_by": [tid],
         }
         rows.append({"pr_id": tid, "depth": 0, "kind": "target", "run": run,
@@ -530,6 +614,34 @@ def status_rows(status: dict) -> list[dict]:
             rows.append({"pr_id": dep, "depth": 1, "kind": "dep", "run": r,
                          "also": also, "progress": _progress(r)})
     return rows
+
+
+def policy_labels(row: dict) -> list[tuple[str, str]]:
+    """``[(label, kind)]`` naming a status row's effective merge policy and
+    what causes a hold — shared by ``format_text`` and the runs popup.
+
+    *kind* is ``stop`` / ``wait`` / ``auto``.  A wait target names its own
+    policy (``wait-for-merge``); a PR held by other wait targets names them
+    (``wait-for-merge ← T``).  Target rows always name a policy; an
+    auto-merge target that a hold overrides says so.
+    """
+    run = row.get("run") or {}
+    pr_id = run.get("pr_id") or row.get("pr_id")
+    held_by = list(run.get("held_by") or [])
+    out: list[tuple[str, str]] = []
+    if run.get("explicit_hold") or run.get("policy") == POLICY_STOP:
+        out.append(("stop-before-merge", "stop"))
+    # A target's own wait policy, even once nothing is left to hold (a
+    # completed target's closure is merged, so it is in no ``held_by``).
+    if pr_id in held_by or (row.get("kind") == "target"
+                            and row.get("policy") == POLICY_WAIT):
+        out.append(("wait-for-merge", "wait"))
+    others = [t for t in held_by if t != pr_id]
+    if others:
+        out.append(("wait-for-merge ← " + ", ".join(others), "wait"))
+    if row.get("kind") == "target" and row.get("policy") == POLICY_AUTO:
+        out.insert(0, ("auto-merge, held" if out else "auto-merge", "auto"))
+    return out
 
 
 def format_text(status: dict) -> str:
@@ -554,7 +666,9 @@ def format_text(status: dict) -> str:
         mark = "◎ " if row["kind"] == "target" else "└ "
         if row["kind"] == "run":
             mark = ""
-        pol = " [stop]" if r.get("policy") == POLICY_STOP else ""
+        # The default policy goes unlabelled in text (only holds show).
+        labels = [lbl for lbl, _ in policy_labels(row) if lbl != "auto-merge"]
+        pol = f" [{'; '.join(labels)}]" if labels else ""
         prog = f" {row['progress']}" if row.get("progress") else ""
         win = f"  win={r['window']['name']}" if r.get("window") else ""
         also = f"  also needed by {', '.join(row['also'])}" if row.get("also") else ""
