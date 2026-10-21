@@ -51,7 +51,8 @@ BOILERPLATE = re.compile(  # sections that are not authored content: never conti
 TITLE_WINDOW = 400      # tokens from the top of the body searched for a recorded title
 NON_PROSE = re.compile(r"^\s*(\||#|Title:|Opened by |[-*]?\s*$)")
 # Issue and PR bodies are edited as work proceeds: task checkboxes and KEP release targets record outcomes.
-PROGRESS_LINE = re.compile(r"(?im)^[ \t]*(?:[-*+][ \t]*)?(?:\[[ xX]\].*|(?:alpha|beta|stable) release target\b.*|enhancement target\b.*)\n?")
+PROGRESS_LINE = re.compile(r"(?i)^[ \t]*(?:[-*+][ \t]*)?(?:\[[ xX]\].*|(?:alpha|beta|stable) release target\b.*|enhancement target\b.*)$")
+HTML_COMMENT = re.compile(r"<!--.*?(?:-->|$)", re.S)
 
 
 # --- text utilities ---------------------------------------------------------
@@ -91,6 +92,30 @@ def drop_dangling_headings(text):
                 continue
         keep.append(line)
     return "\n".join(keep)
+
+
+def drop_progress(text):
+    """Remove progress records from an issue or PR body; returns (text, lines dropped).
+
+    A progress line takes the lines nested under it (deeper-indented lines up
+    to the next line at its own indent or shallower): KEP issues list the
+    implementation and docs PRs of each stage under its checkbox. HTML
+    comments are template guidance that the rendered issue never shows.
+    """
+    out, dropped, parent = [], 0, None
+    for line in HTML_COMMENT.sub("", text).split("\n"):
+        indent = len(line) - len(line.lstrip(" \t"))
+        if line.strip() and parent is not None and indent > parent:
+            dropped += 1
+            continue
+        if line.strip():
+            parent = None
+        if PROGRESS_LINE.match(line):
+            parent = indent
+            dropped += 1
+            continue
+        out.append(line)
+    return "\n".join(out), dropped
 
 
 def request_words(text):
@@ -272,7 +297,7 @@ def assemble_brief(doc, text, items, source_cfg, n, doc_date=None):
         text_in = URL.sub(lambda m: "" if is_self(m.group(0)) else m.group(0), item["text"])
         progress_dropped = 0
         if item["kind"] in ("tracking_issue", "review_thread"):
-            text_in, progress_dropped = PROGRESS_LINE.subn("", text_in)
+            text_in, progress_dropped = drop_progress(text_in)
         segs = segments(text_in)
         hit = [bool(x.strip()) and bool(shared_ngrams(x, body_grams, n)) for x in segs]
         total, dropped = sum(1 for x in segs if x.strip()), sum(hit)
@@ -482,6 +507,8 @@ def build(limit_sources=None):
             handle.write(json.dumps(c) + "\n")
     coverage = coverage_report(docs, statuses, cases_out, pm_report, limit_sources)
     coverage["context_timing"] = {sid: {k: dict(v) for k, v in sorted(kinds.items())} for sid, kinds in sorted(timing.items())}
+    if limit_sources:
+        coverage["partial_sources"] = sorted(limit_sources)
     (CASES / "coverage.json").write_text(json.dumps(coverage, indent=1) + "\n")
     if limit_sources:
         print("partial build (--sources): reports/case-coverage.* left unchanged")
@@ -599,7 +626,8 @@ def write_summary(coverage):
               "version committed on or before the document's date.",
               "- Context written after the document is excluded from briefs; see the section above.",
               "- Issue and pull request bodies are their current text, which authors may have edited after opening; "
-              "task-checkbox and release-target lines, which record progress, are removed from briefs.",
+              "task-checkbox and release-target lines, which record progress, are removed from briefs with the PR links "
+              "nested under them, and so are HTML comments (template guidance).",
               f"- Continuation cases: up to {cont['max_cases_per_document']} per document, spread over eligible headings; "
               f"prefix at least {cont['min_prefix_words']} words, reference {cont['min_reference_words']}–"
               f"{cont['max_reference_words']} words. Boilerplate sections (copyright, IPR, references, addresses, contents) "
@@ -742,7 +770,10 @@ def main():
         coverage = json.loads((CASES / "coverage.json").read_text())
         coverage["check"] = result
         (CASES / "coverage.json").write_text(json.dumps(coverage, indent=1) + "\n")
-        write_summary(coverage)
+        if coverage.get("partial_sources"):
+            print("partial catalog (built with --sources): reports/case-coverage.* left unchanged")
+        else:
+            write_summary(coverage)
         print(json.dumps(result, indent=1))
         raise SystemExit(1 if result["failure_counts"] else 0)
     build(args.sources)

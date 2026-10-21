@@ -549,14 +549,20 @@ def test_progress_lines_and_linked_issue_heading(tmp_path):
     doc = {"identity": "text/0243-widgets.md", "url": "https://example.org/rfc", "id": "r"}
     item = context_item("rfcs", "review_thread", "pr243",
                         "Title: Widgets\n\nWe need widgets because the current design cannot express them at all.\n"
-                        "- [x] Stabilize widgets\n  - Beta release target (x.y): 1.27\n", ["r"])
+                        "- [x] Stabilize widgets\n  - Beta release target (x.y): 1.27\n"
+                        "- [x] Alpha\n  - [x] Code update PR(s):\n    - https://github.com/rust-lang/rust/pull/9911\n"
+                        "<!-- Uncomment these as you prepare\n- [ ] Beta\n-->\n"
+                        "Widgets also simplify the parser considerably.\n", ["r"])
     item["url"] = "https://github.com/rust-lang/rfcs/pull/243"
     item["label"] = "RFC pull request opening post"
     cfg = {"context": {"request": "Write an RFC.", "collectors": []}}
     brief, prov = cases.assemble_brief(doc, text, [item], cfg, N)
     assert "## RFC pull request opening post" in brief["brief"]   # label kept although the body links the PR
     assert "Stabilize widgets" not in brief["brief"] and "1.27" not in brief["brief"]
-    assert prov[0]["progress_lines_dropped"] == 2
+    assert "pull/9911" not in brief["brief"]          # PR links nested under a progress checkbox go with it
+    assert "Uncomment" not in brief["brief"] and "[ ] Beta" not in brief["brief"]
+    assert "simplify the parser" in brief["brief"]   # text after the nested list is kept
+    assert prov[0]["progress_lines_dropped"] == 5
 
 
 def test_dash_list_header_accepts_hash_fields():
@@ -772,3 +778,15 @@ def test_check_reports_missing_pm_conversation(catalog):
     pm = next(json.loads(l) for l in (data / "cases" / "catalog.jsonl").read_text().splitlines() if '"pm_plan"' in l)
     Path(pm["inputs"]["conversation_path"]).unlink()
     assert cases.check(data_dir=data)["failure_counts"] == {"pm_conversation_missing": 1}
+
+
+def test_partial_build_and_check_leave_committed_report(catalog, monkeypatch, capsys):
+    report = cases.REPORTS / "case-coverage.md"
+    before = report.read_text()
+    cases.build(limit_sources=[catalog["cases"][0]["source"]])
+    assert report.read_text() == before
+    monkeypatch.setattr(sys, "argv", ["cases.py", "--check"])
+    with pytest.raises(SystemExit):
+        cases.main()
+    assert report.read_text() == before
+    assert "partial catalog" in capsys.readouterr().out

@@ -183,7 +183,9 @@ exactly once.
     2001) get none. A WG draft that replaced an earlier individual draft is
     dated by the WG draft's -00 (limitation).
   - Issue and PR bodies are their current text; checkbox and release-target
-    lines, which record progress, are removed.
+    lines, which record progress, are removed together with the lines nested
+    under them (KEP issues list each stage's PRs there), and HTML comments
+    (template guidance the rendered issue never shows) are stripped.
 - *How many continuation cases per document?* All boundaries are recorded in
   coverage; up to 3 cases per document are emitted (early/middle/late among
   eligible boundaries, deterministic), eligible when prefix ≥ 100 words and
