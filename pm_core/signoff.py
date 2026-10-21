@@ -741,6 +741,49 @@ def return_awaiting(pr: dict | None) -> str | None:
     return rec.get("awaiting") or None
 
 
+RETURN_LAUNCH_CLAIM_SECONDS = 180
+
+
+def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
+    """Take the launch of the routed *hop*'s fresh session (one winner).
+
+    Several drivers act on ``awaiting`` (the TUI routing a verdict, every
+    ``pm pr auto-sequence`` tick).  Each launch is ``--fresh`` — it kills
+    the window it finds — so two concurrent launchers kill each other's
+    session and leave duplicates behind.  The first caller records a claim
+    and launches; later callers see it and leave the launch alone.
+    ``awaiting`` itself stays set until the session opens, and a claim
+    whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    won = {"ok": False}
+
+    def _apply(data):
+        pr = store.get_pr(data, pr_id)
+        rec = (pr or {}).get("signoff_return")
+        if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+            return
+        claim = rec.get("launch_claim") or {}
+        try:
+            age = (now - datetime.fromisoformat(
+                str(claim.get("at")).replace("Z", "+00:00"))).total_seconds()
+        except (TypeError, ValueError):
+            age = None
+        if claim.get("hop") == hop and age is not None \
+                and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS:
+            return
+        rec["launch_claim"] = {"hop": hop, "at": now.isoformat()}
+        won["ok"] = True
+
+    try:
+        store.locked_update(root, _apply)
+    except Exception as e:
+        _log.warning("claim sign-off return launch for %s: %s", pr_id, e)
+        return False
+    return won["ok"]
+
+
 def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
     """The routed *hop* launched a fresh session: stop forcing a relaunch."""
     def _apply(data):
@@ -748,6 +791,7 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
         rec = (pr or {}).get("signoff_return")
         if isinstance(rec, dict) and rec.get("awaiting") == hop:
             rec["awaiting"] = None
+            rec.pop("launch_claim", None)
 
     try:
         data = store.load(root)

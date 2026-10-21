@@ -674,3 +674,43 @@ def test_concurrent_checks_do_not_race_on_the_base_ref(w):
         assert results == [(tip, None)] * 3, results
     refs = git(w.wd, "for-each-ref", "--format=%(refname)", "refs/pm/").split()
     assert refs == [integration.BASE_REF]
+
+# --- one launcher per return (concurrent drivers) -------------------------
+
+def test_claim_return_launch_has_one_winner_until_cleared(tmp_path):
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned("in_review", "review")]}, tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "review") is True
+    assert signoff.claim_return_launch(tmp_path, PR, "review") is False
+    assert signoff.claim_return_launch(tmp_path, PR, "qa") is False
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["awaiting"] == "review"          # set until the window opens
+    signoff.clear_return_awaiting(tmp_path, PR, "review")
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["awaiting"] is None and "launch_claim" not in ret
+    assert signoff.claim_return_launch(tmp_path, PR, "review") is False
+
+
+def test_claim_return_launch_expires(tmp_path):
+    p = _returned("in_review", "review",
+                  launch_claim={"hop": "review",
+                                "at": "2000-01-01T00:00:00+00:00"})
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [p]}, tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "review") is True
+
+
+def test_cli_leaves_a_claimed_review_return_launch_alone(tmp_path):
+    """A second driver (concurrent tick, or the TUI that routed the
+    verdict) is launching the return's review: relaunching --fresh would
+    kill its window and leave two review windows behind."""
+    result, _, review, qa = _seq(
+        tmp_path, _returned("in_review", "review"),
+        **{"pm_core.cli.pr._check_review_verdict": {"return_value": ("PASS", 3)},
+           "pm_core.signoff.claim_return_launch": {"return_value": False}})
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "running: review"
+    review.callback.assert_not_called()
+    qa.assert_not_called()

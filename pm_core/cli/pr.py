@@ -3485,7 +3485,13 @@ def pr_auto_sequence(pr_id: str):
             verdict = None
         if awaiting == "review":
             # A sign-off REVIEW return: an earlier iteration's verdict
-            # reviewed older code — launch a fresh iteration.
+            # reviewed older code — launch a fresh iteration, unless another
+            # driver (the TUI that routed it, a concurrent tick) is already
+            # launching it: a second --fresh launch would kill that one.
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(root, pr_id, "review"):
+                click.echo("running: review")
+                return
             next_iter = latest_iter + 1
             iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
             ctx = click.get_current_context()
@@ -3663,6 +3669,9 @@ def pr_auto_sequence(pr_id: str):
             click.echo("sign_off: re-qa")
             return
         if hop == "review":
+            if not signoff_mod.claim_return_launch(root, pr_id, "review"):
+                click.echo("running: review")
+                return
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
             iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
