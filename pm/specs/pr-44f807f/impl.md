@@ -127,7 +127,9 @@
   The same holds for restarting, looping back or skipping ahead (continuity, not
   progression, which judges order within the section) and re-introducing the
   document's purpose (continuity, not purpose). Exclusions and non-goals belong to
-  scope_and_abstraction, not risks_and_open_questions.
+  scope_and_abstraction, not risks_and_open_questions. Terms likewise: one concept
+  named several ways is internal_consistency, renaming or redefining a prefix term
+  is continuity, and clarity owns only undefined terms and ambiguous statements.
 - No network or model calls in tests; reference URLs are not fetched in tests.
 - Internal-consistency fixtures contradict themselves only about choices the brief
   leaves open; a contradiction of the brief would also move fidelity.

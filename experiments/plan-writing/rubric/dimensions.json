@@ -241,14 +241,14 @@
       "id": "clarity_and_precision",
       "name": "Clarity and precision",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms are defined and used consistently, and sentences are readable for the intended audience.",
-      "track_notes": {"continuation": "Terms the prefix defined are used with the same meaning."},
+      "definition": "Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms are defined, and sentences are readable for the intended audience.",
+      "track_notes": {"continuation": "Terms the section introduces are defined; renaming or redefining terms the prefix established is scored under continuity, not here."},
       "references": ["iso29148", "incose-gtwr", "rfc8174", "rfc7322", "google-style", "iso24495", "six-traits", "aacu-value"],
       "derived_from": "ISO 29148 'unambiguous'; INCOSE rules against vague terms, escape clauses and open-ended lists; RFC 8174 requirement keywords; RFC 7322 editorial clarity; Google style; ISO 24495 'understandable'; 6+1 'word choice' and 'conventions'; AAC&U 'control of syntax and mechanics'.",
       "detection_guidance": [
         "Flag vague qualifiers (appropriate, as needed, fast, robust, user-friendly, etc., and/or) where a reviewer needs a specific value or condition.",
         "Flag obligations whose force is unclear (should vs must) when it matters.",
-        "Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms."
+        "Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms. One concept named several ways is scored under internal_consistency, not here."
       ],
       "not_a_defect": ["Deliberate openness that is labelled as an open question."],
       "examples": {

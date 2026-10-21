@@ -352,9 +352,9 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### clarity_and_precision — Clarity and precision
 
-**Definition.** Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms are defined and used consistently, and sentences are readable for the intended audience.
+**Definition.** Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms are defined, and sentences are readable for the intended audience.
 
-**Continuation.** Terms the prefix defined are used with the same meaning.
+**Continuation.** Terms the section introduces are defined; renaming or redefining terms the prefix established is scored under continuity, not here.
 
 **Derived from.** ISO 29148 'unambiguous'; INCOSE rules against vague terms, escape clauses and open-ended lists; RFC 8174 requirement keywords; RFC 7322 editorial clarity; Google style; ISO 24495 'understandable'; 6+1 'word choice' and 'conventions'; AAC&U 'control of syntax and mechanics'.
 
@@ -364,7 +364,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 - Flag vague qualifiers (appropriate, as needed, fast, robust, user-friendly, etc., and/or) where a reviewer needs a specific value or condition.
 - Flag obligations whose force is unclear (should vs must) when it matters.
-- Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms.
+- Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms. One concept named several ways is scored under internal_consistency, not here.
 
 **Not a fault.**
 
