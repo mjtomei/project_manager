@@ -1,0 +1,716 @@
+{
+  "generated": "2026-10-21T23:54:11.817Z",
+  "simulated": "All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions.",
+  "simulator": "@evenrealities/evenhub-simulator 0.9.5",
+  "sdk": "@evenrealities/even_hub_sdk 0.0.16",
+  "pretext": "@evenrealities/pretext 0.1.4",
+  "host": "linux-arm64",
+  "journeys": [
+    {
+      "id": "A",
+      "title": "Read a spec, discuss it in its session, revise, approve, hand back to PM",
+      "shots": [
+        {
+          "id": "A01-needs-you",
+          "title": "Needs you",
+          "caption": "Root view lists what is waiting for the user: a spec and a plan to review, a QA scenario that needs input, a manual merge.",
+          "scene": "list:home",
+          "file": "A01-needs-you.png",
+          "raw": "raw/A01-needs-you.png",
+          "steps": []
+        },
+        {
+          "id": "A02-spec-v2-page1",
+          "title": "Spec under review",
+          "caption": "Long-form reading in native text. The footer keeps document identity, version and review state on every page.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "A02-spec-v2-page1.png",
+          "raw": "raw/A02-spec-v2-page1.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "A03-spec-v2-ambiguities",
+          "title": "Reading the ambiguities",
+          "caption": "Pages break at bullets and headings. Page 4 of 5 starts at the section the reviewer wants to discuss.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "A03-spec-v2-ambiguities.png",
+          "raw": "raw/A03-spec-v2-ambiguities.png",
+          "steps": [
+            "down",
+            "down",
+            "down"
+          ]
+        },
+        {
+          "id": "A04-listening",
+          "title": "Speaking to the spec’s own session",
+          "caption": "Hold to speak. The panel names the target session (#214 impl) and the page; the document above stays in place.",
+          "scene": "doc:spec:pr-214:impl:listening",
+          "file": "A04-listening.png",
+          "raw": "raw/A04-listening.png",
+          "steps": [
+            "SIMULATED speech result queued",
+            "long_press",
+            "SIMULATED live words"
+          ]
+        },
+        {
+          "id": "A05-review-draft",
+          "title": "Review before sending",
+          "caption": "Recognized text is reviewed before it is sent. The message carries the document version, hash, section and page.",
+          "scene": "doc:spec:pr-214:impl:review",
+          "file": "A05-review-draft.png",
+          "raw": "raw/A05-review-draft.png",
+          "steps": [
+            "long_press_release"
+          ]
+        },
+        {
+          "id": "A06-sent-keep-reading",
+          "title": "Sent; reading continues",
+          "caption": "Sending returns to the same page. Nothing is resent automatically.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "A06-sent-keep-reading.png",
+          "raw": "raw/A06-sent-keep-reading.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "A07-doc-actions",
+          "title": "Document actions",
+          "caption": "Discuss opens the existing impl session. Approval is offered only for the version on screen.",
+          "scene": "list:doc-actions:spec:pr-214:impl",
+          "file": "A07-doc-actions.png",
+          "raw": "raw/A07-doc-actions.png",
+          "steps": [
+            "SIMULATED pm:agent-reply",
+            "click"
+          ]
+        },
+        {
+          "id": "A08-discussion",
+          "title": "Discussion in the existing session",
+          "caption": "The impl session that wrote the spec, not a new chat. The user’s message shows the context it was sent with; the reply streams.",
+          "scene": "session:pr-214/impl",
+          "file": "A08-discussion.png",
+          "raw": "raw/A08-discussion.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "A09-reply-v3",
+          "title": "Revision delivered",
+          "caption": "The session rewrote the spec. PM sees a new content hash (v3 · 9a07).",
+          "scene": "session:pr-214/impl",
+          "file": "A09-reply-v3.png",
+          "raw": "raw/A09-reply-v3.png",
+          "steps": [
+            "SIMULATED pm:agent-reply",
+            "SIMULATED pm:publish-revision"
+          ]
+        },
+        {
+          "id": "A10-back-changed-banner",
+          "title": "Back on the same page; v2 is no longer current",
+          "caption": "Back returns to page 4 of v2. A banner says v3 exists. The reader does not jump to v3 on its own.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "A10-back-changed-banner.png",
+          "raw": "raw/A10-back-changed-banner.png",
+          "steps": [
+            "double_click"
+          ],
+          "phone": "phone/A10-back-changed-banner.png"
+        },
+        {
+          "id": "A11-actions-approval-blocked",
+          "title": "Approval needs the current version",
+          "caption": "v2 cannot be approved once it has been replaced. \"What changed\" is offered instead.",
+          "scene": "list:doc-actions:spec:pr-214:impl",
+          "file": "A11-actions-approval-blocked.png",
+          "raw": "raw/A11-actions-approval-blocked.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "A12-what-changed",
+          "title": "What changed v2 → v3",
+          "caption": "Changed and added items, by requirement or ambiguity id. Each one opens v3 at that item.",
+          "scene": "list:whatchanged:spec:pr-214:impl",
+          "file": "A12-what-changed.png",
+          "raw": "raw/A12-what-changed.png",
+          "steps": [
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "A13-spec-v3",
+          "title": "Re-review v3 at the change",
+          "caption": "v3 opens at A1. The footer shows v3 is the version under review.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "A13-spec-v3.png",
+          "raw": "raw/A13-spec-v3.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "A14-actions-approve-v3",
+          "title": "Approve the version read",
+          "caption": "The approve row names the version and its content hash.",
+          "scene": "list:doc-actions:spec:pr-214:impl",
+          "file": "A14-actions-approve-v3.png",
+          "raw": "raw/A14-actions-approve-v3.png",
+          "steps": [
+            "click",
+            "down",
+            "down"
+          ]
+        },
+        {
+          "id": "A15-confirm-approval",
+          "title": "Explicit confirmation",
+          "caption": "Confirmation states what approval does: implementation resumes unattended, the automated phases follow, and merge stays manual.",
+          "scene": "list:confirm",
+          "file": "A15-confirm-approval.png",
+          "raw": "raw/A15-confirm-approval.png",
+          "steps": [
+            "click"
+          ],
+          "phone": "phone/A15-confirm-approval.png"
+        },
+        {
+          "id": "A16-handed-back",
+          "title": "Handed back to PM",
+          "caption": "Approval releases the spec hold. PM runs implementation, review, QA and sign-off with no agent windows to drive. Only the merge hold remains.",
+          "scene": "list:progress:pr-214",
+          "file": "A16-handed-back.png",
+          "raw": "raw/A16-handed-back.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "A17-unattended-progress",
+          "title": "Progress without intervention",
+          "caption": "47 minutes later (simulated): implementation and two review iterations finished, and QA is running. The user did nothing in between.",
+          "scene": "list:progress:pr-214",
+          "file": "A17-unattended-progress.png",
+          "raw": "raw/A17-unattended-progress.png",
+          "steps": [
+            "SIMULATED pm:tick",
+            "SIMULATED pm:progress"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "title": "Every PM session: open a QA scenario and its verifier, discuss, return without duplicates",
+      "shots": [
+        {
+          "id": "B01-pr-215",
+          "title": "PR status",
+          "caption": "PR #215 in QA. Its QA spec and every session are one step away.",
+          "scene": "list:pr:pr-215",
+          "file": "B01-pr-215.png",
+          "raw": "raw/B01-pr-215.png",
+          "steps": [
+            "reset",
+            "menu 3",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B02-qa-spec",
+          "title": "Reading the QA spec",
+          "caption": "An approved QA spec. Scenario s2 says the banner clears \"within two polls\".",
+          "scene": "doc:spec:pr-215:qa",
+          "file": "B02-qa-spec.png",
+          "raw": "raw/B02-qa-spec.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "B03-pr-sessions",
+          "title": "#215 sessions",
+          "caption": "Implementation, review, the QA run and sign-off, each with its own state. QA is one entry per run that opens its sessions.",
+          "scene": "list:sessions-pr:pr-215",
+          "file": "B03-pr-sessions.png",
+          "raw": "raw/B03-pr-sessions.png",
+          "steps": [
+            "click",
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B04-qa-run",
+          "title": "QA run 2",
+          "caption": "Planner, the interactive session s0, each scenario with its own state (verifying, needs input, retrying, queued), and finalize.",
+          "scene": "list:qa-run:pr-215",
+          "file": "B04-qa-run.png",
+          "raw": "raw/B04-qa-run.png",
+          "steps": [
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B05-scenario-s2",
+          "title": "Scenario s2 sessions",
+          "caption": "The refiner, execution worker and verifier are separate sessions in window qa-#215-s2. The verifier is working.",
+          "scene": "list:scenario:pr-215:2",
+          "file": "B05-scenario-s2.png",
+          "raw": "raw/B05-scenario-s2.png",
+          "steps": [
+            "down",
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B06-verifier-open",
+          "title": "Verifier session, opened not launched",
+          "caption": "Opening an existing session attaches to it. Nothing new starts. The header gives PR, run, scenario, role and live state.",
+          "scene": "session:pr-215/qa/run2/s2/verifier",
+          "file": "B06-verifier-open.png",
+          "raw": "raw/B06-verifier-open.png",
+          "steps": [
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B07-verifier-draft",
+          "title": "Asking the busy verifier",
+          "caption": "The verifier is busy, so the message joins its queue in the same session.",
+          "scene": "session:pr-215/qa/run2/s2/verifier:review",
+          "file": "B07-verifier-draft.png",
+          "raw": "raw/B07-verifier-draft.png",
+          "steps": [
+            "SIMULATED speech result queued",
+            "long_press",
+            "long_press_release"
+          ]
+        },
+        {
+          "id": "B08-queued",
+          "title": "Queued, not duplicated",
+          "caption": "The follow-up is queued in the verifier’s own session. No second verifier.",
+          "scene": "session:pr-215/qa/run2/s2/verifier",
+          "file": "B08-queued.png",
+          "raw": "raw/B08-queued.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "B09-verifier-reply",
+          "title": "Inspecting the ongoing verification",
+          "caption": "The reply arrives in place. The verifier flags the timing, and PM’s existing retry sends the worker back.",
+          "scene": "session:pr-215/qa/run2/s2/verifier",
+          "file": "B09-verifier-reply.png",
+          "raw": "raw/B09-verifier-reply.png",
+          "steps": [
+            "SIMULATED pm:agent-reply",
+            "SIMULATED pm:session"
+          ],
+          "phone": "phone/B09-verifier-reply.png"
+        },
+        {
+          "id": "B10-session-actions",
+          "title": "Session actions",
+          "caption": "From any session: speak, the scenario’s other sessions, all PR sessions, or straight back to the document it came from.",
+          "scene": "list:session-actions:pr-215/qa/run2/s2/verifier",
+          "file": "B10-session-actions.png",
+          "raw": "raw/B10-session-actions.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "B11-worker-s2",
+          "title": "Switch to the s2 worker",
+          "caption": "Switching moves within scenario s2. The worker shows the re-capture the verifier asked for.",
+          "scene": "session:pr-215/qa/run2/s2/worker",
+          "file": "B11-worker-s2.png",
+          "raw": "raw/B11-worker-s2.png",
+          "steps": [
+            "down",
+            "click",
+            "up",
+            "click"
+          ]
+        },
+        {
+          "id": "B12-scenario-s4",
+          "title": "A relaunched scenario",
+          "caption": "s4’s worker was relaunched (retry 1). Its refiner pane is gone, and its verifier appears only after the first PASS.",
+          "scene": "list:scenario:pr-215:4",
+          "file": "B12-scenario-s4.png",
+          "raw": "raw/B12-scenario-s4.png",
+          "steps": [
+            "double_click",
+            "double_click",
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B13-scenario-s3-needs-input",
+          "title": "A scenario that needs input",
+          "caption": "s3’s refiner rejected the scenario. It needs a decision, so it is also listed in Needs you.",
+          "scene": "list:scenario:pr-215:3",
+          "file": "B13-scenario-s3-needs-input.png",
+          "raw": "raw/B13-scenario-s3-needs-input.png",
+          "steps": [
+            "double_click",
+            "up",
+            "click"
+          ]
+        },
+        {
+          "id": "B14-refiner-s3",
+          "title": "Refiner s3",
+          "caption": "The refiner explains what it needs. The user could answer by voice here.",
+          "scene": "session:pr-215/qa/run2/s3/refiner",
+          "file": "B14-refiner-s3.png",
+          "raw": "raw/B14-refiner-s3.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "B15-return-to-doc",
+          "title": "Back to the originating document",
+          "caption": "One action returns to the QA spec at the same page, through any number of session switches.",
+          "scene": "doc:spec:pr-215:qa",
+          "file": "B15-return-to-doc.png",
+          "raw": "raw/B15-return-to-doc.png",
+          "steps": [
+            "click",
+            "down",
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B16-start-signoff-confirm",
+          "title": "Starting a session is explicit",
+          "caption": "Sign-off is not running. Starting it names its side effect (qa → sign_off). Opening never starts anything.",
+          "scene": "list:confirm",
+          "file": "B16-start-signoff-confirm.png",
+          "raw": "raw/B16-start-signoff-confirm.png",
+          "steps": [
+            "click",
+            "down",
+            "down",
+            "click",
+            "down",
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "B17-starting",
+          "title": "Starting…",
+          "caption": "One request is in flight. The row shows ◐ starting.",
+          "scene": "list:sessions-pr:pr-215",
+          "file": "B17-starting.png",
+          "raw": "raw/B17-starting.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "B18-already-starting",
+          "title": "Repeated taps join the request",
+          "caption": "Selecting it again does not launch a second sign-off.",
+          "scene": "list:sessions-pr:pr-215",
+          "file": "B18-already-starting.png",
+          "raw": "raw/B18-already-starting.png",
+          "steps": [
+            "click"
+          ]
+        },
+        {
+          "id": "B19-signoff-open",
+          "title": "Open when ready",
+          "caption": "Once PM reports the window, selecting it opens the running sign-off session.",
+          "scene": "session:pr-215/signoff",
+          "file": "B19-signoff-open.png",
+          "raw": "raw/B19-signoff-open.png",
+          "steps": [
+            "SIMULATED pm:started",
+            "click"
+          ]
+        },
+        {
+          "id": "B20-project-sessions",
+          "title": "Plan and project sessions",
+          "caption": "Plan, meta, guide and watcher sessions are reachable too, with the same state column.",
+          "scene": "list:project",
+          "file": "B20-project-sessions.png",
+          "raw": "raw/B20-project-sessions.png",
+          "steps": [
+            "menu 4"
+          ]
+        },
+        {
+          "id": "B21-project-sessions-more",
+          "title": "Scrolling a long list",
+          "caption": "The footer shows the position in a list longer than one screen.",
+          "scene": "list:project",
+          "file": "B21-project-sessions-more.png",
+          "raw": "raw/B21-project-sessions-more.png",
+          "steps": [
+            "down",
+            "down",
+            "down",
+            "down",
+            "down",
+            "down",
+            "down",
+            "down",
+            "down"
+          ]
+        },
+        {
+          "id": "B22-all-sessions",
+          "title": "All sessions",
+          "caption": "Every PR with sessions, with live/known counts and attention marks, plus plan and project sessions.",
+          "scene": "list:sessions",
+          "file": "B22-all-sessions.png",
+          "raw": "raw/B22-all-sessions.png",
+          "steps": [
+            "menu 2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "title": "PRs, history and timers, manual merge, busy/error/reconnect",
+      "shots": [
+        {
+          "id": "C01-prs",
+          "title": "PRs and status",
+          "caption": "Open PRs with the state that matters: spec review, QA input, review loop, manual merge, blocked.",
+          "scene": "list:prs",
+          "file": "C01-prs.png",
+          "raw": "raw/C01-prs.png",
+          "steps": [
+            "reset",
+            "menu 3"
+          ]
+        },
+        {
+          "id": "C02-pr-216",
+          "title": "A PR in its review loop",
+          "caption": "Current activity, specs, sessions and history.",
+          "scene": "list:pr:pr-216",
+          "file": "C02-pr-216.png",
+          "raw": "raw/C02-pr-216.png",
+          "steps": [
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "C03-history-timers",
+          "title": "History and timers",
+          "caption": "PR-owned timers with what fires next (\"unknown\" when PM cannot tell), and recent attempts with elapsed time and outcome.",
+          "scene": "list:history:pr-216",
+          "file": "C03-history-timers.png",
+          "raw": "raw/C03-history-timers.png",
+          "steps": [
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "C04-pr-211-manual-merge",
+          "title": "Manual merge wait",
+          "caption": "Signed off with MERGE and held for manual merge. The hold has no countdown.",
+          "scene": "list:pr:pr-211",
+          "file": "C04-pr-211-manual-merge.png",
+          "raw": "raw/C04-pr-211-manual-merge.png",
+          "steps": [
+            "double_click",
+            "double_click",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "C05-history-hold",
+          "title": "An indefinite hold",
+          "caption": "A hold waiting for the user shows \"no countdown\", not a timer.",
+          "scene": "list:history:pr-211",
+          "file": "C05-history-hold.png",
+          "raw": "raw/C05-history-hold.png",
+          "steps": [
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "C06-merge-confirm",
+          "title": "Merge from glasses: confirm",
+          "caption": "Merge names the signed-off HEAD and base. PM’s gate re-checks both.",
+          "scene": "list:confirm",
+          "file": "C06-merge-confirm.png",
+          "raw": "raw/C06-merge-confirm.png",
+          "steps": [
+            "double_click",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "C07-merge-refused",
+          "title": "Gate refusal (simulated head change)",
+          "caption": "The branch moved after sign-off. PM refuses, sign-off reruns, and the manual hold stays.",
+          "scene": "list:confirm",
+          "file": "C07-merge-refused.png",
+          "raw": "raw/C07-merge-refused.png",
+          "steps": [
+            "SIMULATED pm:head-moved",
+            "click"
+          ]
+        },
+        {
+          "id": "C08-reconnecting",
+          "title": "Connection lost",
+          "caption": "After three failed checks (Pageborne’s rule) a banner shows how old the data is. Reading continues from the local copy.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "C08-reconnecting.png",
+          "raw": "raw/C08-reconnecting.png",
+          "steps": [
+            "menu 1",
+            "click",
+            "SIMULATED pm:disconnect"
+          ]
+        },
+        {
+          "id": "C09-not-sent-offline",
+          "title": "Actions fail visibly",
+          "caption": "A send while disconnected is refused and not queued, so nothing goes out later by surprise.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "C09-not-sent-offline.png",
+          "raw": "raw/C09-not-sent-offline.png",
+          "steps": [
+            "SIMULATED speech result queued",
+            "long_press",
+            "long_press_release",
+            "click"
+          ]
+        },
+        {
+          "id": "C10-reconnected",
+          "title": "Reconnected in place",
+          "caption": "Same document and page; nothing was resent.",
+          "scene": "doc:spec:pr-214:impl",
+          "file": "C10-reconnected.png",
+          "raw": "raw/C10-reconnected.png",
+          "steps": [
+            "SIMULATED pm:reconnect"
+          ]
+        },
+        {
+          "id": "C11-root-back",
+          "title": "Back at the root",
+          "caption": "Double tap on the root page must open Even’s system exit dialog (an app-submission rule). The mockup only logs it.",
+          "scene": "list:home",
+          "file": "C11-root-back.png",
+          "raw": "raw/C11-root-back.png",
+          "steps": [
+            "menu 1",
+            "double_click"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "title": "Plan review: changed during confirmation",
+      "shots": [
+        {
+          "id": "D01-plan-v4",
+          "title": "Plan review",
+          "caption": "Plans use the same reader. Discussion goes to the plan’s review session (plan:review:plan-sync).",
+          "scene": "doc:plan:plan-sync",
+          "file": "D01-plan-v4.png",
+          "raw": "raw/D01-plan-v4.png",
+          "steps": [
+            "reset",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "D02-plan-approve-proposed",
+          "title": "Plan approval is proposed",
+          "caption": "PM has no plan approval gate today, so the confirmation labels the effect as proposed.",
+          "scene": "list:confirm",
+          "file": "D02-plan-approve-proposed.png",
+          "raw": "raw/D02-plan-approve-proposed.png",
+          "steps": [
+            "click",
+            "down",
+            "down",
+            "click"
+          ]
+        },
+        {
+          "id": "D03-changed-during-confirm",
+          "title": "Changed while confirming",
+          "caption": "The plan changed (v5) between reading and confirming, so nothing is approved and \"what changed\" is offered.",
+          "scene": "list:confirm",
+          "file": "D03-changed-during-confirm.png",
+          "raw": "raw/D03-changed-during-confirm.png",
+          "steps": [
+            "SIMULATED pm:publish-revision",
+            "click"
+          ]
+        },
+        {
+          "id": "D04-plan-what-changed",
+          "title": "Plan diff",
+          "caption": "v5 added #218.",
+          "scene": "list:whatchanged:plan:plan-sync",
+          "file": "D04-plan-what-changed.png",
+          "raw": "raw/D04-plan-what-changed.png",
+          "steps": [
+            "click"
+          ]
+        }
+      ]
+    }
+  ],
+  "osMenu": {
+    "id": "X01-os-menu",
+    "title": "OS contextual menu",
+    "caption": "Tap-then-hold opens Even’s menu with the app’s four items. On glasses the OS also adds Display off, Brightness and Close, which the simulator does not draw.",
+    "file": "X01-os-menu.png",
+    "raw": "raw/X01-os-menu.png"
+  },
+  "problems": []
+}
