@@ -36,7 +36,9 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import re
+import secrets
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -98,7 +100,20 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
     base_branch = project.get("base_branch", "master")
     if project.get("backend") == "local":
         from pm_core.cli.helpers import _resolve_repo_dir, state_root
-        return str(_resolve_repo_dir(root or state_root(), data)), base_branch
+        from pm_core.paths import workdirs_base
+        repo_dir = _resolve_repo_dir(root or state_root(), data)
+        # Run from a PR workdir (a pm clone of the main repo), the clone's
+        # own base branch is stale: the main repo is the clone's origin.
+        try:
+            in_workdirs = repo_dir.resolve().is_relative_to(
+                workdirs_base().resolve())
+        except OSError:
+            in_workdirs = False
+        if in_workdirs:
+            origin = _out(_git("remote", "get-url", "origin", cwd=repo_dir))
+            if origin and Path(origin).is_dir():
+                return origin, base_branch
+        return str(repo_dir), base_branch
     workdir = pr.get("workdir")
     url = (_out(_git("remote", "get-url", "origin", cwd=workdir))
            if workdir and Path(workdir).is_dir() else "")
@@ -110,11 +125,22 @@ def fetch_base(workdir: str, target_repo: str, base_branch: str) -> tuple[str | 
 
     Returns ``(base_sha, None)`` or ``(None, error)``.
     """
-    r = _git("fetch", "--no-tags", target_repo,
-             f"+refs/heads/{base_branch}:{BASE_REF}", cwd=workdir)
-    if r.returncode != 0:
-        return None, f"fetch {base_branch} from {target_repo} failed: {_detail(r)}"
-    sha = _out(_git("rev-parse", BASE_REF, cwd=workdir))
+    # Each call fetches into its own ref: concurrent checks on one workdir
+    # would otherwise race on the fetch's compare-and-swap of BASE_REF
+    # ("cannot lock ref") or read each other's revision.
+    own_ref = f"{BASE_REF}-{os.getpid()}-{secrets.token_hex(4)}"
+    try:
+        r = _git("fetch", "--no-tags", target_repo,
+                 f"+refs/heads/{base_branch}:{own_ref}", cwd=workdir)
+        if r.returncode != 0:
+            return None, f"fetch {base_branch} from {target_repo} failed: {_detail(r)}"
+        sha = _out(_git("rev-parse", own_ref, cwd=workdir))
+        if sha:
+            # Unconditional update (no expected old value; git retries the
+            # lock), so a concurrent pin cannot fail the check.
+            _git("update-ref", BASE_REF, sha, cwd=workdir)
+    finally:
+        _git("update-ref", "-d", own_ref, cwd=workdir)
     return (sha or None), (None if sha else "fetched base has no revision")
 
 

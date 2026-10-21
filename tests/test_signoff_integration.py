@@ -630,3 +630,47 @@ def test_recheck_from_own_checkout_resolves_remote_target(w, monkeypatch):
     assert rec["status"] == integration.UP_TO_DATE, rec
     assert rec["target_repo"] == str(w.repo)
     assert rec["head"] == w.head
+
+
+def test_local_target_from_pr_workdir_is_the_main_repo(w):
+    """Run from a PR workdir (its own pm/ state), the local target is the
+    main repo the workdir was cloned from: the clone's own master is stale,
+    so checking against it reports "up to date" after master moved."""
+    from pm_core.paths import workdirs_base
+    wd = workdirs_base() / "p-12345678" / "pm-pr-001"
+    wd.parent.mkdir(parents=True)
+    git(w.tdir, "clone", "-q", str(w.repo), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    commit(wd, "feature.txt", "feature\n", "feature")
+    (wd / "pm").mkdir()
+    data = store.load(w.pm_dir)
+    moved = commit(w.repo, "other.txt", "o\n", "base moved")
+    assert integration.target_for(data, {}, wd / "pm") == (str(w.repo), "master")
+    p = dict(store.get_pr(data, PR), workdir=str(wd))
+    rec = integration.run_check(data, p, wd / "pm")
+    assert rec["base_sha"] == moved, rec
+    assert rec["status"] == integration.CLEAN, rec
+
+
+def test_concurrent_checks_do_not_race_on_the_base_ref(w):
+    """Two checks on one workdir while the base moves: each fetch pins its
+    own ref, so neither fails with "cannot lock ref" (compare-and-swap of
+    the shared BASE_REF) and no per-call ref is left behind."""
+    import threading
+    for n in range(8):
+        tip = commit(w.repo, "shared.txt", f"base {n}\n", f"base {n}")
+        barrier = threading.Barrier(3)
+        results = []
+
+        def run():
+            barrier.wait()
+            results.append(integration.fetch_base(str(w.wd), str(w.repo), "master"))
+
+        threads = [threading.Thread(target=run) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert results == [(tip, None)] * 3, results
+    refs = git(w.wd, "for-each-ref", "--format=%(refname)", "refs/pm/").split()
+    assert refs == [integration.BASE_REF]
