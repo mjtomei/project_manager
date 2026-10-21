@@ -135,17 +135,23 @@ def target_policy(app, pr_id: str) -> str:
         pr_id, _targets(app).get(pr_id), _stop_set(app))
 
 
-def spec_review_checker(app, prs: list[dict] | None = None):
+_UNSET = object()
+
+
+def spec_review_checker(app, prs: list[dict] | None = None,
+                        managed=_UNSET):
     """A ``pr_id -> bool`` predicate for :func:`spec_review_required`.
 
     The scope and the review closures are computed once, so a pass over
     many PRs (scheduler, poll tick) doesn't recompute them per PR.
+    *managed* is a :func:`managed_ids` result the caller already has.
     """
     if not is_enabled(app):
         return lambda pr_id: False
     if prs is None:
         prs = (app._data or {}).get("prs") or []
-    managed = managed_ids(app, prs)
+    if managed is _UNSET:
+        managed = managed_ids(app, prs)
     holds = autostart_state.spec_review_holds(prs, _targets(app))
     by_id = {p.get("id"): p for p in prs}
     from pm_core import spec_gen
@@ -696,7 +702,7 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     released = sorted(held_before - set(merge_holds(app)))
     if released:
         _log.info("auto_start: released merge holds on %s", released)
-    _refresh_qa_spec_review(app)
+    refresh_qa_spec_review(app)
 
     def _label(c: dict) -> str:
         rv = ["review-specs"] if c.get("review_specs") else []
@@ -759,7 +765,7 @@ def remove_targets(app, ids: list[str]) -> dict:
               ids, removed, list(targets))
     _sync_enabled(app)
     released = sorted(held_before - set(merge_holds(app)))
-    _refresh_qa_spec_review(app)
+    refresh_qa_spec_review(app)
     # hold: a racing ``g`` merge's spinner frames would overwrite this
     # within 0.1s (QA s18), like "targets +=" above.
     if removed:
@@ -848,11 +854,15 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
         app.log_message(f"Auto-sequence: {result['message']}")
 
 
-def _refresh_qa_spec_review(app) -> None:
-    """Push the current spec-review requirement into running QA loops
-    (read by the QA thread's scenario-launch gate)."""
+def refresh_qa_spec_review(app) -> None:
+    """Push the current spec-review requirement into the QA loops (read
+    by the QA thread's scenario-launch gate).  Called on target changes
+    and every QA poll tick (restart, spec-mode changes)."""
+    loops = list((getattr(app, "_qa_loops", None) or {}).items())
+    if not loops:
+        return
     required = spec_review_checker(app)
-    for pr_id, state in list((getattr(app, "_qa_loops", None) or {}).items()):
+    for pr_id, state in loops:
         if hasattr(state, "spec_review"):
             state.spec_review = required(pr_id)
 

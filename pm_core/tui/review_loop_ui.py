@@ -941,7 +941,7 @@ def _poll_impl_idle(app) -> None:
     untracked_seen: set[str] = set()
     # Computed once per tick rather than per PR below.
     managed = _auto_start.managed_ids(app)
-    spec_review_required = _auto_start.spec_review_checker(app)
+    spec_review_required = _auto_start.spec_review_checker(app, managed=managed)
 
     for pr in (app._data.get("prs") or []):
         pr_id = pr.get("id", "")
