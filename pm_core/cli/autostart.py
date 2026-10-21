@@ -352,9 +352,10 @@ def autostart_list(session, timeout, as_json):
         if not out["targets"]:
             click.echo("No auto-start targets.")
         for t in out["targets"]:
-            held = (f" (held by {', '.join(t['held_by'])})"
-                    if t.get("held_by") and t["held_by"] != [t["pr_id"]]
-                    else "")
+            # Name only *other* wait targets; a wait target's own hold is
+            # already its policy.
+            others = [x for x in t.get("held_by") or [] if x != t["pr_id"]]
+            held = f" (held by {', '.join(others)})" if others else ""
             click.echo(f"  {t['pr_id']}  {t['policy'].replace('_', '-')}"
                        f"{held}  {t.get('title') or ''}")
     _finish(out if as_json else payload, as_json, text)

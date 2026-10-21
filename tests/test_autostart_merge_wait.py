@@ -290,6 +290,20 @@ class TestFlags:
         assert "--stop-before-merge" in out["message"]
         trig.assert_not_called()
 
+    def test_cli_list_names_only_other_holding_targets(self):
+        from pm_core.cli import cli
+        payload = {"ok": True, "status": {"mode": "targets", "targets": [
+            {"pr_id": "f", "policy": "wait_for_merge",
+             "held_by": ["f", "g"], "title": "F"},
+            {"pr_id": "g", "policy": "wait_for_merge",
+             "held_by": ["g"], "title": "G"},
+        ]}}
+        with patch("pm_core.cli.autostart._request", return_value=payload):
+            res = CliRunner().invoke(cli, ["autostart", "list", "-s", "pm-x"])
+        assert res.exit_code == 0, res.output
+        assert "f  wait-for-merge (held by g)  F" in res.output
+        assert "g  wait-for-merge  G" in res.output
+
     def test_cli_help_documents_wait(self):
         from pm_core.cli import cli
         res = CliRunner().invoke(cli, ["autostart", "add", "--help"])
