@@ -1,0 +1,19 @@
+{
+  "id": "continuity_restart",
+  "dimension": "continuity",
+  "concerns": [
+    "poor_progression"
+  ],
+  "case_type": "continuation",
+  "document_kind": "enhancement proposal",
+  "prefix": "# Structured logging for the scheduler\n\n## Summary\n\nThe scheduler's logs become JSON lines with a fixed set of keys, so operators can filter by job and node without regular expressions.\n\n## Schema\n\nEvery line has `ts`, `level`, `job_id`, `node` and `msg`. Optional keys are `attempt` and `error`. We call this set the **core schema**; components may add keys under an `x_` prefix only.",
+  "section_request": "Write the next section, on migrating existing log consumers.",
+  "strong": "## Migration\n\nFor one release the scheduler writes both formats: the existing text line and a core-schema JSON line to a second file. Consumers that grep text logs keep working; dashboards switch to the JSON file and filter on `job_id` and `node`. After that release the text format is removed. Components that already emit extra fields move them under `x_` names during the dual-write release.",
+  "weak": "## Migration\n\nThe scheduler currently writes unstructured text logs. This proposal changes them to JSON so that operators can filter more easily. Each log entry will contain a timestamp, a severity, the job, the machine and a message. For one release the scheduler writes both formats to separate files, after which the text format is removed. Extra fields from components should be renamed somehow.",
+  "expected": {
+    "better": "strong",
+    "dimension": "continuity"
+  },
+  "held_constant": "Both give the same dual-write migration at similar length and plain style.",
+  "notes": "Weak restarts the proposal, renames the core schema's keys and forgets the x_ rule the prefix established."
+}

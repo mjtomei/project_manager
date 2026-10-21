@@ -1,0 +1,18 @@
+{
+  "id": "coverage_lost_requirement_plan",
+  "dimension": "requirement_coverage",
+  "concerns": [
+    "lost_requirements"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "PM plan",
+  "brief": "Autostart currently starts a PR as soon as its dependencies reach in_review. Add an option so that, for a chosen target, autostart waits until every dependency of a PR has merged before starting it.\n\nRequirements:\n1. The wait is set per autostart target and is off by default.\n2. Holds must follow the live dependency graph: editing depends_on while a PR is held takes effect without restarting the TUI.\n3. A dependency closed without merging must not hold its dependents forever.\n4. The TUI log shows why a PR is held.\nDo not change how merges themselves are detected.",
+  "strong": "# Wait-for-merge autostart\n\nAutostart can hold a PR until every dependency has merged. The wait is set per target and is off by default.\n\nHolds are recomputed on each poll from the current dependency graph, so editing depends_on takes effect without a restart. A dependency closed without merging releases its dependents and is logged. The TUI log names the dependencies holding each PR. Merge detection is unchanged.\n\n## PRs\n\n### PR: Merge wait for autostart targets\n- **description**: Per-target wait flag, default off; holds derived each poll from live dependencies; closed-unmerged releases; hold reasons logged.\n- **tests**: hold while open; release on merge; depends_on edit applies without restart; closed-unmerged releases; log names blockers; flag off unchanged.\n- **files**: pm_core/tui/auto_start.py, tests\n- **depends_on**:",
+  "weak": "# Wait-for-merge autostart\n\nAutostart can hold a PR until every dependency has merged. The wait is set per target and is off by default.\n\nHolds are computed when the target is configured, from the dependency graph at that time, and kept until the dependencies merge. The TUI log names the dependencies holding each PR. Merge detection is unchanged.\n\n## PRs\n\n### PR: Merge wait for autostart targets\n- **description**: Per-target wait flag, default off; holds computed at configuration time; hold reasons logged.\n- **tests**: hold while open; release on merge; log names blockers; flag off unchanged.\n- **files**: pm_core/tui/auto_start.py, tests\n- **depends_on**:",
+  "expected": {
+    "better": "strong",
+    "dimension": "requirement_coverage"
+  },
+  "held_constant": "Same structure and length; requirements 1, 4 and the non-goal appear in both.",
+  "notes": "Weak drops requirement 3 (closed-unmerged) entirely and loses requirement 2 (live graph) by computing holds once."
+}

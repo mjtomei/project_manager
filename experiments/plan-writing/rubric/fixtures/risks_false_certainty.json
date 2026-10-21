@@ -1,0 +1,16 @@
+{
+  "id": "risks_false_certainty",
+  "dimension": "risks_and_open_questions",
+  "concerns": [],
+  "case_type": "whole_document",
+  "document_kind": "pitch",
+  "brief": "Pitch a six-week project to let customers export their invoices to accounting software. Two accounting vendors have public APIs; one is rate limited.",
+  "strong": "# Invoice export to accounting software\n\n## Problem\n\nCustomers retype invoices into their accounting software every month.\n\n## Solution\n\nA one-click export of the month's invoices to either supported vendor, using each vendor's public API.\n\n## Rabbit holes\n\nVendor B limits writes to 60 per minute; a large customer's month can take over an hour, so exports run as background jobs with progress, not as a request. Tax codes differ between vendors; we map only the three codes our invoices use and fail loudly on anything else.\n\n## No-gos\n\nTwo-way sync and historical backfill are out of scope.\n\n## Open question\n\nDo we need per-customer vendor credentials, or does each vendor offer an app-level grant? This decides whether week 1 includes an OAuth flow.",
+  "weak": "# Invoice export to accounting software\n\n## Problem\n\nCustomers retype invoices into their accounting software every month.\n\n## Solution\n\nA one-click export of the month's invoices to either supported vendor, using each vendor's public API.\n\n## Risks\n\nBoth vendors have well-documented, stable APIs, so integration is straightforward and will fit easily in six weeks. Performance will not be a concern because invoices are small documents. Customers already use these vendors, so adoption is assured. Any edge cases will be handled during implementation.\n\n## Scope\n\nWe will support everything customers need for accounting integration, including whatever vendor features they already rely on, so that no customer has to change how they work.",
+  "expected": {
+    "better": "strong",
+    "dimension": "risks_and_open_questions"
+  },
+  "held_constant": "Same problem and solution sections.",
+  "notes": "Weak ignores the rate limit the brief names, claims false certainty, has no exclusions and no open questions."
+}

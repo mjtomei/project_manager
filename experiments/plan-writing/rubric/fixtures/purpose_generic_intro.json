@@ -1,0 +1,16 @@
+{
+  "id": "purpose_generic_intro",
+  "dimension": "purpose_and_audience",
+  "concerns": [],
+  "case_type": "whole_document",
+  "document_kind": "enhancement proposal",
+  "brief": "Write a proposal for maintainers to decide whether the CLI should read configuration from XDG_CONFIG_HOME in addition to ~/.toolrc. Several Linux packagers have asked for it.",
+  "strong": "# Read configuration from XDG_CONFIG_HOME\n\n## Motivation\n\nLinux packagers ship defaults under $XDG_CONFIG_HOME, but the CLI only reads ~/.toolrc, so packaged defaults are ignored. Maintainers are asked to approve reading $XDG_CONFIG_HOME/tool/config as well.\n\n## Proposal\n\nRead $XDG_CONFIG_HOME/tool/config (falling back to ~/.config/tool/config), then ~/.toolrc; later files override earlier ones. Existing users see no change because ~/.toolrc still wins.",
+  "weak": "# Read configuration from XDG_CONFIG_HOME\n\n## Motivation\n\nConfiguration is an essential part of command-line tools. There are many standards for where configuration files live, and the XDG Base Directory Specification is one of them. This proposal is about configuration.\n\n## Proposal\n\nRead $XDG_CONFIG_HOME/tool/config (falling back to ~/.config/tool/config), then ~/.toolrc; later files override earlier ones. Existing users see no change because ~/.toolrc still wins.",
+  "expected": {
+    "better": "strong",
+    "dimension": "purpose_and_audience"
+  },
+  "held_constant": "Identical proposal section.",
+  "notes": "Weak motivation names neither the problem (packaged defaults ignored), the requesters, nor the decision asked of maintainers."
+}

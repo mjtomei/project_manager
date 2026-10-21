@@ -1,0 +1,480 @@
+{
+  "version": "1",
+  "description": "Quality dimensions for technical, design and planning documents, derived in rubric.md for pm/plans/plan-doc-eval.md. Judge templates in templates/ render these; fixtures/ exercise each one.",
+  "case_types": ["whole_document", "continuation"],
+  "measure_statuses": {
+    "automatic_candidate": "Computable without a judge or model (parsers, section and lexicon checks, n-gram statistics). Diagnostic only until the calibration PR shows it tracks calibrated judges on this dimension; never a quality score by itself.",
+    "needs_calibration": "Judge-scored or produced by a prompted model through claude-mixed. Must not drive selection until the calibration PR reports consistency, agreement and bias sensitivity for this dimension and case type.",
+    "deferred": "Needs inference-engine access (classifier probabilities, perplexity, NLI logits). Outside the first PRs per plan-doc-eval; listed so later work starts from the literature."
+  },
+  "measure_readiness_values": {
+    "automatic_candidate": "At least one automatic_candidate measure exists besides the judge measure.",
+    "calibration_required": "Only judge or model measures exist; the dimension cannot be measured at all before calibration evidence."
+  },
+  "dimensions": [
+    {
+      "id": "purpose_and_audience",
+      "name": "Purpose, context and audience",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "The document states what problem it addresses, why now, for whom, and what decision or action it asks of the reader, and its content is selected for that reader's needs.",
+      "track_notes": {"continuation": "The section serves the purpose the prefix has established and the role the section's position implies; it does not re-introduce the document's purpose."},
+      "references": ["aacu-value", "iso24495", "fplg", "pep1", "kep-template", "shapeup-pitch", "google-design-docs", "grice"],
+      "derived_from": "AAC&U 'context of and purpose for writing'; ISO 24495 'relevant'; PEP motivation, KEP motivation/goals, Shape Up problem and appetite, Google 'context and scope'; Grice's maxim of relation.",
+      "detection_guidance": [
+        "Can a reader state the problem, the intended reader and the requested decision after the first screen?",
+        "Is there material that serves no identifiable reader need (history of the author's process, general tutorials, marketing)?",
+        "Does the document address a different problem than the brief asks for, or a generic version of it?"
+      ],
+      "not_a_defect": ["A short motivation when the brief already establishes shared context.", "Background that a reviewer needs to evaluate the decision."],
+      "examples": {
+        "strong": "Reviewers currently cannot tell which PRs are blocked by an unmerged dependency. This plan adds a merge wait so autostart holds dependents until their dependencies merge; it asks reviewers to accept the hold semantics in section 2.",
+        "weak": "Project management is an important part of software engineering. Teams use many tools to organize work. This document describes some improvements."
+      },
+      "judge_question": "Does the document make its problem, intended reader and requested decision clear, and select content for that reader?",
+      "score_anchors": {
+        "1": "Purpose absent or wrong; content generic or aimed at no identifiable reader.",
+        "3": "Purpose recoverable but late or vague; some content serves no reader need.",
+        "5": "Problem, reader and requested decision clear early; content consistently selected for that reader."
+      },
+      "candidate_measures": [
+        {"name": "judge_purpose", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference on this dimension."}
+      ],
+      "measure_readiness": "calibration_required",
+      "maps_concerns": ["padding"]
+    },
+    {
+      "id": "fidelity",
+      "name": "Fidelity to brief or prefix",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "Every claim, decision and constraint the document attributes to the brief (or, for continuations, to the prefix) is supported by it and none contradicts it; elaboration beyond the input is consistent with it and recognisable as the writer's proposal rather than presented as agreed fact.",
+      "track_notes": {"continuation": "Judge against the prefix: no contradiction of decisions, names, numbers or scope established earlier in the document."},
+      "references": ["iso29148", "factscore", "summac", "factcc", "qags", "summeval", "grice"],
+      "derived_from": "ISO 29148 'correct'; summarisation consistency literature (FActScore atomic claims, SummaC/FactCC entailment, QAGS question answering, SummEval 'consistency'); Grice's maxim of quality.",
+      "detection_guidance": [
+        "Split the document into atomic claims; for each claim that refers to the input, check that the input supports it.",
+        "Flag numbers, names, identifiers, dates and owners that do not appear in the input and are stated as given rather than proposed.",
+        "Flag reversals: a constraint from the input stated with the opposite polarity or a weakened obligation (MUST to SHOULD).",
+        "For PM plans, flag decisions attributed to the human that the conversation shows the assistant proposed and the human did not accept."
+      ],
+      "not_a_defect": ["Useful elaboration, reasoning or design detail that is consistent with the input, even when the input never mentions it.", "Explicitly marked proposals or assumptions."],
+      "examples": {
+        "strong": "The brief requires a 30-day retention window. This design keeps 30 days; we also propose compacting entries older than 7 days, which the brief does not address.",
+        "weak": "As agreed, retention is 14 days and compaction is mandatory for all tenants."
+      },
+      "judge_question": "Is everything the document states about the brief or prefix supported by it, with no contradictions and with new material presented as proposal rather than agreed fact?",
+      "score_anchors": {
+        "1": "Contradicts the input on a material point or invents agreed decisions.",
+        "3": "No material contradiction, but some unsupported specifics are stated as given.",
+        "5": "All input-attributed content supported; elaboration consistent and clearly the writer's proposal."
+      },
+      "candidate_measures": [
+        {"name": "judge_fidelity", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge with the brief or prefix in view; must quote the conflicting passages."},
+        {"name": "atomic_claim_support", "kind": "model_assisted", "status": "needs_calibration", "description": "FActScore-style: a prompted model decomposes the draft into input-referring claims and labels each supported/contradicted/unsupported against the input.", "references": ["factscore"]},
+        {"name": "nli_consistency", "kind": "model_assisted", "status": "deferred", "description": "SummaC-style sentence-pair entailment between input and draft using an NLI classifier's probabilities.", "references": ["summac", "factcc"]}
+      ],
+      "measure_readiness": "calibration_required",
+      "maps_concerns": ["fidelity", "lost_requirements"]
+    },
+    {
+      "id": "requirement_coverage",
+      "name": "Requirement coverage and traceability",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "Every requirement, constraint, scope decision and open question in the brief is carried into the document where a reader would look for it, so each can be traced back to its source.",
+      "track_notes": {"continuation": "Coverage is measured against commitments the prefix makes for this section (announced topics, promised details, 'see section N'), not against a brief."},
+      "references": ["iso29148", "incose-gtwr", "gotel-finkelstein", "nasa-se-handbook", "qags"],
+      "derived_from": "ISO 29148 and INCOSE set-level completeness; requirements traceability (Gotel and Finkelstein pre-requirements traceability); NASA requirement traceability; QAGS-style question answering adapted from summaries to briefs.",
+      "detection_guidance": [
+        "List the brief's requirements, constraints, non-goals and explicit questions; locate each in the document.",
+        "A requirement is lost when it is absent, merged into a broader statement that no longer implies it, or moved to a place where the reader of that part would not find it (for PM plans: stated in the intro but absent from the PR that must implement it).",
+        "For continuations, list what the prefix promised this section would cover and check each."
+      ],
+      "not_a_defect": ["Requirements consolidated into one statement that still implies each.", "A requirement deliberately deferred with a stated reason."],
+      "examples": {
+        "strong": "PR 2 tests: verify that dependents stay held while any dependency is unmerged, including when the dependency is edited mid-run (brief item 3).",
+        "weak": "PR 2 tests: verify the merge wait works."
+      },
+      "judge_question": "Are all of the brief's (or prefix's) requirements, constraints and promised topics present where a reader would look for them?",
+      "score_anchors": {
+        "1": "Several explicit requirements missing or diluted beyond recognition.",
+        "3": "Most present; one material requirement missing, diluted or misplaced.",
+        "5": "Every requirement traceable to an appropriate place in the document."
+      },
+      "candidate_measures": [
+        {"name": "judge_coverage", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge lists brief items and marks each covered/diluted/missing."},
+        {"name": "brief_item_lexical_recall", "kind": "deterministic", "status": "automatic_candidate", "description": "Split the brief into items (list entries, sentences with obligation words); for each item compute content-word recall in the best-matching document paragraph; report items under a threshold. Paraphrase defeats it, so it flags rather than scores."},
+        {"name": "pm_plan_field_preservation", "kind": "deterministic", "status": "automatic_candidate", "description": "For PM plan cases, parse PR blocks with pm_core.plans.parser.parse_plan_prs and check that titles and depends_on named in the conversation's accepted structure survive."},
+        {"name": "brief_question_answering", "kind": "model_assisted", "status": "needs_calibration", "description": "QAGS-style: generate questions from the brief, answer them from the draft only, compare with answers from the brief.", "references": ["qags"]}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["lost_requirements"]
+    },
+    {
+      "id": "scope_and_abstraction",
+      "name": "Scope and level of abstraction",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "The document works at the level of detail its kind and stage call for: it fixes the decisions a reader must review now, states goals and non-goals, and leaves implementation choices that do not affect those decisions to the people who implement them.",
+      "track_notes": {"continuation": "The section's level of detail matches the prefix's and the section's role; a reference-level section may be detailed where an overview section may not."},
+      "references": ["iso29148", "incose-gtwr", "google-design-docs", "shapeup-principles", "rfc4101", "kep-template", "nasa-se-handbook", "diataxis"],
+      "derived_from": "ISO 29148 and INCOSE 'appropriate' level and solution-free requirements; NASA implementation-free requirements; Google design docs ('really implementation manuals'); Shape Up 'rough, solved, bounded' (wireframes too concrete, words too abstract); RFC 4101 detail for implementors gets in the way of review; KEP goals/non-goals; Diátaxis separation of purposes.",
+      "detection_guidance": [
+        "Mark passages that fix function names, file layouts, data-structure fields, flags or step-by-step code changes; ask whether any reviewed decision depends on them.",
+        "Premature implementation detail is detail that constrains implementers without a reason the document states, or that buries the decisions under it.",
+        "The opposite failure also counts: so abstract that no decision is made (words too abstract).",
+        "Check for explicit non-goals or boundaries."
+      ],
+      "not_a_defect": ["Interface, schema or protocol detail that is itself the decision under review.", "Detail the brief explicitly requests.", "Reference-level sections in genres that require them (PEP specification, RFC protocol detail)."],
+      "examples": {
+        "strong": "Holds are derived from dependency state at read time rather than stored, so an edited dependency graph takes effect without migration. Non-goal: changing how merges themselves are detected.",
+        "weak": "Add a function _compute_holds(self, prs: list[dict]) -> set[str] in pm_core/tui/auto_start.py after line 212, iterate with a for loop, and store results in self._hold_cache."
+      },
+      "judge_question": "Is the level of detail right for this document's kind and stage, deciding what must be reviewed now without fixing implementation choices that no stated decision depends on?",
+      "score_anchors": {
+        "1": "Mostly implementation steps or so abstract that nothing is decided.",
+        "3": "Right level overall with notable stretches of unmotivated implementation detail or vagueness.",
+        "5": "Detail tracks the decisions; boundaries and non-goals explicit."
+      },
+      "candidate_measures": [
+        {"name": "judge_abstraction", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge; must cite the passages it considers premature."},
+        {"name": "implementation_token_density", "kind": "deterministic", "status": "automatic_candidate", "description": "Share of tokens inside code spans/blocks plus identifiers, file paths, line numbers and signatures per 1000 words, compared with the reference distribution for the same document kind."}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["premature_implementation_detail"]
+    },
+    {
+      "id": "rationale_and_alternatives",
+      "name": "Rationale, trade-offs and alternatives",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "Decisions come with the reasons for them, the trade-offs accepted and the credible alternatives rejected, so a reviewer can disagree with a specific step rather than with the whole.",
+      "track_notes": {"continuation": "Applies when the section makes or defends decisions; a purely descriptive section is judged on whether it supports decisions made elsewhere."},
+      "references": ["iso42010", "rust-rfc-template", "pep1", "google-design-docs", "kep-template", "nasa-se-handbook", "aacu-value"],
+      "derived_from": "ISO 42010 decision rationale; Rust RFC 'drawbacks' and 'rationale and alternatives'; PEP rationale and rejected ideas; Google 'alternatives considered'; KEP alternatives; NASA trade studies; AAC&U 'sources and evidence'.",
+      "detection_guidance": [
+        "For each consequential decision, look for a reason tied to a goal or constraint.",
+        "Check that rejected alternatives are ones a knowledgeable reviewer would raise, and that the reason for rejection is specific.",
+        "Flag straw-man alternatives and rationale that only restates the decision."
+      ],
+      "not_a_defect": ["Decisions the brief already settled, cited rather than re-argued."],
+      "examples": {
+        "strong": "We derive holds at read time instead of storing them: stored holds would need invalidation on every graph edit, which is where the previous design lost holds. The cost is a recomputation per poll, measured at under 1 ms for 500 PRs.",
+        "weak": "We derive holds at read time because it is the best approach."
+      },
+      "judge_question": "Are consequential decisions justified with reasons, trade-offs and credible rejected alternatives?",
+      "score_anchors": {
+        "1": "Decisions asserted without reasons.",
+        "3": "Reasons for main decisions; trade-offs or alternatives thin or straw-man.",
+        "5": "Each consequential decision has specific reasons, accepted costs and credible alternatives."
+      },
+      "candidate_measures": [
+        {"name": "judge_rationale", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."}
+      ],
+      "measure_readiness": "calibration_required",
+      "maps_concerns": ["premature_implementation_detail"]
+    },
+    {
+      "id": "organization_and_progression",
+      "name": "Organization and progression",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "The document moves from context to decision to detail in an order a reader can follow: overview before specifics, terms defined before use, dependencies before what depends on them, and each part building on what came before.",
+      "track_notes": {"continuation": "The section advances from where the prefix stopped rather than restarting, looping back or jumping ahead of material the prefix has not yet introduced."},
+      "references": ["gopen-swan", "minto", "rfc4101", "rust-rfc-template", "six-traits", "aacu-value", "fplg", "gov-uk", "coh-metrix"],
+      "derived_from": "Gopen and Swan reader expectations (old before new, stress position); Minto governing idea first; RFC 4101 model before detail; Rust RFC guide-level before reference-level; 6+1 'organization'; AAC&U 'content development'; plain-language 'organize to meet readers' needs'; GOV.UK front-loading; Coh-Metrix cohesion.",
+      "detection_guidance": [
+        "Read only headings and first sentences: do they tell the argument in order?",
+        "Flag terms, components or PRs used before they are introduced, and conclusions that appear before the material supporting them without signposting.",
+        "Flag sections whose order would have to change for the dependencies among them to make sense (for PM plans, a PR described before the PRs it depends on without reason).",
+        "Flag repeated returns to the same topic in separate places."
+      ],
+      "not_a_defect": ["A summary-first structure that states conclusions up front by design (pyramid order).", "Genre-mandated section order."],
+      "examples": {
+        "strong": "Section 1 states the hold rule; section 2 shows how holds are derived from dependency state; section 3 covers edits to the graph while holds are active.",
+        "weak": "Section 1 describes cache invalidation on graph edits; section 2 introduces the hold rule that section 1 relied on; section 3 returns to the cache."
+      },
+      "judge_question": "Can a reader follow the document front to back, with context before detail, terms before use and each part building on the last?",
+      "score_anchors": {
+        "1": "Order obstructs understanding; frequent use-before-introduction or loops.",
+        "3": "Generally ordered with some jumps, forward references or repeated returns.",
+        "5": "Clear progression; headings alone tell the argument."
+      },
+      "candidate_measures": [
+        {"name": "judge_progression", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
+        {"name": "define_before_use", "kind": "deterministic", "status": "automatic_candidate", "description": "Acronyms and capitalised/coded terms whose first occurrence is not a definition pattern (expansion, 'X is', 'we call') but whose defining occurrence appears later."},
+        {"name": "adjacent_section_overlap", "kind": "deterministic", "status": "automatic_candidate", "description": "Coh-Metrix-style content-word overlap between adjacent sections versus non-adjacent ones; low adjacency relative to the reference flags jumps.", "references": ["coh-metrix"]}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["poor_progression"]
+    },
+    {
+      "id": "concision",
+      "name": "Concision and information density",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "Each passage adds information the reader needs; the document omits filler, restatement, obvious material and generic advice that would hold for any project, while keeping elaboration and repetition that help the reader.",
+      "track_notes": {"continuation": "Restating the prefix counts as padding unless it is a brief bridge the reader needs."},
+      "references": ["grice", "fplg", "williams-style", "ms-style", "google-style", "wtd-principles", "verbosity-bias", "lc-alpacaeval"],
+      "derived_from": "Grice's maxim of quantity; plain-language 'omit excess words'; Williams on redundant and implied words; Microsoft 'get to the point fast'; Write the Docs ARID as the counterweight (useful repetition is allowed); verbosity-bias literature for the judge-side risk.",
+      "detection_guidance": [
+        "For each paragraph ask: would a reader of this document lose anything if it were deleted?",
+        "Flag generic statements true of any project (\"testing is important\"), restatements of the previous paragraph, summaries of summaries, and hedging chains.",
+        "Distracting material also counts: content that draws a reviewer's attention away from the decisions that need review.",
+        "Judge density, not length: a long document can be concise and a short one padded."
+      ],
+      "not_a_defect": ["Useful elaboration, examples and reasoning beyond the brief.", "Deliberate repetition for skimmability (a one-line summary at the top of a long section).", "Length the genre requires."],
+      "examples": {
+        "strong": "Dependents stay held until every dependency merges; a dependency edited while held re-evaluates on the next poll.",
+        "weak": "It is important to note that dependencies matter. As we have discussed above, dependents should, in general, wait for their dependencies. In other words, a dependent PR should not start before its dependencies are merged, which, as mentioned, is key."
+      },
+      "judge_question": "Does every passage add information this reader needs, without filler, restatement or generic material, while useful elaboration is kept?",
+      "score_anchors": {
+        "1": "Much of the text is filler, restatement or generic advice.",
+        "3": "Mostly informative with noticeable padding in places.",
+        "5": "Dense with needed information; elaboration earns its place."
+      },
+      "candidate_measures": [
+        {"name": "judge_concision", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge; must point to deletable passages. Calibration must check length sensitivity (verbosity bias) explicitly."},
+        {"name": "redundancy_rate", "kind": "deterministic", "status": "automatic_candidate", "description": "Share of content-word 4-grams that repeat across paragraphs, after removing headings and quoted input."},
+        {"name": "filler_lexicon_rate", "kind": "deterministic", "status": "automatic_candidate", "description": "Vale-style lexicon of filler and throat-clearing phrases ('it is important to note', 'as mentioned above', 'in other words') per 1000 words.", "references": ["vale"]},
+        {"name": "length_ratio", "kind": "deterministic", "status": "automatic_candidate", "role": "bias_covariate", "description": "Draft length over reference length; recorded to measure judge length sensitivity, never scored as quality.", "references": ["lc-alpacaeval"]}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["padding"]
+    },
+    {
+      "id": "clarity_and_precision",
+      "name": "Clarity and precision",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms are defined and used consistently, and sentences are readable for the intended audience.",
+      "track_notes": {"continuation": "Terms the prefix defined are used with the same meaning."},
+      "references": ["iso29148", "incose-gtwr", "rfc8174", "rfc7322", "google-style", "iso24495", "six-traits", "aacu-value"],
+      "derived_from": "ISO 29148 'unambiguous'; INCOSE rules against vague terms, escape clauses and open-ended lists; RFC 8174 requirement keywords; RFC 7322 editorial clarity; Google style; ISO 24495 'understandable'; 6+1 'word choice' and 'conventions'; AAC&U 'control of syntax and mechanics'.",
+      "detection_guidance": [
+        "Flag vague qualifiers (appropriate, as needed, fast, robust, user-friendly, etc., and/or) where a reviewer needs a specific value or condition.",
+        "Flag obligations whose force is unclear (should vs must) when it matters.",
+        "Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms."
+      ],
+      "not_a_defect": ["Deliberate openness that is labelled as an open question."],
+      "examples": {
+        "strong": "The hold MUST be released within one poll interval (default 2 s) after the last dependency merges.",
+        "weak": "The hold should be released quickly and appropriately once things are merged."
+      },
+      "judge_question": "Does each statement have one reasonable reading, with explicit obligations, specific conditions and defined terms?",
+      "score_anchors": {
+        "1": "Key statements ambiguous; obligations and conditions vague.",
+        "3": "Mostly clear; some vague qualifiers or unclear obligations on material points.",
+        "5": "Precise throughout where precision matters."
+      },
+      "candidate_measures": [
+        {"name": "judge_clarity", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
+        {"name": "vague_term_rate", "kind": "deterministic", "status": "automatic_candidate", "description": "INCOSE-derived lexicon of vague and escape-clause terms per 1000 words.", "references": ["incose-gtwr", "vale"]},
+        {"name": "undefined_acronyms", "kind": "deterministic", "status": "automatic_candidate", "description": "Acronyms never expanded in the document or input."}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": []
+    },
+    {
+      "id": "internal_consistency",
+      "name": "Internal consistency",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "The document does not contradict itself: names, numbers, scope, decisions and dependency statements agree across sections.",
+      "track_notes": {"continuation": "Consistency within the section and with the prefix overlaps fidelity; record contradictions of the prefix under fidelity and contradictions inside the new section here."},
+      "references": ["iso29148", "incose-gtwr", "rfc7322", "summeval"],
+      "derived_from": "ISO 29148 and INCOSE set-level consistency; RFC 7322 consistent terminology; SummEval 'consistency' adapted to self-consistency.",
+      "detection_guidance": [
+        "Collect every stated value, name and decision that appears more than once and compare occurrences.",
+        "For PM plans, check that dependencies stated in prose match depends_on fields and that a PR is not both in and out of scope.",
+        "Flag one concept named several ways when readers could take them as different things."
+      ],
+      "not_a_defect": ["A value changed with an explicit note (\"revised from 30 to 14 days after section 4\")."],
+      "examples": {
+        "strong": "Section 2 and the PR list both state that the runner depends on the rubric and the case catalog.",
+        "weak": "Section 2 says the runner needs only the rubric; the PR list makes it depend on the case catalog as well."
+      },
+      "judge_question": "Do names, numbers, scope and decisions agree everywhere they recur in the document?",
+      "score_anchors": {
+        "1": "Material contradictions between sections.",
+        "3": "Minor inconsistencies in naming or secondary values.",
+        "5": "Fully consistent."
+      },
+      "candidate_measures": [
+        {"name": "judge_consistency", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge; must quote both sides of each contradiction."},
+        {"name": "term_variant_detection", "kind": "deterministic", "status": "automatic_candidate", "description": "Near-duplicate identifiers and terms (case, hyphenation, pluralisation, edit distance) used for what may be one concept."},
+        {"name": "pm_dependency_agreement", "kind": "deterministic", "status": "automatic_candidate", "description": "For PM plans, depends_on entries resolve to PR titles in the same plan (pm_core.plans.parser.parse_plan_prs)."}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["fidelity"]
+    },
+    {
+      "id": "risks_and_open_questions",
+      "name": "Risks, uncertainty and open questions",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "The document states what could go wrong, what is unknown, which questions remain for reviewers and what is deliberately excluded, instead of presenting an uncertain plan as settled.",
+      "track_notes": {"continuation": "Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged."},
+      "references": ["kep-template", "rust-rfc-template", "pep1", "shapeup-pitch", "rfc3552", "oxide-rfd1", "google-design-docs"],
+      "derived_from": "KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes and no-gos; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns.",
+      "detection_guidance": [
+        "Look for named risks with consequences and mitigations, not a generic 'risks: bugs may occur'.",
+        "Check that genuinely unknown things are marked as unknown and that exclusions are explicit.",
+        "Flag false certainty: claims about performance, adoption or compatibility without evidence or caveat."
+      ],
+      "not_a_defect": ["A short or empty risks section for a small, low-risk change, if it says so."],
+      "examples": {
+        "strong": "Risk: a dependency closed without merging would hold dependents forever. Mitigation: treat closed-unmerged as released and log it. Open question for reviewers: should a reopened dependency re-hold started dependents?",
+        "weak": "Risks: there may be some edge cases, which will be handled during implementation."
+      },
+      "judge_question": "Are specific risks, unknowns, exclusions and reviewer questions stated, without false certainty?",
+      "score_anchors": {
+        "1": "No risks or open questions where clearly needed; false certainty.",
+        "3": "Some specific risks; others generic or missing.",
+        "5": "Specific risks with mitigations, explicit unknowns and exclusions."
+      },
+      "candidate_measures": [
+        {"name": "judge_risks", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."}
+      ],
+      "measure_readiness": "calibration_required",
+      "maps_concerns": []
+    },
+    {
+      "id": "verifiability",
+      "name": "Verifiability and success criteria",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "The document says how anyone will know it succeeded: requirements are testable, acceptance and test plans are concrete, and milestones or graduation criteria are checkable.",
+      "track_notes": {"continuation": "Applies to sections that state requirements, tests or milestones."},
+      "references": ["iso29148", "incose-gtwr", "nasa-se-handbook", "kep-template", "rfc8174"],
+      "derived_from": "ISO 29148 and INCOSE 'verifiable'; NASA requirement verification; KEP test plan and graduation criteria; RFC 8174 requirement keywords as testable obligations.",
+      "detection_guidance": [
+        "For each requirement or PR, ask what observation would show it is met.",
+        "Flag tests that restate the feature ('verify it works'), unmeasurable criteria and missing failure cases.",
+        "For PM plans, each PR's tests field names concrete behaviours, including the failure and concurrency cases the description implies."
+      ],
+      "not_a_defect": ["Exploratory documents (early RFDs, pitches) that state what evidence would settle a question rather than full acceptance tests."],
+      "examples": {
+        "strong": "Tests: a dependent stays held while its dependency is open; it starts within one poll after merge; a closed-unmerged dependency releases it with a log line.",
+        "weak": "Tests: test the merge wait thoroughly."
+      },
+      "judge_question": "Can a reader tell from the document how success will be checked, with concrete, testable criteria?",
+      "score_anchors": {
+        "1": "No checkable criteria.",
+        "3": "Some concrete tests; key requirements lack checks.",
+        "5": "Every material requirement has a concrete check, including failure cases."
+      },
+      "candidate_measures": [
+        {"name": "judge_verifiability", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
+        {"name": "pm_tests_field_present", "kind": "deterministic", "status": "automatic_candidate", "description": "For PM plans, share of PR blocks with a non-empty tests field that names more than restated feature words (content-word overlap with the description below a threshold)."}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["lost_requirements"]
+    },
+    {
+      "id": "genre_conventions",
+      "name": "Genre and template conformance",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "The document follows the conventions of its kind that readers and tools rely on: required sections and fields, header metadata, section order and machine-readable structure (for PM plans, PR blocks with description, tests, files and depends_on).",
+      "track_notes": {"continuation": "The section has the heading level, numbering and structural conventions the prefix establishes."},
+      "references": ["aacu-value", "pep1", "pep12", "rust-rfc-template", "kep-template", "go-proposal", "rfc7322", "shapeup-pitch", "diataxis"],
+      "derived_from": "AAC&U 'genre and disciplinary conventions'; the corpus's own templates (PEP 1/12, Rust RFC, KEP, Go proposals, RFC 7322, Shape Up); Diátaxis on keeping document kinds distinct.",
+      "detection_guidance": [
+        "Compare the section list with the template of the document kind; missing required sections count, optional ones do not.",
+        "For PM plans, every PR block parses and carries description, tests, files and depends_on; dependency names match PR titles.",
+        "Flag structure borrowed from another genre that misleads (a design doc formatted as a tutorial)."
+      ],
+      "not_a_defect": ["Merged or renamed sections that keep the content the template asks for.", "Brief instructions that override the template."],
+      "examples": {
+        "strong": "### PR: Rubric\n- **description**: ...\n- **tests**: ...\n- **files**: ...\n- **depends_on**:",
+        "weak": "PR 2 - rubric (do this after the catalog): write the rubric and test it."
+      },
+      "judge_question": "Does the document follow the conventions and required structure of its kind?",
+      "score_anchors": {
+        "1": "Required structure missing; tools or readers relying on it would fail.",
+        "3": "Mostly conformant; some required fields or sections missing.",
+        "5": "Fully conformant, with deviations only where they serve the reader."
+      },
+      "candidate_measures": [
+        {"name": "judge_genre", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
+        {"name": "template_section_presence", "kind": "deterministic", "status": "automatic_candidate", "description": "Required-section checklist per document_kind (from the process templates in references.json), heading-matched with synonyms."},
+        {"name": "pm_plan_parse", "kind": "deterministic", "status": "automatic_candidate", "description": "pm_core.plans.parser.parse_plan_prs returns at least one PR, every PR has non-empty description/tests/files, and depends_on resolves."}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": []
+    },
+    {
+      "id": "continuity",
+      "name": "Continuity with the prefix",
+      "applies_to": ["continuation"],
+      "definition": "The new section continues the document the prefix began: it picks up where the prefix stopped, uses the prefix's established terms, decisions and structure, does not repeat material the prefix already covered, and does not jump past material the next section would need to introduce.",
+      "track_notes": {},
+      "references": ["halliday-hasan", "coh-metrix", "gopen-swan", "burrows-delta", "mt-bench"],
+      "derived_from": "Halliday and Hasan cohesion ties; Coh-Metrix referential overlap; Gopen and Swan old-before-new; stylometry (Burrows's Delta) and judge self-preference findings for the bias this dimension must exclude.",
+      "detection_guidance": [
+        "Check that the first paragraph connects to the end of the prefix and that the section fills the role its position implies.",
+        "Flag re-introductions of the document's purpose, redefinitions of established terms, contradictions of prefix decisions (also fidelity) and content duplicated from the prefix.",
+        "Do not reward matching the prefix author's idiosyncratic style (sentence rhythm, favourite words, punctuation habits): that favours the original author and is measured as a bias, not scored as quality."
+      ],
+      "not_a_defect": ["A different but clear writing style.", "A short bridge sentence that recalls a point from much earlier in the prefix."],
+      "examples": {
+        "strong": "With the hold rule from section 2 in place, graph edits need only one addition: a hold re-evaluates whenever its dependency set changes.",
+        "weak": "This document describes a merge-wait feature for autostart. Autostart is a feature that starts PRs automatically."
+      },
+      "judge_question": "Does the section continue the prefix, using its terms and decisions, without repeating it or skipping ahead, judged on content and structure rather than stylistic resemblance?",
+      "score_anchors": {
+        "1": "Restarts, repeats or contradicts the prefix.",
+        "3": "Continues but with some repetition, redefinition or a gap.",
+        "5": "Seamless continuation in content and structure."
+      },
+      "candidate_measures": [
+        {"name": "judge_continuity", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge with the prefix in view; calibration must report sensitivity to style match separately."},
+        {"name": "prefix_repetition", "kind": "deterministic", "status": "automatic_candidate", "description": "Share of content-word 5-grams in the section that also occur in the prefix."},
+        {"name": "established_term_reuse", "kind": "deterministic", "status": "automatic_candidate", "description": "Of terms defined or emphasised in the prefix that the section's topic needs, share used verbatim rather than renamed."},
+        {"name": "style_distance", "kind": "deterministic", "status": "automatic_candidate", "role": "bias_covariate", "description": "Burrows's Delta between prefix and section; recorded to measure how much judges reward style match, never scored as quality.", "references": ["burrows-delta"]}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["poor_progression"]
+    }
+  ],
+  "concerns": [
+    {
+      "id": "padding",
+      "name": "Padding",
+      "description": "Obvious material, filler and text that adds no planning value; distracting material that draws a reviewer away from the decisions that need review.",
+      "source": "pm/docs/plan-session-sources-2026-10-19.md (evaluation-criterion clarifications)",
+      "primary_dimension": "concision",
+      "also_affects": ["purpose_and_audience", "organization_and_progression"],
+      "boundary": "Useful elaboration beyond the brief is not padding. Length alone is not padding; judge density and relevance."
+    },
+    {
+      "id": "premature_implementation_detail",
+      "name": "Premature implementation detail",
+      "description": "Plans and designs that fix code-level choices (functions, files, fields, steps) before the decisions they serve are settled or reviewed.",
+      "source": "pm/plans/plan-doc-eval.md",
+      "primary_dimension": "scope_and_abstraction",
+      "also_affects": ["rationale_and_alternatives", "concision"],
+      "boundary": "Detail that is itself the decision under review (interfaces, schemas, protocols) or that the brief requests is not premature."
+    },
+    {
+      "id": "poor_progression",
+      "name": "Poor progression",
+      "description": "Order that makes the reader reconstruct the argument: details before context, use before introduction, loops back to settled topics; for continuations, restarting or skipping ahead.",
+      "source": "pm/docs/plan-session-sources-2026-10-19.md (\"assess value and coherent progression together\")",
+      "primary_dimension": "organization_and_progression",
+      "also_affects": ["continuity"],
+      "boundary": "Summary-first structure and genre-mandated order are not progression failures."
+    },
+    {
+      "id": "lost_requirements",
+      "name": "Lost requirements",
+      "description": "Requirements, constraints or decisions from the brief or conversation that are missing, diluted or misplaced in the document.",
+      "source": "pm/plans/plan-doc-eval.md (\"Preserve user intent, required plan fields and dependency semantics\")",
+      "primary_dimension": "requirement_coverage",
+      "also_affects": ["fidelity", "verifiability"],
+      "boundary": "A requirement deliberately deferred with a stated reason is not lost."
+    },
+    {
+      "id": "fidelity",
+      "name": "Fidelity",
+      "description": "Content attributed to the brief or prefix that it does not support or that contradicts it, including assistant proposals presented as human decisions.",
+      "source": "pm/plans/plan-doc-eval.md (\"Judge factual fidelity against the brief or prefix as well as readability\")",
+      "primary_dimension": "fidelity",
+      "also_affects": ["internal_consistency", "requirement_coverage"],
+      "boundary": "Consistent elaboration, clearly offered as the writer's proposal, is not a fidelity failure."
+    }
+  ],
+  "previously_identified_concerns": ["padding", "premature_implementation_detail", "poor_progression", "lost_requirements"],
+  "judge_design_references": ["g-eval", "prometheus", "mt-bench", "verbosity-bias", "lc-alpacaeval", "llm-judge-finetuned"]
+}
