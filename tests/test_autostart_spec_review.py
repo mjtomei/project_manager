@@ -198,6 +198,9 @@ class TestSpecGen:
         assert "spec_pending" not in fresh
         assert spec_gen.is_spec_approved(fresh, "impl")
         assert not spec_gen.needs_spec_approval(fresh, "impl")
+        # A caller holding the pre-approval entry must not re-hold it.
+        assert not spec_gen.mark_spec_pending(root, "a", "impl", pr=pr)
+        assert "spec_pending" not in store.get_pr(store.load(root), "a")
 
     def test_edited_approval_updates_the_copy_get_spec_reads(self, tmp_path):
         wd = tmp_path / "wd"

@@ -508,7 +508,8 @@ def mark_spec_pending(root: Path, pr_id: str, phase: str,
 
     Used by the auto-start spec-review gate to connect an inline-generated
     (or already present) spec to the normal approval flow
-    (``pm pr spec-approve`` / ``V``).  Never replaces a pending spec.
+    (``pm pr spec-approve`` / ``V``).  Never replaces a pending spec, and
+    never re-holds a spec approved since the caller's *pr* was loaded.
     Returns True when it set one.  *pr* (the caller's in-memory entry) is
     updated too.
     """
@@ -523,7 +524,10 @@ def mark_spec_pending(root: Path, pr_id: str, phase: str,
     def apply(fresh_data):
         nonlocal marked
         fresh_pr = store.get_pr(fresh_data, pr_id)
-        if not fresh_pr or fresh_pr.get("spec_pending"):
+        # A stale caller (e.g. the TUI before reloading a QA-thread hold
+        # that was then approved) must not ask for the approval again.
+        if (not fresh_pr or fresh_pr.get("spec_pending")
+                or is_spec_approved(fresh_pr, phase)):
             return
         fresh_pr["spec_pending"] = dict(value)
         marked = True
