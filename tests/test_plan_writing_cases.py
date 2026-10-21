@@ -746,3 +746,29 @@ def test_generator_input_rejects_changed_attachment(catalog):
     with pytest.raises(ValueError):
         cases.generator_input(case, data)
     assert cases.check(data_dir=data)["failure_counts"].get("stale_generator_input") == 1
+
+
+def test_fetch_reuses_cached_permanent_failure(tmp_path, monkeypatch):
+    pytest.importorskip("bs4")
+    pytest.importorskip("yaml")
+    context = importlib.import_module("context")
+    import urllib.error
+    monkeypatch.setattr(context, "CTX", tmp_path)
+    calls = []
+
+    def gone(req, timeout=None):
+        calls.append(req.full_url)
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", None, None)
+
+    monkeypatch.setattr(context.urllib.request, "urlopen", gone)
+    for _ in range(2):
+        with pytest.raises(context.FetchError, match="404"):
+            context.fetch("https://example.org/transferred/1")
+    assert len(calls) == 1  # the second call is answered from the cached status
+
+
+def test_check_reports_missing_pm_conversation(catalog):
+    data = catalog["data"]
+    pm = next(json.loads(l) for l in (data / "cases" / "catalog.jsonl").read_text().splitlines() if '"pm_plan"' in l)
+    Path(pm["inputs"]["conversation_path"]).unlink()
+    assert cases.check(data_dir=data)["failure_counts"] == {"pm_conversation_missing": 1}

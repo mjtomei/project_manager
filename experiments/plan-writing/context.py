@@ -44,6 +44,7 @@ from collect import DATA, HERE, page_text, run
 CTX = DATA / "context"
 USER_AGENT = "PMPlanWritingResearch/0.1"
 _host_locks = defaultdict(lambda: threading.Semaphore(3))
+_host_locks_guard = threading.Lock()
 
 
 class FetchError(RuntimeError):
@@ -59,18 +60,21 @@ def fetch(url, binary=False, attempts=5):
     key = hashlib.sha256(url.encode()).hexdigest()[:24]
     path = CTX / "raw" / urllib.parse.urlsplit(url).netloc / (key + ".raw")
     meta = path.with_suffix(".json")
-    if path.exists() and meta.exists():
-        data = path.read_bytes()
+    if meta.exists():
         info = json.loads(meta.read_text())
-        if info.get("status") != 200:
+        if info.get("status") != 200:  # permanent failures are cached as metadata only
             raise FetchError(f"HTTP {info.get('status')} (cached)")
-        return (data if binary else data.decode("utf-8", "replace")), info["retrieved_at"]
+        if path.exists():
+            data = path.read_bytes()
+            return (data if binary else data.decode("utf-8", "replace")), info["retrieved_at"]
     path.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     host = urllib.parse.urlsplit(url).netloc
+    with _host_locks_guard:  # one semaphore per host even when threads meet it first together
+        limit = _host_locks[host]
     for attempt in range(attempts):
         try:
-            with _host_locks[host]:
+            with limit:
                 with urllib.request.urlopen(req, timeout=60) as response:
                     data = response.read()
                     final = response.geturl()

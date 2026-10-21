@@ -483,7 +483,10 @@ def build(limit_sources=None):
     coverage = coverage_report(docs, statuses, cases_out, pm_report, limit_sources)
     coverage["context_timing"] = {sid: {k: dict(v) for k, v in sorted(kinds.items())} for sid, kinds in sorted(timing.items())}
     (CASES / "coverage.json").write_text(json.dumps(coverage, indent=1) + "\n")
-    write_summary(coverage)
+    if limit_sources:
+        print("partial build (--sources): reports/case-coverage.* left unchanged")
+    else:
+        write_summary(coverage)
     print(json.dumps(coverage["totals"], indent=1))
 
 
@@ -705,6 +708,9 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                     failures["pm_event_not_in_record"].append(cid)
             if not case["provenance"]["records"]:
                 failures["pm_without_conversation_record"].append(cid)
+            if not Path(case["inputs"]["conversation_path"]).exists():
+                failures["pm_conversation_missing"].append(cid)
+                continue
             baseline_path = pm_cases.REPO / case["baseline"]["path"]
             baseline = baseline_path.read_text() if baseline_path.exists() else None
             if baseline and baseline.strip() in _input_text(generator_input(case, data_dir)):
