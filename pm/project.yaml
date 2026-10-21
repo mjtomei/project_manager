@@ -29390,3 +29390,70 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e69afc4
+  plan: improvements
+  title: Add dependency-wide merge wait to autostart
+  branch: pm/pr-e69afc4-add-dependency-wide-merge-wait-to-autostart
+  status: pending
+  depends_on: []
+  description: 'Add `pm autostart add <final-pr> --wait-for-merge` so a user can run
+    an entire dependency chain through signoff, manually merge each ready PR, and
+    have newly unblocked work start automatically. Today `--stop-before-merge` holds
+    only explicitly named targets, so targeting the final PR still allows its prerequisites
+    to auto-merge.
+
+
+    Behavior:
+
+    - The new option applies a manual-merge hold to the target and its transitive
+    prerequisites. Keep the final PR as the target; do not turn every prerequisite
+    into an independent target. Preserve the existing per-PR `--stop-before-merge`
+    behavior.
+
+    - Implementation, review, QA, and fresh signoff run normally. After a merge recommendation,
+    show that the PR is waiting for manual merge. A completed manual merge triggers
+    the scheduler to start newly ready dependents.
+
+    - Establish the policy before starting work. For shared dependencies, any active
+    merge-wait target or explicit per-PR hold prevents auto-merge; unrelated targets
+    retain their policy. Resolve the effective hold through one policy path used by
+    scheduling and merge decisions.
+
+    - Apply the policy to newly added dependencies, preserve it through the existing
+    restart mechanism, and remove only inherited holds when their target is removed
+    or its policy changes. Retain independent per-PR holds and holds required by other
+    targets. Re-adding a target without an explicit policy preserves its existing
+    policy. Reject contradictory flags without partially changing state.
+
+    - CLI status and the TUI runs popup show the effective merge policy and which
+    target causes a dependency to wait. Document the single-final-target command and
+    manual merge progression.
+
+
+    Verification: exercise a diamond dependency graph with two initially ready prerequisites.
+    Both reach signoff and wait; manually merging them starts the next stage without
+    another autostart command. Cover shared dependencies with mixed policies, target
+    removal/policy changes, graph changes, restart restoration, and preservation of
+    fresh-signoff requirements. Use focused automated tests plus an integration scenario
+    through the command queue and scheduler.
+
+
+    Related existing bug: pr-c50d365 tracks manual conflict-resolution merges failing
+    to update PM state. Coordinate the end-to-end scenario with that fix rather than
+    silently treating a resolution window''s MERGED message as completed bookkeeping.
+    pr-f821a63 covers broader manual-status-change rescanning; this PR should reuse
+    the existing merged-state reload trigger.
+
+
+    Likely areas: pm_core/cli/autostart.py, pm_core/autostart_state.py, pm_core/tui/auto_start.py,
+    pm_core/tui/review_loop_ui.py, TUI command/status presentation, and focused autostart/signoff
+    tests.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T00:20:58.983191+00:00'
+  updated_at: '2026-10-21T00:20:58.983191+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
