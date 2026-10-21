@@ -481,12 +481,13 @@ def notify_spec_approved(pr: dict, phase: str, edited: bool = False,
     from pm_core import tmux as tmux_mod
     from pm_core.cli.helpers import _pr_display_id
     from pm_core.loop_shared import find_claude_pane, get_pm_session
+    from pm_core.qa_loop import _compute_qa_window_name
 
     session = session or get_pm_session()
     if not session:
         return False
-    display = _pr_display_id(pr)
-    window = display if phase == "impl" else f"qa-{display}"
+    window = (_pr_display_id(pr) if phase == "impl"
+              else _compute_qa_window_name(pr))
     try:
         pane = find_claude_pane(session, window)
         if not pane:
@@ -511,10 +512,10 @@ def has_pending_spec(pr: dict) -> bool:
 
 def get_pending_spec_phase(pr: dict) -> str | None:
     """Return the phase name of the pending spec, or None."""
-    pending = pr.get("spec_pending")
-    if pending and isinstance(pending, dict):
-        return pending.get("phase")
-    return None
+    # One implementation, kept in the import-light autostart_state so the
+    # tree and picker can use it without pulling in spec_gen.
+    from pm_core.autostart_state import pending_spec_phase
+    return pending_spec_phase(pr)
 
 
 def approve_spec(data: dict, pr_id: str, root: Path | None = None,

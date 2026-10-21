@@ -981,10 +981,10 @@ async def check_and_start(app) -> None:
         if pr_id in launching:
             _log.info("auto_start: %s launch already in flight, skipping", pr_id)
             continue
-        if autostart_state.pending_spec_phase(pr) == "impl":
-            # Waiting for approval (pm pr start would refuse anyway); an
-            # in_progress agent waiting on it keeps its window.
-            _log.debug("auto_start: %s impl spec pending, not starting", pr_id)
+        if pr.get("spec_pending"):
+            # Waiting for approval (pm pr start refuses any pending spec);
+            # an in_progress agent waiting on it keeps its window.
+            _log.debug("auto_start: %s spec pending, not starting", pr_id)
             continue
         launching.add(pr_id)
         if pr.get("status") == "pending":

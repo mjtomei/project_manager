@@ -59,7 +59,7 @@
 ### R4. Pause points
 - **Implementation (pending PR):** `check_and_start` calls `sync_spec_reviews(app, prs)` first. This
   marks pending any in-scope PR in `pending`/`in_progress` that requires review and has an
-  unapproved impl spec. It then skips launching PRs whose `spec_pending` phase is `impl`, because `pm pr start`
+  unapproved impl spec. It then skips launching PRs with any `spec_pending` (normally `impl`), because `pm pr start`
   would refuse them anyway. The status reason is "impl spec awaiting approval".
 - **Implementation (in_progress):** `_poll_impl_idle` runs the same per-PR check every tick for
   in-scope review-required in_progress PRs. This sets `S` as soon as the spec file appears. The existing

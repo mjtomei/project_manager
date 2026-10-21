@@ -352,12 +352,10 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
 
     # A spec awaiting approval pauses the phase whatever else is live (a
     # QA planner still running must not read as "planning scenarios").
-    spec_phase = pending_spec_phase(pr)
+    # (A pending PR's impl spec gates its start: pm pr start refuses.)
     if pr.get("spec_pending"):
-        if status == "pending":
-            # Pending → the impl spec gates the start (pm pr start refuses).
-            return "pending", "waiting", spec_review_reason(pr_id, spec_phase)
-        return phase, "waiting", spec_review_reason(pr_id, spec_phase)
+        return phase, "waiting", spec_review_reason(pr_id,
+                                                     pending_spec_phase(pr))
 
     # Merge overlays — the merge step is live regardless of registry status.
     if pr_id in (inp.get("merge_input_required") or set()):

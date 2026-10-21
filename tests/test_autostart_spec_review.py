@@ -399,6 +399,21 @@ class TestNoRewind:
         auto_start.sync_spec_reviews(app)
         assert "spec_pending" not in store.get_pr(store.load(root), "a")
 
+    def test_scheduler_skips_any_pending_spec(self, tmp_path):
+        # pm pr start refuses whatever phase is pending, so the scheduler
+        # must not try (and log an error) on every pass.
+        pr = _pr("a", spec_pending={"phase": "qa", "generated_at": "x"})
+        root = _disk(tmp_path, [pr])
+        app = DiskApp(root)
+        app._auto_start_targets = {"a": {}}
+        app._auto_start = True
+        with patch.object(auto_start, "_start_pr_quiet") as start, \
+             patch.object(auto_start, "_auto_start_review_loops"), \
+             patch.object(auto_start, "_auto_start_qa_loops"), \
+             patch.object(signoff_ui, "advance_all"):
+            asyncio.run(auto_start.check_and_start(app))
+        start.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # QA scenario-launch gate
