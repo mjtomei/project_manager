@@ -94,7 +94,10 @@
   spec-approve runs → project.yaml stays parseable, no lost `spec_pending` / `spec_approved` /
   target records, and every actor gets a reply (no timeouts on the autostart request channel).
 - **E7** `pm pr start` (manual) on a PR with a pending spec → refuses, as before. Starting a PR that is in a
-  review-specs closure manually from the TUI uses the same review-mode spec prompt, and its spec is held.
+  review-specs closure manually from the TUI (`s`, or a typed command-bar `pr start <id>`, which gets
+  `--review-spec` added) uses the same review-mode spec prompt, and its spec is held. Known gap (pr-74c4182, out of
+  scope): the PR Actions picker start row and a shell `pm pr start` give the agent the plain spec prompt. The gate
+  still holds the spec (`S impl`) and blocks the move to review until approval.
 - **E8** `pm pr spec A --regenerate` refreshes the TUI, so an in_progress review-specs PR is held again
   within a poll or two without a manual reload.
 - **E9** `pm autostart add X --review-specs --no-review-specs` fails with conflicting_flags from the CLI
@@ -113,6 +116,9 @@
 - **E14** Review mode from the global `spec-mode review` setting or a per-PR `review_spec` gets the same pauses inside
   auto-start, labelled `review-spec`. Changing the global setting mid-run is picked up on the next poll. Turning
   review mode off (setting, target removal, `autostart clear`, auto-start off) never approves a spec that is already pending.
+- **E15** Approving a spec right after it is held (before the TUI's next reload, for example a QA spec approved within a
+  second of the planner gate holding it) is final. The TUI does not hold that phase again, and the PR does not show `S`
+  for it again.
 
 ## 4. Pass / Fail Criteria
 Pass: every Then above is observable on the named surface. CLI text and JSON agree with the
