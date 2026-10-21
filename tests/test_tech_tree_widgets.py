@@ -565,3 +565,20 @@ async def test_in_review_keeps_finished_loop_marker():
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_return_marker_shown_alongside_running_rework_markers():
+    """R5.2: a PR sent back by sign-off keeps ⇤ while its rework review
+    loop runs (CLI ``pm pr list`` shows it throughout)."""
+    from pm_core.review_loop import ReviewLoopState
+    ret = {"verdict": "SIGNOFF_IMPL", "hop": "impl", "reviewed_head": "abc"}
+    pr = _pr("pr-a", status="in_review", workdir="/w", signoff_return=ret)
+    app = _TreeApp([pr])
+    st = ReviewLoopState(pr_id="pr-a", iteration=2)
+    st.running = True
+    app._review_loops["pr-a"] = st
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "⟳2" in row and "⇤" in row

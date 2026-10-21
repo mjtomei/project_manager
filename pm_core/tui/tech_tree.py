@@ -611,14 +611,15 @@ class PRNode(Widget):
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold cyan"
                     status_text += f" {spinner}"
-        if not loop_marker and marker_offset < 0 \
-                and status in ("in_progress", "in_review", "qa"):
+        ret_offset, ret_style = -1, ""
+        if status in ("in_progress", "in_review", "qa"):
             # Sent back by sign-off: show the return verdict until the
-            # PR's next sign-off decision (same marker as `pm pr list`).
+            # PR's next sign-off decision (same marker as `pm pr list`),
+            # alongside the rework's own spinner / loop marker.
             ret_verdict = display_signoff_verdict(pr)
             if ret_verdict in SIGNOFF_VERDICT_ICONS:
-                marker_offset = 2 + len(status_text) + 1
-                loop_style = SIGNOFF_VERDICT_STYLES.get(ret_verdict, "bold blue")
+                ret_offset = 2 + len(status_text) + 1
+                ret_style = SIGNOFF_VERDICT_STYLES.get(ret_verdict, "bold blue")
                 status_text += f" {SIGNOFF_VERDICT_ICONS[ret_verdict]}"
         if pr.get("spec_pending") and not loop_marker:
             marker_offset = 2 + len(status_text) + 1
@@ -671,6 +672,8 @@ class PRNode(Widget):
             for dx in range(marker_offset, marker_offset + marker_len):
                 if 0 <= dx < NODE_W:
                     style_grid[3][dx] = f"{loop_style} {bg_style}".strip()
+        if 0 <= ret_offset < NODE_W:
+            style_grid[3][ret_offset] = f"{ret_style} {bg_style}".strip()
 
         return _grid_to_text(grid, style_grid)
 
