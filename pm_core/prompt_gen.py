@@ -196,8 +196,9 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None,
     cleanup_block = _auto_cleanup_addendum()
 
     # Include implementation spec if already generated, or preamble to generate one
-    impl_spec_block = format_spec_for_prompt(pr, "impl",
-                                             review_gate=review_gate)
+    # An existing spec is already approved when the review gate applies
+    # (the gate holds the start until then), so only generation changes.
+    impl_spec_block = format_spec_for_prompt(pr, "impl")
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root,
                                                   review_gate=review_gate)
 
@@ -1759,7 +1760,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
-    qa_spec_block = format_spec_for_prompt(pr, "qa", review_gate=review_gate)
+    qa_spec_block = format_spec_for_prompt(pr, "qa")
     qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root,
                                                 review_gate=review_gate)
 

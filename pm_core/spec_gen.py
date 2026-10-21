@@ -836,8 +836,7 @@ Use the contracts and scripted responses below — do not devise your own.
 """
 
 
-def format_spec_for_prompt(pr: dict, phase: str,
-                           review_gate: bool = False) -> str:
+def format_spec_for_prompt(pr: dict, phase: str) -> str:
     """Format a spec for inclusion in a Claude prompt.
 
     Returns a markdown section with the spec, or empty string if no spec.
@@ -852,7 +851,7 @@ def format_spec_for_prompt(pr: dict, phase: str,
     }
     label = phase_labels.get(phase, f"{phase} Spec")
 
-    mode = pr_spec_mode(pr, review_gate)
+    mode = pr_spec_mode(pr)
     pr_id = pr.get("id", "???")
     try:
         root = store.find_project_root()

@@ -138,6 +138,11 @@ def start_pr(app, companion: bool = False) -> None:
         cmd_parts.append("--fresh")
     if companion:
         cmd_parts.append("--companion")
+    from pm_core.tui import auto_start as _auto_start
+    if _auto_start.spec_review_required(app, pr_id):
+        # Same review-mode spec prompt as an auto-start launch: the
+        # scheduler holds this PR's impl spec for approval either way.
+        cmd_parts.append("--review-spec")
     # Pass --transcript so the resulting Claude session writes a hook
     # transcript symlink that ``_poll_impl_idle`` can register in the
     # PaneIdleTracker.  Without it a manually-started PR is never tracked,

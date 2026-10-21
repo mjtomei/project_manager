@@ -29,9 +29,10 @@
   `review_spec: true` and the global `spec-mode=review`. Neither `review_spec` nor the
   global setting is ever written.
 - `spec_gen.pr_spec_mode(pr, review=False)`: `review=True` forces `"review"`. This is threaded through
-  `spec_generation_preamble(pr, phase, root, review_gate=False)`,
-  `format_spec_for_prompt(pr, phase, review_gate=False)`, `_build_spec_prompt` and
+  `spec_generation_preamble(pr, phase, root, review_gate=False)`, `_build_spec_prompt` and
   `generate_spec(..., review=False)`. All of these default to the current behaviour.
+  `format_spec_for_prompt` is deliberately unchanged: under the gate an existing spec is always
+  approved before its step runs, so a review-mode "ask for approval" note would stall the agent.
 
 ### R3. Inline spec → `spec_pending`
 - New `spec_gen` helpers:
@@ -49,7 +50,8 @@
   that approval is recorded only through `pm pr spec-approve <id>` / `V`. The agent must wait for the
   "spec approved" message before doing the work.
 - `pm pr start --review-spec` (hidden) passes `review_gate` into `prompt_gen.generate_prompt`.
-  `auto_start._start_pr_quiet` adds the flag when `spec_review_required`.
+  `auto_start._start_pr_quiet` adds the flag when `spec_review_required`, and so does the TUI's manual
+  start (`pr_view.start_pr`) for an in-scope PR.
   `generate_qa_planner_prompt(..., review_gate=)` gets it from `QALoopState.spec_review`.
 
 ### R4. Pause points
