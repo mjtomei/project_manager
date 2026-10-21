@@ -860,3 +860,124 @@ def test_check_reports_brief_item_missing_from_context(catalog):
     ctx.write_text("".join(l + "\n" for l in ctx.read_text().splitlines() if json.loads(l)["id"] not in used))
     cases._load_context_items.cache_clear()
     assert cases.check(data_dir=data)["failure_counts"] == {"brief_item_missing_from_context": 1}
+
+
+# --- PM source files -----------------------------------------------------------
+
+EARLIER_PLAN = "# Plan: widgets\n\n" + "The earlier plan describes widget compaction in two pull requests with tests. " * 3 + "\n"
+
+
+def read_rows(call_id, path, content, start=1, total=None):
+    """An assistant Read call and its result, as Claude Code records them."""
+    lines = content.count("\n") + 1
+    return [
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": call_id, "name": "Read", "input": {"file_path": path}}]}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": "numbered"}]},
+         "toolUseResult": {"type": "text", "file": {"filePath": path, "content": content, "startLine": start,
+                                                     "numLines": lines, "totalLines": total or lines}}, "timestamp": f"r-{call_id}"},
+    ]
+
+
+def source_session(tmp_path, plan_text, earlier=EARLIER_PLAN, injected=None, human=True):
+    """A mapped session that reads named files and the plan, then edits the plan; returns (out_dir, build result)."""
+    plans = tmp_path / "pm" / "plans"
+    plans.mkdir(parents=True)
+    plan_path = plans / "plan-x.md"
+    plan_path.write_text(plan_text)
+    rows = [{"type": "user", "message": {"role": "user", "content": injected or (
+        "## Task\nRevise the plan. Context may be in a named file (e.g. \"plans/auth.md\", \"DESIGN.md\").")}, "timestamp": "t0"}]
+    if human:
+        rows.append({"type": "user", "message": {"role": "user", "content":
+                     "Use notes/spec.md and docs/missing.md when you revise pm/plans/plan-x.md."}, "timestamp": "t1"})
+    rows += read_rows("a", "/proj/notes/spec.md", "SPEC v1: widgets must compact.")
+    rows += read_rows("b", "/proj/src/explore.py", "EXPLORATION OUTPUT")       # not named: the session's own exploring
+    rows += read_rows("c", str(plan_path), earlier)
+    rows.append({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "d", "name": "Bash",
+                                                               "input": {"command": "cat docs/missing.md"}}]}})
+    rows.append({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "e", "name": "Edit",
+                                                               "input": {"file_path": str(plan_path), "old_string": "a", "new_string": "b"}}]},
+                 "timestamp": "t9"})
+    event_line = len(rows)
+    rows += read_rows("f", "/proj/notes/spec.md", "SPEC v2 LATER REVISION")  # after the event
+    record = tmp_path / "claude" / "-home-matt-proj" / "s.jsonl"
+    record.parent.mkdir(parents=True)
+    record.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    mp = tmp_path / "map.md"
+    mp.write_text(f"| plan-x.md | Draft/write record | `/home/matt/.claude/projects/-home-matt-proj/s.jsonl:{event_line}` |\n")
+    out = tmp_path / "data" / "pm"
+    built = pm_cases.build(out, roots={"claude_projects": str(tmp_path / "claude")}, map_path=mp, plans_dir=plans,
+                           windows_path=tmp_path / "windows.json")
+    return out, built
+
+
+def test_pm_source_files_are_session_snapshots(tmp_path):
+    out, (built, report) = source_session(tmp_path, "# Plan: widgets\n\nThe final plan text.\n")
+    case = built[0]
+    turns = cases.generator_input(case, out.parent)["conversation"]
+    sources = [t for t in turns if t["role"] == "source_file"]
+    assert [(t["path"], t["relation"]) for t in sources] == [
+        ("/proj/notes/spec.md", "named_source"), (str(tmp_path / "pm" / "plans" / "plan-x.md"), "plan_earlier_version")]
+    assert sources[0]["text"] == "SPEC v1: widgets must compact." and sources[1]["text"] == EARLIER_PLAN
+    assert not sources[0]["partial"] and sources[0]["lines"]["total"] == 1
+    text = json.dumps(turns)
+    assert "EXPLORATION OUTPUT" not in text and "LATER REVISION" not in text and "final plan text" not in text
+    assert "source_file" in case["inputs"]["instruction"]
+    prov = case["provenance"]
+    assert {(s["relation"], s["record_line"] < prov["records"][0]["event_line"]) for s in prov["source_files"]} == {
+        ("named_source", True), ("plan_earlier_version", True)}
+    assert all(s["sha256"] and s["read_at"] for s in prov["source_files"])
+    # the pm prompt's example paths are not requests; a named file never read is a gap, with the shell read noted
+    assert [g["path"] for g in prov["source_gaps"]] == ["docs/missing.md"]
+    assert "shell command" in prov["source_gaps"][0]["reason"]
+    # mapped as a fresh write, but the session read an earlier plan with content: an edit
+    assert case["task_kind"] == "edit" and prov["human_turn_fidelity"] == {"applicable": True}
+    assert report[0]["task_kind"] == "edit" and report[0]["source_files"] == 2
+
+
+def test_pm_snapshot_identical_to_baseline_is_withheld(tmp_path):
+    out, (built, _) = source_session(tmp_path, EARLIER_PLAN)
+    case = built[0]
+    turns = cases.generator_input(case, out.parent)["conversation"]
+    assert EARLIER_PLAN not in [t["text"] for t in turns]
+    reasons = {g["reason"] for g in case["provenance"]["source_gaps"]}
+    assert "snapshot identical to the production baseline; withheld" in reasons
+    assert "earlier plan version not read in full in the window" not in reasons  # no longer an edit without it
+    assert case["task_kind"] == "new"
+
+
+def test_pm_reformat_case_is_labelled_and_out_of_fidelity(tmp_path):
+    (tmp_path / "windows.json").write_text(json.dumps({"plan-x.md:s.jsonl:9": {"start_line": 1, "task_kind": "reformat"}}))
+    out, (built, report) = source_session(tmp_path, "# Plan\n\nReformatted.\n", earlier="# plan-x\n\n<!-- Describe the plan here -->\n",
+                                          injected="## Task\nHelp me develop a plan called \"notes/spec.md\".", human=False)
+    case = built[0]
+    assert case["provenance"]["records"][0]["window_reviewed"]
+    assert case["task_kind"] == "reformat" and case["provenance"]["human_turns"] == 0
+    assert case["provenance"]["human_turn_fidelity"] == {"applicable": False, "reason": "reformat of a source document"}
+    assert report[0]["human_turn_fidelity"] is False
+    named = [t for t in cases.generator_input(case, out.parent)["conversation"] if t["role"] == "source_file"]
+    assert named[0]["path"] == "/proj/notes/spec.md"
+    assert not pm_cases.substantive_plan(named[1]["text"])  # pm's empty template
+
+
+def test_pm_coverage_reports_task_kind_and_gaps(catalog):
+    md = (cases.REPORTS / "case-coverage.md").read_text()
+    assert "| Plan | Status | Case | Task | Human turns | Fidelity | Source files | Gaps |" in md
+    assert "| plan-widgets.md | recovered | pm:plan-widgets | new | 2 | yes | 0 | 0 |" in md
+    summary = json.loads((cases.REPORTS / "case-coverage.json").read_text())
+    row = next(p for p in summary["pm_plans"] if p["plan"] == "plan-widgets.md")
+    assert row["task_kind"] == "new" and row["source_gaps"] == []
+
+
+def test_check_flags_source_read_after_event(catalog):
+    data = catalog["data"]
+    pm = next(c for c in catalog["cases"] if c["case_type"] == "pm_plan")
+    convo_path = data / pm["inputs"]["conversation_path"]
+    convo = json.loads(convo_path.read_text())
+    excerpt = convo["excerpts"][0]
+    text = "a file read after the plan was written"
+    excerpt["turns"].append({"line": excerpt["event_line"] + 1, "timestamp": "late", "role": "source_file", "path": "/x",
+                             "relation": "named_source", "text": text, "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                             "lines": {"start": 1, "count": 1, "total": 1}, "partial": False})
+    convo_path.write_text(json.dumps(convo, indent=1))
+    counts = cases.check(data_dir=data)["failure_counts"]
+    assert counts == {"pm_source_read_after_event": 1, "stale_generator_input": 1}

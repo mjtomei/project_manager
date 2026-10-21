@@ -8,8 +8,10 @@ Whole-document cases pair a brief assembled from a document's surrounding
 context (never its body) with the original document as reference.
 Continuation cases show a document up to a section heading and hold the
 section that starts there as reference. PM cases use recovered planning
-conversations as the prompt and the plan file, as it stood at build time,
-as the production baseline. Generator inputs come only from `generator_input`, which never
+conversations as the prompt (with the files the session read at the request's
+direction, and earlier plan versions it edited, as it saw them) and the plan
+file, as it stood at build time, as the production baseline. Generator inputs
+come only from `generator_input`, which never
 reads a reference span or a baseline; references come from `reference_text`.
 
 The catalog stores offsets into the corpus text files rather than copies of
@@ -53,6 +55,7 @@ NON_PROSE = re.compile(r"^\s*(\||#|Title:|Opened by |[-*]?\s*$)")
 # Issue and PR bodies are edited as work proceeds: task checkboxes and KEP release targets record outcomes.
 PROGRESS_LINE = re.compile(r"(?i)^[ \t]*(?:[-*+][ \t]*)?(?:\[[ xX]\].*|(?:alpha|beta|stable) release target\b.*|enhancement target\b.*)$")
 HTML_COMMENT = re.compile(r"<!--.*?(?:-->|$)", re.S)
+SOURCE_FIELDS = ("path", "relation", "lines", "partial")  # what a generator sees of a source_file turn besides its text
 
 
 # --- text utilities ---------------------------------------------------------
@@ -440,8 +443,10 @@ def generator_input(case, data_dir=None, context_items=None):
         if hashlib.sha256(raw.encode()).hexdigest() != case["inputs"]["conversation_sha256"]:
             raise ValueError(f"{case['case_id']}: conversation excerpt changed since the catalog was built")
         convo = json.loads(raw)
-        # excerpts come from separate sessions (oldest first); `session` keeps them apart once flattened
-        turns = [{"session": n, "role": t["role"], "text": t["text"]}
+        # excerpts come from separate sessions (oldest first); `session` keeps them apart once flattened.
+        # source_file turns are files the session read (named sources, earlier plan versions), as it saw them.
+        turns = [{"session": n, "role": t["role"], "text": t["text"],
+                  **{k: t[k] for k in SOURCE_FIELDS if t["role"] == "source_file"}}
                  for n, e in enumerate(convo["excerpts"], 1) for t in e["turns"]]
         return {"instruction": case["inputs"]["instruction"], "conversation": turns}
     raise ValueError("Unknown case type: " + kind)
@@ -617,7 +622,8 @@ KIND_LABELS = {"index_entry": "index entry", "index_preamble": "index page intro
 def write_summary(coverage):
     REPORTS.mkdir(exist_ok=True)
     summary = {k: coverage[k] for k in ("totals", "sources", "dropped", "context_timing") if k in coverage}
-    summary["pm_plans"] = [{k: p.get(k) for k in ("plan", "status", "case_id", "human_turns", "map_evidence")} for p in coverage["pm_plans"]]
+    summary["pm_plans"] = [{k: p.get(k) for k in ("plan", "status", "case_id", "task_kind", "human_turns", "human_turn_fidelity",
+                                                  "source_files", "source_gaps", "map_evidence")} for p in coverage["pm_plans"]]
     if "check" in coverage:
         summary["check"] = coverage["check"]
     (REPORTS / "case-coverage.json").write_text(json.dumps(summary, indent=1) + "\n")
@@ -641,9 +647,22 @@ def write_summary(coverage):
                      f"{s.get('whole_document_only', 0)} | {s.get('continuation_only', 0)} | {s.get('dropped', 0)} | "
                      f"{s['cases'].get('whole_document', 0)} | {s['cases'].get('continuation', 0)} | "
                      + (f"{ctx['items']} ({ctx['fetch_errors']})" if ctx else "no collector") + " |")
-    lines += ["", "## PM plans", "", "| Plan | Status | Case | Human turns |", "|---|---|---|---|"]
+    lines += ["", "## PM plans", "",
+              "*Task* is `new` (a plan written from the conversation), `edit` (the session revised an existing plan; its "
+              "earlier version is in the input) or `reformat` (the plan restates a document the session read). Edit and "
+              "reformat outputs can score well by copying their inputs, so report them apart from new plans. Human-turn "
+              "fidelity does not apply to cases marked *n/a* (no human turns, or a reformat) and they stay out of fidelity "
+              "aggregates. *Source files* are Read snapshots the session saw (files the human or pm prompt named, and earlier "
+              "plan versions); *gaps* are named inputs that could not be recovered, listed in `case-coverage.json`.", "",
+              "| Plan | Status | Case | Task | Human turns | Fidelity | Source files | Gaps |", "|---|---|---|---|---|---|---|---|"]
     for p in coverage["pm_plans"]:
-        lines.append(f"| {p['plan']} | {p['status']} | {p.get('case_id') or ''} | {p.get('human_turns') if p.get('human_turns') is not None else ''} |")
+        cells = [p["plan"], p["status"], p.get("case_id") or ""]
+        if p.get("case_id"):
+            cells += [p["task_kind"], p["human_turns"], "yes" if p["human_turn_fidelity"] else "n/a", p["source_files"],
+                      len(p["source_gaps"])]
+        else:
+            cells += [""] * 5
+        lines.append("| " + " | ".join(str(c) for c in cells) + " |")
     lines += timing_section(coverage.get("context_timing", {}))
     reasons = Counter((d["source"], d["reason"]) for d in coverage["dropped"])
     lines += ["", "## Dropped documents", "",
@@ -780,6 +799,17 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
             if not (data_dir / case["inputs"]["conversation_path"]).exists():
                 failures["pm_conversation_missing"].append(cid)
                 continue
+            convo = json.loads((data_dir / case["inputs"]["conversation_path"]).read_text())
+            for e in convo["excerpts"]:
+                for t in e["turns"]:
+                    if t["role"] != "source_file":
+                        continue
+                    if not t["line"] < e["event_line"]:
+                        failures["pm_source_read_after_event"].append(f"{cid} ({t['path']})")
+                    if hashlib.sha256(t["text"].encode()).hexdigest() != t["sha256"]:
+                        failures["pm_source_hash_mismatch"].append(f"{cid} ({t['path']})")
+                    if t["sha256"] == case["baseline"]["sha256"]:
+                        failures["baseline_in_generator_input"].append(cid)
             try:
                 baseline = reference_text(case, data_dir)
             except ValueError as exc:

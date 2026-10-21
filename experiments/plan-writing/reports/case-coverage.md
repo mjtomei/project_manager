@@ -40,41 +40,43 @@ Cases by type: continuation 42765, pm_plan 24, whole_document 12415.
 
 ## PM plans
 
-| Plan | Status | Case | Human turns |
-|---|---|---|---|
-| plan-001.md | not_located |  |  |
-| plan-002.md | not_located |  |  |
-| plan-003.md | not_located |  |  |
-| plan-3119574.md | recovered | pm:plan-3119574 | 0 |
-| plan-66d430f.md | edits_only | pm:plan-66d430f | 40 |
-| plan-984dfeb.md | recovered | pm:plan-984dfeb | 7 |
-| plan-ambient.md | recovered | pm:plan-ambient | 16 |
-| plan-b6aac3d.md | not_located |  |  |
-| plan-c493724.md | not_located |  |  |
-| plan-cb4ef69.md | edits_only | pm:plan-cb4ef69 | 10 |
-| plan-collaboration.md | recovered | pm:plan-collaboration | 2 |
-| plan-consult.md | recovered | pm:plan-consult | 3 |
-| plan-delivery.md | history_not_mounted |  |  |
-| plan-e4fa5cb.md | not_located |  |  |
-| plan-ff4f1a7.md | recovered | pm:plan-ff4f1a7 | 1 |
-| plan-jurisdiction.md | recovered | pm:plan-jurisdiction | 6 |
-| plan-language-experiment-corpus-v3.md | revision_only | pm:plan-language-experiment-corpus-v3 | 24 |
-| plan-language-experiment.md | recovered | pm:plan-language-experiment | 3 |
-| plan-litreview.md | recovered | pm:plan-litreview | 41 |
-| plan-memory.md | recovered | pm:plan-memory | 3 |
-| plan-mind.md | edits_only | pm:plan-mind | 33 |
-| plan-momentum.md | recovered | pm:plan-momentum | 2 |
-| plan-pulse.md | not_located |  |  |
-| plan-qa.md | edits_only | pm:plan-qa | 2 |
-| plan-quality.md | recovered | pm:plan-quality | 2 |
-| plan-radar.md | recovered | pm:plan-radar | 5 |
-| plan-regression.md | recovered | pm:plan-regression | 15 |
-| plan-self-improve.md | recovered | pm:plan-self-improve | 2 |
-| plan-sensorium.md | recovered | pm:plan-sensorium | 7 |
-| plan-simulation.md | recovered | pm:plan-simulation | 6 |
-| plan-state.md | recovered | pm:plan-state | 2 |
-| plan-user-model-training.md | recovered | pm:plan-user-model-training | 1 |
-| plan-doc-eval.md | not_in_map |  |  |
+*Task* is `new` (a plan written from the conversation), `edit` (the session revised an existing plan; its earlier version is in the input) or `reformat` (the plan restates a document the session read). Edit and reformat outputs can score well by copying their inputs, so report them apart from new plans. Human-turn fidelity does not apply to cases marked *n/a* (no human turns, or a reformat) and they stay out of fidelity aggregates. *Source files* are Read snapshots the session saw (files the human or pm prompt named, and earlier plan versions); *gaps* are named inputs that could not be recovered, listed in `case-coverage.json`.
+
+| Plan | Status | Case | Task | Human turns | Fidelity | Source files | Gaps |
+|---|---|---|---|---|---|---|---|
+| plan-001.md | not_located |  |  |  |  |  |  |
+| plan-002.md | not_located |  |  |  |  |  |  |
+| plan-003.md | not_located |  |  |  |  |  |  |
+| plan-3119574.md | recovered | pm:plan-3119574 | reformat | 0 | n/a | 1 | 0 |
+| plan-66d430f.md | edits_only | pm:plan-66d430f | edit | 40 | yes | 6 | 8 |
+| plan-984dfeb.md | recovered | pm:plan-984dfeb | new | 7 | yes | 0 | 0 |
+| plan-ambient.md | recovered | pm:plan-ambient | new | 16 | yes | 0 | 0 |
+| plan-b6aac3d.md | not_located |  |  |  |  |  |  |
+| plan-c493724.md | not_located |  |  |  |  |  |  |
+| plan-cb4ef69.md | edits_only | pm:plan-cb4ef69 | edit | 10 | yes | 1 | 3 |
+| plan-collaboration.md | recovered | pm:plan-collaboration | new | 2 | yes | 0 | 0 |
+| plan-consult.md | recovered | pm:plan-consult | new | 3 | yes | 0 | 0 |
+| plan-delivery.md | history_not_mounted |  |  |  |  |  |  |
+| plan-e4fa5cb.md | not_located |  |  |  |  |  |  |
+| plan-ff4f1a7.md | recovered | pm:plan-ff4f1a7 | new | 1 | yes | 3 | 0 |
+| plan-jurisdiction.md | recovered | pm:plan-jurisdiction | new | 6 | yes | 0 | 0 |
+| plan-language-experiment-corpus-v3.md | revision_only | pm:plan-language-experiment-corpus-v3 | edit | 24 | yes | 0 | 1 |
+| plan-language-experiment.md | recovered | pm:plan-language-experiment | new | 3 | yes | 0 | 0 |
+| plan-litreview.md | recovered | pm:plan-litreview | new | 41 | yes | 0 | 0 |
+| plan-memory.md | recovered | pm:plan-memory | new | 3 | yes | 0 | 0 |
+| plan-mind.md | edits_only | pm:plan-mind | edit | 33 | yes | 3 | 12 |
+| plan-momentum.md | recovered | pm:plan-momentum | new | 2 | yes | 0 | 0 |
+| plan-pulse.md | not_located |  |  |  |  |  |  |
+| plan-qa.md | edits_only | pm:plan-qa | edit | 2 | yes | 0 | 1 |
+| plan-quality.md | recovered | pm:plan-quality | new | 2 | yes | 0 | 0 |
+| plan-radar.md | recovered | pm:plan-radar | new | 5 | yes | 0 | 0 |
+| plan-regression.md | recovered | pm:plan-regression | edit | 15 | yes | 2 | 2 |
+| plan-self-improve.md | recovered | pm:plan-self-improve | new | 2 | yes | 0 | 0 |
+| plan-sensorium.md | recovered | pm:plan-sensorium | new | 7 | yes | 0 | 0 |
+| plan-simulation.md | recovered | pm:plan-simulation | new | 6 | yes | 0 | 0 |
+| plan-state.md | recovered | pm:plan-state | new | 2 | yes | 0 | 0 |
+| plan-user-model-training.md | recovered | pm:plan-user-model-training | new | 1 | yes | 0 | 0 |
+| plan-doc-eval.md | not_in_map |  |  |  |  |  |  |
 
 ## Context written after the document
 

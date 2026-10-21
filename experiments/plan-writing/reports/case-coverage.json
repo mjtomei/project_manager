@@ -17236,231 +17236,531 @@
    "plan": "plan-001.md",
    "status": "not_located",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Not located in scoped search"
   },
   {
    "plan": "plan-002.md",
    "status": "not_located",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Not located in scoped search"
   },
   {
    "plan": "plan-003.md",
    "status": "not_located",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Not located in scoped search"
   },
   {
    "plan": "plan-3119574.md",
    "status": "recovered",
    "case_id": "pm:plan-3119574",
+   "task_kind": "reformat",
    "human_turns": 0,
+   "human_turn_fidelity": false,
+   "source_files": 1,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-66d430f.md",
    "status": "edits_only",
    "case_id": "pm:plan-66d430f",
+   "task_kind": "edit",
    "human_turns": 40,
+   "human_turn_fidelity": true,
+   "source_files": 6,
+   "source_gaps": [
+    {
+     "path": "plan-66d430f.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 6634,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/bfe5a277-785c-484e-90b4-46024946e8b5.jsonl"
+    },
+    {
+     "path": "/home/matt/claude-work/project-manager/pm/docs/literature-review-user-model.md",
+     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
+     "event_line": 1442,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    },
+    {
+     "path": "/home/matt/claude-work/project-manager/pm/docs/literature-review.md",
+     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
+     "event_line": 1442,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    },
+    {
+     "path": "/home/matt/claude-work/project-manager/pm/docs/adversarial-review/REVIEW_CYCLE_1_USERMODEL.md",
+     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
+     "event_line": 1442,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    },
+    {
+     "path": "/home/matt/claude-work/project-manager/pm/docs/adversarial-review/REVIEW_CYCLE_2_USERMODEL.md",
+     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
+     "event_line": 1442,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    },
+    {
+     "path": "AGENTS.md/CLAUDE.md",
+     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
+     "event_line": 1442,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    },
+    {
+     "path": "/home/matt/claude-work/project-manager/pm/docs/adversarial-review/REVIEW_CYCLE_3_USERMODEL.md",
+     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
+     "event_line": 1442,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    },
+    {
+     "path": "plan-66d430f.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 1442,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    }
+   ],
    "map_evidence": "Edits only"
   },
   {
    "plan": "plan-984dfeb.md",
    "status": "recovered",
    "case_id": "pm:plan-984dfeb",
+   "task_kind": "new",
    "human_turns": 7,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-ambient.md",
    "status": "recovered",
    "case_id": "pm:plan-ambient",
+   "task_kind": "new",
    "human_turns": 16,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-b6aac3d.md",
    "status": "not_located",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Not located in scoped search"
   },
   {
    "plan": "plan-c493724.md",
    "status": "not_located",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Not located in scoped search"
   },
   {
    "plan": "plan-cb4ef69.md",
    "status": "edits_only",
    "case_id": "pm:plan-cb4ef69",
+   "task_kind": "edit",
    "human_turns": 10,
+   "human_turn_fidelity": true,
+   "source_files": 1,
+   "source_gaps": [
+    {
+     "path": "plans/plan-top.md",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 37,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/ad0729bb-6a51-4e0c-87f2-7928635f23a7.jsonl"
+    },
+    {
+     "path": "pm/project.yaml",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 37,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/ad0729bb-6a51-4e0c-87f2-7928635f23a7.jsonl"
+    },
+    {
+     "path": "plan-cb4ef69.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 37,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/ad0729bb-6a51-4e0c-87f2-7928635f23a7.jsonl"
+    }
+   ],
    "map_evidence": "Edits only"
   },
   {
    "plan": "plan-collaboration.md",
    "status": "recovered",
    "case_id": "pm:plan-collaboration",
+   "task_kind": "new",
    "human_turns": 2,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-consult.md",
    "status": "recovered",
    "case_id": "pm:plan-consult",
+   "task_kind": "new",
    "human_turns": 3,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-delivery.md",
    "status": "history_not_mounted",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-e4fa5cb.md",
    "status": "not_located",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Not located in scoped search"
   },
   {
    "plan": "plan-ff4f1a7.md",
    "status": "recovered",
    "case_id": "pm:plan-ff4f1a7",
+   "task_kind": "new",
    "human_turns": 1,
+   "human_turn_fidelity": true,
+   "source_files": 3,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-jurisdiction.md",
    "status": "recovered",
    "case_id": "pm:plan-jurisdiction",
+   "task_kind": "new",
    "human_turns": 6,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-language-experiment-corpus-v3.md",
    "status": "revision_only",
    "case_id": "pm:plan-language-experiment-corpus-v3",
+   "task_kind": "edit",
    "human_turns": 24,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [
+    {
+     "path": "plan-language-experiment-corpus-v3.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 5017,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    }
+   ],
    "map_evidence": "Revision recovered; origin unconfirmed"
   },
   {
    "plan": "plan-language-experiment.md",
    "status": "recovered",
    "case_id": "pm:plan-language-experiment",
+   "task_kind": "new",
    "human_turns": 3,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-litreview.md",
    "status": "recovered",
    "case_id": "pm:plan-litreview",
+   "task_kind": "new",
    "human_turns": 41,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-memory.md",
    "status": "recovered",
    "case_id": "pm:plan-memory",
+   "task_kind": "new",
    "human_turns": 3,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-mind.md",
    "status": "edits_only",
    "case_id": "pm:plan-mind",
+   "task_kind": "edit",
    "human_turns": 33,
+   "human_turn_fidelity": true,
+   "source_files": 3,
+   "source_gaps": [
+    {
+     "path": "/pm_core/watcher_base.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/watchers/auto_start_watcher.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/watcher_manager.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/review_loop.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/qa_loop.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/claude_launcher.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/bridge.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/bridge_client.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "/pm_core/hook_install.py",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "~/.claude/settings.json",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "plan-mind.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 778,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
+    },
+    {
+     "path": "plan-mind.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 432,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/3f3cbb09-b668-414a-85fc-c15f863a3f9c.jsonl"
+    }
+   ],
    "map_evidence": "Edits only"
   },
   {
    "plan": "plan-momentum.md",
    "status": "recovered",
    "case_id": "pm:plan-momentum",
+   "task_kind": "new",
    "human_turns": 2,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-pulse.md",
    "status": "not_located",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": "Not located in scoped search"
   },
   {
    "plan": "plan-qa.md",
    "status": "edits_only",
    "case_id": "pm:plan-qa",
+   "task_kind": "edit",
    "human_turns": 2,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [
+    {
+     "path": "plan-qa.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 193,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
+    }
+   ],
    "map_evidence": "Edits only"
   },
   {
    "plan": "plan-quality.md",
    "status": "recovered",
    "case_id": "pm:plan-quality",
+   "task_kind": "new",
    "human_turns": 2,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-radar.md",
    "status": "recovered",
    "case_id": "pm:plan-radar",
+   "task_kind": "new",
    "human_turns": 5,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-regression.md",
    "status": "recovered",
    "case_id": "pm:plan-regression",
+   "task_kind": "edit",
    "human_turns": 15,
+   "human_turn_fidelity": true,
+   "source_files": 2,
+   "source_gaps": [
+    {
+     "path": "plan-regression.md",
+     "reason": "earlier plan version not read in full in the window",
+     "event_line": 523,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/b84ffc22-4076-44c9-98cd-7e36a0795174.jsonl"
+    },
+    {
+     "path": "pm/reports/regression-latest.md",
+     "reason": "named but not read with the Read tool in the window",
+     "event_line": 220,
+     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/0f889438-5322-4186-af78-831baef8abbf.jsonl"
+    }
+   ],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-self-improve.md",
    "status": "recovered",
    "case_id": "pm:plan-self-improve",
+   "task_kind": "new",
    "human_turns": 2,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-sensorium.md",
    "status": "recovered",
    "case_id": "pm:plan-sensorium",
+   "task_kind": "new",
    "human_turns": 7,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-simulation.md",
    "status": "recovered",
    "case_id": "pm:plan-simulation",
+   "task_kind": "new",
    "human_turns": 6,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-state.md",
    "status": "recovered",
    "case_id": "pm:plan-state",
+   "task_kind": "new",
    "human_turns": 2,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-user-model-training.md",
    "status": "recovered",
    "case_id": "pm:plan-user-model-training",
+   "task_kind": "new",
    "human_turns": 1,
+   "human_turn_fidelity": true,
+   "source_files": 0,
+   "source_gaps": [],
    "map_evidence": "Draft/write record"
   },
   {
    "plan": "plan-doc-eval.md",
    "status": "not_in_map",
    "case_id": null,
+   "task_kind": null,
    "human_turns": null,
+   "human_turn_fidelity": null,
+   "source_files": null,
+   "source_gaps": null,
    "map_evidence": null
   }
  ],

@@ -90,7 +90,11 @@ build time (path + sha256, snapshotted to `data/pm/baselines/<sha256>.md`
 because plan files keep changing on master) plus the content written at the
 event when recoverable. Paths under `data/` are recorded relative to it, so a
 copied `data/` resolves. Plans
-whose records are missing or not located are listed, not fabricated.
+whose records are missing or not located are listed, not fabricated. Files
+the session read at the request's direction, and earlier plan versions it
+edited, enter the excerpt as `source_file` turns (see *PM source files*
+below); each case records `task_kind` (new/edit/reformat) and whether
+human-turn fidelity applies.
 
 R5. **Catalog + coverage report.** `data/cases/catalog.jsonl` (one case per
 line) and `data/cases/coverage.json`; a committed summary
@@ -208,6 +212,30 @@ exactly once.
   that are not tool results, meta/command wrappers, compaction summaries or pm
   injected prompts. Each PM case records the window, counts, and
   `needs_review: true` because the map is not proof of assent.
+- *PM source files* (user decision, 2026-10-21, review loop 5956 i10). Tool
+  results are left out of excerpts, so files the request pointed at were
+  missing from generator inputs. Now kept, as `source_file` turns at the point
+  they were read: the session's own Read results (the actual pre-generation
+  snapshots, with path, sha256, record line, read timestamp and line range;
+  partial reads are marked) of (a) files named in human or injected turns
+  (the pm prompt's "e.g." example paths are not requests) and (b) the target
+  plan itself (`plan_earlier_version`). Reads the session made on its own
+  initiative, reads after the event, current file contents and anything
+  reconstructed from the finished plan are never used; a snapshot identical
+  to the baseline is withheld. Missing inputs are explicit `source_gaps`: a
+  named file never read with Read in the window (a shell read is noted), a
+  failed read, an edit excerpt without a complete read of the earlier plan,
+  or a withheld snapshot. `task_kind` is `edit` for edits_only/revision_only
+  map rows or when the session read an earlier plan version with content
+  (not pm's empty template), `reformat` when a reviewed window says so
+  (plan-3119574 restates plan-litreview.md, its attached source), else `new`.
+  `human_turn_fidelity.applicable` is false for reformat cases and cases with
+  no human turns; such cases stay out of fidelity aggregates. The coverage
+  report lists task, fidelity, source files and gaps per plan and says to
+  report edit/reformat scores apart from new plans, since copying the input
+  inflates them. `cases.py --check` adds `pm_source_read_after_event` and
+  `pm_source_hash_mismatch`, and a source equal to the baseline counts as
+  `baseline_in_generator_input`.
 - *plan-doc-eval.md and plans not in the map* (plan-doc-eval, and plans whose
   map row says not located): listed as `no_located_history`; plan-delivery as
   `history_not_mounted` (Codex). plan-b6aac3d is untracked and absent here.

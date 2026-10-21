@@ -11,6 +11,13 @@ is a Write. Paths the catalog records under out_dir are relative to its parent
 (the data directory), like the corpus text paths, so a copied data/ still
 resolves.
 
+Files the human or the pm prompt named, and earlier versions of the plan
+itself, enter the excerpt as `source_file` turns: the Read results the session
+saw, at the point it read them, with path, hash and line range. Nothing is
+substituted from the current tree or the finished plan; a named file the
+window never read, a failed read, an edit whose earlier version was not read
+in full, or a snapshot identical to the baseline is listed in `source_gaps`.
+
 The map identifies candidate provenance, not assent, so every case is marked
 `needs_review`; reviewed windows live in pm_case_windows.json. Plans whose
 records are missing, unmounted or never located are reported, not invented.
@@ -32,6 +39,12 @@ RECORD_REF = re.compile(r"`(/home/matt/[^`]+?\.jsonl):(\d+)`")
 PLAN_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 INJECTED_MARKERS = ("## Session Context", "You're working on PR", "This session is managed by `pm`",
                     "You are running inside a pm", "## Task\n", "<command-name>", "<local-command")
+PATH_TOKEN = re.compile(r"[\w./~-]*/[\w.-]+\.(?:md|txt|yaml|yml|py|json|rst)\b")
+EXAMPLES = re.compile(r"\(e\.g\.[^)]*\)", re.S)  # the pm prompt's example paths are not requests
+EDIT_STATUSES = ("edits_only", "revision_only")
+INSTRUCTION = "Write the plan file this conversation asks for."
+SOURCE_NOTE = (" Files the session read are included as `source_file` turns, as the session saw them when it read them"
+               " (a line range marks a partial read).")
 SKIP_PREFIXES = ("<local-command-stdout>", "<local-command-stderr>", "Caveat: The messages below",
                  "[Request interrupted", "<command-message>", "<bash-input>", "<bash-stdout>", "<bash-stderr>")
 
@@ -128,8 +141,86 @@ def load_records(path):
     return out
 
 
+def named_paths(turns):
+    """Paths named in human and injected turns, in order of first mention."""
+    out = []
+    for t in turns:
+        if t["role"] in ("human", "injected"):
+            out += [p for p in PATH_TOKEN.findall(EXAMPLES.sub("", t["text"])) if p not in out]
+    return out
+
+
+def path_matches(path, token):
+    """True when a read file path is the path a turn named (absolute, or relative to some root)."""
+    rel = token.lstrip("~").lstrip("/")
+    return path == token or path.endswith("/" + rel)
+
+
+def is_plan_path(path, plan):
+    return Path(path).name == plan and "/plans/" in path
+
+
+def _read_results(window_records):
+    """Read tool results in a window: (snapshots, failed reads, shell commands)."""
+    calls, snapshots, failures, shell = {}, [], [], []
+    for number, obj in window_records:
+        content = (obj.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("name") == "Read" and block.get("id"):
+                calls[block.get("id")] = (number, (block.get("input") or {}).get("file_path") or "")
+            elif block.get("type") == "tool_use" and block.get("name") == "Bash":
+                shell.append((block.get("input") or {}).get("command") or "")
+            elif block.get("type") == "tool_result" and block.get("tool_use_id") in calls:
+                call_line, path = calls[block["tool_use_id"]]
+                result = obj.get("toolUseResult")
+                f = result.get("file") if isinstance(result, dict) and result.get("type") == "text" else None
+                if isinstance(f, dict) and isinstance(f.get("content"), str):
+                    total, count = f.get("totalLines"), f.get("numLines")
+                    snapshots.append({"line": number, "timestamp": obj.get("timestamp"), "read_call_line": call_line,
+                                      "path": f.get("filePath") or path, "text": f["content"],
+                                      "lines": {"start": f.get("startLine"), "count": count, "total": total},
+                                      "partial": not (f.get("startLine") in (1, None) and count == total)})
+                else:
+                    error = result if isinstance(result, str) else json.dumps(block.get("content"))[:200]
+                    failures.append({"line": number, "path": path, "error": str(error)[:200]})
+    return snapshots, failures, shell
+
+
+def source_turns(window_records, turns, plan):
+    """Read snapshots of named files and of the plan itself, plus gaps for named files the window lacks."""
+    snapshots, failures, shell = _read_results(window_records)
+    named = [t for t in named_paths(turns) if not is_plan_path(t, plan)]
+    out, seen = [], set()
+    for snap in snapshots:
+        if is_plan_path(snap["path"], plan):
+            relation = "plan_earlier_version"
+        elif any(path_matches(snap["path"], t) for t in named):
+            relation = "named_source"
+        else:
+            continue  # the session's own exploration: not part of the request
+        sha = hashlib.sha256(snap["text"].encode()).hexdigest()
+        if (snap["path"], sha) in seen:
+            continue  # re-read of identical content
+        seen.add((snap["path"], sha))
+        out.append({**snap, "role": "source_file", "relation": relation, "sha256": sha})
+    gaps = []
+    for token in named:
+        if any(path_matches(s["path"], token) for s in out):
+            continue
+        reason = "named but not read with the Read tool in the window"
+        failed = [f["error"] for f in failures if path_matches(f["path"], token)]
+        if failed:
+            reason += "; read failed: " + failed[0]
+        if any(Path(token).name in cmd for cmd in shell):
+            reason += "; mentioned in a shell command (output is not a file snapshot)"
+        gaps.append({"path": token, "reason": reason})
+    return out, gaps
+
+
 def extract_window(records, event_line, plan, start_line=None):
-    """Turns from the window start up to (not including) the event line."""
+    """Turns from the window start up to (not including) the event line, with source-file snapshots."""
     event = dict(records[event_line - 1][1]) if 0 < event_line <= len(records) else {}
     targets = [t for t in _plan_targets(event) if t[1] == plan]
     if start_line is None:
@@ -155,10 +246,29 @@ def extract_window(records, event_line, plan, start_line=None):
             if isinstance(prompt, str) and prompt.strip():
                 turns.append({"line": number, "timestamp": obj.get("timestamp"), "role": "human",
                               "text": prompt.strip(), "delivery": "queued_while_working"})
+    sources, gaps = source_turns(records[start_line - 1: event_line - 1], turns, plan)
+    turns = sorted(turns + sources, key=lambda t: t["line"])
     written = next((inp.get("content") for tool, _, inp in targets if tool == "Write" and inp.get("content")), None)
     return {"start_line": start_line, "event_line": event_line, "event_timestamp": event.get("timestamp"),
             "event_tools": sorted({t[0] for t in targets}), "event_matches_plan": bool(targets),
-            "turns": turns, "written_content": written}
+            "turns": turns, "source_gaps": gaps, "written_content": written}
+
+
+def substantive_plan(text):
+    """True for an earlier plan version with content, not pm's empty template (title and a comment)."""
+    body = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    return len(re.sub(r"(?m)^#.*$", "", body).split()) > 20
+
+
+def task_kind(status, reviews, turns):
+    """new, edit, or a reviewed override such as reformat (the plan restates a document the session read).
+
+    A session that read an earlier version of the plan with content revised it, whatever the map says.
+    """
+    override = next((r["task_kind"] for r in reviews if r.get("task_kind")), None)
+    revised = any(t["role"] == "source_file" and t["relation"] == "plan_earlier_version" and substantive_plan(t["text"])
+                  for t in turns)
+    return override or ("edit" if status in EDIT_STATUSES or revised else "new")
 
 
 def status_for(row, located):
@@ -172,6 +282,31 @@ def status_for(row, located):
     if "revision" in evidence:
         return "revision_only"
     return "recovered"
+
+
+def finalize_sources(excerpts, plan, status, reviews, baseline_sha):
+    """Withhold snapshots equal to the baseline, classify the task, and collect gaps; returns (kind, sources, gaps).
+
+    Mutates the excerpts' turns and source_gaps, so it runs before they are written.
+    """
+    for e in excerpts:
+        # a snapshot equal to the finished plan would hand the generator its reference
+        for t in [t for t in e["turns"] if t.get("sha256") == baseline_sha]:
+            e["turns"].remove(t)
+            e["source_gaps"].append({"path": t["path"], "reason": "snapshot identical to the production baseline; withheld"})
+    kind = task_kind(status, reviews, [t for e in excerpts for t in e["turns"]])
+    gaps = []
+    for e in excerpts:
+        if kind == "edit" and not any(t["role"] == "source_file" and t["relation"] == "plan_earlier_version"
+                                      and not t["partial"] for t in e["turns"]):
+            e["source_gaps"].append({"path": plan, "reason": "earlier plan version not read in full in the window"})
+        for g in e["source_gaps"]:
+            g = {**g, "event_line": e["event_line"], "record": e["map_path"]}
+            gaps += [g] if g not in gaps else []
+    sources = [{"path": t["path"], "relation": t["relation"], "sha256": t["sha256"], "record_line": t["line"],
+                "read_at": t["timestamp"], "lines": t["lines"], "partial": t["partial"]}
+               for e in excerpts for t in e["turns"] if t["role"] == "source_file"]
+    return kind, sources, gaps
 
 
 def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None):
@@ -200,11 +335,12 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
         entry = {"plan": plan, "map_evidence": row["evidence"], "status": status, "records": refs,
                  "plan_file_exists": plan_path.exists(), "map_note": row["note"]}
         if status in ("recovered", "edits_only", "revision_only") and plan_path.exists():
-            excerpts = []
+            excerpts, reviews = [], []
             for ref in located:
                 records = load_records(ref["local_path"])
                 key = f"{plan}:{Path(ref['local_path']).name}:{ref['line']}"
                 review = windows.get(key, {})
+                reviews.append(review)
                 window = extract_window(records, ref["line"], plan, review.get("start_line"))
                 draft_sha, content = None, window.pop("written_content")
                 if content is not None:
@@ -214,12 +350,15 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
                                  "window_reviewed": bool(review), "review_note": review.get("note"),
                                  "request_line": review.get("request_line"), "draft_sha256": draft_sha, **window})
             excerpts.sort(key=lambda e: e["event_timestamp"] or "")
+            baseline = plan_path.read_text()
+            baseline_sha = hashlib.sha256(baseline.encode()).hexdigest()
+            kind, sources, gaps = finalize_sources(excerpts, plan, status, reviews, baseline_sha)
             convo_path = out_dir / "conversations" / (plan.removesuffix(".md") + ".json")
             convo = json.dumps({"plan": plan, "excerpts": excerpts}, indent=1)
             convo_path.write_text(convo)
             humans = sum(1 for e in excerpts for t in e["turns"] if t["role"] == "human")
-            baseline = plan_path.read_text()
-            baseline_sha = hashlib.sha256(baseline.encode()).hexdigest()
+            fidelity = ({"applicable": False, "reason": "reformat of a source document" if kind == "reformat" else "no human turns"}
+                        if kind == "reformat" or not humans else {"applicable": True})
             snapshot = out_dir / "baselines" / f"{baseline_sha}.md"
             snapshot.write_text(baseline)
             cases.append({
@@ -227,7 +366,8 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
                 "document_id": None, "split_group": "pm-plans",
                 "inputs": {"conversation_path": str(convo_path.relative_to(out_dir.parent)),
                            "conversation_sha256": hashlib.sha256(convo.encode()).hexdigest(),
-                           "instruction": "Write the plan file this conversation asks for."},
+                           "instruction": INSTRUCTION + (SOURCE_NOTE if sources else "")},
+                "task_kind": kind,
                 "baseline": {"path": str(plan_path.relative_to(REPO)) if plan_path.is_relative_to(REPO) else str(plan_path),
                              "snapshot": str(snapshot.relative_to(out_dir.parent)), "sha256": baseline_sha,
                              "words": len(baseline.split()), "role": "production_baseline (not a known-good reference)"},
@@ -239,9 +379,11 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
                                             "window_reviewed": e["window_reviewed"], "request_line": e["request_line"],
                                             "review_note": e["review_note"], "draft_sha256": e["draft_sha256"]} for e in excerpts],
                                "missing_records": [r for r in refs if not r["exists"]],
+                               "source_files": sources, "source_gaps": gaps, "human_turn_fidelity": fidelity,
                                "human_turns": humans, "needs_review": True},
             })
-            entry.update({"case_id": cases[-1]["case_id"], "human_turns": humans})
+            entry.update({"case_id": cases[-1]["case_id"], "human_turns": humans, "task_kind": kind,
+                          "human_turn_fidelity": fidelity["applicable"], "source_files": len(sources), "source_gaps": gaps})
         report.append(entry)
     for path in sorted(plans_dir.glob("plan-*.md")):
         if path.name not in mapped:

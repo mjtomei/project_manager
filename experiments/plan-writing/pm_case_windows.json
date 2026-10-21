@@ -1,10 +1,11 @@
 {
- "_about": "Reviewed conversation windows for PM natural-prompt cases. Keys are <plan>:<record file>:<event line>. start_line is where the discussion leading to the plan begins; request_line is the turn that most directly asks for the write/edit. Notes are paraphrases, not quotes. Reviews locate context; they do not establish assent.",
+ "_about": "Reviewed conversation windows for PM natural-prompt cases. Keys are <plan>:<record file>:<event line>. start_line is where the discussion leading to the plan begins; request_line is the turn that most directly asks for the write/edit. Notes are paraphrases, not quotes. Reviews locate context; they do not establish assent. task_kind overrides the case's task (new/edit) when review finds it is something else, e.g. reformat.",
  "plan-3119574.md:1b7408bc-f28f-4418-af8e-523598ad4ecc.jsonl:20": {
   "start_line": 4,
   "request_line": 4,
-  "note": "pm plan-add prompt naming existing plans/plan-litreview.md; plan is a reformat of that source document into required PR structure. No human turns.",
-  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+  "note": "pm plan-add prompt naming existing plans/plan-litreview.md; plan is a reformat of that source document (attached as a source_file turn) into required PR structure. No human turns, so human-turn fidelity does not apply.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)",
+  "task_kind": "reformat"
  },
  "plan-66d430f.md:6c12ae20-5641-4921-9479-b5e542264c95.jsonl:44": {
   "start_line": 4,
