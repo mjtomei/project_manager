@@ -27852,7 +27852,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:42.844845+00:00'
-  updated_at: '2026-10-13T07:18:49.936939+00:00'
+  updated_at: '2026-10-21T20:00:21.533400+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -27865,6 +27865,15 @@ prs:
       it.'
     created_at: '2026-10-13T07:18:49Z'
     last_edited: '2026-10-13T07:18:49Z'
+  - id: note-f9194e8
+    text: 'Repro from pr-3ae2fc3 QA S21 (2026-10-21): PRs added mid-session to an
+      auto-start closure (local backend) hit "PR X is not committed on master yet.
+      Run pm push" in pm pr start; after pm push + merge the run stayed "queued —
+      ready; starts on next scheduler pass" for 4+ min with no further pass (project.yaml
+      unchanged by the merge). Removing and re-adding the targets started them at
+      once.'
+    created_at: '2026-10-21T20:00:21Z'
+    last_edited: '2026-10-21T20:00:21Z'
 - id: pr-f094946
   plan: bugs
   title: 'Bug: auto-started QA loop selects its new window, pulling attached clients
@@ -29859,7 +29868,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T19:56:12.090660+00:00'
+  updated_at: '2026-10-21T20:00:22.835935+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30043,6 +30052,18 @@ prs:
       prefix+P from the PR window to see its row.'
     created_at: '2026-10-21T19:56:12Z'
     last_edited: '2026-10-21T19:56:12Z'
+  - id: note-c3044d5
+    text: 'QA S21 (4aa3c398, incidental, pre-existing on master): TechTree._rebuild
+      removed every node before mounting the new ones, so each rebuild (every auto-start
+      target add/remove) painted an empty tree for a frame; under add/remove churn
+      21/120 capture-pane samples and 16/62 pm tui view samples showed no PR boxes.
+      Old nodes now stay until the new ones mount, swapped under batch_update; post-fix
+      0/120 blank. Stories 1-5 all held (approve vs regenerate both orders, double
+      approve, QA-spec watcher approve, restart+approve+spec-mode). Gotcha: PRs added
+      mid-session need pm push + git merge before auto-start can start them, and the
+      failed start is not retried (pr-b977417) - re-add the targets.'
+    created_at: '2026-10-21T20:00:22Z'
+    last_edited: '2026-10-21T20:00:22Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
