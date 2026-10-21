@@ -28607,11 +28607,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T13:38:11.755044+00:00'
-  updated_at: '2026-10-13T13:38:11.755044+00:00'
+  updated_at: '2026-10-21T00:34:32.732379+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6c9b875
+    text: 'From pr-e69afc4 (autostart --wait-for-merge): wait-held PRs are merged
+      by hand with g, so a conflicting manual merge hits this bug directly. pr-e69afc4
+      deliberately does NOT treat a resolution window MERGED message as completion;
+      its scheduler advances only when project.yaml shows status merged and the reload
+      runs auto_start.on_state_loaded -> check_and_start. Once this fix finalizes
+      manual conflict merges (status merged + trigger_tui_refresh), dependents of
+      wait-held PRs will start automatically with no extra wiring. Please add an e2e
+      check: wait target with a conflicting prerequisite, g merge, answer the window,
+      dependents start.'
+    created_at: '2026-10-21T00:34:32Z'
+    last_edited: '2026-10-21T00:34:32Z'
 - id: pr-ea04ba8
   plan: bugs
   title: 'Bug: vanilla pm pr merge always opens a spurious resolution window: workdir
