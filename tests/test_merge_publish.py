@@ -10,6 +10,7 @@ untouched; no conflict-resolution window is ever opened.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -344,6 +345,37 @@ def test_vanilla_post_publish_pull_failure_opens_recovery_window_only(vanilla):
     assert len(windows) == 1
     assert windows[0].kwargs["cwd"] == str(vanilla.main)
     assert git(vanilla.upstream, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+
+
+def test_vanilla_recovery_without_workdir_checks_from_main_repo(vanilla):
+    """--propagation-only after a published merge still recovers when the
+    PR workdir is gone: the base is fetched from the main repo."""
+    approve(vanilla)
+    with mock.patch.object(pr_mod, "_finalize_merge"):
+        # Publish, but leave the PR un-finalized (finalize interrupted).
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=vanilla.pm_dir):
+            assert CliRunner().invoke(pr_mod.pr, ["merge", PR]).exit_code == 0
+    git(vanilla.main, "branch", "-q", BRANCH, vanilla.head)
+    shutil.rmtree(vanilla.wd)
+    result, windows, finalized = merge(vanilla, "--propagation-only")
+    assert result.exit_code == 0, result.output
+    assert "already in master" in result.output and finalized
+    assert windows == []
+
+
+@pytest.mark.parametrize("backend", ["vanilla", "github"])
+def test_post_publish_pull_failure_without_window_exits_nonzero(
+        backend, request):
+    """Remote backends alike: published, main checkout not updated and no
+    recovery window -> exit 1, PR not marked merged."""
+    w = request.getfixturevalue(backend)
+    commit(w.main, "local.txt", "x\n", "unpushed local master commit")
+    approve(w)
+    result, windows, finalized = merge(w, "--no-resolve-window")
+    assert result.exit_code != 0
+    assert not finalized and windows == []
+    assert "Pull failed" in result.output
 
 
 # --- github backend (git-backed fake) -------------------------------------

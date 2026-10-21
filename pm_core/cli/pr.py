@@ -2002,9 +2002,23 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
     if backend_name == "local":
         _after_publish(root, data, pr_entry, transcript)
         return
-    # Vanilla: published to origin; bring the main repo checkout up to date
-    # (post-merge recovery — a failure here opens the pull window, which
-    # never publishes code).
+    _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
+                                 resolve_window=resolve_window,
+                                 background=background,
+                                 transcript=transcript, companion=companion)
+
+
+def _sync_main_repo_and_finalize(data: dict, root: Path, pr_entry: dict,
+                                 base_branch: str, *, resolve_window: bool,
+                                 background: bool, transcript: str | None,
+                                 companion: bool) -> None:
+    """Remote backends, after publication: update the main repo checkout
+    from origin, then mark the PR merged.
+
+    Post-merge recovery only — a failed update opens the pull window (which
+    never publishes code) or, without one, exits 1; ``pm pr merge
+    --propagation-only`` finalizes once the checkout is fixed.
+    """
     repo_dir = str(_resolve_repo_dir(root, data))
     if _pull_after_merge(data, pr_entry, repo_dir, base_branch,
                          resolve_window=resolve_window, background=background,
@@ -2193,13 +2207,10 @@ def _publish_github(data: dict, root: Path, pr_entry: dict, workdir: str,
         _verify_github_merge(root, pr_entry, workdir, target_repo,
                              base_branch, base_sha, head, bound)
 
-    repo_dir = str(_resolve_repo_dir(root, data))
-    if _pull_after_merge(data, pr_entry, repo_dir, base_branch,
-                         resolve_window=resolve_window, background=background,
-                         transcript=transcript, companion=companion):
-        _after_publish(root, data, pr_entry, transcript)
-    # Otherwise a pull window was launched (or the user resolves manually);
-    # `pm pr merge --propagation-only` finalizes the completed merge.
+    _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
+                                 resolve_window=resolve_window,
+                                 background=background,
+                                 transcript=transcript, companion=companion)
 
 
 def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
@@ -2267,12 +2278,13 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
             "merge-base", "--is-ancestor", head, f"refs/heads/{base_branch}",
             cwd=repo_dir, check=False).returncode == 0
     else:
-        if head and workdir:
+        if head:
+            # From the main repo when the workdir is gone (the target then
+            # falls back to the project's repo URL).
             target_repo, _ = integration.target_for(data, pr_entry, root)
-            tip, _err = integration.fetch_base(workdir, target_repo,
-                                               base_branch)
+            tip, _err = integration.fetch_base(cwd, target_repo, base_branch)
             merged = bool(tip) and git_ops.run_git(
-                "merge-base", "--is-ancestor", head, tip, cwd=workdir,
+                "merge-base", "--is-ancestor", head, tip, cwd=cwd,
                 check=False).returncode == 0
         if not merged and backend_name == "github" and branch:
             merged = gh_ops.is_pr_merged(cwd, branch)
@@ -2284,15 +2296,13 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
             f"signoff {pr_id}`, then `pm pr merge {pr_id}`.", err=True)
         raise SystemExit(1)
     click.echo(f"PR {pr_id} is already in {base_branch}; recovering.")
-    if backend_name != "local":
-        if not _pull_after_merge(data, pr_entry, repo_dir, base_branch,
+    if backend_name == "local":
+        _after_publish(root, data, pr_entry, transcript)
+        return
+    _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
                                  resolve_window=resolve_window,
                                  background=background,
-                                 transcript=transcript, companion=companion):
-            if not resolve_window:
-                raise SystemExit(1)
-            return
-    _after_publish(root, data, pr_entry, transcript)
+                                 transcript=transcript, companion=companion)
 
 
 @pr.command("qa")
