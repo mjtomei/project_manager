@@ -711,3 +711,38 @@ def test_recorded_title_is_cut_from_plain_text_body():
     grams = cases.body_ngrams(text, None, N, [title])
     assert not cases.shared_ngrams(title, grams, N)
     assert cases.shared_ngrams(title, cases.body_ngrams(text, None, N), N)  # without the cut it would leak
+
+
+def test_parse_date_handles_offsets_and_fractions():
+    # Python 3.10's fromisoformat rejects these forms
+    assert docmeta.parse_date("2020-01-02T03:04:05.12Z") == "2020-01-02"
+    assert docmeta.parse_date("2020-01-02T03:04:05.123456789Z") == "2020-01-02"
+    assert docmeta.parse_date("2020-01-02 23:04:05-0800") == "2020-01-03"
+    assert docmeta.parse_date("2020-01-02T00:30:00+01:00") == "2020-01-01"
+    assert docmeta.parse_date("2020-13-02T00:00:00Z") is None
+
+
+def test_quoted_item_label_falls_back_to_kind():
+    label = "letter of request and statement of task for the widget decadal survey"
+    text = "# Widget concept\n\n" + " ".join([f"This report answers the {label} in full."] * 20)
+    doc = {"identity": "widget-concept.pdf", "url": "https://example.org/widget.pdf", "id": "w"}
+    call = context_item("nasa", "study_call", "call1", "The agency asks for studies of small widget missions to the outer planets.",
+                        ["w"], label="study call: " + label)
+    brief, _ = cases.assemble_brief(doc, text, [call], {"context": {"request": "Write a report."}}, N)
+    assert "## study call\n" in brief["brief"] and label not in brief["brief"]
+    assert not cases.shared_ngrams(brief["brief"], cases.body_ngrams(text, None, N), N)
+
+
+def test_generator_input_rejects_changed_attachment(catalog):
+    data = catalog["data"]
+    case = next(c for c in catalog["cases"] if c["case_type"] == "whole_document" and c["inputs"]["attachments"])
+    ctx = data / "context" / "peps.jsonl"
+    items = [json.loads(l) for l in ctx.read_text().splitlines()]
+    for item in items:
+        if item["role"] == "process":
+            item["text"], item["sha256"] = "edited template", hashlib.sha256(b"edited template").hexdigest()
+    ctx.write_text("".join(json.dumps(i) + "\n" for i in items))
+    cases._load_context_items.cache_clear()
+    with pytest.raises(ValueError):
+        cases.generator_input(case, data)
+    assert cases.check(data_dir=data)["failure_counts"].get("stale_generator_input") == 1

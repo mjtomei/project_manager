@@ -6,7 +6,7 @@ and the title line).
 """
 
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 RFC822_FIELD = re.compile(r"^([A-Z][A-Za-z-]*):[ \t]*(.*)$")
 DASH_FIELD = re.compile(r"^\s*[-*]\s+([A-Z][A-Za-z0-9 ()/#-]*?):[ \t]*(.*)$")  # old Rust RFCs: "- RFC PR #:"
@@ -136,11 +136,18 @@ def parse_date(value):
     if not value:
         return None
     value = str(value).strip()
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?", value)
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|([+-])(\d{2}):?(\d{2}))?", value)
     if m:
-        stamp = datetime.fromisoformat(m.group(0).replace("Z", "+00:00").replace(" ", "T"))
-        if stamp.tzinfo:
-            stamp = stamp.astimezone(timezone.utc)
+        # built field by field: fromisoformat before Python 3.11 rejects "+0000" and 2- or 9-digit fractions
+        y, mo, d, hh, mm = (int(m.group(i)) for i in range(1, 6))
+        try:
+            stamp = datetime(y, mo, d, hh, mm, int(m.group(6) or 0))
+        except ValueError:
+            return None
+        if m.group(7):
+            sign = -1 if m.group(8) == "-" else 1
+            offset = timedelta(hours=int(m.group(9) or 0), minutes=int(m.group(10) or 0)) * sign
+            stamp = (stamp - offset).replace(tzinfo=timezone.utc)
         return stamp.date().isoformat()
     m = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b", value)
     if m:

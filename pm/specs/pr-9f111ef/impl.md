@@ -40,10 +40,10 @@ naming its collectors; `context.py` fetches and caches items into
 source) and fetch notes. Per source:
 - go-proposals: tracking issue `golang/go#N` (number from the `design/N-*.md`
   filename, else the header "Discussion at" link); process = proposal
-  `README.md` (sparse extended) + `design/TEMPLATE.md`.
+  `README.md` + `design/TEMPLATE.md` (versions from GitHub file history).
 - rust-rfcs: review thread `rust-lang/rfcs#N` (filename number / header
   "RFC PR"), tracking issue from header "Rust Issue"; process = `README.md`,
-  `0000-template.md` (sparse extended).
+  `0000-template.md` (versions from GitHub file history).
 - rust-goals: goal tracking issue (`rust-lang/rust-project-goals#N` from the
   metadata table), period index entry (the goal's line in
   `src/<period>/README.md`/`goals.md` slate), process = `TEMPLATE.md` +
@@ -108,6 +108,8 @@ exactly once.
 
 - Briefs and generator inputs are built only through one function per case type
   (`generator_input(case)`), which never reads reference spans; tests target it.
+  It refuses stale inputs (document text or attachment sha256 changed since the
+  build), and `--check` reports those as `stale_generator_input`.
 - Leak filter: normalized lowercase word tokens; any context sentence sharing an
   8-gram with the body is dropped. Body = document text minus a recognised
   metadata header (PEP field list, Rust/Cockroach `- Field:` list, Go

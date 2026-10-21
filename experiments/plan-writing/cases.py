@@ -308,9 +308,11 @@ def assemble_brief(doc, text, items, source_cfg, n, doc_date=None):
         for idx in {owner[j] for i in hits for j in range(i, i + n)}:
             bi, si = flat[idx]
             if bi >= 2 and si == 0:
-                # An item heading: the document often links the same issue, so drop the URL before the label.
-                label_only = f"## {provenance[bi - 2]['label']}"
-                blocks[bi][0] = label_only if blocks[bi][0] != label_only else ""
+                # An item heading: the document often links the same issue, so drop the URL first; a label the
+                # document quotes (e.g. a study call's title) gives way to the bare kind, so the item stays marked.
+                p = provenance[bi - 2]
+                steps = list(dict.fromkeys([f"## {p['label']}", f"## {p['kind'].replace('_', ' ')}", ""]))
+                blocks[bi][0] = steps[steps.index(blocks[bi][0]) + 1] if blocks[bi][0] in steps else steps[0]
                 continue
             blocks[bi][si] = ""
             if bi >= 2 and si >= 2:
@@ -396,9 +398,13 @@ def generator_input(case, data_dir=None, context_items=None):
     kind = case["case_type"]
     if kind == "whole_document":
         items = context_items if context_items is not None else _context_items(data_dir)
-        return {"brief": case["inputs"]["brief"],
-                "attachments": [{"label": a["label"], "text": items[a["context_id"]]["text"]}
-                                for a in case["inputs"]["attachments"] if a["context_id"] in items]}
+        attachments = []
+        for a in case["inputs"]["attachments"]:
+            item = items.get(a["context_id"])
+            if item is None or item["sha256"] != a["sha256"]:
+                raise ValueError(f"{case['case_id']}: attachment {a['label']} changed since the catalog was built")
+            attachments.append({"label": a["label"], "text": item["text"]})
+        return {"brief": case["inputs"]["brief"], "attachments": attachments}
     if kind == "continuation":
         text = (data_dir / case["inputs"]["text_path"]).read_text(encoding="utf-8", errors="replace")
         if hashlib.sha256(text.encode()).hexdigest() != case["provenance"]["text_sha256"]:
@@ -406,7 +412,9 @@ def generator_input(case, data_dir=None, context_items=None):
         return {"instruction": case["inputs"]["instruction"], "prefix": text[: case["inputs"]["prefix_end"]]}
     if kind == "pm_plan":
         convo = json.loads(Path(case["inputs"]["conversation_path"]).read_text())
-        turns = [{"role": t["role"], "text": t["text"]} for e in convo["excerpts"] for t in e["turns"]]
+        # excerpts come from separate sessions (oldest first); `session` keeps them apart once flattened
+        turns = [{"session": n, "role": t["role"], "text": t["text"]}
+                 for n, e in enumerate(convo["excerpts"], 1) for t in e["turns"]]
         return {"instruction": case["inputs"]["instruction"], "conversation": turns}
     raise ValueError("Unknown case type: " + kind)
 
@@ -651,7 +659,11 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                 committed = (a.get("version") or {}).get("committed")
                 if committed and (not doc_date or committed > doc_date):
                     failures["attachment_version_after_document"].append(cid)
-            gen = generator_input(case, data_dir, items)
+            try:
+                gen = generator_input(case, data_dir, items)
+            except ValueError as exc:
+                failures["stale_generator_input"].append(str(exc))
+                continue
             # Attachments are templates the document was written from, so documents legitimately repeat their
             # text; the document reaches the generator only through the brief or by being attached to itself.
             if len(text) > 400 and text[len(text) // 3: len(text) // 3 + 400] in gen["brief"]:
@@ -671,7 +683,11 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                 failures["boundary_method_differs_from_build"].append(f"{cid} ({case['provenance']['boundary_method']} -> {method})")
             elif not sections.is_boundary(found, end) or case["reference"]["start"] != end:
                 failures["prefix_not_at_section_boundary"].append(cid)
-            gen = generator_input(case, data_dir)
+            try:
+                gen = generator_input(case, data_dir)
+            except ValueError as exc:
+                failures["stale_generator_input"].append(str(exc))
+                continue
             reference = text[case["reference"]["start"]: case["reference"]["end"]]
             if reference.strip() and reference.strip() in gen["prefix"] + gen["instruction"]:
                 failures["reference_in_generator_input"].append(cid)
