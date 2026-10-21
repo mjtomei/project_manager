@@ -180,7 +180,11 @@ The model contains:
     `exec_s` / `wait_s` split (wait = `queued`, `waiting_human`, `backoff`
     phases; exec = the rest), `open` flag, and `status` for open attempts
     (`running`, or `interrupted (owner exited)` when the owner process is
-    gone).
+    gone).  A runtime-derived attempt (R3) that the live runtime mirror
+    still shows in flight (`attempt_id` on an in-flight entry) is
+    `running` regardless of its opener: any process clearing the entry
+    ends it, so a short-lived CLI opener (e.g. `pm pr auto-sequence`)
+    exiting does not interrupt it.
   - For parents with two or more scenario children: a `scenarios` dict
     with `count` (distinct scenarios), `attempts` (incl. retries),
     `wall_s` (union of child execution intervals — a scenario's leading
@@ -305,8 +309,10 @@ supply `context` (session/window/task); leave a cross-PR note.
   `superseded`).
 - E3. Concurrent scenarios: parent wall time from parent start/end; the
   sum of scenario time is only shown labelled "sum across N scenarios".
-- E4. Merge: `cleanup_pr_resources` deletes runtime state; the journal
-  remains, so `pm pr history` still works and the picker shows History for
+- E4. Merge: `cleanup_pr_resources` first clears in-flight runtime
+  entries (ending their attempts `interrupted`, "PR resources cleaned
+  up" — unlinking alone would leave them open and shown running after
+  merge), then deletes runtime state; the journal remains, so `pm pr history` still works and the picker shows History for
   merged PRs.
 - E5. No journal (PR older than this feature, or never run): text says
   "No recorded action history"; milestones from project.yaml still shown;

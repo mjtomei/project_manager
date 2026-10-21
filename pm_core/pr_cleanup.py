@@ -84,6 +84,17 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
     # holds every action entry (qa, review-loop, review, start, merge);
     # leaving it behind makes the picker think those loops are still
     # running after we've torn their panes/containers down.
+    # End in-flight actions first so their action-history attempts are
+    # closed; unlinking alone would leave them open (and shown running
+    # after merge) because later clears find no entry to end.
+    try:
+        for action, entry in runtime_state.get_pr_actions(pr_id).items():
+            if (isinstance(entry, dict)
+                    and entry.get("state") in runtime_state.IN_FLIGHT_STATES):
+                runtime_state.clear_action(
+                    pr_id, action, history_reason="PR resources cleaned up")
+    except Exception as e:  # pragma: no cover
+        _log.warning("runtime_state clear before cleanup failed: %s", e)
     try:
         runtime_state.runtime_path(pr_id).unlink(missing_ok=True)
         summary["runtime_state"] = True

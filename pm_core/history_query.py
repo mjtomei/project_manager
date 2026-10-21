@@ -12,7 +12,8 @@ Reconciliation rules (the journal only says what writers *said*):
 
 * An attempt with no end whose owner process is gone is reported as
   ``interrupted`` with an unknown end time (bounded below by the last
-  event seen for it).
+  event seen for it).  A runtime-derived attempt the runtime mirror still
+  shows in flight is running whoever opened it.
 * An attempt with no end whose parent ended is closed at the parent's end.
 * A timer is resolved by its own clear, by its owner attempt ending, or
   by its owner process exiting (``lost``); a ``gate`` timer past its due
@@ -69,7 +70,8 @@ def build_history(pr_id: str, *, pr: dict | None = None,
         p = a.get("_parent_obj")
         if p is not None:
             p["last_seen_t"] = max(p["last_seen_t"], a["last_seen_t"])
-    _reconcile_attempts(attempts, t_now)
+    _reconcile_attempts(attempts,
+                        _runtime_tracked_attempts(pr_id) if live else set())
     for a in attempts.values():
         _compute_spans(a, t_now)
     roots = [a for a in attempts.values() if not a.get("_parent_obj")]
@@ -190,9 +192,21 @@ def _replay(events: list[dict]):
     return attempts, timers, timer_history
 
 
-def _reconcile_attempts(attempts: dict[str, dict], t_now: float) -> None:
+def _reconcile_attempts(attempts: dict[str, dict],
+                        tracked: set[str]) -> None:
+    """Infer the fate of open attempts.
+
+    *tracked* holds the ids of runtime-derived attempts the runtime mirror
+    still shows in flight.  Those belong to the mirror, not to the process
+    that happened to open them (e.g. a short-lived ``pm pr auto-sequence``
+    CLI): whichever process clears the entry ends the attempt, so the
+    opener exiting does not interrupt it.
+    """
     for a in attempts.values():
         if a["ended_t"] is not None:
+            continue
+        if a["id"] in tracked:
+            a["owner_alive"] = True
             continue
         alive = _ah.owner_alive(a.get("owner"))
         a["owner_alive"] = alive
@@ -390,6 +404,18 @@ def _release_terminal_holds(pr: dict, timer_rows: dict) -> None:
         else:
             still.append(row)
     timer_rows["active"] = still
+
+
+def _runtime_tracked_attempts(pr_id: str) -> set[str]:
+    """Attempt ids of the runtime mirror's in-flight entries (raw state:
+    the hook-derived status can relabel an entry but not end it)."""
+    try:
+        from pm_core import runtime_state as _rs
+        return {e["attempt_id"] for e in _rs.get_pr_actions(pr_id).values()
+                if isinstance(e, dict) and e.get("attempt_id")
+                and e.get("state") in _rs.IN_FLIGHT_STATES}
+    except Exception:
+        return set()
 
 
 def _runtime_actions(pr_id: str) -> dict:

@@ -311,6 +311,37 @@ class TestRuntimeCapture:
         rs.set_action_state(PR, "qa", "done", verdict="PASS")
         assert ah.read_events(PR) == []
 
+    def test_attempt_tracked_by_runtime_outlives_its_opener(self, clock):
+        # A short-lived CLI (e.g. ``pm pr auto-sequence``) opens the start
+        # attempt and exits; the runtime entry still shows it in flight.
+        rs.set_action_state(PR, "start", "running", pane_id="%1",
+                            session_id="s1")
+        aid = rs.get_action_state(PR, "start")["attempt_id"]
+        clock.advance(20)
+        with patch.object(ah, "owner_alive", return_value=False):
+            m = hq.build_history(PR, now=clock.t)
+            (a,) = m["attempts"]
+            assert a["id"] == aid and a["open"] and a["elapsed_s"] == 20
+            assert a["outcome"] is None
+            # Once the mirror no longer tracks it, the opener decides.
+            rs.set_action_state(PR, "start", "idle")  # still in flight
+            assert hq.build_history(PR, now=clock.t)["attempts"][0]["open"]
+            with patch.object(rs, "get_pr_actions", return_value={}):
+                a = hq.build_history(PR, now=clock.t)["attempts"][0]
+            assert a["outcome"] == "interrupted"
+
+    def test_pr_cleanup_ends_in_flight_attempts(self, clock):
+        from pm_core import pr_cleanup
+        rs.set_action_state(PR, "merge", "running", pane_id="%1",
+                            session_id="s1")
+        aid = rs.get_action_state(PR, "merge")["attempt_id"]
+        with patch.object(pr_cleanup.container_mod, "cleanup_pr_containers",
+                          return_value=[]):
+            pr_cleanup.cleanup_pr_resources(None, {"id": PR})
+        assert _ends()[aid]["outcome"] == "interrupted"
+        assert "cleaned up" in _ends()[aid]["detail"]
+        assert not rs.runtime_path(PR).exists()
+
     def test_journal_failure_leaves_runtime_unchanged(self, tmp_path,
                                                      monkeypatch):
         blocker = tmp_path / "file"
