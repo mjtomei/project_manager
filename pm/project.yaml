@@ -29859,7 +29859,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T17:00:57.689795+00:00'
+  updated_at: '2026-10-21T18:13:08.652811+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29961,6 +29961,16 @@ prs:
       preceded the QA launch.'
     created_at: '2026-10-21T16:29:19Z'
     last_edited: '2026-10-21T16:29:19Z'
+  - id: note-4986f45
+    text: 'QA S16 (9556b85b): all approve-vs-regenerate rounds (both orders), the
+      P2 double approval and the 3-loop + approve + breadcrumb-restart story held
+      live on 1f2db8f1. One fix: a prompt-mode `pm pr spec --regenerate` of a held
+      spec clears spec_pending, and the TUI reload logged "<id> spec approved — continuing"
+      (never approved) before re-holding. on_state_loaded now gets the pending phase
+      and logs "spec regenerated — not approved" unless spec_approved has it. Driver
+      gotcha: shells source ids.env at rc time, so re-source after adding PRs mid-run.'
+    created_at: '2026-10-21T18:13:08Z'
+    last_edited: '2026-10-21T18:13:08Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
