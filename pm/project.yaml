@@ -8148,6 +8148,16 @@ prs:
       ▲ until the driver stale tick reloads.'
     created_at: '2026-10-21T23:27:46Z'
     last_edited: '2026-10-21T23:27:46Z'
+  - id: note-1c373f5
+    text: 'QA S7 (4e62b9d2): pm pr merge --no-signoff-check on github now verifies
+      a GitHub-side merge against the bound SIGNOFF_MERGE (WARNING + merge_integrity
+      + note; names the publishing merge commit). Not covered: the TUI background
+      GitHub sync (pm_core/tui/sync.py ~L142/L267) still marks a PR merged on GitHub
+      as merged with no integrity check, so a teammate merge that published unreviewed
+      commits is accepted silently if the sync finalizes it before anyone runs pm
+      pr merge.'
+    created_at: '2026-10-21T23:37:54Z'
+    last_edited: '2026-10-21T23:37:54Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
