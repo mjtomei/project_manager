@@ -617,6 +617,7 @@ COMMANDS
   pm pr cleanup [pr-id]         Remove workdir for merged PR
   pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html)
   pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
+  pm pr signoff integrate <pr-id>  Check integration with the latest base (isolated candidate)
   pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text

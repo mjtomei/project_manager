@@ -1611,15 +1611,19 @@ def pr_signoff_record(pr_id: str):
 
 @pr_signoff_group.command("integrate")
 @click.argument("pr_id")
+@click.option("--record", is_flag=True, default=False,
+              help="Record the result on the PR (what a sign-off verdict "
+                   "binds to). Run from the base pm directory.")
 @click.option("--apply", "apply_", is_flag=True, default=False,
               help="Merge a clean base into the PR branch (never the base).")
-def pr_signoff_integrate(pr_id: str, apply_: bool):
-    """Check (and optionally apply) integration with the latest base.
+def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
+    """Check integration with the latest base (isolated candidate).
 
     Fetches the configured base branch from the target repository and
     merges the PR HEAD with it in an isolated candidate — the PR worktree
-    and the base branch are untouched.  Records the result on the PR (the
-    sign-off verdict binds to it) and in ``$CAP/integration.json``.
+    and the base branch are untouched — and prints the result.  Read-only
+    by default (the sign-off launch records the check its verdict binds
+    to); ``--record`` stores it on the PR and in ``$CAP/integration.json``.
     ``--apply`` then merges a *clean* result into the PR branch.  Exits 1
     when the integration conflicts or the check fails.
     """
@@ -1629,7 +1633,10 @@ def pr_signoff_integrate(pr_id: str, apply_: bool):
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
-    rec = integration.check_integration(root, pr_id, data=data)
+    if record or apply_:
+        rec = integration.check_integration(root, pr_id, data=data)
+    else:
+        rec = integration.run_check(data, pr_entry, root)
     click.echo(f"PR {pr_id}: {integration.summary(rec)}")
     click.echo(f"  target: {rec.get('base_branch')} of {rec.get('target_repo')}")
     click.echo(f"  head:   {rec.get('head')}")
@@ -1646,7 +1653,8 @@ def pr_signoff_integrate(pr_id: str, apply_: bool):
             raise SystemExit(1)
         click.echo(f"Merged {rec.get('base_branch')}@{rec['base_sha'][:12]} "
                    f"into the PR branch as {merged[:12]}.")
-    trigger_tui_refresh()
+    if record or apply_:
+        trigger_tui_refresh()
     if rec.get("status") not in integration.MERGEABLE:
         raise SystemExit(1)
 

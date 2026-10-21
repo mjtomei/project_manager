@@ -75,9 +75,15 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
     half-merge; a failed merge is aborted). Does not push (network stays out
     of the TUI poll); merge pushes the approved PR head itself where needed
     (R4).
-- CLI: `pm pr signoff integrate <pr_id> [--apply]` (new subcommand on the
-  existing `_SignoffGroup`), prints a summary (status, base sha, conflicts,
-  overlap) and exits 0 for `up_to_date`/`clean`, 1 for `conflict`/`error`.
+- CLI: `pm pr signoff integrate <pr_id> [--record] [--apply]` (new
+  subcommand on the existing `_SignoffGroup`), prints a summary (status,
+  base sha, conflicts, overlap) and exits 0 for `up_to_date`/`clean`, 1 for
+  `conflict`/`error`. **Read-only by default**: the agent runs it from its
+  own worktree (possibly in a container, where `pm` would otherwise write
+  the workdir's tracked `pm/project.yaml`), so only the host-side launch
+  check (or an explicit `--record` from the base directory) is recorded. When
+  the recorded workdir path does not exist, the current checkout is used if
+  it is on the PR branch.
 - `signoff.launch_signoff_window` runs `check_integration` before building the
   prompt (only on the new-window path, alongside `stamp_signoff_launch`).
 - `prompt_gen.generate_signoff_prompt` gains an **Integration** section: the
@@ -139,6 +145,11 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
   SIGNOFF_MERGE record without an integration binding (**legacy HEAD-only
   approval**) — the driver's existing stale path then retires the run and
   relaunches an integration-aware sign-off.
+- The launch stamp records the HEAD *and* the base revision of the launch
+  check (`signoff-<pr>.head`, second line). A transcript verdict whose run
+  was launched against another base than the current recorded check is
+  retired as stale ("integration re-checked during the run") — a verdict is
+  never rebound to a base the router did not assess.
 - HEAD changes made during sign-off (including `apply_integration` or an
   agent commit) keep the existing launch-stamp rule: a verdict from a run
   launched on another HEAD is retired, never recorded — except a **bounce**

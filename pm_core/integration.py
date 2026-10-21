@@ -230,6 +230,8 @@ def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
         _log.warning("integration target for %s: %s", pr.get("id"), e)
     record.update(target_repo=target_repo, base_branch=base_branch)
     if not workdir or not Path(workdir).is_dir():
+        workdir = _cwd_checkout_of(pr)
+    if not workdir:
         record.update(status=ERROR, error="no PR workdir")
         return record
     head = _out(_git("rev-parse", "HEAD", cwd=workdir))
@@ -247,6 +249,19 @@ def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
         return record
     record.update(compute_candidate(workdir, head, base_sha))
     return record
+
+
+def _cwd_checkout_of(pr: dict) -> str | None:
+    """The current directory's checkout when it is on the PR's branch.
+
+    Lets the sign-off agent re-check from its own worktree (e.g. inside a
+    container, where the recorded host workdir path does not exist).
+    """
+    top = _out(_git("rev-parse", "--show-toplevel", cwd=None))
+    if not top or not pr.get("branch"):
+        return None
+    cur = _out(_git("rev-parse", "--abbrev-ref", "HEAD", cwd=top))
+    return top if cur == pr["branch"] else None
 
 
 def compact(record: dict) -> dict:

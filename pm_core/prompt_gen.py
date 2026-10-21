@@ -522,9 +522,13 @@ isolated candidate (your worktree and the base branch were not touched):
 0. **Check integration with the latest base.** Sign-off owns integration: a
    {SIGNOFF_MERGE} certifies this PR *combined with the base revision above*,
    and the merge step publishes exactly that candidate — it never resolves
-   conflicts. Refresh the check with `pm pr signoff integrate {pr_id}` (it
-   only fetches and computes the candidate; base your verdict on its latest
-   result). Read what changed on the base since the PR branched and judge
+   conflicts. You may refresh the check with
+   `pm pr signoff integrate {pr_id}` (read-only: it fetches and computes
+   the candidate). Your verdict
+   is bound to the check shown above; if a refresh shows the base moved,
+   say so in the report — the merge step re-runs sign-off when the base it
+   approved is no longer current. Read what changed on the base since the
+   PR branched and judge
    whether it interacts with this PR: conflicts, semantic overlap (the same
    behaviour, APIs, data or tests changed on both sides) or changed
    behaviour the PR relies on. Line/file counts alone are not the rule.
@@ -1115,11 +1119,15 @@ mechanics will help you distinguish normal operation from genuine problems.
   idle but the transition has not happened yet -- this is expected, not a problem.
 - **in_review -> qa**: When the review loop reaches a PASS verdict,
   auto-start transitions the PR to `qa` and launches QA scenarios.
-- **qa -> merged**: When QA passes with no changes, auto-start runs `pm pr merge`.
-  If QA finds issues or commits fixes, the PR returns to `in_review` for re-review.
-- **in_review/qa -> merged (merge conflicts)**: If the merge has conflicts, a
-  merge-resolution Claude window opens; once that finishes (also detected via idle
-  polling), the merge is re-attempted.
+- **qa -> sign_off -> merged**: When QA passes, the PR enters `sign_off`. Sign-off
+  checks integration with the latest base and either recommends the merge
+  (auto-start then runs `pm pr merge`, unless a merge hold applies) or routes the PR
+  back to implementation / review / QA. If QA finds issues or commits fixes, the PR
+  returns to `in_review` for re-review.
+- **merge conflicts / a moved base**: `pm pr merge` never resolves conflicts. If the
+  base moved since sign-off it refuses and the PR returns to sign-off, which
+  re-checks integration (conflicts go back to implementation). This is handled
+  automatically -- not a watcher concern.
 
 Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
 auto-start uses), the TUI chord is `zz d`. If you need to manually kick off a review

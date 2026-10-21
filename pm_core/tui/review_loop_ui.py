@@ -993,7 +993,9 @@ def _poll_impl_idle(app) -> None:
     merge_pr_candidates: set[str] = set(pending_merges)
 
     for pr in (app._data.get("prs") or []):
-        if pr.get("status") == "in_review":
+        # A published merge whose main-repo update window is still open
+        # leaves the PR in sign_off (finalize marks it merged).
+        if pr.get("status") in ("in_review", "sign_off"):
             merge_pr_candidates.add(pr["id"])
 
     active_merge_keys: set[str] = set()

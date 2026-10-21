@@ -19,6 +19,15 @@ Sign-off **always gates at merge**: ``SIGNOFF_MERGE`` is a *recommendation*
 (``ready_to_merge``) — sign-off never merges, and the autonomous-vs-gated merge
 decision lives in the plan auto-start watcher (pr-ff9b728), not here.  On genuine
 ambiguity the router emits ``SIGNOFF_BLOCKED`` and escalates rather than merging.
+
+Sign-off **owns integration** (pr-ac10f03): the launch fetches the configured
+base and computes the PR's merge with it in an isolated candidate
+(:mod:`pm_core.integration`); the recorded verdict is bound to the PR HEAD,
+target repo/branch, base revision and candidate tree, and ``pm pr merge``
+publishes exactly that candidate or refuses and returns the PR here.  pm
+routes a conflicted integration to implementation, and every bounce leaves a
+``pr["signoff_return"]`` record (reason, revisions, integration context) for
+the step it returns to.
 """
 
 from __future__ import annotations
@@ -183,27 +192,42 @@ def signoff_launch_stamp(transcript) -> Path:
     return Path(transcript).with_suffix(".head")
 
 
-def stamp_signoff_launch(transcript, sha: str | None) -> None:
-    """Record *sha* as the revision the run writing *transcript* reviews."""
+def stamp_signoff_launch(transcript, sha: str | None,
+                         base_sha: str | None = None) -> None:
+    """Record *sha* as the revision the run writing *transcript* reviews.
+
+    *base_sha* (second line) is the base revision of the integration check
+    the run was launched with: its verdict may only bind to that check.
+    """
     stamp = signoff_launch_stamp(transcript)
     try:
         if sha:
             stamp.parent.mkdir(parents=True, exist_ok=True)
-            stamp.write_text(sha + "\n")
+            stamp.write_text(sha + "\n" + (base_sha + "\n" if base_sha else ""))
         elif stamp.exists():
             stamp.unlink()
     except OSError as e:
         _log.warning("sign-off launch stamp %s: %s", stamp, e)
 
 
+def _launch_stamp_lines(tdir: Path, pr_id: str) -> list[str]:
+    try:
+        return signoff_launch_stamp(
+            signoff_transcript(tdir, pr_id)).read_text().split()
+    except OSError:
+        return []
+
+
 def signoff_launched_sha(tdir: Path, pr_id: str) -> str | None:
     """HEAD the driver's current sign-off run launched on, or None."""
-    try:
-        sha = signoff_launch_stamp(
-            signoff_transcript(tdir, pr_id)).read_text().strip()
-    except OSError:
-        return None
-    return sha or None
+    lines = _launch_stamp_lines(tdir, pr_id)
+    return lines[0] if lines else None
+
+
+def signoff_launched_base(tdir: Path, pr_id: str) -> str | None:
+    """Base revision of the integration check the run launched with."""
+    lines = _launch_stamp_lines(tdir, pr_id)
+    return lines[1] if len(lines) > 1 else None
 
 
 def is_legacy_approval(record: dict | None) -> bool:
@@ -438,18 +462,12 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 print(f"Switched to existing sign-off window '{window_name}'")
                 return
 
-        # Bind this run to the revision it reviews: the driver only records
-        # its transcript verdict while HEAD still equals this stamp.  Only a
-        # newly created window stamps; the fast path above reuses a run whose
-        # stamp is already on disk.
-        if transcript:
-            stamp_signoff_launch(transcript, head_sha(workdir))
-
         # Integration check against the latest configured base (fetch +
         # isolated candidate), recorded on the PR before the prompt is built
         # so the router reviews — and its verdict binds to — that base.
         from pm_core import integration
         root = state_root()
+        rec: dict = {}
         try:
             rec = integration.check_integration(root, pr_id)
             print(f"Integration: {integration.summary(rec)}")
@@ -457,6 +475,14 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         except Exception as e:  # never block the sign-off launch on it
             _log.warning("sign-off integration check for %s: %s", pr_id, e)
             print(f"Integration check failed: {e}")
+
+        # Bind this run to the revision it reviews (and the base it was
+        # checked against): the driver only records its transcript verdict
+        # while HEAD still equals this stamp.  Only a newly created window
+        # stamps; the fast path above reuses a run whose stamp is on disk.
+        if transcript:
+            stamp_signoff_launch(transcript, head_sha(workdir),
+                                 rec.get("base_sha"))
 
         _resolution = resolve_model_and_provider(
             "signoff",
@@ -964,9 +990,17 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
             retire(session, pr_entry, tdir)
             return SignoffStep("launch", stale=True, sha=current_sha,
                                reason="HEAD moved")
+        irec = pr_entry.get("integration") or {}
+        launched_base = signoff_launched_base(tdir, pr_id)
+        if tverdict is not None and launched_base \
+                and irec.get("base_sha") != launched_base:
+            # The integration was re-recorded against another base while the
+            # router ran: its verdict assessed the launch-time base.
+            retire(session, pr_entry, tdir)
+            return SignoffStep("launch", stale=True, sha=current_sha,
+                               reason="integration re-checked during the run")
         if tverdict is not None:
             # launched == current_sha here (or HEAD is unknown).
-            irec = pr_entry.get("integration") or {}
             verdict, coerced = effective_verdict(tverdict, irec, current_sha)
             original = tverdict if coerced else None
             bound = integ.binding(irec) if (

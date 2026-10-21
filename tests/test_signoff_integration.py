@@ -382,3 +382,40 @@ def test_tui_qa_pass_not_handed_to_signoff_while_reqa_awaits(tmp_path):
         auto_start._auto_start_qa_loops(app, [p])
     ss.assert_not_called()
     sq.assert_called_once()                     # the REQA run starts instead
+
+
+def test_verdict_from_run_launched_on_another_base_is_not_bound(w):
+    """The launch stamp names the base its check used; a re-recorded check
+    against another base mid-run makes the verdict stale (no rebinding)."""
+    integration.check_integration(w.pm_dir, PR)
+    launched_base = pr(w)["integration"]["base_sha"]
+    signoff.stamp_signoff_launch(signoff.signoff_transcript(w.tdir, PR),
+                                 w.head, launched_base)
+    commit(w.repo, "other.txt", "o\n", "base moved mid-run")
+    integration.check_integration(w.pm_dir, PR)       # e.g. --record
+    res = signoff.step_signoff(
+        w.pm_dir, pr(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_MERGE,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.action == "launch" and res.stale
+    assert res.reason == "integration re-checked during the run"
+    assert "signoff" not in pr(w)
+
+
+def test_integrate_cli_is_read_only_by_default(w):
+    from pm_core.cli.pr import pr_signoff_integrate
+    commit(w.repo, "other.txt", "o\n", "base moved")
+    with patch("pm_core.cli.pr.state_root", return_value=w.pm_dir), \
+         patch("pm_core.cli.pr.trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_signoff_integrate, [PR])
+        assert r.exit_code == 0, r.output
+        assert "merges cleanly with master@" in r.output
+        assert "integration" not in pr(w)            # nothing recorded
+        r = CliRunner().invoke(pr_signoff_integrate, [PR, "--record"])
+        assert r.exit_code == 0, r.output
+        assert pr(w)["integration"]["status"] == integration.CLEAN
+        r = CliRunner().invoke(pr_signoff_integrate, [PR, "--apply"])
+        assert r.exit_code == 0, r.output
+        assert "into the PR branch" in r.output
+    assert (w.wd / "other.txt").exists()
+    assert git(w.wd, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
