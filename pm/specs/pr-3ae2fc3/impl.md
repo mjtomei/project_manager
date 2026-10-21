@@ -87,7 +87,8 @@
 - `pm pr spec-approve` → `approve_spec` → `spec_gen.notify_spec_approved(pr, phase, edited)`.
   This sends a message with `tmux.send_keys` (plus an extra Enter, the qa_loop follow-up pattern) to the
   waiting agent pane: the impl window `<display_id>` for impl, the planner pane (first pane of `qa-<display_id>`) for QA.
-  If no pane is found it does nothing.
+  If no pane is found it does nothing.  For an edited QA spec the message also asks the
+  planner to commit and push the edited file, since it already pushed the pre-approval copy.
 - Reject (`pm pr spec-approve` with an emptied spec): `reject_spec` regenerates with
   `review=True` when the pending record has `review: True`. The spec therefore stays pending and the phase stays paused.
 - `on_state_loaded` also receives the old `spec_pending` map. When an in-scope PR's pending spec clears,
@@ -108,6 +109,8 @@
   marker, so a running QA planner's spinner can't hide it. The `_signature` includes the pending phase.
 - PR Actions picker (`cli/session.py:_build_picker_lines`), added at the user's request: a
   `[spec review]` badge goes on the `start` row for a pending impl spec and on the `qa` row for a pending QA spec.
+  The picker's h/l navigation (`_picker_nav_pr_ids`) also includes PRs with a pending spec, so a
+  windowless impl-spec pause is reachable (QA S5).
 
 ## 2. Implicit Requirements
 - Writes to `project.yaml` from the TUI use `store.locked_update`. In-memory `app._data` is updated

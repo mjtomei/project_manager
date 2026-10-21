@@ -313,7 +313,9 @@ class TestSpecGen:
         msgs = [c.args[1] for c in send.call_args_list if c.args[1]]
         assert "implementation spec (pm/specs/pr-x/impl.md) was approved" in msgs[0]
         assert "approved with edits" in msgs[1]
+        assert "Commit and push the edited pm/specs/pr-x/qa.md" in msgs[1]
         assert "QA_PLAN_START" in msgs[1]
+        assert "Commit and push" not in msgs[0]
 
     def test_notify_noop_without_window(self):
         with patch("pm_core.loop_shared.find_claude_pane", return_value=None), \

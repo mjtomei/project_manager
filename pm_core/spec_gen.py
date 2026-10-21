@@ -505,6 +505,11 @@ def approval_message(pr: dict, phase: str, edited: bool = False) -> str:
     msg = (f"The {label} spec ({path}) was {how} via pm. Re-read it and "
            f"proceed with the {label} work based on the approved spec.")
     if phase == "qa":
+        if edited:
+            # The planner committed and pushed the pre-approval spec;
+            # the edited copy would otherwise stay uncommitted.
+            msg += (f" Commit and push the edited {path} as you did "
+                    "the original.")
         msg += (" Emit (or re-emit) the complete QA plan "
                 "(QA_PLAN_START ... QA_PLAN_END) reflecting the approved spec.")
     return msg
