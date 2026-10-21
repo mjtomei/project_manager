@@ -1149,6 +1149,33 @@ class TestFakeClaudeLauncher:
         assert "--verdict NONE" in cmd
         assert "--hold 3" in cmd
 
+    def test_build_shell_cmd_fake_writes_prompt_file(self, monkeypatch, tmp_path):
+        """A fake launch writes the prompt file a real launch would, and
+        removes it once the fake exits."""
+        import subprocess
+        from pm_core import claude_launcher
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: {})
+        cmd = claude_launcher.build_claude_shell_cmd(
+            prompt="the impl prompt", session_id="sid-1", cwd=str(tmp_path),
+            session_type="impl")
+        prompt_file = tmp_path / "pm" / "prompts" / "pm_prompt_sid-1.txt"
+        assert prompt_file.read_text() == "the impl prompt"
+        assert cmd.endswith(f"; rm -f {prompt_file}")
+        fake_part = cmd.split(";")[0]
+        subprocess.run(cmd.replace(fake_part, "true"), shell=True, check=True)
+        assert not prompt_file.exists()
+
+    def test_build_shell_cmd_fake_resume_writes_no_prompt_file(self, monkeypatch, tmp_path):
+        from pm_core import claude_launcher
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: {})
+        cmd = claude_launcher.build_claude_shell_cmd(
+            prompt="the impl prompt", session_id="sid-1", resume=True,
+            cwd=str(tmp_path), session_type="impl")
+        assert not (tmp_path / "pm" / "prompts").exists()
+        assert "rm -f" not in cmd
+
     def test_launch_claude_uses_fake_binary(self, monkeypatch, tmp_path):
         """launch_claude must invoke fake-claude binary, not the real claude."""
         from pm_core import claude_launcher
