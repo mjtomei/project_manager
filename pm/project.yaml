@@ -29945,7 +29945,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T23:12:25.136599+00:00'
+  updated_at: '2026-10-21T23:58:47.413004+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30098,6 +30098,40 @@ prs:
       runtime attempt_id of the re-opened attempt aliases to the kept one. Spec E8.'
     created_at: '2026-10-21T23:12:25Z'
     last_edited: '2026-10-21T23:12:25Z'
+  - id: note-3f8d031
+    text: 'S9 refine (ae71ba0e): (1) plain `pm pr cleanup <pr>` only removes the workdir;
+      the resource teardown that ends in-flight attempts ("PR resources cleaned up")
+      is `pm pr cleanup <pr> --resources` (or TUI Y). (2) `pm pr auto-sequence` opens
+      the CLI-owned start mirror only on the in_progress tick that finds the impl
+      transcript; that same tick sees idle and prints "advanced: in_review" (the "started"
+      tick opens nothing). (3) Local-backend merges (g / pm pr merge -> _finalize_merge)
+      only kill windows, never cleanup_pr_resources; the sync merge-detection path
+      is GitHub-only (old_statuses diff is pre-empted by the SIGUSR1 reload). A start
+      entry opened by auto-sequence (never TUI-tracked) may therefore stay in flight
+      and be shown running after the merge (S9 story 5 probes this). (4) Merge INPUT_REQUIRED
+      is not drivable with the fake (merge has no verdicts), and a clean g merge journals
+      no merge attempt, so S9 uses the stop-before-merge hold. (5) cleanup --resources
+      kills windows before clearing runtime: the loop thread may end the iteration
+      first (vanished KILLED / loop failed KILLED); _on_complete then rewrites review-loop=failed
+      KILLED (not in flight).'
+    created_at: '2026-10-21T23:25:04Z'
+    last_edited: '2026-10-21T23:25:04Z'
+  - id: note-5533a1a
+    text: 'QA S9 (2026-10-21): stories 1-3 held; fixed 3 bugs (both live pre/post
+      captures in /pm-captures/scenarios/9). f0041424: (a) poll_for_verdict sat out
+      its 15 s hook wait after z d / pr cleanup killed the pane, so history booked
+      the cancel late and a z d during grace read "elapsed" → pane_exists checked
+      ≤1 s during the wait; (b) pre-existing race: z d in the 2 s launch settle let
+      the stopped loop adopt the fresh review pane by window name (loop stayed "running")
+      → find pane right after the synchronous launch. 1d6cd097: pm pr merge (_finalize_merge)
+      only killed windows, so a CLI-opened start attempt stayed "running → now" forever
+      after merge → pr_cleanup.end_in_flight_actions. Env gotcha: windows made with
+      tmux -L new-window from an outer shell inherit its PATH (~/.local/bin git proxy)
+      → local pm pr merge fetch fails "does not appear to be a git repository"; export
+      the $SCR/bin PATH in cli. Driver gotcha: completion markers stay in -S scrollback;
+      use unique markers/clear-history.'
+    created_at: '2026-10-21T23:58:47Z'
+    last_edited: '2026-10-21T23:58:47Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
