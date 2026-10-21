@@ -882,6 +882,13 @@ def on_state_loaded(app, old_statuses: dict,
         return
     _log.info("auto_start: reload saw %s merged/closed, %s deps changed, "
               "%s spec approved, scheduling pass", newly, regraphed, approved)
+    # Replace the forced "spec awaiting approval" line: a PR approved
+    # mid-implementation just resumes in its pane, so no "starting" line
+    # would follow to supersede it.
+    shown = [i for i in approved if managed is None or i in managed]
+    if shown:
+        app.log_message(f"Auto-start: {', '.join(shown)} spec approved — "
+                        f"continuing", force=True)
     app.run_worker(check_and_start(app))
 
 

@@ -367,6 +367,24 @@ class TestTargets:
         run = {r["pr_id"]: r for r in status["runs"]}["a"]
         assert run["reason"].startswith("impl spec awaiting approval")
 
+    def test_mid_impl_approval_replaces_awaiting_line(self, tmp_path):
+        # An in_progress PR resumes in its pane on approval — no "starting"
+        # line follows, so the reload must supersede "awaiting approval".
+        wd = tmp_path / "wa"
+        root = _disk(tmp_path, [_pr("a", status="in_progress",
+                                    workdir=str(wd))])
+        app = DiskApp(root)
+        app._auto_start_targets = {"a": {REVIEW_KEY: True}}
+        app._auto_start = True
+        app._auto_start_run_id = "run"
+        _write_spec(wd, "a", "impl")
+        assert auto_start.hold_spec_if_due(app, store.get_pr(app._data, "a"))
+        app._load_state()
+        assert "awaiting approval" in app.logs[-1]
+        spec_gen.approve_spec(store.load(root), "a", root=root)
+        app._load_state()
+        assert app.logs[-1] == "Auto-start: a spec approved — continuing"
+
     def test_explicit_review_spec_pr_gated_without_option(self, tmp_path):
         app = _app([_pr("a", review_spec=True), _pr("x", review_spec=True)],
                    tmp_path, {"a": {}})
