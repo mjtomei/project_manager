@@ -299,11 +299,9 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
     # Merge overlays — the merge step is live regardless of registry status.
     if pr_id in (inp.get("merge_input_required") or set()):
         return "merge", "waiting", "merge INPUT_REQUIRED — answer in merge window"
-    if pr_id in (inp.get("merge_propagation") or set()):
-        return "merge", "running", "propagating merge to repo dir"
     if pr_id in (inp.get("pending_merge") or set()):
         if win_live("merge"):
-            return "merge", "running", "resolving merge conflict"
+            return "merge", "running", "updating the main repo after the merge"
         signoff = (inp.get("signoff") or {}).get(pr_id) or {}
         if not (signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE"):
             return (phase, "waiting",
@@ -426,9 +424,9 @@ def build_status(inp: dict) -> dict:
     *inp* keys (all optional except ``prs``): ``prs``, ``targets`` (ordered
     ``{pr_id: record}``), ``all_mode``, ``enabled``, ``run_id``, ``owner``,
     ``stop_before_merge``, ``review_loops``, ``qa_loops``, ``pending_merge``,
-    ``merge_input_required``, ``merge_propagation``, ``launching``,
+    ``merge_input_required``, ``launching``,
     ``impl_idle``, ``windows`` (``{name: id}``), ``signoff``
-    (``{pr_id: {verdict, fresh}}``), ``skip_qa``, ``generated_at``.
+    (``{pr_id: {verdict, fresh, stale_reason?}}``), ``skip_qa``, ``generated_at``.
     """
     prs = inp.get("prs") or []
     pr_map = {p["id"]: p for p in prs if p.get("id")}

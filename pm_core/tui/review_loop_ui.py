@@ -802,7 +802,6 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
     _kill_merge_window(app, pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
-    app._merge_propagation_phase.discard(pr_id)
 
     _log.info("merge_verdict: MERGED for %s, finalizing", pr_id)
     if _attempt_merge(app, pr_id, propagation_only=True, resolve_window=False):
@@ -1063,7 +1062,6 @@ def _poll_impl_idle(app) -> None:
             if _attempt_merge(app, pr_id, resolve_window=False,
                               propagation_only=True):
                 _log.info("merge_idle: %s merged after resolution, starting dependents", pr_id)
-                app._merge_propagation_phase.discard(pr_id)
                 _on_merge_success(app, pr_id, merge_key, tracker,
                                   pending_merges, active_merge_keys)
             # else: still not merged — keep tracking

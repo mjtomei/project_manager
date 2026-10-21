@@ -1161,7 +1161,7 @@ loop for a PR, use `pm tui send` to send `zz d` while the PR is selected.
 You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
 - Implementation windows (Sessions working on PRs)
 - Review windows (Sessions reviewing PRs)
-- Merge windows (Sessions resolving merge conflicts)
+- Merge windows (Sessions updating the main repo after a published merge)
 - The TUI itself
 
 ### 2. Auto-Fix Issues

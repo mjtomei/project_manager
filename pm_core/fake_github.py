@@ -162,7 +162,7 @@ class FakeGitHubRepo:
         """Tip of branch ``name``, or None when it does not exist."""
         result = self._git("rev-parse", "--verify", "--quiet",
                            f"refs/heads/{name}", check=False)
-        return result.stdout.strip() or None if result.returncode == 0 else None
+        return (result.stdout.strip() or None) if result.returncode == 0 else None
 
     def is_merged(self, head: str, base: Optional[str] = None) -> bool:
         """True if ``head``'s tip is an ancestor of ``base``."""

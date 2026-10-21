@@ -695,7 +695,14 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
     from datetime import datetime, timezone
     meta = report_meta(pr["id"])
     reason = None
-    if meta.get("verdict", "").upper() in (verdict, original_verdict or ""):
+    # Only a report written for this decision supplies the reason: its
+    # verdict tag names the routed (or router's) verdict and, when present,
+    # its head tag the reviewed HEAD — not a report left by an earlier run.
+    meta_verdict = (meta.get("verdict") or "").upper()
+    meta_head = meta.get("head") or ""
+    if meta_verdict and meta_verdict in (verdict, original_verdict) \
+            and (not meta_head or (len(meta_head) >= 7 and reviewed_head
+                                   and reviewed_head.startswith(meta_head))):
         reason = meta.get("reason") or None
     rec = pr.get("integration") or {}
     integ = None

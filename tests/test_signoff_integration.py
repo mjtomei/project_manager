@@ -419,3 +419,81 @@ def test_integrate_cli_is_read_only_by_default(w):
         assert "into the PR branch" in r.output
     assert (w.wd / "other.txt").exists()
     assert git(w.wd, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
+
+
+# --- review-loop additions -------------------------------------------------
+
+def test_stale_report_reason_is_not_reused(w):
+    """A report left by an earlier run (other HEAD) doesn't supply the reason."""
+    commit(w.wd, "shared.txt", "pr\n", "pr")
+    commit(w.repo, "shared.txt", "other\n", "base")
+    integration.check_integration(w.pm_dir, PR)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        '<html><head><meta name="pm-signoff-verdict" content="SIGNOFF_IMPL">'
+        '<meta name="pm-signoff-head" content="0123456789abcdef">'
+        '<meta name="pm-signoff-reason" content="old run reason">'
+        '</head><body/></html>')
+    step(w, SIGNOFF_IMPL)
+    ret = pr(w)["signoff_return"]
+    assert ret["reason"] != "old run reason"
+    assert ret["reason"]          # falls back to the coerced/default reason
+
+
+def test_report_without_verdict_tag_supplies_no_reason(w):
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        '<html><head><meta name="pm-signoff-reason" content="untagged">'
+        '</head><body/></html>')
+    integration.check_integration(w.pm_dir, PR)
+    step(w, SIGNOFF_REVIEW)
+    assert pr(w)["signoff_return"]["reason"] == "see report.html and PR notes"
+
+
+def _completed(rc, out="", err=""):
+    return subprocess.CompletedProcess([], rc, out, err)
+
+
+def test_merge_tree_output_parsing():
+    """The git >= 2.38 in-memory path (not exercised by this git)."""
+    with patch.object(integration, "_git",
+                      return_value=_completed(0, "abc123\n")):
+        assert integration._merge_tree("wd", "h", "b") == ("abc123", [], None)
+    out = "def456\na.txt\nb.txt\na.txt\n"
+    with patch.object(integration, "_git", return_value=_completed(1, out)):
+        assert integration._merge_tree("wd", "h", "b") == (
+            None, ["a.txt", "b.txt"], None)
+    with patch.object(integration, "_git",
+                      return_value=_completed(128, "", "fatal: bad")):
+        tree, conflicts, err = integration._merge_tree("wd", "h", "b")
+        assert (tree, conflicts) == (None, []) and "fatal: bad" in err
+
+
+def test_compute_candidate_uses_merge_tree_on_new_git(w):
+    commit(w.repo, "other.txt", "other\n", "other")
+    base_sha, err = integration.fetch_base(str(w.wd), str(w.repo), "master")
+    assert err is None
+    with patch.object(integration, "_git_version", return_value=(2, 45)), \
+            patch.object(integration, "_merge_tree",
+                         return_value=("cafe", [], None)) as mt:
+        out = integration.compute_candidate(str(w.wd), w.head, base_sha)
+    mt.assert_called_once()
+    assert (out["status"], out["candidate_tree"]) == (integration.CLEAN, "cafe")
+
+
+def test_merge_refuses_clearly_without_workdir(w):
+    from pm_core.cli import cli
+    rec = integration.check_integration(w.pm_dir, PR)
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_MERGE, w.head,
+                                   "auto-sequence",
+                                   integration=integration.binding(rec))
+
+    def _gone(d):
+        store.get_pr(d, PR)["workdir"] = str(w.wd) + "-missing"
+    store.locked_update(w.pm_dir, _gone)
+    with patch("pm_core.cli.pr.state_root", return_value=w.pm_dir), \
+            patch("pm_core.cli.helpers.state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(cli, ["pr", "merge", "--no-resolve-window", PR])
+    assert r.exit_code == 1
+    assert "workdir not found" in r.output
+    assert "stale" not in r.output

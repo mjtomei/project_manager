@@ -377,8 +377,6 @@ class ProjectManagerApp(App):
         self._signoff_acted: dict[str, tuple] = {}
         # PRs whose merge window needs human input (INPUT_REQUIRED verdict)
         self._merge_input_required_prs: set[str] = set()
-        # PRs currently in merge propagation phase (step 2 of two-step merge)
-        self._merge_propagation_phase: set[str] = set()
         # Animation frame counter for impl-pane idle polling throttle
         self._impl_poll_counter: int = 0
         # Auto-start state (in-memory; preserved only via the merge-restart

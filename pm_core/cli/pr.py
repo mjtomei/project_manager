@@ -1917,7 +1917,7 @@ def _return_to_signoff(root: Path, pr_entry: dict, reason: str):
 
 def _ref(cwd, ref: str) -> str | None:
     r = git_ops.run_git("rev-parse", "-q", "--verify", ref, cwd=cwd, check=False)
-    return r.stdout.strip() or None if r.returncode == 0 else None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
 def _git_detail(r) -> str:
@@ -1935,7 +1935,7 @@ def _after_publish(root: Path, data: dict, pr_entry: dict, transcript) -> None:
 
 def _publish_approved(data: dict, root: Path, pr_entry: dict,
                       backend_name: str, base_branch: str,
-                      workdir: str | None, *, resolve_window: bool,
+                      workdir: str, *, resolve_window: bool,
                       background: bool, transcript: str | None,
                       companion: bool) -> None:
     """Re-validate the approved candidate and publish it (see above)."""
@@ -1943,11 +1943,6 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
 
     pr_id = pr_entry["id"]
     branch = pr_entry.get("branch", "")
-    if not workdir or not Path(workdir).exists():
-        click.echo(f"PR {pr_id} workdir not found. Cannot merge without the "
-                   "branch.", err=True)
-        raise SystemExit(1)
-
     approved = pr_entry["signoff"]
     bound = approved["integration"]
     head = approved["sha"]
@@ -2444,9 +2439,16 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     from pm_core.signoff import head_sha, merge_gate_refusal
     workdir = pr_entry.get("workdir")
     # No workdir -> no HEAD -> the gate refuses (an approval names a HEAD
-    # that only exists there); never clone just to look.
+    # that only exists there); never clone just to look.  When the approval
+    # is otherwise valid, say the workdir is missing rather than "stale".
     current_sha = head_sha(workdir) if workdir else None
     refusal = merge_gate_refusal(pr_entry, current_sha, base_branch)
+    if current_sha is None and refusal and merge_gate_refusal(
+            pr_entry, (pr_entry.get("signoff") or {}).get("sha"),
+            base_branch) is None:
+        refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
+                   f"candidate live there, so nothing can be published. "
+                   f"Restore the workdir, then re-run sign-off.")
     if refusal:
         click.echo(refusal, err=True)
         raise SystemExit(1)

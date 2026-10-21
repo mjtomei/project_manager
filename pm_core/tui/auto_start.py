@@ -1101,7 +1101,6 @@ def collect_status_inputs(app) -> dict:
         "qa_loops": qa_loops,
         "pending_merge": pending_merge,
         "merge_input_required": set(getattr(app, "_merge_input_required_prs", set()) or ()),
-        "merge_propagation": set(getattr(app, "_merge_propagation_phase", set()) or ()),
         "launching": set(_launching(app)),
         "impl_idle": impl_idle,
         "windows": windows,
