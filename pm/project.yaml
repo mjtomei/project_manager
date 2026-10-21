@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-21T23:27:46.704412+00:00'
+  updated_at: '2026-10-21T23:56:23.978180+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8158,6 +8158,17 @@ prs:
       pr merge.'
     created_at: '2026-10-21T23:37:54Z'
     last_edited: '2026-10-21T23:37:54Z'
+  - id: note-119de43
+    text: 'QA S3 (TUI REVIEW/REQA returns + restart/duplicates): fixed 125afe57. pm
+      pr auto-sequence and the TUI each relaunched the review --fresh on awaiting=review;
+      restart + 2 concurrent ticks left 2 review windows and killed the TUI loop window
+      (restarted TUI then adopted a pane of a CLI window with its dead transcript
+      -> stuck in_review). Now claim_return_launch (launch_claim under the yaml lock,
+      180 s expiry) gives one launcher. Robustness gap left: review_loop._adopt_in_flight_review
+      takes any pane named review-<pr> without checking it runs the transcript session.
+      Local backend needs pm push + merge before O. Captures /pm-captures/scenarios/3'
+    created_at: '2026-10-21T23:56:23Z'
+    last_edited: '2026-10-21T23:56:23Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
