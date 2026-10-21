@@ -183,6 +183,26 @@ class TestJournal:
         p.join(10)
         assert ah.owner_alive(child) is False
 
+    def test_concurrent_first_owner_token(self, monkeypatch):
+        """Threads racing on the first write share one live instance."""
+        import threading
+        monkeypatch.setattr(ah, "_owner_cache", None)
+        monkeypatch.setattr(ah, "_owner_lock_fd", None)
+        barrier = threading.Barrier(8)
+        tokens = []
+
+        def _first():
+            barrier.wait(5)
+            tokens.append(ah.owner_token())
+
+        threads = [threading.Thread(target=_first) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        assert len({t["instance"] for t in tokens}) == 1
+        assert ah.owner_alive(tokens[0]) is True
+
     def test_owner_liveness(self):
         me = ah.owner_token()
         assert ah.owner_alive(me) is True

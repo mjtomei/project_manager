@@ -40,6 +40,7 @@ import json
 import os
 import secrets
 import socket
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,6 +104,18 @@ def iso(t: float | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 _owner_cache: dict | None = None
+# Loop threads and the TUI main thread may write their first event at the
+# same time; without this each would create (and the later one would close)
+# its own instance lock, making the earlier events' owner look dead.
+_owner_mutex = threading.Lock()
+
+
+def _reset_owner_mutex() -> None:
+    global _owner_mutex
+    _owner_mutex = threading.Lock()  # a thread may have held it at fork()
+
+
+os.register_at_fork(after_in_child=_reset_owner_mutex)
 
 
 def _boot_id() -> str | None:
@@ -190,12 +203,17 @@ def owner_token() -> dict:
     """Identity of the current process image, used to judge liveness."""
     global _owner_cache
     pid = os.getpid()
-    if _owner_cache is None or _owner_cache.get("pid") != pid:
-        instance = f"{pid}-{secrets.token_hex(4)}"
-        _owner_cache = {"pid": pid, "start": _start_token(pid),
-                        "host": socket.gethostname(), "instance": instance}
-        _hold_owner_lock(instance)
-    return dict(_owner_cache)
+    cache = _owner_cache
+    if cache is None or cache.get("pid") != pid:
+        with _owner_mutex:
+            cache = _owner_cache
+            if cache is None or cache.get("pid") != pid:
+                instance = f"{pid}-{secrets.token_hex(4)}"
+                _hold_owner_lock(instance)
+                cache = {"pid": pid, "start": _start_token(pid),
+                         "host": socket.gethostname(), "instance": instance}
+                _owner_cache = cache
+    return dict(cache)
 
 
 def _instance_alive(instance: str) -> bool | None:
