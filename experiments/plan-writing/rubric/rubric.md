@@ -6,7 +6,7 @@ Status: no dimension or measure has calibration evidence yet. Every judge measur
 
 ## Survey
 
-The survey covered five families of published guidance. Requirement standards define quality for individual statements and for sets of them. Plain-language standards and style guides define readability for a stated audience. The process templates of the communities in [sources.json](../sources.json) say what each genre owes its reviewers. Published analytic writing rubrics show how general writing quality is split into separately scored traits. The evaluation literature for generated text describes how fidelity and coherence have been measured and how LLM judges fail.
+The survey covered the eight families of published guidance in the table below. Requirement standards define quality for individual statements and for sets of them. Plain-language standards and style guides define readability for a stated audience. The process templates of the communities in [sources.json](../sources.json) say what each genre owes its reviewers. Published analytic writing rubrics show how general writing quality is split into separately scored traits. The evaluation literature for generated text describes how fidelity and coherence have been measured and how LLM judges fail.
 
 | Family | Sources | What they contribute |
 |---|---|---|

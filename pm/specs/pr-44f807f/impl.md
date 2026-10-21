@@ -94,7 +94,11 @@
   dimension has at least one judge measure (`needs_calibration`); dimensions
   that also have a judge-free measure get `measure_readiness:
   automatic_candidate`, the rest `calibration_required`. Automatic candidates are
-  still diagnostics until the calibration PR checks them against judges.
+  still diagnostics until the calibration PR checks them against judges. A third
+  status, `deferred`, marks measures that need inference-engine access (NLI or
+  classifier probabilities) and are outside the first PRs; bias covariates
+  (`role: bias_covariate`, e.g. `length_ratio`, `style_distance`) are
+  automatic but do not make a dimension `automatic_candidate`.
 - *Pointwise vs paired judging.* Plan specifies blinded paired evaluation;
   templates are paired, but ask for a 1–5 score per document per dimension plus
   a per-dimension preference, so pointwise use stays possible. An overall

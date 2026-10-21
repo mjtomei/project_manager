@@ -111,7 +111,7 @@ def test_rubric_doc_has_every_dimension_and_is_current():
         assert c.replace("_", " ").lower() in text.lower()
     # The hand-written concern table must agree with the JSON mapping.
     for c in RUBRIC["concerns"]:
-        row = "| " + c["name"] + " | " + c["primary_dimension"] + " | " + ", ".join(c["also_affects"]) + " |"
+        row = "| " + " | ".join([c["name"], c["primary_dimension"], ", ".join(c["also_affects"]), c["boundary"]]) + " |"
         assert row in text, row
 
 

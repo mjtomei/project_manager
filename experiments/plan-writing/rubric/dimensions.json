@@ -436,7 +436,7 @@
       "source": "pm/docs/plan-session-sources-2026-10-19.md (evaluation-criterion clarifications)",
       "primary_dimension": "concision",
       "also_affects": ["purpose_and_audience", "organization_and_progression"],
-      "boundary": "Useful elaboration beyond the brief is not padding. Length alone is not padding; judge density and relevance."
+      "boundary": "Useful elaboration and genre-required length are not padding; judge density and relevance, not word count."
     },
     {
       "id": "premature_implementation_detail",
@@ -445,7 +445,7 @@
       "source": "pm/plans/plan-doc-eval.md",
       "primary_dimension": "scope_and_abstraction",
       "also_affects": ["rationale_and_alternatives", "concision"],
-      "boundary": "Detail that is itself the decision under review (interfaces, schemas, protocols) or that the brief requests is not premature."
+      "boundary": "Interfaces, schemas or protocols that are themselves under review, and detail the brief asks for, are not premature."
     },
     {
       "id": "poor_progression",
@@ -454,7 +454,7 @@
       "source": "pm/docs/plan-session-sources-2026-10-19.md (\"assess value and coherent progression together\")",
       "primary_dimension": "organization_and_progression",
       "also_affects": ["continuity"],
-      "boundary": "Summary-first structure and genre-mandated order are not progression failures."
+      "boundary": "Summary-first order and genre-mandated order are not failures."
     },
     {
       "id": "lost_requirements",
@@ -472,7 +472,7 @@
       "source": "pm/plans/plan-doc-eval.md (\"Judge factual fidelity against the brief or prefix as well as readability\")",
       "primary_dimension": "fidelity",
       "also_affects": ["internal_consistency", "requirement_coverage"],
-      "boundary": "Consistent elaboration, clearly offered as the writer's proposal, is not a fidelity failure."
+      "boundary": "Consistent elaboration offered as the writer's proposal is not a fidelity failure."
     }
   ],
   "previously_identified_concerns": ["padding", "premature_implementation_detail", "poor_progression", "lost_requirements"],
