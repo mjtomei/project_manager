@@ -701,6 +701,14 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.pane_registry.register_pane"))
             p(patch("pm_core.pane_registry.registry_path", return_value=tmp_path))
             p(patch("pm_core.pane_registry.locked_read_modify_write"))
+            p(patch("pm_core.cli.helpers.state_root", return_value=tmp_path))
+            self.checks = []
+            p(patch("pm_core.integration.check_integration",
+                    side_effect=lambda root, pr_id, **kw: (
+                        self.checks.append(pr_id) or {"status": "up_to_date",
+                                                      "base_branch": "master",
+                                                      "base_sha": "b" * 40})))
+            p(patch("pm_core.signoff.store.load", return_value=data))
 
             signoff.launch_signoff_window(
                 data, pr_entry, background=True,
@@ -714,6 +722,15 @@ class TestWindowLaunchWorkdir:
         args = new_window.call_args
         # workdir lands as the 4th positional argument.
         assert args.args[3] == str(workdir)
+
+    def test_new_window_runs_the_integration_check(self, tmp_path):
+        """Sign-off checks integration with the latest base before the
+        router's prompt is built; the reused-window fast path does not."""
+        self._launch(tmp_path)
+        assert self.checks == ["pr-001"]
+        self._launch(tmp_path,
+                     existing={"id": "@9", "index": 9, "name": "signoff-pr-001"})
+        assert self.checks == []
 
     def test_new_window_stamps_launched_head(self, tmp_path):
         """The run is bound to the HEAD it was launched on (verdict binding)."""
