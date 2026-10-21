@@ -83,7 +83,7 @@ E2. No flags → prints nothing, exit 0 (acceptable; no crash).
 E3. `render_judge("whole_document", ...)` with a prefix, without a brief, or with an empty brief
 → ValueError; `continuation` with a brief or without a prefix → ValueError.
 E4. Empty candidate A or B → ValueError "Both candidates are required".
-E5. Unknown case type → ValueError; a dimension id not applicable to the case type (e.g.
+E5. Unknown case type → ValueError; an empty dimension subset → ValueError; a dimension id not applicable to the case type (e.g.
 `continuity` for whole_document, or a typo) → ValueError naming it.
 E6. Continuation without `section_request` → prompt renders with no "The writers were asked"
 sentence; without `document_kind` → no "Document kind" sentence; no dangling whitespace
@@ -92,14 +92,15 @@ E7. `validate_judgment` problems for: non-object reply; missing `dimensions`; a 
 dimension; an unexpected dimension; duplicate rows; a row whose `dimension` is a list/number;
 scores 0, 6, 3.0, "3", true; preference "a" or "both"; `evidence` a string; missing or invalid
 `overall_preference`.
-E8. `rubric.md` with the GENERATED markers removed → `--write-doc` fails loudly and does not
-truncate or blank the file.
+E8. `rubric.md` with the GENERATED markers removed, duplicated or in reverse order →
+`--write-doc` fails with a clear ValueError and leaves the file byte-identical (no temp files
+left behind).
 E9. A dimension citing a reference id absent from `references.json` → `--write-doc` fails and
 the test suite reports it; a dimension missing its heading in rubric.md → test suite fails.
 E10. Concurrent use: many `--render` processes and runner threads in parallel produce output
 identical to a sequential baseline; concurrent `--write-doc` runs (and pytest runs reading
-`rubric.md` while it is rewritten) leave `rubric.md` identical to committed; any transient
-read failures during overlap are reported, not hidden.
+`rubric.md` while it is rewritten) leave `rubric.md` identical to committed, with no crashes,
+no failed tests and no stray `.rubric.md.*` temp files.
 
 ## Pass/Fail criteria
 
@@ -119,9 +120,18 @@ links, the genre fixture's claim not holding in pm.
 - *`--render` always puts the strong variant in slot A.* It is a debugging aid; blinding and
   order randomisation are the runner's job (documented). Not a defect; the runner story swaps
   order itself.
-- *Concurrent `--write-doc`.* Writes are non-atomic `write_text`; concurrent regeneration is not
-  a supported workflow, so a race that self-heals (final file correct) passes, while a final
-  corrupted file or a pytest crash on a mid-write read is reported as a finding (low severity).
+- *Concurrent `--write-doc`.* Since 85cd00e9, `write_doc` writes a temp file
+  (`rubric/.rubric.md.*`) and `os.replace`s it over `rubric.md`, so readers see either the old or
+  the new file. Concurrent regeneration must now produce zero crashes (the earlier ~1-in-40
+  "not enough values to unpack" crash is a regression if seen), a final `rubric.md` identical to
+  committed, and no leftover `.rubric.md.*` temp files; the file mode of `rubric.md` is kept.
+- *Marker errors (577d343d).* Missing, duplicated or reversed GENERATED markers raise a
+  ValueError naming `rubric.md` and saying it needs exactly one start marker followed by one end
+  marker; the file is left byte-identical.
+- *Empty dimension subset (d4df59e2).* `render_judge(..., dimensions=[])` raises ValueError
+  ("Empty dimension subset"), rather than rendering a prompt with no dimensions.
+- *pm_plan catalog cases (d4df59e2).* The runner treats them as `whole_document` and passes the
+  instruction plus conversation turns (and any attachments) as the brief.
 - *Live judge models.* Not required; a hand-written reply exercises `validate_judgment`. If a
   Claude CLI happens to be available, feeding one rendered prompt to it is optional extra
   evidence, never a pass/fail gate.
