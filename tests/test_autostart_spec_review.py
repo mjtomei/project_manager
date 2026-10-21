@@ -551,6 +551,22 @@ class TestTargets:
         assert not auto_start._approved_since(pr, "qa")
         assert auto_start._approved_since(pr, "impl")
 
+    def test_command_bar_pr_start_gets_review_spec_prompt(self, tmp_path):
+        from pm_core.tui import pr_view
+        app = _app([_pr("a"), _pr("x")], tmp_path,
+                   {"a": {st.REVIEW_KEY: True}})
+
+        def typed(cmd):
+            import shlex
+            return pr_view._with_review_spec(app, cmd, shlex.split(cmd))
+
+        assert typed("pr start a") == "pr start --review-spec a"
+        assert (typed("pr start --workdir /w --fresh a")
+                == "pr start --review-spec --workdir /w --fresh a")
+        assert typed("pr start x") == "pr start x"  # out of scope
+        assert typed("pr start") == "pr start"      # active PR: left alone
+        assert typed("pr start --review-spec a") == "pr start --review-spec a"
+
     def test_explicit_review_spec_pr_gated_without_option(self, tmp_path):
         app = _app([_pr("a", review_spec=True), _pr("x", review_spec=True)],
                    tmp_path, {"a": {}})
