@@ -22,7 +22,8 @@
   workdir, A is marked `spec_pending: impl`. When the agent then goes idle, A is NOT moved to review.
 - **R6** Given A is paused on its impl spec, when the user looks at the surfaces, then:
   - the tree node shows `S impl`;
-  - the PR Actions popup (prefix+P) shows `[spec review]` on the **start** row;
+  - the PR Actions popup (prefix+P) shows `[spec review]` on the **start** row, even when A has
+    no tmux window yet (held before launch);
   - the `a` runs popup and `pm autostart status` show A waiting with the reason
     "impl spec awaiting approval — V or pm pr spec-approve A", a `spec review: impl` label and the spec path;
   - `status --json` runs[A].spec_review has phase=impl, path, approve="pm pr spec-approve A" and key="V".
@@ -32,7 +33,8 @@
   the S marker disappears, and once A goes idle again the chain continues (review → QA).
 - **R8** Given A is paused, when the user approves with edits (the editor changes the text), then the
   edited text is written to the spec file that `pm pr spec A` reads (the workdir copy) and the resume
-  message says "approved with edits".
+  message says "approved with edits". If A had no workdir yet (already-present spec, R12), the edited
+  approved text is the one the fresh workdir and the impl prompt see after A starts, not the committed copy.
 - **R9** Given A is paused, when the user empties the spec in the editor (reject), then the spec is
   regenerated in review mode and A stays paused with `S impl`. It does not advance.
 
@@ -42,7 +44,8 @@
   `S qa` even while the planner spinner is live, the PR Actions popup marks the **qa** row
   `[spec review]`, and status says "QA spec awaiting approval … (scenarios launch after approval)".
 - **R11** Given the QA spec is pending, when the user approves it, then the planner pane gets the
-  approval message (asking it to re-emit the plan), and scenarios launch after that.
+  approval message (asking it to re-emit the plan), and scenarios launch after that. When the approval
+  includes edits, the message also asks the planner to commit and push the edited spec.
 
 ### Already-present spec / no rewind
 - **R12** Given a pending PR whose impl spec already exists (for example committed under `pm/specs/<pr>/impl.md`)
@@ -58,8 +61,10 @@
 - **R15** Given S has an impl spec waiting for approval, when T1 is removed or re-added with
   `--no-review-specs`, then S's pending spec is still pending (not approved). Later specs on S are not gated.
 - **R16** Given a chain paused on a spec, when idle polling runs for several minutes, or the TUI restarts
-  (for example after a merge-triggered restart, or killing and relaunching the session), then the target
-  record keeps review_specs and the PR stays paused with the same surfaces.
+  through the breadcrumb path (`pm tui restart --breadcrumb`, or the merge-triggered restart), then the target
+  record keeps review_specs and the PR stays paused with the same surfaces. A plain Ctrl+R or a session
+  relaunch starts auto-start OFF by design (existing behaviour). The pending spec_pending record still
+  survives, so the PR is still not advanced or relaunched.
 - **R17** Given `--review-specs --wait-for-merge`, then merge holds and spec pauses both appear in labels,
   and approving a spec does not release the merge hold. The manual merge (`g` / `pm pr merge`) is still required.
 - **R18** Given default auto-start (no `--review-specs`, spec-mode prompt), then PRs start, go idle
@@ -88,7 +93,12 @@
 - **E6** Concurrent CLI adds/removes from two shells while the scheduler is polling and a
   spec-approve runs → project.yaml stays parseable, no lost `spec_pending` / `spec_approved` /
   target records, and every actor gets a reply (no timeouts on the autostart request channel).
-- **E7** `pm pr start` (manual) on a PR with a pending spec → refuses, as before.
+- **E7** `pm pr start` (manual) on a PR with a pending spec → refuses, as before. Starting a PR that is in a
+  review-specs closure manually from the TUI uses the same review-mode spec prompt, and its spec is held.
+- **E8** `pm pr spec A --regenerate` refreshes the TUI, so an in_progress review-specs PR is held again
+  within a poll or two without a manual reload.
+- **E9** `pm autostart add X --review-specs --no-review-specs` fails with conflicting_flags from the CLI
+  and from the command bar alike.
 
 ## 4. Pass / Fail Criteria
 Pass: every Then above is observable on the named surface. CLI text and JSON agree with the
@@ -110,3 +120,9 @@ Fail: any of the following.
   (existing spec-approve semantics). Only emptying (reject) keeps it paused afterwards.
 - PRs in review mode through their own `review_spec: true` or the global spec-mode get the same pauses inside
   auto-start, even without `--review-specs` (per the impl spec). Status labels them `review-spec`.
+- `--no-review-specs` on an existing review-specs target reports `options_changed` (R3), not `unchanged`.
+  `status --json` has no `"ok"` key (pre-existing schema). `list --json` does have one.
+- Fake-claude test setup: give each throwaway project unique PR titles, because runtime state is keyed by PR id
+  (pr-6176ec6). For one NEEDS_WORK re-QA run, use qa_scenario verdicts `["NEEDS_WORK","NEEDS_WORK","PASS"]`,
+  because the interactive Scenario 0 window also consumes one. Name any recorder grouped tmux session in pm's
+  `<session>~N` style (pr-095c51d).
