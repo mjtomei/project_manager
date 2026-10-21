@@ -37,7 +37,8 @@ PHASES = ("impl", "qa")
 # told to wait for pm-recorded approval of the spec it writes.  That spec is
 # held for review even if auto-start spec review stops applying before the
 # file appears (target or option removed), since the agent waits regardless.
-# Cleared by the impl approval (or a start without the flag).
+# Cleared by the impl approval (or a start that does not wait: no flag, or
+# the spec already present — :func:`launch_waits_for_impl_approval`).
 IMPL_GATE_KEY = "impl_spec_gate"
 
 
@@ -498,6 +499,18 @@ def _clear_approval(pr: dict, phase: str) -> None:
 def is_spec_approved(pr: dict, phase: str) -> bool:
     """Whether *phase*'s spec was approved through ``approve_spec``."""
     return bool(_approval_stamp(pr, phase))
+
+
+def launch_waits_for_impl_approval(pr: dict, review_gate: bool) -> bool:
+    """Whether an implementation launch with *review_gate* leaves its agent
+    waiting for pm-recorded approval (sets :data:`IMPL_GATE_KEY`).
+
+    Only an agent that writes the spec gets the wait instruction
+    (:func:`spec_generation_preamble`); with a spec already present it is
+    handed that spec and does not wait, so its later regenerations are
+    not held on its account.
+    """
+    return review_gate and get_spec(pr, "impl") is None
 
 
 def needs_spec_approval(pr: dict, phase: str) -> bool:

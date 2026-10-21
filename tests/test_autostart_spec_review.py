@@ -530,6 +530,16 @@ class TestTargets:
         spec_gen._clear_approval(pr_a, "impl")
         assert not auto_start.hold_spec_if_due(app, pr_a)
 
+    def test_gate_key_only_when_agent_writes_spec(self, tmp_path):
+        """A gated launch waits only if it writes the spec; one handed an
+        existing (approved) spec, e.g. a relaunch, does not wait."""
+        wd = tmp_path / "wa"
+        pr = _pr("a", status="in_progress", workdir=str(wd))
+        assert spec_gen.launch_waits_for_impl_approval(pr, True)
+        assert not spec_gen.launch_waits_for_impl_approval(pr, False)
+        _write_spec(wd, "a", "impl")
+        assert not spec_gen.launch_waits_for_impl_approval(pr, True)
+
     def test_mid_impl_approval_replaces_awaiting_line(self, tmp_path):
         # An in_progress PR resumes in its pane on approval — no "starting"
         # line follows, so the reload must supersede "awaiting approval".
