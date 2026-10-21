@@ -83,6 +83,22 @@ class TestJournal:
         ah.start_attempt(PR, "merge")
         assert [e["action"] for e in ah.read_events(PR)] == ["review", "merge"]
 
+    def test_history_path_is_a_file_reads_empty(self, tmp_path, monkeypatch):
+        # ~/.pm/history being a regular file must not crash readers.
+        from pm_core.cli import cli
+        monkeypatch.undo()  # drop conftest's history_dir stub
+        home = tmp_path / "home"
+        (home / ".pm").mkdir(parents=True)
+        (home / ".pm" / "history").write_text("not a dir\n")
+        monkeypatch.setattr(ah, "pm_home", lambda: home / ".pm")
+        assert ah.read_events(PR) == [] and not ah.has_journal(PR)
+        root = tmp_path / "proj"
+        root.mkdir()
+        _project(root)
+        r = CliRunner().invoke(cli, ["-C", str(root), "pr", "history", PR])
+        assert r.exit_code == 0, r.output
+        assert "No recorded action history" in r.output
+
     def test_write_failure_never_raises(self, tmp_path, monkeypatch):
         blocker = tmp_path / "file"
         blocker.write_text("x")

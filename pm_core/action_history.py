@@ -284,7 +284,13 @@ def _kill0(pid: int) -> bool:
 
 def history_dir() -> Path:
     d = pm_home() / "history"
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # Unwritable or not a directory: readers then find no journal and
+        # writers fail inside their own guards, instead of every caller
+        # (``pm pr history``, the popup badge) raising here.
+        pass
     return d
 
 
