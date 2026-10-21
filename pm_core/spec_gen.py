@@ -46,13 +46,16 @@ def get_spec_mode() -> str:
     return "prompt"
 
 
-def pr_spec_mode(pr: dict) -> str:
+def pr_spec_mode(pr: dict, review: bool = False) -> str:
     """Return the effective spec mode for a specific PR.
 
-    Per-PR ``review_spec: true`` overrides to ``review`` mode.
+    Per-PR ``review_spec: true`` overrides to ``review`` mode, as does
+    *review* — the auto-start spec-review gate (``pm autostart add
+    --review-specs``), which applies review mode without touching either
+    the global setting or the PR's own ``review_spec``.
     """
     mode = get_spec_mode()
-    if pr.get("review_spec"):
+    if review or pr.get("review_spec"):
         return "review"
     return mode
 
@@ -69,10 +72,15 @@ def spec_file_path(root: Path, pr_id: str, phase: str) -> Path:
     return spec_dir(root, pr_id) / f"{phase}.md"
 
 
-def get_spec(pr: dict, phase: str) -> str | None:
-    """Get the spec content for a phase, reading from the spec file.
+def _workdir_spec_path(pr: dict, phase: str) -> Path | None:
+    workdir = pr.get("workdir")
+    if not workdir:
+        return None
+    return Path(workdir) / "pm" / "specs" / pr.get("id", "") / f"{phase}.md"
 
-    Returns None if no spec exists or the file is empty.
+
+def spec_location(pr: dict, phase: str) -> Path | None:
+    """The file :func:`get_spec` reads for *phase*, or None if none exists.
 
     Lookup order:
     1. The PR's workdir pm/specs/ — the impl session writes specs here and
@@ -83,26 +91,33 @@ def get_spec(pr: dict, phase: str) -> str | None:
     if phase not in PHASES:
         return None
 
-    pr_id = pr.get("id", "")
-
     # 1. Workdir — most up-to-date copy while the PR is in flight.
-    workdir = pr.get("workdir")
-    if workdir:
-        p = Path(workdir) / "pm" / "specs" / pr_id / f"{phase}.md"
-        if p.exists():
-            content = p.read_text().strip()
-            return content if content else None
+    p = _workdir_spec_path(pr, phase)
+    if p is not None and p.exists():
+        return p
 
     # 2. Local pm directory — spec lives here after the branch is merged.
     try:
         root = store.find_project_root()
     except FileNotFoundError:
         return None
-    canonical = spec_file_path(root, pr_id, phase)
+    canonical = root / "specs" / pr.get("id", "") / f"{phase}.md"
     if canonical.exists():
-        content = canonical.read_text().strip()
-        return content if content else None
+        return canonical
     return None
+
+
+def get_spec(pr: dict, phase: str) -> str | None:
+    """Get the spec content for a phase, reading from the spec file.
+
+    Returns None if no spec exists or the file is empty.  The file is the
+    one :func:`spec_location` finds (workdir copy first, then local pm/).
+    """
+    p = spec_location(pr, phase)
+    if p is None:
+        return None
+    content = p.read_text().strip()
+    return content if content else None
 
 
 def set_spec(pr: dict, phase: str, spec: str,
@@ -124,14 +139,20 @@ def set_spec(pr: dict, phase: str, spec: str,
             _log.warning("spec_gen: cannot find project root for set_spec")
             return None
 
-    path = spec_file_path(root, pr.get("id", "unknown"), phase)
+    # Write where get_spec reads: an inline session's spec lives in the
+    # PR workdir, and an approve-with-edits / reject regeneration written
+    # only under <root> would be shadowed by that stale workdir copy.
+    path = _workdir_spec_path(pr, phase)
+    if path is None or not path.exists():
+        path = spec_file_path(root, pr.get("id", "unknown"), phase)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(spec)
     _log.info("spec_gen: wrote %s spec to %s (%d chars)", phase, path, len(spec))
     return path
 
 
-def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
+def _build_spec_prompt(data: dict, pr: dict, phase: str,
+                       review: bool = False) -> str:
     """Build the Claude prompt for generating a phase spec."""
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
@@ -213,7 +234,7 @@ Run `git diff {base_branch}...HEAD` in the workdir to see what changed.
 Read source files as needed to understand the implementation.
 """
 
-    mode = pr_spec_mode(pr)
+    mode = pr_spec_mode(pr, review)
     ambiguity_instruction = ""
     if mode == "prompt":
         ambiguity_instruction = """
@@ -265,7 +286,8 @@ The spec should contain:
 
 def generate_spec(data: dict, pr_id: str, phase: str,
                   root: Path | None = None,
-                  force: bool = False) -> tuple[str, bool]:
+                  force: bool = False,
+                  review: bool = False) -> tuple[str, bool]:
     """Generate a spec for a PR phase.
 
     Args:
@@ -274,6 +296,8 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         phase: One of "impl", "qa".
         root: Project root (for saving).
         force: If True, regenerate even if spec already exists.
+        review: Force review mode (auto-start spec-review gate): the
+            result is always left pending for approval.
 
     Returns:
         (spec_text, needs_review) — the generated spec and whether
@@ -292,10 +316,10 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         _log.info("spec_gen: using existing %s spec for %s", phase, pr_id)
         return existing, False
 
-    mode = pr_spec_mode(pr)
+    mode = pr_spec_mode(pr, review)
     _log.info("spec_gen: generating %s spec for %s (mode=%s)", phase, pr_id, mode)
 
-    prompt = _build_spec_prompt(data, pr, phase)
+    prompt = _build_spec_prompt(data, pr, phase, review=review)
     workdir = pr.get("workdir")
 
     click.echo(f"Generating {phase} spec for {pr_id}...")
@@ -327,6 +351,8 @@ def generate_spec(data: dict, pr_id: str, phase: str,
             "phase": phase,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if review:
+            pending_value["review"] = True
 
     # Apply all state mutations atomically via locked_update
     if root:
@@ -351,6 +377,118 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         pr.pop("spec_pending", None)
 
     return spec_text, needs_review
+
+
+def _record_approval(pr: dict, phase: str, approved_at: str) -> None:
+    rec = pr.get("spec_approved")
+    if not isinstance(rec, dict):
+        rec = {}
+    rec[phase] = approved_at
+    pr["spec_approved"] = rec
+
+
+def is_spec_approved(pr: dict, phase: str) -> bool:
+    """Whether *phase*'s spec was approved through ``approve_spec``."""
+    rec = pr.get("spec_approved")
+    return isinstance(rec, dict) and bool(rec.get(phase))
+
+
+def needs_spec_approval(pr: dict, phase: str) -> bool:
+    """A spec for *phase* exists, was never approved and nothing is pending.
+
+    Specs from before approvals were recorded count as unapproved (the
+    "already-present spec" case of the auto-start review gate).
+    """
+    if has_pending_spec(pr) or is_spec_approved(pr, phase):
+        return False
+    return get_spec(pr, phase) is not None
+
+
+def mark_spec_pending(root: Path, pr_id: str, phase: str,
+                      source: str = "autostart",
+                      pr: dict | None = None) -> bool:
+    """Hold *phase*'s existing spec for review (sets ``spec_pending``).
+
+    Used by the auto-start spec-review gate to connect an inline-generated
+    (or already present) spec to the normal approval flow
+    (``pm pr spec-approve`` / ``V``).  Never replaces a pending spec.
+    Returns True when it set one.  *pr* (the caller's in-memory entry) is
+    updated too.
+    """
+    value = {
+        "phase": phase,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "review": True,
+        "source": source,
+    }
+    marked = False
+
+    def apply(fresh_data):
+        nonlocal marked
+        fresh_pr = store.get_pr(fresh_data, pr_id)
+        if not fresh_pr or fresh_pr.get("spec_pending"):
+            return
+        fresh_pr["spec_pending"] = dict(value)
+        marked = True
+
+    store.locked_update(root, apply)
+    if marked:
+        if pr is not None:
+            pr["spec_pending"] = dict(value)
+        _log.info("spec_gen: %s spec for %s held for review (%s)",
+                  phase, pr_id, source)
+    return marked
+
+
+PHASE_LABELS = {"impl": "implementation", "qa": "QA"}
+
+
+def approval_message(pr: dict, phase: str, edited: bool = False) -> str:
+    """The message sent to the waiting agent once its spec is approved."""
+    pr_id = pr.get("id", "???")
+    label = PHASE_LABELS.get(phase, phase)
+    path = f"pm/specs/{pr_id}/{phase}.md"
+    how = "approved with edits" if edited else "approved"
+    msg = (f"The {label} spec ({path}) was {how} via pm. Re-read it and "
+           f"proceed with the {label} work based on the approved spec.")
+    if phase == "qa":
+        msg += (" Emit (or re-emit) the complete QA plan "
+                "(QA_PLAN_START ... QA_PLAN_END) reflecting the approved spec.")
+    return msg
+
+
+def notify_spec_approved(pr: dict, phase: str, edited: bool = False,
+                         session: str | None = None) -> bool:
+    """Tell the agent waiting on *phase*'s spec that it was approved.
+
+    The implementation agent lives in the PR window (display id), the QA
+    planner in the first pane of ``qa-<display id>``.  No-op (False) when
+    there is no pm session or the window is gone.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _pr_display_id
+    from pm_core.loop_shared import find_claude_pane, get_pm_session
+
+    session = session or get_pm_session()
+    if not session:
+        return False
+    display = _pr_display_id(pr)
+    window = display if phase == "impl" else f"qa-{display}"
+    try:
+        pane = find_claude_pane(session, window)
+        if not pane:
+            return False
+        tmux_mod.send_keys(pane, approval_message(pr, phase, edited))
+        # Claude's prompt may take the first Enter as a newline in a
+        # pasted block; a second one submits (qa_loop follow-up pattern).
+        tmux_mod.send_keys(pane, "")
+    except Exception:
+        _log.warning("spec_gen: could not notify %s pane for %s",
+                     window, pr.get("id"), exc_info=True)
+        return False
+    _log.info("spec_gen: notified %s (%s) of %s spec approval",
+              window, pr.get("id"), phase)
+    return True
 
 
 def has_pending_spec(pr: dict) -> bool:
@@ -393,6 +531,8 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
 
     # Also update in-memory data for caller
     del pr["spec_pending"]
+    approved_at = datetime.now(timezone.utc).isoformat()
+    _record_approval(pr, phase, approved_at)
 
     if root:
         def apply(fresh_data):
@@ -400,6 +540,7 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
             if not fresh_pr:
                 return
             fresh_pr.pop("spec_pending", None)
+            _record_approval(fresh_pr, phase, approved_at)
 
         store.locked_update(root, apply)
 
@@ -449,8 +590,12 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
 
             store.locked_update(root, apply_feedback)
 
+    # A spec held by the review gate stays held: regenerate in review
+    # mode so rejecting never lets the phase proceed unapproved.
+    review = bool(pending.get("review"))
     try:
-        generate_spec(data, pr_id, phase, root=root, force=True)
+        generate_spec(data, pr_id, phase, root=root, force=True,
+                      review=review)
     finally:
         # Restore original description
         if feedback:
@@ -483,7 +628,8 @@ def oldest_pending_spec_pr(data: dict) -> str | None:
 
 
 def spec_generation_preamble(pr: dict, phase: str,
-                             root: Path | None = None) -> str:
+                             root: Path | None = None,
+                             review_gate: bool = False) -> str:
     """Build a prompt preamble for inline spec generation in the main session.
 
     Returns an empty string if a spec already exists for this phase.
@@ -496,16 +642,18 @@ def spec_generation_preamble(pr: dict, phase: str,
                unresolvable (present flagged questions to user first).
       review — save, present spec summary to user, wait for approval.
 
+    *review_gate* (auto-start spec review) forces review mode and says
+    approval comes only through ``pm pr spec-approve`` / ``V``.
+
     *root* is the pm project directory (containing project.yaml).
     """
     # If spec already exists, nothing to generate
     if get_spec(pr, phase):
         return ""
 
-    mode = pr_spec_mode(pr)
+    mode = pr_spec_mode(pr, review_gate)
     pr_id = pr.get("id", "???")
-    phase_labels = {"impl": "implementation", "qa": "QA"}
-    label = phase_labels.get(phase, phase)
+    label = PHASE_LABELS.get(phase, phase)
 
     # Derive the spec file path — use a relative path so the prompt works
     # inside containers where the workdir is mounted at /workspace rather
@@ -595,6 +743,14 @@ Save the spec to `{file_path}`.
 Then present a brief summary of the spec to the user and ask whether they
 approve or want changes.  If they request changes, update the spec file,
 re-save, and ask again.  Once approved, proceed with the {label} work below."""
+        if review_gate:
+            post_save += f"""
+
+Approval is recorded only through pm: the user approves with
+`pm pr spec-approve {pr_id}` (or `V` in the TUI), which may also edit the
+spec file.  You will receive a message saying the spec was approved — do not
+start the {label} work before that message, even if approval is given in
+this chat; wait for it."""
 
     return f"""
 ## How This Session Works
@@ -680,7 +836,8 @@ Use the contracts and scripted responses below — do not devise your own.
 """
 
 
-def format_spec_for_prompt(pr: dict, phase: str) -> str:
+def format_spec_for_prompt(pr: dict, phase: str,
+                           review_gate: bool = False) -> str:
     """Format a spec for inclusion in a Claude prompt.
 
     Returns a markdown section with the spec, or empty string if no spec.
@@ -695,7 +852,7 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
     }
     label = phase_labels.get(phase, f"{phase} Spec")
 
-    mode = pr_spec_mode(pr)
+    mode = pr_spec_mode(pr, review_gate)
     pr_id = pr.get("id", "???")
     try:
         root = store.find_project_root()

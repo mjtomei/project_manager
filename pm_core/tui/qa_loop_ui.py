@@ -147,6 +147,10 @@ def start_qa(app, pr_id: str) -> None:
         _log.info("start_qa: transitioned %s to qa status", pr_id)
 
     state = QALoopState(pr_id=pr_id)
+    # Auto-start spec review: the planner writes the QA spec in review
+    # mode and the scenario launch waits for its approval.
+    from pm_core.tui import auto_start as _auto_start
+    state.spec_review = _auto_start.spec_review_required(app, pr_id)
 
     def on_update(s: QALoopState):
         # Schedule UI update on the main thread
@@ -285,7 +289,11 @@ def stop_qa(app, pr_id: str) -> None:
 def poll_qa_state(app) -> None:
     """Called from the shared poll timer to update QA state in the TUI."""
     tracker = app._pane_idle_tracker
+    from pm_core.tui import auto_start as _auto_start
     for pr_id, state in list(app._qa_loops.items()):
+        # Track target-set changes (add/remove --review-specs, restart).
+        if state.running:
+            state.spec_review = _auto_start.spec_review_required(app, pr_id)
         # Wire each scenario pane into the idle tracker so the tech tree
         # can animate a spinner while QA is active.  Mirrors the lazy
         # registration used by review_loop_ui._poll_impl_idle.
@@ -470,6 +478,11 @@ def _resume_incomplete_qa(app) -> None:
 
 def _on_qa_update(app, state: QALoopState) -> None:
     """Handle QA progress update — log to TUI."""
+    if state.spec_review_pending != state._ui_spec_review_pending:
+        # The QA thread set/cleared spec_pending on disk: reload so the
+        # tree's S marker and the runs popup follow.
+        state._ui_spec_review_pending = state.spec_review_pending
+        app._load_state()
     if state.latest_output:
         # Escape: the log line renders markup, which would swallow the
         # "[pr-…]" prefix and bracketed parts like "[finalize: …]".

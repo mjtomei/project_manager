@@ -137,7 +137,8 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     return f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
 
 
-def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
+def generate_prompt(data: dict, pr_id: str, session_name: str | None = None,
+                    review_gate: bool = False) -> str:
     """Generate a Claude Code prompt for working on a PR.
 
     Args:
@@ -145,6 +146,8 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
         pr_id: The PR to generate a prompt for.
         session_name: If provided, include TUI interaction instructions
             targeting this tmux session.
+        review_gate: Auto-start spec review applies: the impl spec is
+            written in review mode and waits for pm-recorded approval.
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -193,8 +196,10 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     cleanup_block = _auto_cleanup_addendum()
 
     # Include implementation spec if already generated, or preamble to generate one
-    impl_spec_block = format_spec_for_prompt(pr, "impl")
-    impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
+    impl_spec_block = format_spec_for_prompt(pr, "impl",
+                                             review_gate=review_gate)
+    impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root,
+                                                  review_gate=review_gate)
 
     bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
 
@@ -1713,7 +1718,8 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
 
 def generate_qa_planner_prompt(data: dict, pr_id: str,
                                session_name: str | None = None,
-                               scenario_start: int = 1) -> str:
+                               scenario_start: int = 1,
+                               review_gate: bool = False) -> str:
     """Generate a prompt for the QA planning session.
 
     The planner analyzes the PR and the instruction library to generate
@@ -1753,8 +1759,9 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
-    qa_spec_block = format_spec_for_prompt(pr, "qa")
-    qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root)
+    qa_spec_block = format_spec_for_prompt(pr, "qa", review_gate=review_gate)
+    qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root,
+                                                review_gate=review_gate)
 
     bug_fix_qa_block = ""
     if _is_bug_pr(pr):

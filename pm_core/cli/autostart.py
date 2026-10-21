@@ -24,8 +24,8 @@ import click
 
 from pm_core import store
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_FLAGS, POLICY_STOP, POLICY_WAIT, REPLY_DIR,
-    TERMINAL_STATUSES, format_text,
+    NO_REVIEW_FLAG, POLICY_AUTO, POLICY_FLAGS, POLICY_STOP, POLICY_WAIT,
+    REPLY_DIR, REVIEW_FLAG, TERMINAL_STATUSES, format_text,
 )
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -192,10 +192,16 @@ _json_opt = click.option("--json", "as_json", is_flag=True,
 def _print_changes(payload: dict) -> None:
     for c in payload.get("changes") or []:
         pol = c.get("policy")
-        pol_s = f" ({pol.replace('_', '-')})" if pol else ""
+        parts = [pol.replace('_', '-')] if pol else []
+        if c.get("review_specs"):
+            parts.append("review-specs")
         prev = c.get("previous_policy")
         if prev:
-            pol_s = f" ({pol.replace('_', '-')}; was {prev.replace('_', '-')})"
+            parts.append(f"was {prev.replace('_', '-')}")
+        if "previous_review_specs" in c:
+            parts.append("was " + ("review-specs" if c["previous_review_specs"]
+                                   else "no review-specs"))
+        pol_s = f" ({'; '.join(parts)})" if parts else ""
         click.echo(f"{c.get('action')}: {c.get('pr_id')}{pol_s}")
     if payload.get("released"):
         click.echo("released merge hold: " + ", ".join(payload["released"]))
@@ -235,10 +241,21 @@ def autostart():
     the target (or changing its policy) releases only the holds it caused.
 
     \b
+    Spec review (target option, composes with any policy):
+      --review-specs     pause the target and every transitive
+                         prerequisite for approval of the implementation
+                         spec and again of the QA spec (V in the TUI, or
+                         `pm pr spec-approve PR`); `status` names the
+                         waiting spec and its file.  --no-review-specs
+                         turns it off; a spec already waiting stays
+                         waiting until approved.
+
+    \b
     Examples:
       pm autostart add pr-abc123 pr-def456
       pm autostart add 229 --auto-merge
       pm autostart add pr-final --wait-for-merge   # whole chain, manual merges
+      pm autostart add pr-final --review-specs --wait-for-merge
       pm autostart remove pr-abc123
       pm autostart list --json
       pm autostart status --json
@@ -258,14 +275,24 @@ def autostart():
               help="Hold the target and all its transitive prerequisites "
                    "for a manual merge (g / pm pr merge); merging one "
                    "starts its newly ready dependents")
+@click.option("--review-specs/--no-review-specs", "review", default=None,
+              help="Pause the target and its transitive prerequisites for "
+                   "approval of the implementation spec and the QA spec "
+                   "(V / pm pr spec-approve)")
 @_session_opt
 @_timeout_opt
 @_json_opt
-def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
+def autostart_add(pr_ids, stop, auto, wait, review, session, timeout, as_json):
     """Add PR_IDS as auto-start targets (additive, idempotent).
 
     Re-adding a target without a policy flag keeps its current policy; a
-    flag replaces it.  At most one policy flag may be given.
+    flag replaces it.  At most one policy flag may be given.  Likewise
+    --review-specs / --no-review-specs set or clear spec review and are
+    kept when omitted.
+
+    \b
+    Approve each spec before the chain continues:
+      pm autostart add pr-final --review-specs --wait-for-merge
 
     \b
     Run a whole dependency chain with manual merges:
@@ -287,6 +314,8 @@ def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
         args = ["add", *ids]
         if chosen:
             args.append(POLICY_FLAGS[chosen[0]])
+        if review is not None:
+            args.append(REVIEW_FLAG if review else NO_REVIEW_FLAG)
         payload = _request(session, args, timeout)
     except _Fail as f:
         _emit_fail(f, as_json)
@@ -341,7 +370,7 @@ def autostart_list(session, timeout, as_json):
            "owner": st.get("owner"), "mode": st.get("mode"),
            "targets": [{k: t.get(k) for k in
                         ("pr_id", "title", "policy", "effective_policy",
-                         "held_by", "added_at", "source")}
+                         "held_by", "review_specs", "added_at", "source")}
                        for t in st.get("targets") or []]}
     if not out["ok"]:
         out["error"] = payload.get("error")
@@ -356,8 +385,9 @@ def autostart_list(session, timeout, as_json):
             # already its policy.
             others = [x for x in t.get("held_by") or [] if x != t["pr_id"]]
             held = f" (held by {', '.join(others)})" if others else ""
+            rv = " +review-specs" if t.get("review_specs") else ""
             click.echo(f"  {t['pr_id']}  {t['policy'].replace('_', '-')}"
-                       f"{held}  {t.get('title') or ''}")
+                       f"{rv}{held}  {t.get('title') or ''}")
     _finish(out if as_json else payload, as_json, text)
 
 
@@ -371,6 +401,8 @@ def autostart_status(session, timeout, as_json):
     Same structured representation (schema pm.autostart.status/1) the TUI
     runs popup (key `a`) renders: phase, running/waiting/paused/failed/
     completed state, reason, review iteration / QA progress, tmux window.
+    A run paused on spec approval carries ``spec_review`` (phase impl/qa,
+    spec file path, approval command) and its reason says which spec.
     """
     try:
         payload = _request(session, ["status"], timeout)

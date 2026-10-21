@@ -1015,6 +1015,15 @@ def _current_window_phase(window_name: str) -> str | None:
     return "start"
 
 
+# Picker row of the step a pending spec review holds.
+_SPEC_REVIEW_ACTION: dict[str, str] = {"impl": "start", "qa": "qa"}
+
+
+def _pending_spec_phase(pr: dict) -> str | None:
+    pending = pr.get("spec_pending")
+    return pending.get("phase") if isinstance(pending, dict) else None
+
+
 def _format_action_status(pr_id: str, action: str) -> str:
     """Return a short status badge for an action, or '' when nothing useful.
 
@@ -1193,6 +1202,10 @@ def _build_picker_lines(
         # (e.g. review-loop's '[loop i3]' lives on the review row since
         # review-loop iterations run in the review window).
         status_tag += fold_status.get(label, "")
+        # The step waiting on a spec approval (V / pm pr spec-approve):
+        # the implementation spec gates start, the QA spec gates qa.
+        if _SPEC_REVIEW_ACTION.get(_pending_spec_phase(pr)) == label:
+            status_tag += " [spec review]"
 
         lines.append((f"  {indicator} {label:<18s}"
                       f"{open_tag}{status_tag}", cmd, display_id))

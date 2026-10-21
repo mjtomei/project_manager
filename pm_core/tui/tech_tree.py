@@ -608,10 +608,19 @@ class PRNode(Widget):
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold cyan"
                     status_text += f" {spinner}"
-        if pr.get("spec_pending") and not loop_marker:
+        spec_marker = None
+        if pr.get("spec_pending"):
+            # A spec awaiting approval (V) pauses the step: it outranks the
+            # loop / idle markers — a running QA planner's spinner would
+            # otherwise hide that QA is waiting on it.  "S impl" / "S qa"
+            # names the step that waits.
+            status_text = f"{icon} {status}"
+            phase = (pr["spec_pending"].get("phase")
+                     if isinstance(pr["spec_pending"], dict) else None)
+            spec_marker = f"S {phase}" if phase in ("impl", "qa") else "S"
             marker_offset = 2 + len(status_text) + 1
             loop_style = "bold yellow"
-            status_text += " S"
+            status_text += f" {spec_marker}"
         machine = pr.get("agent_machine")
         if machine:
             avail = NODE_W - 4 - cell_len(status_text) - 1
@@ -655,7 +664,8 @@ class PRNode(Widget):
                 style_grid[1][target_dx] = f"bold magenta {bg_style}".strip()
 
         if marker_offset >= 0 and loop_style:
-            marker_len = len(loop_marker) if loop_marker else 1
+            marker_len = (len(spec_marker) if spec_marker
+                          else len(loop_marker) if loop_marker else 1)
             for dx in range(marker_offset, marker_offset + marker_len):
                 if 0 <= dx < NODE_W:
                     style_grid[3][dx] = f"{loop_style} {bg_style}".strip()
@@ -872,6 +882,8 @@ class TechTree(Widget):
                 pr.get("plan"),
                 pr.get("gh_pr_number"),
                 bool(pr.get("spec_pending")),
+                (pr.get("spec_pending") or {}).get("phase")
+                if isinstance(pr.get("spec_pending"), dict) else None,
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
                 (pr.get("signoff") or {}).get("verdict"),

@@ -980,6 +980,12 @@ def _poll_impl_idle(app) -> None:
 
         tracker.poll(pr_id)
 
+        # Auto-start spec review: hold the impl spec the session just
+        # wrote (inline Step 0) for approval as soon as it appears, so
+        # the agent waiting on it is never taken for finished work below.
+        if status == "in_progress":
+            _auto_start.hold_spec_if_due(app, pr)
+
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
             if pr.get("spec_pending"):

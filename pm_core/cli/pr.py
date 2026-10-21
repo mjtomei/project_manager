@@ -702,11 +702,16 @@ def pr_spec_approve(pr_id: str):
             return
         spec_gen.approve_spec(data, pr_id, root=root, edited_text=edited_content)
         click.echo(f"Spec approved for {phase} phase.")
+        edited_flag = edited_content != spec_text.strip()
     else:
         # Editor returned None = no changes, approve as-is
         spec_gen.approve_spec(data, pr_id, root=root)
         click.echo(f"Spec approved (unchanged) for {phase} phase.")
+        edited_flag = False
 
+    # Resume the agent waiting on this spec (inline Step 0 in review mode).
+    if spec_gen.notify_spec_approved(pr_entry, phase, edited=edited_flag):
+        click.echo("Notified the waiting session.")
     trigger_tui_refresh()
 
 
@@ -720,7 +725,12 @@ def pr_spec_approve(pr_id: str):
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane in the PR workdir")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool):
+@click.option("--review-spec", "review_spec", is_flag=True, default=False,
+              hidden=True,
+              help="Write the impl spec in review mode and wait for "
+                   "pm-recorded approval (used by auto-start spec review)")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool,
+             review_spec: bool = False):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -973,7 +983,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {machine}")
     click.echo(f"Work directory: {work_path}")
 
-    prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
+    prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session,
+                                        review_gate=review_spec)
 
     # Resolve model/provider for this implementation session
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
