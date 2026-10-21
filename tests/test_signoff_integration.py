@@ -353,6 +353,54 @@ def test_cli_ignores_qa_status_older_than_the_return(tmp_path):
     qa.assert_called_once()
 
 
+def test_cli_qa_status_older_than_an_impl_return_does_not_advance(tmp_path):
+    """Rework after an IMPL return must be re-verified, not signed off on
+    the QA PASS sign-off already judged."""
+    old = tmp_path / "qa_status.json"
+    old.write_text("{}")
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "impl", awaiting=None),
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": ("PASS", old)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name": {"return_value": None}})
+    assert result.exit_code == 0, result.output
+    assert "advanced: sign_off" not in result.output
+    qa.assert_called_once()
+
+
+def _review_transcripts(tmp_path, *iters):
+    tdir = tmp_path / "transcripts" / "auto-sequence" / PR
+    tdir.mkdir(parents=True)
+    for i in iters:
+        (tdir / f"review-{PR}-i{i}.jsonl").write_text("")
+    return tdir
+
+
+def test_cli_impl_rework_review_continues_iteration_numbering(tmp_path):
+    """The idle rework advances to review as the NEXT iteration: the next
+    tick reads the highest one, which must be the rework's review."""
+    _review_transcripts(tmp_path, 1, 2, 3)
+    result, _, review, _ = _seq(
+        tmp_path, _returned("in_progress", "impl", awaiting=None),
+        **{"pm_core.cli.pr._check_impl_idle": {"return_value": (True, False)}})
+    assert result.exit_code == 0, result.output
+    assert "advanced: in_review" in result.output
+    kwargs = review.call_args.kwargs
+    assert kwargs["review_iteration"] == 4
+    assert kwargs["transcript"].endswith(f"review-{PR}-i4.jsonl")
+
+
+def test_cli_ignores_review_pass_older_than_an_impl_return(tmp_path):
+    _review_transcripts(tmp_path, 3)
+    result, _, _, qa = _seq(
+        tmp_path, _returned("in_review", "impl", awaiting=None),
+        **{"pm_core.cli.pr._check_review_verdict": {"return_value": ("PASS", 3)},
+           "pm_core.cli.pr._review_window_pane": {"return_value": "%1"}})
+    assert result.exit_code == 0, result.output
+    assert "advanced: qa" not in result.output
+    assert "running: review" in result.output
+    qa.assert_not_called()
+
+
 # --- restart-safe resumption (TUI scheduler) -------------------------------
 
 def test_tui_scheduler_relaunches_awaiting_impl_fresh(tmp_path):

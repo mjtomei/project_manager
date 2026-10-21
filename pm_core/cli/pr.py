@@ -3299,7 +3299,7 @@ def pr_auto_sequence(pr_id: str):
         click.echo("started")
         return
 
-    from pm_core.signoff import return_awaiting
+    from pm_core.signoff import open_return, return_awaiting
     awaiting = return_awaiting(pr_entry)
 
     if status == "in_progress":
@@ -3335,12 +3335,16 @@ def pr_auto_sequence(pr_id: str):
             return
         # Idle and no spec_pending → advance to review.  Persist the
         # transcript symlink under the auto-sequence dir so the next tick
-        # can locate the verdict.  Use review-loop iteration 1 naming so
-        # NEEDS_WORK retries (iteration 2+) follow the same scheme.
-        iter_transcript = tdir / f"review-{pr_id}-i1.jsonl"
+        # can locate the verdict.  Use review-loop iteration naming so
+        # NEEDS_WORK retries follow the same scheme; after a sign-off
+        # return the earlier iterations exist, and the next tick reads
+        # the highest one — so continue numbering after them.
+        _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+        next_iter = latest_iter + 1
+        iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
         ctx = click.get_current_context()
         ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
-                   review_loop=False, review_iteration=1,
+                   review_loop=False, review_iteration=next_iter,
                    review_loop_id="", transcript=str(iter_transcript))
         click.echo("advanced: in_review")
         return
@@ -3350,6 +3354,11 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: no pm tmux session")
             return
         verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+        if verdict and _older_than(
+                tdir / f"review-{pr_id}-i{latest_iter}.jsonl",
+                (open_return(pr_entry) or {}).get("ts")):
+            # Reviewed the code sign-off sent back, not the rework.
+            verdict = None
         if awaiting == "review":
             # A sign-off REVIEW return: an earlier iteration's verdict
             # reviewed older code — launch a fresh iteration.
@@ -3414,11 +3423,11 @@ def pr_auto_sequence(pr_id: str):
 
     if status == "qa":
         overall, _path = _qa_status_for(pr_id)
-        ret = pr_entry.get("signoff_return") or {}
-        if overall and ret.get("hop") == "qa" \
-                and _older_than(_path, ret.get("ts")):
-            # The status predates sign-off's REQA return: it is the run
-            # sign-off already judged insufficient, not the re-run.
+        if overall and _older_than(_path,
+                                   (open_return(pr_entry) or {}).get("ts")):
+            # The status predates sign-off's return (REQA, or rework that
+            # must be re-verified): it is the run sign-off already judged,
+            # not the re-run.
             overall = None
         if overall == "PASS":
             # QA passed and finalized -> advance to the sign_off step, which

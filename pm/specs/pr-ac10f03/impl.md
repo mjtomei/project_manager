@@ -131,7 +131,12 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
     `--fresh` instead of advancing an idle (old) session to review;
     `in_review` + awaiting review → launch a new review iteration instead of
     adopting an older PASS transcript; `qa` + awaiting qa → launch QA instead
-    of adopting an older `qa_status.json` PASS.
+    of adopting an older `qa_status.json` PASS.  For the whole open return
+    episode (any hop), a review transcript or `qa_status.json` written
+    before the return is ignored, and the impl→review advance continues the
+    review iteration numbering (the next tick reads the highest iteration),
+    so rework after an IMPL return is reviewed and re-verified rather than
+    advanced on the pre-return PASS.
   - TUI: `auto_start.check_and_start` starts awaiting-impl PRs with
     `fresh=True`; `_poll_impl_idle` does not auto-review an awaiting-impl PR;
     `_auto_start_qa_loops` / `signoff_ui.advance_all` ignore a recorded QA PASS

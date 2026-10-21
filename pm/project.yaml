@@ -28707,11 +28707,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T13:38:20.751436+00:00'
-  updated_at: '2026-10-13T13:38:20.751436+00:00'
+  updated_at: '2026-10-21T22:43:41.355191+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d48e767
+    text: 'pr-ac10f03 changes vanilla `pm pr merge`: it now pushes the approved merge
+      commit only to the workdir origin FETCH url (git push <fetch-url> <merge>:refs/heads/<base>
+      --force-with-lease), never `git push origin` with the dual push URLs, and no
+      merge window is opened on a push failure. Once pr-ac10f03 merges, re-check whether
+      this bug still reproduces anywhere else (other `git push origin <base>` callers)
+      before working on it.'
+    created_at: '2026-10-21T22:43:41Z'
+    last_edited: '2026-10-21T22:43:41Z'
 - id: pr-d72df02
   plan: bugs
   title: 'Bug: tech-tree node keeps the cyan busy spinner after its impl pane is killed'
