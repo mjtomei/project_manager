@@ -29576,11 +29576,28 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-21T00:15:38.677739+00:00'
+  updated_at: '2026-10-21T03:19:23.365890+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e967b4c
+    text: 'Refiner S5 (concurrency) probe on dd4f97ef: 34 parallel --render + 16-thread
+      runner (240 renders) all matched baseline; 10 parallel --write-doc + 6 pytest
+      + renders x4 waves left rubric.md == committed, but ~1 in 40 --write-doc crashed
+      "ValueError: not enough values to unpack" at text.split(GENERATED_START) after
+      reading a mid-write (truncated) rubric.md from a sibling writer — expected non-atomic-write
+      race, report as low-severity. pytest needs a venv: python3 -m venv V && V/bin/pip
+      install pytest pyyaml; run V/bin/python -m pytest from repo root (tests import
+      pm_core).'
+    created_at: '2026-10-21T03:15:12Z'
+    last_edited: '2026-10-21T03:15:12Z'
+  - id: note-e85b796
+    text: 'QA S5: write_doc now replaces rubric.md via mkstemp+os.replace (85cd00e9);
+      before this, 5/80 concurrent --write-doc runs crashed with ValueError at the
+      GENERATED split. tests/test_doc_rubric.py is now 149 tests, not 148.'
+    created_at: '2026-10-21T03:19:23Z'
+    last_edited: '2026-10-21T03:19:23Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
