@@ -124,6 +124,10 @@
 - In continuations, each prefix-related fault has one owner: contradicting the
   prefix is fidelity, repeating or restarting it is continuity (concision judges
   filler within the section only), so fixtures for one do not move the other.
+  The same holds for restarting, looping back or skipping ahead (continuity, not
+  progression, which judges order within the section) and re-introducing the
+  document's purpose (continuity, not purpose). Exclusions and non-goals belong to
+  scope_and_abstraction, not risks_and_open_questions.
 - No network or model calls in tests; reference URLs are not fetched in tests.
 - Internal-consistency fixtures contradict themselves only about choices the brief
   leaves open; a contradiction of the brief would also move fidelity.
