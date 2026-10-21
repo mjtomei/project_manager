@@ -29937,7 +29937,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T23:04:57.086500+00:00'
+  updated_at: '2026-10-21T23:12:25.136599+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30083,6 +30083,13 @@ prs:
       impl pane after a review loop.'
     created_at: '2026-10-21T23:04:57Z'
     last_edited: '2026-10-21T23:04:57Z'
+  - id: note-c86c649
+    text: 'Review i3: fixed S4 phantom "start untracked" rows at query time (history_query._fold_retracked):
+      a runtime attempt re-tracking the previous same-action attempt session that
+      ended untracked continues it after a "not tracked" span (neither exec nor wait);
+      runtime attempt_id of the re-opened attempt aliases to the kept one. Spec E8.'
+    created_at: '2026-10-21T23:12:25Z'
+    last_edited: '2026-10-21T23:12:25Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
