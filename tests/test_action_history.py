@@ -937,7 +937,10 @@ class TestCliAndPane:
             cli, ["-C", str(root), "pr", "history", PR]).stdout
         monkeypatch.setattr(session, "state_root", lambda: root)
         shown = {}
+        # Wide popup: no wrapping, so the pager text is the CLI text.
         with patch("shutil.which", return_value="/usr/bin/less"), \
+                patch("shutil.get_terminal_size",
+                      return_value=os.terminal_size((500, 30))), \
                 patch.object(session.subprocess, "run",
                              side_effect=lambda cmd, input, **k:
                              shown.update(cmd=cmd, text=input)):
@@ -961,13 +964,36 @@ class TestCliAndPane:
         monkeypatch.setattr(session, "_resolve_root_from_session",
                             lambda s: root if s == "pm-x" else None)
         shown = {}
+        # Wide popup: no wrapping, so the pager text is the CLI text.
         with patch("shutil.which", return_value="/usr/bin/less"), \
+                patch("shutil.get_terminal_size",
+                      return_value=os.terminal_size((500, 30))), \
                 patch.object(session.subprocess, "run",
                              side_effect=lambda cmd, input, **k:
                              shown.update(cmd=cmd, text=input)):
             session._run_picker_command(f"view:history {PR}", "pm-x")
         assert "[in_review]" in shown["text"]
         assert shown["text"] == cli_out
+
+    def test_pane_wraps_to_popup_width(self, tmp_path, clock, monkeypatch):
+        # An 80-col client gives a ~74-col popup: the pager text must be
+        # wrapped by pm (like the CLI on a TTY), not hard-broken by less.
+        from pm_core.cli import cli, session
+        root = _project(tmp_path)
+        _seed(clock)
+        cli_out = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "history", PR]).stdout
+        monkeypatch.setattr(session, "state_root", lambda: root)
+        shown = {}
+        with patch("shutil.which", return_value="/usr/bin/less"), \
+                patch("shutil.get_terminal_size",
+                      return_value=os.terminal_size((50, 30))), \
+                patch.object(session.subprocess, "run",
+                             side_effect=lambda cmd, input, **k:
+                             shown.update(cmd=cmd, text=input)):
+            session._run_picker_command(f"view:history {PR}", "pm-x")
+        assert max(len(ln) for ln in shown["text"].splitlines()) <= 50
+        assert shown["text"].split() == cli_out.split()
 
     def test_catalog_entry(self):
         from pm_core import action_catalog

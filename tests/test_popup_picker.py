@@ -10,6 +10,7 @@ from pm_core.cli.session import (
     _run_picker_command,
     _ALL_ACTIONS,
     _wrap_picker_header,
+    _parse_fzf_expect,
 )
 
 
@@ -438,3 +439,20 @@ class TestWrapPickerHeader:
     def test_fitting_header_unchanged(self):
         header = f"PR Actions — pr-1\n{self.HINT}"
         assert self._wrap(header, 200) == header
+
+
+class TestParseFzfExpect:
+    def test_enter_keeps_selected_row(self):
+        """Enter prints an empty key line; the indented row must survive."""
+        out = "\n    history            [1 run]\n"
+        assert _parse_fzf_expect(out) == ("", "    history            [1 run]")
+
+    def test_shortcut_key(self):
+        assert _parse_fzf_expect("H\n  ● start   [open]\n") == (
+            "H", "  ● start   [open]")
+
+    def test_selected_row_matches_picker_line(self):
+        lines = _build_picker_lines([_pr("pr-1")], "pr-1", [])
+        display = lines[-1][0]
+        _, selected = _parse_fzf_expect(f"\n{display}\n")
+        assert any(d == selected for d, _, _ in lines)

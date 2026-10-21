@@ -1259,7 +1259,14 @@ def _show_view_action(cmd: str, session: str = "") -> None:
     except Exception:
         pr = None
     try:
-        text = "\n".join(action.render(action.query(pr_id, pr))) + "\n"
+        # Wrap at the popup width the way ``emit_paged`` does on a TTY,
+        # so the pager shows the same lines as ``pm pr history`` instead
+        # of less hard-breaking them mid-word.
+        from pm_core.cli.helpers import _wrap_record_to_width
+        width = shutil.get_terminal_size((80, 24)).columns
+        text = "\n".join(
+            _wrap_record_to_width(line, width, "    ")
+            for line in action.render(action.query(pr_id, pr))) + "\n"
     except Exception as e:
         _log.exception("view action %s failed for %s", key, pr_id)
         click.echo(f"{action.label} failed: {e}")
@@ -1301,6 +1308,20 @@ def _fzf_supports_no_input() -> bool:
         supported = False
     _fzf_supports_no_input._cached = supported  # type: ignore[attr-defined]
     return supported
+
+
+def _parse_fzf_expect(stdout: str) -> tuple[str, str]:
+    """Split ``fzf --expect`` output into (pressed key, selected line).
+
+    fzf prints the pressed key (an empty line for Enter) and then the
+    selection.  Only trailing newlines may be dropped: ``strip()`` would
+    eat the empty key line plus the row's indentation, so an Enter
+    selection would be read as a key and nothing would run.
+    """
+    out_lines = stdout.rstrip("\n").split("\n")
+    pressed_key = out_lines[0] if out_lines else ""
+    selected = out_lines[1] if len(out_lines) > 1 else ""
+    return pressed_key, selected
 
 
 def _wrap_picker_header(header: str) -> str:
@@ -2031,9 +2052,7 @@ def popup_picker_cmd(session: str, window_name: str):
                 chord_state = "main"
                 continue
 
-            out_lines = stdout.strip().split("\n")
-            pressed_key = out_lines[0] if out_lines else ""
-            selected = out_lines[1] if len(out_lines) > 1 else ""
+            pressed_key, selected = _parse_fzf_expect(stdout)
 
             if chord_state == "main":
                 if multi_pr and pressed_key in ("h", "left"):
