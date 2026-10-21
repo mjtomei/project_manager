@@ -753,6 +753,31 @@ class TestReconciliation:
                                            "permission prompt")
         assert hq.summary_badge(m) == " [qa s1: permission prompt]"
 
+    def test_scenario_turn_finished_sees_shared_run_grace(
+            self, clock, monkeypatch):
+        """The QA verdict grace is owned by the run but gates every
+        scenario: an idle scenario is in grace, not waiting for a turn."""
+        run = ah.start_attempt(PR, "qa", label="QA run")
+        ah.arm_timer(PR, "qa-grace:L1", purpose="QA scenario verdict grace",
+                     owner_action="qa", owner_attempt=run, duration=30,
+                     effect="gate")
+        s1 = ah.start_attempt(PR, "qa", parent=run, scenario=1,
+                              session_id="sess-1")
+        ah.phase(PR, s1, "agent")
+        clock.advance(10)
+        from pm_core import hook_events
+        monkeypatch.setattr(hook_events, "read_event", lambda sid: {
+            "event_type": "idle_prompt", "timestamp": clock.t - 1})
+        m = hq.build_history(PR, now=clock.t)
+        (row,) = m["current"]
+        assert row["state"] == "turn_finished"
+        assert "verdict grace until" in row["text"]
+        assert row["grace_remaining_s"] == 20
+        assert hq.summary_badge(m) == " [qa s1: turn done, 20s left]"
+        clock.advance(25)  # grace elapsed: now really waiting for a turn
+        m = hq.build_history(PR, now=clock.t)
+        assert "no verdict accepted yet" in m["current"][0]["text"]
+
 
 # ---------------------------------------------------------------------------
 # CLI + pane

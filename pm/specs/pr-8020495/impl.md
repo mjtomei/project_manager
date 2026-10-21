@@ -202,7 +202,9 @@ The model contains:
     for an open attempt in `agent` phase with a known session, the latest
     hook event → distinguishes "agent working", "agent turn finished at T
     (waiting for verdict / in grace)", "processing verdict", "launching
-    next iteration", "waiting on human".
+    next iteration", "waiting on human". The grace shown is the
+    attempt's own `gate` timer or, failing that, the nearest ancestor's
+    (the QA verdict grace is owned by the run and gates every scenario).
   - `waiting_for`: one-line summary (what PM is waiting for now). Priority:
     holds, overdue `fires` timers, an activity row needing a human
     (permission prompt / INPUT_REQUIRED wait), the soonest `fires` timer,

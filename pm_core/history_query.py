@@ -473,13 +473,14 @@ def _current_activity(attempts: dict[str, dict], timers: dict,
                     or a.get("adopted")):
                 ev = None
             if ev and etype == "idle_prompt":
-                grace = [r for r in active_by_owner.get(a["id"], [])
-                         if r.get("effect") == "gate" and r.get("due_t")]
+                grace = _gate_timers(a, active_by_owner)
                 row["state"] = "turn_finished"
                 row["turn_ended_at"] = _ah.iso(ev_t)
                 text = (f"agent turn finished at {_clock(ev_t, t_now)} "
                         f"(idle {_dur(t_now - ev_t)})")
                 if grace:
+                    row["grace_due_at"] = grace[0]["due_at"]
+                    row["grace_remaining_s"] = grace[0]["remaining_s"]
                     text += (f"; verdict grace until "
                              f"{_clock(grace[0]['due_t'], t_now)}")
                 elif a.get("action") in ("review-loop", "qa"):
@@ -519,6 +520,21 @@ def _current_activity(attempts: dict[str, dict], timers: dict,
             row["text"] += " (owner liveness unknown)"
         out.append(row)
     return out
+
+
+def _gate_timers(a: dict, active_by_owner: dict[str, list[dict]]
+                 ) -> list[dict]:
+    """Active countdown gates owned by *a* or, failing that, its nearest
+    ancestor that has one: the QA verdict grace is shared by all scenarios
+    and owned by the run, not by each scenario attempt."""
+    node: dict | None = a
+    while node is not None:
+        gates = [r for r in active_by_owner.get(node["id"], [])
+                 if r.get("effect") == "gate" and r.get("due_t")]
+        if gates:
+            return gates
+        node = node.get("_parent_obj")
+    return []
 
 
 def _derived_hold(timer: str, purpose: str, owner_action: str, armed,
@@ -886,11 +902,13 @@ def summary_badge(model: dict, width: int = 36) -> str:
     elif model.get("current"):
         row = _focus_row(model["current"])
         text = f"{row['name']}: {_BADGE_STATES.get(row['state'], row['state'])}"
-        grace = [t for t in model["timers"]["active"]
-                 if t.get("owner_attempt") == row["attempt"]
-                 and t.get("remaining_s") is not None]
-        if grace:
-            text += f", {_dur(grace[0]['remaining_s'])} left"
+        left = [t["remaining_s"] for t in model["timers"]["active"]
+                if t.get("owner_attempt") == row["attempt"]
+                and t.get("remaining_s") is not None]
+        if not left and row.get("grace_remaining_s") is not None:
+            left = [row["grace_remaining_s"]]  # inherited shared grace
+        if left:
+            text += f", {_dur(left[0])} left"
     elif model.get("attempts"):
         n = len(model["attempts"])
         return f" [{n} run{'s' if n != 1 else ''}]"
