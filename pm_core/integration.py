@@ -100,7 +100,8 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
         from pm_core.cli.helpers import _resolve_repo_dir, state_root
         return str(_resolve_repo_dir(root or state_root(), data)), base_branch
     workdir = pr.get("workdir")
-    url = _out(_git("remote", "get-url", "origin", cwd=workdir)) if workdir else ""
+    url = (_out(_git("remote", "get-url", "origin", cwd=workdir))
+           if workdir and Path(workdir).is_dir() else "")
     return (url or project.get("repo", "")), base_branch
 
 
@@ -226,15 +227,18 @@ def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
     """Fetch the base and compute the candidate for *pr* (no state writes)."""
     record: dict = {"checked_at": _now()}
     workdir = pr.get("workdir")
+    if not workdir or not Path(workdir).is_dir():
+        workdir = _cwd_checkout_of(pr)
     try:
-        target_repo, base_branch = target_for(data, pr, root)
+        # The target comes from the checkout actually used (its origin), so
+        # an in-container re-check resolves it from its own worktree.
+        target_repo, base_branch = target_for(
+            data, dict(pr, workdir=workdir), root)
     except Exception as e:  # repo dir resolution is best-effort
         target_repo, base_branch = "", (data.get("project") or {}).get(
             "base_branch", "master")
         _log.warning("integration target for %s: %s", pr.get("id"), e)
     record.update(target_repo=target_repo, base_branch=base_branch)
-    if not workdir or not Path(workdir).is_dir():
-        workdir = _cwd_checkout_of(pr)
     if not workdir:
         record.update(status=ERROR, error="no PR workdir")
         return record

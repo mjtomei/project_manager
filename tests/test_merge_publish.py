@@ -170,6 +170,27 @@ def test_local_base_moving_during_publication_is_refused(local):
     assert pr_entry(local)["signoff"]["invalidated"]
 
 
+def test_local_base_moving_before_fast_forward_is_refused(local):
+    """The checked-out base moves after the CAS check, right before the
+    fast-forward: the failed ff returns the PR to sign-off (not "re-run")."""
+    approve(local)
+    real = pr_mod.git_ops.run_git
+    racing = {}
+
+    def run_git(*args, **kw):
+        if args[:2] == ("merge", "--ff-only") and not racing:
+            racing["sha"] = commit(local.repo, "race.txt", "race\n", "race")
+        return real(*args, **kw)
+
+    with mock.patch.object(pr_mod.git_ops, "run_git", run_git):
+        result, windows, finalized = merge(local)
+    assert result.exit_code != 0
+    assert "moved during the merge" in result.output
+    assert windows == [] and not finalized
+    assert git(local.repo, "rev-parse", "master") == racing["sha"]
+    assert pr_entry(local)["signoff"]["invalidated"]
+
+
 def test_local_main_repo_on_other_branch_updates_ref(local):
     git(local.repo, "checkout", "-q", "-b", "user-work")
     rec = approve(local)

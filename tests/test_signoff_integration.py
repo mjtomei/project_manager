@@ -524,3 +524,18 @@ def test_head_equal_to_base_is_in_base_not_mergeable(w):
     out = integration.compute_candidate(str(w.wd), base_sha, base_sha)
     assert out["status"] == integration.IN_BASE
     assert out["candidate_tree"] is None
+
+
+def test_recheck_from_own_checkout_resolves_remote_target(w, monkeypatch):
+    """In a container the recorded host workdir is absent: the re-check uses
+    the current checkout of the PR branch and takes the target from its
+    origin (remote backends), instead of failing with no target."""
+    data = store.load(w.pm_dir)
+    data["project"]["backend"] = "vanilla"
+    p = store.get_pr(data, PR)
+    p["workdir"] = str(w.wd.parent / "host-only-path")
+    monkeypatch.chdir(w.wd)
+    rec = integration.run_check(data, p, w.pm_dir)
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    assert rec["target_repo"] == str(w.repo)
+    assert rec["head"] == w.head

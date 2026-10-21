@@ -2056,6 +2056,12 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
                                           cwd=repo_dir, check=False)
         if stash_info:
             _unstash_after_merge(repo_path, stash_info)
+        if merge_r.returncode != 0 and _ref(
+                repo_dir, f"refs/heads/{base_branch}") != base_sha:
+            # A commit landed on the checked-out base after the CAS check.
+            _return_to_signoff(root, pr_entry,
+                               f"{base_branch} in {repo_dir} moved during "
+                               f"the merge")
         if merge_r.returncode != 0:
             click.echo(f"Fast-forward of {base_branch} in {repo_dir} failed:\n"
                        f"{_git_detail(merge_r)}\nNothing in {repo_dir} was "
