@@ -10,7 +10,7 @@ Continuation cases show a document up to a section heading and hold the
 section that starts there as reference. PM cases use recovered planning
 conversations as the prompt and the current plan file as the production
 baseline. Generator inputs come only from `generator_input`, which never
-reads a reference span or a baseline.
+reads a reference span or a baseline; references come from `reference_text`.
 
 The catalog stores offsets into the corpus text files rather than copies of
 prefixes and references, plus each text's sha256 so stale offsets are
@@ -444,6 +444,30 @@ def generator_input(case, data_dir=None, context_items=None):
     raise ValueError("Unknown case type: " + kind)
 
 
+def reference_text(case, data_dir=None):
+    """The withheld text outputs are compared with: the document, the next section, or the plan baseline.
+
+    Refuses references whose file is missing or changed since the build, like generator_input.
+    """
+    kind = case["case_type"]
+    if kind == "pm_plan":
+        path, sha = pm_cases.REPO / case["baseline"]["path"], case["baseline"]["sha256"]
+    elif kind == "whole_document":
+        path, sha = Path(data_dir or DATA) / case["reference"]["text_path"], case["reference"]["sha256"]
+    elif kind == "continuation":
+        path, sha = Path(data_dir or DATA) / case["inputs"]["text_path"], case["provenance"]["text_sha256"]
+    else:
+        raise ValueError("Unknown case type: " + kind)
+    if not path.exists():
+        raise ValueError(f"{case['case_id']}: reference {path} is missing")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if hashlib.sha256(text.encode()).hexdigest() != sha:
+        raise ValueError(f"{case['case_id']}: reference text changed since the catalog was built")
+    if kind == "continuation":
+        return text[case["reference"]["start"]: case["reference"]["end"]]
+    return text
+
+
 # --- build -------------------------------------------------------------------
 
 def build(limit_sources=None):
@@ -694,6 +718,10 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                 if committed and (not doc_date or committed > doc_date):
                     failures["attachment_version_after_document"].append(cid)
             try:
+                reference_text(case, data_dir)
+            except ValueError as exc:
+                failures["stale_reference"].append(str(exc))
+            try:
                 gen = generator_input(case, data_dir, items)
             except ValueError as exc:
                 failures["stale_generator_input"].append(str(exc))
@@ -722,7 +750,7 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
             except ValueError as exc:
                 failures["stale_generator_input"].append(str(exc))
                 continue
-            reference = text[case["reference"]["start"]: case["reference"]["end"]]
+            reference = reference_text(case, data_dir)
             if reference.strip() and reference.strip() in gen["prefix"] + gen["instruction"]:
                 failures["reference_in_generator_input"].append(cid)
             if len(gen["prefix"]) != end:
@@ -742,9 +770,12 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
             if not Path(case["inputs"]["conversation_path"]).exists():
                 failures["pm_conversation_missing"].append(cid)
                 continue
-            baseline_path = pm_cases.REPO / case["baseline"]["path"]
-            baseline = baseline_path.read_text() if baseline_path.exists() else None
-            if baseline and baseline.strip() in _input_text(generator_input(case, data_dir)):
+            try:
+                baseline = reference_text(case, data_dir)
+            except ValueError as exc:
+                failures["stale_reference"].append(str(exc))
+                continue
+            if baseline.strip() and baseline.strip() in _input_text(generator_input(case, data_dir)):
                 failures["baseline_in_generator_input"].append(cid)
     covered = coverage["documents"]
     partial = coverage.get("partial_sources")

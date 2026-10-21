@@ -111,7 +111,9 @@ exactly once.
   It refuses stale inputs (document text or attachment sha256 changed since the
   build), and `--check` reports those as `stale_generator_input`; brief items
   missing from a rebuilt context store are reported as
-  `brief_item_missing_from_context`.
+  `brief_item_missing_from_context`. References (whole document, next section,
+  plan baseline) come only from `reference_text(case)`, which likewise refuses
+  missing or changed files; `--check` reports those as `stale_reference`.
 - Leak filter: normalized lowercase word tokens; any context sentence sharing an
   8-gram with the body is dropped. Body = document text minus a recognised
   metadata header (PEP field list, Rust/Cockroach `- Field:` list, Go

@@ -374,6 +374,31 @@ def test_generator_input_rejects_changed_text(catalog):
         cases.generator_input(case, data)
 
 
+def test_reference_text_returns_withheld_text(catalog):
+    data = catalog["data"]
+    by_type = {c["case_type"]: c for c in catalog["cases"]}
+    cont = by_type["continuation"]
+    text = (data / cont["inputs"]["text_path"]).read_text()
+    assert cases.reference_text(cont, data) == text[cont["reference"]["start"]: cont["reference"]["end"]]
+    whole = by_type["whole_document"]
+    assert cases.reference_text(whole, data) == (data / whole["reference"]["text_path"]).read_text()
+    pm = by_type["pm_plan"]
+    assert "must not see" in cases.reference_text(pm, data)
+
+
+def test_check_reports_stale_reference(catalog):
+    data = catalog["data"]
+    whole = next(c for c in catalog["cases"] if c["case_type"] == "whole_document")
+    (data / whole["reference"]["text_path"]).write_text("rewritten document")
+    pm = next(c for c in catalog["cases"] if c["case_type"] == "pm_plan")
+    Path(pm["baseline"]["path"]).write_text("# edited plan\n")
+    for case in (whole, pm):
+        with pytest.raises(ValueError, match="changed since"):
+            cases.reference_text(case, data)
+    counts = cases.check(data_dir=data)["failure_counts"]
+    assert counts["stale_reference"] == 2
+
+
 def test_markdown_headings_skip_code_fences():
     found = sections.markdown_headings(MD_TEXT)
     titles = [h.title for h in found]
