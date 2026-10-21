@@ -40,6 +40,11 @@ R4. Manual merge advances the chain without another command.
   stays blocked with a reason naming B (`blocked on B (…, wait-for-merge ←
   F)`). When B is then merged, D starts. No `pm autostart` command is
   needed between merges.
+- And the merge output (CLI stdout, and the TUI `g` log line, which shows
+  only the final line) ends with `PR A marked as merged (newly ready: C)`,
+  naming only PRs this merge unblocked — never unrelated dependency-free
+  pending PRs; a merge that unblocks nothing ends with `PR X marked as
+  merged.` (QA s4 fixes 8029f04e / 322a88f4).
 
 R5. Final target completes.
 - Given every prerequisite is merged and F has signed off and is waiting,
@@ -89,6 +94,10 @@ R11. Graph changes.
   (`pm pr edit … --depends-on`),
 - Then N appears in status as `[wait-for-merge ← F]` and is held when it
   signs off; removing the edge releases N (unless otherwise held).
+- And if N is already ready (no unmerged deps), it starts on the reload
+  triggered by the edit itself — no other event or command needed
+  (QA s4 fix 255d2b24). A `depends_on` edit to a PR outside every target's
+  scope starts nothing.
 
 R12. Restart restoration.
 - Given a wait target mid-chain (some PRs merged, one waiting),
