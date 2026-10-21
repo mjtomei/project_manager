@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pm_core import action_history as _ah
+from pm_core.runtime_state import IN_FLIGHT_STATES
 
 SCHEMA = "pm.pr.history/1"
 
@@ -413,7 +414,7 @@ def _runtime_tracked_attempts(pr_id: str) -> set[str]:
         from pm_core import runtime_state as _rs
         return {e["attempt_id"] for e in _rs.get_pr_actions(pr_id).values()
                 if isinstance(e, dict) and e.get("attempt_id")
-                and e.get("state") in _rs.IN_FLIGHT_STATES}
+                and e.get("state") in IN_FLIGHT_STATES}
     except Exception:
         return set()
 
@@ -769,7 +770,12 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
             e = runtime[action]
             bit = f"{action}={e.get('state')}"
             if e.get("verdict"):
-                bit += f" {e['verdict']}"
+                # An in-flight entry keeps the previous iteration's/run's
+                # verdict until the next one lands; don't pair it with
+                # "running" as if it were this run's outcome.
+                in_flight = e.get("state") in IN_FLIGHT_STATES
+                bit += (f" (last {e['verdict']})" if in_flight
+                        else f" {e['verdict']}")
             bits.append(bit)
         lines.append("  runtime: " + ", ".join(bits))
 

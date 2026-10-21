@@ -922,6 +922,17 @@ class TestReconciliation:
         m = hq.build_history(PR, now=clock.t)
         assert "no verdict accepted yet" in m["current"][0]["text"]
 
+    def test_runtime_line_labels_in_flight_verdict_as_previous(self, clock):
+        """A restarted loop keeps the old KILLED verdict while running;
+        the Now section must not read as "running KILLED"."""
+        rs.set_action_state(PR, "review-loop", "done", loop_id="a",
+                            verdict="KILLED")
+        rs.set_action_state(PR, "review-loop", "running", loop_id="b")
+        rs.set_action_state(PR, "review", "done", verdict="LGTM")
+        text = "\n".join(hq.render_text(hq.build_history(PR, now=clock.t)))
+        assert "review=done LGTM" in text
+        assert "review-loop=running (last KILLED)" in text
+
 
 # ---------------------------------------------------------------------------
 # CLI + pane
