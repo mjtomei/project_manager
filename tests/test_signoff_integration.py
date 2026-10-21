@@ -368,6 +368,7 @@ def test_tui_scheduler_relaunches_awaiting_impl_fresh(tmp_path):
     app._auto_start_targets = {PR: st.make_target_record("t"),
                                "pr-002": st.make_target_record("t")}
     app._auto_start_run_id = "run"
+    store.save(app._data, tmp_path)
     calls = []
 
     async def fake_start(_app, pr_id, fresh=False):
@@ -379,6 +380,35 @@ def test_tui_scheduler_relaunches_awaiting_impl_fresh(tmp_path):
          patch("pm_core.tui.signoff_ui.advance_all"):
         asyncio.run(auto_start.check_and_start(app))
     assert sorted(calls) == [(PR, True), ("pr-002", False)]
+
+
+def test_tui_scheduler_does_not_refresh_a_rework_launched_mid_pass(tmp_path):
+    """The pass's PR snapshot predates its awaits: a rework launch that
+    cleared ``awaiting`` meanwhile must not be killed by a second --fresh."""
+    from pm_core import autostart_state as st
+    from pm_core.tui import auto_start
+    from tests.test_autostart_multi_target import FakeApp
+    p = _returned("in_progress", "impl")
+    p["depends_on"] = []
+    app = FakeApp([dict(p)], root=tmp_path)
+    app._auto_start = True
+    app._auto_start_targets = {PR: st.make_target_record("t")}
+    app._auto_start_run_id = "run"
+    disk = {"project": app._data["project"],
+            "prs": [dict(p, signoff_return=dict(p["signoff_return"],
+                                                awaiting=None))]}
+    store.save(disk, tmp_path)                  # the relaunch already ran
+    calls = []
+
+    async def fake_start(_app, pr_id, fresh=False):
+        calls.append((pr_id, fresh))
+
+    with patch.object(auto_start, "_start_pr_quiet", fake_start), \
+         patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+         patch("pm_core.runtime_state.get_action_state", return_value={}), \
+         patch("pm_core.tui.signoff_ui.advance_all"):
+        asyncio.run(auto_start.check_and_start(app))
+    assert calls == [(PR, False)]
 
 
 def test_tui_qa_pass_not_handed_to_signoff_while_reqa_awaits(tmp_path):

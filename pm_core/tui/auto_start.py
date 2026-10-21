@@ -846,9 +846,11 @@ async def check_and_start(app) -> None:
             # A sign-off IMPL return whose fresh session never launched
             # (e.g. TUI restart right after the hop) must relaunch the agent:
             # the old, idle impl window would otherwise be adopted as is.
-            from pm_core.signoff import return_awaiting
+            # Read from disk: ``prs`` predates this pass's awaits, and a
+            # rework launch that finished meanwhile cleared the mark — a
+            # second --fresh would kill that new session.
             if pr.get("status") == "in_progress" \
-                    and return_awaiting(pr) == "impl":
+                    and _awaiting_impl_on_disk(app, pr_id):
                 await _start_pr_quiet(app, pr_id, fresh=True)
             else:
                 await _start_pr_quiet(app, pr_id)
@@ -967,6 +969,17 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui
         qa_loop_ui.start_qa(app, pr_id)
+
+
+def _awaiting_impl_on_disk(app, pr_id: str) -> bool:
+    """Whether the PR's sign-off IMPL return still waits for its launch."""
+    from pm_core.signoff import return_awaiting
+    try:
+        pr = store.get_pr(store.load(app._root), pr_id)
+    except Exception:
+        _log.debug("auto_start: reload for %s failed", pr_id, exc_info=True)
+        return False
+    return return_awaiting(pr) == "impl"
 
 
 async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:

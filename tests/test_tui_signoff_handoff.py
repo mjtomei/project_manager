@@ -57,7 +57,6 @@ class App:
         self._self_driving_qa = {}
         self._pending_merge_prs = set()
         self._merge_input_required_prs = set()
-        self._merge_propagation_phase = set()
         self._session_name = "pm-test"
         self.logs: list[str] = []
         self.log_kw: list[dict] = []

@@ -491,6 +491,27 @@ def test_github_merge_onto_a_moved_base_is_recorded(github):
     integrity = pr_entry(github).get("merge_integrity")
     assert integrity and "not the signed-off base" in integrity["problem"]
     assert rec["base_sha"][:12] in integrity["problem"]
+    notes = [n["text"] for n in pr_entry(github).get("notes") or []]
+    assert any(t.startswith("Merge integrity:") for t in notes)
+
+
+def test_github_already_merged_elsewhere_is_still_verified(github):
+    """``gh pr merge`` failing on an already-merged PR (merged by someone
+    else) still checks what landed: no merge of the approved head on the
+    base is recorded on ``merge_integrity``, not silently accepted."""
+    import subprocess as sp
+    from pm_core import gh_ops
+    approve(github)
+    failed = sp.CompletedProcess([], 1, "", "Pull request is not mergeable")
+    with mock.patch.object(gh_ops, "merge_pr", return_value=failed), \
+         mock.patch.object(gh_ops, "is_pr_merged", return_value=True):
+        result, _, _ = merge(github)
+    assert result.exit_code == 0, result.output
+    assert "already merged" in result.output
+    integrity = pr_entry(github).get("merge_integrity")
+    assert integrity and "no merge commit of the approved head" in \
+        integrity["problem"]
+    assert integrity["merge_sha"] is None
 
 
 def test_two_overlapping_prs_second_needs_integration(local, tmp_path):

@@ -1530,9 +1530,9 @@ def pr_signoff_record(pr_id: str):
     The explicit act after reading ``report.html``: reads the verdict from
     the report's ``pm-signoff-verdict`` meta tag and records it on
     ``pr['signoff']`` (origin=manual) together with the report's content
-    hash, so the merge gate passes without ``--no-signoff-check`` — and
-    re-blocks if the report or HEAD changes afterwards. Recording never
-    changes PR status.
+    hash and the integration check it assessed, so the merge gate passes —
+    and re-blocks if the report, HEAD or base changes afterwards. Recording
+    never changes PR status.
     """
     import hashlib
 
@@ -2189,7 +2189,11 @@ def _publish_github(data: dict, root: Path, pr_entry: dict, workdir: str,
     merge_result = gh_ops.merge_pr(workdir, gh_pr_number, match_head_commit=head)
     if merge_result.returncode != 0:
         if gh_ops.is_pr_merged(workdir, branch):
+            # Merged by someone else (or a retried call): still check that
+            # what landed is the approved candidate.
             click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
+            _verify_github_merge(root, pr_entry, workdir, target_repo,
+                                 base_branch, base_sha, head, bound)
         else:
             stderr = (merge_result.stderr or "").strip()
             now = integration.remote_ref(workdir, target_repo,
@@ -2218,8 +2222,11 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
                          head: str, bound: dict) -> None:
     """Check GitHub's merge commit is the approved candidate; record if not."""
     from pm_core import integration
+    pr_id = pr_entry["id"]
     tip, err = integration.fetch_base(workdir, target_repo, base_branch)
     if err or not tip:
+        click.echo(f"WARNING: could not verify GitHub's merge of {pr_id}: "
+                   f"{err or 'no base revision'}.", err=True)
         return
     log = git_ops.run_git("log", "--merges", "--format=%H %P %T",
                           f"{base_sha}..{tip}", cwd=workdir, check=False)
@@ -2228,27 +2235,40 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
         parts = line.split()
         if len(parts) >= 4 and head in parts[1:-1]:
             found = parts
+    merge_sha = None
     if found is None:
-        return
-    first_parent, tree = found[1], found[-1]
-    if first_parent == base_sha and tree == bound.get("candidate_tree"):
-        return
-    pr_id = pr_entry["id"]
-    if first_parent != base_sha:
-        problem = (f"GitHub merged {pr_id} onto {first_parent[:12]}, not the "
-                   f"signed-off base {base_sha[:12]} (the base moved during "
-                   f"publication)")
+        # No merge commit of the approved head on the base: GitHub merged
+        # another head (or squashed/rebased) — not the approved candidate.
+        problem = (f"no merge commit of the approved head {head[:12]} on "
+                   f"{base_branch} {tip[:12]}; GitHub did not publish the "
+                   f"signed-off candidate")
     else:
-        problem = (f"GitHub merged {pr_id} onto the signed-off base "
-                   f"{base_sha[:12]}, but its merge result differs from the "
-                   f"approved candidate")
-    problem += (f"; published tree {tree[:12]}, approved "
-                f"{(bound.get('candidate_tree') or '?')[:12]}")
+        merge_sha, first_parent, tree = found[0], found[1], found[-1]
+        if first_parent == base_sha and tree == bound.get("candidate_tree"):
+            return
+        if first_parent != base_sha:
+            problem = (f"GitHub merged {pr_id} onto {first_parent[:12]}, not "
+                       f"the signed-off base {base_sha[:12]} (the base moved "
+                       f"during publication)")
+        else:
+            problem = (f"GitHub merged {pr_id} onto the signed-off base "
+                       f"{base_sha[:12]}, but its merge result differs from "
+                       f"the approved candidate")
+        problem += (f"; published tree {tree[:12]}, approved "
+                    f"{(bound.get('candidate_tree') or '?')[:12]}")
+
+    # Recorded and noted on the PR (notes reach every later session and
+    # `pm pr show`), not only printed.
+    text = f"Merge integrity: {problem}."
+    created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    note = {"id": store.generate_note_id(pr_id, text), "text": text,
+            "created_at": created, "last_edited": created}
 
     def _apply(d):
         p = store.get_pr(d, pr_id)
         if p is not None:
-            p["merge_integrity"] = {"problem": problem, "merge_sha": found[0]}
+            p["merge_integrity"] = {"problem": problem, "merge_sha": merge_sha}
+            p["notes"] = (p.get("notes") or []) + [note]
 
     store.locked_update(root, _apply)
     click.echo(f"WARNING: {problem}.", err=True)

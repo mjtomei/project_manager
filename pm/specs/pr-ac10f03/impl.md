@@ -194,7 +194,9 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
        branch is behind it (fast-forward only); `git ls-remote` base must still
        equal `base_sha`; `gh pr merge <n> --merge --match-head-commit <head>`;
        then post-verify that the merge commit's first parent is `base_sha` and
-       its tree is the approved tree. GitHub's API offers no base-revision
+       its tree is the approved tree (also when `gh pr merge` fails because
+       the PR was already merged elsewhere; no merge commit of the approved
+       head on the base is recorded too). GitHub's API offers no base-revision
        precondition, so a base update landing between the `ls-remote` check
        and GitHub's merge cannot be refused; it is detected, recorded on
        `pr["merge_integrity"]`, printed loudly and noted on the PR (see A3).

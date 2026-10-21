@@ -49,7 +49,6 @@ class FakeApp:
         self._self_driving_qa = {}
         self._pending_merge_prs = set()
         self._merge_input_required_prs = set()
-        self._merge_propagation_phase = set()
         self._session_name = None
         self._watcher_manager = MagicMock()
         self._watcher_manager.find_by_type.return_value = None
