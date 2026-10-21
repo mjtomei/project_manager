@@ -29930,7 +29930,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T22:13:27.367608+00:00'
+  updated_at: '2026-10-21T22:18:01.691640+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29982,6 +29982,16 @@ prs:
       + waits and the top scrolls off a 40-row popup. Captures /pm-captures/scenarios/3.'
     created_at: '2026-10-21T22:13:27Z'
     last_edited: '2026-10-21T22:13:27Z'
+  - id: note-a22aa79
+    text: 'QA S2 (d2db746b): fixed ScenarioObserver timing. _launch_next_queued blocks
+      on the dequeued scenario concretizer, so verified scenarios were journaled ending
+      ~17 s late and the concretize was booked as queued wait. It now observes before
+      the launch, and the dequeued scenario gets a "launching" phase. Live-env gotcha:
+      the env -i tmux PATH also needs fake-claude (symlink ~/.local/bin/fake-claude
+      into $SCR/bin), or TUI-launched QA planner panes die "command not found" and
+      QA ends ERROR.'
+    created_at: '2026-10-21T22:18:01Z'
+    last_edited: '2026-10-21T22:18:01Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
