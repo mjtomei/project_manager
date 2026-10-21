@@ -8,6 +8,7 @@ when one has been built locally.
 import hashlib
 import importlib
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -386,12 +387,25 @@ def test_reference_text_returns_withheld_text(catalog):
     assert "must not see" in cases.reference_text(pm, data)
 
 
+def test_pm_baseline_survives_plan_edits_and_data_copy(catalog, tmp_path):
+    pm = next(c for c in catalog["cases"] if c["case_type"] == "pm_plan")
+    original = Path(pm["baseline"]["path"]).read_text()
+    Path(pm["baseline"]["path"]).write_text("# plan edited on master after the build\n")
+    assert cases.reference_text(pm, catalog["data"]) == original
+    # catalog paths are relative to the data directory, so a copied data/ still resolves
+    moved = tmp_path / "copied-data"
+    shutil.copytree(catalog["data"], moved)
+    assert not Path(pm["inputs"]["conversation_path"]).is_absolute()
+    assert cases.generator_input(pm, moved)["conversation"]
+    assert cases.reference_text(pm, moved) == original
+
+
 def test_check_reports_stale_reference(catalog):
     data = catalog["data"]
     whole = next(c for c in catalog["cases"] if c["case_type"] == "whole_document")
     (data / whole["reference"]["text_path"]).write_text("rewritten document")
     pm = next(c for c in catalog["cases"] if c["case_type"] == "pm_plan")
-    Path(pm["baseline"]["path"]).write_text("# edited plan\n")
+    (data / pm["baseline"]["snapshot"]).write_text("# edited plan\n")
     for case in (whole, pm):
         with pytest.raises(ValueError, match="changed since"):
             cases.reference_text(case, data)
@@ -801,7 +815,7 @@ def test_fetch_reuses_cached_permanent_failure(tmp_path, monkeypatch):
 def test_check_reports_missing_pm_conversation(catalog):
     data = catalog["data"]
     pm = next(json.loads(l) for l in (data / "cases" / "catalog.jsonl").read_text().splitlines() if '"pm_plan"' in l)
-    Path(pm["inputs"]["conversation_path"]).unlink()
+    (data / pm["inputs"]["conversation_path"]).unlink()
     assert cases.check(data_dir=data)["failure_counts"] == {"pm_conversation_missing": 1}
 
 

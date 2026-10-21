@@ -5,8 +5,11 @@ opens each referenced conversation record, and extracts the conversation that
 precedes the mapped write/edit event: human turns, assistant replies, and pm
 injected prompts kept as separate roles. Tool calls and tool results are left
 out. The current plan file is attached as the production baseline, not as a
-known-good reference, and the content written at the event is kept when the
-event is a Write.
+known-good reference, and is snapshotted at build time (plan files keep
+changing on master); the content written at the event is kept when the event
+is a Write. Paths the catalog records under out_dir are relative to its parent
+(the data directory), like the corpus text paths, so a copied data/ still
+resolves.
 
 The map identifies candidate provenance, not assent, so every case is marked
 `needs_review`; reviewed windows live in pm_case_windows.json. Plans whose
@@ -166,8 +169,8 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
     windows = json.loads(windows_path.read_text()) if windows_path.exists() else {}
     windows.pop("_about", None)
     out_dir = Path(out_dir)
-    (out_dir / "conversations").mkdir(parents=True, exist_ok=True)
-    (out_dir / "drafts").mkdir(parents=True, exist_ok=True)
+    for sub in ("conversations", "drafts", "baselines"):
+        (out_dir / sub).mkdir(parents=True, exist_ok=True)
     rows = parse_map(map_path)
     mapped = {r["plan"] for r in rows}
     cases, report = [], []
@@ -202,11 +205,16 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
             convo_path.write_text(json.dumps({"plan": plan, "excerpts": excerpts}, indent=1))
             humans = sum(1 for e in excerpts for t in e["turns"] if t["role"] == "human")
             baseline = plan_path.read_text()
+            baseline_sha = hashlib.sha256(baseline.encode()).hexdigest()
+            snapshot = out_dir / "baselines" / f"{baseline_sha}.md"
+            snapshot.write_text(baseline)
             cases.append({
                 "case_id": "pm:" + plan.removesuffix(".md"), "case_type": "pm_plan", "source": "pm-plans",
                 "document_id": None, "split_group": "pm-plans",
-                "inputs": {"conversation_path": str(convo_path), "instruction": "Write the plan file this conversation asks for."},
-                "baseline": {"path": str(plan_path.relative_to(REPO)) if plan_path.is_relative_to(REPO) else str(plan_path), "sha256": hashlib.sha256(baseline.encode()).hexdigest(),
+                "inputs": {"conversation_path": str(convo_path.relative_to(out_dir.parent)),
+                           "instruction": "Write the plan file this conversation asks for."},
+                "baseline": {"path": str(plan_path.relative_to(REPO)) if plan_path.is_relative_to(REPO) else str(plan_path),
+                             "snapshot": str(snapshot.relative_to(out_dir.parent)), "sha256": baseline_sha,
                              "words": len(baseline.split()), "role": "production_baseline (not a known-good reference)"},
                 "provenance": {"map": str(map_path.relative_to(REPO)) if map_path.is_relative_to(REPO) else str(map_path),
                                "map_evidence": row["evidence"], "history_kind": status,

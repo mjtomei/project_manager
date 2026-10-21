@@ -85,8 +85,11 @@ sha256.
 
 R4. **PM natural-prompt cases** from the mapped conversation records: the
 conversation excerpt preceding the plan write/edit event, human turns separated
-from injected/assistant/tool records; baseline = current `pm/plans/<plan>.md`
-(path + sha256) plus the content written at the event when recoverable. Plans
+from injected/assistant/tool records; baseline = `pm/plans/<plan>.md` as it stood at
+build time (path + sha256, snapshotted to `data/pm/baselines/<sha256>.md`
+because plan files keep changing on master) plus the content written at the
+event when recoverable. Paths under `data/` are recorded relative to it, so a
+copied `data/` resolves. Plans
 whose records are missing or not located are listed, not fabricated.
 
 R5. **Catalog + coverage report.** `data/cases/catalog.jsonl` (one case per

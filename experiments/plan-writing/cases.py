@@ -8,8 +8,8 @@ Whole-document cases pair a brief assembled from a document's surrounding
 context (never its body) with the original document as reference.
 Continuation cases show a document up to a section heading and hold the
 section that starts there as reference. PM cases use recovered planning
-conversations as the prompt and the current plan file as the production
-baseline. Generator inputs come only from `generator_input`, which never
+conversations as the prompt and the plan file, as it stood at build time,
+as the production baseline. Generator inputs come only from `generator_input`, which never
 reads a reference span or a baseline; references come from `reference_text`.
 
 The catalog stores offsets into the corpus text files rather than copies of
@@ -436,7 +436,7 @@ def generator_input(case, data_dir=None, context_items=None):
             raise ValueError(f"{case['case_id']}: document text changed since the catalog was built")
         return {"instruction": case["inputs"]["instruction"], "prefix": text[: case["inputs"]["prefix_end"]]}
     if kind == "pm_plan":
-        convo = json.loads(Path(case["inputs"]["conversation_path"]).read_text())
+        convo = json.loads((data_dir / case["inputs"]["conversation_path"]).read_text())
         # excerpts come from separate sessions (oldest first); `session` keeps them apart once flattened
         turns = [{"session": n, "role": t["role"], "text": t["text"]}
                  for n, e in enumerate(convo["excerpts"], 1) for t in e["turns"]]
@@ -449,13 +449,15 @@ def reference_text(case, data_dir=None):
 
     Refuses references whose file is missing or changed since the build, like generator_input.
     """
+    data_dir = Path(data_dir or DATA)
     kind = case["case_type"]
     if kind == "pm_plan":
-        path, sha = pm_cases.REPO / case["baseline"]["path"], case["baseline"]["sha256"]
+        # the build-time snapshot: the plan file itself keeps changing on master
+        path, sha = data_dir / case["baseline"]["snapshot"], case["baseline"]["sha256"]
     elif kind == "whole_document":
-        path, sha = Path(data_dir or DATA) / case["reference"]["text_path"], case["reference"]["sha256"]
+        path, sha = data_dir / case["reference"]["text_path"], case["reference"]["sha256"]
     elif kind == "continuation":
-        path, sha = Path(data_dir or DATA) / case["inputs"]["text_path"], case["provenance"]["text_sha256"]
+        path, sha = data_dir / case["inputs"]["text_path"], case["provenance"]["text_sha256"]
     else:
         raise ValueError("Unknown case type: " + kind)
     if not path.exists():
@@ -767,7 +769,7 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                     failures["pm_event_not_in_record"].append(cid)
             if not case["provenance"]["records"]:
                 failures["pm_without_conversation_record"].append(cid)
-            if not Path(case["inputs"]["conversation_path"]).exists():
+            if not (data_dir / case["inputs"]["conversation_path"]).exists():
                 failures["pm_conversation_missing"].append(cid)
                 continue
             try:
