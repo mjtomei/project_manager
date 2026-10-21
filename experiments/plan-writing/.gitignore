@@ -1,2 +1,4 @@
 data/
 __pycache__/
+# write_doc() temp file; only a killed --write-doc can leave one behind
+rubric/.rubric.md.*

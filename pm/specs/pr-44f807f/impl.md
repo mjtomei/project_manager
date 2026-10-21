@@ -138,6 +138,9 @@
   rejected rather than rendering a prompt with nothing to score.
 - `write_doc()` replaces rubric.md by temp file + rename so concurrent
   `--write-doc` runs and readers never see a partial file (QA S5).
+  The temp name `.rubric.md.<pid>.<tid>` is fixed before the file is created so
+  Ctrl-C cleanup always finds it (QA S6); only SIGKILL can leave one, and
+  `experiments/plan-writing/.gitignore` ignores it.
 - No network or model calls in tests; reference URLs are not fetched in tests.
 - Internal-consistency fixtures contradict themselves only about choices the brief
   leaves open; a contradiction of the brief would also move fidelity.
