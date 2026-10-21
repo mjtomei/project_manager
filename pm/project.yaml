@@ -29464,8 +29464,15 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:20:58.983191+00:00'
-  updated_at: '2026-10-21T00:20:58.983191+00:00'
+  updated_at: '2026-10-21T01:15:17.160135+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-36dd307
+    text: 'QA s4: incidental fix 8029f04e — pm pr merge now prints ''PR X marked as
+      merged (newly ready: …)'' as its LAST line (TUI g log line showed only the ''Newly
+      ready'' entry). Scope fix 255d2b24: reload kicks scheduler pass on in-scope
+      depends_on change (R11 graph edit start).'
+    created_at: '2026-10-21T01:15:17Z'
+    last_edited: '2026-10-21T01:15:17Z'
