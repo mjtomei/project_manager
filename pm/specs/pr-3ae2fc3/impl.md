@@ -46,6 +46,12 @@
   sign-off bounces do not ask again.
   `generate_spec` drops that phase's record when it writes new content (e.g.
   `pm pr spec --regenerate`), so a regenerated spec is reviewed again under the gate.
+- Concurrent approve / regenerate / reject: `approve_spec(..., reviewed_text=)` records the approval only
+  if, under the lock, the PR still has the pending record and spec text the reviewer saw (else
+  `spec-approve` prints `No pending spec review for <id>.` or, when the text changed, refuses with exit 1).
+  `generate_spec` writes under the lock and raises `SpecApprovedMeanwhile` (regenerate/reject exit 1,
+  approved spec kept) when an approval landed after it loaded. The approval message is sent by
+  `notify_spec_approved_if_current` under the lock, only while the approval still stands for that text.
 - `set_spec` writes to the workdir copy when that file exists. Otherwise an approve-with-edits or a
   reject regeneration lands in `<root>/specs` while `get_spec` keeps reading the stale workdir copy.
 - Gate-aware review-mode preamble (`review_gate=True`): it keeps the existing review text and adds

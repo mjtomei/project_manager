@@ -317,6 +317,81 @@ class TestSpecGen:
         assert "QA_PLAN_START" in msgs[1]
         assert "Commit and push" not in msgs[0]
 
+    def test_approval_of_a_spec_regenerated_under_review_is_refused(self, tmp_path):
+        wd = tmp_path / "wd"
+        pend = {"phase": "impl", "generated_at": "t0", "review": True}
+        root = _disk(tmp_path, [_pr("a", status="in_progress", workdir=str(wd),
+                                    spec_pending=pend)])
+        path = _write_spec(wd, "a", "impl", "old")
+        data = store.load(root)  # what the reviewer opened
+        path.write_text("regenerated")  # pm pr spec --regenerate meanwhile
+        assert spec_gen.approve_spec(data, "a", root=root,
+                                     reviewed_text="old") is None
+        fresh = store.get_pr(store.load(root), "a")
+        assert fresh["spec_pending"] == pend
+        assert not spec_gen.is_spec_approved(fresh, "impl")
+
+    def test_second_concurrent_approval_is_not_recorded(self, tmp_path):
+        wd = tmp_path / "wd"
+        root = _disk(tmp_path, [_pr("a", status="in_progress", workdir=str(wd),
+                                    spec_pending={"phase": "impl"})])
+        _write_spec(wd, "a", "impl", "spec")
+        first, second = store.load(root), store.load(root)
+        assert spec_gen.approve_spec(first, "a", root=root,
+                                     reviewed_text="spec") == "impl"
+        stamp = store.get_pr(store.load(root), "a")["spec_approved"]["impl"]
+        assert spec_gen.approve_spec(second, "a", root=root,
+                                     reviewed_text="spec") is None
+        fresh = store.get_pr(store.load(root), "a")
+        assert fresh["spec_approved"] == {"impl": stamp}
+
+    def test_approval_during_regeneration_wins(self, tmp_path):
+        """An approval recorded while ``pm pr spec --regenerate`` was
+        generating is kept: the agent was told to proceed on that text."""
+        wd = tmp_path / "wd"
+        root = _disk(tmp_path, [_pr("a", status="in_progress", workdir=str(wd),
+                                    spec_pending={"phase": "impl"})])
+        path = _write_spec(wd, "a", "impl", "v1")
+        regen_data = store.load(root)  # loaded before the approval
+
+        def approve_meanwhile(*a, **k):
+            spec_gen.approve_spec(store.load(root), "a", root=root,
+                                  reviewed_text="v1")
+            return "v2"
+
+        with patch("pm_core.spec_gen.launch_claude_print",
+                   side_effect=approve_meanwhile):
+            with pytest.raises(spec_gen.SpecApprovedMeanwhile):
+                spec_gen.generate_spec(regen_data, "a", "impl", root=root,
+                                       force=True)
+        fresh = store.get_pr(store.load(root), "a")
+        assert path.read_text() == "v1"
+        assert spec_gen.is_spec_approved(fresh, "impl")
+        assert "spec_pending" not in fresh
+
+    def test_notify_only_while_the_approval_stands(self, tmp_path):
+        wd = tmp_path / "wd"
+        root = _disk(tmp_path, [_pr("a", status="in_progress", workdir=str(wd),
+                                    spec_pending={"phase": "impl"})])
+        path = _write_spec(wd, "a", "impl", "spec")
+        assert spec_gen.approve_spec(store.load(root), "a", root=root,
+                                     reviewed_text="spec") == "impl"
+        with patch.object(spec_gen, "notify_spec_approved",
+                          return_value=True) as notify:
+            assert spec_gen.notify_spec_approved_if_current(
+                root, "a", "impl", "spec")
+            # A regeneration landed between the approval and the notify:
+            # new text on disk, the approval cleared.
+            path.write_text("regenerated")
+            assert not spec_gen.notify_spec_approved_if_current(
+                root, "a", "impl", "spec")
+            store.locked_update(root, lambda d: spec_gen._clear_approval(
+                store.get_pr(d, "a"), "impl"))
+            path.write_text("spec")
+            assert not spec_gen.notify_spec_approved_if_current(
+                root, "a", "impl", "spec")
+        assert notify.call_count == 1
+
     def test_notify_noop_without_window(self):
         with patch("pm_core.loop_shared.find_claude_pane", return_value=None), \
              patch("pm_core.tmux.send_keys") as send:

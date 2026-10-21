@@ -325,6 +325,19 @@ The spec should contain:
     return prompt.strip()
 
 
+class SpecApprovedMeanwhile(Exception):
+    """The spec was approved while a regeneration of it was in flight.
+
+    The approval wins: the regenerated text is discarded, so the agent
+    that was told to proceed and the recorded state stay in agreement.
+    """
+
+
+def _approval_stamp(pr: dict, phase: str) -> str | None:
+    rec = pr.get("spec_approved")
+    return rec.get(phase) if isinstance(rec, dict) else None
+
+
 def generate_spec(data: dict, pr_id: str, phase: str,
                   root: Path | None = None,
                   force: bool = False,
@@ -343,6 +356,10 @@ def generate_spec(data: dict, pr_id: str, phase: str,
     Returns:
         (spec_text, needs_review) — the generated spec and whether
         it requires user review before proceeding.
+
+    Raises:
+        SpecApprovedMeanwhile: with *root*, when the spec was approved
+            after *data* was loaded (nothing is written).
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -382,8 +399,8 @@ def generate_spec(data: dict, pr_id: str, phase: str,
             _log.info("spec_gen: ambiguity detected in %s spec for %s, "
                       "pausing for review", phase, pr_id)
 
-    # Write spec file (safe outside lock — file writes are independent of YAML)
-    set_spec(pr, phase, spec_text, root=root)
+    if not root:
+        set_spec(pr, phase, spec_text, root=root)
 
     # Build pending value for both in-memory and on-disk use
     pending_value = None
@@ -397,10 +414,20 @@ def generate_spec(data: dict, pr_id: str, phase: str,
 
     # Apply all state mutations atomically via locked_update
     if root:
+        seen_approval = _approval_stamp(pr, phase)
+        approved_meanwhile = []
+
         def apply(fresh_data):
             fresh_pr = store.get_pr(fresh_data, pr_id)
             if not fresh_pr:
                 return
+            stamp = _approval_stamp(fresh_pr, phase)
+            if stamp and stamp != seen_approval:
+                approved_meanwhile.append(stamp)
+                return
+            # The file is written under the lock so an approval cannot
+            # land between it and the state update below.
+            set_spec(fresh_pr, phase, spec_text, root=root)
             # Set or clear spec_pending
             if pending_value:
                 fresh_pr["spec_pending"] = pending_value
@@ -411,6 +438,12 @@ def generate_spec(data: dict, pr_id: str, phase: str,
             _clear_approval(fresh_pr, phase)
 
         store.locked_update(root, apply)
+        if approved_meanwhile:
+            _log.info("spec_gen: %s spec for %s approved during regeneration "
+                      "— kept the approved spec", phase, pr_id)
+            raise SpecApprovedMeanwhile(
+                f"The {phase} spec for {pr_id} was approved while it was being "
+                "regenerated; the approved spec was kept.")
         _log.info("spec_gen: saved %s spec for %s (%d chars, needs_review=%s)",
                   phase, pr_id, len(spec_text), needs_review)
 
@@ -550,6 +583,26 @@ def notify_spec_approved(pr: dict, phase: str, edited: bool = False,
     return True
 
 
+def notify_spec_approved_if_current(root: Path, pr_id: str, phase: str,
+                                    approved_text: str,
+                                    edited: bool = False) -> bool:
+    """:func:`notify_spec_approved`, but only while the approval stands.
+
+    Checked and sent under the project.yaml lock: a regeneration or reject
+    that raced the approval (new spec text, approval cleared or the spec
+    pending again) must not leave the agent told to proceed on a spec that
+    is waiting for review again.
+    """
+    with store.locked_read(root) as data:
+        pr = store.get_pr(data, pr_id)
+        if (not pr or has_pending_spec(pr) or not is_spec_approved(pr, phase)
+                or (get_spec(pr, phase) or "") != approved_text.strip()):
+            _log.info("spec_gen: %s spec for %s changed after approval "
+                      "— not notifying", phase, pr_id)
+            return False
+        return notify_spec_approved(pr, phase, edited=edited)
+
+
 def has_pending_spec(pr: dict) -> bool:
     """Check if a PR has a spec waiting for user review."""
     return bool(pr.get("spec_pending"))
@@ -563,13 +616,21 @@ def get_pending_spec_phase(pr: dict) -> str | None:
 
 
 def approve_spec(data: dict, pr_id: str, root: Path | None = None,
-                 edited_text: str | None = None) -> str | None:
+                 edited_text: str | None = None,
+                 reviewed_text: str | None = None) -> str | None:
     """Approve a pending spec, optionally with edits.
 
     Clears ``spec_pending`` and saves.  If *edited_text* is provided,
     updates the spec content.
 
-    Returns the phase that was approved, or None if no pending spec.
+    With *root*, the approval is recorded only if, under the lock, the
+    PR still has the ``spec_pending`` record *data* holds and (when
+    *reviewed_text* is given) the spec still reads *reviewed_text* — so a
+    concurrent approval, regeneration or reject does not get a stale
+    review recorded over it.
+
+    Returns the phase that was approved, or None if no pending spec (or
+    it changed while being reviewed).
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -583,24 +644,36 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
     if not phase:
         return None
 
-    # Write edited spec file (safe outside lock)
-    if edited_text is not None:
+    approved_at = datetime.now(timezone.utc).isoformat()
+
+    if root:
+        recorded = []
+
+        def apply(fresh_data):
+            fresh_pr = store.get_pr(fresh_data, pr_id)
+            if not fresh_pr or fresh_pr.get("spec_pending") != pending:
+                return
+            if (reviewed_text is not None
+                    and (get_spec(fresh_pr, phase) or "") != reviewed_text.strip()):
+                return
+            if edited_text is not None:
+                set_spec(fresh_pr, phase, edited_text.strip(), root=root)
+            fresh_pr.pop("spec_pending", None)
+            _record_approval(fresh_pr, phase, approved_at)
+            recorded.append(True)
+
+        store.locked_update(root, apply)
+        if not recorded:
+            _log.info("spec_gen: %s spec for %s no longer pending as reviewed "
+                      "(approved, regenerated or rejected meanwhile) — approval "
+                      "not recorded", phase, pr_id)
+            return None
+    elif edited_text is not None:
         set_spec(pr, phase, edited_text.strip(), root=root)
 
     # Also update in-memory data for caller
     del pr["spec_pending"]
-    approved_at = datetime.now(timezone.utc).isoformat()
     _record_approval(pr, phase, approved_at)
-
-    if root:
-        def apply(fresh_data):
-            fresh_pr = store.get_pr(fresh_data, pr_id)
-            if not fresh_pr:
-                return
-            fresh_pr.pop("spec_pending", None)
-            _record_approval(fresh_pr, phase, approved_at)
-
-        store.locked_update(root, apply)
 
     _log.info("spec_gen: approved %s spec for %s", phase, pr_id)
     return phase
