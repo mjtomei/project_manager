@@ -610,6 +610,10 @@ def pr_spec(pr_id: str, phase: str | None, regenerate: bool):
         data, pr_id, phase, root=root, force=regenerate,
     )
     if spec_text:
+        # generate_spec drops the phase's approval record (and may set
+        # spec_pending); the TUI must reload so a review-specs target
+        # re-holds the step instead of acting on its stale approval.
+        trigger_tui_refresh()
         click.echo(spec_text)
         if needs_review:
             click.echo(f"\n[spec flagged for review — run `pm pr spec-approve {pr_id}`]", err=True)

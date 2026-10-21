@@ -272,6 +272,24 @@ class TestSpecGen:
         assert pr["spec_approved"] == {"qa": "t1"}
         assert spec_gen.needs_spec_approval(pr, "impl")
 
+    def test_cli_regenerate_refreshes_tui(self, tmp_path):
+        """The TUI holds the PR in memory: without a refresh it keeps the
+        dropped approval and never re-holds the step for review."""
+        from pm_core.cli import cli
+        wd = tmp_path / "wd"
+        root = _disk(tmp_path, [_pr("a", status="in_progress", workdir=str(wd),
+                                    spec_approved={"impl": "t0"})])
+        _write_spec(wd, "a", "impl", "v1")
+        with patch("pm_core.cli.pr.state_root", lambda: root), \
+             patch("pm_core.spec_gen.launch_claude_print", return_value="v2"), \
+             patch("pm_core.cli.pr.trigger_tui_refresh") as refresh:
+            res = CliRunner().invoke(cli, ["pr", "spec", "a", "impl",
+                                           "--regenerate"])
+        assert res.exit_code == 0, res.output
+        assert "v2" in res.output
+        refresh.assert_called_once_with()
+        assert "spec_approved" not in store.get_pr(store.load(root), "a")
+
     def test_review_gate_preamble_requires_pm_approval(self, tmp_path):
         pr = {"id": "pr-x", "title": "t"}
         plain = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
