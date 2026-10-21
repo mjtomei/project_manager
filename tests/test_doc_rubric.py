@@ -306,6 +306,23 @@ def test_write_doc_replaces_file_by_rename(tmp_path, monkeypatch):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["dimensions.json", "fixtures", "references.json", "rubric.md"]
 
 
+def test_write_doc_interrupt_after_temp_created_leaves_no_temp(tmp_path, monkeypatch):
+    # Ctrl-C can land the moment the temp file exists; the cleanup must still know its name and remove it.
+    for name in ("dimensions.json", "references.json", "rubric.md"):
+        (tmp_path / name).write_text((EXP / "rubric" / name).read_text())
+    monkeypatch.setattr(rubric, "RUBRIC", tmp_path)
+
+    def interrupted_open(file, mode="r", *args, **kwargs):
+        Path(file).touch()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(rubric, "open", interrupted_open, raising=False)
+    with pytest.raises(KeyboardInterrupt):
+        rubric.write_doc()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["dimensions.json", "references.json", "rubric.md"]
+    assert (tmp_path / "rubric.md").read_text() == (EXP / "rubric" / "rubric.md").read_text()
+
+
 def test_write_doc_rejects_missing_markers(tmp_path, monkeypatch):
     (tmp_path / "rubric.md").write_text("hand-written text, markers deleted\n")
     monkeypatch.setattr(rubric, "RUBRIC", tmp_path)

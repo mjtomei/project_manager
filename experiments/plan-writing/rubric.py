@@ -10,7 +10,7 @@ without collect.py's dependencies.
 import json
 import os
 import re
-import tempfile
+import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -172,15 +172,19 @@ def write_doc():
         raise ValueError(str(path) + " needs exactly one GENERATED start marker followed by one end marker")
     head, rest = text.split(GENERATED_START, 1)
     tail = rest.split(GENERATED_END, 1)[1]
+    new_text = head + GENERATED_START + "\n" + reference_markdown() + GENERATED_END + tail
     # Replace by rename so a concurrent reader (a test, another --write-doc) never sees a partial file.
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".rubric.md.")
+    # The temp name is fixed before the file exists, so a Ctrl-C right after creation still removes it
+    # (mkstemp can be interrupted after creating its file but before returning the name).
+    # pid + thread id keep concurrent writers apart; a same-named file can only be left by a dead process.
+    tmp = path.with_name(".rubric.md.%d.%d" % (os.getpid(), threading.get_ident()))
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(head + GENERATED_START + "\n" + reference_markdown() + GENERATED_END + tail)
+        with open(tmp, "w") as f:
+            f.write(new_text)
         os.chmod(tmp, os.stat(path).st_mode & 0o7777)
         os.replace(tmp, path)
     except BaseException:
-        os.unlink(tmp)
+        tmp.unlink(missing_ok=True)
         raise
 
 
