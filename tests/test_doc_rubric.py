@@ -304,3 +304,11 @@ def test_write_doc_replaces_file_by_rename(tmp_path, monkeypatch):
     assert doc.read_text() == (EXP / "rubric" / "rubric.md").read_text()
     assert doc.stat().st_ino != before and doc.stat().st_mode & 0o777 == 0o640
     assert sorted(p.name for p in tmp_path.iterdir()) == ["dimensions.json", "fixtures", "references.json", "rubric.md"]
+
+
+def test_write_doc_rejects_missing_markers(tmp_path, monkeypatch):
+    (tmp_path / "rubric.md").write_text("hand-written text, markers deleted\n")
+    monkeypatch.setattr(rubric, "RUBRIC", tmp_path)
+    with pytest.raises(ValueError, match="GENERATED"):
+        rubric.write_doc()
+    assert (tmp_path / "rubric.md").read_text() == "hand-written text, markers deleted\n"

@@ -167,6 +167,9 @@ GENERATED_END = "<!-- END GENERATED -->"
 def write_doc():
     path = RUBRIC / "rubric.md"
     text = path.read_text()
+    if text.count(GENERATED_START) != 1 or text.count(GENERATED_END) != 1 or \
+            text.index(GENERATED_START) > text.index(GENERATED_END):
+        raise ValueError(str(path) + " needs exactly one GENERATED start marker followed by one end marker")
     head, rest = text.split(GENERATED_START, 1)
     tail = rest.split(GENERATED_END, 1)[1]
     # Replace by rename so a concurrent reader (a test, another --write-doc) never sees a partial file.
