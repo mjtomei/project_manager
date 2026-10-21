@@ -445,7 +445,10 @@ class TestCheckAndStart:
         assert [c.args[1] for c in sq.call_args_list] == ["b"]
 
 
-_SIGNED = {"verdict": "SIGNOFF_MERGE", "sha": "head", "origin": "auto-sequence"}
+_SIGNED = {"verdict": "SIGNOFF_MERGE", "sha": "head", "origin": "auto-sequence",
+           # Integration-aware approval (pr-ac10f03): bound to the base too.
+           "integration": {"head": "head", "status": "up_to_date", "base_branch": "master",
+                "target_repo": "/repo", "base_sha": "base", "candidate_tree": "tree"}}
 
 
 def _signed(pid, **kw):

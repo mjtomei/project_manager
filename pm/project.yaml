@@ -167,6 +167,15 @@ prs:
   gh_pr: null
   created_at: null
   updated_at: null
+  integration:
+    checked_at: '2026-10-21T21:25:10.298419+00:00'
+    target_repo: https://github.com/mjtomei/project_manager.git
+    base_branch: master
+    status: error
+    error: no PR workdir
+    conflicts: []
+    overlap: []
+    base_files_count: 0
 - id: pr-002
   plan: plan-001
   title: Include cluster suggestions in import prompt

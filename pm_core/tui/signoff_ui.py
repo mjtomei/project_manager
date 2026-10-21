@@ -285,7 +285,8 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         if result.stale:
             _reload(app)
             app.log_message(
-                f"Sign-off for {pr_id} is stale (HEAD moved) — re-running")
+                f"Sign-off for {pr_id} is stale ({result.reason or 'HEAD moved'})"
+                " — re-running")
         _launch(app, pr_id, tdir, force=result.stale)
         return
 
@@ -303,6 +304,9 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         _launched_at(app).pop(pr_id, None)
     _reload(app)  # verdict record / hop status written behind the TUI's back
     _log.info("signoff: %s routed %s -> %s", pr_id, result.verdict, hop)
+    if result.coerced and hop != "unknown":
+        app.log_message(f"[yellow]Sign-off {pr_id}:[/] {result.coerced}",
+                        sticky=15)
 
     if hop == "ready_to_merge":
         from pm_core.tui.review_loop_ui import _maybe_auto_merge
@@ -357,6 +361,7 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
     QA-passed PRs whose completion callback was missed (restart) to sign-off.
     """
     from pm_core.tui import auto_start as _auto_start
+    from pm_core import signoff as signoff_mod
     if not app._root or not _auto_start.is_enabled(app):
         return
     if prs is None:
@@ -373,7 +378,10 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
                     disk = store.load(app._root)
                 step(app, pr_id, store.get_pr(disk, pr_id))
             elif (status == "qa" and pr_id not in app._qa_loops
-                  and _auto_start.recorded_qa_verdict(pr_id) == "PASS"):
+                  and _auto_start.recorded_qa_verdict(pr_id) == "PASS"
+                  and signoff_mod.return_awaiting(pr) != "qa"):
+                # (A sign-off REQA return still waiting for its QA run must
+                # not be handed back to sign-off on the old PASS.)
                 start_signoff(app, pr_id)
         except Exception:
             _log.exception("signoff_ui: advance failed for %s", pr_id)

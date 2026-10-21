@@ -843,7 +843,15 @@ async def check_and_start(app) -> None:
             _log.info("auto_start: ensuring impl window for in_progress PR %s",
                       pr_id)
         try:
-            await _start_pr_quiet(app, pr_id)
+            # A sign-off IMPL return whose fresh session never launched
+            # (e.g. TUI restart right after the hop) must relaunch the agent:
+            # the old, idle impl window would otherwise be adopted as is.
+            from pm_core.signoff import return_awaiting
+            if pr.get("status") == "in_progress" \
+                    and return_awaiting(pr) == "impl":
+                await _start_pr_quiet(app, pr_id, fresh=True)
+            else:
+                await _start_pr_quiet(app, pr_id)
             started = True
         except Exception as e:
             _log.exception("auto_start: failed to start %s", pr_id)
@@ -947,7 +955,8 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # only duplicate finished work.
         # Any real QA start (review→qa, ``t``) overwrites this record.
         recorded = recorded_qa_verdict(pr_id)
-        if recorded in QA_HOLD_VERDICTS:
+        from pm_core.signoff import return_awaiting
+        if recorded in QA_HOLD_VERDICTS and return_awaiting(pr) != "qa":
             _log.debug("auto_start: %s QA already ended %s, not relaunching",
                        pr_id, recorded)
             continue

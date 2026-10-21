@@ -78,6 +78,22 @@ def signoff_verdict_icon(verdict: str | None) -> str:
     return SIGNOFF_VERDICT_ICONS.get(verdict or "", "")
 
 
+def display_signoff_verdict(pr: dict) -> str | None:
+    """The sign-off verdict a PR row shows (CLI list and TUI tree alike).
+
+    ``sign_off``: the latest valid recorded verdict.  A PR sign-off sent
+    back (open return episode) shows that return verdict until its next
+    sign-off decision.
+    """
+    status = (pr or {}).get("status")
+    if status == "sign_off":
+        return latest_signoff_verdict(pr)
+    if status in ("in_progress", "in_review", "qa"):
+        rec = open_return(pr)
+        return rec.get("verdict") if rec else None
+    return None
+
+
 def signoff_window_name(pr_entry: dict) -> str:
     """The tmux window name for a PR's sign-off window (e.g. ``signoff-#42``)."""
     return f"signoff-{_pr_display_id(pr_entry)}"
@@ -102,7 +118,9 @@ def head_sha(workdir: str | None) -> str | None:
 
 def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
                            sha: str | None, origin: str,
-                           report_hash: str | None = None) -> None:
+                           report_hash: str | None = None,
+                           integration: dict | None = None,
+                           extra: dict | None = None) -> None:
     """Durably record a sign-off *verdict* on the PR (``pr['signoff']``).
 
     Single writer for the record. *origin* says who recorded it:
@@ -121,6 +139,13 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
     ``report.html`` bytes; the merge gate re-hashes the on-disk report and
     refuses when it changed since approval. Records without it (the
     auto-sequence transcript path) skip that check.
+
+    *integration* is the :func:`pm_core.integration.binding` of the
+    integration check the verdict was computed against (target repo/branch,
+    fetched base revision, candidate tree, status).  A SIGNOFF_MERGE
+    without it is a legacy HEAD-only approval: neither adopted nor accepted
+    by the merge gate.  *extra* carries provenance such as a coerced
+    verdict's original keyword and reason.
     """
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).isoformat()
@@ -133,7 +158,17 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
             }
             if report_hash:
                 record["report_hash"] = report_hash
+            if integration:
+                record["integration"] = dict(integration)
+            for k, v in (extra or {}).items():
+                if v is not None:
+                    record[k] = v
             pr["signoff"] = record
+            # A new sign-off decision closes the previous return episode.
+            ret = pr.get("signoff_return")
+            if isinstance(ret, dict) and not ret.get("resolved_at"):
+                ret["resolved_at"] = ts
+                ret["awaiting"] = None
 
     store.locked_update(root, _apply)
 
@@ -171,17 +206,29 @@ def signoff_launched_sha(tdir: Path, pr_id: str) -> str | None:
     return sha or None
 
 
+def is_legacy_approval(record: dict | None) -> bool:
+    """A SIGNOFF_MERGE recorded without an integration binding (HEAD-only)."""
+    record = record or {}
+    return (record.get("verdict") == SIGNOFF_MERGE
+            and not record.get("integration"))
+
+
 def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
     """Return the recorded verdict if it is fresh (record sha == *current_sha*).
 
     Fresh means the verdict was computed against the current branch HEAD (no
     code change since), so auto-sequence can adopt it instead of relaunching.
     Returns None when there is no record, it carries no verdict, the sha is
-    unknown, or the record is stale.
+    unknown, or the record is stale.  An approval the merge gate invalidated
+    (the base moved — :func:`invalidate_signoff`) and a legacy HEAD-only
+    SIGNOFF_MERGE (:func:`is_legacy_approval`) are never fresh: both need an
+    integration-aware sign-off against the current base.
     """
     record = (pr or {}).get("signoff") or {}
     verdict = record.get("verdict")
     sha = record.get("sha")
+    if record.get("invalidated") or is_legacy_approval(record):
+        return None
     if verdict and sha and current_sha and sha == current_sha:
         return verdict
     return None
@@ -190,37 +237,122 @@ def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
 def latest_signoff_verdict(pr: dict) -> str | None:
     """Return the most recently recorded sign-off verdict, fresh or not.
 
-    Used for display (icons / ``pm pr list``); does not consider staleness.
+    Used for display (icons / ``pm pr list``); does not consider HEAD
+    staleness, but an invalidated record shows nothing — sign-off is about
+    to re-run.
     """
-    return ((pr or {}).get("signoff") or {}).get("verdict") or None
+    record = (pr or {}).get("signoff") or {}
+    if record.get("invalidated"):
+        return None
+    return record.get("verdict") or None
 
 
-def merge_gate_refusal(pr: dict, current_sha: str | None) -> str | None:
+def invalidate_signoff(root: Path, pr_id: str, reason: str) -> None:
+    """Mark the PR's recorded sign-off as no longer valid (*reason*).
+
+    Used by the merge gate when the approved base / candidate no longer
+    matches: the record stays for provenance, but it is never adopted or
+    accepted again, so the sign-off driver retires the run and re-runs
+    sign-off against the current base ("return to sign-off").
+    """
+    from datetime import datetime, timezone
+
+    def _apply(data):
+        pr = store.get_pr(data, pr_id)
+        rec = (pr or {}).get("signoff")
+        if isinstance(rec, dict) and rec.get("verdict"):
+            rec["invalidated"] = reason
+            rec["invalidated_at"] = datetime.now(timezone.utc).isoformat()
+
+    store.locked_update(root, _apply)
+
+
+def effective_verdict(verdict: str | None, integration: dict | None,
+                      head: str | None) -> tuple[str | None, str | None]:
+    """Earliest-step routing pm enforces on a router verdict.
+
+    Returns ``(verdict, coerced_reason)``; *coerced_reason* is None when the
+    verdict stands.  A conflicted integration can only go back to
+    implementation (reconciling the base is code work), so MERGE / REVIEW /
+    REQA become IMPL.  A MERGE needs a mergeable integration check of the
+    current HEAD; without one (check failed, never ran, other HEAD) it is
+    BLOCKED — approving is impossible until sign-off can check the base.
+    """
+    from pm_core import integration as integ
+    if not verdict:
+        return verdict, None
+    rec = integration or {}
+    of_head = bool(head) and rec.get("head") == head
+    if of_head and rec.get("status") == integ.CONFLICT \
+            and verdict in (SIGNOFF_MERGE, SIGNOFF_REVIEW, SIGNOFF_REQA):
+        return SIGNOFF_IMPL, (
+            f"{verdict} coerced to {SIGNOFF_IMPL}: merging "
+            f"{rec.get('base_branch')}@{(rec.get('base_sha') or '?')[:8]} "
+            f"conflicts ({', '.join((rec.get('conflicts') or [])[:5])}); "
+            "reconciling it is implementation work")
+    if verdict == SIGNOFF_MERGE and not integ.valid_for(rec, head):
+        if not of_head:
+            why = "no integration check of the current HEAD"
+        else:
+            why = integ.summary(rec)
+        return SIGNOFF_BLOCKED, (
+            f"{SIGNOFF_MERGE} coerced to {SIGNOFF_BLOCKED}: cannot approve "
+            f"without a conflict-free integration check ({why}); re-run "
+            f"sign-off once `pm pr signoff integrate` succeeds")
+    return verdict, None
+
+
+def merge_gate_refusal(pr: dict, current_sha: str | None,
+                       base_branch: str | None = None) -> str | None:
     """Why the ``pm pr merge`` sign-off gate (#226) refuses *pr*, or None.
 
-    Merge requires a recorded SIGNOFF_MERGE whose sha matches *current_sha*;
-    a manual approval (``pm pr signoff record``) additionally pins the
+    Record-only (no network): merge requires a recorded SIGNOFF_MERGE whose
+    sha matches *current_sha* and that is bound to a conflict-free
+    integration check (target branch = *base_branch* when given) which the
+    merge gate has not invalidated; legacy HEAD-only approvals are refused.
+    A manual approval (``pm pr signoff record``) additionally pins the
     approved ``report.html`` content hash, so an edited report re-blocks.
     Auto-sequence records carry no hash (the transcript verdict is the
     approval) and skip that check.  Shared by the CLI gate and the TUI
     auto-merge so the TUI never attempts a merge the gate would refuse.
+    ``pm pr merge`` then re-fetches the base and recomputes the candidate
+    (:func:`pm_core.integration.compute_candidate`) before publishing.
     """
+    from pm_core import integration as integ
     pr_id = pr.get("id")
+    record = pr.get("signoff") or {}
+    if record.get("invalidated"):
+        return (f"PR {pr_id}: the sign-off approval is no longer valid "
+                f"({record['invalidated']}). Sign-off must re-run against "
+                f"the current base: `pm pr signoff --fresh {pr_id}` (the "
+                f"auto-start / auto-sequence driver re-runs it itself).")
+    if is_legacy_approval(record):
+        return (f"PR {pr_id}: the recorded {SIGNOFF_MERGE} predates "
+                f"integration-aware sign-off (bound to HEAD only). Run a "
+                f"fresh sign-off: `pm pr signoff --fresh {pr_id}`.")
     fresh = fresh_recorded_verdict(pr, current_sha)
     if fresh != SIGNOFF_MERGE:
         recorded = latest_signoff_verdict(pr)
         if recorded == SIGNOFF_MERGE and fresh is None:
             return (f"PR {pr_id}: recorded sign-off verdict {recorded} is "
                     f"stale (HEAD moved since). Re-run `pm pr signoff "
-                    f"{pr_id}` against current HEAD, or pass "
-                    f"--no-signoff-check to override.")
+                    f"{pr_id}` against current HEAD.")
         if recorded:
             return (f"PR {pr_id}: sign-off verdict is {recorded}, not "
                     f"{SIGNOFF_MERGE}. Run `pm pr signoff {pr_id}` to "
-                    f"re-route, or pass --no-signoff-check to override.")
+                    f"re-route.")
         return (f"PR {pr_id}: no sign-off verdict recorded yet. Run "
-                f"`pm pr signoff {pr_id}` first, or pass "
-                f"--no-signoff-check to override.")
+                f"`pm pr signoff {pr_id}` first.")
+    bound = record.get("integration") or {}
+    if bound.get("status") not in integ.MERGEABLE \
+            or not bound.get("base_sha") or not bound.get("candidate_tree"):
+        return (f"PR {pr_id}: the approval is not bound to a conflict-free "
+                f"integration ({bound.get('status') or 'no check'}). Re-run "
+                f"`pm pr signoff --fresh {pr_id}`.")
+    if base_branch and bound.get("base_branch") != base_branch:
+        return (f"PR {pr_id}: the approval targets "
+                f"{bound.get('base_branch')!r}, but the project merges into "
+                f"{base_branch!r}. Re-run `pm pr signoff --fresh {pr_id}`.")
     recorded_hash = (pr.get("signoff") or {}).get("report_hash")
     if recorded_hash:
         import hashlib
@@ -233,8 +365,7 @@ def merge_gate_refusal(pr: dict, current_sha: str | None) -> str | None:
         if current_hash != recorded_hash:
             return (f"PR {pr_id}: report.html changed since the recorded "
                     f"approval; re-run `pm pr signoff record {pr_id}` "
-                    f"after reviewing it, or pass --no-signoff-check to "
-                    f"override.")
+                    f"after reviewing it.")
     return None
 
 
@@ -313,6 +444,19 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # stamp is already on disk.
         if transcript:
             stamp_signoff_launch(transcript, head_sha(workdir))
+
+        # Integration check against the latest configured base (fetch +
+        # isolated candidate), recorded on the PR before the prompt is built
+        # so the router reviews — and its verdict binds to — that base.
+        from pm_core import integration
+        root = state_root()
+        try:
+            rec = integration.check_integration(root, pr_id)
+            print(f"Integration: {integration.summary(rec)}")
+            data = store.load(root)
+        except Exception as e:  # never block the sign-off launch on it
+            _log.warning("sign-off integration check for %s: %s", pr_id, e)
+            print(f"Integration check failed: {e}")
 
         _resolution = resolve_model_and_provider(
             "signoff",
@@ -448,7 +592,8 @@ def decide_signoff_hop(verdict: str | None) -> str:
     }.get(verdict or "", "unknown")
 
 
-def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
+def apply_signoff_hop(root: Path, pr_id: str, hop: str,
+                      return_record: dict | None = None) -> str:
     """SIDE-EFFECT half of sign-off routing — perform a bounce hop's transition.
 
     **Auto-sequence only.**  Keeping the mutation here (separate from the pure
@@ -462,6 +607,11 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
     ``"unknown"`` if the PR already left ``sign_off``.  ``ready_to_merge`` /
     ``blocked`` / ``unknown`` carry no state change and are returned unchanged
     (the PR legitimately stays in ``sign_off`` — pm/the watcher owns the merge).
+
+    *return_record* (a bounce's :func:`build_return_record`) is written to
+    ``pr["signoff_return"]`` in the same locked update as the transition, so
+    the routing reason and revisions never exist without the status change
+    (or vice versa) — a restart resumes from both.
     """
     to_status = _BOUNCE_HOP_STATUS.get(hop)
     if to_status is None:
@@ -479,10 +629,160 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str) -> str:
             # leaving the record in place would let a later sign_off re-entry
             # re-adopt the same (now spent) fresh verdict and loop forever.
             pr.pop("signoff", None)
+            if return_record is not None:
+                pr["signoff_return"] = return_record
             transitioned["ok"] = True
 
     store.locked_update(root, _apply)
     return hop if transitioned["ok"] else "unknown"
+
+
+# --- Return records (sign-off -> earlier step) ---------------------------
+# A bounce leaves ``pr["signoff_return"]`` behind: why sign-off sent the PR
+# back, which revisions it reviewed, the integration context (base revision,
+# conflicts, overlap) and whether pm merged the clean base into the branch.
+# The routed step's prompt renders it; ``awaiting`` stays set until that
+# step actually launches a fresh session, so a restart / idle event can't
+# advance the PR on an older session or verdict.
+
+_HOP_VERDICT = {"qa": SIGNOFF_REQA, "review": SIGNOFF_REVIEW,
+                "impl": SIGNOFF_IMPL}
+
+
+def report_meta(pr_id: str) -> dict[str, str]:
+    """``pm-signoff-*`` meta tags of the PR's ``report.html`` (or {})."""
+    from pm_core.behavior_report import extract_signoff_meta
+    from pm_core.paths import captures_root
+    croot = captures_root()
+    if not croot:
+        return {}
+    return extract_signoff_meta(croot / pr_id / "report.html")
+
+
+def build_return_record(pr: dict, verdict: str, hop: str, *,
+                        reviewed_head: str | None,
+                        original_verdict: str | None = None,
+                        coerced_reason: str | None = None,
+                        applied: dict | None = None,
+                        apply_error: str | None = None) -> dict:
+    """The ``pr["signoff_return"]`` record for a bounce (see above)."""
+    from datetime import datetime, timezone
+    meta = report_meta(pr["id"])
+    reason = None
+    if meta.get("verdict", "").upper() in (verdict, original_verdict or ""):
+        reason = meta.get("reason") or None
+    rec = pr.get("integration") or {}
+    integ = None
+    if rec and rec.get("head") == reviewed_head:
+        integ = {k: rec.get(k) for k in (
+            "target_repo", "base_branch", "base_sha", "merge_base", "status",
+            "conflicts", "overlap", "error")}
+    out = {
+        "verdict": verdict, "hop": hop,
+        "reason": reason or coerced_reason or "see report.html and PR notes",
+        "reviewed_head": reviewed_head, "integration": integ,
+        "applied": applied, "awaiting": hop,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    if original_verdict and original_verdict != verdict:
+        out["original_verdict"] = original_verdict
+    if coerced_reason:
+        out["coerced_reason"] = coerced_reason
+    if apply_error:
+        out["apply_error"] = apply_error
+    return out
+
+
+def open_return(pr: dict | None) -> dict | None:
+    """The PR's sign-off return record while that episode is open."""
+    rec = (pr or {}).get("signoff_return")
+    if isinstance(rec, dict) and rec.get("verdict") \
+            and not rec.get("resolved_at"):
+        return rec
+    return None
+
+
+def return_awaiting(pr: dict | None) -> str | None:
+    """The hop a sign-off return still waits to launch (impl/review/qa)."""
+    rec = (pr or {}).get("signoff_return") or {}
+    return rec.get("awaiting") or None
+
+
+def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
+    """The routed *hop* launched a fresh session: stop forcing a relaunch."""
+    def _apply(data):
+        pr = store.get_pr(data, pr_id)
+        rec = (pr or {}).get("signoff_return")
+        if isinstance(rec, dict) and rec.get("awaiting") == hop:
+            rec["awaiting"] = None
+
+    try:
+        data = store.load(root)
+        if return_awaiting(store.get_pr(data, pr_id)) != hop:
+            return
+        store.locked_update(root, _apply)
+    except Exception as e:
+        _log.warning("clear sign-off return for %s: %s", pr_id, e)
+
+
+def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
+    """Prompt block for a PR sign-off sent back (empty when there is none)."""
+    rec = open_return(pr)
+    if not rec:
+        return ""
+    head = (rec.get("reviewed_head") or "?")[:12]
+    lines = [
+        "\n## Previous sign-off return" if for_signoff
+        else "\n## Returned from sign-off",
+        "",
+        f"Sign-off routed this PR back with **{rec['verdict']}** "
+        f"(to {rec.get('hop')}) after reviewing HEAD `{head}`.",
+        f"Reason: {rec.get('reason')}",
+    ]
+    if rec.get("original_verdict"):
+        lines.append(f"(The router chose {rec['original_verdict']}; pm "
+                     f"routed it to the earliest affected step: "
+                     f"{rec.get('coerced_reason')})")
+    integ = rec.get("integration") or {}
+    if integ:
+        base = (f"`{integ.get('base_branch')}` @ "
+                f"`{(integ.get('base_sha') or '?')[:12]}` from "
+                f"`{integ.get('target_repo')}`")
+        lines.append(f"Integration with {base}: **{integ.get('status')}**.")
+        if integ.get("conflicts"):
+            lines.append("Conflicting paths: "
+                         + ", ".join(f"`{c}`" for c in integ["conflicts"]))
+        if integ.get("overlap"):
+            lines.append("Changed on both sides: "
+                         + ", ".join(f"`{c}`" for c in integ["overlap"]))
+    applied = rec.get("applied") or {}
+    if applied.get("merge_sha"):
+        lines.append(
+            f"pm merged that base revision into the PR branch (clean) as "
+            f"`{applied['merge_sha'][:12]}` — review/verify the integrated "
+            "result, not only the PR's own diff.")
+    elif rec.get("apply_error"):
+        lines.append(f"pm did not merge the base into the branch: "
+                     f"{rec['apply_error']}.")
+    if not for_signoff and integ.get("status") == "conflict":
+        sha = integ.get("base_sha") or ""
+        lines.append(
+            f"\nReconcile it in this branch: `git fetch` the base and "
+            f"`git merge {sha[:12] or integ.get('base_branch')}` (or a newer "
+            f"base), resolve the conflicts preserving both sides' intent, run "
+            "the tests, commit and push the PR branch. Never push or merge "
+            "into the base branch yourself — the merge step publishes only a "
+            "freshly signed-off candidate.")
+    if for_signoff:
+        lines.append(
+            f"\nProvenance: `git log {head}..HEAD` shows what changed since "
+            "that sign-off. Decide explicitly whether earlier review/QA "
+            "evidence still covers the current HEAD; code changes cannot be "
+            "approved on stale evidence.")
+    else:
+        lines.append("\nWhen this step completes, the PR goes back through "
+                     "the remaining steps and a fresh sign-off.")
+    return "\n".join(lines) + "\n"
 
 
 # --- Driver step (shared by `pm pr auto-sequence` and the TUI scheduler) ---
@@ -549,8 +849,10 @@ class SignoffStep:
     *action* is ``"launch"`` (caller must launch a fresh router window),
     ``"running"`` (router still working — nothing to do) or ``"hop"`` (a
     verdict was acted on; *hop* is :func:`apply_signoff_hop`'s result).
-    *stale* is True when a launch follows retiring an outdated run.
-    *sha* is the branch HEAD the step evaluated against.
+    *stale* is True when a launch follows retiring an outdated run, and
+    *reason* says why (HEAD moved, base moved, legacy approval).
+    *sha* is the branch HEAD the step evaluated against.  *coerced* is pm's
+    reason when it routed the router's verdict to an earlier step.
     """
 
     action: str
@@ -558,6 +860,43 @@ class SignoffStep:
     verdict: str | None = None
     stale: bool = False
     sha: str | None = None
+    reason: str | None = None
+    coerced: str | None = None
+
+
+def _stale_reason(record: dict) -> str:
+    if record.get("invalidated"):
+        return str(record["invalidated"])
+    if is_legacy_approval(record):
+        return "legacy HEAD-only approval"
+    return "HEAD moved"
+
+
+def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
+                    sha: str | None, original: str | None,
+                    coerced: str | None) -> dict:
+    """Integrate a clean, moved base into the PR branch, then build the
+    return record.  The revalidating step must see the integrated code; a
+    conflicted base is left for implementation (no half-merge)."""
+    from pm_core import integration as integ
+    try:
+        pr = store.get_pr(store.load(root), pr_id) or {"id": pr_id}
+    except Exception:
+        pr = {"id": pr_id}
+    applied, apply_error = None, None
+    rec = pr.get("integration") or {}
+    if pr.get("status") == "sign_off" and rec.get("head") == sha \
+            and rec.get("status") == integ.CLEAN:
+        merge_sha, apply_error = integ.apply_integration(root, pr_id, rec)
+        if merge_sha:
+            applied = {"from_head": sha, "merge_sha": merge_sha,
+                       "base_sha": rec.get("base_sha")}
+            _log.info("sign-off %s: integrated %s@%s into the branch as %s",
+                      pr_id, rec.get("base_branch"),
+                      (rec.get("base_sha") or "")[:8], merge_sha[:8])
+    return build_return_record(
+        pr, verdict, hop, reviewed_head=sha, original_verdict=original,
+        coerced_reason=coerced, applied=applied, apply_error=apply_error)
 
 
 def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
@@ -565,33 +904,45 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
                  retire=None) -> SignoffStep:
     """Advance a ``sign_off`` PR one auto-sequence tick (state side only).
 
-    1. ADOPT a fresh recorded verdict (record sha == current HEAD) — picks up
-       a hand-recorded approval without a wasted re-run.
-    2. A STALE record (HEAD moved since it ran) is never trusted: retire that
-       run (window + transcript), clear the record -> ``launch``.
+    1. ADOPT a fresh recorded verdict (record sha == current HEAD, not
+       invalidated by the merge gate, not a legacy HEAD-only approval) —
+       picks up a hand-recorded approval without a wasted re-run.
+    2. A STALE record (HEAD moved since it ran, the merge gate found the
+       base moved, or a legacy approval) is never trusted: retire that run
+       (window + transcript), clear the record -> ``launch``.
     3. No record: a run launched on another revision than the current HEAD
        (see :func:`stamp_signoff_launch`; unstamped counts as unknown) is
        retired before its verdict can count -> ``launch`` (stale).  Otherwise
-       read this driver's transcript; a verdict there is recorded (origin
-       ``auto-sequence``, sha = the launched HEAD) so later ticks adopt it.
+       read this driver's transcript; a verdict there goes through
+       :func:`effective_verdict` (a conflicted integration routes to IMPL; a
+       MERGE without a conflict-free check of this HEAD is BLOCKED) and is
+       recorded (origin ``auto-sequence``, sha = the launched HEAD, bound to
+       the PR's integration check of that HEAD) so later ticks adopt it.
     4. Still nothing: ``launch`` if the window is gone, else ``running``.
-    5. Verdict: pure :func:`decide_signoff_hop`, then the auto-sequence-only
-       :func:`apply_signoff_hop`; a bounce also retires the run so re-entry
-       starts a genuine fresh router.
+    5. Verdict: pure :func:`decide_signoff_hop`; a bounce first merges a
+       clean moved base into the PR branch and builds the return record,
+       then the auto-sequence-only :func:`apply_signoff_hop` transitions and
+       persists it; a bounce also retires the run so re-entry starts a
+       genuine fresh router.
 
     *read_verdict* / *window_pane* / *retire* default to this module's
     helpers; the CLI passes its own module-level names so existing patch
     points keep working.
     """
+    from pm_core import integration as integ
     read_verdict = read_verdict or signoff_transcript_verdict
     window_pane = window_pane or signoff_window_pane
     retire = retire or retire_signoff_run
     pr_id = pr_entry["id"]
     current_sha = head_sha(pr_entry.get("workdir"))
+    record = pr_entry.get("signoff") or {}
 
     verdict = fresh_recorded_verdict(pr_entry, current_sha)
+    original, coerced = record.get("original_verdict"), \
+        record.get("coerced_reason")
 
-    if verdict is None and (pr_entry.get("signoff") or {}).get("verdict"):
+    if verdict is None and record.get("verdict"):
+        reason = _stale_reason(record)
         retire(session, pr_entry, tdir)
 
         def _clear(d):
@@ -599,7 +950,8 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
             if p:
                 p.pop("signoff", None)
         store.locked_update(root, _clear)
-        return SignoffStep("launch", stale=True, sha=current_sha)
+        return SignoffStep("launch", stale=True, sha=current_sha,
+                           reason=reason)
 
     if verdict is None:
         tverdict = read_verdict(tdir, pr_id)
@@ -610,19 +962,33 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
             # revision): its verdict reviewed other code.  Retire it before
             # it is recorded against the new HEAD.
             retire(session, pr_entry, tdir)
-            return SignoffStep("launch", stale=True, sha=current_sha)
+            return SignoffStep("launch", stale=True, sha=current_sha,
+                               reason="HEAD moved")
         if tverdict is not None:
             # launched == current_sha here (or HEAD is unknown).
-            record_signoff_verdict(root, pr_id, tverdict, current_sha,
-                                   origin="auto-sequence")
-            verdict = tverdict
+            irec = pr_entry.get("integration") or {}
+            verdict, coerced = effective_verdict(tverdict, irec, current_sha)
+            original = tverdict if coerced else None
+            bound = integ.binding(irec) if (
+                current_sha and irec.get("head") == current_sha) else None
+            record_signoff_verdict(
+                root, pr_id, verdict, current_sha, origin="auto-sequence",
+                integration=bound,
+                extra={"original_verdict": original,
+                       "coerced_reason": coerced})
 
     if verdict is None:
         if window_pane(session, pr_entry) is None:
             return SignoffStep("launch", sha=current_sha)
         return SignoffStep("running", sha=current_sha)
 
-    hop = apply_signoff_hop(root, pr_id, decide_signoff_hop(verdict))
+    hop = decide_signoff_hop(verdict)
+    return_record = None
+    if hop in _BOUNCE_HOP_STATUS:
+        return_record = _prepare_bounce(root, pr_id, verdict, hop,
+                                        current_sha, original, coerced)
+    hop = apply_signoff_hop(root, pr_id, hop, return_record=return_record)
     if hop in _BOUNCE_HOP_STATUS:
         retire(session, pr_entry, tdir)
-    return SignoffStep("hop", hop=hop, verdict=verdict, sha=current_sha)
+    return SignoffStep("hop", hop=hop, verdict=verdict, sha=current_sha,
+                       coerced=coerced)

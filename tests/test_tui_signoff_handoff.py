@@ -115,10 +115,23 @@ class World:
                 app,
                 f"pr signoff --background --transcript {transcript} {pr_id}")
             # What ``launch_signoff_window`` stamps next to the transcript of
-            # a newly created window: the HEAD the router run reviews.
+            # a newly created window: the HEAD the router run reviews, and
+            # the integration check it records before building the prompt.
             so.stamp_signoff_launch(transcript, self.head)
+            self.record_integration()
         finally:
             app._signoff_launch_inflight.discard(pr_id)  # worker finished
+
+    def record_integration(self, status: str = "up_to_date") -> None:
+        head = self.head
+
+        def apply(d):
+            store.get_pr(d, PR)["integration"] = {
+                "head": head, "status": status, "base_branch": "master",
+                "target_repo": "/repo", "base_sha": "base",
+                "candidate_tree": None if status == "conflict" else "tree",
+                "conflicts": ["f.py"] if status == "conflict" else []}
+        store.locked_update(self.app._root, apply)
 
     def emit(self, verdict: str) -> None:
         """The router pane prints its verdict into the TUI's transcript."""
@@ -170,6 +183,11 @@ def world_factory(tmp_path):
     yield make
     for p in reversed(patches):
         p.stop()
+
+
+def _BOUND(w):
+    return {"head": w.head, "status": "up_to_date", "base_branch": "master",
+            "target_repo": "/repo", "base_sha": "base", "candidate_tree": "tree"}
 
 
 def _qa_pass(app):
@@ -455,7 +473,8 @@ def test_gate_refusal_is_not_tracked_as_conflict(world_factory):
         _poll(app)
     assert app.pr()["status"] == "sign_off"
     assert app._pending_merge_prs == set()
-    assert any("refused by the sign-off gate" in m for m in app.logs)
+    assert any(f"Merge of {PR} refused" in m and "stale" in m
+               for m in app.logs)
 
 
 def test_reqa_route_restarts_tui_qa(world_factory):
@@ -563,7 +582,8 @@ def test_adopts_existing_fresh_manual_approval(world_factory):
     launching another router."""
     app, w = world_factory(stop=True)
     from pm_core import signoff as so
-    so.record_signoff_verdict(app._root, PR, "SIGNOFF_MERGE", w.head, "manual")
+    so.record_signoff_verdict(app._root, PR, "SIGNOFF_MERGE", w.head, "manual",
+                              integration=_BOUND(w))
     _qa_pass(app)
     assert w.launches() == []
     assert any("ready to merge" in m for m in app.logs)
@@ -632,7 +652,8 @@ def test_manual_approval_with_changed_report_is_not_merged(world_factory,
     from pm_core import signoff as so
     so.record_signoff_verdict(
         app._root, PR, "SIGNOFF_MERGE", w.head, "manual",
-        report_hash=hashlib.sha256(report.read_bytes()).hexdigest())
+        report_hash=hashlib.sha256(report.read_bytes()).hexdigest(),
+        integration=_BOUND(w))
     report.write_text("<html>v2 edited</html>")
     with patch("pm_core.paths.captures_root", return_value=croot):
         _qa_pass(app)

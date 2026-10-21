@@ -87,6 +87,12 @@ the appropriate key in the TUI instead.
 """
 
 
+def _signoff_return_block(pr: dict, for_signoff: bool = False) -> str:
+    """Why sign-off sent this PR back (reason, revisions, integration)."""
+    from pm_core.signoff import format_signoff_return
+    return format_signoff_return(pr, for_signoff=for_signoff)
+
+
 def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     """Format PR notes as a markdown section, or empty string if none.
 
@@ -188,6 +194,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     # Include PR notes (addendums added after work began)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_block += _signoff_return_block(pr)
 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
@@ -281,6 +288,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
 
     # Include PR notes (addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_block += _signoff_return_block(pr)
 
     # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -392,6 +400,40 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
     return "\n" + "\n".join(lines) + "\n"
 
 
+def _signoff_integration_block(pr: dict, pr_id: str) -> str:
+    """The integration check sign-off reviews (see pm_core.integration)."""
+    from pm_core import integration as integ
+    from pm_core.signoff import SIGNOFF_IMPL, SIGNOFF_MERGE
+    rec = pr.get("integration") or {}
+    if not rec:
+        return ("\n_No integration check recorded — run `pm pr signoff "
+                f"integrate {pr_id}` before routing; {SIGNOFF_MERGE} is "
+                "impossible without one._\n")
+    base_sha = rec.get("base_sha") or ""
+    lines = [
+        f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
+        f"- Fetched base revision: `{base_sha or '?'}`",
+        f"- PR HEAD checked: `{rec.get('head') or '?'}`",
+        f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
+    ]
+    if rec.get("merge_base") and base_sha:
+        lines.append(
+            f"- Base changes since this PR branched: `git log --oneline "
+            f"{rec['merge_base'][:12]}..{base_sha[:12]}` / `git diff "
+            f"{rec['merge_base'][:12]} {base_sha[:12]}` "
+            f"({rec.get('base_files_count', 0)} file(s))")
+    if rec.get("overlap"):
+        lines.append("- Files changed on both sides: "
+                     + ", ".join(f"`{f}`" for f in rec["overlap"]))
+    if rec.get("conflicts"):
+        lines.append("- Conflicting paths: "
+                     + ", ".join(f"`{f}`" for f in rec["conflicts"]))
+    if rec.get("status") == integ.CONFLICT:
+        lines.append(f"- A conflicted integration can only route "
+                     f"**{SIGNOFF_IMPL}** (pm enforces this).")
+    return "\n" + "\n".join(lines) + "\n"
+
+
 def generate_signoff_prompt(data: dict, pr_id: str,
                             session_name: str | None = None) -> str:
     """Generate a Claude Code prompt for the sign-off step of a PR.
@@ -440,8 +482,10 @@ def generate_signoff_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_block += _signoff_return_block(pr, for_signoff=True)
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
     qa_block = _signoff_qa_scenarios_block(pr_id)
+    integration_block = _signoff_integration_block(pr, pr_id)
 
     if _is_bug_pr(pr):
         impl_bullet = (
@@ -469,7 +513,25 @@ PR-level *comprehensive* review and a routing decision.
 {pr_notes_block}{impl_spec_block}{plan_context}{tui_block}
 ## QA scenarios (from the QA run)
 {qa_block}
+## Integration with the latest base
+pm fetched the latest `{base_branch}` and merged this PR's HEAD with it in an
+isolated candidate (your worktree and the base branch were not touched):
+{integration_block}
 ## What to do
+
+0. **Check integration with the latest base.** Sign-off owns integration: a
+   {SIGNOFF_MERGE} certifies this PR *combined with the base revision above*,
+   and the merge step publishes exactly that candidate — it never resolves
+   conflicts. Refresh the check with `pm pr signoff integrate {pr_id}` (it
+   only fetches and computes the candidate; base your verdict on its latest
+   result). Read what changed on the base since the PR branched and judge
+   whether it interacts with this PR: conflicts, semantic overlap (the same
+   behaviour, APIs, data or tests changed on both sides) or changed
+   behaviour the PR relies on. Line/file counts alone are not the rule.
+   Never merge the base into the branch, push the base branch, or run any
+   backend merge (`pm pr merge`, `gh pr merge`) yourself — on a return pm
+   merges a clean base into the PR branch for the next step, and
+   conflicts go to implementation.
 
 1. **Read the diff**: run `{diff_cmd}`.
 
@@ -543,6 +605,20 @@ PR-level *comprehensive* review and a routing decision.
    / {SIGNOFF_REVIEW} / {SIGNOFF_IMPL} / {SIGNOFF_BLOCKED} you choose).
    Without it the row shows "verdict unknown". Everything else on the
    dashboard comes from `project.yaml`.
+
+   Also bind the report to what you reviewed, and give the routing reason
+   (the next agent is shown it verbatim):
+
+   ```html
+   <meta name="pm-signoff-head" content="<PR HEAD sha you reviewed>">
+   <meta name="pm-signoff-base" content="<base revision sha you integrated with>">
+   <meta name="pm-signoff-reason" content="<one or two sentences: why this route>">
+   ```
+
+   A human approval (`pm pr signoff record`) is refused unless these match
+   the current HEAD and the recorded integration check. Include an
+   **Integration** section in the report: target base revision, result,
+   overlapping files and your semantic assessment.
 
    ### Suggested shape — adapt as needed to serve the goal above
 
@@ -681,23 +757,32 @@ PR-level *comprehensive* review and a routing decision.
    exactly ONE verdict keyword on its own line.
 
    - **{SIGNOFF_MERGE}** — all three steps met their criteria: the evidence
-     supports the diff and the QA was rigorous. This is a RECOMMENDATION to
-     merge — sign-off never merges itself; the PR is reported ready_to_merge and
-     the merge decision is made later.
+     supports the diff and the QA was rigorous, **and** the PR integrates
+     with the latest base conflict-free with no interaction that needs more
+     work or verification. This is a RECOMMENDATION to merge bound to the
+     reviewed HEAD and base revision — sign-off never merges itself; the PR
+     is reported ready_to_merge and the merge decision is made later. If the
+     PR or the base moves before the merge, the merge is refused and
+     sign-off re-runs.
    - **{SIGNOFF_IMPL}** — covers the **Implementation** step. Purpose of impl:
      deliver the PR's required behavior and an implementation spec. Criteria:
      the diff implements every requirement in the spec/description; an impl
      spec exists and the code matches it; for a bug PR, the pre-fix + post-fix
      captures exist and demonstrate the bug and its fix. Use when there is a
      real gap in the implementation (e.g. an INPUT_REQUIRED reflecting missing
-     required behavior, or missing captures). Back to implementation.
+     required behavior, or missing captures), **or when integrating the base
+     needs code work**: merge conflicts, or base changes that require the
+     PR's code to adapt. Back to implementation (which merges the base into
+     the PR branch and reconciles it).
    - **{SIGNOFF_REVIEW}** — covers the **Review** step. Purpose of review:
      confirm code quality, correctness, and architectural fit. Criteria: the
      change was actually reviewed (a review verdict exists) and no unaddressed
      quality/architecture/correctness issue remains. If code changed after the
      last review (e.g. a scenario fixed something during QA), it has NOT been
      re-reviewed. Must re-pass review AND qa to validate the fix is real and
-     shortcut-free.
+     shortcut-free. Also use it when the base integrates cleanly but its
+     changes overlap this PR enough that the *combined* code needs review
+     (pm merges the clean base into the branch before review runs).
    - **{SIGNOFF_REQA}** — covers the **QA** step. Purpose of QA: prove the
      behavior works against the *real* code path. Criteria: every scenario has
      an accounted-for verdict; each exercised the real path (not a mock) with
@@ -706,9 +791,15 @@ PR-level *comprehensive* review and a routing decision.
      is *unverified* (harness problem made it untrustworthy), a scenario was
      *misframed*, OR you can't assemble the report's "What this PR delivers"
      headline because demonstration evidence is missing for one or more
-     delivered behaviours. Harness/QA problem, not a code problem → re-run
-     QA. Do NOT bounce to impl. **Leave a `pm pr note add {pr_id} '...'`
+     delivered behaviours — or the base integrates cleanly but its changes
+     could affect behaviour this PR's evidence covers, so the affected
+     scenarios must be re-verified on the integrated code (pm merges the
+     clean base into the branch first). Harness/QA problem, not a code
+     problem → re-run QA. Do NOT bounce to impl. **Leave a `pm pr note add {pr_id} '...'`
      entry naming what's missing** so QA knows exactly what to record.
+   - Pick the **earliest** affected step: implementation before review
+     before QA. Preserve valid earlier evidence and say in the report which
+     evidence still holds (and at which revision) and which must be redone.
    - **{SIGNOFF_BLOCKED}** — escalate / hold. Use this for genuine ambiguity
      (CONSERVATIVE BIAS: when truly unsure, BLOCK and escalate rather than
      merge), something impossible / out-of-scope (note the limitation), or an
@@ -831,21 +922,20 @@ Auto-cleanup is enabled. After finishing your main work:
 
 
 def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
-                          session_name: str | None = None,
-                          pull_from_origin: bool = False,
-                          main_repo: str | None = None) -> str:
-    """Generate a Claude Code prompt for resolving a merge failure.
+                          session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for post-merge repo-update recovery.
+
+    The merge step itself never asks an agent to resolve conflicts or to
+    publish anything (pr-ac10f03): it publishes only a freshly signed-off
+    candidate, and conflicts return through sign-off to implementation.
+    The one remaining merge window runs *after* the merge was published,
+    when updating the main repo checkout from origin failed.
 
     Args:
         data: Project data dict.
         pr_id: The PR identifier.
-        error_output: Verbatim error output from the failed merge attempt.
+        error_output: Verbatim error output from the failed update.
         session_name: If provided, include TUI interaction instructions.
-        pull_from_origin: When True, this is a pull-from-origin failure
-            (vanilla/github backend).  The merge window runs in the
-            *repo dir* and needs to pull origin into the local checkout.
-        main_repo: Local backend: the main repo directory pm fast-forwards
-            to the workdir's resolved base branch (defaults to the repo URL).
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -853,10 +943,7 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
-    workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
-
-    backend = data.get("project", {}).get("backend", "vanilla")
     repo_url = data.get("project", {}).get("repo", "")
 
     tui_block = tui_section(session_name) if session_name else ""
@@ -871,11 +958,9 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     except FileNotFoundError:
         pass
 
-    # --- Pull-from-origin variant (vanilla/github) ---
-    if pull_from_origin:
-        prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
+    prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
 
-The PR branch `{branch}` has already been merged and pushed to origin,
+The PR branch `{branch}` has already been merged and published to origin,
 but updating the local repo directory failed:
 
 ```
@@ -888,88 +973,23 @@ You are running in the **main repo directory** (`{repo_url}`), not the PR workdi
 Origin already has the correct merged `{base_branch}`.
 This local checkout needs its `{base_branch}` updated to match origin.
 
+This is recovery of an already-completed merge only. Do NOT push
+`{base_branch}` (or any branch) to origin, do NOT run `pm pr merge` without
+`--propagation-only`, `gh pr merge`, or any other backend merge, and do NOT
+create new commits on `{base_branch}` — pm publishes only signed-off code.
+
 ## Steps
 1. Investigate the error above and fix whatever is blocking the update
-   (e.g. stash uncommitted changes, resolve diverged branches)
-2. Pull `{base_branch}` from origin into this repo directory
+   (e.g. stash uncommitted changes)
+2. Pull `{base_branch}` from origin into this repo directory (fast-forward)
 3. Restore any stashed changes
 4. Verify that `{base_branch}` is now up to date with origin
 5. End with a verdict on its own line — one of:
    - **MERGED** — The repo directory is updated. Everything is done.
-   - **INPUT_REQUIRED** — You need human help to resolve this.
+   - **INPUT_REQUIRED** — You need human help to resolve this (e.g. local
+     commits on `{base_branch}` that origin does not have).
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
-        return prompt.strip()
-
-    # --- Standard merge-conflict variant ---
-    if backend == "local":
-        backend_block = f"""
-## Repository Setup (local backend)
-
-This is a **local-only** git project — origin points to a local directory (`{repo_url}`),
-not a remote server.  The origin repo is non-bare with `{base_branch}` checked out, so
-pushing to origin will be rejected.
-
-Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
-pm then fast-forwards the main repo's `{base_branch}` to this one, so it must
-contain the main repo's current `{base_branch}` as well as `{branch}`:
-`git fetch {main_repo or repo_url} {base_branch} && git merge FETCH_HEAD` (if it is not
-already merged), then merge `{branch}`.  Do not change the main repo directory.
-"""
-    elif backend == "github":
-        backend_block = f"""
-## Repository Setup (GitHub backend)
-
-This project is hosted on GitHub.
-
-After resolving the conflict, push the merged `{base_branch}` to origin.
-"""
-    else:
-        backend_block = f"""
-## Repository Setup (vanilla git backend)
-
-This project uses a remote git server.
-
-After resolving the conflict, push the merged `{base_branch}` to origin.
-"""
-
-    if backend == "local":
-        merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
-        steps_block = f"""## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-4. End with a verdict on its own line — one of:"""
-    else:
-        merged_desc = f"The conflict is resolved, merged, and pushed to origin."
-        steps_block = f"""## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-4. Push the merged `{base_branch}` to origin
-5. End with a verdict on its own line — one of:"""
-
-    prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
-
-The merge of `{branch}` into `{base_branch}` failed with the following error:
-
-```
-{error_output}
-```
-{backend_block}
-## Goal
-
-Resolve the merge conflict so that `{base_branch}` contains the merged result of both branches.
-
-{steps_block}
-   - **MERGED** — {merged_desc}
-   - **INPUT_REQUIRED** — You cannot resolve the conflict automatically and need human help.
-     Describe what you need clearly: which files conflict, what the competing changes are,
-     and what decision the user needs to make. The user will interact with you directly in
-     this pane, and then you should resolve and provide a final **MERGED** verdict.
-
-IMPORTANT: Do NOT report MERGED until ALL steps above are complete. Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
 {tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
     return prompt.strip()
 
@@ -1750,6 +1770,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    pr_notes_block += _signoff_return_block(pr)
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
