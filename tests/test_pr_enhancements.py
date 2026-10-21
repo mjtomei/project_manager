@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import mock
 from unittest.mock import patch, MagicMock
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -1450,3 +1451,44 @@ class TestGitHubCloseResilience:
         assert not workdir.exists()
         data = store.load(pm_dir)
         assert all(p["id"] != "pr-001" for p in data.get("prs", []))
+
+
+class TestFinalizeMergeOutput:
+    """The merged line is printed last (the TUI ``g`` log line shows only
+    the final stdout line) and names only the PRs this merge unblocked."""
+
+    def _finalize(self, tmp_path, prs):
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        store.save({"project": {"name": "p", "repo": str(tmp_path),
+                                "base_branch": "master"},
+                    "prs": prs, "plans": []}, pm_dir)
+        entry = next(p for p in prs if p["id"] == "pr-a")
+
+        @click.command()
+        def run():
+            pr_mod._finalize_merge(pm_dir, entry, "pr-a")
+
+        with mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+                mock.patch("pm_core.cli.helpers._find_tui_pane",
+                           return_value=(None, None)):
+            result = CliRunner().invoke(run)
+        assert result.exit_code == 0, result.output
+        return result.output.strip().splitlines()
+
+    def test_last_line_names_only_unblocked_dependents(self, tmp_path):
+        lines = self._finalize(tmp_path, [
+            {"id": "pr-a", "title": "A", "status": "sign_off"},
+            {"id": "pr-b", "title": "B", "status": "pending",
+             "depends_on": ["pr-a"]},
+            {"id": "pr-x", "title": "X", "status": "pending"},
+        ])
+        assert lines[-1] == "PR pr-a marked as merged (newly ready: pr-b)."
+        assert "Newly ready PRs:" in lines
+
+    def test_no_dependents_plain_merged_line(self, tmp_path):
+        lines = self._finalize(tmp_path, [
+            {"id": "pr-a", "title": "A", "status": "sign_off"},
+            {"id": "pr-x", "title": "X", "status": "pending"},
+        ])
+        assert lines[-1] == "PR pr-a marked as merged."

@@ -1592,16 +1592,20 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
         finalize_transcript(Path(transcript))
 
     # Show newly unblocked PRs.  The merged line goes last: the TUI's ``g``
-    # log line shows only the final stdout line.
+    # log line shows only the final stdout line, so it names just the PRs
+    # this merge unblocked (``ready`` also holds every dependency-free
+    # pending PR).
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
+    unblocked = [p for p in ready if pr_id in (p.get("depends_on") or [])]
     merged = f"PR {_pr_display_id(pr_entry)} marked as merged"
     if ready:
         click.echo("Newly ready PRs:")
         for p in ready:
             click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+    if unblocked:
         click.echo(f"{merged} (newly ready: "
-                   f"{', '.join(_pr_display_id(p) for p in ready)}).")
+                   f"{', '.join(_pr_display_id(p) for p in unblocked)}).")
     else:
         click.echo(f"{merged}.")
 
