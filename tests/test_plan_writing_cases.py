@@ -501,3 +501,64 @@ def test_table_only_request_text_is_thin(tmp_path):
     assert brief["context_strength"] == "thin"
     assert "goal-1234" not in brief["brief"]          # self link stripped
     assert "## Summary" not in brief["brief"]         # heading left without content is dropped
+
+
+def test_progress_lines_and_linked_issue_heading(tmp_path):
+    body = " ".join(["The proposal body explains its own design in plain words."] * 20)
+    text = "# Widgets\n\n- RFC PR #: [rust-lang/rfcs#243](https://github.com/rust-lang/rfcs/pull/243)\n\n" + body
+    doc = {"identity": "text/0243-widgets.md", "url": "https://example.org/rfc", "id": "r"}
+    item = context_item("rfcs", "review_thread", "pr243",
+                        "Title: Widgets\n\nWe need widgets because the current design cannot express them at all.\n"
+                        "- [x] Stabilize widgets\n  - Beta release target (x.y): 1.27\n", ["r"])
+    item["url"] = "https://github.com/rust-lang/rfcs/pull/243"
+    item["label"] = "RFC pull request opening post"
+    cfg = {"context": {"request": "Write an RFC.", "collectors": []}}
+    brief, prov = cases.assemble_brief(doc, text, [item], [], cfg, N)
+    assert "## RFC pull request opening post" in brief["brief"]   # label kept although the body links the PR
+    assert "Stabilize widgets" not in brief["brief"] and "1.27" not in brief["brief"]
+    assert prov[0]["progress_lines_dropped"] == 2
+
+
+def test_dash_list_header_accepts_hash_fields():
+    fields, end = docmeta.parse_dash_list("- Start Date: 2014-09-16\n- RFC PR #: rust-lang/rfcs#243\n- Rust Issue #: x\n\n# Summary\n")
+    assert fields == {"Start Date": "2014-09-16", "RFC PR": "rust-lang/rfcs#243", "Rust Issue": "x"}
+    assert end > 0
+
+
+def test_html_block_text_keeps_inline_runs():
+    bs4 = pytest.importorskip("bs4")
+    pytest.importorskip("yaml")
+    context = importlib.import_module("context")
+    soup = bs4.BeautifulSoup("<div><p>Use the <code>?</code> operator\nfor <a href='#'>errors</a>.</p><ul><li>one</li><li>two</li></ul>"
+                             "<pre>a\nb</pre></div>", "html.parser")
+    assert context.html_block_text(soup) == "Use the ? operator for errors.\n\none\n\ntwo\n\na\nb"
+
+
+def test_check_detects_inputs_leaking_into_generator_input(catalog, monkeypatch):
+    data = catalog["data"]
+    real = cases.generator_input
+
+    def leaky(case, data_dir=None, context_items=None):
+        gen = real(case, data_dir, context_items)
+        if case["case_type"] == "pm_plan":
+            gen["conversation"].append({"role": "human", "text": Path(case["baseline"]["path"]).read_text()})
+        return gen
+
+    monkeypatch.setattr(cases, "generator_input", leaky)
+    counts = cases.check(data_dir=data)["failure_counts"]
+    assert counts.get("baseline_in_generator_input")
+
+
+def test_check_detects_self_attachment(catalog):
+    data = catalog["data"]
+    pep = catalog["docs"]["peps/pep-9999.rst"]
+    ctx = data / "context" / "peps.jsonl"
+    items = [json.loads(l) for l in ctx.read_text().splitlines()]
+    for item in items:
+        if item["role"] == "process":
+            item["document_id"] = pep["id"]
+    ctx.write_text("".join(json.dumps(i) + "\n" for i in items))
+    cases._load_context_items.cache_clear()
+    counts = cases.check(data_dir=data)["failure_counts"]
+    cases._load_context_items.cache_clear()
+    assert counts.get("document_attached_to_itself")

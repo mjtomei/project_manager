@@ -8,7 +8,7 @@ and the title line).
 import re
 
 RFC822_FIELD = re.compile(r"^([A-Z][A-Za-z-]*):[ \t]*(.*)$")
-DASH_FIELD = re.compile(r"^\s*[-*]\s+([A-Z][A-Za-z ()/-]*?):[ \t]*(.*)$")
+DASH_FIELD = re.compile(r"^\s*[-*]\s+([A-Z][A-Za-z0-9 ()/#-]*?):[ \t]*(.*)$")  # old Rust RFCs: "- RFC PR #:"
 GO_FIELD = re.compile(r"^(Authors?(?:\(s\))?|Last updated|Updated|Status|Discussion at|Discussion|Proposal)\s*:?\s*(.*)$", re.I)
 TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
 
@@ -51,7 +51,7 @@ def parse_dash_list(text, max_lines=40):
             break
         m = DASH_FIELD.match(line)
         if m:
-            fields[m.group(1).strip()] = m.group(2).strip()
+            fields[m.group(1).rstrip(" #")] = m.group(2).strip()
             end = start + len(line)
         elif line.strip() and fields:
             break

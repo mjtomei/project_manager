@@ -100,6 +100,29 @@ def make_item(source, kind, key, text, url, applies_to, retrieved_at, role="docu
     return item
 
 
+BLOCK_TAGS = ["p", "div", "li", "ul", "ol", "pre", "blockquote", "table", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
+              "hr", "dl", "dt", "dd", "details", "summary"]
+
+
+def html_block_text(element):
+    """Text of rendered post HTML with line breaks only between block elements.
+
+    get_text("\\n") breaks a line at every inline element (links, code spans),
+    which splits sentences; this keeps inline runs together and keeps the
+    line breaks inside <pre> (indentation is not kept).
+    """
+    for node in element.find_all(string=True):
+        if not node.find_parent("pre"):
+            node.replace_with(re.sub(r"\s+", " ", node))
+    for br in element.find_all("br"):
+        br.replace_with("\n")
+    for block in element.find_all(BLOCK_TAGS):
+        block.insert_before("\n")
+        block.insert_after("\n")
+    lines = [line.strip() for line in element.get_text("").splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def render_fields(fields):
     return "\n".join(f"{k}: {v}" for k, v in fields.items() if v)
 
@@ -139,7 +162,7 @@ def github_thread(url):
     if author:
         title = re.sub(r"\s+by\s+" + re.escape(author.get_text(strip=True)) + r"$", "", title)
     when = first.select_one("relative-time[datetime]")
-    return {"title": title, "body": body.get_text("\n", strip=True),
+    return {"title": title, "body": html_block_text(body),
             "author": author.get_text(strip=True) if author else None,
             "created_at": when.get("datetime") if when else None, "url": url}, stamp
 
@@ -380,7 +403,7 @@ def collect_discourse(source, docs, cfg):
         data, stamp = fetch(url)
         payload = json.loads(data)
         post = payload["post_stream"]["posts"][0]
-        body = BeautifulSoup(post.get("cooked", ""), "html.parser").get_text("\n", strip=True)
+        body = html_block_text(BeautifulSoup(post.get("cooked", ""), "html.parser"))
         text = f"Title: {payload.get('title', '')}\nOpened by {post.get('username')} on {post.get('created_at')}\n\n{body}"
         return make_item(source, "discussion_thread", topic, text, f"https://discuss.python.org/t/{topic}", groups[topic], stamp,
                          label="discussion thread opening post", fields={"title": payload.get("title"), "created_at": post.get("created_at")})

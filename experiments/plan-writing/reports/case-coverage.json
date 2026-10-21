@@ -1,15 +1,15 @@
 {
  "totals": {
   "documents": 18963,
-  "brief_rich": 6121,
-  "brief_thin": 6698,
-  "both_case_types": 11714,
+  "brief_rich": 6012,
+  "brief_thin": 6806,
+  "both_case_types": 11713,
   "whole_document_only": 1105,
-  "continuation_only": 3394,
+  "continuation_only": 3395,
   "dropped": 2750,
   "cases": {
    "continuation": 42765,
-   "whole_document": 12819,
+   "whole_document": 12818,
    "pm_plan": 24
   }
  },
@@ -96,8 +96,8 @@
   },
   "cockroach-rfcs": {
    "documents": 188,
-   "brief_rich": 95,
-   "brief_thin": 87,
+   "brief_rich": 91,
+   "brief_thin": 91,
    "both_case_types": 181,
    "whole_document_only": 1,
    "continuation_only": 5,
@@ -202,8 +202,8 @@
   },
   "kubernetes-keps": {
    "documents": 699,
-   "brief_rich": 645,
-   "brief_thin": 50,
+   "brief_rich": 630,
+   "brief_thin": 65,
    "both_case_types": 692,
    "whole_document_only": 3,
    "continuation_only": 1,
@@ -371,14 +371,14 @@
   },
   "python-peps": {
    "documents": 759,
-   "brief_rich": 111,
-   "brief_thin": 628,
-   "both_case_types": 729,
+   "brief_rich": 107,
+   "brief_thin": 631,
+   "both_case_types": 728,
    "whole_document_only": 10,
-   "continuation_only": 14,
+   "continuation_only": 15,
    "dropped": 6,
    "cases": {
-    "whole_document": 739,
+    "whole_document": 738,
     "continuation": 2149
    },
    "context": {
@@ -415,8 +415,8 @@
   },
   "rust-goals": {
    "documents": 269,
-   "brief_rich": 164,
-   "brief_thin": 34,
+   "brief_rich": 136,
+   "brief_thin": 62,
    "both_case_types": 193,
    "whole_document_only": 5,
    "continuation_only": 42,
@@ -438,8 +438,8 @@
   },
   "rust-rfcs": {
    "documents": 652,
-   "brief_rich": 426,
-   "brief_thin": 225,
+   "brief_rich": 368,
+   "brief_thin": 283,
    "both_case_types": 636,
    "whole_document_only": 15,
    "continuation_only": 1,
@@ -17196,10 +17196,10 @@
   }
  ],
  "check": {
-  "cases_checked": 55608,
+  "cases_checked": 55607,
   "by_type": {
    "continuation": 42765,
-   "whole_document": 12819,
+   "whole_document": 12818,
    "pm_plan": 24
   },
   "failures": {},

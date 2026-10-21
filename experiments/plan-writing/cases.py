@@ -49,6 +49,8 @@ BOILERPLATE = re.compile(  # sections that are not authored content: never conti
     r"authors?'? addresses|author's address|authors' information|contributors' addresses|(table of )?contents|index|"
     r"(normative |informative )?references|bibliography|licen[cs]e|footnotes|acknowledge?ments?|changelog|change log)$")
 NON_PROSE = re.compile(r"^\s*(\||#|Title:|Opened by |[-*]?\s*$)")
+# Issue and PR bodies are edited as work proceeds: task checkboxes and KEP release targets record outcomes.
+PROGRESS_LINE = re.compile(r"(?im)^[ \t]*(?:[-*+][ \t]*)?(?:\[[ xX]\].*|(?:alpha|beta|stable) release target\b.*|enhancement target\b.*)\n?")
 
 
 # --- text utilities ---------------------------------------------------------
@@ -191,6 +193,9 @@ def assemble_brief(doc, text, items, process_items, source_cfg, n):
     provenance = []
     for item in sorted(items, key=lambda i: (i["kind"] not in ("index_entry", "metadata"), i["kind"], i["id"])):
         text_in = URL.sub(lambda m: "" if is_self(m.group(0)) else m.group(0), item["text"])
+        progress_dropped = 0
+        if item["kind"] in ("tracking_issue", "review_thread"):
+            text_in, progress_dropped = PROGRESS_LINE.subn("", text_in)
         segs = segments(text_in)
         hit = [bool(x.strip()) and bool(shared_ngrams(x, body_grams, n)) for x in segs]
         total, dropped = sum(1 for x in segs if x.strip()), sum(hit)
@@ -209,7 +214,7 @@ def assemble_brief(doc, text, items, process_items, source_cfg, n):
         provenance.append({"context_id": item["id"], "kind": item["kind"], "label": item.get("label", item["kind"]),
                            "url": item["url"], "retrieved_at": item["retrieved_at"], "sha256": item["sha256"],
                            "segments_total": total, "segments_dropped": sum(1 for x, h in zip(segs, hit) if x.strip() and h),
-                           "truncated_at_quoted_document": bool(truncated)})
+                           "truncated_at_quoted_document": bool(truncated), "progress_lines_dropped": progress_dropped})
         blocks.append([f"## {item.get('label', item['kind'])}" + (f" ({item['url']})" if item.get("url") else ""), "\n"] + kept)
     # Second pass over the assembled text: passages can straddle piece boundaries.
     while True:
@@ -224,6 +229,11 @@ def assemble_brief(doc, text, items, process_items, source_cfg, n):
             break
         for idx in {owner[j] for i in hits for j in range(i, i + n)}:
             bi, si = flat[idx]
+            if bi >= 2 and si == 0:
+                # An item heading: the document often links the same issue, so drop the URL before the label.
+                label_only = f"## {provenance[bi - 2]['label']}"
+                blocks[bi][0] = label_only if blocks[bi][0] != label_only else ""
+                continue
             blocks[bi][si] = ""
             if bi >= 2 and si >= 2:
                 provenance[bi - 2]["segments_dropped"] += 1
@@ -458,6 +468,8 @@ def write_summary(coverage):
               f"- Briefs never share a run of {prep['brief_leak_ngram']} words with the document body (body excludes the "
               "metadata header and title line). A context item that quotes the body for 30% or more of its segments is "
               "cut where the quote starts. Process documents and templates are attachments, not brief text.",
+              "- Issue and pull request bodies are their current text, which authors may have edited after opening; "
+              "task-checkbox and release-target lines, which record progress, are removed from briefs.",
               f"- Continuation cases: up to {cont['max_cases_per_document']} per document, spread over eligible headings; "
               f"prefix at least {cont['min_prefix_words']} words, reference {cont['min_reference_words']}–"
               f"{cont['max_reference_words']} words. Boilerplate sections (copyright, IPR, references, addresses, contents) "
@@ -473,6 +485,15 @@ def write_summary(coverage):
 
 
 # --- validation --------------------------------------------------------------
+
+def _input_text(value):
+    """All strings in a generator input joined raw, so substring checks see unescaped text."""
+    if isinstance(value, dict):
+        return "\n".join(_input_text(v) for v in value.values())
+    if isinstance(value, list):
+        return "\n".join(_input_text(v) for v in value)
+    return value if isinstance(value, str) else ""
+
 
 def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
     """Validate catalog invariants; returns a dict of failures (empty lists when clean)."""
@@ -501,13 +522,17 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                 failures["brief_quotes_document_body"].append(cid)
             if not case["provenance"].get("brief_items"):
                 failures["brief_without_item_provenance"].append(cid)
-            gen = json.dumps(generator_input(case, data_dir, items))
-            if len(text) > 400 and text[len(text) // 3: len(text) // 3 + 400] in gen:
+            gen = generator_input(case, data_dir, items)
+            # Attachments are templates the document was written from, so documents legitimately repeat their
+            # text; the document reaches the generator only through the brief or by being attached to itself.
+            if len(text) > 400 and text[len(text) // 3: len(text) // 3 + 400] in gen["brief"]:
                 failures["reference_in_generator_input"].append(cid)
+            if any(items.get(a["context_id"], {}).get("document_id") == doc["id"] for a in case["inputs"]["attachments"]):
+                failures["document_attached_to_itself"].append(cid)
         elif case["case_type"] == "continuation":
             doc = docs[case["document_id"]]
             text = (data_dir / doc["text_path"]).read_text(encoding="utf-8", errors="replace")
-            if doc["id"] not in heading_cache:
+            if doc["id"] not in heading_cache:  # one entry: a document's cases are consecutive in the catalog
                 raw = (data_dir / doc["raw_path"]).read_bytes()
                 heading_cache = {doc["id"]: sections.headings(doc, text, raw)[1]}
             found = heading_cache[doc["id"]]
@@ -534,7 +559,7 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                 failures["pm_without_conversation_record"].append(cid)
             baseline_path = pm_cases.REPO / case["baseline"]["path"]
             baseline = baseline_path.read_text() if baseline_path.exists() else None
-            if baseline and baseline in json.dumps(generator_input(case, data_dir)):
+            if baseline and baseline.strip() in _input_text(generator_input(case, data_dir)):
                 failures["baseline_in_generator_input"].append(cid)
     covered = coverage["documents"]
     missing = sorted(set(docs) - set(covered))
