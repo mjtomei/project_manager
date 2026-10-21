@@ -29576,7 +29576,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-21T03:19:23.365890+00:00'
+  updated_at: '2026-10-21T03:44:41.138761+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29598,6 +29598,66 @@ prs:
       GENERATED split. tests/test_doc_rubric.py is now 149 tests, not 148.'
     created_at: '2026-10-21T03:19:23Z'
     last_edited: '2026-10-21T03:19:23Z'
+  - id: note-271b84e
+    text: 'Refiner S8: pm plan add launches the REAL /usr/local/bin/claude (also ~/.local/bin/claude).
+      Run it as env PATH=$HOME/.local/share/pm/venv/bin:/usr/bin:/bin pm plan add
+      ... so it prints "Claude CLI not found" instead; then overwrite pm/plans/<plan-id>.md
+      with the fixture text and pm plan load. Verified on 354a4a19: strong -> 2 PRs
+      (2nd <- 1st), weak -> "No PRs found in plan file..." exit 1. validate_judgment
+      duplicate-row message is generic ("duplicate or malformed dimension rows"),
+      and prompts contain double spaces from the JSON schema indent, so check doubled
+      spaces only in the opening paragraph.'
+    created_at: '2026-10-21T03:38:50Z'
+    last_edited: '2026-10-21T03:38:50Z'
+  - id: note-eb96a68
+    text: 'QA S8 (runner integration) PASS on 354a4a19. Spec gotcha: PATH="$HOME/.local/share/pm/venv/bin:/usr/bin:/bin"
+      has no pm in the review container (pm=/usr/local/bin/pm, which sits beside /usr/local/bin/claude),
+      so use a dir holding only a pm symlink to keep pm plan add from launching claude.'
+    created_at: '2026-10-21T03:43:14Z'
+    last_edited: '2026-10-21T03:43:14Z'
+  - id: note-73c2ff5
+    text: 'S6 refiner (2026-10-21, head 354a4a19): tests/test_doc_rubric.py now has
+      150 tests (not 149). In a smoke run of 3 waves (12 --write-doc + 20 --render
+      each), plus 40 SIGINT and 40 SIGKILL interrupts, there were 0 failures, no leftover
+      .rubric.md.* files, and git status stayed clean. The mkstemp-to-replace window
+      is tiny, so a SIGKILL temp leftover is hard to hit. .gitignore does not cover
+      .rubric.md.*, so a leftover file would show as untracked in git status. The
+      S5 drivers in /pm-captures/scenarios/5/scripts can be reused.'
+    created_at: '2026-10-21T03:34:29Z'
+    last_edited: '2026-10-21T03:34:29Z'
+  - id: note-a5dc82b
+    text: 'QA S6 (2026-10-21): concurrency held at 354a4a19 (12 waves: 612 renders,
+      144 write-docs, 36 pytest; 6000 threaded jobs with 126 background write-docs;
+      all clean). But SIGINT could leave a 0-byte .rubric.md.XXXX (10/2000 interrupts
+      at 11-17 ms) because KeyboardInterrupt fired as mkstemp os.open returned, before
+      the cleanup try started. Fixed in 6324448d: the temp name .rubric.md.<pid>.<tid>
+      is chosen before the file is created inside the try, and the text is built first.
+      Post-fix 0/2000. Tests are now 151. SIGKILL can still rarely leave a .rubric.md.*
+      file (1/271 dense kills), which git shows as untracked; consider a .gitignore
+      rule. SIGINT during CPython startup exits 1 (init_import_site) and never reaches
+      rubric.py.'
+    created_at: '2026-10-21T03:43:52Z'
+    last_edited: '2026-10-21T03:43:52Z'
+  - id: note-e3f6c48
+    text: 'S7 refine (rubric maintenance): every "### <dim> — " heading in rubric.md
+      lives inside the GENERATED block (lines ~90-555), so "heading deleted outside
+      the block" cannot happen; a deleted heading fails test_rubric_doc_has_every_dimension_and_is_current
+      and --write-doc restores it. Leak checks must compare against fixture fields
+      (id/notes/held_constant/"expected" key/URLs), not bare words: the whole_document
+      template itself says "which is expected to be better", and fixture text plus
+      the continuity definition contain "notes"/"generated"/"original". Read-only-dir
+      check needs a non-root user. Run pytest with PYTHONPATH=<clone root> (env has
+      PYTHONPATH=/opt/pm-src).'
+    created_at: '2026-10-21T03:35:48Z'
+    last_edited: '2026-10-21T03:35:48Z'
+  - id: note-3b51061
+    text: 'QA S7 maintenance loop PASS on 354a4a19 (captures /pm-captures/scenarios/7).
+      On 6324448d spec counts drift +1: baseline 151 passed; unknown-ref case is 4
+      failed/147 passed (new test_write_doc_interrupt_after_temp_created_leaves_no_temp
+      also fails); heading-damage first run is 2 failed/149 passed (test_write_doc_replaces_file_by_rename
+      also fails, expected). Update qa spec counts.'
+    created_at: '2026-10-21T03:44:41Z'
+    last_edited: '2026-10-21T03:44:41Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
