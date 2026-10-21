@@ -29576,7 +29576,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-21T04:19:57.779684+00:00'
+  updated_at: '2026-10-21T04:21:10.233129+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29688,6 +29688,13 @@ prs:
       are specified only; implementing and calibrating them is pr-8df6472 work.'
     created_at: '2026-10-21T04:19:57Z'
     last_edited: '2026-10-21T04:19:57Z'
+  - id: note-42f82f4
+    text: 'Sign-off re-run 2026-10-21 on 0d1a6bf3: SIGNOFF_MERGE re-confirmed. Only
+      change since 5e5c1646 is the prior sign-off note in pm/project.yaml; 151 tests
+      pass, --write-doc leaves tree clean. Report /pm-captures/report.html refreshed
+      (head, diff, notes).'
+    created_at: '2026-10-21T04:21:10Z'
+    last_edited: '2026-10-21T04:21:10Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
