@@ -17,7 +17,7 @@
       "name": "Purpose, context and audience",
       "applies_to": ["whole_document", "continuation"],
       "definition": "The document states what problem it addresses, why now, for whom, and what decision or action it asks of the reader, and its content is selected for that reader's needs.",
-      "track_notes": {"continuation": "The section serves the purpose the prefix has established and the role the section's position implies; it does not re-introduce the document's purpose."},
+      "track_notes": {"continuation": "The section serves the purpose the prefix has established and the role the section's position implies; re-introducing the document's purpose is scored under continuity, not here."},
       "references": ["aacu-value", "iso24495", "fplg", "pep1", "kep-template", "shapeup-pitch", "google-design-docs", "grice"],
       "derived_from": "AAC&U 'context of and purpose for writing'; ISO 24495 'relevant'; PEP motivation, KEP motivation/goals, Shape Up problem and appetite, Google 'context and scope'; Grice's maxim of relation.",
       "detection_guidance": [
@@ -115,7 +115,7 @@
       "definition": "The document works at the level of detail its kind and stage call for: it fixes the decisions a reader must review now, states goals and non-goals, and leaves implementation choices that do not affect those decisions to the people who implement them.",
       "track_notes": {"continuation": "The section's level of detail matches the prefix's and the section's role; a reference-level section may be detailed where an overview section may not."},
       "references": ["iso29148", "incose-gtwr", "google-design-docs", "shapeup-principles", "rfc4101", "kep-template", "nasa-se-handbook", "diataxis"],
-      "derived_from": "ISO 29148 and INCOSE 'appropriate' level and solution-free requirements; NASA implementation-free requirements; Google design docs ('really implementation manuals'); Shape Up 'rough, solved, bounded' (wireframes too concrete, words too abstract); RFC 4101 detail for implementors gets in the way of review; KEP goals/non-goals; Diátaxis separation of purposes.",
+      "derived_from": "ISO 29148 and INCOSE 'appropriate' level and solution-free requirements; NASA implementation-free requirements; Google design docs ('really implementation manuals'); Shape Up 'rough, solved, bounded' (wireframes too concrete, words too abstract; no-gos as the boundary); RFC 4101 detail for implementors gets in the way of review; KEP goals/non-goals; Diátaxis separation of purposes.",
       "detection_guidance": [
         "Mark passages that fix function names, file layouts, data-structure fields, flags or step-by-step code changes; ask whether any reviewed decision depends on them.",
         "Premature implementation detail is detail that constrains implementers without a reason the document states, or that buries the decisions under it.",
@@ -175,7 +175,7 @@
       "name": "Organization and progression",
       "applies_to": ["whole_document", "continuation"],
       "definition": "The document moves from context to decision to detail in an order a reader can follow: overview before specifics, terms defined before use, dependencies before what depends on them, and each part building on what came before.",
-      "track_notes": {"continuation": "The section advances from where the prefix stopped rather than restarting, looping back or jumping ahead of material the prefix has not yet introduced."},
+      "track_notes": {"continuation": "Judge order within the section; restarting the prefix, looping back over it or jumping ahead of material it has not yet introduced is scored under continuity, not here."},
       "references": ["gopen-swan", "minto", "rfc4101", "rust-rfc-template", "six-traits", "aacu-value", "fplg", "gov-uk", "coh-metrix"],
       "derived_from": "Gopen and Swan reader expectations (old before new, stress position); Minto governing idea first; RFC 4101 model before detail; Rust RFC guide-level before reference-level; 6+1 'organization'; AAC&U 'content development'; plain-language 'organize to meet readers' needs'; GOV.UK front-loading; Coh-Metrix cohesion.",
       "detection_guidance": [
@@ -305,13 +305,13 @@
       "id": "risks_and_open_questions",
       "name": "Risks, uncertainty and open questions",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document states what could go wrong, what is unknown, which questions remain for reviewers and what is deliberately excluded, instead of presenting an uncertain plan as settled.",
+      "definition": "The document states what could go wrong, what is unknown, and which questions remain for reviewers, instead of presenting an uncertain plan as settled.",
       "track_notes": {"continuation": "Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged."},
       "references": ["kep-template", "rust-rfc-template", "pep1", "shapeup-pitch", "rfc3552", "oxide-rfd1", "google-design-docs"],
-      "derived_from": "KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes and no-gos; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns.",
+      "derived_from": "KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns.",
       "detection_guidance": [
         "Look for named risks with consequences and mitigations, not a generic 'risks: bugs may occur'.",
-        "Check that genuinely unknown things are marked as unknown and that exclusions are explicit.",
+        "Check that genuinely unknown things are marked as unknown. Exclusions and non-goals are scored under scope_and_abstraction, not here.",
         "Flag false certainty: claims about performance, adoption or compatibility without evidence or caveat."
       ],
       "not_a_defect": ["A short or empty risks section for a small, low-risk change, if it says so."],
@@ -319,11 +319,11 @@
         "strong": "Risk: a dependency closed without merging would hold dependents forever. Mitigation: treat closed-unmerged as released and log it. Open question for reviewers: should a reopened dependency re-hold started dependents?",
         "weak": "Risks: there may be some edge cases, which will be handled during implementation."
       },
-      "judge_question": "Are specific risks, unknowns, exclusions and reviewer questions stated, without false certainty?",
+      "judge_question": "Are specific risks, unknowns and reviewer questions stated, without false certainty?",
       "score_anchors": {
         "1": "No risks or open questions where clearly needed; false certainty.",
         "3": "Some specific risks; others generic or missing.",
-        "5": "Specific risks with mitigations, explicit unknowns and exclusions."
+        "5": "Specific risks with mitigations, explicit unknowns and reviewer questions."
       },
       "candidate_measures": [
         {"name": "judge_risks", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."}

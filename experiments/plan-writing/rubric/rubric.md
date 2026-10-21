@@ -32,7 +32,7 @@ A dimension was kept when at least two independent families name it as a distinc
 - **Concision** is Grice's quantity maxim and the plain-language rule to omit excess words. Write the Docs' ARID principle and the user's own criterion (useful elaboration is not a fault, see below) keep it from becoming a length penalty.
 - **Clarity and precision** is ISO 29148 "unambiguous", the INCOSE vague-term rules and RFC 8174 keywords. It is separated from concision because a text can be short and vague.
 - **Internal consistency** is ISO 29148 and INCOSE set consistency. It is separated from fidelity because the failure is within the document, with no input needed to detect it.
-- **Risks, uncertainty and open questions** comes from KEP risks and mitigations, Rust unresolved questions, PEP open issues, Shape Up rabbit holes and no-gos, and RFC 3552.
+- **Risks, uncertainty and open questions** comes from KEP risks and mitigations, Rust unresolved questions, PEP open issues, Shape Up rabbit holes, and RFC 3552. Exclusions and no-gos belong to scope, which owns non-goals.
 - **Verifiability and success criteria** is ISO 29148 and INCOSE "verifiable" and the KEP test plan and graduation criteria. For PM plans it is the tests field.
 - **Genre and template conformance** is AAC&U "genre and disciplinary conventions" made concrete by the corpus templates and, for PM plans, by the structure `pm_core/plans/parser.py` parses.
 - **Continuity with the prefix** applies only to continuation cases. It is cohesion (Halliday and Hasan, Coh-Metrix) and the old-before-new expectation across the cut. It deliberately excludes stylistic resemblance, which plan-doc-eval flags as favouring the original author.
@@ -107,7 +107,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 **Definition.** The document states what problem it addresses, why now, for whom, and what decision or action it asks of the reader, and its content is selected for that reader's needs.
 
-**Continuation.** The section serves the purpose the prefix has established and the role the section's position implies; it does not re-introduce the document's purpose.
+**Continuation.** The section serves the purpose the prefix has established and the role the section's position implies; re-introducing the document's purpose is scored under continuity, not here.
 
 **Derived from.** AAC&U 'context of and purpose for writing'; ISO 24495 'relevant'; PEP motivation, KEP motivation/goals, Shape Up problem and appetite, Google 'context and scope'; Grice's maxim of relation.
 
@@ -214,7 +214,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 **Continuation.** The section's level of detail matches the prefix's and the section's role; a reference-level section may be detailed where an overview section may not.
 
-**Derived from.** ISO 29148 and INCOSE 'appropriate' level and solution-free requirements; NASA implementation-free requirements; Google design docs ('really implementation manuals'); Shape Up 'rough, solved, bounded' (wireframes too concrete, words too abstract); RFC 4101 detail for implementors gets in the way of review; KEP goals/non-goals; Diátaxis separation of purposes.
+**Derived from.** ISO 29148 and INCOSE 'appropriate' level and solution-free requirements; NASA implementation-free requirements; Google design docs ('really implementation manuals'); Shape Up 'rough, solved, bounded' (wireframes too concrete, words too abstract; no-gos as the boundary); RFC 4101 detail for implementors gets in the way of review; KEP goals/non-goals; Diátaxis separation of purposes.
 
 **Sources.** [ISO/IEC/IEEE 29148:2018 Systems and software engineering — Life cycle processes — Requirements engineering](https://www.iso.org/standard/72089.html); [INCOSE Guide to Writing Requirements (GtWR), version 4](https://www.incose.org/docs/default-source/working-groups/requirements-wg/gtwr/incose_rwg_gtwr_v4_040423_final_drafts.pdf); [Design Docs at Google (M. Ubl, industrialempathy.com)](https://www.industrialempathy.com/posts/design-docs-at-google/); [Shape Up, Principles of Shaping (R. Singer, Basecamp)](https://basecamp.com/shapeup/1.1-chapter-02); [RFC 4101 — Writing Protocol Models (E. Rescorla)](https://www.rfc-editor.org/rfc/rfc4101); [Kubernetes KEP template (kubernetes/enhancements NNNN-kep-template)](https://github.com/kubernetes/enhancements/blob/master/keps/NNNN-kep-template/README.md); [NASA Systems Engineering Handbook (NASA/SP-2016-6105 Rev 2)](https://www.nasa.gov/reference/systems-engineering-handbook/); [Diátaxis: a systematic approach to technical documentation authoring (D. Procida)](https://diataxis.fr/)
 
@@ -280,7 +280,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 **Definition.** The document moves from context to decision to detail in an order a reader can follow: overview before specifics, terms defined before use, dependencies before what depends on them, and each part building on what came before.
 
-**Continuation.** The section advances from where the prefix stopped rather than restarting, looping back or jumping ahead of material the prefix has not yet introduced.
+**Continuation.** Judge order within the section; restarting the prefix, looping back over it or jumping ahead of material it has not yet introduced is scored under continuity, not here.
 
 **Derived from.** Gopen and Swan reader expectations (old before new, stress position); Minto governing idea first; RFC 4101 model before detail; Rust RFC guide-level before reference-level; 6+1 'organization'; AAC&U 'content development'; plain-language 'organize to meet readers' needs'; GOV.UK front-loading; Coh-Metrix cohesion.
 
@@ -420,18 +420,18 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### risks_and_open_questions — Risks, uncertainty and open questions
 
-**Definition.** The document states what could go wrong, what is unknown, which questions remain for reviewers and what is deliberately excluded, instead of presenting an uncertain plan as settled.
+**Definition.** The document states what could go wrong, what is unknown, and which questions remain for reviewers, instead of presenting an uncertain plan as settled.
 
 **Continuation.** Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged.
 
-**Derived from.** KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes and no-gos; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns.
+**Derived from.** KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns.
 
 **Sources.** [Kubernetes KEP template (kubernetes/enhancements NNNN-kep-template)](https://github.com/kubernetes/enhancements/blob/master/keps/NNNN-kep-template/README.md); [Rust RFC template (rust-lang/rfcs 0000-template.md)](https://github.com/rust-lang/rfcs/blob/master/0000-template.md); [PEP 1 — PEP Purpose and Guidelines](https://peps.python.org/pep-0001/); [Shape Up, Chapter 6: Write the Pitch (R. Singer, Basecamp)](https://basecamp.com/shapeup/1.5-chapter-06); [RFC 3552 — Guidelines for Writing RFC Text on Security Considerations](https://www.rfc-editor.org/rfc/rfc3552); [Oxide RFD 1 — Requests for Discussion](https://rfd.shared.oxide.computer/rfd/0001); [Design Docs at Google (M. Ubl, industrialempathy.com)](https://www.industrialempathy.com/posts/design-docs-at-google/)
 
 **Detection guidance.**
 
 - Look for named risks with consequences and mitigations, not a generic 'risks: bugs may occur'.
-- Check that genuinely unknown things are marked as unknown and that exclusions are explicit.
+- Check that genuinely unknown things are marked as unknown. Exclusions and non-goals are scored under scope_and_abstraction, not here.
 - Flag false certainty: claims about performance, adoption or compatibility without evidence or caveat.
 
 **Not a fault.**
@@ -442,7 +442,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 **Example, weaker.** Risks: there may be some edge cases, which will be handled during implementation.
 
-**Score anchors.** 1: No risks or open questions where clearly needed; false certainty. 3: Some specific risks; others generic or missing. 5: Specific risks with mitigations, explicit unknowns and exclusions.
+**Score anchors.** 1: No risks or open questions where clearly needed; false certainty. 3: Some specific risks; others generic or missing. 5: Specific risks with mitigations, explicit unknowns and reviewer questions.
 
 **Candidate measures** (readiness: calibration_required).
 
