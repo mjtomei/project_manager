@@ -130,7 +130,8 @@ def reference_markdown(rubric=None, references=None):
         fixtures.setdefault(f["dimension"], []).append(f["id"])
     out = ["| Dimension | Case types | Readiness | Automatic candidates | Concerns |", "|---|---|---|---|---|"]
     for d in rubric["dimensions"]:
-        auto = [m["name"] for m in d["candidate_measures"] if m["status"] == "automatic_candidate"]
+        auto = [m["name"] + (" (bias covariate)" if m.get("role") == "bias_covariate" else "")
+                for m in d["candidate_measures"] if m["status"] == "automatic_candidate"]
         out.append("| " + " | ".join([d["id"], ", ".join(d["applies_to"]), d["measure_readiness"],
                                        ", ".join(auto) or "—", ", ".join(d["maps_concerns"]) or "—"]) + " |")
     for d in rubric["dimensions"]:

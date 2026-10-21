@@ -8,7 +8,7 @@
     "deferred": "Needs inference-engine access (classifier probabilities, perplexity, NLI logits). Outside the first PRs per plan-doc-eval; listed so later work starts from the literature."
   },
   "measure_readiness_values": {
-    "automatic_candidate": "At least one automatic_candidate measure exists besides the judge measure.",
+    "automatic_candidate": "At least one automatic_candidate quality measure exists besides the judge measure; bias covariates do not count.",
     "calibration_required": "Only judge or model measures exist; the dimension cannot be measured at all before calibration evidence."
   },
   "dimensions": [
@@ -208,7 +208,7 @@
       "name": "Concision and information density",
       "applies_to": ["whole_document", "continuation"],
       "definition": "Each passage adds information the reader needs; the document omits filler, restatement, obvious material and generic advice that would hold for any project, while keeping elaboration and repetition that help the reader.",
-      "track_notes": {"continuation": "Restating the prefix counts as padding unless it is a brief bridge the reader needs."},
+      "track_notes": {"continuation": "Judge filler and restatement within the section; repetition of the prefix itself is scored under continuity, not here."},
       "references": ["grice", "fplg", "williams-style", "ms-style", "google-style", "wtd-principles", "verbosity-bias", "lc-alpacaeval"],
       "derived_from": "Grice's maxim of quantity; plain-language 'omit excess words'; Williams on redundant and implied words; Microsoft 'get to the point fast'; Write the Docs ARID as the counterweight (useful repetition is allowed); verbosity-bias literature for the judge-side risk.",
       "detection_guidance": [
@@ -425,7 +425,7 @@
         {"name": "style_distance", "kind": "deterministic", "status": "automatic_candidate", "role": "bias_covariate", "description": "Burrows's Delta between prefix and section; recorded to measure how much judges reward style match, never scored as quality.", "references": ["burrows-delta"]}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": ["poor_progression"]
+      "maps_concerns": ["poor_progression", "padding"]
     }
   ],
   "concerns": [
@@ -435,7 +435,7 @@
       "description": "Obvious material, filler and text that adds no planning value; distracting material that draws a reviewer away from the decisions that need review.",
       "source": "pm/docs/plan-session-sources-2026-10-19.md (evaluation-criterion clarifications)",
       "primary_dimension": "concision",
-      "also_affects": ["purpose_and_audience", "organization_and_progression"],
+      "also_affects": ["purpose_and_audience", "organization_and_progression", "continuity"],
       "boundary": "Useful elaboration and genre-required length are not padding; judge density and relevance, not word count."
     },
     {

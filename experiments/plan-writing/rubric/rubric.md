@@ -41,11 +41,11 @@ Sentence-level mechanics (AAC&U "control of syntax and mechanics", 6+1 "conventi
 
 ## The previously identified concerns
 
-The four concerns raised during planning are placed within this set rather than treated as the measure. Fidelity is mapped the same way. The user's criterion, recorded in [plan-session-sources-2026-10-19.md](../../../pm/docs/plan-session-sources-2026-10-19.md), sets the boundary for all of them. Additional material not explicitly discussed is not automatically wrong. Obvious material, or text that adds no planning value, is a primary readability problem. Distracting material draws review away from important decisions. Whether agents share these limitations is an open question.
+The four concerns raised during planning are placed within this set rather than treated as the measure. Fidelity is mapped the same way. The user's criterion, recorded in [plan-session-sources-2026-10-19.md](../../../pm/docs/plan-session-sources-2026-10-19.md), sets the boundary for all of them. Additional material not explicitly discussed is not automatically wrong. Obvious material, or text that adds no planning value, is a primary readability problem. Distracting material draws review away from important decisions. Whether distracting material impairs agent readers the way it impairs human reviewers is an open question.
 
 | Concern | Primary dimension | Also affects | Boundary |
 |---|---|---|---|
-| Padding | concision | purpose_and_audience, organization_and_progression | Useful elaboration and genre-required length are not padding; judge density and relevance, not word count. |
+| Padding | concision | purpose_and_audience, organization_and_progression, continuity | Useful elaboration and genre-required length are not padding; judge density and relevance, not word count. |
 | Premature implementation detail | scope_and_abstraction | rationale_and_alternatives, concision | Interfaces, schemas or protocols that are themselves under review, and detail the brief asks for, are not premature. |
 | Poor progression | organization_and_progression | continuity | Summary-first order and genre-mandated order are not failures. |
 | Lost requirements | requirement_coverage | fidelity, verifiability | A requirement deliberately deferred with a stated reason is not lost. |
@@ -95,13 +95,13 @@ The dimensions come from published guidance and are not yet validated against pr
 | scope_and_abstraction | whole_document, continuation | automatic_candidate | implementation_token_density | premature_implementation_detail |
 | rationale_and_alternatives | whole_document, continuation | calibration_required | — | premature_implementation_detail |
 | organization_and_progression | whole_document, continuation | automatic_candidate | define_before_use, adjacent_section_overlap | poor_progression, padding |
-| concision | whole_document, continuation | automatic_candidate | redundancy_rate, filler_lexicon_rate, length_ratio | padding, premature_implementation_detail |
+| concision | whole_document, continuation | automatic_candidate | redundancy_rate, filler_lexicon_rate, length_ratio (bias covariate) | padding, premature_implementation_detail |
 | clarity_and_precision | whole_document, continuation | automatic_candidate | vague_term_rate, undefined_acronyms | — |
 | internal_consistency | whole_document, continuation | automatic_candidate | term_variant_detection, pm_dependency_agreement | fidelity |
 | risks_and_open_questions | whole_document, continuation | calibration_required | — | — |
 | verifiability | whole_document, continuation | automatic_candidate | pm_tests_field_present | lost_requirements |
 | genre_conventions | whole_document, continuation | automatic_candidate | template_section_presence, pm_plan_parse | — |
-| continuity | continuation | automatic_candidate | prefix_repetition, established_term_reuse, style_distance | poor_progression |
+| continuity | continuation | automatic_candidate | prefix_repetition, established_term_reuse, style_distance (bias covariate) | poor_progression, padding |
 
 ### purpose_and_audience — Purpose, context and audience
 
@@ -316,7 +316,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 **Definition.** Each passage adds information the reader needs; the document omits filler, restatement, obvious material and generic advice that would hold for any project, while keeping elaboration and repetition that help the reader.
 
-**Continuation.** Restating the prefix counts as padding unless it is a brief bridge the reader needs.
+**Continuation.** Judge filler and restatement within the section; repetition of the prefix itself is scored under continuity, not here.
 
 **Derived from.** Grice's maxim of quantity; plain-language 'omit excess words'; Williams on redundant and implied words; Microsoft 'get to the point fast'; Write the Docs ARID as the counterweight (useful repetition is allowed); verbosity-bias literature for the judge-side risk.
 

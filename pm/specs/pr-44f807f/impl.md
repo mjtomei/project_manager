@@ -121,4 +121,7 @@
 - Fixture variants are short; length differences are deliberate only in the
   padding fixture, so other fixtures keep lengths similar to avoid confounding
   with verbosity bias.
+- In continuations, each prefix-related fault has one owner: contradicting the
+  prefix is fidelity, repeating or restarting it is continuity (concision judges
+  filler within the section only), so fixtures for one do not move the other.
 - No network or model calls in tests; reference URLs are not fetched in tests.
