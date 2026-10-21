@@ -751,6 +751,7 @@ class TechTree(Widget):
         self._node_widgets: dict[str, PRNode] = {}
         self._label_widgets: dict[str, PlanLabel] = {}
         self._plan_groups: list[PlanGroup] = []      # for viewport culling
+        self._retiring: set[Widget] = set()           # replaced, removal pending
         self._neighbors: dict[str, dict[str, str | None]] = {}
         self._layout_sig: tuple | None = None
         self._cached_layout = None
@@ -1003,7 +1004,11 @@ class TechTree(Widget):
         if not self.is_mounted:
             return
 
-        self.remove_children()
+        # The old widgets stay on screen until their replacements are mounted
+        # (see _mount_replacing); removing them first painted an empty tree
+        # for a frame on every rebuild, e.g. each auto-start target change.
+        old_children = [c for c in self.children if c not in self._retiring]
+        self._retiring.update(old_children)
         self._node_widgets = {}
         self._label_widgets = {}
         self._plan_groups = []
@@ -1020,7 +1025,8 @@ class TechTree(Widget):
             self.styles.width = "100%"
             self.styles.height = "100%"
             from textual.widgets import Static
-            self.mount(Static(Text(msg, style="dim")))
+            self._mount_replacing([Static(Text(msg, style="dim"))],
+                                  old_children)
             return
 
         width, height = self._content_size()
@@ -1139,9 +1145,30 @@ class TechTree(Widget):
                 self._label_widgets[virtual_id] = label
                 new_widgets.append(label)
 
-        self.mount_all(new_widgets)
+        self._mount_replacing(new_widgets, old_children)
         # Cull bands outside the viewport once the new widgets are laid out.
         self.call_after_refresh(self._cull_offscreen_bands)
+
+    def _mount_replacing(self, new_widgets: list[Widget],
+                         old_children: list[Widget]) -> None:
+        """Mount *new_widgets*, then remove *old_children* in one repaint.
+
+        Textual paints a widget only once its Mount has run, but hides a
+        pruned one at once, so the swap waits for the mount with repaints
+        suspended: the screen goes straight from the old tree to the new one.
+        """
+        await_mount = self.mount_all(new_widgets)
+
+        async def swap() -> None:
+            try:
+                with self.app.batch_update():
+                    await await_mount
+                    if old_children:
+                        await self.remove_children(old_children)
+            finally:
+                self._retiring.difference_update(old_children)
+
+        self.call_next(swap)
 
     def _cull_offscreen_bands(self, *args) -> None:
         """Show only plan bands intersecting the viewport (+ a margin).

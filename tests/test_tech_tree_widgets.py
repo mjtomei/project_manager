@@ -288,6 +288,28 @@ async def test_auto_start_toggle_rebuilds_for_marker():
         assert before != after  # rebuilt so the ◎ marker can render
 
 
+@async_test
+async def test_rebuild_keeps_old_nodes_until_new_ones_mount():
+    # A rebuild (here: an auto-start target change) must never leave a frame
+    # with no paintable nodes: the old nodes stay until their replacements
+    # have mounted, then go in the same repaint, leaving one node per PR.
+    app = _TreeApp([_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])])
+    async with app.run_test(size=(120, 40)) as pilot:
+        tree = app.query_one(TechTree)
+        before = {id(n) for n in app.query(PRNode)}
+        app._auto_start = True
+        app._auto_start_targets = {"pr-b": {}}
+        tree.update_prs([_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])])
+        shown = [n for n in app.query(PRNode)
+                 if n.is_mounted and not n._pruning]
+        assert {id(n) for n in shown} == before
+        await pilot.pause()
+        after = list(app.query(PRNode))
+        assert sorted(n.pr_id for n in after) == ["pr-a", "pr-b"]
+        assert not before & {id(n) for n in after}
+        assert not tree._retiring
+
+
 def test_recompute_before_mount_does_not_mark_built():
     # _recompute on an unmounted tree must NOT set _built — otherwise the
     # post-mount build (with identical data, so layout_changed is False) would
