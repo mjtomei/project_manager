@@ -135,15 +135,6 @@ def target_policy(app, pr_id: str) -> str:
         pr_id, _targets(app).get(pr_id), _stop_set(app))
 
 
-def spec_review_holds(app, prs: list[dict] | None = None) -> dict[str, list[str]]:
-    """``{pr_id: [review targets]}`` from active ``review_specs`` targets."""
-    if not is_enabled(app):
-        return {}
-    if prs is None:
-        prs = (app._data or {}).get("prs") or []
-    return autostart_state.spec_review_holds(prs, _targets(app))
-
-
 def spec_review_checker(app, prs: list[dict] | None = None):
     """A ``pr_id -> bool`` predicate for :func:`spec_review_required`.
 
