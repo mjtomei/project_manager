@@ -14,12 +14,53 @@
       "sparse": [
         "/design/",
         "/LICENSE*",
-        "/COPYING*"
+        "/COPYING*",
+        "/README.md"
       ],
       "include": [
         "design/*.md"
       ],
-      "split_group": "go-proposals"
+      "split_group": "go-proposals",
+      "context": {
+        "request": "Write a design document for a proposal to the Go project, for the design/ directory of the golang/proposal repository.",
+        "collectors": [
+          {
+            "type": "github",
+            "kind": "tracking_issue",
+            "label": "proposal tracking issue",
+            "repo": "golang/go",
+            "path": "issues",
+            "numbers": [
+              {
+                "from": "identity",
+                "pattern": "^design/(\\d+)-"
+              },
+              {
+                "from": "header",
+                "pattern": "(?:golang\\.org/issues?/|go\\.dev/issues?/|github\\.com/golang/go/issues/)(\\d+)"
+              }
+            ]
+          },
+          {
+            "type": "header",
+            "format": "go",
+            "fields": [
+              "Author(s)",
+              "Authors",
+              "Author"
+            ],
+            "label": "design document byline"
+          },
+          {
+            "type": "process",
+            "files": [
+              "README.md",
+              "design/TEMPLATE.md"
+            ],
+            "label": "Go proposal process and design template"
+          }
+        ]
+      }
     },
     {
       "id": "rust-rfcs",
@@ -30,12 +71,63 @@
       "sparse": [
         "/text/",
         "/LICENSE*",
-        "/COPYING*"
+        "/COPYING*",
+        "/README.md",
+        "/0000-template.md"
       ],
       "include": [
         "text/*.md"
       ],
-      "split_group": "rust"
+      "split_group": "rust",
+      "context": {
+        "request": "Write a Rust RFC for the rust-lang/rfcs repository.",
+        "collectors": [
+          {
+            "type": "github",
+            "kind": "review_thread",
+            "label": "RFC pull request opening post",
+            "repo": "rust-lang/rfcs",
+            "path": "pull",
+            "numbers": [
+              {
+                "from": "identity",
+                "pattern": "^text/(\\d+)-"
+              }
+            ]
+          },
+          {
+            "type": "github",
+            "kind": "tracking_issue",
+            "label": "Rust tracking issue",
+            "repo": "rust-lang/rust",
+            "path": "issues",
+            "numbers": [
+              {
+                "from": "header",
+                "pattern": "Rust Issue:[^\\n]*?rust-lang/rust(?:/issues/|#)(\\d+)",
+                "chars": 1500
+              }
+            ]
+          },
+          {
+            "type": "header",
+            "format": "dash_list",
+            "fields": [
+              "Feature Name",
+              "Start Date"
+            ],
+            "label": "RFC header metadata"
+          },
+          {
+            "type": "process",
+            "files": [
+              "README.md",
+              "0000-template.md"
+            ],
+            "label": "Rust RFC process and template"
+          }
+        ]
+      }
     },
     {
       "id": "rust-goals",
@@ -51,7 +143,58 @@
       "include": [
         "src/*.md"
       ],
-      "split_group": "rust"
+      "split_group": "rust",
+      "context": {
+        "request": "Write a Rust project goal proposal for the rust-lang/rust-project-goals repository.",
+        "collectors": [
+          {
+            "type": "github",
+            "kind": "tracking_issue",
+            "label": "project goal tracking issue",
+            "repo": "rust-lang/rust-project-goals",
+            "path": "issues",
+            "numbers": [
+              {
+                "from": "header",
+                "pattern": "Tracking issue[^\\n]*?rust-lang/(?:rust-project-goals|goals)#(\\d+)",
+                "chars": 2500
+              }
+            ],
+            "documents": "^src/20\\d\\d"
+          },
+          {
+            "type": "header",
+            "format": "md_table",
+            "fields": [
+              "Point of contact",
+              "Contact",
+              "Teams",
+              "Team(s)",
+              "Task owners",
+              "Zulip channel"
+            ],
+            "documents": "^src/20\\d\\d",
+            "label": "goal metadata table"
+          },
+          {
+            "type": "markdown_index",
+            "files": [
+              "README.md",
+              "goals.md"
+            ],
+            "documents": "^src/20\\d\\d",
+            "label": "goal slate entry"
+          },
+          {
+            "type": "process",
+            "files": [
+              "src/TEMPLATE.md",
+              "src/how_to/propose_a_goal.md"
+            ],
+            "label": "Rust project goal template and proposal guide"
+          }
+        ]
+      }
     },
     {
       "id": "python-peps",
@@ -68,7 +211,42 @@
         "peps/pep-*.rst",
         "peps/pep-*.md"
       ],
-      "split_group": "python-peps"
+      "split_group": "python-peps",
+      "context": {
+        "request": "Write a Python Enhancement Proposal (PEP) for the python/peps repository.",
+        "collectors": [
+          {
+            "type": "header",
+            "format": "rfc822",
+            "fields": [
+              "PEP",
+              "Title",
+              "Author",
+              "Sponsor",
+              "Type",
+              "Topic",
+              "Created",
+              "Python-Version",
+              "Requires",
+              "Replaces",
+              "Discussions-To"
+            ],
+            "label": "PEP preamble (decision fields excluded)"
+          },
+          {
+            "type": "discourse",
+            "label": "discussion thread opening post"
+          },
+          {
+            "type": "process",
+            "files": [
+              "peps/pep-0001.rst",
+              "peps/pep-0012.rst"
+            ],
+            "label": "PEP process (PEP 1) and template (PEP 12)"
+          }
+        ]
+      }
     },
     {
       "id": "kubernetes-keps",
@@ -84,7 +262,49 @@
       "include": [
         "keps/*.md"
       ],
-      "split_group": "kubernetes-keps"
+      "split_group": "kubernetes-keps",
+      "context": {
+        "request": "Write a Kubernetes Enhancement Proposal (KEP) document for the kubernetes/enhancements repository.",
+        "collectors": [
+          {
+            "type": "kep_yaml",
+            "fields": [
+              "title",
+              "kep-number",
+              "authors",
+              "owning-sig",
+              "participating-sigs",
+              "creation-date",
+              "reviewers",
+              "approvers",
+              "see-also",
+              "replaces"
+            ],
+            "label": "KEP metadata"
+          },
+          {
+            "type": "github",
+            "kind": "tracking_issue",
+            "label": "enhancement tracking issue",
+            "repo": "kubernetes/enhancements",
+            "path": "issues",
+            "numbers": [
+              {
+                "from": "identity",
+                "pattern": "^keps/[^/]+/(\\d+)-"
+              }
+            ]
+          },
+          {
+            "type": "process",
+            "files": [
+              "keps/NNNN-kep-template/README.md",
+              "keps/README.md"
+            ],
+            "label": "KEP template and process"
+          }
+        ]
+      }
     },
     {
       "id": "cockroach-rfcs",
@@ -100,7 +320,58 @@
       "include": [
         "docs/RFCS/*.md"
       ],
-      "split_group": "cockroach-rfcs"
+      "split_group": "cockroach-rfcs",
+      "context": {
+        "request": "Write a CockroachDB RFC for the docs/RFCS directory of the cockroachdb/cockroach repository.",
+        "collectors": [
+          {
+            "type": "header",
+            "format": "dash_list",
+            "fields": [
+              "Feature Name",
+              "Start Date",
+              "Authors",
+              "Author(s)"
+            ],
+            "label": "RFC header metadata"
+          },
+          {
+            "type": "github",
+            "kind": "review_thread",
+            "label": "RFC pull request opening post",
+            "repo": "cockroachdb/cockroach",
+            "path": "pull",
+            "numbers": [
+              {
+                "from": "header",
+                "pattern": "RFC PR:[^\\n]*?cockroachdb/cockroach/pull/(\\d+)",
+                "chars": 1500
+              }
+            ]
+          },
+          {
+            "type": "github",
+            "kind": "tracking_issue",
+            "label": "linked CockroachDB issue",
+            "repo": "cockroachdb/cockroach",
+            "path": "issues",
+            "numbers": [
+              {
+                "from": "header",
+                "pattern": "Cockroach Issue:[^\\n]*?cockroachdb/cockroach/issues/(\\d+)",
+                "chars": 1500
+              }
+            ]
+          },
+          {
+            "type": "process",
+            "files": [
+              "docs/RFCS/README.md"
+            ],
+            "label": "CockroachDB RFC process"
+          }
+        ]
+      }
     },
     {
       "id": "linux-docs",
@@ -133,7 +404,16 @@
       "include": [
         "*.md"
       ],
-      "split_group": "ietf-quic"
+      "split_group": "ietf-quic",
+      "context": {
+        "request": "Write an Internet-Draft for the IETF QUIC working group.",
+        "collectors": [
+          {
+            "type": "ietf",
+            "documents": "^rfc\\d+\\.md$"
+          }
+        ]
+      }
     },
     {
       "id": "opentitan",
@@ -210,7 +490,16 @@
       "kind": "rsync",
       "domain": "internet_protocols",
       "document_kind": "rfc",
-      "url": "rsync.rfc-editor.org::rfcs-text-only/"
+      "url": "rsync.rfc-editor.org::rfcs-text-only/",
+      "context": {
+        "request": "Write an IETF RFC.",
+        "collectors": [
+          {
+            "type": "ietf"
+          }
+        ]
+      },
+      "split_group_rule": "ietf_working_group"
     },
     {
       "id": "oxide-rfds",
@@ -219,7 +508,23 @@
       "document_kind": "request_for_discussion",
       "index": "https://rfd.shared.oxide.computer/",
       "oxide_index": true,
-      "link_pattern": "^https://rfd.shared.oxide.computer/rfd/[0-9]+$"
+      "link_pattern": "^https://rfd.shared.oxide.computer/rfd/[0-9]+$",
+      "context": {
+        "request": "Write an Oxide Computer Company Request for Discussion (RFD).",
+        "collectors": [
+          {
+            "type": "oxide",
+            "api": "https://rfd-api.shared.oxide.computer/rfd"
+          },
+          {
+            "type": "process",
+            "files": [
+              "https://rfd.shared.oxide.computer/rfd/0001"
+            ],
+            "label": "Oxide RFD process (RFD 1)"
+          }
+        ]
+      }
     },
     {
       "id": "chromium-designs",
@@ -228,7 +533,17 @@
       "document_kind": "design_document",
       "index": "https://www.chromium.org/developers/design-documents/",
       "link_pattern": "^https://www.chromium.org/developers/design-documents/",
-      "split_group": "chromium"
+      "split_group": "chromium",
+      "context": {
+        "request": "Write a Chromium design document.",
+        "collectors": [
+          {
+            "type": "index",
+            "label": "design documents index entry",
+            "preamble": true
+          }
+        ]
+      }
     },
     {
       "id": "chromiumos-designs",
@@ -237,7 +552,17 @@
       "document_kind": "design_document",
       "index": "https://www.chromium.org/chromium-os/chromiumos-design-docs/",
       "link_pattern": "^https://www.chromium.org/chromium-os/",
-      "split_group": "chromium"
+      "split_group": "chromium",
+      "context": {
+        "request": "Write a Chromium OS design document.",
+        "collectors": [
+          {
+            "type": "index",
+            "label": "design documents index entry",
+            "preamble": true
+          }
+        ]
+      }
     },
     {
       "id": "nasa-mission-concepts",
@@ -248,7 +573,38 @@
       "index_start_heading": "NASA Planetary",
       "index_end_heading": "Previous",
       "link_pattern": "(?i)\\.pdf(?:\\?|$)",
-      "split_group": "nasa-planetary-concepts"
+      "split_group": "nasa-planetary-concepts",
+      "context": {
+        "request": "Write a NASA planetary mission concept study report.",
+        "collectors": [
+          {
+            "type": "index",
+            "label": "NASA planetary science documents index entry"
+          },
+          {
+            "type": "study_call",
+            "match_group": "Completed 2020",
+            "label": "study call: ROSES-2018 C.30 Planetary Mission Concept Studies",
+            "urls": [
+              "https://science.nasa.gov/researchers/sara/grant-solicitations/roses-2018/amendment-64-new-opportunity-in-c30-planetary-mission-concept-studies",
+              "https://science.nasa.gov/researchers/sara/grant-solicitations/roses-2018/amendment-71-c-30-planetary-mission-concept-studies-text-correction-and-due-date-delay"
+            ],
+            "start_marker": "NASA has started preparations",
+            "end_marker": "\nShare\nDetails"
+          },
+          {
+            "type": "study_call",
+            "match_group": "Decadal Survey-Requested",
+            "label": "study call: letter of request and statement of task for the 2023-2032 planetary science and astrobiology decadal survey",
+            "urls": [
+              "https://nap.nationalacademies.org/read/26522/chapter/27"
+            ],
+            "start_marker": "LETTER OF REQUEST",
+            "end_marker": "Next Chapter:",
+            "strip_pattern": "Page\\s+\\d+\\s+Share\\s+Cite\\s+Bookmark\\s+Suggested Citation:.*?Save\\s+Cancel"
+          }
+        ]
+      }
     },
     {
       "id": "nasa-luvoir",
@@ -256,7 +612,23 @@
       "domain": "physical_sciences",
       "document_kind": "mission_concept_study",
       "index": "https://asd.gsfc.nasa.gov/luvoir/reports/",
-      "link_pattern": "(?i)\\.pdf(?:\\?|$)"
+      "link_pattern": "(?i)\\.pdf(?:\\?|$)",
+      "context": {
+        "request": "Write a final report for a NASA large astrophysics mission concept study prepared for the 2020 Astrophysics Decadal Survey.",
+        "collectors": [
+          {
+            "type": "index",
+            "label": "mission concept study reports page entry"
+          },
+          {
+            "type": "study_call",
+            "label": "study call: NASA Astrophysics Division establishment of large mission concept studies for the 2020 Decadal Survey (2015-11-30)",
+            "urls": [
+              "https://science.nasa.gov/wp-content/uploads/2023/05/Establishment_of_Large_Astrophysics_Mission_Concept_Studies_2015_11_30.pdf"
+            ]
+          }
+        ]
+      }
     },
     {
       "id": "nasa-lynx",
@@ -264,7 +636,23 @@
       "domain": "physical_sciences",
       "document_kind": "mission_concept_study",
       "index": "https://wwwastro.msfc.nasa.gov/lynx/",
-      "link_pattern": "(?i)\\.pdf(?:\\?|$)"
+      "link_pattern": "(?i)\\.pdf(?:\\?|$)",
+      "context": {
+        "request": "Write a final report for a NASA large astrophysics mission concept study prepared for the 2020 Astrophysics Decadal Survey.",
+        "collectors": [
+          {
+            "type": "index",
+            "label": "mission concept study reports page entry"
+          },
+          {
+            "type": "study_call",
+            "label": "study call: NASA Astrophysics Division establishment of large mission concept studies for the 2020 Decadal Survey (2015-11-30)",
+            "urls": [
+              "https://science.nasa.gov/wp-content/uploads/2023/05/Establishment_of_Large_Astrophysics_Mission_Concept_Studies_2015_11_30.pdf"
+            ]
+          }
+        ]
+      }
     },
     {
       "id": "cern-hl-lhc",
@@ -333,5 +721,15 @@
       ],
       "license_note": "AOSA site states CC-BY-3.0; retain attribution and chapter notices."
     }
-  ]
+  ],
+  "case_preparation": {
+    "brief_leak_ngram": 8,
+    "continuation": {
+      "max_cases_per_document": 3,
+      "min_prefix_words": 100,
+      "min_reference_words": 30,
+      "max_reference_words": 4000
+    },
+    "no_context_sources": "Sources without a context block yield continuation cases only."
+  }
 }

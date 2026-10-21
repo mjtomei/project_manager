@@ -1,0 +1,177 @@
+{
+ "_about": "Reviewed conversation windows for PM natural-prompt cases. Keys are <plan>:<record file>:<event line>. start_line is where the discussion leading to the plan begins; request_line is the turn that most directly asks for the write/edit. Notes are paraphrases, not quotes. Reviews locate context; they do not establish assent.",
+ "plan-3119574.md:1b7408bc-f28f-4418-af8e-523598ad4ecc.jsonl:20": {
+  "start_line": 4,
+  "request_line": 4,
+  "note": "pm plan-add prompt naming existing plans/plan-litreview.md; plan is a reformat of that source document into required PR structure. No human turns.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-66d430f.md:6c12ae20-5641-4921-9479-b5e542264c95.jsonl:44": {
+  "start_line": 4,
+  "request_line": 4,
+  "note": "pm-injected plan-review prompt; edit fixes format issues (missing PRs section) for loader, not new content.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-66d430f.md:77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl:1442": {
+  "start_line": 935,
+  "request_line": 1418,
+  "note": "Plan-regression review session drifted into user-model lit review and adversarial cycles; revision edit relaxing pre-registration/snapshot pinning and locating artifact URL.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-66d430f.md:bfe5a277-785c-484e-90b4-46024946e8b5.jsonl:6634": {
+  "start_line": 6592,
+  "request_line": 6629,
+  "note": "Long mixed session; topic starts with user's LLM user-modeling hypothesis and lit survey. Plan filed just before; this edit adds instruction-only baselines and small/large compute experiment tiers.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-984dfeb.md:bfe5a277-785c-484e-90b4-46024946e8b5.jsonl:7511": {
+  "start_line": 7440,
+  "request_line": 7495,
+  "note": "New plan drafted from explicit request; grew out of plan-review coherence discussion, then user reframed plans as living negotiating data structures.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-ambient.md:bfe5a277-785c-484e-90b4-46024946e8b5.jsonl:404": {
+  "start_line": 224,
+  "request_line": 395,
+  "note": "New plan drafted from explicit request generalizing the mobile voice doc-viewer PR into a context-aware multi-surface interface vision.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-cb4ef69.md:ad0729bb-6a51-4e0c-87f2-7928635f23a7.jsonl:37": {
+  "start_line": 28,
+  "request_line": 28,
+  "note": "Revision of existing plan: user requested extending hierarchical plans to support external child plans in other repos.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-cb4ef69.md:f0903e83-8e36-470a-9030-f7f22001300e.jsonl:375": {
+  "start_line": 20,
+  "request_line": 251,
+  "note": "Cross-plan note edit from overlap review after jurisdiction/riscv campaign planning; relocates slices of this plan into plan-jurisdiction.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-collaboration.md:e5e83fc6-ab9e-4b43-a658-0576f32fd235.jsonl:7363": {
+  "start_line": 7327,
+  "request_line": 7346,
+  "note": "Spun out of plan-radar discussion: user floated cross-plan/cross-user collaboration, then asked for it as its own plan with meritocracy vision. Drafted from explicit request.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-consult.md:3f3cbb09-b668-414a-85fc-c15f863a3f9c.jsonl:1325": {
+  "start_line": 1280,
+  "request_line": 1319,
+  "note": "New plan drafted on explicit request. Grew out of the user-state-as-RL-input idea, which the user generalized to consulting any operator, with no hierarchy and unannounced handicaps. It also builds on the earlier usefulness/judge discussion.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-ff4f1a7.md:eb0da688-03d6-438f-9452-a244334fa3fb.jsonl:35": {
+  "start_line": 4,
+  "request_line": 4,
+  "note": "pm plan-add prompt titled Doc review; assistant asked scoping questions and user supplied adversarial-review feature description that the draft is built on.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-jurisdiction.md:f0903e83-8e36-470a-9030-f7f22001300e.jsonl:161": {
+  "start_line": 20,
+  "request_line": 147,
+  "note": "Design conversation on swarm governance/consent; user endorsed a new plan earlier and answered the assistant's draft-choice questions, triggering the write.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-language-experiment-corpus-v3.md:6646635b-9331-4484-80b4-a8fcc27a7991.jsonl:5017": {
+  "start_line": 4318,
+  "request_line": 5007,
+  "note": "Revision-only edit adding the hardest tasks (and model-sweep tweaks) to the v3 corpus that came out of the methodical generation pipeline started at 4318.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-language-experiment.md:6646635b-9331-4484-80b4-a8fcc27a7991.jsonl:3626": {
+  "start_line": 3533,
+  "request_line": 3621,
+  "note": "Drafted from an explicit request for a code-quality/language experiment plan, which grew out of the Haskell/functional-rewrite discussion.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-litreview.md:6c12ae20-5641-4921-9479-b5e542264c95.jsonl:2559": {
+  "start_line": 1621,
+  "request_line": 2555,
+  "note": "Merges the earlier litreview-ui and litreview-impl plans into one file. The walker UI design started at 1621; the first plan request was at 1981.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-memory.md:3f3cbb09-b668-414a-85fc-c15f863a3f9c.jsonl:158": {
+  "start_line": 20,
+  "request_line": 131,
+  "note": "User proposed memory-as-branching and reasoning-move ideas; after mapping existing plans, user explicitly asked for a plan-memory draft on plan-mind and plan-radar.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-mind.md:3f3cbb09-b668-414a-85fc-c15f863a3f9c.jsonl:432": {
+  "start_line": 311,
+  "request_line": 425,
+  "note": "Edit adding the BranchRequest primitive. Came out of the branching-efficiency discussion (311) and the branching-primitive proposal (378), and was approved at 425.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-mind.md:6646635b-9331-4484-80b4-a8fcc27a7991.jsonl:778": {
+  "start_line": 135,
+  "request_line": 707,
+  "note": "Edit adding a pm-owned complete-stream-log capture invariant to plan-mind (renamed from agent-wrapper). Belongs to the agent-wrapper abstraction thread that began at 135.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-momentum.md:3f3cbb09-b668-414a-85fc-c15f863a3f9c.jsonl:1223": {
+  "start_line": 1185,
+  "request_line": 1214,
+  "note": "New plan drafted from the user's idea of developer attention as the bottleneck and of surfacing next steps; the user then asked for a draft.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-qa.md:77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl:193": {
+  "start_line": 144,
+  "request_line": 167,
+  "note": "Plan-regression review session; edit only adds a cross-plan overlap note to plan-qa header after user asked about overlap with regression plan.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-quality.md:e5e83fc6-ab9e-4b43-a658-0576f32fd235.jsonl:5879": {
+  "start_line": 5836,
+  "request_line": 5860,
+  "note": "New plan drafted from a postmortem on the missed signoff FakeClaude registration; user reframed it toward generic type hygiene and an automated refactor methodology. Gap discovered earlier, around line 5463.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-radar.md:e5e83fc6-ab9e-4b43-a658-0576f32fd235.jsonl:6854": {
+  "start_line": 6808,
+  "request_line": 6846,
+  "note": "Drafted fresh after a multi-turn brainstorm, sparked by a webwright tangent, on a project-scoped recommender/news aggregator; user then explicitly asked for the draft. Earlier session content was unrelated PR/QA work.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-regression.md:0f889438-5322-4186-af78-831baef8abbf.jsonl:220": {
+  "start_line": 4,
+  "request_line": 198,
+  "note": "Plan-review session rewrite incorporating prereq cleanup, rate-limited pool primitive, and watcher/supervisor reframe; final approval was a short yes.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-regression.md:b84ffc22-4076-44c9-98cd-7e36a0795174.jsonl:523": {
+  "start_line": 489,
+  "request_line": 507,
+  "note": "Initial draft: user listed dev-flow quality changes, assistant mapped to PRs, user approved and asked to add PRs and draft the plan.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-self-improve.md:d82ba595-def7-440e-a0f7-9323ad16d069.jsonl:74": {
+  "start_line": 62,
+  "request_line": 68,
+  "note": "Within plan-regression review, user proposed self-modifying pm tournament with fitness metric; asked for a plan file draft for plan add.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-sensorium.md:6646635b-9331-4484-80b4-a8fcc27a7991.jsonl:645": {
+  "start_line": 412,
+  "request_line": 495,
+  "note": "New plan split out of the agent-wrapper/mind refactor. Contents come from the gap-audit workflow (412) and mind framing (448-481); named at 495.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-simulation.md:e5e83fc6-ab9e-4b43-a658-0576f32fd235.jsonl:7453": {
+  "start_line": 7346,
+  "request_line": 7448,
+  "note": "Sketch plan created from a single user suggestion; builds on preceding collaboration-plan split and encyclical long-term-thinking threads.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-state.md:bfe5a277-785c-484e-90b4-46024946e8b5.jsonl:2684": {
+  "start_line": 2652,
+  "request_line": 2681,
+  "note": "Drafted after the user asked for a unified database/persistent-state plan and picked option 2. The current 'not pursued' decision came from a later edit.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ },
+ "plan-user-model-training.md:6c12ae20-5641-4921-9479-b5e542264c95.jsonl:3346": {
+  "start_line": 3340,
+  "request_line": 3340,
+  "note": "New sketch plan drafted right after one human turn that states a new theory and asks to capture it. Earlier session topics are unrelated.",
+  "reviewed": "2026-10-21, agent review of recovered human turns (pr-9f111ef)"
+ }
+}
