@@ -153,17 +153,23 @@ class TestBuildPickerLines:
         assert "#158" in displays
         assert "#160" not in displays
 
-    def test_merged_pr_returns_empty(self):
+    def test_merged_pr_offers_only_history(self):
+        # Session actions are gone after merge; the History view stays.
         prs = [_pr("pr-001", "merged", "Done PR", gh_pr_number=158)]
-        assert _build_picker_lines(prs, "#158") == []
+        lines = _build_picker_lines(prs, "#158")
+        cmds = [cmd for _, cmd, _ in lines if cmd]
+        assert cmds == ["view:history pr-001"]
 
     def test_only_window_actions_get_rows(self):
         # start / review / qa / signoff / merge each have their own window
         # and should appear; edit and review-loop are shortcut-only.
         prs = [_pr("pr-001", "pending", "New PR", gh_pr_number=158)]
         lines = _build_picker_lines(prs, "#158")
-        action_lines = [d for d, cmd, _ in lines if cmd]
+        action_lines = [d for d, cmd, _ in lines
+                        if cmd and not cmd.startswith("view:")]
         assert len(action_lines) == 5
+        view_cmds = [cmd for _, cmd, _ in lines if cmd.startswith("view:")]
+        assert view_cmds == ["view:history pr-001"]
         assert any("start" in d for d in action_lines)
         assert any("review" in d and "review-loop" not in d
                    for d in action_lines)
@@ -287,7 +293,7 @@ class TestPerSessionWindowIndicator:
              else "signoff" if "signoff" in d
              else "merge" if "merge" in d
              else "start"): d
-            for d, cmd, _ in lines if cmd
+            for d, cmd, _ in lines if cmd and not cmd.startswith("view:")
         }
 
     def test_caller_active_window_gets_filled_dot(self):
