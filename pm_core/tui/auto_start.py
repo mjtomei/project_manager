@@ -149,6 +149,7 @@ def spec_review_checker(app, prs: list[dict] | None = None):
     holds = autostart_state.spec_review_holds(prs, _targets(app))
     by_id = {p.get("id"): p for p in prs}
     from pm_core import spec_gen
+    global_mode = spec_gen.get_spec_mode()
 
     def required(pr_id: str) -> bool:
         if managed is not None and pr_id not in managed:
@@ -156,7 +157,8 @@ def spec_review_checker(app, prs: list[dict] | None = None):
         if pr_id in holds:
             return True
         pr = by_id.get(pr_id)
-        return bool(pr) and spec_gen.pr_spec_mode(pr) == "review"
+        return bool(pr) and spec_gen.pr_spec_mode(
+            pr, global_mode=global_mode) == "review"
     return required
 
 
@@ -1261,6 +1263,7 @@ def collect_status_inputs(app) -> dict:
     from pm_core import spec_gen
     spec_reviews: dict[str, dict] = {}
     review_modes: set[str] = set()
+    global_mode = spec_gen.get_spec_mode()
     for pr in prs:
         pr_id = pr.get("id")
         if not pr_id or not scoped(pr_id):
@@ -1269,7 +1272,8 @@ def collect_status_inputs(app) -> dict:
         if phase:
             loc = spec_gen.spec_location(pr, phase)
             spec_reviews[pr_id] = {"path": str(loc) if loc else None}
-        if enabled and spec_gen.pr_spec_mode(pr) == "review":
+        if enabled and spec_gen.pr_spec_mode(
+                pr, global_mode=global_mode) == "review":
             review_modes.add(pr_id)
 
     project = (app._data or {}).get("project") or {}

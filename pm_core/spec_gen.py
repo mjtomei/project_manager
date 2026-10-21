@@ -47,18 +47,19 @@ def get_spec_mode() -> str:
     return "prompt"
 
 
-def pr_spec_mode(pr: dict, review: bool = False) -> str:
+def pr_spec_mode(pr: dict, review: bool = False,
+                 global_mode: str | None = None) -> str:
     """Return the effective spec mode for a specific PR.
 
     Per-PR ``review_spec: true`` overrides to ``review`` mode, as does
     *review* — the auto-start spec-review gate (``pm autostart add
     --review-specs``), which applies review mode without touching either
-    the global setting or the PR's own ``review_spec``.
+    the global setting or the PR's own ``review_spec``.  *global_mode* is
+    a :func:`get_spec_mode` result already read (a pass over many PRs).
     """
-    mode = get_spec_mode()
     if review or pr.get("review_spec"):
         return "review"
-    return mode
+    return global_mode or get_spec_mode()
 
 
 def spec_dir(root: Path, pr_id: str) -> Path:
