@@ -369,3 +369,26 @@ class TestProgressLogLine:
         assert Text.from_markup(msg).plain == (
             "QA [pr-001]: QA complete: NEEDS_WORK [finalize: FINALIZE_DONE]"
             " — Login flow: PASS")
+
+    def test_spec_review_pause_forced_past_sticky(self):
+        """The QA-spec pause lands right after the sticky "Review loop
+        done" line; it is the cue to press V, so it is forced and held.
+        Later progress lines are not."""
+        from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS
+        from pm_core.tui.qa_loop_ui import _on_qa_update
+        app = MagicMock()
+        state = QALoopState(pr_id="pr-001")
+        state.spec_review_pending = True
+        state.latest_output = ("QA spec awaiting approval (V / pm pr "
+                               "spec-approve pr-001) — scenarios launch "
+                               "after approval")
+        _on_qa_update(app, state)
+        assert app.log_message.call_args.kwargs == {
+            "force": True, "hold": CONFIRM_HOLD_SECONDS}
+        app.log_message.reset_mock()
+        _on_qa_update(app, state)  # same pending state: not a new pause
+        assert app.log_message.call_args.kwargs == {}
+        state.spec_review_pending = False
+        state.latest_output = "QA spec approved — continuing QA"
+        _on_qa_update(app, state)
+        assert app.log_message.call_args.kwargs == {}

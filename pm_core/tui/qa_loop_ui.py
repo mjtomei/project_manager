@@ -478,15 +478,25 @@ def _resume_incomplete_qa(app) -> None:
 
 def _on_qa_update(app, state: QALoopState) -> None:
     """Handle QA progress update — log to TUI."""
+    paused = False
     if state.spec_review_pending != state._ui_spec_review_pending:
         # The QA thread set/cleared spec_pending on disk: reload so the
         # tree's S marker and the runs popup follow.
         state._ui_spec_review_pending = state.spec_review_pending
+        paused = state.spec_review_pending
         app._load_state()
     if state.latest_output:
         # Escape: the log line renders markup, which would swallow the
         # "[pr-…]" prefix and bracketed parts like "[finalize: …]".
-        app.log_message(escape(f"QA [{state.pr_id}]: {state.latest_output}"))
+        msg = escape(f"QA [{state.pr_id}]: {state.latest_output}")
+        if paused:
+            # The pause is the user's cue to press V, and it lands ~2 s
+            # after the sticky "Review loop done" line — force it past
+            # that and hold it against same-frame follow-ons.
+            from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS
+            app.log_message(msg, force=True, hold=CONFIRM_HOLD_SECONDS)
+        else:
+            app.log_message(msg)
 
 
 def _on_qa_complete(app, state: QALoopState) -> None:
