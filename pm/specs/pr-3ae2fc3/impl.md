@@ -59,7 +59,10 @@
   "spec approved" message before doing the work.
 - `pm pr start --review-spec` (hidden) passes `review_gate` into `prompt_gen.generate_prompt`.
   `auto_start._start_pr_quiet` adds the flag when `spec_review_required`, and so does the TUI's manual
-  start (`pr_view.start_pr`) for an in-scope PR.
+  start (`pr_view.start_pr`) and a command-bar `pr start <id>` (`pr_view._with_review_spec`) for an
+  in-scope PR. Known gap (filed as pr-74c4182): the PR Actions picker's start row and a shell
+  `pm pr start` don't add the flag, so the agent gets the plain spec prompt. The gate still holds the
+  spec (`S impl`) and blocks the review transition until approval.
   `generate_qa_planner_prompt(..., review_gate=)` gets it from `QALoopState.spec_review`.
 
 ### R4. Pause points
@@ -153,3 +156,5 @@
 - `skip_qa` projects: the QA gate never applies.
 - A QA NEEDS_WORK → re-QA cycle: the QA spec was approved on the first pass, so there is no second pause.
 - `pm pr auto-sequence` (CLI) already reports `paused: spec_pending`; it is unchanged.
+- The impl idle edge (`PaneIdleTracker.became_idle`) is consumed only for in-scope PRs, so an
+  impl that went idle while its target was removed still advances after it is re-added (QA S9).
