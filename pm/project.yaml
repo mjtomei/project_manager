@@ -29981,6 +29981,24 @@ prs:
       Impl hold latency is up to 5 s (every 5th poll tick), not ~1 s.'
     created_at: '2026-10-21T18:16:07Z'
     last_edited: '2026-10-21T18:16:07Z'
+  - id: note-ae13d01
+    text: 'S15 refiner: an empty qa.md is never held for review (get_spec treats an
+      empty file as missing, so needs_spec_approval is False and spec-approve says
+      "No pending spec review"). The empty-approval story must hold a NON-empty QA
+      spec first and only then empty the workdir qa.md before approving. skip_qa story:
+      add "signoff": {"verdicts": ["SIGNOFF_MERGE"]} so P reaches the stop-before-merge
+      hold.'
+    created_at: '2026-10-21T17:47:47Z'
+    last_edited: '2026-10-21T17:47:47Z'
+  - id: note-5066d0b
+    text: 'QA S15 PASS on 1f2db8f1, no edits: empty QA-spec approval -> INPUT_REQUIRED
+      in 1 s, no relaunch over 75 s; NEEDS_WORK re-QA (qa-<id>-s2) never re-paused;
+      skip_qa target only paused on impl and reached "stop-before-merge — press g".
+      Recording gotcha: first-time QA window select moves the attached client to qa-<id>
+      right at the QA spec pause, so press prefix 0 in the recorded client to show
+      the TUI log-bar pause line.'
+    created_at: '2026-10-21T18:04:42Z'
+    last_edited: '2026-10-21T18:04:42Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
