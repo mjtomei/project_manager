@@ -29950,61 +29950,68 @@ prs:
   notes: []
 - id: pr-9e7847d
   plan: tui-ux
-  title: 'Even Realities PM interface: constraints, interaction design and demo screenshots'
+  title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
   branch: pm/pr-9e7847d-even-realities-pm-interface-constraints-interactio
   status: pending
   depends_on: []
-  description: 'Define the PM interface for Even Realities glasses before deciding
-    how to refactor either codebase. This is the first of four PRs replacing the pending
-    mobile web pane (pr-72c8695).
+  description: 'Define first-class plan/spec review and PM session access on Even
+    Realities glasses before deciding how to refactor either codebase. The central
+    journey is: read a plan or spec, discuss it in its associated PM session, request
+    revisions or approve the current version, and let PM carry out implementation
+    without manually driving agent windows. PR actions and status support that journey.
+    This is the first of four PRs replacing the pending mobile web pane (pr-72c8695).
 
 
-    Review the actual glasses model, firmware/SDK and the existing Pageborne app.
-    The user''s ~/even/reading is currently ~/even/reader on this host. Establish
-    the constraints that affect the design: display and text layout, supported input/navigation,
-    updates and feedback, connection lifecycle, and what belongs on glasses versus
-    a companion surface. Cite the relevant SDK documentation and distinguish verified
-    behavior from assumptions.
+    Review the actual glasses model, firmware/SDK and existing Pageborne app. The
+    user''s ~/even/reading is currently ~/even/reader on this host. Establish the
+    constraints affecting document readability, navigation/input, updates, feedback,
+    connection lifecycle, and glasses versus companion behavior. Cite SDK documentation
+    and distinguish verified behavior from assumptions.
 
 
     Deliver a concise interaction proposal with runnable mockups and demo screenshots
-    at the glasses viewport. Show PR selection, action/status navigation, history/timers,
-    spec-review and manual-merge waits, session access, and representative busy/error/reconnect
-    states. Explain how the controls reach these views and actions; the mockups should
-    make the intended experience reviewable before production implementation.
+    at the glasses viewport. Make long-form plan/spec reading, discussion in the correct
+    existing session, revision/re-review and explicit approval first-class flows.
+    Show how reading context and document/session identity are retained when moving
+    between a document and its discussion; distinguish a changed document from the
+    version being reviewed. Demonstrate approval handing work back to unattended PM
+    execution. Include PR selection, action/status navigation, history/timers, manual-merge
+    waits and representative busy/error/reconnect states. Define the user-facing behavior
+    without presupposing a particular layout or gesture scheme.
 
 
     Do not prescribe shared components, package boundaries, APIs or specific extractions.
-    Record open implementation questions for the two subsequent refactoring PRs, whose
-    scope will be determined from the reviewed mockups. Those PRs depend on this one
-    but not on each other; the final PR implements the interface after both.
+    Record open implementation questions for the two subsequent refactoring PRs. Their
+    scope will be determined from the reviewed mockups; they depend on this PR but
+    not on each other. The final PR implements the interface after both.
 
 
-    Acceptance: the proposed controls and screens fit the documented constraints;
-    screenshots come from the runnable mockup or simulator and clearly identify simulated
-    behavior. Keep the design and screenshots easy to inspect from PM''s normal report.
-    Manual merge of this PR is the design checkpoint before refactoring starts. No
-    production Pageborne or PM refactor is part of this PR.'
+    Acceptance: the reading/discussion/approval journey is reviewable and fits the
+    documented constraints. Screenshots come from a runnable mockup or simulator and
+    identify simulated behavior. Keep the proposal and screenshots easy to inspect
+    from PM''s report. Manual merge of this PR is the design checkpoint before refactoring
+    starts. No production Pageborne or PM refactor is part of this PR.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-21T21:39:27.758092+00:00'
+  updated_at: '2026-10-21T21:41:43.185486+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-9374887
   plan: tui-ux
-  title: 'Even Realities PM interface: Pageborne sharing refactor after mockup review'
+  title: 'Even Realities document review: Pageborne sharing after mockup review'
   branch: pm/pr-9374887-even-realities-pm-interface-pageborne-sharing-refa
   status: pending
   depends_on:
   - pr-9e7847d
   description: 'After the interface/mockup PR is reviewed and merged, inspect Pageborne
     (currently ~/even/reader) and determine what functionality the approved PM glasses
-    experience should share with it. The required refactoring is intentionally undecided
-    until those mockups exist.
+    experience should share with it, especially the first-class plan/spec reading
+    and linked-session discussion journey. The required refactoring is intentionally
+    undecided until those mockups exist.
 
 
     Implement only the sharing/refactoring justified by that interface, preserving
@@ -30023,14 +30030,15 @@ prs:
 
 
     Acceptance: explain the concrete reuse supported by the mockups, verify that the
-    relevant Pageborne behavior still works on its existing surfaces, and provide
-    a clear, tested handoff for the implementation PR. Choose the specific refactoring
-    and checks after reviewing the mockups, not from this placeholder description.'
+    relevant Pageborne document-reading and session behavior still works on its existing
+    surfaces, and provide a clear, tested handoff for the implementation PR. Choose
+    the specific refactoring and checks after reviewing the mockups, not from this
+    placeholder description.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:28.531325+00:00'
-  updated_at: '2026-10-21T21:39:28.531325+00:00'
+  updated_at: '2026-10-21T21:41:43.881377+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30045,8 +30053,10 @@ prs:
   - pr-9e7847d
   description: 'After the interface/mockup PR is reviewed and merged, inspect PM''s
     existing actions picker and determine what functionality the approved glasses
-    experience should share with it. The required refactoring is intentionally undecided
-    until those mockups exist.
+    experience should share with it. Include the PM side of the document-review journey:
+    finding the relevant plan/spec and discussion session, explicit review/approval
+    where applicable, and handing approved work back to unattended execution. The
+    required refactoring is intentionally undecided until those mockups exist.
 
 
     Implement only the refactoring justified by the approved interface, preserving
@@ -30065,58 +30075,73 @@ prs:
 
 
     Acceptance: show how the resulting reuse supports the approved interface without
-    duplicating PM workflow decisions. Verify the existing picker behavior, action
-    targeting and applicable approval/merge gates. Choose the concrete refactoring
-    and tests after reviewing the mockups.'
+    duplicating PM workflow decisions. Verify the existing picker behavior, document/session/action
+    targeting and applicable approval/merge gates. An interface action must not approve
+    the wrong document version or require a human to shepherd ordinary implementation
+    after approval. Choose the concrete refactoring and tests after reviewing the
+    mockups.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:29.331751+00:00'
-  updated_at: '2026-10-21T21:39:29.331751+00:00'
+  updated_at: '2026-10-21T21:41:44.572431+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-1e0772a
   plan: tui-ux
-  title: Implement the reviewed Even Realities PM glasses interface
+  title: Implement Even Realities plan/spec review and PM session interface
   branch: pm/pr-1e0772a-implement-the-reviewed-even-realities-pm-glasses-i
   status: pending
   depends_on:
   - pr-9374887
   - pr-e5873d7
-  description: 'Implement the approved Even Realities PM interface using the results
-    of the two independent refactoring PRs. This final PR replaces the delivery goal
-    of the old mobile web actions pane; its product and architecture choices come
-    from the reviewed glasses mockups and subsequent refactoring work.
+  description: 'Implement the approved Even Realities interface using the results
+    of the two independent refactoring PRs. First-class plan/spec review and discussion
+    in the appropriate PM sessions are the main user journey: read, discuss or request
+    revisions, review the updated document, explicitly approve where required, then
+    let implementation proceed without manual agent-window intervention. Product and
+    architecture choices come from the reviewed mockups and subsequent refactoring
+    work.
 
 
-    Make the approved PR navigation, action/status views, history/timers, waits/approvals
-    and session interaction work against the live PM flow. Use the Pageborne and PM
-    reuse points established by the prerequisites; do not create a second copy of
-    workflow policy. Preserve project/PR/action/session identity, existing-session
+    Make plan/spec reading and navigation, document-version awareness, linked-session
+    discussion and return to reading work against live PM state. Reuse the correct
+    existing session or start the appropriate one through PM when needed; keep the
+    document and conversation context associated. Approval must apply to the version
+    actually reviewed, and changed documents must not silently inherit it. Use PM''s
+    existing workflow and review controls rather than interpreting a navigation or
+    discussion action as approval.
+
+
+    Implement the supporting PR actions/status views, history/timers and review/merge
+    waits specified by the design. Use the Pageborne and PM reuse points established
+    by the prerequisites. Preserve project/PR/document/action/session identity, existing-session
     reuse, and approval/manual-merge gates. Handle repeated inputs, reconnects and
-    stale state without duplicate workers or actions on the wrong PR.
+    stale state without duplicate workers or actions on the wrong target. After approval,
+    ordinary implementation and subsequent automated phases proceed through PM; configured
+    review and manual merge holds remain explicit.
 
 
-    Deliver the actual glasses experience and any companion behavior specified by
-    the reviewed design. Keep existing Pageborne and terminal-picker workflows working.
-    Record the exact revisions and setup needed across repositories so the result
-    is reproducible.
+    Deliver the actual glasses experience and companion behavior specified by the
+    design. Keep existing Pageborne and terminal-picker workflows working. Record
+    the exact revisions and setup needed across repositories.
 
 
-    Acceptance: demonstrate the approved journeys with current PM state, including
-    ordinary actions, relevant review/merge waits, history and recovery from a connection
-    interruption. Retain screenshots or recordings and meaningful regression evidence
-    for shared behavior. Use the simulator for reproducible checks and record actual-device
-    results or an explicit remaining hardware-validation gap; do not present mockups
-    as proof of a working glasses integration. This PR depends on both refactoring
+    Acceptance: demonstrate a complete live plan/spec reading-to-discussion-to-revision/approval
+    journey that hands off to unattended implementation and exposes its progress.
+    Exercise a document changed during review, session reconnection, relevant review/manual-merge
+    holds, history and repeated inputs. Retain screenshots/recordings and regression
+    evidence for shared behavior. Use the simulator for reproducible checks and record
+    actual-device results or an explicit remaining hardware-validation gap; do not
+    present mockups as proof of working integration. This PR depends on both refactoring
     PRs.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:30.108250+00:00'
-  updated_at: '2026-10-21T21:39:30.108250+00:00'
+  updated_at: '2026-10-21T21:41:45.286773+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
