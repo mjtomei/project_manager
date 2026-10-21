@@ -529,7 +529,7 @@ The dimensions come from published guidance and are not yet validated against pr
 **Detection guidance.**
 
 - Check that the first paragraph connects to the end of the prefix and that the section fills the role its position implies.
-- Flag re-introductions of the document's purpose, redefinitions of established terms, contradictions of prefix decisions (also fidelity) and content duplicated from the prefix.
+- Flag re-introductions of the document's purpose, redefinitions of established terms and content duplicated from the prefix. Contradictions of prefix decisions are scored under fidelity, not here.
 - Do not reward matching the prefix author's idiosyncratic style (sentence rhythm, favourite words, punctuation habits): that favours the original author and is measured as a bias, not scored as quality.
 
 **Not a fault.**
@@ -541,7 +541,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 **Example, weaker.** This document describes a merge-wait feature for autostart. Autostart is a feature that starts PRs automatically.
 
-**Score anchors.** 1: Restarts, repeats or contradicts the prefix. 3: Continues but with some repetition, redefinition or a gap. 5: Seamless continuation in content and structure.
+**Score anchors.** 1: Restarts or repeats the prefix, or ignores the terms and decisions it established. 3: Continues but with some repetition, redefinition or a gap. 5: Seamless continuation in content and structure.
 
 **Candidate measures** (readiness: automatic_candidate).
 

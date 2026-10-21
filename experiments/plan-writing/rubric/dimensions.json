@@ -404,7 +404,7 @@
       "derived_from": "Halliday and Hasan cohesion ties; Coh-Metrix referential overlap; Gopen and Swan old-before-new; stylometry (Burrows's Delta) and judge self-preference findings for the bias this dimension must exclude.",
       "detection_guidance": [
         "Check that the first paragraph connects to the end of the prefix and that the section fills the role its position implies.",
-        "Flag re-introductions of the document's purpose, redefinitions of established terms, contradictions of prefix decisions (also fidelity) and content duplicated from the prefix.",
+        "Flag re-introductions of the document's purpose, redefinitions of established terms and content duplicated from the prefix. Contradictions of prefix decisions are scored under fidelity, not here.",
         "Do not reward matching the prefix author's idiosyncratic style (sentence rhythm, favourite words, punctuation habits): that favours the original author and is measured as a bias, not scored as quality."
       ],
       "not_a_defect": ["A different but clear writing style.", "A short bridge sentence that recalls a point from much earlier in the prefix."],
@@ -414,7 +414,7 @@
       },
       "judge_question": "Does the section continue the prefix, using its terms and decisions, without repeating it or skipping ahead, judged on content and structure rather than stylistic resemblance?",
       "score_anchors": {
-        "1": "Restarts, repeats or contradicts the prefix.",
+        "1": "Restarts or repeats the prefix, or ignores the terms and decisions it established.",
         "3": "Continues but with some repetition, redefinition or a gap.",
         "5": "Seamless continuation in content and structure."
       },
