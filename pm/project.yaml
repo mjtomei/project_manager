@@ -29847,7 +29847,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T16:48:19.639948+00:00'
+  updated_at: '2026-10-21T16:53:46.656132+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29918,6 +29918,14 @@ prs:
       before ~/.local/bin (test_local_merge_sync fails on the git proxy).'
     created_at: '2026-10-21T16:48:19Z'
     last_edited: '2026-10-21T16:48:19Z'
+  - id: note-495d078
+    text: 'QA S7 (1581f2a6): end-to-end review-specs chain PASS, no edits: impl pause
+      survives 4 min idle + pm tui restart --breadcrumb (same window/pid, generated_at
+      unchanged), edited impl/QA approvals, QA spec holds scenarios past QA_PLAN_END,
+      wait-for-merge sign-off hold, g merge -> B pauses. The V spec-review pane exits
+      right after approving, so its output only shows up in a recorder cast.'
+    created_at: '2026-10-21T16:53:46Z'
+    last_edited: '2026-10-21T16:53:46Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
