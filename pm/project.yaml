@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-488ac6d
+  active_pr: pr-8c1dd15
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -29489,3 +29489,30 @@ prs:
       depends_on change (R11 graph edit start).'
     created_at: '2026-10-21T01:15:17Z'
     last_edited: '2026-10-21T01:15:17Z'
+- id: pr-8c1dd15
+  plan: bugs
+  title: 'Bug: TUI log line keeps a released PR''s ''waiting for manual merge (wait-for-merge:
+    F)'' line after a graph edit drops it from scope'
+  branch: pm/pr-8c1dd15-bug-tui-log-line-keeps-a-released-pr-s-waiting-for
+  status: pending
+  depends_on: []
+  description: 'Found in pr-e69afc4 QA s6 (2026-10-21). When a wait-for-merge target
+    F holds signed-off prereq N, the TUI log line reads ''✓ N signed off (SIGNOFF_MERGE
+    @ sha) — waiting for manual merge (wait-for-merge: F) — press g to merge''. A
+    CLI ''pm pr edit <C> --depends-on <A>'' then drops N from F''s closure. Status
+    and the runs popup drop N right away, as they should, but the reload logs nothing.
+    The stale waiting/press-g line stays on the TUI log line until some unrelated
+    message replaces it (minutes, in s6). Suggested fix: in auto_start.on_state_loaded,
+    when a deps change takes a held signed-off PR out of every wait target''s closure,
+    log a short line such as ''N no longer held (left wait-for-merge scope of F)''.
+    Code: pm_core/tui/review_loop_ui.py _maybe_auto_merge hold line; pm_core/tui/auto_start.py
+    on_state_loaded. Captures: /pm-captures/scenarios/6 (tui/popup-t3.txt bottom line).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T02:01:29.162905+00:00'
+  updated_at: '2026-10-21T02:01:29.162905+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
