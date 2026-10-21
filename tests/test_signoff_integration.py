@@ -387,6 +387,19 @@ def test_cli_impl_rework_review_continues_iteration_numbering(tmp_path):
     kwargs = review.call_args.kwargs
     assert kwargs["review_iteration"] == 4
     assert kwargs["transcript"].endswith(f"review-{PR}-i4.jsonl")
+    # The open window reviewed the pre-return code: replace, don't adopt.
+    assert kwargs["fresh"] is True
+
+
+def test_cli_first_review_advance_keeps_existing_window(tmp_path):
+    result, _, review, _ = _seq(
+        tmp_path, {"id": PR, "title": "T", "branch": BRANCH,
+                   "status": "in_progress", "workdir": "/wd"},
+        **{"pm_core.cli.pr._check_impl_idle": {"return_value": (True, False)}})
+    assert result.exit_code == 0, result.output
+    kwargs = review.call_args.kwargs
+    assert kwargs["review_iteration"] == 1
+    assert kwargs["fresh"] is False
 
 
 def test_cli_ignores_review_pass_older_than_an_impl_return(tmp_path):

@@ -3338,12 +3338,16 @@ def pr_auto_sequence(pr_id: str):
         # can locate the verdict.  Use review-loop iteration naming so
         # NEEDS_WORK retries follow the same scheme; after a sign-off
         # return the earlier iterations exist, and the next tick reads
-        # the highest one — so continue numbering after them.
+        # the highest one — so continue numbering after them.  An open
+        # review window then reviewed the older code: replace it (fresh)
+        # rather than switching to it, or no rework review ever runs and
+        # the in_review tick waits on that window forever.
         _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         next_iter = latest_iter + 1
         iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
         ctx = click.get_current_context()
-        ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
+        ctx.invoke(pr_review, pr_id=pr_id, fresh=latest_iter > 0,
+                   background=True,
                    review_loop=False, review_iteration=next_iter,
                    review_loop_id="", transcript=str(iter_transcript))
         click.echo("advanced: in_review")
