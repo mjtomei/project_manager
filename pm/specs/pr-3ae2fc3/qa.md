@@ -99,6 +99,20 @@
   within a poll or two without a manual reload.
 - **E9** `pm autostart add X --review-specs --no-review-specs` fails with conflicting_flags from the CLI
   and from the command bar alike.
+- **E10** Approving an empty pending QA spec ("Spec content is empty — nothing to review.") releases the planner
+  gate, but QA then ends INPUT_REQUIRED "QA spec was not generated during planning". Scenarios never launch
+  against an empty spec, and nothing hangs.
+- **E11** `pm pr spec-approve` racing `pm pr spec --regenerate` on the same PR: only the record and text the reviewer
+  saw are approved. An approval that lands mid-regeneration wins, and regenerate/reject exit 1 "approved while it was
+  being regenerated". A losing concurrent approver prints "No pending spec review for X.". The agent pane gets the
+  "approved" message only while the approval stands.
+- **E12** A prerequisite whose impl goes idle while its target is removed (out of scope) still advances to review once
+  the target is re-added. The idle edge is not consumed while out of scope.
+- **E13** When the QA spec pause starts right after a review loop finishes, the TUI log bar shows the QA-spec pause
+  message, not the "Review loop done" line.
+- **E14** Review mode from the global `spec-mode review` setting or a per-PR `review_spec` gets the same pauses inside
+  auto-start, labelled `review-spec`. Changing the global setting mid-run is picked up on the next poll. Turning
+  review mode off (setting, target removal, `autostart clear`, auto-start off) never approves a spec that is already pending.
 
 ## 4. Pass / Fail Criteria
 Pass: every Then above is observable on the named surface. CLI text and JSON agree with the
