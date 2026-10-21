@@ -29615,11 +29615,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-21T00:15:38.677748+00:00'
+  updated_at: '2026-10-21T02:42:30.612811+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-4106e20
+    text: 'Rubric interface from pr-44f807f: import experiments/plan-writing/rubric.py
+      via importlib (hyphenated dir; stdlib only). render_judge(case_type, document_a=,
+      document_b=, brief=|prefix=, section_request=, document_kind=, dimensions=)
+      renders blinded A/B prompts; caller owns order randomisation/swaps. validate_judgment(obj,
+      ids) checks the per-dimension JSON reply (score_a/score_b 1-5, preference A|B|tie,
+      separate overall_preference) -> treat non-empty problems as failed evaluation.
+      rubric/fixtures/*.json: strong/weak pairs, one target dimension each; padding
+      pairs double as verbosity-bias probes. length_ratio and style_distance measures
+      are bias covariates, never quality. Automatic candidate measures are specified
+      in dimensions.json but not implemented.'
+    created_at: '2026-10-21T02:42:30Z'
+    last_edited: '2026-10-21T02:42:30Z'
 - id: pr-09c4e8e
   plan: plan-doc-eval
   title: Automated planning prompt improvement campaign
