@@ -15,6 +15,7 @@ Verdicts (shared with review):
   INPUT_REQUIRED — Issues found but not fixed, or ambiguity requiring human judgment.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -221,6 +222,10 @@ class QALoopState:
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
+    # Action-history journal ids (pm_core.action_history): the run attempt
+    # and, while planning, the planner child attempt.
+    history_attempt: str = ""
+    _history_planner: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -2647,7 +2652,33 @@ def _poll_tmux_verdicts(
                            queued_scenarios=_queued_indices,
                            verdict_reasons=state.scenario_verdict_reasons)
 
+    from pm_core import action_history as _ah
+    observer = _ah.ScenarioObserver(state.pr_id, state.history_attempt or None,
+                                    state.loop_id)
+    _grace_timer = f"qa-grace:{state.loop_id}"
+    # Journal clock (not monotonic) so the clear reason costs no extra
+    # monotonic reads and agrees with controlled-clock tests.
+    _grace_due = [0.0]
+
+    def _arm_grace() -> None:
+        _grace_due[0] = _ah.now() + _VERDICT_GRACE_PERIOD
+        _ah.arm_timer(state.pr_id, _grace_timer,
+                      purpose="QA scenario verdict grace (all scenarios)",
+                      owner_action="qa",
+                      owner_attempt=state.history_attempt or None,
+                      duration=_VERDICT_GRACE_PERIOD, effect="gate",
+                      expected="scenario verdicts accepted on the next "
+                               "idle turn")
+
+    def _observe() -> None:
+        with verification_lock:
+            verifying_now = set(verifying)
+        observer.observe(state.scenarios, pending=pending,
+                         verifying=verifying_now, queued=_queued_indices,
+                         verdicts=state.scenario_verdicts)
+
     grace_start = time.monotonic()
+    _arm_grace()
 
     def _run_verification(scenario: QAScenario, verdict: str, content: str):
         """Background thread: run verification in this scenario's
@@ -2734,6 +2765,7 @@ def _poll_tmux_verdicts(
         _launch_next_queued()  # returns immediately once cap is reached
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
+        _observe()
         time.sleep(_POLL_INTERVAL)
 
         # Refresh the resume snapshot each iteration so a TUI restart can
@@ -2884,20 +2916,28 @@ def _poll_tmux_verdicts(
                         "(backoff %.0fs)",
                         scenario.index, retries + 1,
                         _SCENARIO_MAX_RETRIES, backoff)
+                    observer.relaunching(scenario, retries + 1, backoff)
                     time.sleep(backoff)
                     if state.stop_requested:
                         # A stop (e.g. ``z t`` fresh start) killed the
                         # window; relaunching would orphan a worker.
+                        _ah.clear_timer(
+                            state.pr_id,
+                            f"qa-backoff:{state.loop_id}:s{scenario.index}",
+                            "cancelled")
                         break
                     retry_counts[scenario.index] = retries + 1
                     if _relaunch_scenario_window(
                         scenario, state, data, pr_data,
                         session, workdir_path,
                     ):
+                        observer.relaunched(scenario, True)
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
+                        _arm_grace()
                         _last_scenario_hook_ts.pop(scenario.index, None)
                         continue
+                    observer.relaunched(scenario, False)
                     # Relaunch failed — will retry on next poll iteration
                     continue
                 _log.warning("Scenario %d window exited without verdict "
@@ -3058,6 +3098,11 @@ def _poll_tmux_verdicts(
                                queued_scenarios=_queued_indices,
                                verification_failures=verification_failures,
                                verdict_reasons=state.scenario_verdict_reasons)
+
+    _observe()
+    observer.finish(stopped=state.stop_requested)
+    _ah.clear_timer(state.pr_id, _grace_timer,
+                    "elapsed" if _ah.now() >= _grace_due[0] else "cancelled")
 
 
 # ---------------------------------------------------------------------------
@@ -3516,7 +3561,57 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
         _log.exception("Failed to create status pane")
 
 
+@contextlib.contextmanager
+def _journal_qa_run(state: QALoopState, *, resumed: bool):
+    """Journal one QA run (or resume) as an action-history attempt."""
+    from pm_core import action_history as _ah
+
+    state.history_attempt = _ah.start_attempt(
+        state.pr_id, "qa", loop_id=state.loop_id,
+        label="QA resume" if resumed else "QA run",
+        resumed=True if resumed else None)
+    try:
+        yield
+    except BaseException as e:
+        _ah.end_attempt(state.pr_id, state._history_planner, "failed",
+                        detail="QA run crashed")
+        _ah.end_attempt(state.pr_id, state.history_attempt, "failed",
+                        verdict="ERROR", detail=f"{type(e).__name__}: {e}"[:300])
+        raise
+    else:
+        verdict = state.latest_verdict or None
+        if state.stop_requested or not verdict:
+            # No verdict: aborted before running (e.g. the PR merged).
+            outcome = "cancelled"
+        elif verdict == "ERROR":
+            outcome = "failed"
+        else:
+            outcome = "done"
+        # A planner still open here was abandoned with its run: cancelled
+        # with it (stop, PR merged mid-planning), otherwise failed.
+        _ah.end_attempt(state.pr_id, state._history_planner,
+                        "cancelled" if outcome == "cancelled" else "failed",
+                        detail="planning did not finish")
+        _ah.end_attempt(state.pr_id, state.history_attempt, outcome,
+                        verdict=verdict,
+                        detail=(state.latest_output or "")[:300] or None)
+    finally:
+        state._history_planner = ""
+
+
 def run_qa_sync(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    on_update: Callable[[QALoopState], None] | None = None,
+    max_scenarios: int | None = None,
+) -> QALoopState:
+    """Run QA (see :func:`_run_qa_sync`), journaling it as an attempt."""
+    with _journal_qa_run(state, resumed=False):
+        return _run_qa_sync(state, pm_root, pr_data, on_update, max_scenarios)
+
+
+def _run_qa_sync(
     state: QALoopState,
     pm_root: Path,
     pr_data: dict,
@@ -3623,6 +3718,13 @@ def run_qa_sync(
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
+        from pm_core import action_history as _ah
+        _ah.phase(state.pr_id, state.history_attempt or None, "planning")
+        state._history_planner = _ah.start_attempt(
+            state.pr_id, "qa", parent=state.history_attempt or None,
+            loop_id=state.loop_id, label="planner")
+        _ah.phase(state.pr_id, state._history_planner, "planning",
+                  "building planner prompt and window")
 
         state.latest_output = "Planning QA scenarios..."
         _notify()
@@ -3751,6 +3853,16 @@ def run_qa_sync(
         plan_problem = ""
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
+        _ah.phase(state.pr_id, state._history_planner, "agent",
+                  f"planner pane {planner_pane}",
+                  session_id=planner_session_id)
+        _planner_timer = f"qa-planner-deadline:{state.loop_id}"
+        _ah.arm_timer(state.pr_id, _planner_timer,
+                      purpose="QA planner deadline",
+                      owner_action="qa",
+                      owner_attempt=state._history_planner or None,
+                      duration=_PLANNER_TIMEOUT, effect="fires",
+                      expected="stop waiting for a plan → QA INPUT_REQUIRED")
         from pm_core import hook_events as _hook_events
         from pm_core.claude_launcher import WorkspacePromptWatch
         _hook_baseline = time.time()
@@ -3874,6 +3986,9 @@ def run_qa_sync(
             elif plan.problems:
                 plan_problem = "; ".join(plan.problems)
 
+        _ah.clear_timer(state.pr_id, _planner_timer,
+                        "fired" if time.monotonic() >= deadline
+                        else "cancelled")
         if plan_found:
             _log.info("QA plan parsed: %d scenario(s) for %s",
                       len(state.scenarios), state.pr_id)
@@ -3923,6 +4038,17 @@ def run_qa_sync(
             # Otherwise keep the "not consumed" / "no parseable scenarios"
             # explanation set above on screen.
             state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
+        if state.stop_requested:
+            _ah.end_attempt(state.pr_id, state._history_planner, "cancelled")
+        else:
+            _ah.end_attempt(
+                state.pr_id, state._history_planner, "done",
+                verdict=None if state.scenarios else VERDICT_INPUT_REQUIRED,
+                detail=(f"{len(state.scenarios)} scenario(s)"
+                        if state.scenarios else state.latest_output[:300]))
+        state._history_planner = ""
+        _ah.phase(state.pr_id, state.history_attempt or None, "launching",
+                  "spec gate, concretizing and launching scenarios")
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
@@ -4109,6 +4235,9 @@ def _execute_and_finalize(
     # restart can pick the run back up.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
+    from pm_core import action_history as _ah
+    _ah.phase(state.pr_id, state.history_attempt or None, "agent",
+              "collecting scenario verdicts")
     _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
                         status_path, notify,
                         queued_scenarios=queued_scenarios,
@@ -4117,6 +4246,8 @@ def _execute_and_finalize(
                         repo_root=repo_root,
                         pm_root=pm_root)
 
+    _ah.phase(state.pr_id, state.history_attempt or None, "verdict",
+              "aggregating verdicts and running the finalize pane")
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
     # A stopped run can leave scenarios without a verdict; never call
@@ -4185,6 +4316,17 @@ def _execute_and_finalize(
 
 
 def resume_qa_sync(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    on_update: Callable[[QALoopState], None] | None = None,
+) -> QALoopState:
+    """Resume QA (see :func:`_resume_qa_sync`), journaling it as an attempt."""
+    with _journal_qa_run(state, resumed=True):
+        return _resume_qa_sync(state, pm_root, pr_data, on_update)
+
+
+def _resume_qa_sync(
     state: QALoopState,
     pm_root: Path,
     pr_data: dict,

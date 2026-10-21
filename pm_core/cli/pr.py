@@ -2843,6 +2843,37 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
     trigger_tui_refresh()
 
 
+@pr.command("history")
+@click.argument("pr_id")
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable JSON output (schema pm.pr.history/1)")
+def pr_history(pr_id: str, as_json: bool):
+    """Show a PR's action attempts, timings, and active timers/holds.
+
+    Lists past review/QA/sign-off/merge attempts with start/end times,
+    elapsed time (split into execution vs waiting where recorded), outcome
+    and iteration/scenario, plus the timers and human holds PM is waiting
+    on right now.  Works after merge and without a running TUI.
+    """
+    import json as _json
+    from pm_core import action_history, history_query
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if pr_entry is None:
+        if not action_history.has_journal(pr_id):
+            _require_pr(data, pr_id)  # prints the not-found error and exits
+        # Removed from project.yaml but its journal survives.
+        model = history_query.build_history(pr_id)
+    else:
+        model = history_query.build_history(pr_entry["id"], pr=pr_entry)
+    if as_json:
+        click.echo(_json.dumps(model, indent=2))
+        return
+    emit_paged(history_query.render_text(model), indent="    ")
+
+
 @pr_note.command("list")
 @click.argument("pr_id")
 def pr_note_list(pr_id: str):

@@ -329,6 +329,8 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                    if state.latest_verdict in ("ERROR", "KILLED")
                    else "done")
     _rs.set_action_state(state.pr_id, "review-loop", final_state,
+                         history_outcome=("cancelled"
+                                          if state.stop_requested else None),
                          iteration=state.iteration,
                          verdict=state.latest_verdict)
 
@@ -649,6 +651,14 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
             f"— {tail}",
             force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
+        from pm_core import action_history as _ah
+        _ah.arm_timer(pr_id, f"merge-hold:{pr_id}",
+                      purpose=("manual merge hold (stop-before-merge)"
+                               if hold.get("explicit") else
+                               "manual merge hold (wait-for-merge: "
+                               f"{', '.join(hold['targets'])})"),
+                      owner_action="merge", duration=None, effect="fires",
+                      expected="human presses g (or pm pr merge) to merge")
         return
 
     _log.info("auto_merge: %s signed off, merging", pr_id)
@@ -694,6 +704,8 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     """
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
+    from pm_core import action_history as _ah
+    _ah.clear_timer(pr_id, f"merge-hold:{pr_id}", "released")
 
     # Pass the flag explicitly in both directions — the in-tmux env-var
     # default would otherwise flip resolve_window=False back on.
@@ -782,6 +794,9 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
       Clean up regardless.
     """
     # Clear merge input_required state if it was set
+    if pr_id in app._merge_input_required_prs:
+        from pm_core import action_history as _ah
+        _ah.clear_timer(pr_id, f"merge-input-required:{pr_id}", "released")
     app._merge_input_required_prs.discard(pr_id)
 
     # Kill the current merge window and clean up tracker state
@@ -841,6 +856,13 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     verdict detection will finalize.
     """
     # Track which PRs have merge input_required (for TUI display)
+    if pr_id not in app._merge_input_required_prs:
+        from pm_core import action_history as _ah
+        _ah.arm_timer(pr_id, f"merge-input-required:{pr_id}",
+                      purpose="merge INPUT_REQUIRED hold",
+                      owner_action="merge", duration=None, effect="fires",
+                      expected="human answers in the merge window; "
+                               "MERGED finalizes the merge")
     app._merge_input_required_prs.add(pr_id)
 
     # Reset the verdict tracker so we can detect MERGED after the user helps

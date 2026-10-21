@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
+from pm_core import action_history as _ah
 from pm_core.paths import configure_logger
 from pm_core.loop_shared import (
     get_pm_session as _get_pm_session_shared,
@@ -169,7 +170,8 @@ class PaneKilledError(Exception):
 
 def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
                        transcript: str,
-                       iteration: int = 0, loop_id: str = "") -> str:
+                       iteration: int = 0, loop_id: str = "",
+                       history_attempt: str | None = None) -> str:
     """Launch a review window and poll its JSONL transcript for the verdict.
 
     ``transcript`` is required — it is the path to the per-iteration
@@ -192,6 +194,8 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
 
     window_name = _compute_review_window_name(pr_data)
 
+    _ah.phase(pr_id, history_attempt, "launching",
+              f"pm pr review --fresh (window {window_name})")
     _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id,
                           transcript=transcript)
 
@@ -205,16 +209,34 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     _log.info("review_loop: polling pane %s in window %s (transcript=%s)",
               pane_id, window_name, transcript)
 
-    content = _poll_for_verdict(pane_id, transcript,
-                                 grace_period=_VERDICT_GRACE_PERIOD,
-                                 workdir=pr_data.get("workdir"))
+    _ah.phase(pr_id, history_attempt, "agent", f"review pane {pane_id}")
+    grace_timer = f"review-grace:{history_attempt}"
+    if history_attempt:
+        _ah.arm_timer(pr_id, grace_timer,
+                      purpose=f"review verdict grace (iteration {iteration})",
+                      owner_action="review-loop",
+                      owner_attempt=history_attempt,
+                      duration=_VERDICT_GRACE_PERIOD, effect="gate",
+                      expected="verdicts accepted on the next idle turn")
+    # Journal clock (not monotonic) so controlled-clock tests agree.
+    grace_end = _ah.now() + _VERDICT_GRACE_PERIOD
+    try:
+        content = _poll_for_verdict(pane_id, transcript,
+                                     grace_period=_VERDICT_GRACE_PERIOD,
+                                     workdir=pr_data.get("workdir"))
+    finally:
+        if history_attempt:
+            _ah.clear_timer(pr_id, grace_timer,
+                            "elapsed" if _ah.now() >= grace_end
+                            else "cancelled")
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
 
 
 def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
-                            transcript_dir: str | None) -> str | None:
+                            transcript_dir: str | None,
+                            history_attempt: str | None = None) -> str | None:
     """Collect the verdict of an iteration that was in flight at a TUI restart.
 
     A resumed loop (breadcrumb restore) whose counter was bumped but has
@@ -247,6 +269,8 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     _log.info("review_loop: adopting in-flight iteration %d for %s "
               "(pane %s, transcript=%s)", state.iteration, state.pr_id,
               pane_id, transcript)
+    _ah.phase(state.pr_id, history_attempt, "agent",
+              f"adopted review pane {pane_id}", session_id=session_id)
     # The verdict may have landed between the breadcrumb write and now;
     # the poller only wakes on idle events newer than its start.
     ev = hook_events.read_event(session_id)
@@ -279,6 +303,27 @@ def _wait_for_follow_up_verdict(pr_data: dict,
         session, window_name, iter_transcript, verdicts=ALL_VERDICTS,
         stop_check=lambda: state.stop_requested, log_prefix="review_loop",
     )
+
+
+def _start_iteration_attempt(state: ReviewLoopState,
+                             transcript_dir: str | None,
+                             adopted: bool = False) -> str:
+    """Journal the start of review iteration ``state.iteration``."""
+    transcript = (f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+                  if transcript_dir else None)
+    parent = None
+    try:
+        from pm_core import runtime_state as _rs
+        entry = _rs.get_action_state(state.pr_id, "review-loop")
+        if entry.get("loop_id") == state.loop_id:
+            parent = entry.get("attempt_id")
+    except Exception:
+        pass
+    return _ah.start_attempt(
+        state.pr_id, "review-loop", loop_id=state.loop_id, parent=parent,
+        iteration=state.iteration, transcript=transcript,
+        label=f"iteration {state.iteration}",
+        adopted=True if adopted else None)
 
 
 def should_stop(verdict: str) -> bool:
@@ -328,35 +373,53 @@ def run_review_loop_sync(
                 _log.info("review_loop: stop requested after %d iterations", state.iteration)
                 break
 
+            attempt = None
             try:
                 output = None
                 if adopt:
                     adopt = False
+                    attempt = _start_iteration_attempt(
+                        state, saved_transcript_dir, adopted=True)
                     output = _adopt_in_flight_review(
-                        state, pr_data, saved_transcript_dir)
+                        state, pr_data, saved_transcript_dir,
+                        history_attempt=attempt)
                     if output is None:
                         # Nothing live to adopt — rerun the same iteration.
+                        _ah.end_attempt(state.pr_id, attempt, "vanished",
+                                        detail="nothing live to adopt; "
+                                               "rerunning iteration")
+                        attempt = None
                         state.iteration -= 1
                 if output is None:
                     state.iteration += 1
                     _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
                     iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+                    attempt = _start_iteration_attempt(state, transcript_dir)
                     output = _run_claude_review(
                         state.pr_id, pm_root, pr_data,
                         iteration=state.iteration, loop_id=state.loop_id,
                         transcript=iter_transcript,
+                        history_attempt=attempt,
                     )
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
                 state.latest_output = str(e)
+                _ah.end_attempt(state.pr_id, attempt,
+                                "cancelled" if state.stop_requested
+                                else "vanished",
+                                verdict=VERDICT_KILLED, detail=str(e)[:300])
                 break
             except Exception as e:
                 _log.exception("review_loop: review failed on iteration %d", state.iteration)
                 state.latest_verdict = "ERROR"
                 state.latest_output = str(e)
+                _ah.end_attempt(state.pr_id, attempt, "failed",
+                                verdict="ERROR", detail=str(e)[:300])
                 break
 
+            _ah.phase(state.pr_id, attempt, "verdict",
+                      "verdict found; processing")
             verdict = parse_review_verdict(output)
             state.latest_verdict = verdict
             state.latest_output = output
@@ -386,16 +449,40 @@ def run_review_loop_sync(
                 # rounds within the same loop still show a notification.
                 state._ui_notified_input = False
 
+                hold = f"review-input-required:{attempt}"
+                _ah.phase(state.pr_id, attempt, "waiting_human",
+                          "INPUT_REQUIRED — waiting for a follow-up verdict "
+                          "from the review pane")
+                if attempt:
+                    _ah.arm_timer(
+                        state.pr_id, hold,
+                        purpose=f"review INPUT_REQUIRED hold "
+                                f"(iteration {state.iteration})",
+                        owner_action="review-loop", owner_attempt=attempt,
+                        duration=None, effect="fires",
+                        expected="human answers in the review pane; "
+                                 "next verdict resumes the loop")
                 follow_up_output = _wait_for_follow_up_verdict(pr_data, state)
                 state.input_required = False
+                if attempt:
+                    _ah.clear_timer(state.pr_id, hold,
+                                    "released" if follow_up_output
+                                    else "cancelled")
 
                 if follow_up_output is None:
                     # Pane died or stop requested
                     if state.stop_requested:
+                        _ah.end_attempt(state.pr_id, attempt, "cancelled",
+                                        verdict=VERDICT_INPUT_REQUIRED)
                         break
                     state.latest_verdict = VERDICT_KILLED
                     state.latest_output = "Review pane disappeared during INPUT_REQUIRED wait"
+                    _ah.end_attempt(state.pr_id, attempt, "vanished",
+                                    verdict=VERDICT_KILLED,
+                                    detail=state.latest_output)
                     break
+                _ah.phase(state.pr_id, attempt, "verdict",
+                          "follow-up verdict found; processing")
 
                 verdict = parse_review_verdict(follow_up_output)
                 # Treat repeated INPUT_REQUIRED as NEEDS_WORK
@@ -417,6 +504,8 @@ def run_review_loop_sync(
                         on_iteration(state)
                     except Exception:
                         _log.exception("review_loop: on_iteration callback failed")
+
+            _ah.end_attempt(state.pr_id, attempt, "done", verdict=verdict)
 
             if should_stop(verdict):
                 _log.info("review_loop: stopping — verdict=%s", verdict)

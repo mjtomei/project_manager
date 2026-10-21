@@ -618,6 +618,7 @@ COMMANDS
   pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html)
   pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
   pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
+  pm pr history <pr-id> [--json]  Past action attempts, timings, active timers/holds
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
   pm pr note list <pr-id>              List notes on a PR

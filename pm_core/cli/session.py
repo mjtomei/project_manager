@@ -956,8 +956,21 @@ _SHORTCUT_FOLD_INTO: dict[str, str] = {
     "review-loop": "review",
 }
 
-# Terminal statuses — PRs in these states have no actions.
+# Terminal statuses — PRs in these states have no session actions (view
+# actions from ``pm_core.action_catalog``, e.g. History, stay available).
 _TERMINAL_STATUSES = {"merged", "closed"}
+
+# Commands prefixed with "view:" render a catalog view action (``view:<key>
+# <pr_id>``) inside the popup instead of running a pm subcommand.
+_VIEW_PREFIX = "view:"
+
+
+def _view_actions_for_status(status: str) -> list[tuple[str, str]]:
+    """(label, command template) pairs for the catalog's view actions."""
+    from pm_core import action_catalog
+    return [(a.key, f"{_VIEW_PREFIX}{a.key} {{pr_id}}")
+            for a in action_catalog.view_actions(status)]
+
 
 # Map status to the action label representing the current phase.
 _STATUS_PHASE: dict[str, str] = {
@@ -1127,7 +1140,8 @@ def _build_picker_lines(
 
     status = pr.get("status", "")
     actions = _actions_for_status(status)
-    if not actions:
+    view_actions = _view_actions_for_status(status)
+    if not actions and not view_actions:
         return []
 
     lines: list[tuple[str, str, str]] = []
@@ -1197,7 +1211,63 @@ def _build_picker_lines(
         lines.append((f"  {indicator} {label:<18s}"
                       f"{open_tag}{status_tag}", cmd, display_id))
 
+    # Read-only view actions (History): no window, so no indicator/[open];
+    # the badge is the view's own one-line summary.
+    for label, cmd_template in view_actions:
+        lines.append((f"    {label:<18s}{_view_action_badge(label, pr)}",
+                      cmd_template.format(pr_id=pr["id"]), display_id))
+
     return lines
+
+
+def _view_action_badge(key: str, pr: dict) -> str:
+    try:
+        from pm_core import action_catalog
+        action = action_catalog.get(key)
+        if action is None or action.badge is None or action.query is None:
+            return ""
+        return action.badge(action.query(pr["id"], pr))
+    except Exception:
+        _log.debug("view badge %s failed for %s", key, pr.get("id"),
+                   exc_info=True)
+        return ""
+
+
+def _show_view_action(cmd: str) -> None:
+    """Render a ``view:<key> <pr_id>`` command inside the popup.
+
+    The text is paged with ``less -R`` reading keys from the popup's tty
+    (q closes it); without ``less`` it is printed and the popup waits for
+    a dismiss key.
+    """
+    import shutil
+    from pm_core import action_catalog
+    key, _, pr_id = cmd[len(_VIEW_PREFIX):].partition(" ")
+    action = action_catalog.get(key)
+    if action is None or action.query is None or action.render is None:
+        click.echo(f"Unknown view action: {key}")
+        _wait_dismiss()
+        return
+    try:
+        pr = store.get_pr(store.load(state_root()), pr_id)
+    except Exception:
+        pr = None
+    try:
+        text = "\n".join(action.render(action.query(pr_id, pr))) + "\n"
+    except Exception as e:
+        _log.exception("view action %s failed for %s", key, pr_id)
+        click.echo(f"{action.label} failed: {e}")
+        _wait_dismiss()
+        return
+    if shutil.which("less"):
+        try:
+            subprocess.run(["less", "-R", "-+F", "-+X"], input=text,
+                           text=True, check=False)
+            return
+        except OSError:
+            pass
+    click.echo(text, nl=False)
+    _wait_dismiss()
 
 
 def _fzf_supports_no_input() -> bool:
@@ -1626,9 +1696,12 @@ def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
     import sys
 
-    route = "tui" if cmd.startswith("tui:") else "direct"
+    route = ("tui" if cmd.startswith("tui:")
+             else "view" if cmd.startswith(_VIEW_PREFIX) else "direct")
     _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
-    if cmd.startswith("tui:"):
+    if cmd.startswith(_VIEW_PREFIX):
+        _show_view_action(cmd)
+    elif cmd.startswith("tui:"):
         # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
         # independent: doesn't depend on tmux send-keys timing, can't
         # be eaten by whichever widget has focus, and supports queuing
@@ -1779,7 +1852,9 @@ def popup_picker_cmd(session: str, window_name: str):
             (p for p in prs if _pr_display_id(p) == pr_disp), None)
         label_to_cmd: dict[str, str] = {}
         if picked is not None:
-            for lbl, tpl in _actions_for_status(picked.get("status", "")):
+            status = picked.get("status", "")
+            for lbl, tpl in (_actions_for_status(status)
+                             + _view_actions_for_status(status)):
                 label_to_cmd[lbl] = tpl.format(pr_id=picked["id"])
         # Phase indicator only meaningful for the invoking PR — when
         # navigating to a different PR the user isn't "in" any of its
@@ -1814,6 +1889,9 @@ def popup_picker_cmd(session: str, window_name: str):
         "i": "signoff",
         "g": "merge",
     }
+    from pm_core import action_catalog
+    for _view in action_catalog.view_actions():
+        _SHORTCUT_KEYS[_view.shortcut] = _view.key
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
 

@@ -8777,11 +8777,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-21T18:01:28.274120+00:00'
-  updated_at: '2026-03-21T18:01:28.274120+00:00'
+  updated_at: '2026-10-21T20:03:23.722978+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5f48f2f
+    text: 'From pr-8020495 (PR action history): the per-PR journal pm_core/action_history.py
+      records events with an `owner` (pid/start/instance, used only for liveness)
+      and accepts an optional `context` field on every event (action_history.record(...,
+      context={...})). It defines no attribution model of its own. When this PR adds
+      the action-context structure (session/window/task), populate `context` from
+      it in action_history.record so `pm pr history` and the History pane can show
+      who started each attempt.'
+    created_at: '2026-10-21T20:03:23Z'
+    last_edited: '2026-10-21T20:03:23Z'
 - id: pr-2c67d50
   plan: plan-qa
   title: Resume QA scenario polling after INPUT_REQUIRED with follow-up verdict loop
@@ -29943,11 +29953,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T19:14:50.410487+00:00'
+  updated_at: '2026-10-21T20:03:25.625602+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-be7015d
+    text: 'Impl done (head 5bddb270): journal pm_core/action_history.py (~/.pm/history/{pr}.jsonl,
+      append+flock; owner liveness via per-process-image lock in history/owners, exec-safe),
+      model+render pm_core/history_query.py, catalog pm_core/action_catalog.py, CLI
+      `pm pr history <pr> [--json]`, picker H/History row (also for merged PRs). Instrumented:
+      runtime_state.set_action_state (generic attempts, excluding qa), review_loop
+      iterations/grace/INPUT_REQUIRED hold, qa_loop run/planner/deadline/scenarios
+      (ScenarioObserver)/backoff/grace, signoff_ui router launches + throttle, merge
+      holds. Live-verified in an isolated tmux (-L) with scratch HOME + fake-claude:
+      review NEEDS_WORK→INPUT_REQUIRED→PASS, z d cancel, Ctrl+R restart mid-loop and
+      mid-QA, 3 overlapping QA scenarios. The live env needs `env -i` (CLAUDECODE
+      / PM_HOST_HOME leak in otherwise) and a dummy `claude` on PATH. 13 pre-existing
+      test failures (markdown module + hook installer) also fail on master.'
+    created_at: '2026-10-21T20:03:25Z'
+    last_edited: '2026-10-21T20:03:25Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
@@ -30006,8 +30031,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:51.114484+00:00'
-  updated_at: '2026-10-21T19:14:51.114484+00:00'
+  updated_at: '2026-10-21T20:03:24.740138+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c12bdf5
+    text: 'From pr-8020495: pm_core/action_catalog.py is the start of the shared action
+      catalog. It holds ActionDef records; the History view action (key history, kind
+      view, shortcut H, cli `pr history {pr_id}`) exposes query=history_query.build_history
+      (JSON model, schema pm.pr.history/1) and render=history_query.render_text, plus
+      badge=summary_badge. It is available for every status, including merged and
+      closed. The terminal picker (cli/session.py) already renders view actions from
+      the catalog (`view:<key> <pr_id>` commands). Move the session actions from session.py
+      `_ALL_ACTIONS` into the same module, and have the mobile pane render the History
+      model from `query()` instead of shelling out.'
+    created_at: '2026-10-21T20:03:24Z'
+    last_edited: '2026-10-21T20:03:24Z'

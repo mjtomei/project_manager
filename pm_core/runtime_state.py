@@ -109,13 +109,101 @@ def get_action_state(pr_id: str, action: str) -> dict:
     return get_pr_actions(pr_id).get(action, {}) or {}
 
 
+IN_FLIGHT_STATES = {"queued", "launching", "running", "idle", "waiting"}
+
+# Actions whose attempts are journaled by their owner rather than derived
+# from runtime transitions: the ``qa`` entry is driven by per-scenario pane
+# registration, so a derived attempt would start at the first scenario
+# pane instead of at planning (``qa_loop`` journals the run itself).
+_UNJOURNALED_ACTIONS = {"qa"}
+
+
+def _pane_alive(pane_id: str | None) -> bool:
+    if not pane_id:
+        return False
+    try:
+        from pm_core import tmux as tmux_mod
+        return bool(tmux_mod.pane_exists(pane_id))
+    except Exception:
+        return False
+
+
+def _journal_transition(pr_id: str, action: str, cur: dict,
+                        state: str | None, extras: dict, clearing: bool,
+                        history_outcome: str | None,
+                        history_reason: str | None) -> None:
+    """Mirror one runtime transition into the action-history journal.
+
+    Called under the runtime file's lock so concurrent writers agree on
+    a single attempt id, which is stored in the entry as ``attempt_id``.
+    Mutates *cur* (the entry about to be written) only to set/drop that
+    field.  Never raises.
+    """
+    if action in _UNJOURNALED_ACTIONS:
+        return
+    try:
+        from pm_core import action_history as _ah
+        prior = cur.get("state")
+        prior_attempt = cur.get("attempt_id")
+        in_flight = prior in IN_FLIGHT_STATES and bool(prior_attempt)
+        if clearing:
+            if in_flight:
+                if history_reason:
+                    _ah.end_attempt(pr_id, prior_attempt, "interrupted",
+                                    detail=history_reason)
+                elif _pane_alive(cur.get("pane_id")):
+                    # The pane still exists; PM merely stopped watching it
+                    # (e.g. the PR moved on to review).
+                    _ah.end_attempt(
+                        pr_id, prior_attempt, "untracked",
+                        detail="pane still open; PM stopped tracking it")
+                else:
+                    _ah.end_attempt(
+                        pr_id, prior_attempt, "vanished",
+                        detail="pane gone or no longer tracked")
+            return
+        if state in ("queued", "launching", "running"):
+            def _identity(d: dict) -> str | None:
+                return d.get("loop_id") or d.get("session_id")
+            new_ident = _identity(extras) if extras else None
+            old_ident = _identity(cur)
+            if in_flight and not (new_ident and old_ident
+                                  and new_ident != old_ident):
+                return  # same attempt, still going
+            if in_flight:
+                _ah.end_attempt(pr_id, prior_attempt, "superseded",
+                                detail="replaced by a new run")
+            fields = {k: extras.get(k) for k in
+                      ("loop_id", "session_id", "pane_id")
+                      if extras.get(k) is not None}
+            cur["attempt_id"] = _ah.start_attempt(pr_id, action,
+                                                  source="runtime", **fields)
+        elif state in ("done", "failed"):
+            if in_flight:
+                _ah.end_attempt(pr_id, prior_attempt,
+                                history_outcome or state,
+                                verdict=extras.get("verdict"),
+                                iteration=extras.get("iteration"))
+    except Exception:
+        _log.debug("runtime_state: journal %s/%s failed", pr_id, action,
+                   exc_info=True)
+
+
 def set_action_state(pr_id: str, action: str, state: str | None,
+                     *, history_outcome: str | None = None,
+                     history_reason: str | None = None,
                      **extras: Any) -> None:
     """Record an action transition.
 
     Pass ``state=None`` together with no extras to clear the action
     entry.  Extra fields are merged into the action dict; pass
     ``None`` for a field to drop it from the persisted dict.
+
+    Transitions are also journaled as action attempts
+    (:mod:`pm_core.action_history`).  *history_outcome* overrides the
+    recorded outcome of a ``done``/``failed`` transition (e.g.
+    ``cancelled``); *history_reason* marks a clear as an interruption
+    (e.g. a TUI-restart sweep) rather than a vanished pane.
     """
     if state is not None and state not in VALID_STATES:
         _log.warning("runtime_state: unknown state %r for %s/%s",
@@ -140,12 +228,21 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                     data["actions"] = actions
                 if state is None and not extras:
                     prior_state_for_log = (actions.get(action) or {}).get("state")
+                    prior_entry = actions.get(action)
+                    if isinstance(prior_entry, dict):
+                        _journal_transition(pr_id, action, prior_entry,
+                                            None, {}, True, history_outcome,
+                                            history_reason)
                     actions.pop(action, None)
                 else:
                     cur = actions.get(action) or {}
                     if not isinstance(cur, dict):
                         cur = {}
                     prior_state_for_log = cur.get("state")
+                    if state is not None:
+                        _journal_transition(pr_id, action, cur, state,
+                                            extras, False, history_outcome,
+                                            history_reason)
                     if state is not None:
                         prior_state = cur.get("state")
                         # A fresh launch of this action invalidates any
@@ -215,8 +312,9 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                        exc_info=True)
 
 
-def clear_action(pr_id: str, action: str) -> None:
-    set_action_state(pr_id, action, None)
+def clear_action(pr_id: str, action: str, *,
+                 history_reason: str | None = None) -> None:
+    set_action_state(pr_id, action, None, history_reason=history_reason)
 
 
 def sweep_stale_states(reason: str = "tui-restart") -> int:
@@ -233,7 +331,6 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
     Returns the number of action entries that were cleared.
     """
     runtime_dir = _runtime_dir()
-    in_flight = {"queued", "launching", "running", "idle", "waiting"}
     swept = 0
     try:
         files = list(runtime_dir.iterdir())
@@ -250,13 +347,15 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
         if not isinstance(actions, dict):
             continue
         targets = [a for a, e in actions.items()
-                   if isinstance(e, dict) and e.get("state") in in_flight]
+                   if isinstance(e, dict)
+                   and e.get("state") in IN_FLIGHT_STATES]
         if not targets:
             continue
         pr_id = data.get("pr_id") or path.stem
         for action in targets:
             try:
-                clear_action(pr_id, action)
+                clear_action(pr_id, action,
+                             history_reason=f"swept on {reason}")
                 swept += 1
             except Exception:
                 _log.debug("runtime_state: sweep failed for %s/%s",

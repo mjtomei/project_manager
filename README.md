@@ -232,6 +232,15 @@ From the TUI:
 The loop runs in the background without stealing focus from your active window,
 so you can continue working while reviews iterate.
 
+To see what a PR's actions did and what pm is waiting for — e.g. whether an
+apparently stalled review is still running, processing a verdict, in a verdict
+grace period, or held for human input — run `pm pr history <pr-id>` (add
+`--json` for scripts) or press `H` in the PR actions popup (`prefix+P`). It
+lists each review iteration, QA run/scenario, sign-off and merge attempt with
+start/end times, execution vs. waiting time and outcome, plus the timers and
+holds that are currently armed. History is kept per PR under
+`~/.pm/history/` and stays available after the PR merges.
+
 ## Auto-start targets
 
 Auto-start drives an explicit set of target PRs through implementation →
