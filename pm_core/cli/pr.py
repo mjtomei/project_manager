@@ -664,6 +664,7 @@ def pr_spec_approve(pr_id: str):
         spec_gen.approve_spec(data, pr_id, root=root)
         # A gate-held agent still waits for the approval message.
         spec_gen.notify_spec_approved(pr_entry, phase)
+        trigger_tui_refresh()
         return
 
     header_lines = [

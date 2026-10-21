@@ -3559,7 +3559,11 @@ def _wait_for_qa_spec_approval(state: QALoopState, pm_root: Path,
         _set_spec_review_pending(state, True, notify)
         if state.stop_requested:
             return False
-        live = store.get_pr(store.load(pm_root), state.pr_id) or {}
+        try:
+            live = store.get_pr(store.load(pm_root), state.pr_id) or {}
+        except Exception:
+            _log.debug("QA spec wait: load failed", exc_info=True)
+            live = {}
         if (live.get("status") or "") in ("merged", "closed"):
             return False
         time.sleep(interval)
@@ -3892,6 +3896,10 @@ def run_qa_sync(
                             "planner to re-plan")
                         _notify()
                         deferred_plan = None
+                        # Only an idle turn after the re-plan request can
+                        # hold the new plan; an earlier one re-reads the
+                        # pre-edit plan.
+                        _hook_baseline = time.time()
 
             _remaining = max(0.0, deadline - time.monotonic())
             ev = _hook_events.wait_for_event(

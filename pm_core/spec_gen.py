@@ -101,6 +101,7 @@ def spec_location(pr: dict, phase: str) -> Path | None:
         root = store.find_project_root()
     except FileNotFoundError:
         return None
+    # Not spec_file_path(): a lookup must not create the spec directory.
     canonical = root / "specs" / pr.get("id", "") / f"{phase}.md"
     if canonical.exists():
         return canonical
