@@ -33,6 +33,24 @@ def _candidate_window_names(display_id: str, session: str) -> list[str]:
     return base
 
 
+def end_in_flight_actions(pr_id: str,
+                          reason: str = "PR resources cleaned up") -> None:
+    """Clear every in-flight runtime entry for *pr_id*, ending its attempt.
+
+    For callers that tear a PR's panes down: an entry left in flight keeps
+    its history attempt shown running, and when the process that opened it
+    has exited (e.g. a ``pm pr auto-sequence`` CLI) nothing else ends it.
+    """
+    try:
+        for action, entry in runtime_state.get_pr_actions(pr_id).items():
+            if (isinstance(entry, dict)
+                    and entry.get("state") in runtime_state.IN_FLIGHT_STATES):
+                runtime_state.clear_action(pr_id, action,
+                                           history_reason=reason)
+    except Exception as e:  # pragma: no cover
+        _log.warning("runtime_state clear of in-flight actions failed: %s", e)
+
+
 def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
     """Remove every live resource for *pr*.
 
@@ -87,14 +105,7 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
     # End in-flight actions first so their action-history attempts are
     # closed; unlinking alone would leave them open (and shown running
     # after merge) because later clears find no entry to end.
-    try:
-        for action, entry in runtime_state.get_pr_actions(pr_id).items():
-            if (isinstance(entry, dict)
-                    and entry.get("state") in runtime_state.IN_FLIGHT_STATES):
-                runtime_state.clear_action(
-                    pr_id, action, history_reason="PR resources cleaned up")
-    except Exception as e:  # pragma: no cover
-        _log.warning("runtime_state clear before cleanup failed: %s", e)
+    end_in_flight_actions(pr_id)
     try:
         runtime_state.runtime_path(pr_id).unlink(missing_ok=True)
         summary["runtime_state"] = True

@@ -414,6 +414,29 @@ class TestRuntimeCapture:
         assert "cleaned up" in _ends()[aid]["detail"]
         assert not rs.runtime_path(PR).exists()
 
+    def test_finalize_merge_ends_in_flight_attempts(self, clock, tmp_path):
+        """pm pr merge kills the PR's panes; an in-flight entry opened by a
+        process that has since exited (a CLI auto-sequence's start) would
+        otherwise stay shown running after the merge."""
+        from pm_core.cli import pr as pr_cli
+        root = _project(tmp_path)
+        rs.set_action_state(PR, "start", "running", pane_id="%1",
+                            session_id="s1")
+        rs.set_action_state(PR, "start", "idle")
+        rs.set_action_state(PR, "review-loop", "failed", verdict="KILLED")
+        aid = rs.get_action_state(PR, "start")["attempt_id"]
+        with patch("pm_core.cli.helpers._find_tui_pane",
+                   return_value=(None, None)), \
+                patch.object(pr_cli, "trigger_tui_refresh"):
+            pr_cli._finalize_merge(root, {"id": PR}, PR)
+        assert _ends()[aid]["outcome"] == "interrupted"
+        assert "cleaned up" in _ends()[aid]["detail"]
+        assert not rs.get_action_state(PR, "start")
+        # Terminal entries keep their post-mortem verdict.
+        assert rs.get_action_state(PR, "review-loop")["verdict"] == "KILLED"
+        assert not any(a["open"] for a in
+                       hq.build_history(PR, now=clock.t)["attempts"])
+
     def test_journal_failure_leaves_runtime_unchanged(self, tmp_path,
                                                      monkeypatch):
         blocker = tmp_path / "file"
