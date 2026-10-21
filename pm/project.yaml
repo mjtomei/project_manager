@@ -29937,7 +29937,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T22:56:37.323042+00:00'
+  updated_at: '2026-10-21T23:04:57.086500+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30076,6 +30076,13 @@ prs:
       runtime tombstone or a query-time merge of same-session runtime attempts.'
     created_at: '2026-10-21T22:56:37Z'
     last_edited: '2026-10-21T22:56:37Z'
+  - id: note-153e694
+    text: 'Review i2 (1eb51561): history Now line shows an in-flight runtime entry
+      verdict as "(last X)" (QA S3 obs 3: "review-loop=running KILLED"). Still open,
+      cosmetic: S4 phantom "start untracked" rows when pane_idle re-registers the
+      impl pane after a review loop.'
+    created_at: '2026-10-21T23:04:57Z'
+    last_edited: '2026-10-21T23:04:57Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
