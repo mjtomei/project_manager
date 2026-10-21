@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-21T21:46:48.760707+00:00'
+  updated_at: '2026-10-21T23:27:46.704412+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8140,6 +8140,14 @@ prs:
       not prevented.'
     created_at: '2026-10-21T21:46:48Z'
     last_edited: '2026-10-21T21:46:48Z'
+  - id: note-9f1e672
+    text: 'QA S8: fixed pre-existing tech-tree marker bug b290ebcb: a finished review
+      loop (⟳1✓) masked the sign_off ▲ / stale re-run spinner, so the TUI disagreed
+      with pm pr list. Merge gate g / command bar / auto-merge refusals + O / wait-for-merge
+      holds all held. Remaining nit: up to 4 s after a refusal the TUI still shows
+      ▲ until the driver stale tick reloads.'
+    created_at: '2026-10-21T23:27:46Z'
+    last_edited: '2026-10-21T23:27:46Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
