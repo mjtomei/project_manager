@@ -29859,7 +29859,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T19:04:28.458230+00:00'
+  updated_at: '2026-10-21T19:56:12.090660+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30020,6 +30020,29 @@ prs:
       it. Full suite 3314 pass.'
     created_at: '2026-10-21T19:04:28Z'
     last_edited: '2026-10-21T19:04:28Z'
+  - id: note-770db51
+    text: 'S18 refiner: the PR Actions picker cannot reach a pending, windowless PR
+      (_picker_nav_pr_ids lists only PRs with windows, spec pauses or the home PR),
+      so its start row cannot start R3. S18 uses a shell `pm pr start` for R3 instead,
+      which falls under the same pr-74c4182 gap. Command-bar `pr start` and shell
+      `pm pr start` pass no --transcript, so _poll_impl_idle never registers those
+      panes (register raises ValueError and the loop continues before hold_spec_if_due).
+      Their impl specs are held only on the next check_and_start pass (sync_spec_reviews),
+      and they never auto-advance to review on idle; only `s` (which passes --transcript)
+      is held per tick. S18 checks the per-PR hold latency for this.'
+    created_at: '2026-10-21T19:29:05Z'
+    last_edited: '2026-10-21T19:29:05Z'
+  - id: note-33c1595
+    text: 'QA S18 (b590cd17): command-bar `pr start` / shell `pm pr start` of a review-specs
+      closure member were never held on the impl spec their agent wrote (no --transcript
+      → _poll_impl_idle skipped them before hold_spec_if_due; R2 sat "implementing"
+      5m50s until an unrelated restart pass). The hold now runs before pane registration;
+      post-fix holds 2.9/5.1/4.9 s for s / command bar / shell. Incidental test-infra
+      809be0bf: fake-claude launches now write pm/prompts/pm_prompt_<id>.txt (removed
+      on exit) so QA can read the launch prompt. Picker without fzf has no h/l: open
+      prefix+P from the PR window to see its row.'
+    created_at: '2026-10-21T19:56:12Z'
+    last_edited: '2026-10-21T19:56:12Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
