@@ -14,6 +14,11 @@ finished document. Fields recording decisions taken after writing (status,
 resolution, milestones reached) are excluded so context does not reveal
 outcomes. cases.py filters every item against the document body before it
 enters a brief.
+
+Each item is stamped with when it was written relative to the document
+(sources.json `written`); cases.py never uses context written after the
+document. data/context/<source>.dates.json records each document's date,
+which selects the process-document versions attached to it.
 """
 
 import argparse
@@ -255,30 +260,99 @@ def collect_kep_yaml(source, docs, cfg):
 
 # --- Process documents ----------------------------------------------------
 
-def collect_process(source, docs, cfg):
+def github_repo(source):
+    return re.sub(r"^https://github\.com/|\.git$", "", source["url"])
+
+
+def file_history(repo, branch, path):
+    """Commits that touched `path` on `branch`, newest first, as (committed_day, oid).
+
+    Read from GitHub's commit-history page, which does not follow renames;
+    sources.json lists a process file's former paths for that.
+    """
+    out, after = [], None
+    while True:
+        url = f"https://github.com/{repo}/commits/{branch}/{urllib.parse.quote(path)}"
+        page, _ = fetch(url + (f"?after={urllib.parse.quote(after)}" if after else ""))
+        route = None
+        for script in BeautifulSoup(page, "html.parser").find_all("script", attrs={"data-target": "react-app.embeddedData"}):
+            route = (json.loads(script.string or "{}").get("payload") or {}).get("commitsRefRoute") or route
+        if route is None:
+            raise FetchError("no commit history in " + url)
+        out += [(docmeta.parse_date(c["committedDate"]), c["oid"]) for g in route["commitGroups"] for c in g["commits"]]
+        pagination = route["filters"]["pagination"]
+        if not pagination.get("hasNextPage"):
+            return out
+        after = pagination["endCursor"]
+
+
+def collect_process(source, docs, cfg, dates=None):
+    """Process documents and templates as they stood when each document was started.
+
+    A version is the file at the last commit on or before the document's date
+    (see document_dates); documents without a date, or older than every
+    version, get no attachment. With `"versioned": false` the current file is
+    attached to every document (and is excluded from briefs unless its
+    `written` setting says it predates them).
+    """
     by_identity = {d["identity"]: d for d in docs}
     items, errors = [], []
-    for ref in cfg["files"]:
-        doc = by_identity.get(ref)
+    if not cfg.get("versioned", True):
+        for ref in cfg["files"]:
+            doc = by_identity.get(ref)
+            try:
+                if doc:
+                    text, url, stamp = doc_text(doc), doc["url"], doc["retrieved_at"]
+                else:
+                    data, stamp = fetch(ref, binary=True)
+                    text, url = extract(data, ref), ref
+            except Exception as exc:
+                errors.append({"collector": "process", "ref": ref, "error": str(exc)})
+                continue
+            items.append(make_item(source, "process", ref, text, url, ["*"], stamp, role="process",
+                                   document_id=doc["id"] if doc else None, label=f"{cfg.get('label', 'process document')}: {ref}"))
+        return items, errors
+    repo, branch = github_repo(source), cfg["branch"]
+    dates = dates or {}
+    for entry in cfg["files"]:
+        ref = entry if isinstance(entry, str) else entry["path"]
+        paths = [ref] + ([] if isinstance(entry, str) else entry.get("former_paths", []))
         try:
-            if doc:
-                text, url, stamp, did = doc_text(doc), doc["url"], doc["retrieved_at"], doc["id"]
-            elif ref.startswith("https://"):
-                data, stamp = fetch(ref, binary=True)
-                text, url, did = extract(data, ref), ref, None
-            else:
-                path = checkout_path(source, ref)
-                if not path.exists():
-                    raise FetchError("process file missing from checkout (extend sparse and rerun collect.py)")
-                text = path.read_text(errors="replace")
-                rev = run(["git", "-C", str(path.parent), "rev-parse", "HEAD"]).strip()
-                url = source["url"].removesuffix(".git") + "/blob/" + rev + "/" + ref
-                stamp, did = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(), None
+            # newest first; within a day, history order (newest first) breaks ties
+            versions = [(day, oid, path) for day, _, oid, path in
+                        sorted(((day, -pos, oid, path) for path in paths
+                                for pos, (day, oid) in enumerate(file_history(repo, branch, path)) if day), reverse=True)]
         except Exception as exc:
-            errors.append({"collector": "process", "ref": ref, "error": str(exc)})
+            errors.append({"collector": "process", "ref": ref, "error": "history: " + str(exc)})
             continue
-        items.append(make_item(source, "process", ref, text, url, ["*"], stamp, role="process",
-                               document_id=did, label=f"{cfg.get('label', 'process document')}: {ref}"))
+        self_id = by_identity[ref]["id"] if ref in by_identity else None
+        users = defaultdict(list)
+        for doc in docs:
+            day = (dates.get(doc["id"]) or {}).get("date")
+            if day and doc["id"] != self_id:
+                users[day].append(doc["id"])
+        texts, chosen = {}, defaultdict(list)
+        for day in sorted(users, reverse=True):
+            for vday, oid, path in versions:
+                if vday > day:
+                    continue
+                if (oid, path) not in texts:
+                    url = f"https://raw.githubusercontent.com/{repo}/{oid}/{urllib.parse.quote(path)}"
+                    try:
+                        texts[(oid, path)] = fetch(url)
+                    except FetchError as exc:  # the commit that renamed or deleted the path
+                        texts[(oid, path)] = None
+                        if "404" not in str(exc):
+                            errors.append({"collector": "process", "ref": ref, "url": url, "error": str(exc)})
+                if texts[(oid, path)] is not None:
+                    chosen[(vday, oid, path)].extend(users[day])
+                    break
+        for (vday, oid, path), applies in sorted(chosen.items()):
+            text, stamp = texts[(oid, path)]
+            items.append(make_item(source, "process", f"{ref}@{oid}", text, f"https://github.com/{repo}/blob/{oid}/{path}",
+                                   applies, stamp, role="process", document_id=self_id,
+                                   label=f"{cfg.get('label', 'process document')}: {ref} (version of {vday})",
+                                   version={"path": path, "commit": oid, "committed": vday}, written_at=vday))
     return items, errors
 
 
@@ -440,10 +514,6 @@ def collect_oxide(source, docs, cfg):
 
 # --- IETF -----------------------------------------------------------------
 
-MONTHS = {m: i for i, m in enumerate(["January", "February", "March", "April", "May", "June", "July", "August",
-                                       "September", "October", "November", "December"], 1)}
-
-
 def rfc_index():
     data, stamp = fetch("https://www.rfc-editor.org/rfc-index.xml", binary=True)
     ns = {"r": "https://www.rfc-editor.org/rfc-index"}
@@ -464,14 +534,6 @@ def rfc_index():
     return out, stamp
 
 
-def end_of_month(entry):
-    try:
-        year, month = int(entry["year"]), MONTHS.get(entry["month"], 12)
-    except ValueError:
-        return None
-    return datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=timezone.utc).isoformat()
-
-
 def datatracker_all(path):
     out, url = [], "https://datatracker.ietf.org" + path
     while url:
@@ -487,9 +549,28 @@ def ietf_numbers(source, doc):
     return int(m.group(1)) if m else None
 
 
+def first_draft_dates():
+    """Draft name -> day its -00 revision was submitted, from the datatracker's revision events.
+
+    Events start with the datatracker (around 2001); older drafts have none.
+    """
+    out = {}
+    for event in datatracker_all("/api/v1/doc/newrevisiondocevent/?format=json&limit=1000&rev=00&doc__type=draft"):
+        name = event["doc"].rstrip("/").rsplit("/", 1)[-1]
+        day = docmeta.parse_date(event["time"])
+        if day and (name not in out or day < out[name]):
+            out[name] = day
+    return out
+
+
 def collect_ietf(source, docs, cfg):
     index, stamp = rfc_index()
     items, errors = [], []
+    try:
+        first_drafts = first_draft_dates()
+    except Exception as exc:
+        first_drafts = {}
+        errors.append({"collector": "ietf_first_drafts", "error": str(exc)})
     by_wg = defaultdict(list)
     drafts = {}
     for doc in docs:
@@ -500,16 +581,19 @@ def collect_ietf(source, docs, cfg):
         fields = {"RFC number": str(number), "Title": entry["title"], "Authors": ", ".join(entry["authors"]),
                   "Published": f"{entry['month']} {entry['year']}", "Stream": entry["stream"],
                   "Area": entry["area"], "Working group": entry["wg"] if entry["wg"] != "NON WORKING GROUP" else "",
-                  "Category": entry["category"], "Source draft": entry["draft"],
+                  "Category": entry["category"], "Source draft": re.sub(r"-\d\d$", "", entry["draft"]),
                   "Obsoletes": ", ".join(entry["obsoletes"]), "Updates": ", ".join(entry["updates"])}
+        draft_name = re.sub(r"-\d\d$", "", entry["draft"]) if entry["draft"] else ""
+        first = first_drafts.get(draft_name)
+        fields["First draft submitted"] = first or ""
         fields = {k: v for k, v in fields.items() if v}
         items.append(make_item(source, "index_entry", f"rfc{number}:{doc['id']}", render_fields(fields),
                                f"https://www.rfc-editor.org/info/rfc{number}", [doc["id"]], stamp, fields=fields,
                                label="RFC Editor index entry (abstract excluded)"))
-        if entry["wg"] and entry["wg"] != "NON WORKING GROUP":
-            by_wg[entry["wg"]].append((doc["id"], end_of_month(entry)))
-        if entry["draft"]:
-            drafts.setdefault(re.sub(r"-\d\d$", "", entry["draft"]), []).append(doc["id"])
+        if entry["wg"] and entry["wg"] != "NON WORKING GROUP" and first:
+            by_wg[entry["wg"]].append((doc["id"], first))
+        if draft_name:
+            drafts.setdefault(draft_name, []).append(doc["id"])
     if not cfg.get("charters", True):
         return items, errors
     try:
@@ -528,8 +612,9 @@ def collect_ietf(source, docs, cfg):
             if re.fullmatch(r"\d\d", h["rev"]):
                 approved[h["rev"]] = min(approved.get(h["rev"], h["time"]), h["time"])
         out = []
-        for doc_id, published in by_wg[wg]:
-            usable = [rev for rev, t in approved.items() if published and t <= published]
+        for doc_id, first in by_wg[wg]:
+            # the charter in force when the source draft was first submitted, not a later revision
+            usable = [rev for rev, t in approved.items() if docmeta.parse_date(t) <= first]
             if usable:
                 out.append((max(usable, key=lambda r: approved[r]), doc_id))
         made = []
@@ -538,7 +623,8 @@ def collect_ietf(source, docs, cfg):
             text, got = fetch(url)
             made.append(make_item(source, "charter", f"{name}-{rev}", text, url, [d for r, d in out if r == rev], got,
                                   label=f"working group charter ({wg}, revision {rev}, approved {approved[rev][:10]})",
-                                  fields={"group": wg, "revision": rev, "approved": approved[rev]}))
+                                  fields={"group": wg, "revision": rev, "approved": approved[rev]},
+                                  written_at=docmeta.parse_date(approved[rev])))
         return made
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
@@ -612,21 +698,91 @@ def documents_by_source():
     return out
 
 
+TIMINGS = {"before", "with_document", "identity", "dated", "after"}
+
+
+def stamp_timing(item, cfg):
+    """Record when an item was written relative to its documents (see sources.json `written`).
+
+    before: predates the document by construction (study calls, charters and
+    template versions chosen by date); with_document: the document's own
+    metadata; identity: a record written after the document, reduced to the
+    fields that identify it; dated: compared by date in cases.py; after:
+    written after the document and never used in a brief.
+    """
+    written = cfg["written"]
+    if isinstance(written, dict):
+        written = written[item["kind"]]
+    if written not in TIMINGS:
+        raise ValueError(f"unknown written setting {written!r}")
+    item["written"] = written
+    item.setdefault("written_at", docmeta.parse_date(item["fields"].get("created_at")))
+    if written == "identity":
+        keep = cfg["identity_fields"]
+        item["fields_withheld"] = sorted(k for k in item["fields"] if k not in keep)
+        item["text"] = render_fields({k: item["fields"][k] for k in keep if item["fields"].get(k)})
+        item["sha256"] = hashlib.sha256(item["text"].encode()).hexdigest()
+        item["words"] = len(item["text"].split())
+    note = cfg.get("written_note")
+    item["written_note"] = note.get(item["kind"]) if isinstance(note, dict) else note
+    return item
+
+
+def document_dates(source, docs, items):
+    """Per document, the latest date known not to follow the start of its writing, with its basis."""
+    rule = source["context"].get("document_date")
+    out = {}
+    if not rule:
+        return out
+    by_doc = defaultdict(list)
+    for item in items:
+        for doc_id in item["applies_to"]:
+            by_doc[doc_id].append(item)
+    for doc in docs:
+        day = None
+        for item in by_doc.get(doc["id"], []):
+            if rule["from"] == "metadata" and item["kind"] == "metadata":
+                day = docmeta.parse_date(item["fields"].get(rule["field"]))
+            elif rule["from"] == "item" and item["kind"] == rule["kind"] and item.get("number_from") == rule.get("number_from"):
+                day = item.get("written_at")
+            elif rule["from"] == "ietf_first_draft" and item["kind"] == "index_entry":
+                day = docmeta.parse_date(item["fields"].get("First draft submitted"))
+            if day:
+                break
+        if day:
+            out[doc["id"]] = {"date": day, "basis": rule["basis"]}
+    return out
+
+
 def collect_context(source, docs):
     items, errors = [], []
-    for cfg in source["context"]["collectors"]:
+    collectors = source["context"]["collectors"]
+    dates = None
+    # process collectors run last: template versions are chosen by document date
+    for cfg in sorted(collectors, key=lambda c: c["type"] == "process"):
+        if cfg["type"] == "process" and dates is None:
+            dates = document_dates(source, docs, items)
         selected = [d for d in docs if re.search(cfg.get("documents", ""), d["identity"])]
         try:
-            got, errs = COLLECTORS[cfg["type"]](source, selected, cfg)
+            if cfg["type"] == "process":
+                got, errs = collect_process(source, selected, cfg, dates)
+            else:
+                got, errs = COLLECTORS[cfg["type"]](source, selected, cfg)
+            got = [stamp_timing(i, cfg) for i in got]
         except Exception as exc:
             got, errs = [], [{"collector": cfg["type"], "error": f"{type(exc).__name__}: {exc}"}]
         items.extend(got)
         errors.extend(errs)
+    if dates is None:
+        dates = document_dates(source, docs, items)
     CTX.mkdir(parents=True, exist_ok=True)
     unique = {i["id"]: i for i in items}
     (CTX / (source["id"] + ".jsonl")).write_text("".join(json.dumps(i) + "\n" for i in sorted(unique.values(), key=lambda i: i["id"])))
+    (CTX / (source["id"] + ".dates.json")).write_text(json.dumps(dates, indent=1, sort_keys=True) + "\n")
     status = {"source": source["id"], "items": len(unique), "documents_with_items": len({d for i in unique.values() if i["role"] != "process" for d in i["applies_to"]}),
+              "documents_dated": len(dates),
               "by_kind": dict(sorted({k: sum(1 for i in unique.values() if i["kind"] == k) for k in {i["kind"] for i in unique.values()}}.items())),
+              "by_written": dict(sorted({w: sum(1 for i in unique.values() if i["written"] == w) for w in {i["written"] for i in unique.values()}}.items())),
               "errors": errors, "finished_at": now()}
     (CTX / (source["id"] + ".status.json")).write_text(json.dumps(status, indent=2) + "\n")
     print(json.dumps({k: (len(v) if k == "errors" else v) for k, v in status.items()}), flush=True)

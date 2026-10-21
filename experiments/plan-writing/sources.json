@@ -14,8 +14,7 @@
       "sparse": [
         "/design/",
         "/LICENSE*",
-        "/COPYING*",
-        "/README.md"
+        "/COPYING*"
       ],
       "include": [
         "design/*.md"
@@ -39,7 +38,9 @@
                 "from": "header",
                 "pattern": "(?:golang\\.org/issues?/|go\\.dev/issues?/|github\\.com/golang/go/issues/)(\\d+)"
               }
-            ]
+            ],
+            "written": "dated",
+            "written_note": "Proposal issues usually come first and a file design/N-*.md is named after issue N, so that issue predates it. An issue found only through a Discussion link in the document's header cannot be dated against the document and is dropped."
           },
           {
             "type": "header",
@@ -49,7 +50,9 @@
               "Authors",
               "Author"
             ],
-            "label": "design document byline"
+            "label": "design document byline",
+            "written": "with_document",
+            "written_note": "The document's own header or metadata file, written with it."
           },
           {
             "type": "process",
@@ -57,9 +60,18 @@
               "README.md",
               "design/TEMPLATE.md"
             ],
-            "label": "Go proposal process and design template"
+            "label": "Go proposal process and design template",
+            "written": "before",
+            "branch": "master",
+            "written_note": "The template version committed on or before the opening of the proposal issue the document is named after."
           }
-        ]
+        ],
+        "document_date": {
+          "from": "item",
+          "kind": "tracking_issue",
+          "number_from": "identity",
+          "basis": "opening of the proposal issue the design file is named after"
+        }
       }
     },
     {
@@ -71,9 +83,7 @@
       "sparse": [
         "/text/",
         "/LICENSE*",
-        "/COPYING*",
-        "/README.md",
-        "/0000-template.md"
+        "/COPYING*"
       ],
       "include": [
         "text/*.md"
@@ -93,7 +103,9 @@
                 "from": "identity",
                 "pattern": "^text/(\\d+)-"
               }
-            ]
+            ],
+            "written": "after",
+            "written_note": "The pull request's opening post submits the finished RFC text for review, so it is written after the document."
           },
           {
             "type": "github",
@@ -107,7 +119,9 @@
                 "pattern": "Rust Issue:[^\\n]*?rust-lang/rust(?:/issues/|#)(\\d+)",
                 "chars": 1500
               }
-            ]
+            ],
+            "written": "after",
+            "written_note": "rust-lang/rust tracking issues are opened after an RFC is accepted, to track implementation and stabilisation."
           },
           {
             "type": "header",
@@ -116,7 +130,9 @@
               "Feature Name",
               "Start Date"
             ],
-            "label": "RFC header metadata"
+            "label": "RFC header metadata",
+            "written": "with_document",
+            "written_note": "The document's own header or metadata file, written with it."
           },
           {
             "type": "process",
@@ -124,9 +140,17 @@
               "README.md",
               "0000-template.md"
             ],
-            "label": "Rust RFC process and template"
+            "label": "Rust RFC process and template",
+            "written": "before",
+            "branch": "main",
+            "written_note": "The README and template versions committed on or before the RFC's Start Date."
           }
-        ]
+        ],
+        "document_date": {
+          "from": "metadata",
+          "field": "Start Date",
+          "basis": "Start Date in the RFC header"
+        }
       }
     },
     {
@@ -160,7 +184,9 @@
                 "chars": 2500
               }
             ],
-            "documents": "^src/20\\d\\d"
+            "documents": "^src/20\\d\\d",
+            "written": "after",
+            "written_note": "Goal tracking issues are opened after a goal is accepted into a slate and copy the goal document's summary."
           },
           {
             "type": "header",
@@ -174,7 +200,9 @@
               "Zulip channel"
             ],
             "documents": "^src/20\\d\\d",
-            "label": "goal metadata table"
+            "label": "goal metadata table",
+            "written": "with_document",
+            "written_note": "The document's own header or metadata file, written with it."
           },
           {
             "type": "markdown_index",
@@ -183,7 +211,9 @@
               "goals.md"
             ],
             "documents": "^src/20\\d\\d",
-            "label": "goal slate entry"
+            "label": "goal slate entry",
+            "written": "after",
+            "written_note": "Slate entries are added when the goal is accepted."
           },
           {
             "type": "process",
@@ -191,7 +221,10 @@
               "src/TEMPLATE.md",
               "src/how_to/propose_a_goal.md"
             ],
-            "label": "Rust project goal template and proposal guide"
+            "label": "Rust project goal template and proposal guide",
+            "written": "before",
+            "branch": "main",
+            "written_note": "Goal documents carry no start date, so no template version can be shown to predate them and none is attached."
           }
         ]
       }
@@ -231,21 +264,44 @@
               "Replaces",
               "Discussions-To"
             ],
-            "label": "PEP preamble (decision fields excluded)"
+            "label": "PEP preamble (decision fields excluded)",
+            "written": "with_document",
+            "written_note": "The document's own header or metadata file, written with it."
           },
           {
             "type": "discourse",
-            "label": "discussion thread opening post"
+            "label": "discussion thread opening post",
+            "written": "dated",
+            "written_note": "Discussions-To threads usually announce an already drafted PEP; a thread opened after the PEP's Created date is dropped."
           },
           {
             "type": "process",
             "files": [
-              "peps/pep-0001.rst",
-              "peps/pep-0012.rst"
+              {
+                "path": "peps/pep-0001.rst",
+                "former_paths": [
+                  "pep-0001.txt"
+                ]
+              },
+              {
+                "path": "peps/pep-0012.rst",
+                "former_paths": [
+                  "pep-0012.rst",
+                  "pep-0012.txt"
+                ]
+              }
             ],
-            "label": "PEP process (PEP 1) and template (PEP 12)"
+            "label": "PEP process (PEP 1) and template (PEP 12)",
+            "written": "before",
+            "branch": "main",
+            "written_note": "PEP 1 and PEP 12 as committed on or before the PEP's Created date."
           }
-        ]
+        ],
+        "document_date": {
+          "from": "metadata",
+          "field": "Created",
+          "basis": "Created field in the PEP preamble"
+        }
       }
     },
     {
@@ -280,7 +336,9 @@
               "see-also",
               "replaces"
             ],
-            "label": "KEP metadata"
+            "label": "KEP metadata",
+            "written": "with_document",
+            "written_note": "The document's own header or metadata file, written with it."
           },
           {
             "type": "github",
@@ -293,17 +351,33 @@
                 "from": "identity",
                 "pattern": "^keps/[^/]+/(\\d+)-"
               }
-            ]
+            ],
+            "written": "dated",
+            "written_note": "Enhancement issues are normally opened to propose the work before the KEP; an issue opened after the KEP's creation-date is dropped. Bodies are edited as work proceeds, and their progress lines are removed."
           },
           {
             "type": "process",
             "files": [
-              "keps/NNNN-kep-template/README.md",
+              {
+                "path": "keps/NNNN-kep-template/README.md",
+                "former_paths": [
+                  "keps/YYYYMMDD-kep-template.md",
+                  "keps/0000-kep-template.md"
+                ]
+              },
               "keps/README.md"
             ],
-            "label": "KEP template and process"
+            "label": "KEP template and process",
+            "written": "before",
+            "branch": "master",
+            "written_note": "The KEP template and process README as committed on or before the KEP's creation-date."
           }
-        ]
+        ],
+        "document_date": {
+          "from": "metadata",
+          "field": "creation-date",
+          "basis": "creation-date in kep.yaml"
+        }
       }
     },
     {
@@ -333,7 +407,9 @@
               "Authors",
               "Author(s)"
             ],
-            "label": "RFC header metadata"
+            "label": "RFC header metadata",
+            "written": "with_document",
+            "written_note": "The document's own header or metadata file, written with it."
           },
           {
             "type": "github",
@@ -347,7 +423,9 @@
                 "pattern": "RFC PR:[^\\n]*?cockroachdb/cockroach/pull/(\\d+)",
                 "chars": 1500
               }
-            ]
+            ],
+            "written": "after",
+            "written_note": "The pull request's opening post submits the finished RFC text for review, so it is written after the document."
           },
           {
             "type": "github",
@@ -361,16 +439,26 @@
                 "pattern": "Cockroach Issue:[^\\n]*?cockroachdb/cockroach/issues/(\\d+)",
                 "chars": 1500
               }
-            ]
+            ],
+            "written": "dated",
+            "written_note": "A linked issue opened after the RFC's Start Date is dropped."
           },
           {
             "type": "process",
             "files": [
               "docs/RFCS/README.md"
             ],
-            "label": "CockroachDB RFC process"
+            "label": "CockroachDB RFC process",
+            "written": "before",
+            "branch": "master",
+            "written_note": "The RFC process README as committed on or before the RFC's Start Date (replaced in 2024 by a pointer to a new process)."
           }
-        ]
+        ],
+        "document_date": {
+          "from": "metadata",
+          "field": "Start Date",
+          "basis": "Start Date in the RFC header"
+        }
       }
     },
     {
@@ -410,9 +498,31 @@
         "collectors": [
           {
             "type": "ietf",
-            "documents": "^rfc\\d+\\.md$"
+            "documents": "^rfc\\d+\\.md$",
+            "written": {
+              "index_entry": "identity",
+              "charter": "before",
+              "milestone": "after"
+            },
+            "identity_fields": [
+              "Title",
+              "Authors",
+              "Stream",
+              "Area",
+              "Working group",
+              "Source draft"
+            ],
+            "written_note": {
+              "index_entry": "The RFC Editor index entry is written at publication; only fields that identify the document are kept, and the publication date, category and obsoletes/updates are withheld.",
+              "charter": "Only the charter revision approved on or before the submission of the source draft's -00 revision; RFCs whose first draft cannot be dated (before the datatracker, about 2001) get no charter.",
+              "milestone": "A milestone can name a draft only once the draft exists, so milestones naming it are written after the document was started."
+            }
           }
-        ]
+        ],
+        "document_date": {
+          "from": "ietf_first_draft",
+          "basis": "submission of the source draft's -00 revision (datatracker)"
+        }
       }
     },
     {
@@ -495,9 +605,31 @@
         "request": "Write an IETF RFC.",
         "collectors": [
           {
-            "type": "ietf"
+            "type": "ietf",
+            "written": {
+              "index_entry": "identity",
+              "charter": "before",
+              "milestone": "after"
+            },
+            "identity_fields": [
+              "Title",
+              "Authors",
+              "Stream",
+              "Area",
+              "Working group",
+              "Source draft"
+            ],
+            "written_note": {
+              "index_entry": "The RFC Editor index entry is written at publication; only fields that identify the document are kept, and the publication date, category and obsoletes/updates are withheld.",
+              "charter": "Only the charter revision approved on or before the submission of the source draft's -00 revision; RFCs whose first draft cannot be dated (before the datatracker, about 2001) get no charter.",
+              "milestone": "A milestone can name a draft only once the draft exists, so milestones naming it are written after the document was started."
+            }
           }
-        ]
+        ],
+        "document_date": {
+          "from": "ietf_first_draft",
+          "basis": "submission of the source draft's -00 revision (datatracker)"
+        }
       },
       "split_group_rule": "ietf_working_group"
     },
@@ -514,14 +646,24 @@
         "collectors": [
           {
             "type": "oxide",
-            "api": "https://rfd-api.shared.oxide.computer/rfd"
+            "api": "https://rfd-api.shared.oxide.computer/rfd",
+            "written": "identity",
+            "identity_fields": [
+              "RFD",
+              "Title",
+              "Authors"
+            ],
+            "written_note": "The RFD index is maintained after writing; only number, title and authors are kept, and labels are withheld."
           },
           {
             "type": "process",
             "files": [
               "https://rfd.shared.oxide.computer/rfd/0001"
             ],
-            "label": "Oxide RFD process (RFD 1)"
+            "label": "Oxide RFD process (RFD 1)",
+            "written": "after",
+            "versioned": false,
+            "written_note": "RFD 1 is today's process text; RFDs carry no start date, so no earlier version can be chosen."
           }
         ]
       }
@@ -540,7 +682,19 @@
           {
             "type": "index",
             "label": "design documents index entry",
-            "preamble": true
+            "preamble": true,
+            "written": {
+              "index_entry": "identity",
+              "index_preamble": "after"
+            },
+            "identity_fields": [
+              "Index section",
+              "Title"
+            ],
+            "written_note": {
+              "index_entry": "The index page is maintained after the documents; only the entry's section and title are kept, and its description is withheld.",
+              "index_preamble": "The current index page introduction cannot be dated against the documents."
+            }
           }
         ]
       }
@@ -559,7 +713,19 @@
           {
             "type": "index",
             "label": "design documents index entry",
-            "preamble": true
+            "preamble": true,
+            "written": {
+              "index_entry": "identity",
+              "index_preamble": "after"
+            },
+            "identity_fields": [
+              "Index section",
+              "Title"
+            ],
+            "written_note": {
+              "index_entry": "The index page is maintained after the documents; only the entry's section and title are kept, and its description is withheld.",
+              "index_preamble": "The current index page introduction cannot be dated against the documents."
+            }
           }
         ]
       }
@@ -579,7 +745,13 @@
         "collectors": [
           {
             "type": "index",
-            "label": "NASA planetary science documents index entry"
+            "label": "NASA planetary science documents index entry",
+            "written": "identity",
+            "identity_fields": [
+              "Index section",
+              "Title"
+            ],
+            "written_note": "The index page lists finished reports; only section and title are kept, and descriptions are withheld."
           },
           {
             "type": "study_call",
@@ -590,7 +762,9 @@
               "https://science.nasa.gov/researchers/sara/grant-solicitations/roses-2018/amendment-71-c-30-planetary-mission-concept-studies-text-correction-and-due-date-delay"
             ],
             "start_marker": "NASA has started preparations",
-            "end_marker": "\nShare\nDetails"
+            "end_marker": "\nShare\nDetails",
+            "written": "before",
+            "written_note": "The call solicited the studies, so it predates the reports."
           },
           {
             "type": "study_call",
@@ -601,7 +775,9 @@
             ],
             "start_marker": "LETTER OF REQUEST",
             "end_marker": "Next Chapter:",
-            "strip_pattern": "Page\\s+\\d+\\s+Share\\s+Cite\\s+Bookmark\\s+Suggested Citation:.*?Save\\s+Cancel"
+            "strip_pattern": "Page\\s+\\d+\\s+Share\\s+Cite\\s+Bookmark\\s+Suggested Citation:.*?Save\\s+Cancel",
+            "written": "before",
+            "written_note": "The call solicited the studies, so it predates the reports."
           }
         ]
       }
@@ -618,14 +794,22 @@
         "collectors": [
           {
             "type": "index",
-            "label": "mission concept study reports page entry"
+            "label": "mission concept study reports page entry",
+            "written": "identity",
+            "identity_fields": [
+              "Index section",
+              "Title"
+            ],
+            "written_note": "The index page lists finished reports; only section and title are kept, and descriptions are withheld."
           },
           {
             "type": "study_call",
             "label": "study call: NASA Astrophysics Division establishment of large mission concept studies for the 2020 Decadal Survey (2015-11-30)",
             "urls": [
               "https://science.nasa.gov/wp-content/uploads/2023/05/Establishment_of_Large_Astrophysics_Mission_Concept_Studies_2015_11_30.pdf"
-            ]
+            ],
+            "written": "before",
+            "written_note": "The call solicited the studies, so it predates the reports."
           }
         ]
       }
@@ -642,14 +826,22 @@
         "collectors": [
           {
             "type": "index",
-            "label": "mission concept study reports page entry"
+            "label": "mission concept study reports page entry",
+            "written": "identity",
+            "identity_fields": [
+              "Index section",
+              "Title"
+            ],
+            "written_note": "The index page lists finished reports; only section and title are kept, and descriptions are withheld."
           },
           {
             "type": "study_call",
             "label": "study call: NASA Astrophysics Division establishment of large mission concept studies for the 2020 Decadal Survey (2015-11-30)",
             "urls": [
               "https://science.nasa.gov/wp-content/uploads/2023/05/Establishment_of_Large_Astrophysics_Mission_Concept_Studies_2015_11_30.pdf"
-            ]
+            ],
+            "written": "before",
+            "written_note": "The call solicited the studies, so it predates the reports."
           }
         ]
       }
@@ -730,6 +922,7 @@
       "min_reference_words": 30,
       "max_reference_words": 4000
     },
-    "no_context_sources": "Sources without a context block yield continuation cases only."
+    "no_context_sources": "Sources without a context block yield continuation cases only.",
+    "context_timing": "Context written after the document is never used in a brief: a brief must state the request as it stood before the document existed, and material written afterwards (review submissions, acceptance and tracking records, announcements, index descriptions, current versions of process documents) restates the finished document or reveals its outcome. Each collector's `written` setting records its timing and `written_note` the reason; `dated` items are compared with the document date in cases.py."
   }
 }

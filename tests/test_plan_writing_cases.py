@@ -131,11 +131,11 @@ def doc_record(source, identity, text, root, raw=None, split_group=None, dup=Non
             "duplicate_group": dup or sha, "canonical_id": uid}
 
 
-def context_item(source, kind, key, text, applies_to, role="document", **extra):
+def context_item(source, kind, key, text, applies_to, role="document", written="before", **extra):
     item = {"id": hashlib.sha256(f"{source}:{kind}:{key}".encode()).hexdigest()[:24], "source": source, "kind": kind,
             "key": key, "role": role, "url": f"https://example.org/ctx/{key}", "retrieved_at": "2026-10-20T00:00:00+00:00",
             "applies_to": applies_to, "fields": {}, "text": text, "sha256": hashlib.sha256(text.encode()).hexdigest(),
-            "words": len(text.split()), "label": kind.replace("_", " ")}
+            "words": len(text.split()), "label": kind.replace("_", " "), "written": written}
     item.update(extra)
     return item
 
@@ -149,7 +149,8 @@ CONFIG = {
         {"id": "plain", "kind": "git"},
     ],
     "case_preparation": {"brief_leak_ngram": N, "continuation": {"max_cases_per_document": 3, "min_prefix_words": 20,
-                                                                 "min_reference_words": 10, "max_reference_words": 4000}},
+                                                                 "min_reference_words": 10, "max_reference_words": 4000},
+                         "context_timing": "Context written after the document is never used in a brief."},
 }
 
 
@@ -189,14 +190,20 @@ def catalog(tmp_path, monkeypatch):
     ctx = data / "context"
     ctx.mkdir()
     pep_items = [
-        context_item("peps", "metadata", pep["id"], "PEP: 9999\nTitle: Frobnicate the widget registry\nType: Standards Track", [pep["id"]]),
+        context_item("peps", "metadata", pep["id"], "PEP: 9999\nTitle: Frobnicate the widget registry\nType: Standards Track", [pep["id"]],
+                     written="with_document"),
         context_item("peps", "discussion_thread", "t1",
                      "Title: Compacting the registry\n\nOur services leak memory through the widget table and we need a fix.\n"
                      # a sentence copied from the body, and a passage split across two lines
                      "Large applications register thousands of transient widgets and the registry becomes the dominant source.\n"
                      "The proposal walks the registry after each garbage\ncollection cycle and removes entries whose widgets\n"
-                     "Please comment on the approach in this thread.", [pep["id"]]),
-        context_item("peps", "process", "pep-0012", "PEP template: write an Abstract and a Motivation.", ["*"], role="process", document_id=None),
+                     "Please comment on the approach in this thread.", [pep["id"]], written="dated", written_at="2019-12-01"),
+        context_item("peps", "discussion_thread", "t2", "Title: PEP 9999 posted\n\nThe accepted design now ships in the next release for everyone.",
+                     [pep["id"]], written="dated", written_at="2020-03-01"),
+        context_item("peps", "review_thread", "pr1", "Title: Add PEP 9999\n\nThis pull request adds the finished PEP for the registry.",
+                     [pep["id"]], written="after"),
+        context_item("peps", "process", "pep-0012@v1", "PEP template: write an Abstract and a Motivation.", [pep["id"]], role="process",
+                     document_id=None, version={"path": "pep-0012.txt", "commit": "abc", "committed": "2019-06-01"}),
     ]
     md_items = [
         context_item("goprop", "tracking_issue", "go12345",
@@ -204,8 +211,11 @@ def catalog(tmp_path, monkeypatch):
                      + MD_TEXT.split("## Background")[1][:600], [md["id"]]),
         context_item("goprop", "metadata", md_byline_only["id"], "Author(s): Someone", [md_byline_only["id"]]),
     ]
-    rfc_items = [context_item("rfcs", "index_entry", "rfc9999", "RFC number: 9999\nTitle: The Widget Transfer Protocol\nWorking group: wtp",
-                              [rfc["id"]], fields={"Working group": "wtp", "Stream": "IETF"})]
+    rfc_items = [context_item("rfcs", "index_entry", "rfc9999", "Title: The Widget Transfer Protocol\nWorking group: wtp",
+                              [rfc["id"]], written="identity", fields={"Working group": "wtp", "Stream": "IETF"}),
+                 context_item("rfcs", "milestone", "draft-wtp", "- Submit the widget transfer protocol to the IESG for publication as a standard",
+                              [rfc["id"]], written="after")]
+    (ctx / "peps.dates.json").write_text(json.dumps({pep["id"]: {"date": "2020-01-01", "basis": "Created"}}))
     for name, items in (("peps", pep_items), ("goprop", md_items), ("rfcs", rfc_items)):
         (ctx / f"{name}.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items))
         (ctx / f"{name}.status.json").write_text(json.dumps({"source": name, "items": len(items), "by_kind": {}, "errors": []}))
@@ -497,7 +507,7 @@ def test_table_only_request_text_is_thin(tmp_path):
                         "Details at https://example.org/goal-1234 for reviewers\n"
                         "## Summary\n\nThe goal document body has its own words. The goal document body has its own words.", ["g"])
     cfg = {"context": {"request": "Write a goal."}}
-    brief, _ = cases.assemble_brief(doc, text, [item], [], cfg, N)
+    brief, _ = cases.assemble_brief(doc, text, [item], cfg, N)
     assert brief["context_strength"] == "thin"
     assert "goal-1234" not in brief["brief"]          # self link stripped
     assert "## Summary" not in brief["brief"]         # heading left without content is dropped
@@ -513,7 +523,7 @@ def test_progress_lines_and_linked_issue_heading(tmp_path):
     item["url"] = "https://github.com/rust-lang/rfcs/pull/243"
     item["label"] = "RFC pull request opening post"
     cfg = {"context": {"request": "Write an RFC.", "collectors": []}}
-    brief, prov = cases.assemble_brief(doc, text, [item], [], cfg, N)
+    brief, prov = cases.assemble_brief(doc, text, [item], cfg, N)
     assert "## RFC pull request opening post" in brief["brief"]   # label kept although the body links the PR
     assert "Stabilize widgets" not in brief["brief"] and "1.27" not in brief["brief"]
     assert prov[0]["progress_lines_dropped"] == 2
@@ -562,3 +572,112 @@ def test_check_detects_self_attachment(catalog):
     counts = cases.check(data_dir=data)["failure_counts"]
     cases._load_context_items.cache_clear()
     assert counts.get("document_attached_to_itself")
+
+
+# --- context timing ------------------------------------------------------------
+
+def test_context_written_after_document_is_excluded(catalog):
+    pep = catalog["docs"]["peps/pep-9999.rst"]
+    case = next(c for c in catalog["cases"] if c["case_id"] == "doc:" + pep["id"])
+    brief = case["inputs"]["brief"]
+    assert "leak memory through the widget table" in brief       # thread opened before the PEP's date
+    assert "accepted design now ships" not in brief              # thread opened after it
+    assert "pull request adds the finished PEP" not in brief     # written after by nature
+    excluded = {p["kind"]: p["excluded"] for p in case["provenance"]["items_considered"] if p.get("excluded")}
+    assert excluded == {"discussion_thread": "written 2020-03-01, after the document (2020-01-01)",
+                        "review_thread": "written after the document"}
+    assert case["provenance"]["document_date"]["date"] == "2020-01-01"
+    assert case["inputs"]["attachments"][0]["version"]["committed"] == "2019-06-01"
+    rfc = catalog["docs"]["rfc9999.txt"]
+    rfc_case = next(c for c in catalog["cases"] if c["case_id"] == "doc:" + rfc["id"])
+    assert "IESG" not in rfc_case["inputs"]["brief"] and rfc_case["provenance"]["context_strength"] == "thin"
+    timing = catalog["coverage"]["context_timing"]
+    assert timing["peps"]["discussion_thread"] == {"admitted": 1, "excluded": 1}
+    assert timing["rfcs"]["milestone"] == {"excluded": 1}
+    md = (catalog["data"].parent / "reports" / "case-coverage.md").read_text()
+    assert "## Context written after the document" in md
+
+
+def test_timing_exclusion_rules():
+    rule = cases.timing_exclusion
+    assert rule({"written": "before"}, None) is None
+    assert rule({"written": "with_document"}, None) is None
+    assert rule({"written": "identity"}, None) is None
+    assert rule({"written": "after"}, "2020-01-01") == "written after the document"
+    assert rule({}, "2020-01-01") == "written after the document"                    # unstamped counts as later
+    assert rule({"written": "dated", "written_at": "2020-01-01"}, "2020-01-01") is None  # same day admitted
+    assert rule({"written": "dated", "written_at": "2020-01-02"}, "2020-01-01").startswith("written 2020-01-02")
+    assert rule({"written": "dated", "written_at": "2019-01-01"}, None) == "document date unknown"
+    assert rule({"written": "dated"}, "2020-01-01") == "item date unknown"
+
+
+def test_check_flags_context_written_after_document(catalog):
+    data = catalog["data"]
+    pep = catalog["docs"]["peps/pep-9999.rst"]
+    path = data / "cases" / "catalog.jsonl"
+    rows = [json.loads(l) for l in path.read_text().splitlines()]
+    late = next(json.loads(l) for l in (data / "context" / "peps.jsonl").read_text().splitlines() if '"review_thread"' in l)
+    for row in rows:
+        if row["case_id"] == "doc:" + pep["id"]:
+            row["provenance"]["brief_items"].append({"context_id": late["id"]})
+            row["inputs"]["attachments"][0]["version"]["committed"] = "2021-01-01"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    counts = cases.check(data_dir=data)["failure_counts"]
+    assert counts.get("brief_uses_context_written_after_document") == 1
+    assert counts.get("attachment_version_after_document") == 1
+
+
+def test_stamp_timing_and_document_dates():
+    pytest.importorskip("bs4")
+    pytest.importorskip("yaml")
+    context = importlib.import_module("context")
+    source = {"id": "s", "context": {"document_date": {"from": "metadata", "field": "Created", "basis": "Created"}}}
+    index = {"id": "i", "kind": "index_entry", "fields": {"Title": "Widgets", "Index entry": "A design that adds widgets."},
+             "text": "Title: Widgets\nIndex entry: A design that adds widgets.", "applies_to": ["d"]}
+    cfg = {"written": {"index_entry": "identity"}, "identity_fields": ["Index section", "Title"], "written_note": {"index_entry": "n"}}
+    item = context.stamp_timing(index, cfg)
+    assert item["written"] == "identity" and item["text"] == "Title: Widgets" and item["fields_withheld"] == ["Index entry"]
+    issue = context.stamp_timing({"id": "t", "kind": "tracking_issue", "fields": {"created_at": "2019-12-31T23:30:00-05:00"},
+                                  "text": "x", "applies_to": ["d"]}, {"written": "dated"})
+    assert issue["written_at"] == "2020-01-01"                     # UTC day
+    meta = {"id": "m", "kind": "metadata", "fields": {"Created": "05-Sep-2022"}, "applies_to": ["d"]}
+    assert context.document_dates(source, [{"id": "d"}], [meta]) == {"d": {"date": "2022-09-05", "basis": "Created"}}
+    with pytest.raises(ValueError):
+        context.stamp_timing({"kind": "x", "fields": {}, "text": ""}, {"written": "sometime"})
+
+
+def test_process_versions_predate_each_document(monkeypatch):
+    pytest.importorskip("bs4")
+    pytest.importorskip("yaml")
+    context = importlib.import_module("context")
+    history = {"tmpl.md": [("2021-05-01", "c3"), ("2020-01-01", "c2"), ("2020-01-01", "c1b")], "old-tmpl.md": [("2020-01-01", "c1b"), ("2018-01-01", "c0")]}
+    monkeypatch.setattr(context, "file_history", lambda repo, branch, path: history[path])
+
+    def fake_fetch(url, binary=False):
+        if "c1b/old-tmpl.md" in url:
+            raise context.FetchError("HTTP 404")  # the rename commit removed the old path
+        return url.rsplit("/", 2)[-2] + " text", "2026-10-21T00:00:00+00:00"
+
+    monkeypatch.setattr(context, "fetch", fake_fetch)
+    source = {"id": "s", "url": "https://github.com/o/r.git"}
+    docs = [{"id": d, "identity": f"docs/{d}.md"} for d in ("a", "b", "c", "undated")]
+    dates = {"a": {"date": "2022-01-01"}, "b": {"date": "2020-01-01"}, "c": {"date": "2017-01-01"}}
+    cfg = {"branch": "main", "files": [{"path": "tmpl.md", "former_paths": ["old-tmpl.md"]}], "label": "template"}
+    items, errors = context.collect_process(source, docs, cfg, dates)
+    assert errors == []
+    used = {i["version"]["commit"]: i["applies_to"] for i in items}
+    assert used == {"c3": ["a"], "c2": ["b"]}  # c: older than every version; undated: no attachment
+
+
+def test_recorded_title_is_cut_from_plain_text_body():
+    title = "Transition and Modernization of the Internet Registration Service"
+    text = ("Network Working Group                          S. Williamson\n\n          Transition and Modernization\n"
+            "       of the Internet Registration Service\n\nStatus of this Memo\n\n   This memo provides information.\n")
+    entry = context_item("rfcs", "index_entry", "rfc1400", f"Title: {title}\nAuthors: S. Williamson", ["r"],
+                         written="identity", fields={"Title": title})
+    doc = {"identity": "rfc1400.txt", "url": "https://example.org/rfc1400", "id": "r"}
+    brief, _ = cases.assemble_brief(doc, text, [entry], {"context": {"request": "Write an RFC."}}, N)
+    assert title in brief["brief"] and brief["titles"] == [title]
+    grams = cases.body_ngrams(text, None, N, [title])
+    assert not cases.shared_ngrams(title, grams, N)
+    assert cases.shared_ngrams(title, cases.body_ngrams(text, None, N), N)  # without the cut it would leak

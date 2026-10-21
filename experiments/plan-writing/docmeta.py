@@ -6,6 +6,7 @@ and the title line).
 """
 
 import re
+from datetime import date, datetime, timezone
 
 RFC822_FIELD = re.compile(r"^([A-Z][A-Za-z-]*):[ \t]*(.*)$")
 DASH_FIELD = re.compile(r"^\s*[-*]\s+([A-Z][A-Za-z0-9 ()/#-]*?):[ \t]*(.*)$")  # old Rust RFCs: "- RFC PR #:"
@@ -121,3 +122,39 @@ def body_text(text, header_format=None):
     if span:
         body = body[:span[0]] + " " * (span[1] - span[0]) + body[span[1]:]
     return body
+
+
+MONTH_NAMES = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
+def parse_date(value):
+    """ISO day (YYYY-MM-DD) from the date forms found in headers and records, else None.
+
+    Accepts ISO dates and timestamps (UTC offsets are applied), 05-Sep-2022,
+    2017/09/25 and "September 25, 2017". Returns None for anything vaguer.
+    """
+    if not value:
+        return None
+    value = str(value).strip()
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?", value)
+    if m:
+        stamp = datetime.fromisoformat(m.group(0).replace("Z", "+00:00").replace(" ", "T"))
+        if stamp.tzinfo:
+            stamp = stamp.astimezone(timezone.utc)
+        return stamp.date().isoformat()
+    m = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b", value)
+    if m:
+        y, mo, d = map(int, m.groups())
+    else:
+        m = re.match(r"^(\d{1,2})[- ]([A-Za-z]{3})[A-Za-z]*[- ,]+(\d{4})\b", value) or None
+        if m:
+            d, mo, y = int(m.group(1)), MONTH_NAMES.get(m.group(2).lower()), int(m.group(3))
+        else:
+            m = re.match(r"^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b", value)
+            if not m:
+                return None
+            mo, d, y = MONTH_NAMES.get(m.group(1).lower()), int(m.group(2)), int(m.group(3))
+    try:
+        return date(y, mo, d).isoformat() if mo else None
+    except ValueError:
+        return None

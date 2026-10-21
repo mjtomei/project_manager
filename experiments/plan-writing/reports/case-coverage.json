@@ -1,15 +1,15 @@
 {
  "totals": {
   "documents": 18963,
-  "brief_rich": 6012,
-  "brief_thin": 6806,
-  "both_case_types": 11713,
-  "whole_document_only": 1105,
-  "continuation_only": 3395,
-  "dropped": 2750,
+  "brief_rich": 4672,
+  "brief_thin": 7743,
+  "both_case_types": 11331,
+  "whole_document_only": 1084,
+  "continuation_only": 3777,
+  "dropped": 2771,
   "cases": {
    "continuation": 42765,
-   "whole_document": 12818,
+   "whole_document": 12415,
    "pm_plan": 24
   }
  },
@@ -96,21 +96,21 @@
   },
   "cockroach-rfcs": {
    "documents": 188,
-   "brief_rich": 91,
-   "brief_thin": 91,
-   "both_case_types": 181,
+   "brief_rich": 68,
+   "brief_thin": 111,
+   "both_case_types": 178,
    "whole_document_only": 1,
-   "continuation_only": 5,
+   "continuation_only": 8,
    "dropped": 1,
    "cases": {
-    "whole_document": 182,
+    "whole_document": 179,
     "continuation": 551
    },
    "context": {
-    "items": 391,
+    "items": 403,
     "by_kind": {
      "metadata": 183,
-     "process": 1,
+     "process": 13,
      "review_thread": 121,
      "tracking_issue": 86
     },
@@ -145,21 +145,21 @@
   },
   "go-proposals": {
    "documents": 128,
-   "brief_rich": 67,
+   "brief_rich": 56,
    "brief_thin": 31,
-   "both_case_types": 95,
-   "whole_document_only": 3,
-   "continuation_only": 25,
-   "dropped": 5,
+   "both_case_types": 85,
+   "whole_document_only": 2,
+   "continuation_only": 35,
+   "dropped": 6,
    "cases": {
-    "whole_document": 98,
+    "whole_document": 87,
     "continuation": 355
    },
    "context": {
-    "items": 179,
+    "items": 196,
     "by_kind": {
      "metadata": 83,
-     "process": 2,
+     "process": 19,
      "tracking_issue": 94
     },
     "fetch_errors": 0
@@ -180,8 +180,8 @@
   },
   "ietf-rfcs": {
    "documents": 9841,
-   "brief_rich": 4579,
-   "brief_thin": 5262,
+   "brief_rich": 4072,
+   "brief_thin": 5769,
    "both_case_types": 8896,
    "whole_document_only": 945,
    "continuation_only": 0,
@@ -191,9 +191,9 @@
     "continuation": 26175
    },
    "context": {
-    "items": 10784,
+    "items": 10620,
     "by_kind": {
-     "charter": 533,
+     "charter": 369,
      "index_entry": 9841,
      "milestone": 410
     },
@@ -202,21 +202,21 @@
   },
   "kubernetes-keps": {
    "documents": 699,
-   "brief_rich": 630,
-   "brief_thin": 65,
-   "both_case_types": 692,
-   "whole_document_only": 3,
-   "continuation_only": 1,
-   "dropped": 3,
+   "brief_rich": 418,
+   "brief_thin": 272,
+   "both_case_types": 688,
+   "whole_document_only": 2,
+   "continuation_only": 5,
+   "dropped": 4,
    "cases": {
-    "whole_document": 695,
+    "whole_document": 690,
     "continuation": 2064
    },
    "context": {
-    "items": 1338,
+    "items": 1383,
     "by_kind": {
      "metadata": 692,
-     "process": 2,
+     "process": 47,
      "tracking_issue": 644
     },
     "fetch_errors": 2
@@ -371,22 +371,22 @@
   },
   "python-peps": {
    "documents": 759,
-   "brief_rich": 107,
-   "brief_thin": 631,
-   "both_case_types": 728,
+   "brief_rich": 24,
+   "brief_thin": 715,
+   "both_case_types": 729,
    "whole_document_only": 10,
-   "continuation_only": 15,
+   "continuation_only": 14,
    "dropped": 6,
    "cases": {
-    "whole_document": 738,
+    "whole_document": 739,
     "continuation": 2149
    },
    "context": {
-    "items": 866,
+    "items": 1004,
     "by_kind": {
      "discussion_thread": 118,
      "metadata": 746,
-     "process": 2
+     "process": 140
     },
     "fetch_errors": 3
    }
@@ -415,22 +415,20 @@
   },
   "rust-goals": {
    "documents": 269,
-   "brief_rich": 136,
-   "brief_thin": 62,
-   "both_case_types": 193,
-   "whole_document_only": 5,
-   "continuation_only": 42,
-   "dropped": 29,
+   "brief_rich": 0,
+   "brief_thin": 0,
+   "both_case_types": 0,
+   "whole_document_only": 0,
+   "continuation_only": 235,
+   "dropped": 34,
    "cases": {
-    "continuation": 681,
-    "whole_document": 198
+    "continuation": 681
    },
    "context": {
-    "items": 364,
+    "items": 362,
     "by_kind": {
      "index_entry": 27,
      "metadata": 208,
-     "process": 2,
      "tracking_issue": 127
     },
     "fetch_errors": 0
@@ -438,21 +436,21 @@
   },
   "rust-rfcs": {
    "documents": 652,
-   "brief_rich": 368,
-   "brief_thin": 283,
-   "both_case_types": 636,
-   "whole_document_only": 15,
-   "continuation_only": 1,
-   "dropped": 0,
+   "brief_rich": 0,
+   "brief_thin": 464,
+   "both_case_types": 463,
+   "whole_document_only": 1,
+   "continuation_only": 174,
+   "dropped": 14,
    "cases": {
-    "whole_document": 651,
+    "whole_document": 464,
     "continuation": 1792
    },
    "context": {
-    "items": 1731,
+    "items": 1836,
     "by_kind": {
      "metadata": 624,
-     "process": 2,
+     "process": 107,
      "review_thread": 642,
      "tracking_issue": 463
     },
@@ -984,6 +982,12 @@
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   },
   {
+   "document_id": "918590842cb6fa91fb62453b",
+   "source": "go-proposals",
+   "identity": "design/cryptography-principles.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
    "document_id": "aede0f276b9c3ec81048dc3c",
    "source": "go-proposals",
    "identity": "design/go2draft-type-parameters.md",
@@ -999,6 +1003,12 @@
    "document_id": "7eda842acaccaccbf220c05f",
    "source": "kubernetes-keps",
    "identity": "keps/prod-readiness/README.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "3c4e436394ced44dd7b7006b",
+   "source": "kubernetes-keps",
+   "identity": "keps/sig-auth/5681-conditional-authorization/images/authorizer-chain-computation.md",
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   },
   {
@@ -16812,9 +16822,21 @@
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   },
   {
+   "document_id": "fda8ea7424635f198c72cae1",
+   "source": "rust-goals",
+   "identity": "src/2024h2/goals.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
    "document_id": "86fc632cd8bdd3560cc3f8be",
    "source": "rust-goals",
    "identity": "src/2024h2/not_accepted.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "d4348e16a07ad81ebad79477",
+   "source": "rust-goals",
+   "identity": "src/2025h1/goals.md",
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   },
   {
@@ -16824,9 +16846,21 @@
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   },
   {
+   "document_id": "9ed416d1520af837da0a33c6",
+   "source": "rust-goals",
+   "identity": "src/2025h2/goals.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
    "document_id": "c852f0c476c7ffa8d5f5b0f7",
    "source": "rust-goals",
    "identity": "src/2025h2/not_accepted.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "0b91b9efb1e0934fe6767568",
+   "source": "rust-goals",
+   "identity": "src/2025h2/reports.md",
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   },
   {
@@ -16845,6 +16879,12 @@
    "document_id": "6ac7f1a3a1f2f8c9ed531ea4",
    "source": "rust-goals",
    "identity": "src/2026/help-wanted.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "15680aabcead5f1496ff7314",
+   "source": "rust-goals",
+   "identity": "src/2026/roadmaps.md",
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   },
   {
@@ -16960,8 +17000,237 @@
    "source": "rust-goals",
    "identity": "src/rfc.md",
    "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "6448b118662d98430ea9d1b0",
+   "source": "rust-rfcs",
+   "identity": "text/0060-rename-strbuf.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "3b886d053b3790ba5b977933",
+   "source": "rust-rfcs",
+   "identity": "text/0085-pattern-macros.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "7b6d8298e70784f913420d5a",
+   "source": "rust-rfcs",
+   "identity": "text/0139-remove-cross-borrowing-entirely.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "539c3f5f716fa337a5e948bf",
+   "source": "rust-rfcs",
+   "identity": "text/0341-remove-virtual-structs.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "c324d58136387849ec277187",
+   "source": "rust-rfcs",
+   "identity": "text/0342-keywords.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "9168fe9fc663e8afe90e030f",
+   "source": "rust-rfcs",
+   "identity": "text/0469-feature-gate-box-patterns.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "811bde6ec510666f80ab3bdc",
+   "source": "rust-rfcs",
+   "identity": "text/0534-deriving2derive.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "0df18c57a0bc98df65316156",
+   "source": "rust-rfcs",
+   "identity": "text/0593-forbid-Self-definitions.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "657274fd86998f4f7a1d1e46",
+   "source": "rust-rfcs",
+   "identity": "text/2071-impl-trait-type-alias.md",
+   "reason": "no headings detected; no recoverable context"
+  },
+  {
+   "document_id": "8fcc49425e364d45d4a3931a",
+   "source": "rust-rfcs",
+   "identity": "text/3392-leadership-council/Leadership-Council-RFCja.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "96fdf1557aa971c3cf2b3d69",
+   "source": "rust-rfcs",
+   "identity": "text/3392-leadership-council/Leadership-Council-RFCzh-Hans.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "60d20a3319c325d4f6a50461",
+   "source": "rust-rfcs",
+   "identity": "text/3392-leadership-council/Leadership-Council-RFCzh-Hant.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "3f33fd9ab644d7b17a6058fb",
+   "source": "rust-rfcs",
+   "identity": "text/3392-leadership-council/motivation.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
+  },
+  {
+   "document_id": "a49be628f00c6f35181c7ddc",
+   "source": "rust-rfcs",
+   "identity": "text/3392-leadership-council/non-goals.md",
+   "reason": "no section boundary meets the prefix/reference length limits; no recoverable context"
   }
  ],
+ "context_timing": {
+  "chromium-designs": {
+   "index_entry": {
+    "admitted": 262
+   }
+  },
+  "chromiumos-designs": {
+   "index_entry": {
+    "admitted": 35
+   },
+   "index_preamble": {
+    "excluded": 35
+   }
+  },
+  "cockroach-rfcs": {
+   "metadata": {
+    "admitted": 183
+   },
+   "process": {
+    "admitted": 170
+   },
+   "review_thread": {
+    "excluded": 121
+   },
+   "tracking_issue": {
+    "admitted": 75,
+    "excluded": 14
+   }
+  },
+  "go-proposals": {
+   "metadata": {
+    "admitted": 83
+   },
+   "process": {
+    "admitted": 160
+   },
+   "tracking_issue": {
+    "admitted": 88,
+    "excluded": 11
+   }
+  },
+  "ietf-rfcs": {
+   "charter": {
+    "admitted": 4072
+   },
+   "index_entry": {
+    "admitted": 9841
+   },
+   "milestone": {
+    "excluded": 410
+   }
+  },
+  "kubernetes-keps": {
+   "metadata": {
+    "admitted": 692
+   },
+   "process": {
+    "admitted": 1210
+   },
+   "tracking_issue": {
+    "admitted": 424,
+    "excluded": 229
+   }
+  },
+  "nasa-luvoir": {
+   "index_entry": {
+    "admitted": 2
+   },
+   "study_call": {
+    "admitted": 2
+   }
+  },
+  "nasa-lynx": {
+   "index_entry": {
+    "admitted": 1
+   },
+   "study_call": {
+    "admitted": 1
+   }
+  },
+  "nasa-mission-concepts": {
+   "index_entry": {
+    "admitted": 25
+   },
+   "study_call": {
+    "admitted": 36
+   }
+  },
+  "oxide-rfds": {
+   "index_entry": {
+    "admitted": 84
+   },
+   "process": {
+    "excluded": 84
+   }
+  },
+  "python-peps": {
+   "discussion_thread": {
+    "excluded": 94,
+    "admitted": 26
+   },
+   "metadata": {
+    "admitted": 746
+   },
+   "process": {
+    "admitted": 1353
+   }
+  },
+  "quic-drafts": {
+   "charter": {
+    "admitted": 6
+   },
+   "index_entry": {
+    "admitted": 6
+   },
+   "milestone": {
+    "excluded": 6
+   }
+  },
+  "rust-goals": {
+   "index_entry": {
+    "excluded": 27
+   },
+   "metadata": {
+    "admitted": 208
+   },
+   "tracking_issue": {
+    "excluded": 190
+   }
+  },
+  "rust-rfcs": {
+   "metadata": {
+    "admitted": 624
+   },
+   "process": {
+    "admitted": 918
+   },
+   "review_thread": {
+    "excluded": 652
+   },
+   "tracking_issue": {
+    "excluded": 471
+   }
+  }
+ },
  "pm_plans": [
   {
    "plan": "plan-001.md",
@@ -17196,10 +17465,10 @@
   }
  ],
  "check": {
-  "cases_checked": 55607,
+  "cases_checked": 55204,
   "by_type": {
    "continuation": 42765,
-   "whole_document": 12818,
+   "whole_document": 12415,
    "pm_plan": 24
   },
   "failures": {},

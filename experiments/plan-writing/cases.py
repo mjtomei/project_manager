@@ -48,6 +48,7 @@ BOILERPLATE = re.compile(  # sections that are not authored content: never conti
     r"^(status of this memo|copyright( notice| statement)?|full copyright statement|intellectual property( rights)?|"
     r"authors?'? addresses|author's address|authors' information|contributors' addresses|(table of )?contents|index|"
     r"(normative |informative )?references|bibliography|licen[cs]e|footnotes|acknowledge?ments?|changelog|change log)$")
+TITLE_WINDOW = 400      # tokens from the top of the body searched for a recorded title
 NON_PROSE = re.compile(r"^\s*(\||#|Title:|Opened by |[-*]?\s*$)")
 # Issue and PR bodies are edited as work proceeds: task checkboxes and KEP release targets record outcomes.
 PROGRESS_LINE = re.compile(r"(?im)^[ \t]*(?:[-*+][ \t]*)?(?:\[[ xX]\].*|(?:alpha|beta|stable) release target\b.*|enhancement target\b.*)\n?")
@@ -97,6 +98,33 @@ def request_words(text):
     return sum(len(URL.sub("", l).split()) for l in text.splitlines() if not NON_PROSE.match(l))
 
 
+def body_ngrams(text, header_fmt, n, titles=()):
+    """N-grams of the document body that briefs must not share.
+
+    The body excludes the metadata header and title heading (docmeta.body_text)
+    and the first occurrence near the top of each title recorded in the
+    document's metadata or index entry: plain-text RFC titles are centred lines
+    that no heading rule finds. Cuts split the token stream, so no n-gram spans one.
+    """
+    toks = tokens(docmeta.body_text(text, header_fmt))
+    cuts = []
+    for title in titles:
+        tt = tokens(title)
+        for i in range(min(TITLE_WINDOW, len(toks) - len(tt) + 1)) if len(tt) >= 2 else ():
+            if toks[i:i + len(tt)] == tt:
+                cuts.append((i, i + len(tt)))
+                break
+    grams, start = set(), 0
+    for a, b in sorted(cuts):
+        grams |= ngrams(toks[start:a], n)
+        start = max(start, b)
+    return grams | ngrams(toks[start:], n)
+
+
+def record_titles(items):
+    return sorted({i["fields"][k] for i in items for k in ("Title", "title") if (i.get("fields") or {}).get(k)})
+
+
 def shared_ngrams(text, body_grams, n):
     toks = tokens(text)
     return [i for i in range(len(toks) - n + 1) if tuple(toks[i:i + n]) in body_grams]
@@ -112,17 +140,49 @@ def load_corpus():
     return [json.loads(line) for line in (DATA / "corpus.jsonl").read_text().splitlines()]
 
 
-def load_context():
-    by_doc, process = defaultdict(list), defaultdict(list)
-    for path in sorted((DATA / "context").glob("*.jsonl")):
+def load_context(data_dir=None):
+    """Context items by document, items shared by a whole source, and document dates."""
+    context_dir = Path(data_dir or DATA) / "context"
+    by_doc, shared = defaultdict(list), defaultdict(list)
+    for path in sorted(context_dir.glob("*.jsonl")):
         for line in path.read_text().splitlines():
             item = json.loads(line)
-            if item["role"] == "process":
-                process[item["source"]].append(item)
+            if item["applies_to"] == ["*"]:
+                shared[item["source"]].append(item)
             else:
                 for doc_id in item["applies_to"]:
                     by_doc[doc_id].append(item)
-    return by_doc, process
+    return by_doc, shared, load_dates(data_dir)
+
+
+def load_dates(data_dir=None):
+    dates = {}
+    for path in sorted((Path(data_dir or DATA) / "context").glob("*.dates.json")):
+        dates.update(json.loads(path.read_text()))
+    return dates
+
+
+def timing_exclusion(item, doc_date):
+    """Why an item may not inform a brief for a document dated `doc_date`, or None when it may.
+
+    Context written after the document restates the finished document or
+    reveals its outcome, so only items that predate it (or are its own
+    metadata, or identity fields of a later record) are used. `dated` items
+    count as earlier when dated on or before the document's day; items
+    without a `written` stamp are treated as later.
+    """
+    written = item.get("written", "after")
+    if written in ("before", "with_document", "identity"):
+        return None
+    if written == "dated":
+        if not doc_date:
+            return "document date unknown"
+        if not item.get("written_at"):
+            return "item date unknown"
+        if item["written_at"] > doc_date:
+            return f"written {item['written_at']}, after the document ({doc_date})"
+        return None
+    return "written after the document"
 
 
 def read_text(doc):
@@ -181,10 +241,27 @@ def self_reference(doc):
     return lambda url: any(m in url for m in marks)
 
 
-def assemble_brief(doc, text, items, process_items, source_cfg, n):
-    """Brief text, attachments and provenance, or None when no purpose-stating context survives."""
-    body = docmeta.body_text(text, header_format(source_cfg))
-    body_grams = ngrams(tokens(body), n)
+def assemble_brief(doc, text, items, source_cfg, n, doc_date=None):
+    """Brief text, attachments and provenance, or None when no purpose-stating context survives.
+
+    `items` are the document's context items, process documents included;
+    `doc_date` is the document's date (see context.document_dates). Items
+    written after the document are left out and listed in the provenance
+    with the reason.
+    """
+    excluded, usable = [], []
+    for item in items:
+        reason = "the document itself" if item.get("document_id") == doc["id"] else timing_exclusion(item, doc_date)
+        if reason:
+            excluded.append({"context_id": item["id"], "kind": item["kind"], "label": item.get("label", item["kind"]),
+                             "url": item["url"], "written": item.get("written"), "written_at": item.get("written_at"),
+                             "excluded": reason})
+        else:
+            usable.append(item)
+    process_items = [i for i in usable if i["role"] == "process"]
+    items = [i for i in usable if i["role"] != "process"]
+    titles = record_titles(items)
+    body_grams = body_ngrams(text, header_format(source_cfg), n, titles)
     is_self = self_reference(doc)
     request = source_cfg["context"]["request"]
     if any(i.get("doc_role") == "supporting document" for i in items):
@@ -199,7 +276,8 @@ def assemble_brief(doc, text, items, process_items, source_cfg, n):
         segs = segments(text_in)
         hit = [bool(x.strip()) and bool(shared_ngrams(x, body_grams, n)) for x in segs]
         total, dropped = sum(1 for x in segs if x.strip()), sum(hit)
-        truncated = total and dropped / total >= PASTE_FRACTION
+        # Field records (metadata, index entries) are short, so one matching title line is no sign of a pasted draft.
+        truncated = item["kind"] in REQUEST_KINDS and total and dropped / total >= PASTE_FRACTION
         if truncated:
             # The item quotes the document at length (a pasted draft); keep only what precedes the quote.
             first = hit.index(True)
@@ -247,15 +325,18 @@ def assemble_brief(doc, text, items, process_items, source_cfg, n):
             kept_items.append((p, block[0], content))
     qualifying = [p for p, _, c in kept_items if p["kind"] in REQUEST_KINDS or p["kind"] in ("index_entry", "index_preamble")
                   or (p["kind"] == "metadata" and any(re.search(rf"^{re.escape(f)}:", c, re.M) for f in TITLE_FIELDS))]
+    provenance += excluded
     if not qualifying:
         return None, provenance
     parts = [blocks[0][0], blocks[1][0]] + [(head + "\n" if head else "") + content for _, head, content in kept_items]
     brief = "\n\n".join(x for x in parts if x.strip())
     rich = any(p["request_words_kept"] >= RICH_WORDS for p, _, _ in kept_items)
     attachments = [{"context_id": i["id"], "label": i.get("label"), "url": i["url"], "sha256": i["sha256"],
-                    "retrieved_at": i["retrieved_at"]}
-                   for i in process_items if i.get("document_id") != doc["id"]]
-    return {"brief": brief, "attachments": attachments, "context_strength": "rich" if rich else "thin",
+                    "retrieved_at": i["retrieved_at"], "version": i.get("version")}
+                   for i in process_items]
+    provenance += [{"context_id": a["context_id"], "kind": "process", "label": a["label"], "url": a["url"], "attachment": True}
+                   for a in attachments]
+    return {"brief": brief, "attachments": attachments, "context_strength": "rich" if rich else "thin", "titles": titles,
             "items": [p for p, _, _ in kept_items]}, provenance
 
 
@@ -337,10 +418,11 @@ def build(limit_sources=None):
     prep = config["case_preparation"]
     source_cfgs = {s["id"]: s for s in config["sources"]}
     docs = load_corpus()
-    by_doc, process = load_context()
+    by_doc, shared, dates = load_context()
     groups = split_groups(docs, by_doc, source_cfgs)
     CASES.mkdir(parents=True, exist_ok=True)
     statuses, cases_out = {}, []
+    timing = defaultdict(lambda: defaultdict(Counter))  # source -> kind -> admitted/excluded (document-item pairs)
     n = prep["brief_leak_ngram"]
     for doc in docs:
         if limit_sources and doc["source"] not in limit_sources:
@@ -355,15 +437,21 @@ def build(limit_sources=None):
         status = {"source": doc["source"], "identity": doc["identity"], "words": doc["words"], "brief": None,
                   "continuation_cases": 0}
         if cfg.get("context") and doc["words"]:
-            brief, item_prov = assemble_brief(doc, text, by_doc.get(doc["id"], []), process.get(doc["source"], []), cfg, n)
+            doc_date = dates.get(doc["id"])
+            brief, item_prov = assemble_brief(doc, text, by_doc.get(doc["id"], []) + shared.get(doc["source"], []), cfg, n,
+                                              (doc_date or {}).get("date"))
             status["context_items"] = len(item_prov)
+            for p in item_prov:
+                timing[doc["source"]][p["kind"]]["excluded" if p.get("excluded") else "admitted"] += 1
             if brief:
                 cases_out.append({"case_id": "doc:" + doc["id"], "case_type": "whole_document", **common,
                                   "inputs": {"brief": brief["brief"], "attachments": brief["attachments"]},
                                   "reference": {"document_id": doc["id"], "text_path": doc["text_path"],
                                                 "sha256": doc["sha256"], "words": doc["words"]},
-                                  "provenance": {**doc_prov, "brief_items": brief["items"], "items_considered": item_prov,
+                                  "provenance": {**doc_prov, "document_date": doc_date, "brief_items": brief["items"],
+                                                 "items_considered": item_prov,
                                                  "context_strength": brief["context_strength"], "leak_ngram": n,
+                                                 "titles_excluded_from_body": brief["titles"],
                                                  "assembly": "deterministic; no model calls"}})
                 status["brief"] = brief["context_strength"]
         method, found, eligible, conts = continuation_cases(doc, text, raw, prep["continuation"]) if doc["words"] else ("none", 0, 0, [])
@@ -385,6 +473,7 @@ def build(limit_sources=None):
         for c in cases_out:
             handle.write(json.dumps(c) + "\n")
     coverage = coverage_report(docs, statuses, cases_out, pm_report, limit_sources)
+    coverage["context_timing"] = {sid: {k: dict(v) for k, v in sorted(kinds.items())} for sid, kinds in sorted(timing.items())}
     (CASES / "coverage.json").write_text(json.dumps(coverage, indent=1) + "\n")
     write_summary(coverage)
     print(json.dumps(coverage["totals"], indent=1))
@@ -426,9 +515,36 @@ def coverage_report(docs, statuses, cases_out, pm_report, limit_sources=None):
             "pm_plans": pm_report, "documents": statuses}
 
 
+def timing_section(counts):
+    """Report lines explaining which context is excluded for being written after the document."""
+    config = load_config()
+    lines = ["", "## Context written after the document", "",
+             config["case_preparation"].get("context_timing", "").replace("`", ""), "",
+             "Counts are document–item pairs: *admitted* items passed the timing rule (they may still lose text to the "
+             "leak filter); *excluded* items were left out of the brief for timing.", "",
+             "| Source | Context | Timing | Admitted | Excluded | Why |", "|---|---|---|---|---|---|"]
+    for source in config["sources"]:
+        sid = source["id"]
+        for col in source.get("context", {}).get("collectors", []):
+            written, notes = col.get("written"), col.get("written_note")
+            kinds = list(written) if isinstance(written, dict) else [col.get("kind") or COLLECTOR_KINDS.get(col["type"], col["type"])]
+            for kind in kinds:
+                w = written[kind] if isinstance(written, dict) else written
+                note = notes[kind] if isinstance(notes, dict) else notes
+                c = counts.get(sid, {}).get(kind, {})
+                lines.append(f"| {sid} | {col.get('label') or kind} ({kind}) | {w} | {c.get('admitted', 0)} | "
+                             f"{c.get('excluded', 0)} | {note or ''} |")
+    return lines
+
+
+COLLECTOR_KINDS = {"header": "metadata", "kep_yaml": "metadata", "process": "process", "index": "index_entry",
+                   "markdown_index": "index_entry", "discourse": "discussion_thread", "oxide": "index_entry",
+                   "study_call": "study_call"}
+
+
 def write_summary(coverage):
     REPORTS.mkdir(exist_ok=True)
-    summary = {k: coverage[k] for k in ("totals", "sources", "dropped")}
+    summary = {k: coverage[k] for k in ("totals", "sources", "dropped", "context_timing") if k in coverage}
     summary["pm_plans"] = [{k: p.get(k) for k in ("plan", "status", "case_id", "human_turns", "map_evidence")} for p in coverage["pm_plans"]]
     if "check" in coverage:
         summary["check"] = coverage["check"]
@@ -456,6 +572,7 @@ def write_summary(coverage):
     lines += ["", "## PM plans", "", "| Plan | Status | Case | Human turns |", "|---|---|---|---|"]
     for p in coverage["pm_plans"]:
         lines.append(f"| {p['plan']} | {p['status']} | {p.get('case_id') or ''} | {p.get('human_turns') if p.get('human_turns') is not None else ''} |")
+    lines += timing_section(coverage.get("context_timing", {}))
     reasons = Counter((d["source"], d["reason"]) for d in coverage["dropped"])
     lines += ["", "## Dropped documents", "",
               "Documents with neither recoverable context nor a usable section boundary. The full list with ids is in "
@@ -467,7 +584,9 @@ def write_summary(coverage):
     lines += ["", "## Rules and limits", "",
               f"- Briefs never share a run of {prep['brief_leak_ngram']} words with the document body (body excludes the "
               "metadata header and title line). A context item that quotes the body for 30% or more of its segments is "
-              "cut where the quote starts. Process documents and templates are attachments, not brief text.",
+              "cut where the quote starts. Process documents and templates are attachments, not brief text, in the "
+              "version committed on or before the document's date.",
+              "- Context written after the document is excluded from briefs; see the section above.",
               "- Issue and pull request bodies are their current text, which authors may have edited after opening; "
               "task-checkbox and release-target lines, which record progress, are removed from briefs.",
               f"- Continuation cases: up to {cont['max_cases_per_document']} per document, spread over eligible headings; "
@@ -506,6 +625,7 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
     source_cfgs = {s["id"]: s for s in load_config()["sources"]}
     failures = defaultdict(list)
     items = _context_items(data_dir)
+    dates = load_dates(data_dir)
     heading_cache = {}
     for case in cases:
         cid = case["case_id"]
@@ -517,11 +637,20 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
             doc = docs[case["document_id"]]
             text = (data_dir / doc["text_path"]).read_text(encoding="utf-8", errors="replace")
             n = case["provenance"]["leak_ngram"]
-            body = ngrams(tokens(docmeta.body_text(text, header_format(source_cfgs.get(doc["source"], {})))), n)
+            body = body_ngrams(text, header_format(source_cfgs.get(doc["source"], {})), n,
+                               case["provenance"].get("titles_excluded_from_body", []))
             if shared_ngrams(case["inputs"]["brief"], body, n):
                 failures["brief_quotes_document_body"].append(cid)
             if not case["provenance"].get("brief_items"):
                 failures["brief_without_item_provenance"].append(cid)
+            doc_date = (dates.get(doc["id"]) or {}).get("date")
+            used = [p["context_id"] for p in case["provenance"]["brief_items"]] + [a["context_id"] for a in case["inputs"]["attachments"]]
+            if any(timing_exclusion(items[i], doc_date) for i in used if i in items):
+                failures["brief_uses_context_written_after_document"].append(cid)
+            for a in case["inputs"]["attachments"]:
+                committed = (a.get("version") or {}).get("committed")
+                if committed and (not doc_date or committed > doc_date):
+                    failures["attachment_version_after_document"].append(cid)
             gen = generator_input(case, data_dir, items)
             # Attachments are templates the document was written from, so documents legitimately repeat their
             # text; the document reaches the generator only through the brief or by being attached to itself.

@@ -56,7 +56,8 @@ source) and fetch notes. Per source:
   = `docs/RFCS/README.md`.
 - ietf-rfcs and quic-drafts: rfc-index.xml entry (title, authors, date, draft
   name, stream, area, WG, publication category, obsoletes/updates; never the
-  abstract), WG charter revision in effect at publication (datatracker charter
+  abstract), WG charter revision in effect when the source draft was first
+  submitted (datatracker charter
   history + `www.ietf.org/charter/charter-ietf-<wg>-<rev>.txt`), WG milestones
   whose docs include the RFC's draft (current + history).
 - oxide-rfds: RFD API index entry (title, authors, labels); process = RFD 1.
@@ -141,10 +142,42 @@ exactly once.
 - *Is a title "document body"?* Titles from metadata/index records are context
   (they identify the request); the title heading line is excluded from the body
   for the leak check. All other brief text must pass the 8-gram filter.
-- *Templates vs leak check.* Templates predate documents and are identical for
-  every document of a source, so they are attachments with their own provenance
-  and are not part of the brief text checked for leakage. A process document is
-  never attached to itself.
+- *Templates vs leak check.* Templates are attachments with their own
+  provenance and are not part of the brief text checked for leakage. A process
+  document is never attached to itself. Each document gets the template version
+  committed on or before its date (see the timing decision below), not the
+  current file.
+- *Context written after the document* (user decision, 2026-10-21, review loop
+  5956). Anything written after the target document is dropped from briefs, and
+  the coverage report explains each excluded type. Each collector in
+  `sources.json` carries `written` (`before`, `with_document`, `identity`,
+  `dated`, `after`) and `written_note`. `context.py` stamps items and writes
+  `data/context/<source>.dates.json` (each document's date and basis:
+  PEP Created, Rust/Cockroach Start Date, KEP creation-date, the opening of
+  the Go proposal issue a design file is named after, and the IETF source
+  draft's -00 submission). `cases.timing_exclusion` admits `dated` items on or
+  before the document's day; unstamped items count as later. Results:
+  - dropped as written after: Rust RFC and Cockroach PR opening posts (they
+    submit the finished text), rust-lang/rust tracking issues (opened after
+    acceptance), Rust goal tracking issues and slate entries (written on
+    acceptance, copying the goal summary), IETF milestones naming the draft,
+    the Chromium index introduction, and Oxide RFD 1 (current text, no RFD
+    dates);
+  - dated: Go proposal issues, PEP Discussions-To threads, KEP enhancement
+    issues and Cockroach linked issues, kept only when opened on or before
+    the document's date;
+  - identity only (user choice): index records written after the document
+    keep only fields that identify it: IETF title, authors, stream, area,
+    working group and source draft (RFC number, date, category,
+    obsoletes/updates withheld); Oxide RFD number, title and authors (labels
+    withheld); Chromium and NASA index section and title (descriptions
+    withheld);
+  - charters: the revision approved on or before the source draft's -00
+    submission; RFCs whose first draft predates datatracker events (about
+    2001) get none. A WG draft that replaced an earlier individual draft is
+    dated by the WG draft's -00 (limitation).
+  - Issue and PR bodies are their current text; checkbox and release-target
+    lines, which record progress, are removed.
 - *How many continuation cases per document?* All boundaries are recorded in
   coverage; up to 3 cases per document are emitted (early/middle/late among
   eligible boundaries, deterministic), eligible when prefix ≥ 100 words and
@@ -178,5 +211,5 @@ exactly once.
 - Duplicate documents (same sha256) share split group; each still gets cases.
 - Issue pages that 404/redirect (transferred issues) are recorded as fetch
   failures and the brief falls back to remaining items.
-- Charter revisions approved after publication are not used (no post-hoc
-  charter); RFCs then keep index/milestone context only.
+- Charter revisions approved after the source draft's first submission are
+  not used; RFCs then keep identity index fields only.
