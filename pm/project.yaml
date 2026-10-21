@@ -29931,8 +29931,8 @@ prs:
 
     - Use one history query/presentation model for the CLI and pane. Keep it available
     after merge or pane removal, and expose it through the shared action catalog used
-    by the planned mobile pane. Reuse action-source context from pr-291e891 where
-    available; do not introduce a competing attribution model.
+    by the planned Even Realities interface. Reuse action-source context from pr-291e891
+    where available; do not introduce a competing attribution model.
 
 
     Verify a real review/retry/QA sequence, overlapping scenarios, approval holds,
@@ -29943,70 +29943,180 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T19:14:50.410487+00:00'
+  updated_at: '2026-10-21T21:40:00.306182+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-72c8695
+- id: pr-9e7847d
   plan: tui-ux
-  title: Mobile PR actions pane with shared dispatch and app session links
-  branch: pm/pr-72c8695-mobile-pr-actions-pane-with-shared-dispatch-and-ap
+  title: 'Even Realities PM interface: constraints, interaction design and demo screenshots'
+  branch: pm/pr-9e7847d-even-realities-pm-interface-constraints-interactio
   status: pending
-  depends_on:
-  - pr-3ae2fc3
-  description: 'Add a phone-friendly web version of the PR actions pane to the existing
-    PM dashboard/report service. A user should be able to select a PR, see its action
-    state, start or resume an action, and open that action''s session in ChatGPT or
-    Claude on their phone. Existing remote-control connections are already working;
-    build on them.
+  depends_on: []
+  description: 'Define the PM interface for Even Realities glasses before deciding
+    how to refactor either codebase. This is the first of four PRs replacing the pending
+    mobile web pane (pr-72c8695).
 
 
-    - Extract the action definitions, availability/status, variants, and launch-or-attach
-    dispatch from `pm_core/cli/session.py` and the current TUI handlers into a shared
-    layer. Terminal and web render that layer, so adding or changing an action happens
-    in one place. Include current fresh/loop options and #236''s spec-review visibility
-    and approval controls. Non-session actions such as editing metadata, reading history,
-    or approving a spec use their appropriate UI rather than a fabricated session
-    link.
-
-    - Reuse a live action session or launch through the existing PM flow, then resolve
-    its actual provider-issued link. Preserve project, host, PR, action and pane identity,
-    including QA scenario sessions. Repeated taps, slow launches and reconnects must
-    not create duplicate workers or dispatch against a newly selected PR. Keep existing
-    spec-approval and merge gates authoritative.
-
-    - Enable Claude Remote Control centrally on new session startup, or enable it
-    on demand in an existing session at a safe prompt without interrupting work. Capture/reuse
-    the actual remote URL; a local Claude session UUID is not necessarily a remote
-    session identifier. Use existing ChatGPT/Codex host pairing and supported session
-    links. Keep provider link resolution separate from PM action behavior so other
-    backends can supply it later; this does not require the full planned backend migration.
-
-    - Keep report/evidence links and the current localhost/Tailscale deployment. Use
-    validated action requests through existing dispatch, with normal request-origin
-    protection, rather than GET mutations or a shell-command endpoint. Show startup/link
-    availability and actionable failures, with browser/status fallback when an app
-    cannot open. Refresh state after returning from the mobile app.
+    Review the actual glasses model, firmware/SDK and the existing Pageborne app.
+    The user''s ~/even/reading is currently ~/even/reader on this host. Establish
+    the constraints that affect the design: display and text layout, supported input/navigation,
+    updates and feedback, connection lifecycle, and what belongs on glasses versus
+    a companion surface. Cite the relevant SDK documentation and distinguish verified
+    behavior from assumptions.
 
 
-    Verify action parity against the terminal pane, narrow-screen use, existing-session
-    reuse and new-session launch, spec holds/manual merge holds, duplicate requests,
-    reconnects and stale links. Exercise a real phone handoff for each configured
-    provider and record the supported app/platform behavior; mocks alone do not establish
-    that an app link works.
+    Deliver a concise interaction proposal with runnable mockups and demo screenshots
+    at the glasses viewport. Show PR selection, action/status navigation, history/timers,
+    spec-review and manual-merge waits, session access, and representative busy/error/reconnect
+    states. Explain how the controls reach these views and actions; the mockups should
+    make the intended experience reviewable before production implementation.
 
 
-    Coordinate with pr-8020495 for the shared History action, pr-3a8111d for Claude
-    session names, and pr-291e891/pr-c41f029 for action-source context. Keep pr-4702a11''s
-    document/voice editor a separate surface. Starting points: `pm_core/cli/session.py`,
-    TUI action dispatch, `runtime_state.py`, `pane_registry.py`, `claude_launcher.py`,
-    and `dashboard_server.py`.'
+    Do not prescribe shared components, package boundaries, APIs or specific extractions.
+    Record open implementation questions for the two subsequent refactoring PRs, whose
+    scope will be determined from the reviewed mockups. Those PRs depend on this one
+    but not on each other; the final PR implements the interface after both.
+
+
+    Acceptance: the proposed controls and screens fit the documented constraints;
+    screenshots come from the runnable mockup or simulator and clearly identify simulated
+    behavior. Keep the design and screenshots easy to inspect from PM''s normal report.
+    Manual merge of this PR is the design checkpoint before refactoring starts. No
+    production Pageborne or PM refactor is part of this PR.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-10-21T19:14:51.114484+00:00'
-  updated_at: '2026-10-21T19:14:51.114484+00:00'
+  created_at: '2026-10-21T21:39:27.758092+00:00'
+  updated_at: '2026-10-21T21:39:27.758092+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9374887
+  plan: tui-ux
+  title: 'Even Realities PM interface: Pageborne sharing refactor after mockup review'
+  branch: pm/pr-9374887-even-realities-pm-interface-pageborne-sharing-refa
+  status: pending
+  depends_on:
+  - pr-9e7847d
+  description: 'After the interface/mockup PR is reviewed and merged, inspect Pageborne
+    (currently ~/even/reader) and determine what functionality the approved PM glasses
+    experience should share with it. The required refactoring is intentionally undecided
+    until those mockups exist.
+
+
+    Implement only the sharing/refactoring justified by that interface, preserving
+    Pageborne''s current behavior. Determine the appropriate ownership and reuse mechanism
+    from the design and actual code; do not assume a new package, service or generic
+    UI framework is needed. If existing reuse points suffice, demonstrate that and
+    document the no-refactor outcome rather than manufacturing architectural work.
+    Keep changes in the appropriate repository/worktree and record any cross-repository
+    revisions needed by the final implementation.
+
+
+    This PR depends only on the interface/mockup PR within this sequence. It is independent
+    of the PM actions-picker refactoring PR; neither should require the other to finish.
+    Coordinate against the same reviewed behavior and leave the actual PM glasses
+    feature to the final implementation PR.
+
+
+    Acceptance: explain the concrete reuse supported by the mockups, verify that the
+    relevant Pageborne behavior still works on its existing surfaces, and provide
+    a clear, tested handoff for the implementation PR. Choose the specific refactoring
+    and checks after reviewing the mockups, not from this placeholder description.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T21:39:28.531325+00:00'
+  updated_at: '2026-10-21T21:39:28.531325+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e5873d7
+  plan: tui-ux
+  title: 'Even Realities PM interface: actions-picker sharing refactor after mockup
+    review'
+  branch: pm/pr-e5873d7-even-realities-pm-interface-actions-picker-sharing
+  status: pending
+  depends_on:
+  - pr-9e7847d
+  description: 'After the interface/mockup PR is reviewed and merged, inspect PM''s
+    existing actions picker and determine what functionality the approved glasses
+    experience should share with it. The required refactoring is intentionally undecided
+    until those mockups exist.
+
+
+    Implement only the refactoring justified by the approved interface, preserving
+    the terminal picker and current workflow behavior. Determine shared ownership
+    and reuse points from the actual code, including the history/timers work in pr-8020495,
+    spec-review controls in pr-3ae2fc3 and the sign-off/merge boundary in pr-ac10f03
+    as available. Do not preselect a catalog, dispatcher, transport or package architecture.
+    If existing reuse points suffice, demonstrate that and document the no-refactor
+    outcome.
+
+
+    This PR depends only on the interface/mockup PR within this sequence. It is independent
+    of the Pageborne sharing refactor; neither should require the other to finish.
+    Base the handoff on the reviewed behavior and leave the actual glasses feature
+    to the final implementation PR.
+
+
+    Acceptance: show how the resulting reuse supports the approved interface without
+    duplicating PM workflow decisions. Verify the existing picker behavior, action
+    targeting and applicable approval/merge gates. Choose the concrete refactoring
+    and tests after reviewing the mockups.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T21:39:29.331751+00:00'
+  updated_at: '2026-10-21T21:39:29.331751+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1e0772a
+  plan: tui-ux
+  title: Implement the reviewed Even Realities PM glasses interface
+  branch: pm/pr-1e0772a-implement-the-reviewed-even-realities-pm-glasses-i
+  status: pending
+  depends_on:
+  - pr-9374887
+  - pr-e5873d7
+  description: 'Implement the approved Even Realities PM interface using the results
+    of the two independent refactoring PRs. This final PR replaces the delivery goal
+    of the old mobile web actions pane; its product and architecture choices come
+    from the reviewed glasses mockups and subsequent refactoring work.
+
+
+    Make the approved PR navigation, action/status views, history/timers, waits/approvals
+    and session interaction work against the live PM flow. Use the Pageborne and PM
+    reuse points established by the prerequisites; do not create a second copy of
+    workflow policy. Preserve project/PR/action/session identity, existing-session
+    reuse, and approval/manual-merge gates. Handle repeated inputs, reconnects and
+    stale state without duplicate workers or actions on the wrong PR.
+
+
+    Deliver the actual glasses experience and any companion behavior specified by
+    the reviewed design. Keep existing Pageborne and terminal-picker workflows working.
+    Record the exact revisions and setup needed across repositories so the result
+    is reproducible.
+
+
+    Acceptance: demonstrate the approved journeys with current PM state, including
+    ordinary actions, relevant review/merge waits, history and recovery from a connection
+    interruption. Retain screenshots or recordings and meaningful regression evidence
+    for shared behavior. Use the simulator for reproducible checks and record actual-device
+    results or an explicit remaining hardware-validation gap; do not present mockups
+    as proof of a working glasses integration. This PR depends on both refactoring
+    PRs.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T21:39:30.108250+00:00'
+  updated_at: '2026-10-21T21:39:30.108250+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
