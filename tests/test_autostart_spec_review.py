@@ -222,6 +222,22 @@ class TestSpecGen:
         assert pr["spec_pending"]["review"] is True
         assert spec_gen.get_spec(pr, "impl") == "v2"
 
+    def test_regenerated_spec_needs_approval_again(self, tmp_path):
+        """``pm pr spec --regenerate`` writes new content: the earlier
+        approval no longer covers it (only that phase's record drops)."""
+        wd = tmp_path / "wd"
+        root = _disk(tmp_path, [_pr("a", status="in_progress", workdir=str(wd),
+                                    spec_approved={"impl": "t0", "qa": "t1"})])
+        _write_spec(wd, "a", "impl", "v1")
+        assert not spec_gen.needs_spec_approval(
+            store.get_pr(store.load(root), "a"), "impl")
+        with patch("pm_core.spec_gen.launch_claude_print", return_value="v2"):
+            spec_gen.generate_spec(store.load(root), "a", "impl", root=root,
+                                   force=True)
+        pr = store.get_pr(store.load(root), "a")
+        assert pr["spec_approved"] == {"qa": "t1"}
+        assert spec_gen.needs_spec_approval(pr, "impl")
+
     def test_review_gate_preamble_requires_pm_approval(self, tmp_path):
         pr = {"id": "pr-x", "title": "t"}
         plain = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)

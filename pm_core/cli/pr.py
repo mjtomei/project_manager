@@ -662,6 +662,8 @@ def pr_spec_approve(pr_id: str):
     if not spec_text:
         click.echo(f"Spec content is empty — nothing to review.", err=True)
         spec_gen.approve_spec(data, pr_id, root=root)
+        # A gate-held agent still waits for the approval message.
+        spec_gen.notify_spec_approved(pr_entry, phase)
         return
 
     header_lines = [

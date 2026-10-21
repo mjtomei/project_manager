@@ -365,6 +365,9 @@ def generate_spec(data: dict, pr_id: str, phase: str,
                 fresh_pr["spec_pending"] = pending_value
             else:
                 fresh_pr.pop("spec_pending", None)
+            # New content: an approval of the previous spec no longer
+            # applies (the auto-start review gate asks again).
+            _clear_approval(fresh_pr, phase)
 
         store.locked_update(root, apply)
         _log.info("spec_gen: saved %s spec for %s (%d chars, needs_review=%s)",
@@ -375,6 +378,7 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         pr["spec_pending"] = pending_value
     else:
         pr.pop("spec_pending", None)
+    _clear_approval(pr, phase)
 
     return spec_text, needs_review
 
@@ -385,6 +389,14 @@ def _record_approval(pr: dict, phase: str, approved_at: str) -> None:
         rec = {}
     rec[phase] = approved_at
     pr["spec_approved"] = rec
+
+
+def _clear_approval(pr: dict, phase: str) -> None:
+    rec = pr.get("spec_approved")
+    if isinstance(rec, dict) and phase in rec:
+        del rec[phase]
+        if not rec:
+            del pr["spec_approved"]
 
 
 def is_spec_approved(pr: dict, phase: str) -> bool:

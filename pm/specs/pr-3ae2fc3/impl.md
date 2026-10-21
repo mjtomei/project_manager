@@ -44,6 +44,8 @@
     spec already exists, so it never overwrites one.
 - `approve_spec` now also records `spec_approved[phase] = <iso>`. This is needed so that later QA runs and
   sign-off bounces do not ask again.
+  `generate_spec` drops that phase's record when it writes new content (e.g.
+  `pm pr spec --regenerate`), so a regenerated spec is reviewed again under the gate.
 - `set_spec` writes to the workdir copy when that file exists. Otherwise an approve-with-edits or a
   reject regeneration lands in `<root>/specs` while `get_spec` keeps reading the stale workdir copy.
 - Gate-aware review-mode preamble (`review_gate=True`): it keeps the existing review text and adds
@@ -102,7 +104,7 @@
   - `review_specs: bool` (required for this PR) and `review_specs_by: [targets]`.
   `format_text` adds `[review-specs]` / `[review-specs ← T]` labels and a `spec=<path>` suffix.
   The runs popup shows the same labels and the reason.
-- Tree (`tech_tree.py`): when `spec_pending`, the marker is `S·i` (impl) or `S·q` (QA). It replaces any loop
+- Tree (`tech_tree.py`): when `spec_pending`, the marker is `S impl` or `S qa`. It replaces any loop
   marker, so a running QA planner's spinner can't hide it. The `_signature` includes the pending phase.
 - PR Actions picker (`cli/session.py:_build_picker_lines`), added at the user's request: a
   `[spec review]` badge goes on the `start` row for a pending impl spec and on the `qa` row for a pending QA spec.

@@ -16,6 +16,7 @@ from pm_core import store, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
+from pm_core.autostart_state import pending_spec_phase
 from pm_core.claude_launcher import find_editor
 
 from pm_core.cli import cli
@@ -1019,11 +1020,6 @@ def _current_window_phase(window_name: str) -> str | None:
 _SPEC_REVIEW_ACTION: dict[str, str] = {"impl": "start", "qa": "qa"}
 
 
-def _pending_spec_phase(pr: dict) -> str | None:
-    pending = pr.get("spec_pending")
-    return pending.get("phase") if isinstance(pending, dict) else None
-
-
 def _format_action_status(pr_id: str, action: str) -> str:
     """Return a short status badge for an action, or '' when nothing useful.
 
@@ -1204,7 +1200,7 @@ def _build_picker_lines(
         status_tag += fold_status.get(label, "")
         # The step waiting on a spec approval (V / pm pr spec-approve):
         # the implementation spec gates start, the QA spec gates qa.
-        if _SPEC_REVIEW_ACTION.get(_pending_spec_phase(pr)) == label:
+        if _SPEC_REVIEW_ACTION.get(pending_spec_phase(pr)) == label:
             status_tag += " [spec review]"
 
         lines.append((f"  {indicator} {label:<18s}"

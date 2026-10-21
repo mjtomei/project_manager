@@ -20,6 +20,7 @@ from rich.text import Text
 from rich.cells import cell_len
 from rich.console import RenderableType
 
+from pm_core.autostart_state import pending_spec_phase
 from pm_core.tui import item_message, perf
 from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
 
@@ -615,8 +616,7 @@ class PRNode(Widget):
             # otherwise hide that QA is waiting on it.  "S impl" / "S qa"
             # names the step that waits.
             status_text = f"{icon} {status}"
-            phase = (pr["spec_pending"].get("phase")
-                     if isinstance(pr["spec_pending"], dict) else None)
+            phase = pending_spec_phase(pr)
             spec_marker = f"S {phase}" if phase in ("impl", "qa") else "S"
             marker_offset = 2 + len(status_text) + 1
             loop_style = "bold yellow"
@@ -882,8 +882,7 @@ class TechTree(Widget):
                 pr.get("plan"),
                 pr.get("gh_pr_number"),
                 bool(pr.get("spec_pending")),
-                (pr.get("spec_pending") or {}).get("phase")
-                if isinstance(pr.get("spec_pending"), dict) else None,
+                pending_spec_phase(pr),
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
                 (pr.get("signoff") or {}).get("verdict"),
