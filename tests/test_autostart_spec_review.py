@@ -502,6 +502,18 @@ class TestTargets:
         run = {r["pr_id"]: r for r in status["runs"]}["a"]
         assert run["reason"].startswith("impl spec awaiting approval")
 
+    def test_target_change_refreshes_running_qa_loops_only(self, tmp_path):
+        app = _app([_pr("a", status="qa"), _pr("b", status="qa")],
+                   tmp_path, {})
+        running = qa_loop.QALoopState(pr_id="a", running=True)
+        finished = qa_loop.QALoopState(pr_id="b", latest_verdict="PASS")
+        app._qa_loops = {"a": running, "b": finished}
+        auto_start.add_targets(app, ["a", "b"], review_specs=True)
+        assert running.spec_review
+        assert not finished.spec_review
+        auto_start.add_targets(app, ["a"], review_specs=False)
+        assert not running.spec_review
+
     def test_gated_launch_held_after_option_removed(self, tmp_path):
         """An agent launched with the wait-for-approval prompt waits even
         if its target goes away before it writes the spec."""

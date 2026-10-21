@@ -859,10 +859,14 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
 
 
 def refresh_qa_spec_review(app) -> None:
-    """Push the current spec-review requirement into the QA loops (read
-    by the QA thread's scenario-launch gate).  Called on target changes
-    and every QA poll tick (restart, spec-mode changes)."""
-    loops = list((getattr(app, "_qa_loops", None) or {}).items())
+    """Push the current spec-review requirement into the running QA loops
+    (read by the QA thread's scenario-launch gate).  Called on target
+    changes and every QA poll tick (restart, spec-mode changes).  Finished
+    loops linger for their verdicts; skipping them keeps an idle tick from
+    recomputing the closures."""
+    loops = [(pr_id, state) for pr_id, state
+             in list((getattr(app, "_qa_loops", None) or {}).items())
+             if getattr(state, "running", False)]
     if not loops:
         return
     required = spec_review_checker(app)
