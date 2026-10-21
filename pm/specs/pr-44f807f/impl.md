@@ -84,7 +84,7 @@
   toward the original author to be measured, not rewarded).
 - PM plan cases need the genre dimension to cover required plan fields and
   dependency semantics (plan-doc-eval "Preserve user intent, required plan
-  fields and dependency semantics"); `pm_core/plan_parser.py` is the existing
+  fields and dependency semantics"); `pm_core/plans/parser.py` is the existing
   automatic check for PM plan PR blocks.
 
 ## Ambiguities (resolved)

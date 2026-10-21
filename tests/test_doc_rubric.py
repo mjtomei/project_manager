@@ -97,7 +97,8 @@ def test_concerns_map_onto_dimensions():
         primary = next(d for d in DIMS if d["id"] == c["primary_dimension"])
         assert c["id"] in primary["maps_concerns"]
     for d in DIMS:
-        assert set(d["maps_concerns"]) <= set(concerns)
+        mapped = {c["id"] for c in concerns.values() if d["id"] in [c["primary_dimension"]] + c["also_affects"]}
+        assert set(d["maps_concerns"]) == mapped, d["id"]
 
 
 def test_rubric_doc_has_every_dimension_and_is_current():
@@ -108,6 +109,10 @@ def test_rubric_doc_has_every_dimension_and_is_current():
     assert generated == rubric.reference_markdown(), "run: python3 experiments/plan-writing/rubric.py --write-doc"
     for c in RUBRIC["previously_identified_concerns"]:
         assert c.replace("_", " ").lower() in text.lower()
+    # The hand-written concern table must agree with the JSON mapping.
+    for c in RUBRIC["concerns"]:
+        row = "| " + c["name"] + " | " + c["primary_dimension"] + " | " + ", ".join(c["also_affects"]) + " |"
+        assert row in text, row
 
 
 # ---- fixtures ---------------------------------------------------------------
@@ -272,3 +277,13 @@ def test_validate_judgment():
     dup = _judgment(ids)
     dup["dimensions"].append(dict(dup["dimensions"][0]))
     assert any("duplicate" in p for p in rubric.validate_judgment(dup, ids))
+    odd = _judgment(ids)
+    odd["dimensions"][0]["dimension"] = ["not", "hashable"]
+    odd["dimensions"][1]["evidence"] = "q"
+    problems = rubric.validate_judgment(odd, ids)
+    assert any("malformed" in p for p in problems) and any("evidence" in p for p in problems)
+
+
+def test_render_fixture_rejects_bad_slot():
+    with pytest.raises(ValueError):
+        rubric.render_fixture(FIXTURES[0], strong_as="a")

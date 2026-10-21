@@ -113,6 +113,8 @@ def render_judge(case_type, *, document_a, document_b, brief=None, prefix=None,
 
 def render_fixture(fixture, strong_as="A", rubric=None):
     """Render a fixture pair with its strong variant in slot strong_as ("A" or "B")."""
+    if strong_as not in ("A", "B"):
+        raise ValueError("strong_as must be A or B")
     a, b = ((fixture["strong"], fixture["weak"]) if strong_as == "A" else (fixture["weak"], fixture["strong"]))
     return render_judge(fixture["case_type"], document_a=a, document_b=b, brief=fixture.get("brief"),
                         prefix=fixture.get("prefix"), section_request=fixture.get("section_request"),
@@ -170,7 +172,8 @@ def validate_judgment(judgment, dimension_ids):
     rows = judgment.get("dimensions")
     if not isinstance(rows, list):
         return ["missing dimensions list"]
-    seen = [r.get("dimension") for r in rows if isinstance(r, dict)]
+    # Non-string ids (a judge may emit lists or numbers) are dropped here and reported as malformed below.
+    seen = [r.get("dimension") for r in rows if isinstance(r, dict) and isinstance(r.get("dimension"), str)]
     for missing in [i for i in dimension_ids if i not in seen]:
         problems.append("missing dimension " + missing)
     for extra in sorted(set(seen) - set(dimension_ids)):
@@ -185,6 +188,8 @@ def validate_judgment(judgment, dimension_ids):
                 problems.append(str(r.get("dimension")) + ": " + key + " not an integer 1-5")
         if r.get("preference") not in PREFERENCES:
             problems.append(str(r.get("dimension")) + ": preference not A, B or tie")
+        if not isinstance(r.get("evidence"), list):
+            problems.append(str(r.get("dimension")) + ": evidence not a list")
     if judgment.get("overall_preference") not in PREFERENCES:
         problems.append("overall_preference not A, B or tie")
     return problems

@@ -91,11 +91,11 @@ The dimensions come from published guidance and are not yet validated against pr
 |---|---|---|---|---|
 | purpose_and_audience | whole_document, continuation | calibration_required | — | padding |
 | fidelity | whole_document, continuation | calibration_required | — | fidelity, lost_requirements |
-| requirement_coverage | whole_document, continuation | automatic_candidate | brief_item_lexical_recall, pm_plan_field_preservation | lost_requirements |
+| requirement_coverage | whole_document, continuation | automatic_candidate | brief_item_lexical_recall, pm_plan_field_preservation | lost_requirements, fidelity |
 | scope_and_abstraction | whole_document, continuation | automatic_candidate | implementation_token_density | premature_implementation_detail |
 | rationale_and_alternatives | whole_document, continuation | calibration_required | — | premature_implementation_detail |
-| organization_and_progression | whole_document, continuation | automatic_candidate | define_before_use, adjacent_section_overlap | poor_progression |
-| concision | whole_document, continuation | automatic_candidate | redundancy_rate, filler_lexicon_rate, length_ratio | padding |
+| organization_and_progression | whole_document, continuation | automatic_candidate | define_before_use, adjacent_section_overlap | poor_progression, padding |
+| concision | whole_document, continuation | automatic_candidate | redundancy_rate, filler_lexicon_rate, length_ratio | padding, premature_implementation_detail |
 | clarity_and_precision | whole_document, continuation | automatic_candidate | vague_term_rate, undefined_acronyms | — |
 | internal_consistency | whole_document, continuation | automatic_candidate | term_variant_detection, pm_dependency_agreement | fidelity |
 | risks_and_open_questions | whole_document, continuation | calibration_required | — | — |

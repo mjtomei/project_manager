@@ -106,7 +106,7 @@
         {"name": "brief_question_answering", "kind": "model_assisted", "status": "needs_calibration", "description": "QAGS-style: generate questions from the brief, answer them from the draft only, compare with answers from the brief.", "references": ["qags"]}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": ["lost_requirements"]
+      "maps_concerns": ["lost_requirements", "fidelity"]
     },
     {
       "id": "scope_and_abstraction",
@@ -201,7 +201,7 @@
         {"name": "adjacent_section_overlap", "kind": "deterministic", "status": "automatic_candidate", "description": "Coh-Metrix-style content-word overlap between adjacent sections versus non-adjacent ones; low adjacency relative to the reference flags jumps.", "references": ["coh-metrix"]}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": ["poor_progression"]
+      "maps_concerns": ["poor_progression", "padding"]
     },
     {
       "id": "concision",
@@ -235,7 +235,7 @@
         {"name": "length_ratio", "kind": "deterministic", "status": "automatic_candidate", "role": "bias_covariate", "description": "Draft length over reference length; recorded to measure judge length sensitivity, never scored as quality.", "references": ["lc-alpacaeval"]}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": ["padding"]
+      "maps_concerns": ["padding", "premature_implementation_detail"]
     },
     {
       "id": "clarity_and_precision",
