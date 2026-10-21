@@ -574,7 +574,9 @@ def _signoff_gate(app, pr_id: str) -> tuple[str | None, str | None, dict]:
         data = app._data
     pr = store.get_pr(data or {}, pr_id) or {}
     sha = signoff_mod.head_sha(pr.get("workdir"))
-    return sha, signoff_mod.merge_gate_refusal(pr, sha), pr
+    base_branch = ((data or {}).get("project") or {}).get("base_branch",
+                                                         "master")
+    return sha, signoff_mod.merge_gate_refusal(pr, sha, base_branch), pr
 
 
 def _maybe_auto_merge(app, pr_id: str) -> None:

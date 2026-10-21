@@ -106,6 +106,22 @@ def test_merge_verdict_binds_the_integration_check(w):
     assert signoff.merge_gate_refusal(pr(w), w.head, "master") is None
 
 
+def test_tui_gate_checks_the_configured_base_branch(w):
+    """The TUI auto-merge gate refuses what `pm pr merge` refuses: an
+    approval for another base branch than the project merges into."""
+    from pm_core.tui.review_loop_ui import _signoff_gate
+    integration.check_integration(w.pm_dir, PR)
+    step(w, SIGNOFF_MERGE)
+    app = SimpleNamespace(_root=w.pm_dir, _data=None)
+    assert _signoff_gate(app, PR)[1] is None
+
+    def _retarget(d):
+        d["project"]["base_branch"] = "develop"
+    store.locked_update(w.pm_dir, _retarget)
+    refusal = _signoff_gate(app, PR)[1]
+    assert refusal and "'develop'" in refusal
+
+
 def test_conflicted_integration_routes_merge_to_impl(w):
     commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
     commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")

@@ -45,14 +45,16 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
   - `target_for(data, pr, root)` → `(target_repo, base_branch)`. `local`
     backend: the main repo dir (`cli.helpers._resolve_repo_dir` /
     `project.repo`); `vanilla`/`github`: the workdir's `origin` URL.
-  - `fetch_base(workdir, target_repo, base_branch, backend)` → fetched base
-    sha. Local: `git fetch <main repo> <base>` (FETCH_HEAD). Remote:
-    `git fetch origin <base>` → `origin/<base>`. The fetched revision is pinned
-    under `refs/pm/integration/base` in the workdir so the candidate objects
-    stay reachable.
+  - `fetch_base(workdir, target_repo, base_branch)` → `(base_sha, error)`:
+    `git fetch --no-tags <target_repo> +refs/heads/<base>:refs/pm/integration/base`
+    for every backend (local: the main repo dir; remote: the origin fetch
+    URL). The fetched revision is pinned under `refs/pm/integration/base` in
+    the workdir so the candidate objects stay reachable and no shared ref
+    (FETCH_HEAD, `origin/<base>`) is relied on.
   - `compute_candidate(workdir, head, base_sha)` → `(status, tree,
     conflicts)`: `up_to_date` when `base_sha` is an ancestor of `head`
-    (candidate tree = `head^{tree}`); otherwise merges in a **temporary
+    (candidate tree = `head^{tree}`); `in_base` when `head` is already
+    contained in `base_sha` (merged; not mergeable); otherwise merges in a **temporary
     detached worktree** (`git worktree add --detach`; git 2.34 in this
     environment has no `merge-tree --write-tree`; when git ≥ 2.38 the
     in-memory `merge-tree --write-tree` is used instead), `git merge
@@ -237,8 +239,12 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
 
 ## 2. Implicit requirements
 - The integration check must not disturb a running agent in the PR workdir:
-  temp worktrees live outside the workdir (`workdirs_base()/.integration/…`),
+  temp worktrees live outside the workdir (a `tempfile.mkdtemp` directory),
   only refs under `refs/pm/` are written, and `git worktree prune` cleans up.
+- `pm pr start` relaunching implementation on a workdir that holds pm's
+  unpushed integration merge must not flatten it: `git_ops.pull_rebase` uses
+  `git pull --rebase=merges` (a plain `--rebase` replays every base commit
+  onto the PR branch).
 - Container mode: the router agent runs `pm pr signoff integrate` inside the
   container; the check must work there too (it only needs the workdir git
   repo + origin/main-repo access). If it fails in-container, the launch-time
