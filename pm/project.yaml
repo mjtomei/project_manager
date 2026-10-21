@@ -30030,6 +30030,28 @@ prs:
       empty history, rc 0).'
     created_at: '2026-10-21T22:23:16Z'
     last_edited: '2026-10-21T22:23:16Z'
+  - id: note-98081f9
+    text: 'S1 refine (f21fca85): fake-claude cannot hold a review INPUT_REQUIRED wait.
+      The fake re-emits idle_prompt every 2 s with the same transcript, so wait_for_follow_up_verdict
+      re-reads INPUT_REQUIRED within ~0.2-2.2 s and coerces it to NEEDS_WORK. The
+      "review INPUT_REQUIRED hold" lasts at most ~2 s and the iteration ends done
+      NEEDS_WORK; nobody can answer it. Catch the hold with a background `pm pr history
+      --json` poll every 0.25 s; its popup badge is not observable. Grace is 20 s
+      from the agent phase: per-iteration fake delay must be <~15 s for "turn finished;
+      verdict grace until" to show. Start the PR with CLI `pm pr start` (TUI s passes
+      --transcript and journals a start attempt). fzf/less are missing from the image;
+      sudo apt-get install them for the popup.'
+    created_at: '2026-10-21T21:55:48Z'
+    last_edited: '2026-10-21T21:55:48Z'
+  - id: note-834a179
+    text: 'QA S1 (2026-10-21): fixed 3 popup issues at 80 cols — (1) shortcut hint
+      truncated to "H=h.." → header wraps between items (36a08f72); (2) pre-existing
+      picker bug: Enter on ANY action row (incl. history) did nothing because stdout.strip()
+      ate fzf --expect empty key line + row indent → _parse_fzf_expect (b51784bb);
+      (3) History pager hard-broken mid-word by less in ~74-col popup → wrap with
+      CLI record wrapper (b51784bb). All S1 history/timer/hold Thens otherwise held.'
+    created_at: '2026-10-21T22:14:21Z'
+    last_edited: '2026-10-21T22:14:21Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
