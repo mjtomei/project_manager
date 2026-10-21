@@ -29847,7 +29847,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T14:21:00.824711+00:00'
+  updated_at: '2026-10-21T15:27:53.217292+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29859,3 +29859,12 @@ prs:
       for a pending QA spec.'
     created_at: '2026-10-21T14:21:00Z'
     last_edited: '2026-10-21T14:21:00Z'
+  - id: note-565cd44
+    text: 'QA S6 (concurrency): stale TUI log line fixed in 0b295cf6. Approving a
+      mid-impl spec now logs "<id> spec approved — continuing". QA spec text says
+      the re-add with --no-review-specs prints "unchanged:", but the impl prints "options_changed:"
+      as the design spec defines. status --json has no "ok": true key (pre-existing
+      schema). Use `pm tui restart --breadcrumb` (not Ctrl+R) to keep targets across
+      a restart.'
+    created_at: '2026-10-21T15:27:53Z'
+    last_edited: '2026-10-21T15:27:53Z'
