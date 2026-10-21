@@ -29859,7 +29859,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T18:59:06.456824+00:00'
+  updated_at: '2026-10-21T19:04:28.458230+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30013,6 +30013,13 @@ prs:
       wait now uses _POLL_INTERVAL.'
     created_at: '2026-10-21T18:59:06Z'
     last_edited: '2026-10-21T18:59:06Z'
+  - id: note-f5b178f
+    text: 'Review i5 (incidental, pre-existing on master): tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      failed inside pm containers because the tmp_hooks_home fixture set HOME but
+      left PM_HOST_HOME, which hook_install._host_home prefers; the fixture now unsets
+      it. Full suite 3314 pass.'
+    created_at: '2026-10-21T19:04:28Z'
+    last_edited: '2026-10-21T19:04:28Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
