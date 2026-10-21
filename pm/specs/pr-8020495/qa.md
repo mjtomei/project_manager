@@ -34,6 +34,12 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   "review input required" hold is listed with no due time / no remaining
   countdown, the iteration shows a `waiting_human` phase counted as waiting
   (not execution) time, and `Waiting for:` begins with `human:`.
+  *Live-test caveat:* fake-claude re-emits its idle hook every 2 s, so the
+  review loop re-reads INPUT_REQUIRED and coerces it to NEEDS_WORK within
+  ~0.2–2.2 s; the hold is only catchable by polling `pm pr history --json`
+  every ~0.25 s, and the iteration then ends `done NEEDS_WORK`. Durable
+  human holds are exercised through merge INPUT_REQUIRED, QA
+  INPUT_REQUIRED and sign-off BLOCKED (R11/R12).
 - **R5 — QA run with overlapping scenarios.** Given a QA run with 3
   scenarios launched together, when the user views history, then the QA run
   attempt has a planner child (label `planner`) and three scenario children
@@ -140,6 +146,34 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   `<pr>.1.jsonl`; history still shows attempts from both generations.
 - **E9 — superseded loop.** Given a review loop restarted while one is
   running, the old loop attempt ends `superseded`, not `done`.
+  (The superseded loop's open iteration may first read `superseded`, then
+  `cancelled KILLED` once the old loop thread sees its pane gone; either is
+  acceptable, `done`/`running` is not.)
+- **E10 — re-tracked impl pane (impl spec E8).** Given PM stops watching
+  the impl pane while a review loop owns the PR and re-registers it when
+  the loop ends, then history shows one `start` attempt continuing after a
+  "not tracked" span (counted as neither exec nor wait), not an extra
+  "start untracked" row per review loop.
+- **E11 — cleanup ends in-flight attempts.** Given an action is in flight
+  (impl pane, review loop, merge pane), when `pm pr cleanup` (or merge
+  detection) tears down the PR's resources, then those attempts end
+  `interrupted` with reason "PR resources cleaned up"; none is shown
+  running afterwards and the history survives.
+- **E12 — short-lived CLI openers.** Given an attempt opened by a
+  short-lived CLI process (e.g. the start mirror registered by
+  `pm pr auto-sequence`) that the runtime mirror still tracks in flight,
+  then history shows it running, not "interrupted — owner process exited".
+- **E13 — Now line verdicts.** An in-flight runtime entry shows its stale
+  verdict as `(last X)` (e.g. `review-loop=running (last NEEDS_WORK)`),
+  never as if it were the running attempt's outcome.
+- **E14 — history path not a directory.** If `~/.pm/history` is a regular
+  file, `pm pr history` (text and `--json`) prints honest empty history and
+  exits 0; loops are unaffected.
+- **E15 — popup ergonomics.** At 80 columns the popup header wraps so the
+  `H=history` hint is visible, Enter on any action row (including history)
+  runs it, and the History pager wraps at word boundaries to the popup
+  width and reads the session's project root (current status/milestones),
+  not a workdir's stale project.yaml.
 
 ## 4. Pass / fail criteria
 
