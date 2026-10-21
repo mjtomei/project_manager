@@ -131,11 +131,12 @@ def _end_attempt(app, pr_id: str, outcome: str, **kw) -> None:
         _ah.end_attempt(pr_id, attempt, outcome, **kw)
     elif outcome == "done":
         # A router launched before a TUI restart (adopted run) delivered
-        # the verdict: close the newest attempt its old owner left open.
-        # Older open ones were abandoned runs, not this verdict's.
-        prev = _ah.open_attempts(pr_id, "signoff")
+        # the verdict: close the newest attempt if its old owner left it
+        # open.  Older open ones were abandoned runs, not this verdict's,
+        # and an ended newest one means the verdict was already journaled.
+        prev = _ah.newest_open_attempt(pr_id, "signoff")
         if prev:
-            _ah.end_attempt(pr_id, prev[-1], outcome, adopted=True, **kw)
+            _ah.end_attempt(pr_id, prev, outcome, adopted=True, **kw)
 
 
 def _launch(app, pr_id: str, tdir, force: bool = False) -> None:

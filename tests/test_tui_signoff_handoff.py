@@ -768,8 +768,8 @@ def test_terminal_signoff_hop_does_not_reread_journal_each_poll(
     _qa_pass(app)
     w.emit("SIGNOFF_MERGE")
     calls = []
-    real = action_history.open_attempts
-    with patch.object(action_history, "open_attempts",
+    real = action_history.newest_open_attempt
+    with patch.object(action_history, "newest_open_attempt",
                       side_effect=lambda *a: calls.append(a) or real(*a)):
         _poll(app, n=5)
     ends = [e for e in action_history.read_events(PR)
@@ -797,11 +797,27 @@ def test_adopted_verdict_closes_only_newest_open_router_attempt():
     from types import SimpleNamespace
     from pm_core import action_history
     from pm_core.tui import signoff_ui
-    old = action_history.start_attempt(PR, "signoff", label="old")
+    action_history.start_attempt(PR, "signoff", label="old")
     new = action_history.start_attempt(PR, "signoff", label="new")
     signoff_ui._end_attempt(SimpleNamespace(), PR, "done",
                             verdict="SIGNOFF_MERGE")
-    assert action_history.open_attempts(PR, "signoff") == [old]
+    assert action_history.newest_open_attempt(PR, "signoff") is None
     (end,) = [e for e in action_history.read_events(PR)
               if e["kind"] == "attempt_end"]
     assert (end["attempt"], end["adopted"]) == (new, True)
+
+
+def test_adopted_verdict_leaves_abandoned_run_when_newest_ended():
+    """A run abandoned before a relaunch that already delivered its verdict
+    must not absorb a re-routed verdict after a later TUI restart."""
+    from types import SimpleNamespace
+    from pm_core import action_history
+    from pm_core.tui import signoff_ui
+    abandoned = action_history.start_attempt(PR, "signoff", label="old")
+    relaunch = action_history.start_attempt(PR, "signoff", label="new")
+    action_history.end_attempt(PR, relaunch, "done", verdict="SIGNOFF_MERGE")
+    signoff_ui._end_attempt(SimpleNamespace(), PR, "done",
+                            verdict="SIGNOFF_MERGE")
+    ends = [e["attempt"] for e in action_history.read_events(PR)
+            if e["kind"] == "attempt_end"]
+    assert ends == [relaunch] and abandoned not in ends

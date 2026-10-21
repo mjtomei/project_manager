@@ -351,17 +351,21 @@ def has_journal(pr_id: str) -> bool:
 # Attempt / timer helpers
 # ---------------------------------------------------------------------------
 
-def open_attempts(pr_id: str, action: str) -> list[str]:
-    """Ids of *action* attempts that were started but never ended."""
-    started: list[str] = []
+def newest_open_attempt(pr_id: str, action: str) -> str | None:
+    """Id of the newest *action* attempt, if it was started but never ended.
+
+    ``None`` when the newest attempt has ended: an older attempt left open
+    was abandoned (its owner exited), not the one still in flight.
+    """
+    newest: str | None = None
     ended: set[str] = set()
     for ev in read_events(pr_id):
         kind = ev.get("kind")
         if kind == "attempt_start" and ev.get("action") == action:
-            started.append(ev.get("attempt"))
+            newest = ev.get("attempt") or newest
         elif kind == "attempt_end":
             ended.add(ev.get("attempt"))
-    return [a for a in started if a and a not in ended]
+    return newest if newest and newest not in ended else None
 
 
 def start_attempt(pr_id: str, action: str, *, attempt: str | None = None,
