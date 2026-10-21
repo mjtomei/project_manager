@@ -46,7 +46,9 @@ R2. **Single effective-hold path.** Add pure
 bool, "targets": [wait-target ids]}}` and `effective_policy(pr_id, holds)`.
 A PR is held iff it is in `_stop_before_merge` (explicit per-PR hold) or it
 is in the closure (`closure()`, target included) of any *active* target
-whose record has `wait_for_merge`. `auto_start.merge_hold(app, pr_id)` and
+whose record has `wait_for_merge`; merged/closed closure members are not
+held (nothing to merge, and they must not show up as "released").
+`auto_start.merge_hold(app, pr_id)` and
 `auto_start.policy_for(app, pr_id)` (effective) wrap it with live app state;
 these are used by:
   - `review_loop_ui._maybe_auto_merge` (merge decision; replaces the raw
@@ -107,10 +109,14 @@ R9. **Presentation.** Status run entries gain `held_by` (wait targets that
 hold it) and `explicit_hold` (bool); `policy` becomes the effective policy
 (`stop_before_merge` > `wait_for_merge` > `auto_merge`). Target entries
 report their own configured `policy` (may now be `wait_for_merge`) plus
-`effective_policy`/`held_by`. `format_text` shows `[stop]` /
-`[wait ← T]`; the popup shows `[wait-for-merge ← T]` on target and dep rows
-(with `[stop-before-merge]` / `[auto-merge]` as before). `_list_summary` and
-`pm autostart list` show the three-valued target policy. Schema stays
+`effective_policy`/`held_by`. One helper, `autostart_state.policy_labels`,
+names a row's policy and hold causes for both `format_text` and the popup:
+`[stop-before-merge]`, `[wait-for-merge]` (a wait target's own policy),
+`[wait-for-merge ← T]` (held by other wait targets), and on target rows
+`[auto-merge]` / `[auto-merge, held]` (text output omits the plain
+`auto-merge` default). `_list_summary` and `pm autostart list` show the
+three-valued target policy; `list` adds `(held by T)` naming only *other*
+wait targets that hold the target. Schema stays
 `pm.autostart.status/1` (additive fields).
 
 R10. **Docs.** README "Auto-start targets" and `pm autostart --help`/`add

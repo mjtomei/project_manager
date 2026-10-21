@@ -407,7 +407,7 @@ class TestStatus:
         status = self._status(prs, tmp_path, wait=["f"], targets=["h"])
         text = st.format_text(status)
         assert "◎ f [wait-for-merge]" in text
-        assert "└ a [wait ← f]" in text or "└ a [wait-for-merge ← f]" in text
+        assert "└ a [wait-for-merge ← f]" in text
         # h is an auto-merge target; its dep b is held by f.
         assert "◎ h " in text and "◎ h [" not in text
         rows = st.status_rows(status)
@@ -424,6 +424,13 @@ class TestStatus:
                                          ("wait-for-merge ← f", "wait")]
         assert "◎ a [auto-merge, held; wait-for-merge ← f]" in \
             st.format_text(status)
+
+    def test_target_row_without_run_still_names_wait(self):
+        # A completed wait target has no run entry and holds nothing (its
+        # closure is merged), but its header still names its policy.
+        row = {"pr_id": "f", "kind": "target", "policy": st.POLICY_WAIT,
+               "run": {"pr_id": "f", "policy": st.POLICY_AUTO, "held_by": []}}
+        assert st.policy_labels(row) == [("wait-for-merge", "wait")]
 
 
 def test_runs_popup_shows_wait_policy(tmp_path):

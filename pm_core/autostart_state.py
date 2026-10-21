@@ -631,7 +631,10 @@ def policy_labels(row: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     if run.get("explicit_hold") or run.get("policy") == POLICY_STOP:
         out.append(("stop-before-merge", "stop"))
-    if pr_id in held_by:
+    # A target's own wait policy, even once nothing is left to hold (a
+    # completed target's closure is merged, so it is in no ``held_by``).
+    if pr_id in held_by or (row.get("kind") == "target"
+                            and row.get("policy") == POLICY_WAIT):
         out.append(("wait-for-merge", "wait"))
     others = [t for t in held_by if t != pr_id]
     if others:
