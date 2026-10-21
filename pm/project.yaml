@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2935ce2
+  active_pr: pr-6176ec6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -29847,7 +29847,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T15:40:23.237208+00:00'
+  updated_at: '2026-10-21T15:41:21.767951+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29876,6 +29876,14 @@ prs:
       the agent pane is in copy/view mode.'
     created_at: '2026-10-21T15:40:23Z'
     last_edited: '2026-10-21T15:40:23Z'
+  - id: note-7c0b760
+    text: 'QA S5: picker "No PR windows open." for a windowless impl-spec pause fixed
+      in 2dd1cba3 (_picker_nav_pr_ids). For re-QA specs: the interactive Scenario
+      0 window also consumes the fake qa_scenario cursor, so use ["NEEDS_WORK","NEEDS_WORK","PASS"]
+      for one NEEDS_WORK run; give each throwaway project a unique PR title (runtime_state
+      is keyed by PR id only, filed pr-6176ec6).'
+    created_at: '2026-10-21T15:41:21Z'
+    last_edited: '2026-10-21T15:41:21Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
@@ -29897,6 +29905,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-21T15:40:17.074279+00:00'
   updated_at: '2026-10-21T15:40:17.074279+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6176ec6
+  plan: bugs
+  title: 'Bug: runtime_state keyed only by PR id leaks a finished QA verdict into
+    another project with a same-titled PR'
+  branch: pm/pr-6176ec6-bug-runtime-state-keyed-only-by-pr-id-leaks-a-fini
+  status: pending
+  depends_on: []
+  description: 'pm_core/runtime_state.py stores ~/.pm/runtime/{pr_id}.json with no
+    project key, and PR ids derive from the title, so two projects with a PR titled
+    "Feature V" share pr-5ae769c. Repro (found in pr-3ae2fc3 QA scenario 5): project
+    A: pr add "Feature V", run autostart through QA PASS. Project B (fresh dir): pr
+    add "Feature V", pr start, pr edit --status qa, pm autostart add <id> → auto_start.recorded_qa_verdict()
+    reads A''s qa {state: done, verdict: PASS} and _auto_start_qa_loops skips QA;
+    signoff_ui.advance_all hands it straight to sign-off ("Auto-start: <id> → sign-off")
+    without ever running QA. Same leak likely affects the picker badges (_format_action_status)
+    and review-loop records. Fix: namespace runtime files by project root/tag, or
+    store the project root in the record and ignore mismatches.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T15:41:20.902710+00:00'
+  updated_at: '2026-10-21T15:41:20.902710+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
