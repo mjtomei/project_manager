@@ -959,6 +959,16 @@ def _poll_impl_idle(app) -> None:
         active_pr_ids.add(pr_id)
         window_name = _pr_display_id(pr)
 
+        # Auto-start spec review: hold the impl spec the session just
+        # wrote (inline Step 0) for approval as soon as it appears, so
+        # the agent waiting on it is never taken for finished work below.
+        # Done before pane registration: a manual launch without
+        # ``--transcript`` (command-bar or shell ``pm pr start``) is never
+        # registered, and its spec must still be held this tick.
+        if status == "in_progress":
+            _auto_start.hold_spec_if_due(
+                app, pr, required=spec_review_required(pr_id))
+
         # Lazy pane resolution: register if not yet tracked or pane gone.
         # Hook-driven tracking requires the transcript path launched by
         # ``pm pr start --transcript``; skip PRs without one (e.g. manual
@@ -982,13 +992,6 @@ def _poll_impl_idle(app) -> None:
                 continue
 
         tracker.poll(pr_id)
-
-        # Auto-start spec review: hold the impl spec the session just
-        # wrote (inline Step 0) for approval as soon as it appears, so
-        # the agent waiting on it is never taken for finished work below.
-        if status == "in_progress":
-            _auto_start.hold_spec_if_due(
-                app, pr, required=spec_review_required(pr_id))
 
         # Detect newly-idle in_progress PRs for auto-review.  The idle edge
         # is consumed only for PRs auto-start acts on: an impl that went

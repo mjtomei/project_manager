@@ -932,6 +932,39 @@ def test_chain_pauses_at_both_spec_steps_end_to_end(tmp_path):
         assert "--review-spec" in launches[-1]
 
 
+def test_untracked_manual_launch_spec_held_by_idle_poll(tmp_path):
+    """A closure member started by hand without ``--transcript``
+    (command-bar or shell ``pm pr start``) never registers with the idle
+    tracker.  The spec its agent writes must still be held by the per-tick
+    poll; pre-fix it waited for an unrelated scheduler pass."""
+    wm = tmp_path / "wm"
+    root = _disk(tmp_path, [_pr("m", status="in_progress", workdir=str(wm)),
+                            _pr("t", deps=["m"])])
+    app = DiskApp(root)
+    app._session_name = "s"
+    app._pending_merge_prs = set()
+    tracker = MagicMock()
+    tracker.is_tracked.return_value = False
+    tracker.register.side_effect = ValueError("no transcript symlink")
+    tracker.tracked_keys.return_value = []
+    app._pane_idle_tracker = tracker
+    app._auto_start_targets = {
+        "t": {**st.make_target_record("test"), "review_specs": True}}
+    app._auto_start = True
+    app._auto_start_run_id = "run"
+    _write_spec(wm, "m", "impl")
+
+    with patch.object(review_loop_ui, "_find_impl_pane", return_value="%1"), \
+         patch.object(review_loop_ui, "_watch_untracked_trust"), \
+         patch.object(review_loop_ui, "_prune_untracked_trust"), \
+         patch.object(auto_start, "get_transcript_dir",
+                      return_value=tmp_path / "t"):
+        review_loop_ui._poll_impl_idle(app)
+
+    tracker.poll.assert_not_called()
+    assert store.get_pr(store.load(root), "m")["spec_pending"]["phase"] == "impl"
+
+
 # ---------------------------------------------------------------------------
 # QA planner poll: a plan read while the QA spec awaits approval is deferred
 # ---------------------------------------------------------------------------
