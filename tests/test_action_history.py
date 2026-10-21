@@ -74,6 +74,15 @@ class TestJournal:
         ah.start_attempt(PR, "merge")
         assert [e["action"] for e in ah.read_events(PR)] == ["review", "merge"]
 
+    def test_append_after_truncated_last_line_is_not_lost(self, clock):
+        # A crash mid-write leaves a partial line with no trailing newline;
+        # the next event must start on its own line, not be glued onto it.
+        ah.start_attempt(PR, "review")
+        with open(ah.journal_path(PR), "a") as f:
+            f.write('{"kind": "attempt_start", "act')
+        ah.start_attempt(PR, "merge")
+        assert [e["action"] for e in ah.read_events(PR)] == ["review", "merge"]
+
     def test_write_failure_never_raises(self, tmp_path, monkeypatch):
         blocker = tmp_path / "file"
         blocker.write_text("x")

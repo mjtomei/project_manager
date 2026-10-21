@@ -312,10 +312,16 @@ def record(pr_id: str, kind: str, **fields: Any) -> None:
         event.update({k: v for k, v in fields.items() if v is not None})
         line = json.dumps(event, sort_keys=True, default=str) + "\n"
         path = journal_path(pr_id)
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
             try:
+                # A crash mid-write can leave a partial last line with no
+                # newline; start on a fresh line so this event isn't glued
+                # onto it and lost with it.
+                size = os.fstat(fd).st_size
+                if size and os.pread(fd, 1, size - 1) != b"\n":
+                    line = "\n" + line
                 os.write(fd, line.encode())
                 st = os.fstat(fd)
                 # Only the writer holding the current file may rotate: one
