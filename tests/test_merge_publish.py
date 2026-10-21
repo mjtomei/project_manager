@@ -424,6 +424,43 @@ def test_github_base_moved_after_approval_is_refused(github):
     assert _gh_merge_calls(github.fake) == []
 
 
+def test_github_unreadable_base_keeps_the_approval(github):
+    """A failed ls-remote of the base is "unknown", not "moved": nothing is
+    merged and the approval stays valid for a retry."""
+    approve(github)
+    real = integration.remote_ref
+
+    def flaky(workdir, target, ref):
+        return None if ref == "refs/heads/master" else real(workdir, target, ref)
+
+    with mock.patch.object(integration, "remote_ref", side_effect=flaky):
+        result, windows, finalized = merge(github)
+    assert result.exit_code != 0
+    assert "cannot read master" in result.output
+    assert not finalized and windows == []
+    assert _gh_merge_calls(github.fake) == []
+    assert not pr_entry(github)["signoff"].get("invalidated")
+
+
+def test_github_merge_onto_a_moved_base_is_recorded(github):
+    """GitHub has no base precondition: a merge that landed on another base
+    is detected afterwards and recorded on ``merge_integrity``."""
+    from pm_core import gh_ops
+    rec = approve(github)
+    orig = gh_ops.merge_pr
+
+    def merge_after_base_moves(workdir, number, **kw):
+        commit(github.remote, "late.txt", "l\n", "landed during the merge")
+        return orig(workdir, number, **kw)
+
+    with mock.patch.object(gh_ops, "merge_pr", side_effect=merge_after_base_moves):
+        result, _, _ = merge(github)
+    assert result.exit_code == 0, result.output
+    integrity = pr_entry(github).get("merge_integrity")
+    assert integrity and "not the signed-off base" in integrity["problem"]
+    assert rec["base_sha"][:12] in integrity["problem"]
+
+
 def test_two_overlapping_prs_second_needs_integration(local, tmp_path):
     """Merging the first PR makes the second's approval stale; its fresh
     integration check finds the conflict (-> implementation), and after the

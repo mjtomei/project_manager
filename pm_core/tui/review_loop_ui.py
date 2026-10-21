@@ -987,7 +987,7 @@ def _poll_impl_idle(app) -> None:
                 newly_idle.append((pr_id, pr))
 
     # --- Second pass: merge resolution windows ---
-    # Discover merge windows for ALL in_review PRs, not just
+    # Discover merge windows for ALL in_review / sign_off PRs, not just
     # _pending_merge_prs.  This ensures MERGED verdict detection works
     # whether auto-start is enabled or not.
     pending_merges: set[str] = app._pending_merge_prs

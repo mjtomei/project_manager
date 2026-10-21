@@ -2161,9 +2161,15 @@ def _publish_github(data: dict, root: Path, pr_entry: dict, workdir: str,
             raise SystemExit(1)
         click.echo(f"Pushed approved head {head[:12]} to {branch}.")
     now = integration.remote_ref(workdir, target_repo, f"refs/heads/{base_branch}")
+    if now is None:
+        # Unknown is not "moved": keep the approval, publish nothing.
+        click.echo(f"PR {pr_id}: cannot read {base_branch} of {target_repo}; "
+                   f"nothing was merged. Re-run 'pm pr merge {pr_id}'.",
+                   err=True)
+        raise SystemExit(1)
     if now != base_sha:
         _return_to_signoff(root, pr_entry, f"{base_branch} moved during the "
-                           f"merge ({base_sha[:12]} -> {(now or '?')[:12]})")
+                           f"merge ({base_sha[:12]} -> {now[:12]})")
 
     click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
     merge_result = gh_ops.merge_pr(workdir, gh_pr_number, match_head_commit=head)
@@ -2174,7 +2180,7 @@ def _publish_github(data: dict, root: Path, pr_entry: dict, workdir: str,
             stderr = (merge_result.stderr or "").strip()
             now = integration.remote_ref(workdir, target_repo,
                                          f"refs/heads/{base_branch}")
-            if now != base_sha:
+            if now is not None and now != base_sha:
                 _return_to_signoff(root, pr_entry,
                                    f"{base_branch} moved during the merge")
             click.echo(f"gh pr merge failed: {stderr}\nNothing was merged; "
@@ -2217,10 +2223,16 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
     if first_parent == base_sha and tree == bound.get("candidate_tree"):
         return
     pr_id = pr_entry["id"]
-    problem = (f"GitHub merged {pr_id} onto {first_parent[:12]}, not the "
-               f"signed-off base {base_sha[:12]} (the base moved during "
-               f"publication); the published tree {tree[:12]} differs from "
-               f"the approved candidate")
+    if first_parent != base_sha:
+        problem = (f"GitHub merged {pr_id} onto {first_parent[:12]}, not the "
+                   f"signed-off base {base_sha[:12]} (the base moved during "
+                   f"publication)")
+    else:
+        problem = (f"GitHub merged {pr_id} onto the signed-off base "
+                   f"{base_sha[:12]}, but its merge result differs from the "
+                   f"approved candidate")
+    problem += (f"; published tree {tree[:12]}, approved "
+                f"{(bound.get('candidate_tree') or '?')[:12]}")
 
     def _apply(d):
         p = store.get_pr(d, pr_id)
