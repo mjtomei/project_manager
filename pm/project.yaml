@@ -12727,20 +12727,21 @@ prs:
     step), using deterministic fakes, before declaring the loop unsupervised-ready.
 
 
-    REFRAMED FOR PHASE 11: the two impl watchers (pr-e3a711c, pr-d39a7fb) and the
-    programmatic auto_start.py are replaced by ONE plan auto-start watcher (pr-ff9b728);
-    per-PR merge/route decisions move to the sign-off step (pr-2d5f712). So this PR
-    validates the GENERALIZED watcher + sign-off, not the old per-plan watchers or
-    auto-merge/gated-merge behaviors.
+    Phase 11 retains the programmatic scheduler and adds the plan watcher (pr-ff9b728)
+    above it. Validate watcher decisions through shared PM operations, scheduler-owned
+    phase transitions, and sign-off recommendations. Existing CLI/TUI auto-start must
+    also work with the watcher off. Cover duplicate requests, watcher restart, shared
+    dependencies, explicit and inherited manual merge holds, and fresh approval without
+    bypasses or duplicate workers.
 
 
     Targets:
 
     1. Plan auto-start watcher tests (tests/test_plan_watcher.py) via FakeClaudeSession
     (pr-abcf70f) + FakeGitHubBackend (pr-9603d04): per-plan config (gated vs autonomous,
-    mandated taste check), max-in-flight concurrency, picks ready PRs respecting deps,
-    runs the per-PR auto-sequence chain (qa -> sign_off -> merge), defers per-PR decisions
-    to sign-off. Scenarios bind to regression tests (pr-06a96fa) or author new ones
+    mandated taste check), max-in-flight concurrency, arms targets through PM; the
+    scheduler checks readiness and advances the per-PR flow, while sign-off recommends
+    the next step. Scenarios bind to regression tests (pr-06a96fa) or author new ones
     (pr-2680fbf), NOT INSTRUCTION+ARTIFACT.
 
     2. Discovery supervisor (pr-271cb3a, unchanged) launch + reconcile cycle.
@@ -12763,8 +12764,8 @@ prs:
 
 
     Depends on: pr-06a96fa, pr-2680fbf, pr-51586d2 (Phase 10 chain), pr-1d8b2b7 (verdict
-    registry), pr-ff9b728 (the generalized plan watcher + sign-off it validates; replaces
-    the old auto-start command pr-d60d185 this probe used to drive).
+    registry), pr-ff9b728 (the plan watcher integrated with the retained scheduler
+    and sign-off flow).
 
 
     Out of scope: coverage gates (Phase 7); adding regression tests beyond validating
@@ -12773,7 +12774,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T20:49:18.500977+00:00'
-  updated_at: '2026-05-25T15:41:39.187127+00:00'
+  updated_at: '2026-10-21T00:48:08.726694+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21268,8 +21269,8 @@ prs:
   - pr-ff9b728
   - pr-c77561b
   description: 'Claude-driven regression-test markdowns covering the watcher / observation
-    surfaces, REFRAMED for Phase 11: the surfaces are now the single PLAN AUTO-START
-    WATCHER (pr-ff9b728) + the sign-off step (pr-2d5f712), not the two old impl watchers.
+    surfaces, REFRAMED for Phase 11: the surfaces are the plan watcher (pr-ff9b728),
+    retained programmatic scheduler and sign-off step (pr-2d5f712).
 
 
     Files in pm/qa/regression/:
@@ -21280,10 +21281,11 @@ prs:
     rolling context, in-flight continuation.
 
     2. plan-watcher-pick-and-advance.md — the generalized plan watcher against a plan:
-    picks ready PRs respecting deps, honors max-in-flight, runs the per-PR auto-sequence
-    chain (qa -> sign_off -> merge), defers the merge/route decision to sign-off.
-    Variants: at concurrency cap (no-op); autonomous plan (sign-off merges); gated
-    plan (sign-off holds for human); stuck PR (loop guard -> INPUT_REQUIRED).
+    arms targets and requests recovery through PM; the scheduler enforces readiness,
+    concurrency, single phase ownership and fresh-signoff merge policy. Variants:
+    at concurrency cap (no-op); authorized auto-merge; explicit and dependency-inherited
+    human holds; shared dependencies; stalled work; duplicate ticks; watcher restart;
+    and ordinary CLI/TUI auto-start with the watcher off.
 
     3. sign-off-step.md — qa-finalize -> sign_off: comprehensive review, verdict-router
     next-hops (merge / re-qa / back-to-impl / escalate), audit notes.
@@ -21302,7 +21304,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:12.969486+00:00'
-  updated_at: '2026-05-26T00:28:09.173957+00:00'
+  updated_at: '2026-10-21T00:48:09.387819+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21317,8 +21319,8 @@ prs:
   - pr-c77561b
   description: 'Claude-driven regression-test markdown covering the auto-sequence
     chain (pr-e58459b) — now start -> review -> QA -> SIGN_OFF -> merge after Phase
-    11. Exercises every pause/transition on both entry points (TUI O keypress + pm
-    pr auto-sequence <id>).
+    11. Exercises every pause/transition through existing TUI/CLI entry points, with
+    the watcher enabled and disabled. Retain the programmatic scheduler and its checks.
 
 
     pm/qa/regression/auto-sequence-halt-conditions.md, conditions:
@@ -21332,9 +21334,10 @@ prs:
     4. sign_off stage (NEW): qa-finalize enters sign_off; verify the chain advances
     to sign_off, the verdict router runs, and on a bounce it routes back through review+qa.
 
-    5. gated sign-off hold (REPLACES auto_merge=false): a gated plan''s PR reaches
-    sign_off and HOLDS for the human instead of merging (the plan watcher''s per-plan
-    gated config + sign-off gated mode, pr-2d5f712 / pr-ff9b728).
+    5. manual merge holds: fresh sign-off is required before a PR shows merge-ready;
+    explicit stop-before-merge and dependency-wide --wait-for-merge holds remain binding
+    across shared dependencies, watcher recovery and restart. Manual merges unblock
+    dependents automatically. The watcher cannot bypass a human hold.
 
     6. review NEEDS_WORK loop; 7. QA NEEDS_WORK loop; 8. max-iterations / no-progress
     stop (pr-ed10ac4).
@@ -21343,12 +21346,13 @@ prs:
     For each: entry point, condition fired, emitted state, correct resume.
 
 
-    Depends on: pr-ff9b728 (the chain''s sign_off stage + gated hold this PR exercises).'
+    Depends on: pr-ff9b728 (watcher integration with the existing scheduler and sign-off
+    flow).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:39.950664+00:00'
-  updated_at: '2026-05-26T00:28:11.367123+00:00'
+  updated_at: '2026-10-21T00:48:10.056984+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25291,95 +25295,61 @@ prs:
   signed_off_at: '2026-09-18T14:00:47.727000+00:00'
 - id: pr-ff9b728
   plan: plan-regression
-  title: Plan auto-start watcher — generalize impl watchers + become the auto-start
-    engine (replaces programmatic auto-start)
+  title: Plan watcher using the existing auto-start scheduler
   branch: pm/pr-ff9b728-auto-run-wiring-re-loop-on-code-change-loop-guard-
   status: pending
   depends_on:
   - pr-2d5f712
-  description: 'Replace the two plan-specific impl watchers, the AutoStartWatcher,
-    AND the programmatic auto-start with a single PLAN AUTO-START WATCHER that shepherds
-    a plan while the sign-off step (pr-2d5f712) shepherds each PR. Sign-off concretizes
-    the taste-check/gated-merge the impl watchers improvise today, so this supersedes
-    that machinery and removes the dead code. Kept as one PR per the design.
+  description: 'Add a plan supervisor above the existing programmatic auto-start scheduler.
+    The watcher chooses work, maintains the plan and handles exceptions; the scheduler
+    continues to execute ordinary PR lifecycles. Retain pm_core/tui/auto_start.py,
+    multi-target CLI/TUI controls, status visibility, restart handling and the per-PR
+    auto-sequence/sign-off flow. Ordinary auto-start must remain usable with the watcher
+    disabled.
 
 
-    GENERALIZE THE IMPL WATCHERS: fold pr-e3a711c (bug-fix), pr-d39a7fb (improvement-fix),
-    and the AutoStartWatcher (pane monitoring) into one watcher parameterized per
-    plan — gated vs autonomous, mandated checks (the improvements taste check), prioritization
-    guidance, "resolve high-level issues". Same functionality, one class; the concrete
-    watchers + near-duplicate prompt builders are removed.
+    Plan decisions: generalize the bug-fix and improvement-fix watchers into one supervisor
+    parameterized by plan policy, required checks, priorities and resource limits.
+    Choose targets and concurrency within configured bounds; diagnose stalled work
+    and request recovery through shared PM commands/lifecycle operations. The scheduler
+    owns dependency readiness, routine phase transitions and idempotent launches.
+    Do not introduce a competing phase loop or edit lifecycle state directly. Watcher
+    retries, CLI/TUI requests and restart must not launch duplicate workers or merges.
 
 
-    BECOME THE AUTO-START ENGINE: this watcher IS the auto-start. Remove the programmatic
-    orchestration in pm_core/tui/auto_start.py (check_and_start, _auto_start_review_loops,
-    _auto_start_qa_loops, auto_sequence_for_pr, the one-shot _transitive_deps walk).
-    The watcher picks ready PRs from its plan (deps satisfied), runs the per-PR auto-sequence
-    chain (pr-e58459b, kept — now with the qa -> sign_off -> merge tail). The TUI
-    auto-start toggle becomes start/stop for this watcher.
+    Merge authority: sign-off recommends; the execution path enforces fresh approval
+    and configured policy. The watcher may arm authorized auto-merge work or request
+    a merge through the same checks. Explicit stop-before-merge and dependency-wide
+    --wait-for-merge holds remain binding, including shared dependencies. A watcher
+    cannot release a human hold or bypass it by invoking the manual merge command
+    without authorization. A successful manual merge wakes the scheduler without another
+    watcher decision.
 
 
-    SIGN-OFF RECOMMENDS; THIS WATCHER DECIDES THE MERGE: the sign-off step (pr-2d5f712)
-    routes each PR (bounce / ready_to_merge / blocked) but NEVER merges — auto-sequence
-    always gates at merge. AUTONOMY LIVES HERE: on a ready_to_merge recommendation
-    the watcher performs the merge (autonomous) or holds for a human (gated) per its
-    PER-PLAN config (e.g. bugs autonomous, ux gated). The sign-off step has no autonomy
-    flag of its own.
+    Plan feedback: discovery and any workflow session can file bug/improvement work.
+    The watcher adds justified prerequisite PRs, updates depends_on and plan sections
+    through validated additive mutations, rejects cycles, records reasons in plan
+    notes, and publishes plan/registry changes together. Gated plan edits remain subject
+    to their configured authority. The scheduler recomputes readiness from the resulting
+    graph. pr-b77702b retains its implementation-session dependency-merge preamble;
+    this PR does not own that work.
 
 
-    DEP-MERGE ON START — STAYS IN THE IMPL SESSION (pr-b77702b), NOT this watcher:
-    when a PR''s depends_on PRs aren''t merged yet, the dependency branches are merged
-    into the workdir before work begins, via the IMPL session''s start prompt. The
-    workdir is set up programmatically at start and is only available to the impl
-    session, so the watcher only decides WHEN to start; the merge happens inside the
-    session. This PR does not own that logic — see pr-b77702b.
+    Continuity and recovery: retain decisions, evidence links and recovery history
+    in plan notes. Apply the existing review/QA/sign-off return path after substantive
+    code changes, including merge-resolution changes; note-only handoffs do not restart
+    acceptance. Use the planned ten-bounce ceiling and pr-ed10ac4''s earlier no-progress
+    checks, resetting only on real progress. Bound recovery attempts and preserve
+    evidence when parking blocked work.
 
 
-    MAX IN-FLIGHT PRS (new, a change to auto-start): the watcher chooses how many
-    PRs to drive concurrently rather than walking one target''s dep tree serially.
-    Bounded, watcher-judged each tick.
-
-
-    REGRESSION LOOP CLOSES HERE: discovery still schedules regression runs; any session
-    (regression/review/QA/sign-off/impl) auto-files bug/improvement PRs (pr-539110b,
-    pr-47940bc); the per-plan watchers for bugs and ux pick them up and drive them
-    through sign-off.
-
-
-    REAL-CODE FEEDBACK INTO THE PLAN (dynamic plan/graph mutation): when a new PR
-    is needed (missing dep / assumed-missing feature / new feature), file the PR(s)
-    + set depends_on (insert upstream); ADDITIVELY edit the plan file to add ### PR:
-    section(s) (no plan-file writer exists today — plan_parser only reads; never reword/delete
-    existing content); re-resolve which PRs are ready so new upstream work starts
-    before the blocked PR; commit plan + project.yaml atomically + pm pr note. Cycle
-    detection; gated mode surfaces the edit first; additive-only is the autonomous
-    guarantee.
-
-
-    WATCHER CONTINUITY = PLAN NOTES: per-tick continuity (today pm/watchers/<name>.log)
-    is recast as PLAN NOTES carried in the plan files (analogous to PR notes), human-readable
-    in the plan and surfaced in the behavior interface (pr-8e693f6). The flat log
-    files are removed.
-
-
-    LOOP SAFETY: re-loop invariant — any code/content change routes back through review
-    AND qa before merge; note-only actions (incl. notes on other PRs) don''t re-trigger
-    review. Loop guard — default 10 bounces/PR (configurable), reset on real progress;
-    repeated root cause escalates to INPUT_REQUIRED early. Reuses pr-ed10ac4''s no-progress
-    hashing at the across-bounce layer.
-
-
-    SINGLE-PR MODE: the per-PR auto-sequence chain (qa -> sign_off -> merge) run on
-    demand — pm pr auto-sequence <id> (which always gates at merge: it reports ready_to_merge
-    and stops), with a thin pm pr signoff <id> for just the sign-off step. No parallel
-    pm pr auto command.
-
-
-    REMOVED (dead code): auto_start.py programmatic orchestration; bug_fix_impl_watcher.py
-    + improvement_fix_impl_watcher.py + AutoStartWatcher; pm/watchers/*.log files
-    (replaced by plan notes); the improvement watcher''s gated-at-QA-PASS path and
-    pr-b77702b''s auto_merge gating (its dep-merge preamble is retained, rescoped,
-    in pr-b77702b); any ad-hoc taste-check/sign-off code.
+    Acceptance: exercise existing CLI/TUI auto-start with the watcher off, then watcher-driven
+    prioritization and recovery through those same operations. Cover shared dependencies,
+    inherited and explicit merge holds, duplicate ticks, watcher/TUI restarts, adoption
+    of running sessions, stale sign-off and substantive integration changes. Keep
+    the existing scheduler regression tests. Consolidate duplicate watchers, prompts
+    or decision paths only after equivalent behavior is demonstrated; deleting the
+    scheduler is not a requirement.
 
 
     Depends on: pr-2d5f712 (sign-off step).'
@@ -25387,7 +25357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-07-18T19:57:39.770138+00:00'
+  updated_at: '2026-10-21T00:48:08.079039+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
