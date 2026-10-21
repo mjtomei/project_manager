@@ -38,6 +38,8 @@ def dimensions_for(case_type, ids=None, rubric=None):
         raise ValueError("Unknown case type: " + str(case_type))
     dims = [d for d in (rubric or load_rubric())["dimensions"] if case_type in d["applies_to"]]
     if ids is not None:
+        if not ids:
+            raise ValueError("Empty dimension subset for " + case_type)
         known = {d["id"] for d in dims}
         unknown = [i for i in ids if i not in known]
         if unknown:
@@ -93,7 +95,10 @@ def render_judge(case_type, *, document_a, document_b, brief=None, prefix=None,
     """Render the judge prompt for one blinded pair.
 
     whole_document needs brief; continuation needs prefix and may take the section_request
-    the generator was given. dimensions limits the rubric to the listed ids.
+    the generator was given. dimensions limits the rubric to the listed ids. Catalog cases of
+    type pm_plan are whole-document cases: pass the instruction and conversation turns as the
+    brief. Brief attachments belong in the brief text, since fidelity and coverage are judged
+    against it.
     """
     dims = dimensions_for(case_type, dimensions, rubric)
     kind_line = (" Document kind: " + document_kind + "." if document_kind else "")
@@ -155,7 +160,7 @@ def reference_markdown(rubric=None, references=None):
     return "\n".join(out) + "\n"
 
 
-GENERATED_START = "<!-- GENERATED: python3 rubric.py --write-doc -->"
+GENERATED_START = "<!-- GENERATED: python3 experiments/plan-writing/rubric.py --write-doc -->"
 GENERATED_END = "<!-- END GENERATED -->"
 
 

@@ -62,8 +62,9 @@ Each concern has at least one concern-tagged fixture. Lost requirements, for exa
 - **Bias instructions.** Length is not quality (verbosity bias). Consistent elaboration is not a fidelity fault. For continuations, a candidate is not rewarded for imitating the prefix author's style.
 - **Track separation.** `render_judge()` lists only the dimensions that apply to the case type. Track notes tell continuation judges to measure coverage against what the prefix promised and fidelity against what the prefix established. The two tracks use different templates and are never pooled.
 - **Output contract.** A JSON object with one row per dimension (`dimension`, `evidence`, `rationale`, `score_a`, `score_b`, `preference`), plus `overall_preference` and `overall_rationale`. `validate_judgment()` checks it, so the runner can treat a malformed reply as a failed evaluation rather than a score.
+- **Case mapping.** The case catalog's `pm_plan` cases are whole-document cases: the runner passes the instruction and the recovered conversation as the brief, with `document_kind` "PM plan", so fidelity is judged against the human turns. Brief attachments are appended to the brief text for the same reason.
 
-Render a fixture's prompt with `python3 rubric.py --render whole_document`, `--render continuation` or `--render <fixture id>`.
+Render a fixture's prompt with `python3 experiments/plan-writing/rubric.py --render whole_document`, `--render continuation` or `--render <fixture id>`; `--write-doc` regenerates the dimension reference below.
 
 ## What calibration must establish
 
@@ -86,7 +87,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ## Dimension reference
 
-<!-- GENERATED: python3 rubric.py --write-doc -->
+<!-- GENERATED: python3 experiments/plan-writing/rubric.py --write-doc -->
 | Dimension | Case types | Readiness | Automatic candidates | Concerns |
 |---|---|---|---|---|
 | purpose_and_audience | whole_document, continuation | calibration_required | — | padding |

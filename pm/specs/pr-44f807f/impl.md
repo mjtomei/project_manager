@@ -130,6 +130,14 @@
   scope_and_abstraction, not risks_and_open_questions. Terms likewise: one concept
   named several ways is internal_consistency, renaming or redefining a prefix term
   is continuity, and clarity owns only undefined terms and ambiguous statements.
+- The case catalog (pr-9f111ef) adds a `pm_plan` case type whose input is an
+  instruction plus conversation turns, and whole-document briefs carry attachments.
+  Neither is a separate judge track: `pm_plan` renders as `whole_document` with the
+  conversation as the brief, and attachments are appended to the brief text
+  (documented in `render_judge()` and rubric.md). An empty `dimensions` subset is
+  rejected rather than rendering a prompt with nothing to score.
+- `write_doc()` replaces rubric.md by temp file + rename so concurrent
+  `--write-doc` runs and readers never see a partial file (QA S5).
 - No network or model calls in tests; reference URLs are not fetched in tests.
 - Internal-consistency fixtures contradict themselves only about choices the brief
   leaves open; a contradiction of the brief would also move fidelity.

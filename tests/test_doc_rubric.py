@@ -235,6 +235,8 @@ def test_render_rejects_wrong_inputs():
         rubric.render_judge("pooled", brief="b", document_a="a", document_b="b")
     with pytest.raises(ValueError):
         rubric.render_judge("whole_document", brief="b", document_a="a", document_b="b", dimensions=["continuity"])
+    with pytest.raises(ValueError):
+        rubric.render_judge("whole_document", brief="b", document_a="a", document_b="b", dimensions=[])
 
 
 def test_dimension_subset():
