@@ -78,6 +78,7 @@ def build_history(pr_id: str, *, pr: dict | None = None,
 
     timer_rows = _reconcile_timers(timers, attempts, t_now)
     timer_rows["recent"] = (timer_history + timer_rows["recent"])
+    _release_terminal_holds(pr or {}, timer_rows)
 
     runtime = _runtime_actions(pr_id) if live else {}
     current = _current_activity(attempts, timers, timer_rows, t_now,
@@ -365,6 +366,28 @@ def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
         active.append(row)
     active.sort(key=lambda r: (r["due_t"] is None, r["due_t"] or 0))
     return {"active": active, "overdue": overdue, "recent": recent}
+
+
+def _release_terminal_holds(pr: dict, timer_rows: dict) -> None:
+    """Resolve journaled holds a merged/closed PR can no longer be in.
+
+    A PR can merge without passing a hold's release point (``g`` runs ``pm
+    pr merge``, GitHub merges arrive via sync), so the hold's owner may
+    still be alive with the hold uncleared.
+    """
+    status = pr.get("status")
+    if status not in ("merged", "closed"):
+        return
+    resolved_t = _parse_iso(pr.get("merged_at")) if status == "merged" \
+        else None
+    still = []
+    for row in timer_rows["active"]:
+        if row["due_t"] is None:
+            timer_rows["recent"].append(
+                _timer_row(row, f"released (PR {status})", resolved_t))
+        else:
+            still.append(row)
+    timer_rows["active"] = still
 
 
 def _runtime_actions(pr_id: str) -> dict:

@@ -15,6 +15,7 @@ Verdicts (shared with review):
   INPUT_REQUIRED — Issues found but not fixed, or ambiguity requiring human judgment.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -3560,43 +3561,40 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
         _log.exception("Failed to create status pane")
 
 
+@contextlib.contextmanager
 def _journal_qa_run(state: QALoopState, *, resumed: bool):
-    """Context manager journaling one QA run (or resume) as an attempt."""
-    import contextlib
+    """Journal one QA run (or resume) as an action-history attempt."""
     from pm_core import action_history as _ah
 
-    @contextlib.contextmanager
-    def _cm():
-        state.history_attempt = _ah.start_attempt(
-            state.pr_id, "qa", loop_id=state.loop_id,
-            label="QA resume" if resumed else "QA run",
-            resumed=True if resumed else None)
-        try:
-            yield
-        except BaseException as e:
-            _ah.end_attempt(state.pr_id, state._history_planner, "failed",
-                            detail="QA run crashed")
-            _ah.end_attempt(state.pr_id, state.history_attempt, "failed",
-                            verdict="ERROR", detail=f"{type(e).__name__}: {e}"[:300])
-            raise
+    state.history_attempt = _ah.start_attempt(
+        state.pr_id, "qa", loop_id=state.loop_id,
+        label="QA resume" if resumed else "QA run",
+        resumed=True if resumed else None)
+    try:
+        yield
+    except BaseException as e:
+        _ah.end_attempt(state.pr_id, state._history_planner, "failed",
+                        detail="QA run crashed")
+        _ah.end_attempt(state.pr_id, state.history_attempt, "failed",
+                        verdict="ERROR", detail=f"{type(e).__name__}: {e}"[:300])
+        raise
+    else:
+        verdict = state.latest_verdict or None
+        if state.stop_requested or not verdict:
+            # No verdict: aborted before running (e.g. the PR merged).
+            outcome = "cancelled"
+        elif verdict == "ERROR":
+            outcome = "failed"
         else:
-            verdict = state.latest_verdict or None
-            if state.stop_requested or not verdict:
-                # No verdict: aborted before running (e.g. the PR merged).
-                outcome = "cancelled"
-            elif verdict == "ERROR":
-                outcome = "failed"
-            else:
-                outcome = "done"
-            _ah.end_attempt(state.pr_id, state._history_planner,
-                            "cancelled" if state.stop_requested else "failed",
-                            detail="planning did not finish")
-            _ah.end_attempt(state.pr_id, state.history_attempt, outcome,
-                            verdict=verdict,
-                            detail=(state.latest_output or "")[:300] or None)
-        finally:
-            state._history_planner = ""
-    return _cm()
+            outcome = "done"
+        _ah.end_attempt(state.pr_id, state._history_planner,
+                        "cancelled" if state.stop_requested else "failed",
+                        detail="planning did not finish")
+        _ah.end_attempt(state.pr_id, state.history_attempt, outcome,
+                        verdict=verdict,
+                        detail=(state.latest_output or "")[:300] or None)
+    finally:
+        state._history_planner = ""
 
 
 def run_qa_sync(

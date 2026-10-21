@@ -621,6 +621,23 @@ class TestReconciliation:
         assert hold["remaining_s"] is None
         assert m["waiting_for"] == "human: impl spec awaiting approval"
 
+    def test_merged_pr_releases_uncleared_hold(self, clock):
+        # ``g`` merges via ``pm pr merge``, which never reaches the TUI's
+        # release point: the hold's live owner leaves it uncleared.
+        ah.arm_timer(PR, f"merge-hold:{PR}", purpose="manual merge hold",
+                     owner_action="merge", duration=None, effect="fires")
+        pr = {"id": PR, "status": "sign_off"}
+        m = hq.build_history(PR, pr=pr, now=clock.t, live=False)
+        assert m["waiting_for"] == "human: manual merge hold"
+        clock.advance(60)
+        pr = {"id": PR, "status": "merged", "merged_at": ah.iso(clock.t)}
+        m = hq.build_history(PR, pr=pr, now=clock.t, live=False)
+        assert m["holds"] == []
+        assert not m["waiting_for"].startswith("human")
+        (row,) = m["timers"]["recent"]
+        assert row["resolution"] == "released (PR merged)"
+        assert row["resolved_t"] == clock.t
+
     def test_missing_history_is_honest(self, clock):
         pr = {"id": PR, "status": "merged", "title": "Old",
               "created_at": "2026-01-01T00:00:00Z",

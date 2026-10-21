@@ -189,7 +189,10 @@ The model contains:
     `recent` (cleared/elapsed/lost with resolution reason).
     Reconciliation: cleared → resolved; owner attempt ended → `cancelled
     (owner ended)`; owner process dead → `lost (owner exited)`; `gate`
-    timer past due → `elapsed`.
+    timer past due → `elapsed`; journaled hold still open on a
+    merged/closed PR → `released (PR merged|closed)` at `merged_at`
+    (merges via `pm pr merge` / GitHub sync never reach the TUI's
+    hold-release point).
   - `holds`: journaled + derived holds.
   - `now`: live per-action status (runtime `derive_action_status`) plus,
     for an open attempt in `agent` phase with a known session, the latest
