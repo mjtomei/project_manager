@@ -29949,6 +29949,18 @@ prs:
       first on PATH.'
     created_at: '2026-10-21T17:00:57Z'
     last_edited: '2026-10-21T17:00:57Z'
+  - id: note-c3700f5
+    text: 'S10 refiner: approving an EMPTY pending QA spec (pm pr spec-approve → "Spec
+      content is empty — nothing to review.") releases the planner gate and notifies
+      the planner, but the post-planning spec check (qa_loop "QA spec missing ...
+      after planning") then ends QA INPUT_REQUIRED "QA spec was not generated during
+      planning" since get_spec treats an empty workdir qa.md as missing. Scenarios
+      do not launch against an empty spec; that is the expected non-hanging outcome.
+      Story 1 here goes through review→start_qa, so the qa-<id> planner + -s0 windows
+      DO open during the QA pause (only -s1+ are withheld), unlike S5 where the pause
+      preceded the QA launch.'
+    created_at: '2026-10-21T16:29:19Z'
+    last_edited: '2026-10-21T16:29:19Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
