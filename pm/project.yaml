@@ -29930,7 +29930,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T22:12:21.997899+00:00'
+  updated_at: '2026-10-21T22:13:27.367608+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29970,6 +29970,18 @@ prs:
       at all. Consider ending/not opening that attempt in short-lived CLI processes.'
     created_at: '2026-10-21T22:12:21Z'
     last_edited: '2026-10-21T22:12:21Z'
+  - id: note-6ed3c23
+    text: 'QA S3 (cancel/supersede/restart) PASS on f21fca85, no edits. Observations
+      for follow-up: (1) superseded loop child i1 is first closed "superseded / parent
+      run ended first", then ~7s later rewritten to "cancelled KILLED" when the old
+      loop thread sees its pane gone; (2) once (pre-restart, A after loop 8333 PASS)
+      the non-loop review tracker re-registered the finished loop pane as a new "review
+      running" attempt (Waiting for: review: agent working) until the next tui-mount
+      sweep; not reproduced on demand; (3) "runtime: review-loop=running KILLED" shows
+      the previous verdict next to running; (4) popup history without less prints
+      + waits and the top scrolls off a 40-row popup. Captures /pm-captures/scenarios/3.'
+    created_at: '2026-10-21T22:13:27Z'
+    last_edited: '2026-10-21T22:13:27Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
