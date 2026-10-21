@@ -109,7 +109,7 @@ export class SimPM {
     const s = this.session(sessionId);
     this.pendingStarts.delete(sessionId);
     s.state = 'working'; s.stateText = 'working';
-    s.transcript = [{ who: 'pm', t: `Started from glasses at ${this.now()}` }, { who: 'agent', t: 'Reading the QA verdicts and evidence for #215…' }];
+    s.transcript = [{ who: 'pm', t: `Started from glasses at ${this.now()}` }, { who: 'agent', t: s.short === 'sign-off' ? `Reading the QA verdicts and evidence for ${this.prLabel(s.pr)}…` : `Loading context for ${s.role}…` }];
     if (s.pr && s.short === 'sign-off') { const p = this.pr(s.pr); p.status = 'sign_off'; p.activity = 'Sign-off running'; }
     this.emit('started', { sessionId });
   }

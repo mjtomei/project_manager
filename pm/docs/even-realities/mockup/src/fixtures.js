@@ -137,7 +137,8 @@ export const SESSIONS = [
   // ---- #211: signed off, manual merge hold ----------------------------
   { id: 'pr-211/signoff', pr: 'pr-211', role: 'Sign-off', short: 'sign-off', window: 'signoff-#211', pane: 'signoff-claude', state: 'done', stateText: 'MERGE @a1b2c3d',
     transcript: [T('agent', 'SIGNOFF_MERGE. Integration check against master 7e5d0aa is clean.')] },
-  { id: 'pr-211/merge', pr: 'pr-211', role: 'Merge recovery', short: 'merge', window: 'merge-#211', pane: 'merge-claude', state: 'none', stateText: 'none open' },
+  { id: 'pr-211/merge', pr: 'pr-211', role: 'Merge recovery', short: 'merge', window: 'merge-#211', pane: 'merge-claude', state: 'none', stateText: 'none open',
+    effects: ['Runs pr merge --resolve-window: attempts the merge.'] },
   // ---- Project / plan sessions ----------------------------------------
   { id: 'plan-sync/review', pr: null, group: 'Plans', role: 'Plan review', short: 'plan review', window: 'plan-sync', pane: 'plan-review', state: 'idle', stateText: 'idle',
     doc: 'plan:plan-sync', transcript: [T('agent', 'Plan v4 covers five PRs. #217 depends on #214. Anything to change before you approve?')] },

@@ -29,7 +29,7 @@ The demo buttons inject the same SIMULATED events the journeys use.
 
 ```bash
 npm run capture    # -> ../screenshots/*.png, raw/, phone/, manifest.json
-node scripts/gallery.mjs   # -> ../index.html
+npm run gallery    # -> ../index.html
 ```
 
 - `capture` starts `server.mjs` and the official simulator (`@evenrealities/evenhub-simulator@0.9.5`) with its automation API. It then replays `scripts/journeys.mjs`:

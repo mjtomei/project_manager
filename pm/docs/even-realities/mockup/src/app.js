@@ -214,7 +214,8 @@ export class App {
       case 'sessions-pr': {
         const ss = pm.sessionsFor(v.pr);
         const out = [];
-        const top = ss.filter(s => s.run == null);
+        // Merge recovery is listed only when its window exists (session-inventory.md).
+        const top = ss.filter(s => s.run == null && !(s.short === 'merge' && s.state === 'none'));
         const order = ['impl', 'review', 'sign-off', 'merge', 'claude'];
         top.sort((a, b) => order.indexOf(a.short) - order.indexOf(b.short));
         const runs = [...new Set(ss.filter(s => s.run != null).map(s => s.run))];
@@ -450,7 +451,8 @@ export class App {
   returnTo(target) { while (this.view !== target && this.stack.length > 1) this.stack.pop(); }
   jumpTo(v) {
     // Reuse an equivalent list already on the stack instead of growing it.
-    const i = this.stack.findIndex(x => x.type === 'list' && x.kind === v.kind && x.pr === v.pr && x.k === v.k);
+    // Scenario numbers are unique only within a QA run, so the run is part of the identity.
+    const i = this.stack.findIndex(x => x.type === 'list' && x.kind === v.kind && x.pr === v.pr && x.run === v.run && x.k === v.k);
     if (i >= 0) { this.stack.length = i + 1; return; }
     this.push(v);
   }
@@ -567,7 +569,6 @@ export class App {
   }
   sessionTitle(s) {
     if (!s.pr) return s.role;
-    if (s.run != null && s.scenario != null && s.helper) return `#${this.pm.pr(s.pr).num} QA run ${s.run} · s${s.scenario} ${s.role}`;
     if (s.run != null && s.scenario != null) return `#${this.pm.pr(s.pr).num} QA run ${s.run} · s${s.scenario} ${s.role}`;
     if (s.run != null) return `#${this.pm.pr(s.pr).num} QA run ${s.run} · ${s.role}`;
     return `#${this.pm.pr(s.pr).num} ${s.role}`;
@@ -590,7 +591,10 @@ export class App {
       case 'session-actions': { const s = pm.session(v.id); return [this.sessionTitle(s), stateCell(s)]; }
       case 'sessions': return ['Sessions · all PRs', { t: `${pm.sessions.length} known`, dim: true }];
       case 'sessions-pr': { const p = pm.pr(v.pr); return [`#${p.num} sessions`, { t: p.status, dim: true }]; }
-      case 'qa-run': return [`#${pm.pr(v.pr).num} QA run ${v.run}`, { t: 'scenarios 1-5', dim: true }];
+      case 'qa-run': {
+        const ks = pm.sessionsFor(v.pr).filter(s => s.run === v.run && s.scenario > 0).map(s => s.scenario);
+        return [`#${pm.pr(v.pr).num} QA run ${v.run}`, { t: ks.length ? `scenarios ${Math.min(...ks)}-${Math.max(...ks)}` : 'no scenarios', dim: true }];
+      }
       case 'scenario': { const s = pm.sessionsFor(v.pr).find(x => x.run === v.run && x.scenario === v.k); return [`#${pm.pr(v.pr).num} run ${v.run} · s${v.k} ${s.scenarioTitle}`, null]; }
       case 'project': return ['Plans and project sessions', { t: pm.project.name, dim: true }];
       case 'prs': return ['PRs and status', { t: 'plan-sync', dim: true }];

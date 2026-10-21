@@ -23,17 +23,20 @@ export function renderCompanion(root, app, pm, act) {
   } else {
     const [title] = app.title(v);
     parts.push(`<h2>${esc(title)}</h2>`);
-    if (v.kind === 'confirm') parts.push(`<ul>${v.confirm.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><p><button data-i="select">${esc(v.confirm.yes)}</button> <button data-i="back">${esc(v.confirm.no)}</button></p>`);
+    if (v.kind === 'confirm') parts.push(`<ul>${v.confirm.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><p><button data-confirm>${esc(v.confirm.yes)}</button> <button data-i="back">${esc(v.confirm.no)}</button></p>`);
     else parts.push('<ul class="rows">' + app.items(v).map(it => `<li class="${it.act ? 'act' : ''}">${esc(Array.isArray(it.l) ? it.l.map(s => s.t).join(' ') : it.l)} <small>${esc(it.r?.t || '')}</small></li>`).join('') + '</ul>');
   }
   root.innerHTML = parts.join('');
   root.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => act(b.dataset.i)));
+  // Run the confirmation directly: "select" would pick whatever row the glasses cursor is on.
+  root.querySelector('[data-confirm]')?.addEventListener('click', () => { v.confirm.run(); act('noop'); });
   const form = root.querySelector('form.compose');
   if (form) form.addEventListener('submit', e => {
     e.preventDefault();
     const text = form.querySelector('input').value.trim();
     if (!text) return;
-    const r = pm.send(v.id, text, null);
+    // Typed messages carry the same reading context as spoken ones.
+    const r = pm.send(v.id, text, app.contextFor({ session: v.id, doc: app.originDoc() }));
     app.say(r.ok ? `Sent from phone to ${app.sessionName(pm.session(v.id))}` : `! Not sent: ${r.reason}`);
     act('noop');
   });

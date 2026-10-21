@@ -129,5 +129,3 @@ export function pageDefinition(built) {
   for (const t of textObject) if (t.containerName.length > 16) built.problems.push(`container name ${t.containerName} > 16`);
   return page;
 }
-
-export const WIDTH_PX = WIDTH;

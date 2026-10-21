@@ -28,7 +28,7 @@ Code references were read on that revision. In-flight branches (none merged) are
 | QA status dashboard | `qa-#N` / `qa-status` (`qa_loop.py:3513`) | not a session; its content is the QA run list itself | PR sessions → QA run R | — |
 | QA interactive | `qa-#N-s0` / `qa-scenario-s0` (`qa_loop.py:1815`) | `#N QA run R · s0 Interactive` | QA run → s0 | via the status pane |
 | QA scenario: refiner | `qa-#N-sK` / `qa-concretize-sK` (`qa_loop.py:2157`) | `#N QA run R · sK Refiner` + scenario title | QA run → sK → Refiner | via the status pane, then pane selection |
-| QA scenario: execution worker | `qa-#N-sK` / `qa-scenario-sK` (`qa_loop.py:2158`). On relaunch the window is recreated **without** the refiner pane (`qa_loop.py:2398`) | `#N QA run R · sK Execution`, `retry n` | QA run → sK → Execution | same |
+| QA scenario: execution worker | `qa-#N-sK` / `qa-scenario-sK` (`qa_loop.py:2158`). On relaunch the window is recreated **without** the refiner pane (`qa_loop.py:2505` `_relaunch_scenario_window`) | `#N QA run R · sK Execution`, `retry n` | QA run → sK → Execution | same |
 | QA scenario: verifier | `qa-#N-sK` / `qa-verify-sK`, created lazily on the first PASS (`qa_loop.py:3393`) | `#N QA run R · sK Verifier`, `checking n/3`, `FLAGGED · retry n/3`, `VERIFIED` | QA run → sK → Verifier | **not directly reachable** |
 | QA finalize | `qa-#N` / `qa-finalize` (`qa_loop.py:700`) | `#N QA run R · QA finalize` | QA run → Finalize | — |
 | Sign-off | `signoff-#N` / `signoff-claude` | `#N Sign-off`; verdict from `pr.signoff` | PR sessions → Sign-off | Switch, or launch. **Side effect: qa → sign_off.** No runtime badge writer exists |

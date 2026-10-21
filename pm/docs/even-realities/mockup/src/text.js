@@ -74,12 +74,6 @@ export function wrap(text, maxPx) {
   return out;
 }
 
-// Wrap with a hanging indent (bullets, list rows).
-export function wrapHanging(first, rest, text, maxPx) {
-  const lines = wrap(text, maxPx - Math.max(getTextWidth(first), getTextWidth(rest)));
-  return lines.map((line, i) => (i ? rest : first) + line);
-}
-
 // Spaces that move the next glyph to x (relative to the container's left).
 export function padTo(current, x) {
   const gap = x - getTextWidth(current);
