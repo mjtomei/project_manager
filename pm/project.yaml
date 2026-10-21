@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-21T00:35:10.362869+00:00'
+  updated_at: '2026-10-21T03:15:15.826080+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29548,6 +29548,21 @@ prs:
       explicitly or request a scoped input bundle if needed.'
     created_at: '2026-10-21T00:23:53Z'
     last_edited: '2026-10-21T00:35:10Z'
+  - id: note-909dd28
+    text: 'Catalog built 2026-10-21 (72010e9e). data/ is gitignored, so the built
+      context store and catalog exist only in this PR workdir under experiments/plan-writing/data/{context,cases,pm},
+      not in the main checkout. To rebuild after copying the corpus snapshot into
+      data/: python3 collect.py --sources go-proposals rust-rfcs (adds process files
+      to the sparse checkouts; restore corpus.jsonl/manifests from the snapshot afterwards,
+      since only retrieved_at shifts), then python3 context.py (about 30 min uncached,
+      about 3 min cached; GitHub HTML, not the API, so no token is needed), python3
+      cases.py, python3 cases.py --check. pdftotext is needed (apt poppler-utils),
+      and so is bs4. PM cases read $HOME/.claude/projects (override with PM_CLAUDE_PROJECTS);
+      the Codex history for plan-delivery is not mounted. Reviewed PM windows: pm_case_windows.json.
+      Use cases.generator_input(case) as the only generator-input path, because it
+      never reads references or baselines.'
+    created_at: '2026-10-21T03:15:15Z'
+    last_edited: '2026-10-21T03:15:15Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
@@ -29615,11 +29630,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-21T00:15:38.677748+00:00'
+  updated_at: '2026-10-21T03:15:16.620822+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-096c836
+    text: 'From pr-9f111ef: the case catalog is experiments/plan-writing/data/cases/catalog.jsonl
+      (built by cases.py; data/ is gitignored, so rebuild per the pr-9f111ef note).
+      Get generator inputs only through cases.generator_input(case); continuation
+      cases store offsets plus text_sha256. Each case has split_group (IETF grouped
+      by working group, merged across duplicates) and, for whole-document cases, context_strength
+      rich or thin. PM cases are needs_review, with the plan file as production baseline.
+      reports/case-coverage.md has counts.'
+    created_at: '2026-10-21T03:15:16Z'
+    last_edited: '2026-10-21T03:15:16Z'
 - id: pr-09c4e8e
   plan: plan-doc-eval
   title: Automated planning prompt improvement campaign
