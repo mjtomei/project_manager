@@ -568,6 +568,18 @@ def test_picker_badges_waiting_step():
         assert badged == [row]
 
 
+def test_picker_navigates_windowless_spec_pause():
+    """An autostart impl-spec pause holds the PR before any window
+    exists; the picker opened from the TUI window still reaches it."""
+    from pm_core.cli.session import _picker_nav_pr_ids
+    prs = [{"id": "pr-1", "title": "T", "status": "pending",
+            "spec_pending": {"phase": "impl"}},
+           {"id": "pr-2", "title": "U", "status": "pending"},
+           {"id": "pr-3", "title": "W", "status": "in_progress"}]
+    assert _picker_nav_pr_ids(prs, {"main", "pr-3"}, None) == ["pr-1", "pr-3"]
+    assert _picker_nav_pr_ids(prs[1:2], {"main"}, None) == []
+
+
 def test_tree_marker_names_phase_and_outranks_loop_marker():
     from tests.test_tech_tree_widgets import _TreeApp
     from pm_core.tui.tech_tree import PRNode

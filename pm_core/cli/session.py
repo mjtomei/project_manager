@@ -1687,6 +1687,40 @@ def _resolve_root_from_session(session: str) -> Path | None:
     return get_session_pm_root(tag)
 
 
+def _picker_nav_pr_ids(prs: list[dict], open_windows: set[str],
+                       home_pr: str | None) -> list[str]:
+    """Display ids the PR Actions picker navigates (h/l), in order.
+
+    PRs that the user has at least one open window for, plus PRs paused
+    on a spec review (an autostart impl-spec pause holds the PR before
+    any window exists, and its start row carries the [spec review]
+    badge).  The invoking window's PR (if any) is included as the
+    "home" position for the 0 key.  When the picker is opened from a
+    non-PR window (home_pr is None), navigation cycles through those PRs.
+    """
+    from pm_core.cli.helpers import _pr_display_id
+
+    def _pr_has_open_window(pr: dict) -> bool:
+        did = _pr_display_id(pr)
+        for pat in _ACTION_WINDOW_PATTERNS.values():
+            if pat and pat.format(display_id=did) in open_windows:
+                return True
+        return False
+
+    nav_pr_ids: list[str] = []
+    seen: set[str] = set()
+    for p in prs:
+        did = _pr_display_id(p)
+        if did and (_pr_has_open_window(p) or did == home_pr
+                    or pending_spec_phase(p)):
+            if did not in seen:
+                nav_pr_ids.append(did)
+                seen.add(did)
+    if home_pr and home_pr not in seen:
+        nav_pr_ids.insert(0, home_pr)
+    return nav_pr_ids
+
+
 @cli.command("_popup-picker", hidden=True)
 @click.argument("session")
 @click.argument("window_name", default="")
@@ -1745,29 +1779,8 @@ def popup_picker_cmd(session: str, window_name: str):
 
     from pm_core.cli.helpers import _pr_display_id
 
-    # Build the navigation list: PRs that the user has at least one
-    # open window for.  The invoking window's PR (if any) is included
-    # as the "home" position for the 0 key.  When the picker is opened
-    # from a non-PR window (current_pr is None), home_pr is None and
-    # navigation cycles through whichever PRs have live windows.
-    def _pr_has_open_window(pr: dict) -> bool:
-        did = _pr_display_id(pr)
-        for pat in _ACTION_WINDOW_PATTERNS.values():
-            if pat and pat.format(display_id=did) in open_windows:
-                return True
-        return False
-
     home_pr = current_pr  # may be None when invoked from a non-PR window
-    nav_pr_ids: list[str] = []
-    seen: set[str] = set()
-    for p in prs:
-        did = _pr_display_id(p)
-        if did and (_pr_has_open_window(p) or did == home_pr):
-            if did not in seen:
-                nav_pr_ids.append(did)
-                seen.add(did)
-    if home_pr and home_pr not in seen:
-        nav_pr_ids.insert(0, home_pr)
+    nav_pr_ids = _picker_nav_pr_ids(prs, open_windows, home_pr)
 
     if not nav_pr_ids:
         click.echo("PR Actions (prefix+P)")
