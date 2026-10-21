@@ -211,18 +211,22 @@ def hold_spec_if_due(app, pr: dict, prs: list[dict] | None = None,
                      required: bool | None = None) -> bool:
     """Mark *pr*'s present-but-unapproved spec pending when auto-start's
     spec review applies (*required*: a precomputed
-    :func:`spec_review_required`).  Returns True when it set
-    ``spec_pending``."""
+    :func:`spec_review_required`), or when its implementation agent was
+    launched to wait for pm approval (``spec_gen.IMPL_GATE_KEY``) — that
+    agent waits even after the option stops applying.  Returns True when
+    it set ``spec_pending``."""
     if not app._root or pr.get("spec_pending"):
         return False
-    if required is None:
-        required = spec_review_required(app, pr["id"], prs)
-    if not required:
-        return False
+    from pm_core import spec_gen
+    if not (pr.get("status") == "in_progress"
+            and pr.get(spec_gen.IMPL_GATE_KEY)):
+        if required is None:
+            required = spec_review_required(app, pr["id"], prs)
+        if not required:
+            return False
     phase = _spec_phase_due(app, pr)
     if not phase:
         return False
-    from pm_core import spec_gen
     try:
         marked = spec_gen.mark_spec_pending(app._root, pr["id"], phase, pr=pr)
     except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:

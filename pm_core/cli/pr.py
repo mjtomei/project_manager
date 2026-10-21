@@ -1013,6 +1013,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         _record_status_timestamp(pr, "in_progress")
         pr["agent_machine"] = machine
         pr["workdir"] = work_path_str
+        if review_spec:
+            pr[spec_gen.IMPL_GATE_KEY] = True
+        else:
+            pr.pop(spec_gen.IMPL_GATE_KEY, None)
         if gh_pr_info:
             pr["gh_pr"] = gh_pr_info["url"]
             pr["gh_pr_number"] = gh_pr_info["number"]

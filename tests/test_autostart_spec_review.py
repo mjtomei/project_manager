@@ -502,6 +502,25 @@ class TestTargets:
         run = {r["pr_id"]: r for r in status["runs"]}["a"]
         assert run["reason"].startswith("impl spec awaiting approval")
 
+    def test_gated_launch_held_after_option_removed(self, tmp_path):
+        """An agent launched with the wait-for-approval prompt waits even
+        if its target goes away before it writes the spec."""
+        wd = tmp_path / "wa"
+        root = _disk(tmp_path, [
+            _pr("a", status="in_progress", workdir=str(wd),
+                **{spec_gen.IMPL_GATE_KEY: True}),
+            _pr("b", status="in_progress", workdir=str(tmp_path / "wb"))])
+        app = DiskApp(root)
+        app._auto_start_targets = {}
+        app._auto_start = False
+        _write_spec(wd, "a", "impl")
+        _write_spec(tmp_path / "wb", "b", "impl")
+        for pr_id in ("a", "b"):
+            auto_start.hold_spec_if_due(app, store.get_pr(app._data, pr_id))
+        fresh = store.load(root)
+        assert store.get_pr(fresh, "a")["spec_pending"]["phase"] == "impl"
+        assert "spec_pending" not in store.get_pr(fresh, "b")  # plain prompt
+
     def test_mid_impl_approval_replaces_awaiting_line(self, tmp_path):
         # An in_progress PR resumes in its pane on approval — no "starting"
         # line follows, so the reload must supersede "awaiting approval".
@@ -675,6 +694,17 @@ class TestQASpecGate:
                                     spec_pending={"phase": "qa"})])
         state = qa_loop.QALoopState(pr_id="a", spec_review=False)
         assert qa_loop._qa_spec_gate(state, root)
+
+    def test_gated_planner_held_after_option_removed(self, tmp_path):
+        """A planner prompted to wait for pm approval keeps the gate when
+        the TUI clears spec_review mid-planning (target removed)."""
+        wd = tmp_path / "w"
+        root = _disk(tmp_path, [_pr("a", status="qa", workdir=str(wd))])
+        _write_spec(wd, "a", "qa")
+        state = qa_loop.QALoopState(pr_id="a", spec_review=False,
+                                    planner_spec_gate=True)
+        assert qa_loop._qa_spec_gate(state, root)
+        assert store.get_pr(store.load(root), "a")["spec_pending"]["phase"] == "qa"
 
     def test_wait_stops_on_stop_request(self, tmp_path):
         root = _disk(tmp_path, [_pr("a", status="qa",

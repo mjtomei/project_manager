@@ -33,6 +33,12 @@ _log = configure_logger("pm.spec_gen")
 # Phase names that have specs
 PHASES = ("impl", "qa")
 
+# PR key set by ``pm pr start --review-spec``: the implementation agent was
+# told to wait for pm-recorded approval of the spec it writes.  That spec is
+# held for review even if auto-start spec review stops applying before the
+# file appears (target or option removed), since the agent waits regardless.
+IMPL_GATE_KEY = "impl_spec_gate"
+
 
 
 def get_spec_mode() -> str:

@@ -223,6 +223,9 @@ class QALoopState:
     spec_review: bool = False
     # True while this run is paused on the QA spec's approval.
     spec_review_pending: bool = False
+    # The planner was launched with the wait-for-pm-approval spec prompt:
+    # its QA spec is held even if spec_review is cleared mid-planning.
+    planner_spec_gate: bool = False
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
@@ -3500,6 +3503,10 @@ def _verify_single_scenario(
 # Core orchestration
 # ---------------------------------------------------------------------------
 
+def _spec_review_applies(state: QALoopState) -> bool:
+    return state.spec_review or state.planner_spec_gate
+
+
 def _qa_spec_gate(state: QALoopState, pm_root: Path,
                   pr: dict | None = None) -> bool:
     """True while scenario launch must wait for the QA spec's approval.
@@ -3518,7 +3525,7 @@ def _qa_spec_gate(state: QALoopState, pm_root: Path,
             return state.spec_review_pending
     if spec_gen.get_pending_spec_phase(pr) == "qa":
         return True
-    if state.spec_review and spec_gen.needs_spec_approval(pr, "qa"):
+    if _spec_review_applies(state) and spec_gen.needs_spec_approval(pr, "qa"):
         try:
             spec_gen.mark_spec_pending(pm_root, state.pr_id, "qa")
         except Exception:
@@ -3712,6 +3719,7 @@ def run_qa_sync(
         _notify()
 
         scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
+        state.planner_spec_gate = state.spec_review
         planner_prompt = prompt_gen.generate_qa_planner_prompt(
             data, state.pr_id, session,
             scenario_start=scenario_start,
@@ -3879,7 +3887,7 @@ def run_qa_sync(
 
             # Spec review: waiting on a human must not time the planner
             # out; an approval releases a deferred plan.
-            if state.spec_review or state.spec_review_pending:
+            if _spec_review_applies(state) or state.spec_review_pending:
                 if _qa_spec_gate(state, pm_root, _live):
                     _set_spec_review_pending(state, True, _notify)
                     deadline = max(deadline,
@@ -3910,7 +3918,7 @@ def run_qa_sync(
             # Under spec review, re-check the gate at the poll cadence so
             # a QA spec written mid-planning is held within seconds.
             _wait = (_POLL_INTERVAL
-                     if state.spec_review or state.spec_review_pending
+                     if _spec_review_applies(state) or state.spec_review_pending
                      else 15.0)
             ev = _hook_events.wait_for_event(
                 planner_session_id,
