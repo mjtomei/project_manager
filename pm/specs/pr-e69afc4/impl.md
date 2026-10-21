@@ -68,6 +68,11 @@ press 'g' to merge`, and status reason reads
 `signed off (fresh SIGNOFF_MERGE); waiting for manual merge (held by <T>) —
 press g`.
 
+R4a. **Merge output.** `pm pr merge` prints `PR X marked as merged
+(newly ready: …)` as its *last* stdout line, naming only PRs this merge
+unblocked, because the TUI `g` log line shows only the final line
+(QA s4, 8029f04e / 322a88f4).
+
 R4. **Manual merge advances.** A manual merge of a held PR is observed via
 the existing reload trigger (`on_state_loaded` → `check_and_start`), which
 starts newly-ready dependents in scope. No new trigger; no new MERGED-message
@@ -85,6 +90,11 @@ disjoint) keep their policy.
 R7. **Lifecycle.**
   - New dependencies (graph edits) are held automatically — holds are
     derived from the current `depends_on` closure at decision time.
+    A reload that shows an in-scope PR's `depends_on` changed
+    (`pm pr edit --depends-on`) also kicks `check_and_start`
+    (`on_state_loaded(app, old_statuses, old_deps)`), so a ready
+    prerequisite pulled into a closure starts without another event
+    (QA s4, 255d2b24).
   - Restart: the flag rides on the target record that
     `targets_to_breadcrumb`/`targets_from_breadcrumb` already round-trip.
   - Removing a wait target or changing its policy releases only its derived
