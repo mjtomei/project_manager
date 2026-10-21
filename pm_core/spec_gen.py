@@ -62,6 +62,11 @@ def pr_spec_mode(pr: dict, review: bool = False,
     return global_mode or get_spec_mode()
 
 
+def _root_spec_path(root: Path, pr_id: str, phase: str) -> Path:
+    """``<pm-root>/specs/<pr-id>/<phase>.md`` without creating anything."""
+    return root / "specs" / pr_id / f"{phase}.md"
+
+
 def spec_dir(root: Path, pr_id: str) -> Path:
     """Return the spec directory for a PR: ``<pm-root>/specs/<pr-id>/``."""
     d = root / "specs" / pr_id
@@ -109,7 +114,7 @@ def spec_location(pr: dict, phase: str) -> Path | None:
     except FileNotFoundError:
         return None
     # Not spec_file_path(): a lookup must not create the spec directory.
-    canonical = root / "specs" / pr.get("id", "") / f"{phase}.md"
+    canonical = _root_spec_path(root, pr.get("id", ""), phase)
     if canonical.exists():
         return canonical
     return None
@@ -175,7 +180,7 @@ def seed_workdir_specs(root: Path, pr_id: str, workdir: Path) -> list[Path]:
         return []
     written = []
     for phase in PHASES:
-        src = root / "specs" / pr_id / f"{phase}.md"
+        src = _root_spec_path(root, pr_id, phase)
         if not src.exists():
             continue
         content = src.read_text()

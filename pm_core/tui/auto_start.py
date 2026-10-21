@@ -922,14 +922,13 @@ def _approved_since(pr: dict, old_pending) -> bool:
     """Whether *pr*'s cleared spec_pending was cleared by an approval.
 
     *old_pending* is the pending phase before the reload (``True`` when
-    only its presence is known).
+    only its presence is known).  A phaseless record can't have been
+    approved (``approve_spec`` ignores it), and an older approval of
+    another phase must not read as this one's.
     """
-    rec = pr.get("spec_approved")
-    if not isinstance(rec, dict):
-        return False
-    if isinstance(old_pending, str):
-        return bool(rec.get(old_pending))
-    return any(rec.values())
+    from pm_core import spec_gen
+    return (isinstance(old_pending, str)
+            and spec_gen.is_spec_approved(pr, old_pending))
 
 
 def _prune_completed_targets(app, prs: list[dict]) -> None:

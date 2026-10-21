@@ -543,6 +543,14 @@ class TestTargets:
         assert store.get_pr(store.load(root), "a")["spec_pending"]["phase"] \
             == "impl"
 
+    def test_phaseless_pending_cleared_is_not_an_approval(self):
+        # A phaseless spec_pending can't be approved (approve_spec skips
+        # it): another phase's older approval must not read as this one's.
+        pr = {"id": "a", "spec_approved": {"impl": "t0"}}
+        assert not auto_start._approved_since(pr, True)
+        assert not auto_start._approved_since(pr, "qa")
+        assert auto_start._approved_since(pr, "impl")
+
     def test_explicit_review_spec_pr_gated_without_option(self, tmp_path):
         app = _app([_pr("a", review_spec=True), _pr("x", review_spec=True)],
                    tmp_path, {"a": {}})
