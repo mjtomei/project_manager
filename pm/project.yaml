@@ -29930,7 +29930,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T20:03:25.625602+00:00'
+  updated_at: '2026-10-21T22:12:21.997899+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29950,6 +29950,26 @@ prs:
       test failures (markdown module + hook installer) also fail on master.'
     created_at: '2026-10-21T20:03:25Z'
     last_edited: '2026-10-21T20:03:25Z'
+  - id: note-c450740
+    text: 'S6 refine (concurrency/rotation): only qa-run-bg (spawned by `pm pr auto-sequence
+      <pr>` on an in_review PR with an auto-seq review PASS transcript) and auto-sequence
+      itself (impl-idle check registers the start mirror) write journals from a non-TUI
+      process; `pm pr review` from a shell writes nothing itself (TUI mirror journals
+      it, and ignores PASS). fake-claude scripted cursor is per session_type and session-wide,
+      so concurrent reviews on different PRs share one NW/NW/PASS sequence; `pm fake-claude
+      config set` resets the cursor. Rotation = single `<pr>.1.jsonl` generation,
+      threshold 4194304 bytes.'
+    created_at: '2026-10-21T21:55:44Z'
+    last_edited: '2026-10-21T21:55:44Z'
+  - id: note-d3dc6f7
+    text: 'QA S6 (2026-10-21): all concurrency/rotation Thens held at f21fca85. Side
+      observation (not asserted): a start mirror attempt opened by the `pm pr auto-sequence`
+      CLI (impl-idle check) is never ended, so history shows "start interrupted —
+      owner process exited (pid N); end time unknown" right after a successful start
+      while runtime shows start=idle. `pm pr start` from CLI records no start row
+      at all. Consider ending/not opening that attempt in short-lived CLI processes.'
+    created_at: '2026-10-21T22:12:21Z'
+    last_edited: '2026-10-21T22:12:21Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
