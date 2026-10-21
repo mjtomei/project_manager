@@ -309,6 +309,28 @@ class TestTargets:
         assert res["error"] == "conflicting_flags"
         assert auto_start.get_targets(app) == []
 
+    @pytest.mark.parametrize("order", [
+        ["--review-specs", "--no-review-specs"],
+        ["--no-review-specs", "--review-specs"]])
+    def test_cli_rejects_conflicting_review_flags_before_sending(
+            self, tmp_path, monkeypatch, order):
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        store.save({"project": {"name": "t", "repo": "/r",
+                                "base_branch": "master"},
+                    "prs": [_pr("a")]}, pm_dir)
+        monkeypatch.setattr("pm_core.cli.autostart.state_root", lambda: pm_dir)
+        from pm_core.cli import cli
+        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+            res = CliRunner().invoke(cli, [
+                "autostart", "add", "a", *order, "--json", "-s", "pm-x"])
+        assert res.exit_code == 1
+        out = json.loads(res.output)
+        assert out["error"] == "conflicting_flags"
+        assert out["message"] == (
+            "conflicting flags: --review-specs, --no-review-specs")
+        trig.assert_not_called()
+
     def test_flag_rejected_off_add(self, tmp_path):
         app = _app([_pr("a")], tmp_path, {"a": {}})
         res = auto_start.handle_command(app, ["remove", "a", "--review-specs"])

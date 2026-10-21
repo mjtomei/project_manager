@@ -275,14 +275,19 @@ def autostart():
               help="Hold the target and all its transitive prerequisites "
                    "for a manual merge (g / pm pr merge); merging one "
                    "starts its newly ready dependents")
-@click.option("--review-specs/--no-review-specs", "review", default=None,
+# Two plain flags rather than a click on/off pair: a pair lets the last
+# one silently win, while giving both must be rejected like the command bar.
+@click.option("--review-specs", "review_on", is_flag=True,
               help="Pause the target and its transitive prerequisites for "
                    "approval of the implementation spec and the QA spec "
                    "(V / pm pr spec-approve)")
+@click.option("--no-review-specs", "review_off", is_flag=True,
+              help="Turn spec review off for the target")
 @_session_opt
 @_timeout_opt
 @_json_opt
-def autostart_add(pr_ids, stop, auto, wait, review, session, timeout, as_json):
+def autostart_add(pr_ids, stop, auto, wait, review_on, review_off, session,
+                  timeout, as_json):
     """Add PR_IDS as auto-start targets (additive, idempotent).
 
     Re-adding a target without a policy flag keeps its current policy; a
@@ -310,6 +315,10 @@ def autostart_add(pr_ids, stop, auto, wait, review, session, timeout, as_json):
             flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
             raise _Fail(EXIT_INVALID, "conflicting_flags",
                         f"conflicting merge policies: {flags}")
+        if review_on and review_off:
+            raise _Fail(EXIT_INVALID, "conflicting_flags",
+                        f"conflicting flags: {REVIEW_FLAG}, {NO_REVIEW_FLAG}")
+        review = True if review_on else False if review_off else None
         ids = _validate(pr_ids, for_add=True)
         args = ["add", *ids]
         if chosen:
