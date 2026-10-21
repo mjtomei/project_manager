@@ -24,6 +24,7 @@ from pathlib import Path
 import click
 
 from pm_core import store
+from pm_core.autostart_state import pending_spec_phase
 from pm_core.claude_launcher import launch_claude_print
 from pm_core.paths import configure_logger, get_global_setting_value
 
@@ -514,7 +515,6 @@ def get_pending_spec_phase(pr: dict) -> str | None:
     """Return the phase name of the pending spec, or None."""
     # One implementation, kept in the import-light autostart_state so the
     # tree and picker can use it without pulling in spec_gen.
-    from pm_core.autostart_state import pending_spec_phase
     return pending_spec_phase(pr)
 
 
