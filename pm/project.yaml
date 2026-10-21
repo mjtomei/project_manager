@@ -29576,7 +29576,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-21T03:44:41.138761+00:00'
+  updated_at: '2026-10-21T04:03:53.647141+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29658,6 +29658,15 @@ prs:
       also fails, expected). Update qa spec counts.'
     created_at: '2026-10-21T03:44:41Z'
     last_edited: '2026-10-21T03:44:41Z'
+  - id: note-c10d673
+    text: 'QA S12 PASS on 542cde34 (captures /pm-captures/scenarios/12): 5 waves (170
+      renders, 600 threaded, 60 write-doc, 20 pytest) clean; 3000 SIGINT 0 temp leftovers;
+      2057 SIGKILL left 11 real .rubric.md.* (9 empty, 2 partial 32K/48K) all gitignored
+      via .gitignore:4, rubric.md never changed. Spec drift: fresh umask-022 clone
+      has rubric.md mode 644, not 664. SIGINT no-output exit 130 (~12%) comes from
+      default SIGINT disposition at startup/shutdown, not rubric.py.'
+    created_at: '2026-10-21T04:03:53Z'
+    last_edited: '2026-10-21T04:03:53Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
