@@ -59,7 +59,8 @@
 - **R14** Given targets T1 (`--review-specs`) and T2 (plain) that share prerequisite S, then S requires
   review (status `[review-specs ← T1]`), and T2's private prerequisites do not.
 - **R15** Given S has an impl spec waiting for approval, when T1 is removed or re-added with
-  `--no-review-specs`, then S's pending spec is still pending (not approved). Later specs on S are not gated.
+  `--no-review-specs`, then S's pending spec is still pending (not approved). Later specs on S are not gated,
+  except a spec that S's running agent was launched to wait for (E16).
 - **R16** Given a chain paused on a spec, when idle polling runs for several minutes, or the TUI restarts
   through the breadcrumb path (`pm tui restart --breadcrumb`, or the merge-triggered restart), then the target
   record keeps review_specs and the PR stays paused with the same surfaces. A plain Ctrl+R or a session
@@ -119,6 +120,15 @@
 - **E15** Approving a spec right after it is held (before the TUI's next reload, for example a QA spec approved within a
   second of the planner gate holding it) is final. The TUI does not hold that phase again, and the PR does not show `S`
   for it again.
+- **E16** An agent launched with the review-gate prompt waits for approval whatever happens to the option afterwards
+  (review i3–i5). If an impl agent started under `--review-specs` (scheduler, `s`, or command-bar `pr start`) has not
+  yet written its spec when the target is removed, or the PR stays in scope only through a plain target, the spec it
+  then writes is still held (`S impl`), the agent is not taken for finished on idle, and this survives a restart.
+  The impl approval ends this: a later `pm pr spec <id> --regenerate`, with auto-start off, is not held. An agent
+  started with `--review-spec` while an impl spec is already present (approved) gets no wait instruction, and a later
+  regeneration is not held for it either. A start without the flag clears the gate. The same applies to a QA planner
+  launched under spec review: if the option goes away mid-planning, a `qa.md` written afterwards is still held and
+  scenarios wait for approval.
 
 ## 4. Pass / Fail Criteria
 Pass: every Then above is observable on the named surface. CLI text and JSON agree with the
