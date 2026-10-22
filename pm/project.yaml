@@ -23675,7 +23675,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/223
   gh_pr_number: 223
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-10-22T15:29:07.767604+00:00'
+  updated_at: '2026-10-22T16:10:15.063328+00:00'
   started_at: '2026-05-25T03:27:03.889385+00:00'
   reviewed_at: '2026-05-25T03:39:45.883451+00:00'
   merged_at: null
@@ -23887,6 +23887,32 @@ prs:
       — any C1/C2/C4 or post-fix failure is a distinct cause to fix or file.'
     created_at: '2026-10-22T15:29:07Z'
     last_edited: '2026-10-22T15:29:07Z'
+  - id: note-d79d9f6
+    text: 'QA scenario 8 refiner (2026-10-22): the lock is ~/.pm/workdirs/.review-launch-<pm-session>-<pr_id>.lock,
+      an flock that the kernel drops when its holder dies. To drive the SIGKILL triple,
+      poll `lslocks -n -o PID,PATH` and match the lock path with /usr/bin/grep -F,
+      then kill -9 that PID. This finds the real `pm pr review --fresh --review-loop`
+      launcher while it holds the lock and avoids pgrep -f self-match. Two zz d on
+      one PR both go through the single TUI: the second supersedes the first loop,
+      and both loop threads spawn launchers that serialise on the lock in either order.
+      So check which loop ends up owning the window, not just the window count. fzf
+      is absent: get the junegunn/fzf linux_arm64 release binary from GitHub (reachable).
+      Alternatively, the command popup (pm _popup-cmd <sess>, typing `review-loop
+      <pr>` / `pr qa <pr>`) uses the same _run_picker_command spinner path.'
+    created_at: '2026-10-22T15:50:33Z'
+    last_edited: '2026-10-22T15:50:33Z'
+  - id: note-a63824a
+    text: 'QA s8 (concurrency r2) PASS on ce6cd54d: same-PR concurrent zz d gives
+      1 window and both spinners ok=True; A+B locks held together; review+t converge;
+      SIGKILL holder recovers with no wait. Spec notes for future runs: (1) the superseded
+      launch uses a fake-claude review cursor slot, so use [NW,NW,PASS] to see NW->PASS
+      on the survivor; (2) the spinner skips select_window for action=qa by design
+      (QA switches itself); (3) runtime_state has no running qa entry (QA uses qa_status.json
+      and only writes runtime at done); (4) export tmux -g PYTHONPATH=/workspace before
+      pm session, or the TUI runs /opt/pm-src (no lock); (5) keep about 0.7 s between
+      chord keys (pr-d8b15e7).'
+    created_at: '2026-10-22T16:10:14Z'
+    last_edited: '2026-10-22T16:10:14Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
@@ -31163,6 +31189,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T14:04:42.745914+00:00'
   updated_at: '2026-10-22T14:04:42.745914+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d8b15e7
+  plan: bugs
+  title: 'Bug: popup picker drops type-ahead chord keys typed while fzf relaunches
+    (fast "zzd" is lost or dismisses the picker)'
+  branch: pm/pr-d8b15e7-bug-popup-picker-drops-type-ahead-chord-keys-typed
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/session.py picker chord loop (~L1885-1990) relaunches
+    a fresh fzf for each chord state (main -> z -> zz). Keys typed before the next
+    fzf has started are lost. Repro (QA pr-8409c64 s8, fzf 0.59.0): run `pm _popup-picker
+    <sess> <pr-window>` in a pane, then `tmux send-keys -t <pane> z z d` in one burst.
+    The picker stays in the "z" state and the second z and the d are dropped. Interleaving
+    per-key sends across two panes made the picker exit to the shell, with "d" leaking
+    to the prompt. A gap of about 0.7s between keys works. A fast typist doing zz
+    d can lose the chord. Possible fixes: keep one fzf and switch header/expect with
+    a reload or transform bind, or drain and replay buffered stdin before relaunching.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T16:05:37.412983+00:00'
+  updated_at: '2026-10-22T16:05:37.412983+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
