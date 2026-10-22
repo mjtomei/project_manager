@@ -78,7 +78,7 @@ The behavior is defined on six intents. The mockup binds them as Pageborne and E
 | Back | double tap | Must open the system exit dialog on the root page |
 | Speak | hold, release to review | Review panel: Send / Speak again / Cancel |
 | Go to | tap-then-hold opens the OS menu with app items: Needs you, Sessions, PRs and status, Plans and project | X01. The OS adds Display off, Brightness and Close |
-| Confirm | choose on a confirmation screen | Approval, starts and merge are never one gesture away |
+| Confirm | choose on a confirmation screen | Approval, starts and merge are never one gesture away. Leaving a confirmation (back or the OS menu) cancels it; returning never lands on a pending confirm |
 
 ## 6. Glasses versus companion
 

@@ -18,6 +18,7 @@ const glyphFor = s => STATE_GLYPH[s] || '·';
 const ATTENTION = new Set(['needs', 'waiting', 'failed']);
 const LIVE = new Set(['working', 'idle', 'waiting', 'needs', 'starting']);
 const stateCell = s => ({ t: `${glyphFor(s.state)} ${s.stateText}`, dim: !ATTENTION.has(s.state) && s.state !== 'working' && s.state !== 'starting' });
+const TRANSIENT = new Set(['confirm', 'doc-actions', 'session-actions']); // closed when navigating away
 const LIST_ROWS = BODY_ROWS - 1; // row 0 is the identity/header row
 const INDENT = 28; // label x after the cursor column (▶ is 20 px)
 const TEXT_WIDTH = 540; // wrap width; leaves room below the 552 px container
@@ -118,6 +119,11 @@ export class App {
     // Leaving through the OS menu drops an unsent message; say so, as Cancel does.
     if (this.overlay) this.say('Cancelled · nothing sent');
     this.overlay = null;
+    // Leaving a confirmation or an actions list closes it, so Back from the
+    // chosen view never lands on a choice one tap from confirming.
+    let cancelled = false;
+    while (this.stack.length > 1 && TRANSIENT.has(this.view.kind)) { cancelled ||= this.view.kind === 'confirm'; this.stack.pop(); }
+    if (cancelled) this.say('Cancelled · nothing changed');
     if (item.go === 'home') { this.stack = [this.stack[0]]; return; }
     // Choosing the view already shown does not stack a copy Back must step through.
     if (this.view.type === 'list' && this.view.kind === item.go) return;

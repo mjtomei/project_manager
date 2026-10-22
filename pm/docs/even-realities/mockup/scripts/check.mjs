@@ -178,6 +178,22 @@ if (!only.length) {
     for (let i = 0; i < 3; i++) app.intent('menu', 2);
     rule(app.stack.length === 2, `menu Sessions ×3 stacked ${app.stack.map(x => x.kind || x.type).join(' › ')}`);
   }
+  // Leaving a confirmation or actions list through the OS menu closes it: Back
+  // from the chosen view never lands one tap away from merging or approving.
+  for (const [open, label, under] of [
+    [a => a.push({ type: 'list', kind: 'pr', pr: 'pr-211', cursor: 0, top: 0 }), /^Merge #211/, 'list:pr:pr-211'],
+    [a => { a.openDoc('spec:pr-214:impl'); a.intent('select'); }, /^Approve v/, 'doc:spec:pr-214:impl'],
+    [a => a.openDoc('spec:pr-214:impl'), null, 'doc:spec:pr-214:impl'],
+  ]) {
+    const app = new App(new SimPM());
+    open(app);
+    if (label) app.view.cursor = app.items(app.view).findIndex(i => label.test(i.l));
+    app.intent('select');
+    app.intent('menu', 2);
+    rule(!label || app.toast === 'Cancelled · nothing changed', `menu from ${label} confirmation: toast ${app.toast}`);
+    app.intent('back');
+    rule(app.sceneId() === under, `${label ?? 'doc actions'} → menu Sessions → Back landed on ${app.sceneId()}`);
+  }
   // Approving a QA spec resumes QA in its planner, not implementation.
   {
     const app = new App(new SimPM());
