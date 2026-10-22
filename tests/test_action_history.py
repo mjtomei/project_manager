@@ -140,6 +140,35 @@ class TestJournal:
         assert labels[-1] == "n39"
         assert len(labels) == len(set(labels))
 
+    def test_reader_racing_a_rotation_keeps_the_rotated_generation(
+            self, clock, monkeypatch):
+        """A rotation between the reader's opens of the current and the
+        rotated journal must not drop the generation just rotated."""
+        import builtins
+        path = ah.journal_path(PR)
+        rotated = path.with_name(f"{PR}.1.jsonl")
+        ah.start_attempt(PR, "review", label="old-gen")
+        os.replace(path, rotated)
+        for i in range(3):
+            ah.start_attempt(PR, "review", label=f"mid{i}")
+        real_open = builtins.open
+        state = {"armed": True}
+
+        def _open(p, *a, **kw):
+            f = real_open(p, *a, **kw)
+            if state["armed"] and str(p) in (str(path), str(rotated)):
+                # Another writer rotates right after the reader's first
+                # open, whichever file that is.
+                state["armed"] = False
+                os.replace(path, rotated)
+                path.write_text("")
+            return f
+
+        monkeypatch.setattr(builtins, "open", _open)
+        labels = [e.get("label") for e in ah.read_events(PR)]
+        monkeypatch.setattr(builtins, "open", real_open)
+        assert labels == ["mid0", "mid1", "mid2"]
+
     def test_stale_writer_does_not_rotate_over_old_generation(
             self, clock, monkeypatch):
         """A writer whose fd points at an already-rotated file must not

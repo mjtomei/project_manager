@@ -452,19 +452,37 @@ def read_events(pr_id: str) -> list[dict]:
     """All events for *pr_id*, oldest first.  Skips unreadable lines."""
     path = journal_path(pr_id)
     events: list[dict] = []
-    for p in (_rotated_path(path), path):
+    # Open the current journal before the rotated one.  A rotation between
+    # the two opens then makes both name the same (just rotated) file, read
+    # once below; the other order would read the generation it replaced and
+    # the fresh file, missing the one that was just rotated.
+    files = []
+    for p in (path, _rotated_path(path)):
         try:
             # errors="replace": a corrupt byte only spoils its own line
             # (skipped below as bad JSON) instead of raising out of every
             # reader, sign-off routing included.
-            with open(p, "r", errors="replace") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                try:
-                    raw = f.read()
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            files.append(open(p, "r", errors="replace"))
+        except OSError:
+            pass
+    raws: list[str] = []
+    seen_inodes: set[int] = set()
+    for f in reversed(files):  # oldest generation first
+        try:
+            ino = os.fstat(f.fileno()).st_ino
+            if ino in seen_inodes:
+                continue
+            seen_inodes.add(ino)
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                raws.append(f.read())
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except OSError:
             continue
+        finally:
+            f.close()
+    for raw in raws:
         for line in raw.splitlines():
             line = line.strip()
             if not line:

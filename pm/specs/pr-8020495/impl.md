@@ -309,7 +309,10 @@ attempt rows uninterpreted (omitted when absent).
   to `{pr}.1.jsonl` (one generation) and the reader reads both. Only a
   writer whose fd is still the current file (same inode) rotates, so a
   writer that opened the file just before another rotated it cannot
-  replace the fresh journal over the previous generation.
+  replace the fresh journal over the previous generation.  The reader
+  opens the current file before the rotated one and reads a file once
+  per inode, so a rotation between its two opens cannot drop the
+  generation just rotated.
 - I9. Live owners touch their lock file once a second (heartbeat); a
   dead owner's last heartbeat bounds its interrupted attempts and keeps
   a `gate` that ran out before it died `elapsed` rather than `lost`.
