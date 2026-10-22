@@ -24126,6 +24126,20 @@ prs:
       filed pr-341337e, so open the popups one after the other. Captures /pm-captures/scenarios/19.'
     created_at: '2026-10-22T17:29:53Z'
     last_edited: '2026-10-22T17:29:53Z'
+  - id: note-c1b8f1f
+    text: 'QA scenario 15 refiner (2026-10-22): the picker has no flat PR list. It
+      shows one PR at a time, with the header "PR Actions — <display_id> (k/N)", and
+      h/l cycles through the session-project PRs that have open windows. From a non-PR
+      window, home is None and the cursor starts on the first such PR in project.yaml
+      order. So the Then "lists session PRs, not foreign PRs" is checked by cycling
+      l through all N headers. select_window targets the attached grouped session
+      (current_or_base_session), so assert on #{window_name} of $S~1. Reset the fake-claude
+      cursor per story with `config set`. Run the pre-fix control (popup PYTHONPATH
+      = worktree of 660e43a2, whose spinner uses state_root()) LAST, and kill the
+      picker pid: a q leaves a review-loop suppress flag that the next zz d spinner
+      consumes, so it skips the switch.'
+    created_at: '2026-10-22T17:01:10Z'
+    last_edited: '2026-10-22T17:01:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
