@@ -132,8 +132,8 @@ both the display id and the local id.
 - QA scenario-only windows (`qa-#N-s1`) count as open windows for the nav
   list, matching `_build_picker_lines`' `[open]` matching.
 
-- Single PR in nav list and it's actionless: no nav keys; Enter is ignored;
-  q/Esc quits.  No exit-on-keypress.
+- Single PR in nav list and it's actionless: no nav hint or `(i/n)`; h/l/0
+  only reload (req 8); Enter is ignored; q/Esc quits.  No exit-on-keypress.
 - Home PR is merged and also has open windows: appears once (dedup by
   canonical display id).
 - Two windows for the same PR under both id forms: one nav entry.
