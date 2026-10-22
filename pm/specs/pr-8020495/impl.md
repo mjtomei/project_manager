@@ -313,7 +313,10 @@ attempt rows uninterpreted (omitted when absent).
 - I9. Live owners touch their lock file once a second (heartbeat); a
   dead owner's last heartbeat bounds its interrupted attempts and keeps
   a `gate` that ran out before it died `elapsed` rather than `lost`.
-  Only owners with an open attempt or uncleared timer are probed.
+  Arming a `gate` also schedules one extra beat just after its due time
+  (`_beat_after`), so an owner killed within a second of the due time
+  still left a beat past it.  Only owners with an open attempt or
+  uncleared timer are probed.
 
 ## 3. Ambiguities (resolved)
 
@@ -393,3 +396,22 @@ attempt rows uninterpreted (omitted when absent).
   (`review_loop_ui._transcript_is_another_session`, cached per pane);
   pairing them mirrored a phantom "review running" forever (QA S26,
   c4e3f5b0).
+- E12. Cancel latency: `poll_for_verdict` checks the pane at most once a
+  second while it waits for a hook event, and `_run_claude_review`
+  looks the review pane up right after the synchronous launch (the 2 s
+  wait is only a fallback).  Otherwise a `z d` / `pm pr cleanup` that
+  killed the pane was noticed only after the full hook wait (the cancel
+  was journaled late, and a grace cancelled by `z d` read "elapsed"),
+  and a `z d` in the old 2 s gap let the stopped loop adopt the fresh
+  same-named review pane (QA S9, f0041424).
+- E13. QA resume snapshots: `qa_resume.json` is rewritten right after a
+  scenario relaunch and a dequeued launch (not only at the top of each
+  poll), verification passes that landed while the poll loop was blocked
+  are settled into it first (`_drain_verified`), and a resumed run does
+  not poll scenarios that had already settled (`settled_before`).  A
+  restart in those windows otherwise resumed with a dead pane id or an
+  unverified PASS: duplicate workers past the cap, a second "done" per
+  scenario and re-verification into exited panes (QA S18 6813a7ec, S22
+  d6d0987a).  A follow-up typed into a pane that went away is treated
+  as the pane being gone (`_send_followup`), not an error out of the
+  poll loop.
