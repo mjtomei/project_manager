@@ -30898,7 +30898,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T14:04:42.745914+00:00'
-  updated_at: '2026-10-22T15:07:28.171172+00:00'
+  updated_at: '2026-10-22T15:18:03.625209+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30933,6 +30933,17 @@ prs:
       bin/ or with a which marker; QA swapped it to exec /workspace/bin/fake-claude.'
     created_at: '2026-10-22T15:07:28Z'
     last_edited: '2026-10-22T15:07:28Z'
+  - id: note-09e901d
+    text: 'QA S4 incidental fix 2d126ac1 (+47167ee3 tests): concurrent prefix+M/P
+      from two clients raced on tmux "current client" (run-shell/popup have no pane).
+      Pre-fix: one client got no popup (its typing went into its pane), and picker
+      `s` (pr start, existing window) in client 1 switched client 2''s grouped session
+      to that window. Fix: bindings pass #{q:client_name} #{q:session_name}; _popup-show
+      uses display-popup -c/-t with S/W pinned; popup dispatchers export PM_POPUP_SESSION
+      read by tmux.get_session_name() when no TMUX_PANE. Sessions started before this
+      fix need a reattach (pm session) to pick up the new bindings.'
+    created_at: '2026-10-22T15:18:03Z'
+    last_edited: '2026-10-22T15:18:03Z'
 - id: pr-089af69
   plan: bugs
   title: 'Bug: TUI pr-edit pane vanishes silently when the editor fails to start'
