@@ -3,7 +3,7 @@
 // A frame is what a view wants on the glasses:
 //   rows:   up to 9 body rows; each row {l: [{t, dim}], r: {t, dim}}
 //   footer: {left, right}; left is bright status, right is dim commands
-//   panel:  optional {top, rows} bordered box (voice review, confirmation)
+//   panel:  optional {top, rows} bordered box (voice listening and review)
 //   menu:   app items for the OS contextual menu
 //
 // The container set is fixed so that ordinary updates use

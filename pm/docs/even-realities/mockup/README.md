@@ -46,7 +46,7 @@ To run on glasses during development, serve the directory and open it with `even
 | File | Role |
 |---|---|
 | `src/text.js` | Geometry (576×288, 27 px rows, 9 body rows + footer), glyph availability, wrapping with pretext widths |
-| `src/frame.js` | Frame → fixed set of 8 SDK text containers; checks bytes, rows, widths, glyphs, menu and capture rules |
+| `src/frame.js` | Frame → fixed set of 7 SDK text containers, plus a bordered 8th while the voice panel is open; checks bytes, rows, widths, glyphs, menu and capture rules |
 | `src/app.js` | Views, navigation stack and intents; DOM-free |
 | `src/sim-pm.js`, `src/fixtures.js` | SIMULATED PM: documents with versions, sessions, PRs, history, gates |
 | `src/display.js` | SDK backend (create, then in-place upgrades, rebuild only for panels) and the browser canvas mirror |

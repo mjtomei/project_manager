@@ -1,7 +1,7 @@
 // Drive the official Even Hub simulator through the demo journeys and save
 // glasses screenshots (576x288) plus a few companion (phone WebView) shots.
 //
-//   npm ci && node scripts/capture.mjs [--out ../screenshots] [A B ...]
+//   npm ci --ignore-scripts && node scripts/capture.mjs [--out ../screenshots] [A B ...]
 //
 // Linux without a display needs Xvfb and dbus-run-session (the simulator is a
 // GTK/WebKitGTK app); this script wraps it with `xvfb-run -a` when DISPLAY is
