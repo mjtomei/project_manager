@@ -2572,6 +2572,21 @@ def _relaunch_scenario_window(
 # Verdict polling helpers
 # ---------------------------------------------------------------------------
 
+def _send_followup(pane_id: str, msg: str) -> bool:
+    """Type *msg* into a scenario pane, then two extra Enters (newlines do
+    not always submit).  False when the pane went away mid-send."""
+    from pm_core import tmux as tmux_mod
+    try:
+        tmux_mod.send_keys(pane_id, msg)
+        for _ in range(2):
+            time.sleep(1)
+            tmux_mod.send_keys(pane_id, "")
+    except subprocess.CalledProcessError:
+        _log.warning("Follow-up to pane %s failed: pane is gone", pane_id)
+        return False
+    return True
+
+
 def _poll_tmux_verdicts(
     state: QALoopState,
     data: dict,
@@ -2610,7 +2625,20 @@ def _poll_tmux_verdicts(
     _launch_queue: list[QAScenario] = list(queued_scenarios or [])
     _queued_indices: set[int] = {s.index for s in _launch_queue}
 
-    pending = {s.index for s in state.scenarios if s.window_name}
+    # A resumed run restores verdicts from its snapshot.  A scenario that
+    # already settled there (a non-PASS verdict, or a PASS that was verified
+    # or needs no verification) has nothing left to collect: polling it
+    # again would journal a second attempt for it and hold a concurrency
+    # slot.  Only resumed scenarios carry both a session and a verdict here.
+    settled_before = {
+        s.index for s in state.scenarios
+        if s.window_name and s.session_id
+        and s.index in state.scenario_verdicts
+        and (state.scenario_verdicts[s.index] != VERDICT_PASS
+             or not verify_enabled or s.index in state.verified_scenarios)
+    }
+    pending = {s.index for s in state.scenarios
+               if s.window_name and s.index not in settled_before}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
     # Track how many verification failures each scenario has had
     verification_failures: dict[int, int] = {}
@@ -2654,7 +2682,8 @@ def _poll_tmux_verdicts(
                            verdict_reasons=state.scenario_verdict_reasons)
 
     observer = _ah.ScenarioObserver(state.pr_id, state.history_attempt or None,
-                                    state.loop_id)
+                                    state.loop_id,
+                                    settled_before=settled_before)
     _grace_timer = f"qa-grace:{state.loop_id}"
     # Journal clock (not monotonic) so the clear reason costs no extra
     # monotonic reads and agrees with controlled-clock tests.
@@ -2714,6 +2743,47 @@ def _poll_tmux_verdicts(
             # and ``pending`` is also empty the loop exits before it
             # sees the result (race condition).
 
+    # Verification passes settled outside the main loop's result handling
+    # (see _drain_verified); the main loop runs their follow-ups.
+    _drained: list[int] = []
+
+    def _accept_verified(scenario: QAScenario) -> None:
+        verifying.discard(scenario.index)
+        _log.info("Verification passed for scenario %d (%s)",
+                  scenario.index, scenario.title)
+        state.verified_scenarios.add(scenario.index)
+        state.latest_output = (
+            f"Scenario {scenario.index} ({scenario.title}): "
+            f"{state.scenario_verdicts[scenario.index]} (verified)"
+        )
+        _notify()
+
+    def _drain_verified() -> bool:
+        """Settle verification passes that landed while the loop was blocked
+        (a dequeued scenario's concretizer, a relaunch backoff, the poll
+        sleep).  The snapshot written next must record them: a restart
+        before the main loop got to them would otherwise resume the
+        scenario as unverified and verify it a second time."""
+        with verification_lock:
+            done = sorted(i for i, (ok, _) in verification_results.items()
+                          if ok)
+            for i in done:
+                del verification_results[i]
+        for i in done:
+            scenario = next((s for s in state.scenarios if s.index == i), None)
+            if scenario is None:
+                verifying.discard(i)
+                continue
+            _accept_verified(scenario)
+            _drained.append(i)
+        return bool(done)
+
+    def _snapshot() -> None:
+        if _drain_verified():
+            _observe()
+        _write_resume_file(state, use_containers, concurrency_cap,
+                           _queued_indices)
+
     def _launch_next_queued():
         """Launch the next queued scenario if concurrency allows."""
         if not _launch_queue:
@@ -2751,8 +2821,7 @@ def _poll_tmux_verdicts(
             # Snapshot now, not on the next poll: a TUI restart in between
             # would resume with this scenario still queued and launch a
             # second worker beside the live one.
-            _write_resume_file(state, use_containers, concurrency_cap,
-                               _queued_indices)
+            _snapshot()
         else:
             # Window creation failed — mark INPUT_REQUIRED so this
             # scenario isn't silently lost (which could cause a false
@@ -2780,8 +2849,7 @@ def _poll_tmux_verdicts(
         # Refresh the resume snapshot each iteration so a TUI restart can
         # re-enter this loop with up-to-date scenario pane/session state
         # (queued launches and verdicts both mutate it).
-        _write_resume_file(state, use_containers, concurrency_cap,
-                           _queued_indices)
+        _snapshot()
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
         verdicts_changed = False
@@ -2790,6 +2858,8 @@ def _poll_tmux_verdicts(
         with verification_lock:
             completed_verifications = dict(verification_results)
             verification_results.clear()
+        drained = bool(_drained)
+        _drained.clear()
 
         for scenario_idx, (passed, reason) in completed_verifications.items():
             verifying.discard(scenario_idx)
@@ -2801,14 +2871,7 @@ def _poll_tmux_verdicts(
                              scenario_idx)
                 continue
             if passed:
-                _log.info("Verification passed for scenario %d (%s)",
-                          scenario_idx, scenario.title)
-                state.verified_scenarios.add(scenario_idx)
-                state.latest_output = (
-                    f"Scenario {scenario_idx} ({scenario.title}): "
-                    f"{state.scenario_verdicts[scenario_idx]} (verified)"
-                )
-                _notify()
+                _accept_verified(scenario)
             else:
                 fails = verification_failures.get(scenario_idx, 0) + 1
                 verification_failures[scenario_idx] = fails
@@ -2838,8 +2901,7 @@ def _poll_tmux_verdicts(
                         pane_id = None
                     if pane_id is None:
                         pane_id = _get_scenario_pane(session, scenario.window_name)
-                    if pane_id:
-                        followup_msg = (
+                    if pane_id and not _send_followup(pane_id, (
                             f"Your verdict was reviewed and flagged: {reason} — "
                             f"Please re-evaluate this scenario. Make sure you "
                             f"actually execute the test steps (run commands, "
@@ -2848,14 +2910,9 @@ def _poll_tmux_verdicts(
                             f"End with `Reason: <one sentence>` on the "
                             f"second-to-last line and a new verdict "
                             f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
-                            f"on the last line."
-                        )
-                        tmux_mod.send_keys(pane_id, followup_msg)
-                        # Send extra Enters to ensure the message is
-                        # submitted — sometimes newlines don't trigger.
-                        for _ in range(2):
-                            time.sleep(1)
-                            tmux_mod.send_keys(pane_id, "")
+                            f"on the last line.")):
+                        pane_id = None
+                    if pane_id:
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
                         # Clear verdict and put back in pending.  Stamp the
@@ -2945,8 +3002,7 @@ def _poll_tmux_verdicts(
                         # the next poll would otherwise resume with the dead
                         # pane, treat the live retry as vanished and launch
                         # a duplicate worker.
-                        _write_resume_file(state, use_containers,
-                                           concurrency_cap, _queued_indices)
+                        _snapshot()
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         _arm_grace()
@@ -3100,10 +3156,10 @@ def _poll_tmux_verdicts(
                     _launch_next_queued()
 
         # Launch queued scenarios after verified completions too
-        if completed_verifications:
+        if completed_verifications or drained:
             _launch_next_queued()
 
-        if verdicts_changed or completed_verifications:
+        if verdicts_changed or completed_verifications or drained:
             with verification_lock:
                 verifying_snapshot = set(verifying)
             _write_status_file(status_path, state.pr_id, state.scenarios,

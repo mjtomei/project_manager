@@ -809,6 +809,37 @@ class TestScenarioObserver:
             "attempts"][0]["children"]
         assert [p["phase"] for p in kid["phases"]] == ["agent"]
 
+    def test_settled_without_running_journals_once(self, clock):
+        """A scenario that settles without ever running (launch failure)
+        gets one zero-length attempt, not one per poll tick."""
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        for _ in range(4):
+            obs.observe([_sc(1)], pending=set(), verifying=set(),
+                        queued=set(), verdicts={1: "INPUT_REQUIRED"})
+            clock.advance(5)
+        kids = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert [(k["outcome"], k["verdict"]) for k in kids] == [
+            ("done", "INPUT_REQUIRED")]
+
+    def test_resumed_run_skips_scenarios_settled_before(self, clock):
+        """A resumed run's scenarios that settled before the restart belong
+        to the earlier run attempt: the new run journals none for them."""
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1", settled_before={1, 2})
+        scs = [_sc(1), _sc(2), _sc(3)]
+        done = {1: "PASS", 2: "NEEDS_WORK"}
+        for _ in range(3):
+            obs.observe(scs, pending={3}, verifying=set(), queued=set(),
+                        verdicts=done)
+            clock.advance(5)
+        obs.observe(scs, pending=set(), verifying=set(), queued=set(),
+                    verdicts={**done, 3: "PASS"})
+        kids = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert [(k["scenario"], k["verdict"]) for k in kids] == [(3, "PASS")]
+
 
 class TestQARunJournal:
     @pytest.mark.parametrize("stop,verdict,run_out,planner_out", [

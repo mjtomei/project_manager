@@ -1787,6 +1787,125 @@ class TestScenarioRetryLogic:
         next_poll = after.index(("sleep", _POLL_INTERVAL))
         assert ("write", "%99") in after[:next_poll]
 
+    def test_dequeue_snapshot_records_verification_that_landed_during_launch(
+            self, tmp_path):
+        """A dequeue blocks the loop in the concretizer.  A verification
+        pass that lands meanwhile must be in the snapshot written right
+        after the launch: a TUI restart there would otherwise resume the
+        scenario as unverified and verify it a second time."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+        import itertools
+        import threading
+        import time as _time
+
+        real_sleep = _time.sleep
+        scs = []
+        for i in (1, 2, 3):
+            sc = QAScenario(index=i, title=f"T{i}", focus="t")
+            sc.window_name = f"qa-test-s{i}" if i < 3 else None
+            sc.session_id = f"sid-dq-{i}" if i < 3 else None
+            sc.transcript_path = f"/tmp/t{i}.jsonl"
+            scs.append(sc)
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.scenarios = list(scs)
+        state.scenario_verdicts = {}
+        release_s2 = threading.Event()
+        events = []
+
+        def verify(scenario, *a, **k):
+            if scenario.index == 2:
+                release_s2.wait(5)
+            return True, "", None
+
+        def launch(st, *a, **k):
+            sc = st.scenarios[0]
+            sc.window_name, sc.session_id = "qa-test-s3", "sid-dq-3"
+            release_s2.set()
+            for t in threading.enumerate():
+                if t.name.endswith("-2"):
+                    t.join(5)
+            events.append(("launched",))
+
+        def read_event(sid):
+            return {"event_type": "idle_prompt", "timestamp": _time.time() + 1000,
+                    "session_id": sid}
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux", side_effect=launch), \
+             patch("pm_core.qa_loop._verify_single_scenario", side_effect=verify), \
+             patch("pm_core.qa_loop._write_resume_file",
+                   side_effect=lambda st, *a, **k: events.append(
+                       ("write", sorted(st.verified_scenarios)))), \
+             patch("pm_core.qa_loop.time.sleep",
+                   side_effect=lambda s: real_sleep(0.05)), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", side_effect=read_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript", return_value="PASS"), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript", return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: None, queued_scenarios=[scs[2]], concurrency_cap=2,
+            )
+
+        assert state.verified_scenarios == {1, 2, 3}
+        after = events[events.index(("launched",)) + 1:]
+        assert after[0] == ("write", [1, 2])
+
+    def test_resumed_run_does_not_poll_settled_scenarios(self, tmp_path):
+        """A resumed run re-polls only scenarios still in flight; one that
+        settled before the restart would otherwise get a second attempt and
+        hold a concurrency slot."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+        import itertools
+        import time as _time
+
+        scs = []
+        for i in (1, 2, 3):
+            sc = QAScenario(index=i, title=f"T{i}", focus="t")
+            sc.window_name, sc.session_id = f"qa-test-s{i}", f"sid-set-{i}"
+            sc.transcript_path = f"/tmp/t{i}.jsonl"
+            scs.append(sc)
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = scs
+        state.scenario_verdicts = {1: VERDICT_PASS, 2: VERDICT_NEEDS_WORK}
+        state.verified_scenarios = {1}
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": _time.time() + 1000}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS") as mock_extract, \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: None,
+            )
+
+        assert [c.args[0] for c in mock_extract.call_args_list] == ["/tmp/t3.jsonl"]
+        assert state.scenario_verdicts == {1: VERDICT_PASS, 2: VERDICT_NEEDS_WORK,
+                                           3: VERDICT_PASS}
+
+    def test_followup_to_vanished_pane_reports_failure(self):
+        """A scenario pane that dies mid follow-up must not raise out of
+        the poll loop (that ended the whole QA run ERROR)."""
+        import subprocess
+        from pm_core.qa_loop import _send_followup
+
+        err = subprocess.CalledProcessError(1, ["tmux", "send-keys"])
+        with patch("pm_core.tmux.send_keys", side_effect=[None, err]), \
+             patch("pm_core.qa_loop.time.sleep"):
+            assert _send_followup("%16", "msg") is False
+        with patch("pm_core.tmux.send_keys"), patch("pm_core.qa_loop.time.sleep"):
+            assert _send_followup("%16", "msg") is True
+
     def test_retries_exhausted_gives_input_required(self, tmp_path):
         """When all retries are used, scenario gets INPUT_REQUIRED."""
         from pm_core.qa_loop import (

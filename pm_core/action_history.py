@@ -514,7 +514,8 @@ class ScenarioObserver:
     journals starts, phase changes and ends.  It never mutates loop state.
     """
 
-    def __init__(self, pr_id: str, parent: str | None, loop_id: str = ""):
+    def __init__(self, pr_id: str, parent: str | None, loop_id: str = "",
+                 settled_before=()):
         self.pr_id = pr_id
         self.parent = parent
         self.loop_id = loop_id
@@ -524,8 +525,10 @@ class ScenarioObserver:
         self._seen: set[int] = set()
         # Scenarios whose window died and are between relaunches.
         self._dead: set[int] = set()
-        # Scenarios that have had at least one journaled attempt.
-        self._had_attempt: set[int] = set()
+        # Scenarios that have had at least one journaled attempt.  A resumed
+        # run's scenarios that settled before the restart had theirs in the
+        # earlier run attempt.
+        self._had_attempt: set[int] = set(settled_before)
 
     def _start(self, sc, status: str) -> str:
         idx = sc.index
@@ -600,6 +603,7 @@ class ScenarioObserver:
                                       label=getattr(sc, "title", None) or None)
                     end_attempt(self.pr_id, a, "done",
                                 verdict=verdicts.get(idx))
+                    self._had_attempt.add(idx)
                 continue
             prev = cur["status"]
             if status == prev:
