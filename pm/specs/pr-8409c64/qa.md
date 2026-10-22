@@ -76,8 +76,10 @@ switch fires.
 - **Given** the review-loop spinner is showing in the popup.
 - **When** the user presses `q` or `Esc`.
 - **Then** the popup closes immediately, the session does **not** switch to the
-  review window, and focus is not later stolen when the launch completes (the
-  suppress-switch flag is honored).
+  review window, and focus is not later stolen when the launch completes.
+  Assert this on the surface (active window). For review-loop the spinner is
+  the only switcher, so once it exits nothing switches. No later
+  `consume_suppress_switch` call is involved, so do not assert one.
 
 ### R6 — QA `t`, newly launched QA window: live switch AND popup dismissal
 Added 2026-10-22 (user report: `t` switched the client to the QA window but the
@@ -104,8 +106,11 @@ tested rather than guessed.
     entry, and the spinner log line `spinner exit: reason=window_open
     target=qa-<display_id>` (must NOT be `reason=terminal_state`).
   - **(c) QA continues** — after the popup is gone the run keeps going:
-    runtime_state `qa` still `launching`/`running`, `qa-<display_id>` still
-    alive, scenario windows `qa-<display_id>-sN` appear/progress afterwards.
+    `qa-<display_id>` still alive, scenario windows `qa-<display_id>-sN`
+    appear/progress afterwards, and the run's `qa_status.json`
+    (`~/.pm/workdirs/qa/<pr_id>-*/`) has no `overall` yet. Do not require a
+    runtime_state `qa` entry: QA mirrors one only through pane registration
+    and otherwise writes it only at `done`.
 
 ### R7 — QA `t` with an existing QA window/run: live switch AND popup dismissal
 - **Given** the same attached client and contexts **C1–C4**, with a QA run
@@ -119,9 +124,11 @@ tested rather than guessed.
   same run/loop id, scenario windows untouched, state still `running`.
 
 ### R6/R7 context matrix
-Run R6 and R7 in every context (8 cells). `PM_PROJECT` is set/unset **in the
-pane that opens the popup** (the popup inherits the pane's cwd via
-`_popup-show -d` and the client environment):
+Run R6 and R7 in every context (8 cells). The popup inherits the pane's cwd
+(via `_popup-show -d`), but its environment comes from the tmux **global +
+client-session** environment, not the pane shell. So set or unset
+`PM_PROJECT` with `tmux set-environment -t <client-session> PM_PROJECT <root>/pm`
+or `-r PM_PROJECT`, check `-g` as well, and confirm with a probe popup:
 - **C1 — TUI/root, `PM_PROJECT` unset**: pane cwd = the session's project root
   (the TUI/main window or a shell `cd`'d there); `unset PM_PROJECT`.
 - **C2 — TUI/root, `PM_PROJECT` set** to the session's pm dir.
@@ -139,6 +146,12 @@ up in a cell where the old lookup was already correct (C1/C2/C4), that is a
 **distinct remaining cause**: diagnose it from the spinner log
 (`~/.pm/debug/<tag>.log`, `PM_SPINNER_TRACE=1`) and fix it on this PR or file
 it as a separate bug — do not count the cell as passing.
+
+Out of scope: `z t` (fresh QA) from a non-QA window moving the originating
+client to the new `qa-<id>` window. For `qa` the spinner deliberately never
+selects a window, and following the invoker needs origin-session capture,
+which pr-c41f029 owns (see impl.md EC6). Do not fail this PR's cells on
+that behavior.
 
 ### R8 — A failed launch still surfaces its error
 - **Given** an action whose launch fails (runtime_state reaches `failed`, or a

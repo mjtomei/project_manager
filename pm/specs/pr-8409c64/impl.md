@@ -78,10 +78,13 @@ resolution independent of the popup's cwd / `PM_PROJECT`, matching the
 picker's own listing.
 
 ```python
-saved_root = _resolve_root_from_session(session)
-root = saved_root if saved_root is not None else state_root()
-data = store.load(root)
+def _session_project_root(session):
+    saved_root = _resolve_root_from_session(session)
+    return saved_root if saved_root is not None else state_root()
 ```
+
+Both the picker listing (`popup_picker_cmd`) and the spinner call this one
+helper, so the two can no longer disagree about which project owns a PR.
 
 This is the minimal change at the true root cause; the window-appearance and
 suppress-switch logic downstream is already correct (verified: with a valid
@@ -140,6 +143,19 @@ suppress-switch logic downstream is already correct (verified: with a valid
 - **EC5 — failed launch**: unchanged terminal-state short-circuit still prints
   `✗ <action>: failed` and waits via `_wait_dismiss`
   (`tests/test_picker_spinner_terminal.py`).
+- **EC6 — `z t` (fresh QA) from a non-QA window: out of scope, owned by
+  pr-c41f029.** QA scenario 7 (2026-10-22) found that the spinner, popup
+  dismissal and window replacement are all correct, but the originating
+  client stays put: for `qa` the spinner never selects (by design), and
+  `qa_loop` planning only moves sessions that were watching the *old*
+  `qa-<id>` window. The fix is origin-session capture (pr-c41f029,
+  `followers_for_window`), verified live by merging that branch onto this one.
+  This PR does not depend on pr-c41f029 and does not add a second invoker-follow
+  mechanism. The user-reported variant (`t`, non-fresh) passes in all C1–C4
+  cells (QA S6/S7).
+- **Live QA results for EC4 (2026-10-22, ce6cd54d):** R6/R7 post-fix passed in
+  C1–C4. In the pre-fix control only C3 reproduced (`target_window=None`,
+  popup held until `terminal_state`), which confirms the single root cause.
 
 ## 5. Ambiguities
 

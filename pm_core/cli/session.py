@@ -1285,18 +1285,12 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         return
     _trace = os.environ.get("PM_SPINNER_TRACE") == "1"
     try:
-        # Resolve the project root from the session — the same way the
-        # popup picker resolves it for its listing — rather than from the
-        # popup's cwd / PM_PROJECT.  A popup launched from a non-project
-        # window (or a workdir clone for a *different* PR) would otherwise
-        # have state_root() load the wrong project.yaml, fail to find
-        # pr_id, leave display_id (and thus target_window) None, and spin
-        # forever without ever matching — or switching to — the review
-        # window.  Fall back to state_root() when session metadata is
-        # absent (older sessions), preserving prior behavior.
-        saved_root = _resolve_root_from_session(session)
-        root = saved_root if saved_root is not None else state_root()
-        data = store.load(root)
+        # Resolve the root from the session, not the popup's cwd: a popup
+        # opened from a non-project window (or another PR's workdir clone)
+        # would otherwise load the wrong project.yaml, miss pr_id, leave
+        # target_window None and spin forever without ever matching — or
+        # switching to — the action's window.
+        data = store.load(_session_project_root(session))
         from pm_core.cli.helpers import _pr_display_id
         display_id = None
         for p in data.get("prs") or []:
@@ -1688,6 +1682,18 @@ def _resolve_root_from_session(session: str) -> Path | None:
     return get_session_pm_root(tag)
 
 
+def _session_project_root(session: str) -> Path:
+    """Project root for popup code running on behalf of *session*.
+
+    Prefers the session's persisted root so the popup picker and its
+    spinner agree on which project.yaml owns a PR regardless of the popup's
+    cwd; falls back to ``state_root()`` when session metadata is absent
+    (older sessions).  May raise ``FileNotFoundError`` from that fallback.
+    """
+    saved_root = _resolve_root_from_session(session)
+    return saved_root if saved_root is not None else state_root()
+
+
 @cli.command("_popup-picker", hidden=True)
 @click.argument("session")
 @click.argument("window_name", default="")
@@ -1716,9 +1722,8 @@ def popup_picker_cmd(session: str, window_name: str):
         click.echo("Not a pm session.")
         _pause_and_exit(1)
 
-    saved_root = _resolve_root_from_session(session)
     try:
-        root = saved_root if saved_root is not None else state_root()
+        root = _session_project_root(session)
         data = store.load(root)
     except FileNotFoundError:
         click.echo("No project.yaml found.")
