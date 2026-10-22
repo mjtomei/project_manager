@@ -30898,7 +30898,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T14:04:42.745914+00:00'
-  updated_at: '2026-10-22T14:54:40.225853+00:00'
+  updated_at: '2026-10-22T15:07:28.171172+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30914,6 +30914,25 @@ prs:
       run it last. Put /usr/bin/git first on PATH before pm session.'
     created_at: '2026-10-22T14:54:40Z'
     last_edited: '2026-10-22T14:54:40Z'
+  - id: note-baf898d
+    text: 'QA S2 refine: in this container /usr/local/bin/pm is `python3 -m pm_core.wrapper`
+      (cwd first on sys.path), so the OUTER `pm _popup-cmd` from a window cwd holding
+      a pm_core imports that cwd code; for a plain project (no pm_core next to pm/)
+      it never swaps away, so the child dispatcher_root = the cwd clone. Drive popup
+      QA with the venv console-script pm (pm_core.wrapper:main) first on the tmux
+      server PATH; the -m launcher gap is outside this PR (launcher, not the dispatchers).'
+    created_at: '2026-10-22T15:07:26Z'
+    last_edited: '2026-10-22T15:07:26Z'
+  - id: note-81515e3
+    text: 'QA S2 (3dbd4f7c): picker d (pr review) from a PR window launched REAL claude
+      despite session fake-claude _all config — build_claude_shell_cmd got no session_tag,
+      so the gate used the workdir cwd tag. Fixed by passing the tmux-aware tag in
+      pr start/review/merge launchers (pr.py) + test. Other launchers (qa_loop, signoff,
+      guide, pane_ops) still default to cwd tag — tracked by pr-ea4fffa. Harness:
+      ~/.local/bin/fake-claude resolves via `pm which` → breaks in workdirs without
+      bin/ or with a which marker; QA swapped it to exec /workspace/bin/fake-claude.'
+    created_at: '2026-10-22T15:07:28Z'
+    last_edited: '2026-10-22T15:07:28Z'
 - id: pr-089af69
   plan: bugs
   title: 'Bug: TUI pr-edit pane vanishes silently when the editor fails to start'
@@ -30957,8 +30976,15 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:00:51.407046+00:00'
-  updated_at: '2026-10-22T15:00:51.407046+00:00'
+  updated_at: '2026-10-22T15:07:29.121136+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-57814cd
+    text: 'pr-24f022e QA S2 fixed the pr start/review/merge window launchers (pass
+      tmux-aware session_tag to build_claude_shell_cmd, commit 3dbd4f7c). Remaining:
+      _fake_claude_config_for_type(None) callers in claude_launcher + qa_loop/signoff/guide/pane_ops
+      launches, and skip-permissions lookup.'
+    created_at: '2026-10-22T15:07:29Z'
+    last_edited: '2026-10-22T15:07:29Z'
