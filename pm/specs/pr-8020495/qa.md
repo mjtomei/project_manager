@@ -77,7 +77,9 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   merged (runtime state cleaned up, panes closed), when the user opens the
   actions popup, then only the History row is offered (not "No actions
   available"), and `pm pr history` still shows every attempt; any journaled
-  hold still open shows as `released (PR merged)`. A stale
+  hold still open shows as `released (PR merged)` — also when the TUI
+  that armed it has exited or was killed before the history is read (never
+  `lost (owner process exited)` on a merged/closed PR). A stale
   spec-awaiting-approval flag on a merged/closed PR is not shown as a hold.
 - **R10 — sign-off router and throttle.** Given auto-start drives a PR into
   sign-off, when the router launches, then history shows a
@@ -193,8 +195,11 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   earlier day of the same year, full `YYYY-MM-DD HH:MM:SS` in another
   year; an attempt's end carries a date only when it falls on another day
   than its start. Rows from an earlier day (the usual view of a merged
-  PR) still fit 80 columns unwrapped, and the Milestones line wraps
-  between items, never inside one.
+  PR) still fit 80 columns unwrapped, the Milestones line wraps
+  between items, never inside one, and a Recent-timers row whose
+  resolution time carries a full date wraps between its parts
+  (`purpose: resolution` / `at …` / `(armed …)`) instead of exceeding 80
+  columns.
 - **E6 — overdue.** A `fires` timer past due whose owner is alive shows
   `overdue by Xs`, never negative remaining.
 - **E7 — concurrent writers.** Two or more processes (TUI loop threads, a
