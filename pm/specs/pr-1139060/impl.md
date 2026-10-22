@@ -105,6 +105,11 @@ name are serialized.
   that tag+PR, checked under a per-proxy fcntl lock; `create_container` holds
   that lock from proxy start until `run` returns so a concurrent release
   cannot stop a proxy a new container is about to mount.
+  A per-container (unshared: qa-debug, untagged) proxy is stopped whenever
+  its container is removed, by whichever process removes it.
+  If the QA run-end release is skipped because another reconcile holds the
+  reaper lock, it is re-queued in the background (live panes would
+  otherwise keep those containers "owned" forever).
   Workdirs, captures, transcripts, QA workdirs are never touched.
 
 ### R4 — Reconcile on startup and periodically

@@ -1033,12 +1033,14 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
+            window_created = False
             try:
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
                         pm_session, window_name, cmd, str(work_path),
                         switch=not background,
                     )
+                    window_created = bool(claude_pane)
                     if claude_pane:
                         win = tmux_mod.find_window_by_name(pm_session, window_name)
                         if win:
@@ -1046,6 +1048,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 else:
                     tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
                                         switch=not background)
+                    window_created = True
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -1055,6 +1058,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 clear_return_awaiting(root, pr_id, "impl")
                 return
             except Exception as e:
+                if window_created:
+                    # The Claude pane exists (a later step such as the
+                    # companion split failed) — keep its container.
+                    click.echo(f"Launched Claude in tmux window '{window_name}' "
+                               f"(setup warning: {e})", err=True)
+                    return
                 click.echo(f"Failed to create tmux window: {e}", err=True)
                 # No pane will ever exec into the container — release it.
                 discard_container(_cname)

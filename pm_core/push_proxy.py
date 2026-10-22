@@ -822,6 +822,14 @@ def stop_push_proxy(container_name: str) -> None:
         if parsed and parsed.session_tag and pid:
             release_proxy_if_unused(parsed.session_tag, pid,
                                     exclude={container_name})
+        # A per-container proxy (no session tag or PR, e.g. qa-debug or
+        # legacy untagged containers) serves only this container.
+        import tempfile
+        own_sock = os.path.join(tempfile.gettempdir(),
+                                f"{_SOCKET_DIR_PREFIX}{container_name}",
+                                "push.sock")
+        if os.path.exists(own_sock):
+            _kill_proxy_socket(own_sock)
         return
 
     if "\0" in key:

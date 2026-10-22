@@ -303,7 +303,7 @@ on top.
 @click.option("--pr", "pr_id", default=None, help="Filter by PR ID")
 def container_cleanup(pr_id: str | None):
     """Remove stale pm containers."""
-    from pm_core.container import _run_runtime, remove_container, CONTAINER_PREFIX
+    from pm_core.container import _run_runtime, remove_containers, CONTAINER_PREFIX
 
     result = _run_runtime(
         "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
@@ -319,7 +319,7 @@ def container_cleanup(pr_id: str | None):
         click.echo("No pm containers found.")
         return
 
-    removed = 0
+    names = []
     for line in lines:
         parts = line.split("\t", 1)
         name = parts[0].strip()
@@ -327,10 +327,14 @@ def container_cleanup(pr_id: str | None):
         if pr_id and pr_id not in name:
             continue
         click.echo(f"  Removing: {name} ({status})")
-        remove_container(name)
-        removed += 1
+        names.append(name)
 
-    click.echo(f"Removed {removed} container(s).")
+    removed, failures = remove_containers(names)
+    for name, err in sorted(failures.items()):
+        click.echo(f"  FAILED:   {name}: {err}", err=True)
+    click.echo(f"Removed {len(removed)} container(s).")
+    if failures:
+        raise SystemExit(1)
 
 
 def echo_reap_outcome(outcome) -> None:

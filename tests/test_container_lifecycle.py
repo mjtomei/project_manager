@@ -507,6 +507,34 @@ class TestProxyRelease:
         assert push_proxy.release_proxy_if_unused("t", "pr-1") is None
         assert killed == []
 
+    def test_foreign_per_container_proxy_stopped_on_remove(self, monkeypatch, tmp_path):
+        """A qa-debug/untagged container removed by another process (the
+        reaper) still has its private proxy stopped."""
+        import tempfile
+        from pm_core import push_proxy
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        name = "pm-qa-debug-abc-123"
+        sock_dir = tmp_path / f"{push_proxy._SOCKET_DIR_PREFIX}{name}"
+        sock_dir.mkdir()
+        (sock_dir / "push.sock").write_text("")
+        killed = []
+        monkeypatch.setattr(push_proxy, "_kill_proxy_socket", killed.append)
+        push_proxy.stop_push_proxy(name)
+        assert killed == [str(sock_dir / "push.sock")]
+
+    def test_foreign_shared_container_leaves_private_paths_alone(self, monkeypatch, tmp_path):
+        import tempfile
+        from pm_core import push_proxy
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        released = []
+        monkeypatch.setattr(push_proxy, "release_proxy_if_unused",
+                            lambda tag, pr, exclude=(): released.append((tag, pr)))
+        killed = []
+        monkeypatch.setattr(push_proxy, "_kill_proxy_socket", killed.append)
+        push_proxy.stop_push_proxy("pm-t-impl-pr-1a2b")
+        assert released == [("t", "pr-1a2b")]
+        assert killed == []
+
 
 # ---------------------------------------------------------------------------
 # QA: run-end release and launch failures
@@ -555,6 +583,21 @@ class TestQARelease:
                                 failures={names[0]: "boom"}))
         assert qa_loop._release_scenario_containers(st, "pm-t") is True
         assert "pm container reap" in st.latest_output
+
+    def test_skipped_release_is_retried_in_background(self, monkeypatch):
+        from pm_core import qa_loop
+        st = self._state()
+        st.scenario_verdicts = {1: qa_loop.VERDICT_PASS}
+        monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda s: set())
+        calls = []
+
+        def _release(names, **kw):
+            calls.append(kw)
+            return reaper.Outcome(skipped=True) if kw.get("wait", True) else None
+        monkeypatch.setattr(reaper, "release_containers", _release)
+        qa_loop._release_scenario_containers(st, "pm-t")
+        assert len(calls) == 2
+        assert calls[1]["wait"] is False and calls[1]["owner_release"] is True
 
     def test_launch_failure_is_not_a_verdict(self):
         from pm_core import qa_loop
@@ -627,3 +670,22 @@ class TestReapCLI:
         monkeypatch.setattr(cm, "restart_container", restarted.append)
         r = CliRunner().invoke(cli, ["container", "restart", "pm-x-review-pr-1"])
         assert r.exit_code == 1 and "%4" in r.output and restarted == []
+
+    def test_cleanup_continues_past_failure(self, monkeypatch):
+        """`pm container cleanup` reports a stuck container instead of
+        aborting the rest (remove_container now raises when it can't)."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: _cp(
+            out="pm-a-impl-pr-1\tUp\npm-a-review-pr-1\tUp\n"))
+        removed = []
+
+        def _rm(name):
+            if "review" in name:
+                raise cm.ContainerError("still present after 10 s")
+            removed.append(name)
+        monkeypatch.setattr(cm, "remove_container", _rm)
+        r = CliRunner().invoke(cli, ["container", "cleanup"])
+        assert r.exit_code == 1
+        assert removed == ["pm-a-impl-pr-1"]
+        assert "FAILED" in r.output and "Removed 1 container(s)." in r.output

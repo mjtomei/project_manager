@@ -4338,6 +4338,12 @@ def _release_scenario_containers(state: QALoopState, session: str) -> bool:
         names, reason="qa-run-end", owner_release=True)
     _log.info("QA %s/%s released containers: %s", state.pr_id,
               state.loop_id, outcome.summary())
+    if outcome.skipped:
+        # Another reconcile held the reaper lock past the wait.  Their live
+        # panes would keep them "owned" from the reconciler's point of view,
+        # so retry the owner release in the background rather than leak.
+        container_reaper.release_containers(
+            names, reason="qa-run-end", owner_release=True, wait=False)
     if outcome.failures:
         state.latest_output += (
             f" [container cleanup failed for {len(outcome.failures)}"
