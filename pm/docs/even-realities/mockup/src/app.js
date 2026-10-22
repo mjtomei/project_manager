@@ -172,6 +172,8 @@ export class App {
         const r = this.pm.start(s.id);
         this.pop();
         if (!r.ok) return this.fail(r);
+        // PM started it while the confirmation was showing: open that one.
+        if (r.already === 'running') return this.openSession(s.id);
         this.say(r.already === 'starting' ? `Already starting ${s.short}` : `Starting ${s.short} (${r.id}) · not opened twice`);
       },
     });

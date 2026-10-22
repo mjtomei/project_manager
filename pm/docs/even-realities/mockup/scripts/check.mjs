@@ -268,6 +268,16 @@ if (!only.length) {
     rule(app.view === opened && opened.scroll === 1 && copies === 1, `${via}: ${app.stack.map(x => x.kind || x.type).join(' › ')} (${copies} copies)`);
     if (keepsDoc) { app.intent('back'); rule(app.view.type === 'doc', `${via} → Back landed on ${app.sceneId()}, not the document`); }
   }
+  // A session PM starts while its Start confirmation is showing opens on
+  // confirm instead of claiming a new start (with no request id).
+  {
+    const app = new App(new SimPM());
+    app.confirmStart(app.pm.session('pr-215/signoff'));
+    app.pmEvent({ type: 'started', session: 'pr-215/signoff' });
+    app.intent('select');
+    rule(app.view.type === 'session' && app.view.id === 'pr-215/signoff' && !/undefined|^Starting/.test(app.toast || ''),
+      `confirm Start after PM started it: ${app.sceneId()} toast ${app.toast}`);
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);
