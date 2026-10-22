@@ -31041,7 +31041,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:01:50.214450+00:00'
-  updated_at: '2026-10-22T16:15:09.951472+00:00'
+  updated_at: '2026-10-22T17:03:16.267116+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31067,6 +31067,16 @@ prs:
       (pm pr spec <pr> qa in spec-mode auto) or it ends INPUT_REQUIRED.'
     created_at: '2026-10-22T15:55:52Z'
     last_edited: '2026-10-22T15:55:52Z'
+  - id: note-a1fb062
+    text: 'QA S1 NEEDS_WORK→fixed 7dc5d0f1: live QA spec review (QA ended INPUT_REQUIRED
+      for missing spec, then spec flagged) rendered "QA SPEC REVIEW qa INPUT_REQUIRED";
+      phase_text now drops the phase token when the attention label names the phase.
+      All other S1 Thens held (wide/narrow/width clamps/color control/JSON). Setup
+      traps: commit in A workdir before sign-off (in_base→BLOCKED); qa s0 eats first
+      scripted qa_scenario verdict; hold G review IR by replacing ~/.pm/hooks/<sid>.json
+      with a dir (pr-c8482a8). Scripts: /pm-captures/scenarios/1/scripts.'
+    created_at: '2026-10-22T17:03:16Z'
+    last_edited: '2026-10-22T17:03:16Z'
 - id: pr-c8482a8
   plan: bugs
   title: 'fake-claude cannot hold a review INPUT_REQUIRED: 2 s idle_prompt refresh
