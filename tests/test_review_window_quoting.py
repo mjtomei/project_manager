@@ -279,3 +279,21 @@ def test_review_claude_pane_starts_in_pr_workdir(fake_tmux, monkeypatch):
     args, kwargs = calls[0]
     assert args[2] == "fake-claude-cmd"
     assert kwargs.get("cwd") == fake_tmux["workdir"]
+
+
+# --- pr-24f022e: launch config follows the tmux session, not the cwd ---
+
+def test_review_claude_cmd_uses_tmux_session_tag(fake_tmux, monkeypatch):
+    """Run from a PR workdir (picker / prefix+M popup), the cwd's tag names
+    no session, so fake-claude / skip-permissions must be looked up under
+    the tmux session's tag."""
+    seen: list[dict] = []
+
+    def fake_build(**kw):
+        seen.append(kw)
+        return "fake-claude-cmd"
+
+    monkeypatch.setattr(pr_mod, "build_claude_shell_cmd", fake_build)
+    pr_mod._launch_review_window(_make_data(),
+                                 _make_pr("t", fake_tmux["workdir"]))
+    assert seen and seen[0]["session_tag"] == "test"

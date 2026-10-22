@@ -1012,6 +1012,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             else:
                 _claude_cwd = str(work_path)
                 _claude_write_dir = None
+            # Session-scoped launch config (fake-claude, skip-permissions)
+            # follows the tmux session, not the cwd — run from a PR workdir
+            # (picker / prefix+M popup) the cwd tag names no session.
+            _stag = pm_session.removeprefix("pm-") if pm_session else None
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
@@ -1019,12 +1023,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          model=resolved_model,
                                          provider=resolved_provider,
                                          effort=_resolution.effort,
+                                         session_tag=_stag,
                                          session_type="impl")
             # Optionally wrap in a container for isolation
             from pm_core.container import (
                 wrap_claude_cmd, ContainerError, discard_container,
             )
-            _stag = pm_session.removeprefix("pm-") if pm_session else None
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
@@ -1209,6 +1213,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     else:
         _claude_cwd = workdir
         _claude_write_dir = None
+    # Session-scoped config (fake-claude, skip-permissions, the captures
+    # bind-mount below) follows the tmux session, not the cwd.
+    _review_stag = pm_session.removeprefix("pm-")
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
@@ -1216,6 +1223,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
+                                         session_tag=_review_stag,
                                          session_type="review")
     # Optionally wrap in a container for isolation.
     # Always remove any existing container for this review before creating a
@@ -1230,12 +1238,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         wrap_claude_cmd, ContainerError, discard_container,
         is_container_mode_enabled, _make_container_name,
     )
-    # Resolve a session_tag for the captures bind-mount so the review
+    # session_tag drives the captures bind-mount so the review
     # container's /pm-captures points at the same per-PR captures dir
     # the impl and QA containers use (lets a reviewer read pre/post-fix
     # captures and scenario captures from inside their pane).
-    _review_pm_session = _get_pm_session()
-    _review_stag = _review_pm_session.removeprefix("pm-") if _review_pm_session else None
     if is_container_mode_enabled():
         # The tagged name is the one wrap_claude_cmd will create/reuse.
         discard_container(_make_container_name(f"review-{pr_id}", _review_stag))
@@ -1810,6 +1816,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
+                                         session_tag=pm_session.removeprefix("pm-"),
                                          session_type="merge")
     # Runs on the host — it updates the main repo checkout, which the
     # branch-scoped container push proxy is not set up for.
