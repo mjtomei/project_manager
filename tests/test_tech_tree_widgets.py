@@ -18,7 +18,7 @@ from textual.widgets import Static
 from pm_core.pane_idle import PaneIdleTracker
 from pm_core.tui.tech_tree import (
     TechTree, PRNode, PlanGroup, EdgeCanvas,
-    compute_neighbors, _node_y, NODE_H, SORT_FIELD_KEYS,
+    compute_neighbors, _node_y, NODE_H, NODE_W, SORT_FIELD_KEYS,
 )
 
 
@@ -634,6 +634,9 @@ async def test_return_marker_kept_next_to_pending_spec_marker():
             text = node.render()
             row = text.plain.splitlines()[3]
             assert f"{icon} {marker}" in row, row
+            # "◎ in_progress ⇤ S impl" is wider than the box: the row
+            # still ends in the box's right border.
+            assert len(row) == NODE_W and row[-1] in "│║", row
             base = sum(len(l) + 1 for l in text.plain.splitlines()[:3])
             col = row.index(f"{icon} {marker}")
             assert icon_style in _style_at(text, base + col)

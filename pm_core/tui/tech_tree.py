@@ -635,6 +635,14 @@ class PRNode(Widget):
             marker_offset = 2 + len(status_text) + 1
             loop_style = "bold yellow"
             status_text += f" {spec_marker}"
+        if cell_len(status_text) > NODE_W - 4:
+            # Too wide for the box (e.g. "◎ in_progress ⇤ S impl"): drop the
+            # status icon, which repeats the status word, rather than push
+            # the right border off the box.
+            cut = len(icon) + 1
+            status_text = status_text[cut:]
+            marker_offset -= cut if marker_offset >= 0 else 0
+            ret_offset -= cut if ret_offset >= 0 else 0
         machine = pr.get("agent_machine")
         if machine:
             avail = NODE_W - 4 - cell_len(status_text) - 1
