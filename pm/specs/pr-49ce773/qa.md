@@ -123,6 +123,10 @@ E7. **Given** the home PR's windows are all closed while the popup is open,
 E8. **Given** a live PR is shown, **When** the user moves to an action row and
 presses Enter (or double-clicks it), **Then** that action is dispatched (it
 used to close the popup without running anything — S2 refiner note).
+E9. **Given** a live PR is shown with the cursor on the PR title row (where fzf
+starts), **When** the user presses Enter (or double-clicks the title row),
+**Then** nothing is dispatched and the popup stays open on the same PR; only
+q/Esc quits (review 6b78 i3 — this used to close the popup).
 
 ## Concurrent use / shared resources
 
