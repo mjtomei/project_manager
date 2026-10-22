@@ -31483,7 +31483,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T23:19:21.474948+00:00'
+  updated_at: '2026-10-22T23:34:19.409500+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31648,6 +31648,21 @@ prs:
       during a queued deferral since no pane is mid-turn.'
     created_at: '2026-10-22T23:19:21Z'
     last_edited: '2026-10-22T23:19:21Z'
+  - id: note-8ffaafc
+    text: 'QA S10 (2026-10-22): all 7 stories held after fixes; captures /pm-captures/scenarios/10
+      (REPORT.md). CODE CHANGES needing normal re-review: dbb88ea8 push proxy spawned
+      with python -m from the project cwd imported a project-level pm_core/ and never
+      came up (now cwd=/ + own pm_core root on PYTHONPATH; real-daemon regression);
+      60574f28+aea1fb8a TUI resume took the first qa_resume.json per PR, so after
+      z t superseded a run, Ctrl+R recovered the stale run and orphaned the live one
+      (now unfinished-first then newest; a non-chosen snapshot is cleared only if
+      finished, not an in-memory loop workdir, not owned elsewhere; regressions in
+      tests/test_qa_resume.py). Filed pr-09f01da (in-container pm shim imports shadow
+      pm_core; blocks faked workers in shadow projects). -sN orphan-sweep repro noted
+      on pr-1139060 (dup pr-f4db036 closed). Story 2 recovery path: Claude own retry.
+      TUI does not name a missing-image failure (pm log only).'
+    created_at: '2026-10-22T23:34:19Z'
+    last_edited: '2026-10-22T23:34:19Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
