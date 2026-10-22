@@ -111,6 +111,8 @@ def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
             continue
         rec = _retain_record(name) or {}
         try:
+            # "at" has whole-second resolution, so compare against the
+            # truncated listing time (errs on keeping the marker).
             if float(rec.get("at") or 0) >= int(since):
                 continue
         except (TypeError, ValueError):
@@ -186,11 +188,19 @@ def list_containers() -> list[ContainerInfo] | None:
              if ln.strip().startswith(container_mod.CONTAINER_PREFIX)]
     if not names:
         return []
-    fmt = ("{{.Name}}\t{{.Id}}\t{{.State.Running}}\t{{.State.Status}}\t"
-           "{{json .Config.Labels}}")
+    return _inspect(names, timeout=60)
+
+
+_INSPECT_FMT = ("{{.Name}}\t{{.Id}}\t{{.State.Running}}\t{{.State.Status}}\t"
+                "{{json .Config.Labels}}")
+
+
+def _inspect(names: list[str], timeout: int) -> list[ContainerInfo] | None:
+    """ContainerInfo for each existing pm container in *names*; None if the
+    runtime couldn't be run."""
     try:
-        insp = container_mod._run_runtime("inspect", "--format", fmt, *names,
-                                          check=False, timeout=60)
+        insp = container_mod._run_runtime("inspect", "--format", _INSPECT_FMT,
+                                          *names, check=False, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return None
     out: list[ContainerInfo] = []
@@ -326,11 +336,19 @@ def _owner_panes(info: ContainerInfo, cache: _PaneCache,
 
 
 def live_owner_panes(name: str, container_id: str = "") -> list[str]:
-    """Live tmux panes started for container *name* (fresh query)."""
-    info = ContainerInfo(name=name, id=container_id)
-    parsed = container_mod.parse_container_name(name)
-    if parsed:
-        info.session_tag = parsed.session_tag
+    """Live tmux panes started for container *name* (fresh query).
+
+    The container's own labels are consulted so the tmux server it was
+    launched from (``pm.tmux_socket``) is searched even when that isn't
+    this process's server.
+    """
+    found = _inspect([name], timeout=10) or []
+    info = found[0] if found else ContainerInfo(name=name)
+    info.id = container_id or info.id
+    if info.session_tag is None:
+        parsed = container_mod.parse_container_name(name)
+        if parsed:
+            info.session_tag = parsed.session_tag
     owners, _ = _owner_panes(info, _PaneCache(), fresh=True)
     return owners
 

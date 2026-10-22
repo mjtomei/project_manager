@@ -392,6 +392,27 @@ class TestReaperOwnership:
         out = reaper.reconcile(reason="manual")
         assert out.error and out.removed == []
 
+    def test_live_owner_panes_searches_the_labeled_tmux_server(self, monkeypatch, tmp_path):
+        """Reuse/restart guards must find a pane on the server the container
+        was launched from, even when it isn't this process's server."""
+        name = "pm-repo-ab12-review-pr-aaaa"
+        sock = str(tmp_path / "other-tmux.sock")
+        Path(sock).touch()
+        labels = ('{"pm.managed":"1","pm.kind":"review",'
+                  f'"pm.tmux_socket":"{sock}"}}')
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: MagicMock(
+            returncode=0, stdout=f"{name}\tcid1\ttrue\trunning\t{labels}\n"))
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.delenv("TMUX", raising=False)
+
+        def _query(server):
+            if server.socket_file == sock:
+                return reaper._PaneSnapshot(
+                    panes=[("%7", "pm-repo-ab12", f"podman exec -it {name} claude")])
+            return reaper._PaneSnapshot(panes=[])
+        monkeypatch.setattr(reaper, "_query_server", _query)
+        assert reaper.live_owner_panes(name) == ["%7"]
+
 
 # ---------------------------------------------------------------------------
 # Verified reuse / setup failure cleanup
