@@ -24006,6 +24006,43 @@ prs:
       Captures /pm-captures/scenarios/6.'
     created_at: '2026-10-22T16:20:47Z'
     last_edited: '2026-10-22T16:20:47Z'
+  - id: note-a7c7981
+    text: 'QA scenario 9 refiner (2026-10-22), all 5 triples were verified live through
+      the real prefix+P popup. Approach: outer client `tmux -u -L outer new-session
+      -d -x 200 -y 50 "env -u TMUX tmux attach -t <S>~1"`, then `tmux -L outer send-keys
+      -t outer C-b P` etc. (1) Removing a workdir does NOT make a launch fail, because
+      _ensure_workdir re-clones it; replacing the workdir with a file still opens
+      review-<id>. A failure that reliably happens before any window opens: start
+      ALL PRs first, then `rm -rf <broken workdir>; chmod 555 ~/.pm/workdirs/<project-dir>`,
+      so the re-clone lock file cannot be created. Result: review-loop runtime_state
+      goes to failed/ERROR and the popup shows "✗ review-loop: failed (ERROR)"; QA
+      t goes to done/ERROR and the popup shows "✗ qa: failed (ERROR)". The popup shows
+      only the verdict. The reason text is in the TUI log / ~/.pm/debug/<project-tag>.log.
+      (2) fake-claude cannot delay window creation. To delay it, hold `flock ~/.pm/workdirs/.review-launch-<S>-<pr>.lock
+      sleep 25` and press q/Esc about 2s after zz d. (3) d / z d / i / z i are route=direct
+      (pm pr review/signoff subprocess): there is NO spinner and NO reason=window_open
+      line; the subprocess switches the client itself. i needs qa/sign_off status
+      or `pm project set skip-qa on`. (4) With ~/.pm/sessions/<tag>/pm_root missing,
+      prefix+P from a non-project cwd shows "No project.yaml found. / Press q/Esc/Enter
+      to close..." before any listing, so the chord is unreachable there (known limit).
+      (5) #N: there is no CLI for gh_pr_number. Bootstrap it in project.yaml (chmod
+      644 + atomic replace), then pm push + merge + pr start, which gives an impl
+      window "#42" so the PR appears in the picker nav (press l).'
+    created_at: '2026-10-22T15:59:13Z'
+    last_edited: '2026-10-22T15:59:13Z'
+  - id: note-fff98d7
+    text: 'QA scenario 9 PASS (ce6cd54d, no code edits): BROKEN zz d/t keep popup
+      with ✗ + Press q (terminal_state failed/ERROR, qa done/ERROR); q/Esc during
+      held review launch lock exit reason=keypress, window appears later, client/base
+      never move; d / z d / i / z i switch from scratch cwd; missing pm_root falls
+      back via rootwin cwd (window_open) and shows "No project.yaml found." from scratch;
+      #42 review-loop switches. QA TRAP: picker direct dispatches (z d, i, z i) from
+      a non-git popup cwd launch REAL claude (fake-claude gate keyed by cwd tag "default",
+      same class as pr-ea4fffa/pr-f98ac63, fix 3dbd4f7c not merged here) — kill those
+      pids or set a fake-claude config for that cwd before running them. Captures
+      /pm-captures/scenarios/9.'
+    created_at: '2026-10-22T16:11:28Z'
+    last_edited: '2026-10-22T16:11:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
