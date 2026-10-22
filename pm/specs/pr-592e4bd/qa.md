@@ -30,6 +30,16 @@ env-by-name).
   `--live` it sends one harmless tools-disabled prompt and reports the
   reply, the requested model(s) (all `work/…`), the transcript path and its
   models, and the hook event (Stop); exit 0.
+- **RQ3a** Given a live probe whose cwd contains characters other than
+  letters/digits (e.g. a `mkdtemp` suffix ending in `_`, as in supervisor
+  smoke `host-work-route-smoke-20261022T194946Z`, session
+  `f87c899f-…`, where Claude wrote `-tmp-pm-route-probe-020ea4s-/`),
+  When `pm provider test <route> --live` runs, Then it finds the transcript
+  Claude actually wrote (all non-alphanumerics mangled to `-`) and reports
+  its path and models. When the transcript or the pm hook event is
+  genuinely absent, Then the result is `Live: FAILED — missing evidence:
+  …` naming the expected path(s) and exit 1, never `Live: OK` with
+  `Transcript: (none)`.
 - **RQ4** Given container mode is available, When the user runs
   `pm provider test <route> --container [--live]`, Then a throwaway
   container is created with the bridge socket mount, the in-container
@@ -166,6 +176,10 @@ env-by-name).
 - **E9** Given only `qa_scenario` set to a plain model (legacy config, no
   `qa_interactive`), When s0 launches, Then s0 keeps that plain model; if
   `qa_scenario` is a router provider, s0 does not follow it.
+- **E9a** Given a pm-managed session whose cwd contains `_` (or spaces,
+  `+`, …), When pm computes its transcript path (hook pollers, s0/planner
+  transcript symlinks, live probe), Then it matches the directory real
+  Claude writes (`-` for every non-alphanumeric character).
 - **E10** Given `ANTHROPIC_API_KEY` exported in the user's environment,
   When a routed session starts, Then the key is not visible to that
   claude process, but unrouted sessions keep it.

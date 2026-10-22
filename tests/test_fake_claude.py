@@ -1,6 +1,7 @@
 """Tests for pm_core.fake_claude and the pm fake-claude CLI command."""
 
 import json
+import re
 import subprocess
 import sys
 from io import StringIO
@@ -1459,7 +1460,9 @@ class TestTranscriptHookCLI:
         )
         assert result.returncode == 0
         assert "PASS" in result.stdout
-        mangled = str(tmp_path).replace("/", "-").replace(".", "-")
+        # Claude Code's mangling: every non-alphanumeric character -> "-"
+        # (pytest dirs contain "_").
+        mangled = re.sub(r"[^a-zA-Z0-9]", "-", str(tmp_path))
         transcript = (tmp_path / ".claude" / "projects" / mangled
                       / f"{self.SID}.jsonl")
         assert transcript.exists()

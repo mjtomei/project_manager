@@ -21,6 +21,7 @@ staying open afterwards only when stdin is a terminal (a live tmux pane).
 
 import json
 import os
+import re
 import select
 import sys
 import time
@@ -330,13 +331,13 @@ def _claude_transcript_path(session_id: str) -> Path:
 
     Mirrors ``claude_launcher._claude_project_dir`` — Claude Code stores
     transcripts under ``~/.claude/projects/<mangled-cwd>/<session-id>.jsonl``
-    with ``/`` and ``.`` in the path replaced by ``-``.  The fake runs in the
+    with every non-alphanumeric character replaced by ``-``.  The fake runs in the
     pane's cwd, which is the cwd pm passed to ``build_claude_shell_cmd``, so
     the launcher-side ``transcript_path_for`` resolves to the same file.
     (``verdict_transcript._read_transcript_text`` additionally globs by
     session-id, so minor cwd drift is tolerated.)
     """
-    mangled = os.getcwd().replace("/", "-").replace(".", "-")
+    mangled = re.sub(r"[^a-zA-Z0-9]", "-", os.getcwd())
     return Path.home() / ".claude" / "projects" / mangled / f"{session_id}.jsonl"
 
 

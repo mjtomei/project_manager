@@ -896,6 +896,111 @@ class TestPollLoopRouteGating:
 
 
 # ---------------------------------------------------------------------------
+# Live probe evidence (pm provider test --live)
+# ---------------------------------------------------------------------------
+
+# Stand-in for claude -p: writes its transcript where real Claude does (every
+# non-alphanumeric cwd character -> '-', so '_' too) and, unless told not
+# to, the pm hook event for its session.
+_PROBE_CLAUDE = r"""#!/usr/bin/env python3
+import json, os, re, sys
+sid = sys.argv[sys.argv.index("--session-id") + 1]
+model = sys.argv[sys.argv.index("--model") + 1]
+home = os.environ["HOME"]
+if os.environ.get("PROBE_TRANSCRIPT", "1") == "1":
+    d = os.path.join(home, ".claude", "projects",
+                     re.sub(r"[^a-zA-Z0-9]", "-", os.getcwd()))
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, sid + ".jsonl"), "w") as f:
+        f.write(json.dumps({"type": "assistant", "message": {
+            "model": model.split("/")[-1], "content": "ok"}}) + "\n")
+if os.environ.get("PROBE_HOOK", "1") == "1":
+    hooks = os.environ["PROBE_HOOKS_DIR"]
+    os.makedirs(hooks, exist_ok=True)
+    with open(os.path.join(hooks, sid + ".json"), "w") as f:
+        json.dump({"event_type": "Stop", "session_id": sid}, f)
+print(json.dumps({"result": "ok", "is_error": False,
+                  "modelUsage": {model: {}}}))
+"""
+
+
+class TestLiveProbe:
+    @pytest.fixture
+    def probe_env(self, short_dir, monkeypatch):
+        bindir = short_dir / "bin"
+        bindir.mkdir()
+        exe = bindir / "claude"
+        exe.write_text(_PROBE_CLAUDE)
+        exe.chmod(0o755)
+        home = short_dir / "home"
+        home.mkdir()
+        hooks = home / ".pm" / "hooks"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+        monkeypatch.setenv("PROBE_HOOKS_DIR", str(hooks))
+        monkeypatch.setattr("pm_core.hook_events._HOOKS_BASE", hooks)
+        monkeypatch.setattr("pm_core.worker_route.time.sleep", lambda s: None)
+        return short_dir
+
+    def _probe(self, cwd):
+        cfg = ProviderConfig(name=ROUTE, type="router",
+                             api_base="http://127.0.0.1:1", model=MODEL)
+        return worker_route.live_probe(cfg, cwd=str(cwd))
+
+    def test_underscore_cwd_finds_transcript(self, probe_env):
+        # Supervisor-found: tempfile.mkdtemp suffixes may contain '_'; Claude
+        # writes -tmp-pm-route-probe-xxxx-/, which pm used to miss and then
+        # still report Live OK with transcript (none).
+        cwd = probe_env / "pm-route-probe-020ea4s_"
+        cwd.mkdir()
+        out = self._probe(cwd)
+        assert out["ok"], out
+        assert out["transcript"] and "probe-020ea4s-" in out["transcript"]
+        assert out["transcript_models"] == ["claude-opus-5-5"]
+        assert out["hook_event"] == "Stop"
+
+    def test_missing_transcript_is_a_failure(self, probe_env, monkeypatch):
+        monkeypatch.setenv("PROBE_TRANSCRIPT", "0")
+        cwd = probe_env / "probe"
+        cwd.mkdir()
+        out = self._probe(cwd)
+        assert not out["ok"]
+        assert out["transcript"] is None
+        assert "missing evidence" in out["error"]
+        assert "no transcript" in out["error"]
+
+    def test_missing_hook_event_is_a_failure(self, probe_env, monkeypatch):
+        monkeypatch.setenv("PROBE_HOOK", "0")
+        cwd = probe_env / "probe"
+        cwd.mkdir()
+        out = self._probe(cwd)
+        assert not out["ok"]
+        assert out["transcript"] is not None
+        assert "no pm hook event" in out["error"]
+
+    def test_cli_reports_missing_evidence(self, probe_env, pm_home_dir,
+                                          monkeypatch):
+        monkeypatch.setenv("PROBE_TRANSCRIPT", "0")
+        s, port = _listener()
+        try:
+            _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}")
+            from click.testing import CliRunner
+            from pm_core.cli import cli
+            r = CliRunner().invoke(cli, ["provider", "test", ROUTE, "--live"])
+        finally:
+            s.close()
+        assert r.exit_code == 1, r.output
+        assert "Live: FAILED" in r.output and "missing evidence" in r.output
+        assert "Live: OK" not in r.output
+
+
+def test_transcript_path_matches_claude_mangling():
+    from pm_core.claude_launcher import transcript_path_for
+    p = transcript_path_for("/tmp/pm-route-probe-020ea4s_/a.b c", "sid")
+    assert p.parent.name == "-tmp-pm-route-probe-020ea4s--a-b-c"
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 

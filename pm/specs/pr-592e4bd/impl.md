@@ -278,3 +278,20 @@ a tools-disabled `claude -p` through the route, reporting requested models
    `test_failed_create_does_not_expose_env_values` (fails on the old form —
    checked by mutation). pm.container log files written before this fix
    may still contain such values; they are not rewritten.
+4. *Live probe: transcript missed, still "Live OK"* (supervisor, final
+   reviewed-head host smoke `host-work-route-smoke-20261022T194946Z`,
+   `transcript-lookup-finding.json`; probe cwd `/tmp/pm-route-probe-020ea4s_`).
+   Real Claude mangles every non-alphanumeric cwd character to `-`; pm's
+   `claude_launcher._claude_project_dir` (pre-existing, master) mapped only
+   `/` and `.`, so the probe looked in `…020ea4s_/` while Claude wrote
+   `…020ea4s-/`, and `live_probe` then passed vacuously (empty transcript
+   model list) without the transcript. Fix: `_claude_project_dir` and
+   fake-claude's mirror use `re.sub(r"[^a-zA-Z0-9]", "-", cwd)`;
+   `live_probe` falls back to `~/.claude/projects/*/<sid>.jsonl` and fails
+   with `missing evidence: …` (expected paths named) when the transcript,
+   its model or the pm hook event is absent. Regressions (mutation-checked):
+   `TestLiveProbe::test_underscore_cwd_finds_transcript`,
+   `test_missing_transcript_is_a_failure`,
+   `test_missing_hook_event_is_a_failure`,
+   `test_cli_reports_missing_evidence`,
+   `test_transcript_path_matches_claude_mangling`.

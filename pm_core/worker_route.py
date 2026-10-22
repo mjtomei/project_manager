@@ -554,6 +554,13 @@ def live_probe(cfg: ProviderConfig, *, container_name: str | None = None,
         out["error"] = (payload.get("result") or r.stderr.strip()[-800:]
                         or "no output")
     tpath = transcript_path_for(run_cwd, sid)
+    if not tpath.exists():
+        # The session id is unique: find the transcript wherever Claude's
+        # cwd mangling put it rather than report it missing.
+        found = sorted((Path.home() / ".claude" / "projects").glob(
+            f"*/{sid}.jsonl"))
+        if found:
+            tpath = found[0]
     out["transcript"] = str(tpath) if tpath.exists() else None
     out["transcript_models"] = _transcript_models(tpath)
     ev = None
@@ -563,12 +570,26 @@ def live_probe(cfg: ProviderConfig, *, container_name: str | None = None,
             break
         time.sleep(0.25)
     out["hook_event"] = (ev or {}).get("event_type")
-    out["ok"] = (r.returncode == 0 and not payload.get("is_error")
-                 # Requested models must all carry the route prefix: an
-                 # unprefixed one would have gone to the router's default
-                 # (main) account.
-                 and bool(out["models"])
-                 and all(m == cfg.model for m in out["models"])
+    ran = r.returncode == 0 and not payload.get("is_error")
+    # Requested models must all carry the route prefix: an unprefixed one
+    # would have gone to the router's default (main) account.
+    routed = (bool(out["models"])
+              and all(m == cfg.model for m in out["models"]))
+    # The probe is evidence that routed sessions keep their transcript and
+    # hooks, so missing evidence is a failure, not a vacuous pass.
+    missing = []
+    if out["transcript"] is None:
+        missing.append(f"no transcript for session {sid} under "
+                       f"{tpath.parent.parent} (expected {tpath})")
+    elif not out["transcript_models"]:
+        missing.append(f"transcript {tpath} records no model")
+    if not out["hook_event"]:
+        missing.append(f"no pm hook event recorded for session {sid} "
+                       f"(expected {hook_events.event_path(sid)}); check "
+                       "that pm's Claude hooks are installed")
+    if ran and routed and missing and not out.get("error"):
+        out["error"] = "missing evidence: " + "; ".join(missing)
+    out["ok"] = (ran and routed and not missing
                  and all(model_on_route(cfg, m)
                          for m in out["transcript_models"]))
     return out

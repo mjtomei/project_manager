@@ -760,9 +760,10 @@ def _claude_project_dir(cwd: str) -> Path:
     """Compute Claude's project directory for a given working directory.
 
     Claude Code stores transcripts in ~/.claude/projects/{mangled-path}/
-    where the path has '/' replaced with '-' and '.' replaced with '-'.
+    where every character of the path other than ASCII letters and digits
+    (``/``, ``.``, ``_``, spaces, ...) is replaced with '-'.
     """
-    mangled = cwd.replace("/", "-").replace(".", "-")
+    mangled = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
     return Path.home() / ".claude" / "projects" / mangled
 
 
