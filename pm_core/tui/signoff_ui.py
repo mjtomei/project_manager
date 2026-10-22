@@ -166,7 +166,7 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
     _end_attempt(app, pr_id, "superseded",
                  detail=("stale run (HEAD moved) relaunched" if force
                          else "router window gone; relaunched"))
-    attempt = _ah.start_attempt(pr_id, "signoff", label="sign-off router",
+    attempt = _ah.start_attempt(pr_id, "signoff", label="router",
                                 stale=True if force else None)
     _attempts(app)[pr_id] = attempt
     _ah.phase(pr_id, attempt, "launching", "pm pr signoff --background")

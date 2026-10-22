@@ -296,7 +296,10 @@ supply `context` (session/window/task); leave a cross-PR note.
 - I5. Tests isolate `pm_home` (conftest autouse fixture for the history
   dir, like `_isolated_runtime_state`).
 - I6. Text output must be readable at 80 columns; times shown local
-  `HH:MM:SS` with date when not today, durations `1h02m`, `3m05s`, `12s`.
+  `HH:MM:SS`, `MM-DD HH:MM:SS` when not today (full date in another
+  year), and an attempt's end dated only when it falls on another day
+  than its start, so rows from earlier days (most of a merged PR's
+  history) still fit unwrapped; durations `1h02m`, `3m05s`, `12s`.
 - I7. The picker tests that assert the exact action label list / row count
   are updated for the History row.
 - I8. Journals are bounded: when a file exceeds 4 MB, the writer rotates it

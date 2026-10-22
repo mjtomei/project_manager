@@ -821,9 +821,9 @@ def _missing_notes(pr: dict, events: list[dict]) -> list[str]:
     first = float(events[0].get("t") or 0)
     started = _parse_iso(pr.get("started_at")) or _parse_iso(pr.get("created_at"))
     if started is not None and started < first - 60:
-        notes.append(f"Actions before {_fmt_time(first, first)} "
-                     f"({_ah.iso(first)}) were not recorded; earlier "
-                     "milestones come from project.yaml only.")
+        notes.append(f"Actions before {_ah.iso(first)} were not "
+                     "recorded; earlier milestones come from project.yaml "
+                     "only.")
     return notes
 
 
@@ -890,12 +890,18 @@ def _dur(s: float | None) -> str:
     return f"{d}d{h:02d}h"
 
 
-def _fmt_time(t: float | None, t_now: float) -> str:
+def _fmt_time(t: float | None, t_ref: float) -> str:
+    """Local time, with as much date as differs from *t_ref*'s day:
+    ``HH:MM:SS`` on the same day, ``MM-DD HH:MM:SS`` in the same year.
+    The short forms keep a row from an earlier day within 80 columns."""
     if t is None:
         return "unknown"
     lt = datetime.fromtimestamp(t)
-    if lt.date() == datetime.fromtimestamp(t_now).date():
+    ref = datetime.fromtimestamp(t_ref)
+    if lt.date() == ref.date():
         return lt.strftime("%H:%M:%S")
+    if lt.year == ref.year:
+        return lt.strftime("%m-%d %H:%M:%S")
     return lt.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -977,9 +983,10 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
     if model["milestones"]:
         lines.append("")
         lines.append("Milestones (project.yaml)")
-        lines.append("  " + "   ".join(
-            f"{m['event']} {_fmt_time(m['t'], t_now)}" for m in model["milestones"]
-            if m.get("t") is not None))
+        lines.extend(_wrap_joined(
+            "  ", [f"{m['event']} {_fmt_time(m['t'], t_now)}"
+                   for m in model["milestones"] if m.get("t") is not None],
+            "  ", sep="  "))
 
     if model["missing"]:
         lines.append("")
@@ -1017,7 +1024,8 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     ind = "  " * depth
     start = _fmt_time(a["started_t"], t_now)
     if a.get("ended_t") is not None:
-        end = _fmt_time(a["ended_t"], t_now)
+        # Dated only when it ends on another day than it started.
+        end = _fmt_time(a["ended_t"], a["started_t"])
     elif a.get("open"):
         end = "now"
     else:
@@ -1047,7 +1055,8 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
             split += f", wait {_dur(a['wait_s'])}"
         parts = [f"{_PHASE_LABELS.get(p['phase'], p['phase'])} "
                  f"{_dur(p['duration_s'])}" for p in a["phases"]]
-        out.extend(_wrap_phases(f"{sub}{split}  [", parts, sub + "  "))
+        out.extend(_wrap_joined(f"{sub}{split}  [", parts, sub + "  ",
+                                sep=" ·", close="]"))
     sc = a.get("scenarios")
     if sc and sc["sum_s"] >= 1:
         out.append(f"{sub}scenarios: {sc['count']} ({sc['attempts']} attempts), "
@@ -1060,19 +1069,20 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     return out
 
 
-def _wrap_phases(head: str, parts: list[str], cont: str,
-                 width: int = 80) -> list[str]:
-    """``head`` + ``parts`` joined by `` · `` and closed with ``]``,
-    wrapped at *width* with continuation lines indented by *cont*."""
+def _wrap_joined(head: str, parts: list[str], cont: str, *, sep: str,
+                 close: str = "", width: int = 80) -> list[str]:
+    """``head`` + ``parts``, each but the last followed by *sep* and the
+    last by *close*, wrapped at *width* between parts with continuation
+    lines indented by *cont*."""
     lines: list[str] = []
     cur = head
     for i, part in enumerate(parts):
-        piece = part + ("]" if i == len(parts) - 1 else " ·")
-        sep = "" if cur in (head, cont) else " "
+        piece = part + (close if i == len(parts) - 1 else sep)
+        gap = "" if cur in (head, cont) else " "
         if cur not in (head, cont) and len(cur) + 1 + len(piece) > width:
-            lines.append(cur)
-            cur, sep = cont, ""
-        cur += sep + piece
+            lines.append(cur.rstrip())
+            cur, gap = cont, ""
+        cur += gap + piece
     lines.append(cur)
     return lines
 

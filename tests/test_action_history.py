@@ -3,6 +3,7 @@
 import json
 import multiprocessing
 import os
+import re
 import socket
 import threading
 import time
@@ -1166,7 +1167,7 @@ class TestReconciliation:
         assert kid["elapsed_s"] == 40
 
     def test_adopted_end_is_flagged(self, clock):
-        a = ah.start_attempt(PR, "signoff", label="sign-off router")
+        a = ah.start_attempt(PR, "signoff", label="router")
         clock.advance(20)
         ah.end_attempt(PR, a, "done", verdict="SIGNOFF_BLOCKED",
                        adopted=True)
@@ -1472,6 +1473,37 @@ class TestCliAndPane:
         top = "  review INPUT_REQUIRED hold (iteration 2): released at 23:25:17 (armed 23:25:15)"
         cont = _wrap_record_to_width(top, 74, "    ").splitlines()[1]
         assert cont.startswith("    (") and not cont.startswith("     ")
+
+    def test_earlier_day_rows_fit_80_columns(self, clock):
+        # A merged PR's history is mostly read on a later day: dated rows
+        # must still fit 80 columns unwrapped, so the duration column and
+        # the name/outcome stay on one line.
+        rs.set_action_state(PR, "review-loop", "running",
+                            loop_id="deadbeefcafe")
+        loop = rs.get_action_state(PR, "review-loop")["attempt_id"]
+        it = ah.start_attempt(PR, "review-loop", parent=loop,
+                              loop_id="deadbeefcafe", iteration=1)
+        ah.phase(PR, it, "agent")
+        clock.advance(300)
+        ah.end_attempt(PR, it, "done", verdict="NEEDS_WORK")
+        rs.set_action_state(PR, "review-loop", "done", verdict="PASS")
+        so = ah.start_attempt(PR, "signoff", label="router")
+        clock.advance(60)
+        ah.end_attempt(PR, so, "done", verdict="SIGNOFF_MERGE")
+        pr = {"id": PR, "status": "merged",
+              **{k: ah.iso(T0 - 86400) for k in
+                 ("created_at", "started_at", "reviewed_at",
+                  "signed_off_at", "merged_at")}}
+        m = hq.build_history(PR, pr=pr, now=clock.t + 3 * 86400,
+                             live=False)
+        # Notes are prose, left to the TTY wrapper.
+        lines = [ln for ln in hq.render_text(m) if not ln.startswith("Note:")]
+        assert max(len(ln) for ln in lines) <= 80
+        assert not any(ln != ln.rstrip() for ln in lines)
+        rows = [ln for ln in lines if "→" in ln and "signoff" in ln]
+        # Dated start; the same-day end is time only.
+        assert re.match(r"\s+\d\d-\d\d \d\d:\d\d:\d\d → \d\d:\d\d:\d\d\s+1m00s"
+                        r"  signoff router  done SIGNOFF_MERGE$", rows[0])
 
     def test_catalog_entry(self):
         from pm_core import action_catalog
