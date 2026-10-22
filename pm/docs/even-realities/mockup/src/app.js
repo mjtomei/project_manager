@@ -3,7 +3,7 @@
 //
 // Intents are the behavior; the gesture binding lives in input.js and is one
 // candidate (see ../proposal.md "Candidate binding").
-import { wrap, fit, width, GLYPH, RIGHT_X, BODY_ROWS } from './text.js';
+import { wrap, width, GLYPH, BODY_ROWS } from './text.js';
 import { row } from './frame.js';
 
 export const MENU = Object.freeze([
@@ -131,7 +131,7 @@ export class App {
 
   openSession(id, how = 'open') {
     const s = this.pm.session(id);
-    if (s.state === 'none' || (s.state === 'starting')) return this.confirmStart(s);
+    if (s.state === 'none' || s.state === 'starting') return this.confirmStart(s);
     this.push({ type: 'session', id, scroll: 0, opened: s.state === 'ended' ? 'ended' : how });
     if (s.state !== 'ended') this.say(`Opened existing ${s.pane} · nothing launched`);
   }

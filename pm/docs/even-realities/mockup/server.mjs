@@ -30,7 +30,8 @@ http.createServer((req, res) => {
     res.end(JSON.stringify({ events: events.slice(since), seq: events.length }));
     return;
   }
-  let p = decodeURIComponent(url.pathname);
+  let p;
+  try { p = decodeURIComponent(url.pathname); } catch { res.writeHead(400); res.end('bad path'); return; }
   if (p.endsWith('/')) p += 'index.html';
   const file = path.join(root, p);
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end('not found'); return; }

@@ -34,7 +34,7 @@ export const GLYPH = Object.freeze({
   cursor: '▶', done: '■', pending: '□', approved: '◆', held: '◇', up: '▲', down: '▼', dot: '·',
 });
 export function missingGlyphs(text) {
-  return [...new Set([...text].filter(c => c !== '\n' && c !== ' ' && c !== ' ' && !getAdvW(c.codePointAt(0))))];
+  return [...new Set([...text].filter(c => c !== '\n' && c !== ' ' && !getAdvW(c.codePointAt(0))))];
 }
 
 // Truncate to a pixel budget with an ellipsis (… is in the font).
