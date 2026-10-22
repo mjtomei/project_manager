@@ -55,7 +55,8 @@ def _load(root):
 
 
 def _run_spinner(window_seq, state_seq,
-                 tui_cmd="review-loop start pr-001", stale_suppress=False):
+                 tui_cmd="review-loop start pr-001", stale_suppress=False,
+                 client_session=None, client_attached=True, tmux=None):
     """Drive _wait_for_tui_command with simulated tmux + runtime_state.
 
     Simulates the bug condition: state_root() resolves to a FOREIGN project
@@ -72,9 +73,11 @@ def _run_spinner(window_seq, state_seq,
     def get_state(_pr, _action):
         return sq.pop(0) if len(sq) > 1 else sq[0]
 
-    fake_tmux = MagicMock()
+    fake_tmux = tmux if tmux is not None else MagicMock()
     fake_tmux.list_windows.side_effect = list_windows
     fake_tmux.select_window = MagicMock(return_value=True)
+    fake_tmux.select_window_in_session = MagicMock(return_value=True)
+    fake_tmux.session_has_clients = MagicMock(return_value=client_attached)
     echoed: list[str] = []
 
     with patch.object(session_mod, "tmux_mod", fake_tmux), \
@@ -91,7 +94,8 @@ def _run_spinner(window_seq, state_seq,
                side_effect=lambda msg="", **_kw: echoed.append(str(msg))):
         try:
             session_mod._wait_for_tui_command(
-                "pm-sess", tui_cmd, tick_s=0.0001)
+                "pm-sess", tui_cmd, tick_s=0.0001,
+                client_session=client_session)
         except SystemExit:
             pass
     return fake_tmux.select_window, echoed
@@ -201,3 +205,71 @@ def test_qa_spinner_dismisses_for_existing_qa_window(fake_stdin):
     assert _exited_on_window(echoed, "qa-pr-001"), echoed
     assert not any("qa: done" in line for line in echoed), echoed
     assert not select_window.called
+
+
+def test_switch_targets_the_popup_client_session(fake_stdin):
+    """Two clients attached (pm-sess~1, pm-sess~2): the spinner in ~2's popup
+    must switch ~2, not whichever client typed last.
+
+    A popup has no $TMUX_PANE, so ``select_window``'s current-session lookup
+    resolves to the most recently active client; with both users typing the
+    chord, both popups switched the same client and the other was left on
+    its old window (QA scenario 19).
+    """
+    W = "review-pr-001"
+    fake_tmux = MagicMock()
+    select_window, _ = _run_spinner(
+        window_seq=[[], [(W, "@9")], [(W, "@9")]],
+        state_seq=[{"state": "running", "updated_at": "t0"},
+                   {"state": "running", "updated_at": "t1"},
+                   {"state": "done", "verdict": "PASS", "updated_at": "t2"}],
+        client_session="pm-sess~2", tmux=fake_tmux,
+    )
+    assert not select_window.called
+    assert fake_tmux.select_window_in_session.call_args.args == (
+        "pm-sess~2", W)
+
+
+def test_switch_falls_back_when_popup_session_unattached(fake_stdin):
+    """A picker run in an unattached session (e.g. headless in the base
+    session) keeps the old attached-session lookup."""
+    W = "review-pr-001"
+    fake_tmux = MagicMock()
+    select_window, _ = _run_spinner(
+        window_seq=[[], [(W, "@9")], [(W, "@9")]],
+        state_seq=[{"state": "running", "updated_at": "t0"},
+                   {"state": "running", "updated_at": "t1"},
+                   {"state": "done", "verdict": "PASS", "updated_at": "t2"}],
+        client_session="pm-sess", client_attached=False, tmux=fake_tmux,
+    )
+    assert select_window.call_args.args == ("pm-sess", W)
+    assert not fake_tmux.select_window_in_session.called
+
+
+def test_review_loop_switch_waits_for_inflight_launch(fake_stdin):
+    """A review window that appears while another launch still holds the
+    PR's launch lock is about to be superseded (killed + recreated by the
+    queued launch); the spinner must not switch to it until the lock clears.
+
+    QA scenario 19 story 4: switching early selected the doomed window after
+    the second launch had snapshotted its sessions, so the client was bounced
+    back to its old window when the doomed window was killed.
+    """
+    W = "review-pr-001"
+    busy = [True, True, True, False]
+    fake_tmux = MagicMock()
+
+    def probe(_session, _pr):
+        return busy.pop(0) if len(busy) > 1 else busy[0]
+
+    with patch.object(session_mod, "_review_launch_in_progress",
+                      side_effect=probe):
+        _run_spinner(
+            window_seq=[[(W, "@5")], [(W, "@5")], [], [(W, "@6")],
+                        [(W, "@6")]],
+            state_seq=[{"state": "running", "updated_at": "t0"}],
+            client_session="pm-sess~1", tmux=fake_tmux,
+        )
+    # Every busy probe was consumed before the single switch fired.
+    assert busy == [False]
+    assert fake_tmux.select_window_in_session.call_count == 1

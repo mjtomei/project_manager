@@ -1131,8 +1131,7 @@ def _review_window_launch_lock(pm_session: str, pr_id: str):
     on exactly one review window.
     """
     import fcntl
-    from pm_core.paths import workdirs_base
-    lock_path = workdirs_base() / f".review-launch-{pm_session}-{pr_id}.lock"
+    lock_path = _review_launch_lock_path(pm_session, pr_id)
     fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -1142,6 +1141,37 @@ def _review_window_launch_lock(pm_session: str, pr_id: str):
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
+
+
+def _review_launch_lock_path(pm_session: str, pr_id: str):
+    from pm_core.paths import workdirs_base
+    return workdirs_base() / f".review-launch-{pm_session}-{pr_id}.lock"
+
+
+def review_launch_in_progress(pm_session: str, pr_id: str) -> bool:
+    """True while a review launch for this PR holds the launch lock.
+
+    A window seen during that time may be about to be superseded: a queued
+    second launch snapshots the sessions on it, kills it and recreates it,
+    so a session that selects it after the snapshot is bounced off when the
+    window dies.  Callers that switch focus to the review window wait for
+    this to clear first.
+    """
+    import fcntl
+    try:
+        fd = os.open(str(_review_launch_lock_path(pm_session, pr_id)),
+                     os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError:
+        return True
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
 
 
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,

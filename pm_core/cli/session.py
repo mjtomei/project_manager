@@ -1256,7 +1256,8 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
 
 
 def _wait_for_tui_command(session: str, tui_cmd: str,
-                          tick_s: float = 0.15) -> None:
+                          tick_s: float = 0.15,
+                          client_session: str | None = None) -> None:
     """Show a spinner while a queued TUI command transitions states.
 
     Polls the shared runtime-state file and the tmux window list and
@@ -1265,6 +1266,9 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     ``q`` or ``Esc`` at any time to dismiss the spinner *without*
     cancelling the queued command (the TUI continues to handle it
     once it picks the entry up off the queue).
+
+    *client_session* is the (grouped) session the popup was opened for;
+    when it has an attached client the switch targets it directly.
     """
     import select
     import sys
@@ -1419,6 +1423,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     prev_cur_state = None
     prev_window_open = None
     prev_saw_disappear = False
+    prev_launch_busy = False
     try:
         while True:
             entry = _rs.get_action_state(pr_id, action)
@@ -1452,6 +1457,19 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             else:
                 window_open = bool(cur_window_ids)
                 cur_window_id = cur_window_ids[0] if cur_window_ids else None
+            # Two review-loop launches on one PR serialise on the launch
+            # lock; the window the first one created is superseded by the
+            # second, which moves only the sessions already on it.  Hold
+            # the switch until no launch is in flight so we never select
+            # a window that is about to be killed.
+            launch_busy = (window_open and action == "review-loop"
+                           and _review_launch_in_progress(session, pr_id))
+            if launch_busy:
+                window_open = False
+            if launch_busy != prev_launch_busy:
+                _log.info("spinner transition: launch_in_progress %s -> %s",
+                          prev_launch_busy, launch_busy)
+                prev_launch_busy = launch_busy
 
             if cur_state != prev_cur_state:
                 _log.info("spinner transition: cur_state %s -> %s",
@@ -1533,10 +1551,24 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     except Exception:
                         pass
                     try:
-                        rc = tmux_mod.select_window(session, target_window)
+                        # A popup has no $TMUX_PANE, so select_window's
+                        # current-session lookup falls back to the most
+                        # recently active client — with two clients
+                        # attached, whoever typed last gets switched.
+                        # Target the popup's own session instead.
+                        if (client_session
+                                and tmux_mod.session_has_clients(
+                                    client_session)):
+                            sel_session = client_session
+                            rc = tmux_mod.select_window_in_session(
+                                client_session, target_window)
+                        else:
+                            sel_session = session
+                            rc = tmux_mod.select_window(
+                                session, target_window)
                         _log.info(
                             "spinner select_window: target=%s:%s ok=%s",
-                            session, target_window, rc,
+                            sel_session, target_window, rc,
                         )
                     except Exception:
                         _log.exception("spinner select_window failed")
@@ -1653,7 +1685,7 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # Brief progress display: poll runtime_state for the action to
         # transition out of 'queued' / into 'running'.  Exits early on
         # state transition or when the target window appears.
-        _wait_for_tui_command(base, tui_cmd)
+        _wait_for_tui_command(base, tui_cmd, client_session=session)
     else:
         # Run pm command directly. Capture stdout/stderr so we can re-emit
         # them ourselves — display-popup -E's raw-mode TTY mangles bytes
@@ -1686,6 +1718,16 @@ def _resolve_root_from_session(session: str) -> Path | None:
     if tag == base:
         return None
     return get_session_pm_root(tag)
+
+
+def _review_launch_in_progress(session: str, pr_id: str) -> bool:
+    try:
+        from pm_core.cli.pr import review_launch_in_progress
+        return review_launch_in_progress(
+            pane_registry.base_session_name(session), pr_id)
+    except Exception:
+        _log.debug("spinner: launch lock probe failed", exc_info=True)
+        return False
 
 
 def _session_project_root(session: str) -> Path:

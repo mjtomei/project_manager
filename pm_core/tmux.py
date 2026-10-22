@@ -557,6 +557,15 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
     return grouped
 
 
+def session_has_clients(name: str) -> bool:
+    """True if at least one client is attached to session *name*."""
+    result = _run(
+        _tmux_cmd("display-message", "-t", name, "-p", "#{session_attached}"),
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() not in ("", "0")
+
+
 def find_unattached_grouped_session(base: str, socket_path: str | None = None) -> str | None:
     """Find the earliest grouped session with no clients attached."""
     for name in list_grouped_sessions(base, socket_path=socket_path):
