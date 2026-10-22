@@ -7,6 +7,9 @@ from pm_core.cli.session import (
     _status_phase,
     _current_window_pr_id,
     _build_picker_lines,
+    _build_nav_entries,
+    _find_pr_for_window_id,
+    _no_actions_notice,
     _run_picker_command,
     _ALL_ACTIONS,
 )
@@ -406,3 +409,373 @@ class TestPickerMergeDispatch:
              patch("pm_core.cli.session._wait_dismiss") as wait_mock:
             _run_picker_command("pr start pr-123", "sess")
         assert not wait_mock.called
+
+
+class TestFindPrForWindowId:
+    def test_matches_display_id(self):
+        prs = [_pr("pr-001", gh_pr_number=12)]
+        assert _find_pr_for_window_id(prs, "#12") is prs[0]
+
+    def test_local_id_window_after_gh_number_assigned(self):
+        """Window named pr-001 before the GitHub PR existed still resolves
+        once the PR's display id becomes #12."""
+        prs = [_pr("pr-001", gh_pr_number=12)]
+        assert _find_pr_for_window_id(prs, "pr-001") is prs[0]
+
+    def test_gh_number_as_string(self):
+        prs = [_pr("pr-001", gh_pr_number="12")]
+        assert _find_pr_for_window_id(prs, "#12") is prs[0]
+
+    def test_gh_number_lost_is_unresolvable(self):
+        """Window #193 whose PR lost gh_pr_number can't be matched."""
+        prs = [_pr("pr-f5b7eef")]
+        assert _find_pr_for_window_id(prs, "#193") is None
+
+    def test_empty(self):
+        assert _find_pr_for_window_id([_pr("pr-001")], "") is None
+
+
+class TestBuildNavEntries:
+    def test_non_pr_window_skips_merged(self):
+        prs = [_pr("pr-a", status="merged", gh_pr_number=238),
+               _pr("pr-b", status="in_review", gh_pr_number=240),
+               _pr("pr-c", status="closed", gh_pr_number=241),
+               _pr("pr-d", status="qa", gh_pr_number=242)]
+        wins = {"#238", "review-#238", "#240", "qa-#241", "qa-#242-s1"}
+        nav, by_disp, home = _build_nav_entries(prs, None, wins)
+        assert nav == ["#240", "#242"]
+        assert home is None
+        assert by_disp["#240"] is prs[1]
+
+    def test_merged_home_pr_kept_at_its_position(self):
+        prs = [_pr("pr-b", status="in_review", gh_pr_number=240),
+               _pr("pr-a", status="merged", gh_pr_number=238),
+               _pr("pr-d", status="qa", gh_pr_number=242)]
+        wins = {"#238", "#240", "#242"}
+        nav, by_disp, home = _build_nav_entries(prs, "#238", wins)
+        assert nav == ["#240", "#238", "#242"]
+        assert home == "#238"
+        assert by_disp["#238"] is prs[1]
+
+    def test_home_canonicalized_from_local_id_window(self):
+        prs = [_pr("pr-001", status="in_review", gh_pr_number=12)]
+        nav, by_disp, home = _build_nav_entries(prs, "pr-001", {"pr-001"})
+        assert nav == ["#12"]
+        assert home == "#12"
+
+    def test_window_named_by_local_id_counts_as_open(self):
+        prs = [_pr("pr-001", status="in_review", gh_pr_number=12)]
+        nav, _, _ = _build_nav_entries(prs, None, {"review-pr-001"})
+        assert nav == ["#12"]
+
+    def test_unresolvable_home_kept_first(self):
+        prs = [_pr("pr-f5b7eef", status="in_review"),
+               _pr("pr-b", status="in_review", gh_pr_number=240)]
+        nav, by_disp, home = _build_nav_entries(prs, "#193", {"#193", "#240"})
+        assert nav == ["#193", "#240"]
+        assert home == "#193"
+        assert "#193" not in by_disp
+
+    def test_no_duplicate_when_home_has_windows(self):
+        prs = [_pr("pr-a", status="in_review", gh_pr_number=5)]
+        nav, _, _ = _build_nav_entries(prs, "#5", {"#5", "review-#5"})
+        assert nav == ["#5"]
+
+
+class TestNoActionsNotice:
+    def test_merged(self):
+        assert _no_actions_notice("#238", _pr("pr-a", status="merged")) == \
+            "No actions — PR is merged."
+
+    def test_closed(self):
+        assert _no_actions_notice("#9", _pr("pr-a", status="closed")) == \
+            "No actions — PR is closed."
+
+    def test_lookup_failure_does_not_claim_merged(self):
+        msg = _no_actions_notice("#193", None)
+        assert msg == "Could not load actions for #193."
+        assert "merged" not in msg
+
+
+class _FakeFzf:
+    """Scripted stand-in for the picker's fzf subprocess.
+
+    Each entry in ``script`` is ``(returncode, stdout)`` for one fzf
+    launch; every launch's argv and stdin are recorded.
+    """
+
+    def __init__(self, script, on_launch=None):
+        self.script = list(script)
+        self.calls: list[dict] = []
+        self.on_launch = on_launch
+
+    def __call__(self, cmd, **kwargs):
+        fake = self
+
+        class _Proc:
+            def communicate(self, input=None):
+                fake.calls.append({"cmd": cmd, "input": input})
+                if fake.on_launch:
+                    fake.on_launch(len(fake.calls))
+                rc, out = fake.script.pop(0)
+                self.returncode = rc
+                return out, ""
+        return _Proc()
+
+
+def _header(call):
+    return next(a for a in call["cmd"] if a.startswith("--header="))[len("--header="):]
+
+
+def _expect(call):
+    for a in call["cmd"]:
+        if a.startswith("--expect="):
+            return a[len("--expect="):].split(",")
+    return []
+
+
+def _run_picker(tmp_path, monkeypatch, prs, windows, window_name, script,
+                on_launch=None):
+    """Drive popup_picker_cmd end to end with a fake fzf.
+
+    ``prs`` is re-read on every project.yaml load, so a test can mutate it
+    from ``on_launch(n)`` (called before the n-th fzf launch returns) to
+    simulate a PR being merged while the popup is open.
+    """
+    from pm_core.cli import session as sess
+
+    reg = tmp_path / "registry.json"
+    reg.write_text("{}")
+    monkeypatch.setenv("PM_PROJECT", str(tmp_path))
+    fzf = _FakeFzf(script, on_launch)
+    run_cmd = MagicMock()
+    with patch.object(sess.pane_registry, "registry_path", return_value=reg), \
+         patch.object(sess, "_resolve_root_from_session", return_value=tmp_path), \
+         patch.object(sess.store, "load",
+                      side_effect=lambda *a, **k: {"prs": [dict(p) for p in prs]}), \
+         patch.object(sess.tmux_mod, "list_windows",
+                      return_value=[{"name": n, "id": f"@{i}"}
+                                    for i, n in enumerate(windows)]), \
+         patch.object(sess, "_session_active_windows", return_value={}), \
+         patch.object(sess, "_fzf_supports_no_input", return_value=True), \
+         patch.object(sess, "_wait_dismiss"), \
+         patch.object(sess, "_run_picker_command", run_cmd), \
+         patch("shutil.which", return_value="/usr/bin/fzf"), \
+         patch.object(sess.subprocess, "Popen", fzf):
+        try:
+            sess.popup_picker_cmd.callback("pm-x", window_name)
+        except SystemExit:
+            pass
+    return fzf, run_cmd
+
+
+class TestPopupPickerNoActions:
+    PRS = [
+        {"id": "pr-m", "status": "merged", "title": "Merged",
+         "gh_pr_number": 238},
+        {"id": "pr-r", "status": "in_review", "title": "Review",
+         "gh_pr_number": 240},
+        {"id": "pr-q", "status": "qa", "title": "QA", "gh_pr_number": 242},
+    ]
+    WINDOWS = ["tui", "#238", "review-#238", "#240", "qa-#242"]
+
+    def test_non_pr_window_lands_on_active_pr(self, tmp_path, monkeypatch):
+        """Opened from a non-PR window, merged #238 (with stale windows) is
+        skipped: the picker lands on #240 and offers its actions."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "tui",
+            [(0, "s\n")])
+        first = fzf.calls[0]
+        assert _header(first).startswith("PR Actions — #240  (1/2)")
+        assert "No actions" not in first["input"]
+        run_cmd.assert_called_once()
+        assert "pr-r" in run_cmd.call_args.args[0]
+
+    def test_merged_home_pr_shows_notice_and_navigates(self, tmp_path, monkeypatch):
+        """Opened from merged #238's own window: show it with a scoped
+        notice, keep nav keys working, and allow actions on the next PR."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#238",
+            [(0, "l\n"), (0, "s\n")])
+        first, second = fzf.calls
+        assert _header(first).startswith("PR Actions — #238  (1/3)")
+        assert "No actions — PR is merged." in first["input"]
+        assert "merged or closed" not in first["input"]
+        # Action keys aren't accepted for the merged PR; nav keys are.
+        exp = _expect(first)
+        assert "l" in exp and "h" in exp and "0" in exp
+        assert not ({"s", "e", "d", "t", "i", "g", "z"} & set(exp))
+        assert "enter:ignore" in next(a for a in first["cmd"]
+                                      if a.startswith("--bind="))
+        assert "s=start" not in _header(first)
+        # After l: next PR with its actions and full key set.
+        assert _header(second).startswith("PR Actions — #240  (2/3)")
+        assert "s" in _expect(second)
+        run_cmd.assert_called_once()
+        assert "pr-r" in run_cmd.call_args.args[0]
+
+    def test_unresolvable_window_reports_lookup_failure(self, tmp_path, monkeypatch, caplog):
+        """Window #193 whose PR has no gh_pr_number in project.yaml: don't
+        claim it's merged, log a warning, and let the user navigate away."""
+        prs = [{"id": "pr-f5b7eef", "status": "in_review", "title": "x"},
+               {"id": "pr-r", "status": "in_review", "title": "Review",
+                "gh_pr_number": 240}]
+        with patch("pm_core.cli.session._log") as log:
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#193", "#240"], "#193",
+                [(0, "l\n"), (130, "")])
+        first, second = fzf.calls
+        assert "Could not load actions for #193." in first["input"]
+        assert "merged" not in first["input"]
+        assert log.warning.called
+        assert _header(second).startswith("PR Actions — #240")
+        run_cmd.assert_not_called()
+
+    def test_single_actionless_pr_does_not_exit_on_keypress(self, tmp_path, monkeypatch):
+        """Only PR is merged: no accept keys at all, Enter is ignored, and
+        only q/Esc (fzf abort) closes the popup."""
+        prs = [self.PRS[0]]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#238"], "#238", [(130, "")])
+        (call,) = fzf.calls
+        assert not any(a.startswith("--expect") for a in call["cmd"])
+        assert "enter:ignore" in next(a for a in call["cmd"]
+                                      if a.startswith("--bind="))
+        run_cmd.assert_not_called()
+
+    def test_local_id_window_resolves_to_display_id(self, tmp_path, monkeypatch):
+        """Window named pr-r (before #240 existed) resolves to #240's actions."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, ["pr-r"], "pr-r", [(0, "s\n")])
+        assert _header(fzf.calls[0]).startswith("PR Actions — #240")
+        assert "pr-r" in run_cmd.call_args.args[0]
+
+
+def _shown(call):
+    """(header PR position line, notice-or-first row) for one fzf launch."""
+    return _header(call).splitlines()[0]
+
+
+class TestPopupPickerMergedNavigation:
+    """note-40057f4: moving to/from retained merged entries must never
+    exit the picker, and live PRs stay reachable in both directions."""
+
+    def _prs(self):
+        return [
+            {"id": "pr-ac10f03", "status": "merged", "title": "Merged",
+             "gh_pr_number": 238},
+            {"id": "pr-r", "status": "in_review", "title": "Review",
+             "gh_pr_number": 240},
+            {"id": "pr-q", "status": "qa", "title": "QA",
+             "gh_pr_number": 242},
+        ]
+
+    WINDOWS = ["#238", "review-#238", "merge-#238", "#240", "qa-#242"]
+
+    def test_from_live_pr_merged_never_listed(self, tmp_path, monkeypatch):
+        """Opened from live #240 with #238's windows still open: l, l
+        (wrap), h, 0 cycle only the live PRs; #238 never appears."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self._prs(), self.WINDOWS, "review-#240",
+            [(0, "l\n"), (0, "l\n"), (0, "h\n"), (0, "0\n"), (130, "")])
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — #240  (1/2)",
+            "PR Actions — #242  (2/2)",
+            "PR Actions — #240  (1/2)",
+            "PR Actions — #242  (2/2)",
+            "PR Actions — #240  (1/2)",
+        ]
+        assert not any("#238" in c["input"] for c in fzf.calls)
+        run_cmd.assert_not_called()
+
+    def test_from_merged_home_both_directions_and_back(self, tmp_path, monkeypatch):
+        """Opened from #238's window: h wraps to #242, 0 returns to the
+        merged home (notice, no actions), l reaches #240, which runs."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self._prs(), self.WINDOWS, "merge-#238",
+            [(0, "h\n"), (0, "0\n"), (0, "l\n"), (0, "d\n")])
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — #238  (1/3)",
+            "PR Actions — #242  (3/3)",
+            "PR Actions — #238  (1/3)",
+            "PR Actions — #240  (2/3)",
+        ]
+        for i in (0, 2):
+            assert "No actions — PR is merged." in fzf.calls[i]["input"]
+            assert "d" not in _expect(fzf.calls[i])
+        run_cmd.assert_called_once()
+        assert run_cmd.call_args.args[0].endswith("pr-r") or \
+            "pr-r" in run_cmd.call_args.args[0]
+
+    def test_pr_merged_while_open_drops_from_nav(self, tmp_path, monkeypatch):
+        """#242 merges while the popup sits on #240: the next l reloads and
+        must not land on #242 or index past the shrunken list."""
+        prs = self._prs()
+
+        def on_launch(n):
+            if n == 1:
+                prs[2]["status"] = "merged"
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, self.WINDOWS, "review-#240",
+            [(0, "l\n"), (130, "")], on_launch=on_launch)
+        first, second = fzf.calls
+        assert _shown(first) == "PR Actions — #240  (1/2)"
+        # Only #240 is left: no position counter, no nav keys.
+        assert _shown(second) == "PR Actions — #240"
+        assert "No actions" not in second["input"]
+        run_cmd.assert_not_called()
+
+    def test_shown_pr_merged_before_action_is_not_dispatched(self, tmp_path, monkeypatch):
+        """#240 merges while displayed: pressing s re-renders it with the
+        merged notice (no command), then l moves to #242, which runs."""
+        prs = self._prs()
+
+        def on_launch(n):
+            if n == 1:
+                prs[1]["status"] = "merged"
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, self.WINDOWS, "review-#240",
+            [(0, "s\n"), (0, "l\n"), (0, "s\n")], on_launch=on_launch)
+        first, second, third = fzf.calls
+        assert _shown(first) == "PR Actions — #240  (1/2)"
+        assert _shown(second) == "PR Actions — #240  (1/2)"
+        assert "No actions — PR is merged." in second["input"]
+        assert "s" not in _expect(second)
+        # #240 is the home PR (opened from its window), so it stays listed.
+        assert _shown(third) == "PR Actions — #242  (2/2)"
+        run_cmd.assert_called_once()
+        assert "pr-q" in run_cmd.call_args.args[0]
+
+    def test_chord_on_pr_merged_mid_chord_is_not_dispatched(self, tmp_path, monkeypatch):
+        """z s (fresh start) on a PR merged after the chord began must not
+        build a fresh-start command for the merged PR."""
+        prs = self._prs()
+
+        def on_launch(n):
+            if n == 2:
+                prs[1]["status"] = "merged"
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, self.WINDOWS, "review-#240",
+            [(0, "z\n"), (0, "s\n"), (130, "")], on_launch=on_launch)
+        assert "No actions — PR is merged." in fzf.calls[2]["input"]
+        run_cmd.assert_not_called()
+
+    def test_all_navigable_prs_merge_keeps_picker_open(self, tmp_path, monkeypatch):
+        """Opened from a non-PR window; both live PRs merge.  Navigating
+        keeps showing the current PR's notice instead of exiting."""
+        prs = self._prs()
+
+        def on_launch(n):
+            if n == 1:
+                prs[1]["status"] = "merged"
+                prs[2]["status"] = "closed"
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, self.WINDOWS, "tui",
+            [(0, "l\n"), (130, "")], on_launch=on_launch)
+        assert _shown(fzf.calls[1]) == "PR Actions — #240"
+        assert "No actions — PR is merged." in fzf.calls[1]["input"]
+        run_cmd.assert_not_called()
