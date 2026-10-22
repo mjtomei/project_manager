@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T03:21:22.804546+00:00'
+  updated_at: '2026-10-22T05:17:00.162622+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30479,6 +30479,19 @@ prs:
       attach deadlocked tmux -L server); pm pr start </dev/null outside a session.'
     created_at: '2026-10-22T03:21:22Z'
     last_edited: '2026-10-22T03:21:22Z'
+  - id: note-0fce646
+    text: 'QA S28 (2026-10-22): fixed c0d2f019. kill -9 0.4 s after a QA grace due
+      (last 1 s heartbeat 0.5 s before due) flipped the already-elapsed gate to "lost
+      (owner process exited)"; arm_timer now schedules an extra owner-lock beat just
+      after each gate due (_beat_after). Post-fix all S28 Thens held (X C-r: XA loop
+      swept/i1 >9s/grace lost, YB untouched one loop done PASS all Y-pid events; kill
+      -9: run >49s, s1 >30s, grace elapsed x4 reads, qa_resume.json kept, resumed
+      done PASS, 857+543 reader files clean). Spec gap: step 7 leaves XQ in_progress,
+      so t never sets status qa and the respawned TUI drops qa_resume.json (by design)
+      -> add `pm pr edit XQ --status in_review` before t. Obs: picker review badge
+      [loop i1] while i2 runs (runtime iteration = completed count). Captures /pm-captures/scenarios/28.'
+    created_at: '2026-10-22T05:17:00Z'
+    last_edited: '2026-10-22T05:17:00Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
