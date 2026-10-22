@@ -156,6 +156,28 @@ client session), the pm log file (warnings).
   between relaunches), and the header/(i/n) end on the PR the key count
   predicts.  Then dispatch an action: the stale picker frame is cleared
   before the command's output appears.
+- C5. Post-master-merge dispatch path (sign-off SIGNOFF_IMPL, merge
+  37637456): both the picker's direct route and the `pm>` command popup
+  (`_popup-cmd`) now run `_session_pm_argv(session, ...)` with
+  PM_POPUP_SESSION exported.  A live action dispatched from a PR window
+  (cwd = PR workdir) must run under the tmux session's tag: pm log lines
+  land in the session's debug log and a review/qa pane obeys the session's
+  fake-claude config (re-check pr-f98ac63, likely fixed by #240).  After a
+  client's grouped session goes away, a later popup on another client must
+  still dispatch into that other client's session.
+
+## Before/after evidence of the original symptom (sign-off request)
+
+B1. **Given** a project where a merged PR with retained windows (like #238)
+comes first in project.yaml order and a live PR (like #193, in_review) has
+open windows, **When** the user opens prefix+P from the TUI window on the
+base-branch (master 4dcbff73) build, **Then** the popup prints `No actions
+available (PR is merged or closed).` and exits on a keypress; opening it on
+the live PR and pressing next onto the merged entry and next again exits too.
+**When** the same steps run on this branch, **Then** the popup lands on the
+live PR, the merged PR is not in the list, opening it from the merged PR's
+own window shows `No actions — PR is merged.` with working nav, and nothing
+exits except q/Esc or a dispatched action.
 
 ## Pass/Fail criteria
 
