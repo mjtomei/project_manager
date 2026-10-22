@@ -900,6 +900,25 @@ class TestReconciliation:
         (r,) = hq.build_history(PR, now=clock.t, live=False)["timers"]["recent"]
         assert (r["resolution"], r["resolved_t"]) == ("elapsed", due)
 
+    def test_rearm_after_clear_keeps_cleared_row(self, clock):
+        # One timer id per PR (the sign-off throttle): the router released
+        # it, the next router arms it again; the released row must stay.
+        a1 = ah.start_attempt(PR, "signoff")
+        ah.arm_timer(PR, "th", purpose="throttle", owner_action="signoff",
+                     owner_attempt=a1, duration=60, effect="gate")
+        clock.advance(20)
+        ah.clear_timer(PR, "th", "released")
+        ah.end_attempt(PR, a1, "done")
+        clock.advance(100)
+        a2 = ah.start_attempt(PR, "signoff")
+        ah.arm_timer(PR, "th", purpose="throttle", owner_action="signoff",
+                     owner_attempt=a2, duration=60, effect="gate")
+        m = hq.build_history(PR, now=clock.t, live=False)
+        assert [r["owner_attempt"] for r in m["timers"]["active"]] == [a2]
+        assert [(r["owner_attempt"], r["resolution"], r["resolved_t"])
+                for r in m["timers"]["recent"]] == \
+            [(a1, "released", T0 + 20)]
+
     def test_owner_probed_once_per_build(self, clock):
         # Abandoned attempts and timers of one owner pile up in the journal;
         # one build judges that owner once, so they can't disagree.

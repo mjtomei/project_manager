@@ -201,6 +201,11 @@ def _replay(events: list[dict]):
             prev = timers.get(tid)
             if prev and prev.get("cleared") is None:
                 timer_history.append(_timer_row(prev, "re-armed", t))
+            elif prev:
+                # Re-armed after it was cleared (e.g. the sign-off throttle
+                # released by one router, armed again by the next): keep the
+                # earlier timer's own resolution.
+                timer_history.append(_cleared_row(prev))
             timers[tid] = {
                 "timer": tid, "purpose": ev.get("purpose"),
                 "owner_action": ev.get("owner_action"),
@@ -456,6 +461,18 @@ def _timer_row(tm: dict, resolution: str, resolved_t: float | None) -> dict:
     }
 
 
+def _cleared_row(tm: dict) -> dict:
+    c = tm["cleared"]
+    resolved = c["t"]
+    due = tm.get("due_t")
+    # A gate is only cleared "elapsed" when its owner gets round to it (e.g.
+    # at scenario end), possibly long after it ran out; it elapsed at its due
+    # time, as the uncleared read in _reconcile_timers says.
+    if c.get("reason") == "elapsed" and due is not None:
+        resolved = min(resolved, due)
+    return _timer_row(tm, c.get("reason") or "cleared", resolved)
+
+
 def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
                       t_now: float, owner_alive) -> dict:
     active: list[dict] = []
@@ -464,15 +481,7 @@ def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
     for tm in timers.values():
         due = tm.get("due_t")
         if tm.get("cleared"):
-            c = tm["cleared"]
-            resolved = c["t"]
-            # A gate is only cleared "elapsed" when its owner gets round to
-            # it (e.g. at scenario end), possibly long after it ran out; it
-            # elapsed at its due time, as the uncleared read below says.
-            if c.get("reason") == "elapsed" and due is not None:
-                resolved = min(resolved, due)
-            recent.append(_timer_row(tm, c.get("reason") or "cleared",
-                                     resolved))
+            recent.append(_cleared_row(tm))
             continue
         owner_att = attempts.get(tm.get("owner_attempt") or "")
         if owner_att is not None and owner_att["ended_t"] is not None:
