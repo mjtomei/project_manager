@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-22T00:18:48.966Z",
+  "generated": "2026-10-22T14:25:46.549Z",
   "simulated": "All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions.",
   "simulator": "@evenrealities/evenhub-simulator 0.9.5",
   "sdk": "@evenrealities/even_hub_sdk 0.0.16",
@@ -536,7 +536,7 @@
         {
           "id": "C03-history-timers",
           "title": "History and timers",
-          "caption": "PR-owned timers with what fires next (\"unknown\" when PM cannot tell), and recent attempts with elapsed time and outcome.",
+          "caption": "PR-owned timers with their owner and what fires next (\"unknown\" when PM cannot tell), and the newest attempts that fit, with elapsed time and outcome; older attempts are counted.",
           "scene": "list:history:pr-216",
           "file": "C03-history-timers.png",
           "raw": "raw/C03-history-timers.png",

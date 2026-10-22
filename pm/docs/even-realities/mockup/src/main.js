@@ -40,20 +40,23 @@ function applyDirector(e) {
 }
 
 // Poll on an interval with an in-flight guard: a single lost timer callback
-// (the SDK wraps WebView timers) cannot stop the director.
+// (the SDK wraps WebView timers) cannot stop the director, and the request
+// timeout keeps one hung fetch from holding the guard forever.
 let polling = false;
 async function pollDirector() {
   if (polling) return;
   polling = true;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 2000);
   try {
-    const r = await fetch(`/director?since=${directorSeq}`, { cache: 'no-store' });
+    const r = await fetch(`/director?since=${directorSeq}`, { cache: 'no-store', signal: abort.signal });
     if (r.ok) {
       const { events, seq } = await r.json();
       directorSeq = seq;
       for (const e of events) { log(`DIRECTOR ${e.type}`); applyDirector(e); }
     }
   } catch (e) { if (!directorFailed) log(`DIRECTOR unavailable: ${e?.message || e}`); directorFailed = true; }
-  finally { polling = false; }
+  finally { clearTimeout(timer); polling = false; }
 }
 
 async function connectGlasses() {

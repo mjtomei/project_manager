@@ -80,6 +80,8 @@ export function buildFrame(frame) {
   const footRight = f.right ? fit(f.right, CONTENT_WIDTH - 24 - Math.min(width(f.left || ''), 300)) : '';
   const footLeft = fit(f.left || '', CONTENT_WIDTH - 20 - width(footRight));
   const footDim = footRight ? padTo('', CONTENT_WIDTH - 6 - width(footRight)) + footRight : ' ';
+  // The command hint is how the user operates the view; it must stay whole.
+  if (f.right && footRight !== f.right) problems.push(`footer hint truncated: ${f.right}`);
 
   const contents = {
     input: ' ', left, leftDim, right, rightDim, foot: footLeft || ' ', footDim,

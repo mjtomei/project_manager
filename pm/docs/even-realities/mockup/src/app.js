@@ -3,7 +3,7 @@
 //
 // Intents are the behavior; the gesture binding lives in input.js and is one
 // candidate (see ../proposal.md "Candidate binding").
-import { wrap, width, GLYPH, BODY_ROWS } from './text.js';
+import { wrap, width, GLYPH, BODY_ROWS, MARGIN, RIGHT_X } from './text.js';
 import { row } from './frame.js';
 
 export const MENU = Object.freeze([
@@ -308,13 +308,22 @@ export class App {
         return out;
       }
       case 'history': {
+        // Nothing here is selectable, so the view cannot scroll: each timer
+        // takes two rows (its owner does not fit beside the countdown) and
+        // only the newest attempts that fit are shown.
         const h = pm.historyFor(v.pr);
         const out = [it([{ t: 'TIMERS', dim: true }], null, null)];
-        for (const t of h.timers) out.push(it([{ t: t.what }, { t: ` · ${t.owner}`, dim: true }], { t: `${t.left} → ${t.then}`, dim: false }, null));
+        for (const t of h.timers) {
+          out.push(it(t.what, { t: `${t.left} → ${t.then}`, dim: false }, null));
+          out.push(it([{ t: `owner: ${t.owner}`, x: 18, dim: true }], null, null));
+        }
         if (!h.timers.length) out.push(it([{ t: 'No PR-owned timers', dim: true }], null, null));
-        out.push(it([{ t: 'ATTEMPTS', dim: true }], null, null));
+        const room = Math.max(1, LIST_ROWS - out.length - 1);
+        const shown = h.attempts.slice(-room);
+        const earlier = h.attempts.length - shown.length;
+        out.push(it([{ t: 'ATTEMPTS', dim: true }], earlier ? { t: `+${earlier} earlier`, dim: true } : null, null));
         if (!h.attempts.length) out.push(it([{ t: 'No attempts yet', dim: true }], null, null));
-        for (const [at, what, took, outcome] of h.attempts.slice(-5)) out.push(it([{ t: at, dim: true }, { t: what, x: 86 }], { t: `${took} ${outcome}`, dim: outcome !== 'running' }, null));
+        for (const [at, what, took, outcome] of shown) out.push(it([{ t: at, dim: true }, { t: what, x: 86 }], { t: `${took} ${outcome}`, dim: outcome !== 'running' }, null));
         return out;
       }
       case 'whatchanged': {
@@ -600,9 +609,9 @@ export class App {
     if (s.run != null) return `#${this.pm.pr(s.pr).num} QA run ${s.run} · ${s.role}`;
     return `#${this.pm.pr(s.pr).num} ${s.role}`;
   }
-  breadcrumb(skip = 0) {
+  breadcrumb(skip = 0, keep = 2) {
     const names = this.stack.slice(0, this.stack.length - skip).map(x => this.shortName(x)).filter(Boolean);
-    return names.slice(-2).join(' › ');
+    return names.slice(-keep).join(' › ');
   }
   shortName(x) {
     if (x.type === 'doc') return `${this.pm.doc(x.docId).label} v${x.version} p${this.page(x).page}`;
@@ -650,8 +659,11 @@ export class App {
       rows.push(row([...(selected ? [{ t: GLYPH.cursor }] : []), ...segs.map((s, n) => ({ ...s, x: n === 0 || s.x != null ? INDENT + (s.x ?? 0) : undefined, dim: s.dim ?? !it.act }))], it.r));
     });
     const more = items.length > per ? ` · ${v.top + 1}-${Math.min(items.length, v.top + per)}/${items.length}` : '';
-    const hint = v.kind === 'confirm' ? 'Swipe: choose · Tap: confirm' : items.some(i => i.act) ? 'Tap: open · 2×: back' : '2×: back';
-    return { rows, footer: { left: `${this.breadcrumb(0) || ''}${more}`, right: hint } };
+    const confirm = v.kind === 'confirm';
+    const hint = confirm ? 'Swipe: choose · Tap: confirm' : items.some(i => i.act) ? 'Tap: open · 2×: back' : '2×: back';
+    // A confirmation's title names its subject; a one-level trail leaves the
+    // footer room to show how to confirm in full.
+    return { rows, footer: { left: `${this.breadcrumb(0, confirm ? 1 : 2) || ''}${more}`, right: hint } };
   }
   renderOverlay(frame) {
     const o = this.overlay;
@@ -669,8 +681,12 @@ export class App {
     const text = wrap((o.purpose === 'changes' ? 'Revise: ' : '') + o.text, 528).slice(0, 2);
     let x = 10;
     const choiceSegs = VOICE_CHOICES.flatMap((c, i) => { const segs = [{ t: i === o.choice ? GLYPH.cursor : '', x }, { t: c, x: x + 22, dim: i !== o.choice }]; x += 22 + width(c) + 28; return segs; });
+    // Name the pane or window too when it fits beside the busy state; the
+    // session name alone still identifies the target.
+    const to = `To ${this.sessionName(s)}`;
+    const where = `${to} · ${s.pane !== s.short ? s.pane : 'window ' + s.window}`;
     rows.splice(top, 4,
-      row([{ t: `To ${this.sessionName(s)} · ${s.pane !== s.short ? s.pane : 'window ' + s.window}`, dim: true, x: 6 }], { t: s.state === 'working' ? '◐ busy: queues' : '', dim: true }),
+      row([{ t: width(where) <= RIGHT_X - MARGIN - 14 ? where : to, dim: true, x: 6 }], { t: s.state === 'working' ? '◐ busy: queues' : '', dim: true }),
       row([{ t: text[0] || '', x: 6 }]),
       row([{ t: text[1] || (ctx ? `[${ctx.label}]` : ''), x: 6, dim: !text[1] }]),
       row(choiceSegs));
