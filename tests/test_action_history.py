@@ -1003,6 +1003,15 @@ class TestReconciliation:
         assert kid["id"] == c and kid["outcome"] == "cancelled"
         assert kid["elapsed_s"] == 40
 
+    def test_adopted_end_is_flagged(self, clock):
+        a = ah.start_attempt(PR, "signoff", label="sign-off router")
+        clock.advance(20)
+        ah.end_attempt(PR, a, "done", verdict="SIGNOFF_BLOCKED",
+                       adopted=True)
+        m = hq.build_history(PR, now=clock.t, live=False)
+        assert m["attempts"][0]["adopted"] is True
+        assert "(adopted)" in "\n".join(hq.render_text(m))
+
     def test_open_child_of_superseded_parent(self, clock):
         p = ah.start_attempt(PR, "review-loop", source="runtime",
                              loop_id="L1")

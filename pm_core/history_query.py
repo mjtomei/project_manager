@@ -192,7 +192,9 @@ def _replay(events: list[dict]):
             if ev.get("iteration") is not None and a.get("iteration") is None:
                 a["iteration"] = ev["iteration"]
             if ev.get("adopted"):
-                a["end_adopted"] = True
+                # Ended by a later owner that picked the run up (e.g. a
+                # sign-off router launched before a TUI restart).
+                a["adopted"] = True
             a["last_seen_t"] = max(a["last_seen_t"], t)
         elif kind == "timer_arm":
             tid = ev.get("timer")

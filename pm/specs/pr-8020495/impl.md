@@ -68,7 +68,9 @@ Kinds:
     `verifying`, `queued`, `waiting_human`, `backoff`, `planning`), `detail`.
   - `attempt_end` — `attempt`, `outcome` (`done`, `failed`, `cancelled`,
     `superseded`, `interrupted`, `vanished`, `untracked`), optional
-    `verdict`, `detail`.
+    `verdict`, `detail`, and `adopted` when a later owner ended a run it
+    picked up (sign-off router across a TUI restart); the query shows
+    such an attempt flagged `adopted`.
   - `timer_arm` — `timer` (stable id, e.g. `review-grace:<attempt>`),
     `purpose`, `owner_action`, `owner_attempt`, `armed_t`, `due_t` (null =
     indefinite hold), `effect` (`gate` = nothing happens at due, it only
