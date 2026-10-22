@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T14:27:00.191573+00:00'
+  updated_at: '2026-10-22T14:51:37.158816+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29604,6 +29604,17 @@ prs:
       (clean, 55204 cases; 4660 rich).'
     created_at: '2026-10-22T14:27:00Z'
     last_edited: '2026-10-22T14:27:00Z'
+  - id: note-d10752b
+    text: 'Review loop 05c5 i2 (f84b3a51), user chose strict charter dating: context.charter_written_by
+      dates IETF charter revisions from datatracker docevent new_revision events (approved
+      after NN-xx proposals, else day entered; legacy archive imported 2009-08-29).
+      The first event carries the group start date and is dated only by the next event,
+      dropped if none; rev 00 skipped. i1 assumption "legacy 01 = original charter"
+      was wrong (pppext-01 cites RFC 1661; dhc-01 gives RFC 2131 status). Rich briefs
+      4660 -> 3094 (IETF 2500). Rebuild: context.py --sources ietf-rfcs quic-drafts,
+      cases.py, cases.py --check (clean, 55204).'
+    created_at: '2026-10-22T14:51:37Z'
+    last_edited: '2026-10-22T14:51:37Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
