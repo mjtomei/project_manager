@@ -294,14 +294,25 @@ def apply_layout(session: str, window: str, layout_string: str) -> bool:
     return True
 
 
+# Set by a pane-less caller (the prefix+P popup) on the pm commands it
+# runs, naming the grouped session whose client invoked it.
+CALLER_SESSION_ENV = "PM_CALLER_SESSION"
+
+
 def get_session_name() -> str:
     """Get the current tmux session name (must be called from within tmux).
 
     Uses $TMUX_PANE to target the specific pane, which is more reliable
     than display-message without a target (which uses "current client"
-    and can return wrong session in background processes).
+    and can return wrong session in background processes).  Without a
+    pane (e.g. a command run from a display-popup) an explicit
+    $PM_CALLER_SESSION wins: tmux's "current client" is the most recently
+    active one, and keys typed into a popup don't count as activity, so
+    with several clients attached it can name another user's session.
     """
     pane = os.environ.get("TMUX_PANE")
+    if not pane and os.environ.get(CALLER_SESSION_ENV):
+        return os.environ[CALLER_SESSION_ENV]
     if pane:
         # Target the specific pane to get accurate session name
         result = _run(

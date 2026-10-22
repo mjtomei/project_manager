@@ -1739,8 +1739,14 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # them ourselves — display-popup -E's raw-mode TTY mangles bytes
         # streamed by the child, leaving the user staring at an empty
         # popup when something fails.
+        # Name the invoking session explicitly: the popup has no pane, so
+        # the command would otherwise resolve "its" session from tmux's
+        # most recently active client and could switch another client's
+        # session to the new window.
         full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
-        result = subprocess.run(full_cmd, text=True, capture_output=True)
+        env = {**os.environ, tmux_mod.CALLER_SESSION_ENV: session}
+        result = subprocess.run(full_cmd, text=True, capture_output=True,
+                                env=env)
         if result.stdout:
             click.echo(result.stdout, nl=False)
         if result.returncode != 0:

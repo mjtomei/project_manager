@@ -135,6 +135,13 @@ both the display id and the local id.
 - Two windows for the same PR under both id forms: one nav entry.
 - Navigating from an actionless PR to an actionable one restores the full
   expect list/hints on the next fzf launch (header recomputed per loop).
+- Several clients attached (grouped `base~N` sessions), popup open on each:
+  a direct dispatch (`pr start` / `pr review` …) must switch only the
+  invoking client's session.  The popup has no `$TMUX_PANE`, and keys typed
+  into a popup don't update tmux client activity, so the command's
+  "current client" lookup picked the other client (QA scenario 5, also on
+  master).  `_run_picker_command` passes `PM_CALLER_SESSION=<session>` and
+  `tmux.get_session_name()` honours it when there is no pane.
 
 ## QA acceptance checks (carry into the QA spec)
 
