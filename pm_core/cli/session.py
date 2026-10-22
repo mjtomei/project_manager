@@ -2055,7 +2055,7 @@ def popup_picker_cmd(session: str, window_name: str):
     # Shortcut keys: press a key to immediately run an action.
     # Ordered to match _ALL_ACTIONS display order.
     # Note: q is reserved for quitting the picker (mapped to fzf abort
-    # below), so qa uses 'a'.
+    # below), so qa uses 't'.
     _SHORTCUT_KEYS = {
         "s": "start",
         "e": "edit",
