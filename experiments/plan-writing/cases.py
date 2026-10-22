@@ -467,7 +467,7 @@ def generator_input(case, data_dir=None, context_items=None):
             raise ValueError(f"{case['case_id']}: document text changed since the catalog was built")
         return {"instruction": case["inputs"]["instruction"], "prefix": text[: case["inputs"]["prefix_end"]]}
     if kind == "pm_plan":
-        raw = (data_dir / case["inputs"]["conversation_path"]).read_text()
+        raw = (data_dir / case["inputs"]["conversation_path"]).read_text(encoding="utf-8")
         if hashlib.sha256(raw.encode()).hexdigest() != case["inputs"]["conversation_sha256"]:
             raise ValueError(f"{case['case_id']}: conversation excerpt changed since the catalog was built")
         convo = json.loads(raw)
@@ -721,7 +721,7 @@ def write_summary(coverage):
               "- Context fetch errors are listed per source in `data/context/<source>.status.json`."]
     if "check" in coverage:
         lines += ["", "## Validation", "", "```", json.dumps(coverage["check"], indent=1), "```"]
-    (REPORTS / "case-coverage.md").write_text("\n".join(lines) + "\n")
+    (REPORTS / "case-coverage.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # --- validation --------------------------------------------------------------

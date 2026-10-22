@@ -57,7 +57,7 @@ def sha256_file(path):
 def parse_map(path=MAP_PATH):
     """Rows of the inventory table: plan, evidence, [(record_path, line), ...]."""
     rows = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         m = re.match(r"^\|\s*(plan-[\w.-]+\.md)\s*\|\s*([^|]+?)\s*\|\s*(.*?)\s*\|\s*$", line)
         if m:
             refs = [(p, int(n)) for p, n in RECORD_REF.findall(m.group(3))]
@@ -349,22 +349,22 @@ def build(out_dir, roots=None, map_path=None, plans_dir=None, windows_path=None)
                 draft_sha, content = None, window.pop("written_content")
                 if content is not None:
                     draft_sha = hashlib.sha256(content.encode()).hexdigest()
-                    (out_dir / "drafts" / f"{draft_sha}.md").write_text(content)
+                    (out_dir / "drafts" / f"{draft_sha}.md").write_text(content, encoding="utf-8")
                 excerpts.append({"record": ref["local_path"], "map_path": ref["map_path"], "record_sha256": sha256_file(ref["local_path"]),
                                  "window_reviewed": bool(review), "review_note": review.get("note"),
                                  "request_line": review.get("request_line"), "draft_sha256": draft_sha, **window})
             excerpts.sort(key=lambda e: e["event_timestamp"] or "")
-            baseline = plan_path.read_text()
+            baseline = plan_path.read_text(encoding="utf-8")
             baseline_sha = hashlib.sha256(baseline.encode()).hexdigest()
             kind, sources, gaps = finalize_sources(excerpts, plan, status, reviews, baseline_sha)
             convo_path = out_dir / "conversations" / (plan.removesuffix(".md") + ".json")
             convo = json.dumps({"plan": plan, "excerpts": excerpts}, indent=1)
-            convo_path.write_text(convo)
+            convo_path.write_text(convo, encoding="utf-8")
             humans = sum(1 for e in excerpts for t in e["turns"] if t["role"] == "human")
             fidelity = ({"applicable": False, "reason": "reformat of a source document" if kind == "reformat" else "no human turns"}
                         if kind == "reformat" or not humans else {"applicable": True})
             snapshot = out_dir / "baselines" / f"{baseline_sha}.md"
-            snapshot.write_text(baseline)
+            snapshot.write_text(baseline, encoding="utf-8")
             cases.append({
                 "case_id": "pm:" + plan.removesuffix(".md"), "case_type": "pm_plan", "source": "pm-plans",
                 "document_id": None, "split_group": "pm-plans",

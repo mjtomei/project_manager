@@ -243,7 +243,7 @@ def collect_kep_yaml(source, docs, cfg):
         if not path.exists():
             continue
         try:
-            data = yaml.safe_load(path.read_text()) or {}
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except Exception as exc:  # malformed YAML or invalid dates in some kep.yaml files
             errors.append({"collector": "kep_yaml", "path": str(path), "error": str(exc)})
             continue
@@ -449,7 +449,7 @@ def collect_markdown_index(source, docs, cfg):
             path = checkout_path(source, folder) / index_name
             if not path.exists():
                 continue
-            lines = path.read_text(errors="replace").splitlines()
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
             rel = str(Path(folder) / index_name)
             for doc in members:
                 if doc["identity"] == rel:
