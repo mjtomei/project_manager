@@ -266,8 +266,12 @@ supply `context` (session/window/task); leave a cross-PR note.
   Probes take the owner lock exclusively for an instant, so concurrent
   probes serialize on `history/owners/.probe` (two unserialized probes of
   the same dead owner see each other's lock and call it alive). A pid
-  reused by another process must not count as alive. Released lock files
-  older than 30 days are pruned.
+  reused by another process must not count as alive, and neither may an
+  exited-but-unreaped (zombie) pid. A probe that cannot open the owners
+  dir (read-only or broken history storage) reports unknown, never
+  raises. One `build_history` judges each owner once (memoized), so all
+  of an owner's open attempts and timers get the same verdict. Released
+  lock files older than 30 days are pruned.
 - I5. Tests isolate `pm_home` (conftest autouse fixture for the history
   dir, like `_isolated_runtime_state`).
 - I6. Text output must be readable at 80 columns; times shown local
