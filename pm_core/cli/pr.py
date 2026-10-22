@@ -1108,8 +1108,8 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
 
 
 @contextlib.contextmanager
-def _review_window_launch_lock(pm_session: str, window_name: str):
-    """Serialise concurrent review-window launches for one window.
+def _review_window_launch_lock(pm_session: str, pr_id: str):
+    """Serialise concurrent review-window launches for one PR.
 
     The review window for a PR is a single shared tmux window
     (``review-<display_id>``).  Each ``pm pr review --fresh`` runs in its
@@ -1121,20 +1121,18 @@ def _review_window_launch_lock(pm_session: str, window_name: str):
     sess:review-<display_id>`` ambiguous (it fails), so the popup spinner's
     focus switch silently no-ops.
 
-    An ``fcntl.flock`` on a per-(session, window) lock file, held by
-    :func:`_launch_review_window` across the whole launch (find, kill,
-    create, split, pane registration), makes it atomic across processes:
+    An ``fcntl.flock`` on a per-(session, PR) lock file — same location and
+    keying as the sign-off launch lock (``signoff.launch_signoff_window``) —
+    held by :func:`_launch_review_window` across the whole launch (find,
+    kill, create, split, pane registration), makes it atomic across processes:
     the second launch blocks until the first has created its window, then
     finds it and either supersedes it (fresh: kill+recreate) or switches
     to it (non-fresh fast path) instead of racing — the session converges
     on exactly one review window.
     """
     import fcntl
-    from pm_core.paths import pm_home
-    safe = window_name.replace("/", "_")
-    lock_dir = pm_home() / "locks"
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_dir / f"review-launch-{pm_session}-{safe}.lock"
+    from pm_core.paths import workdirs_base
+    lock_path = workdirs_base() / f".review-launch-{pm_session}-{pr_id}.lock"
     fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -1164,8 +1162,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             review_loop=review_loop, review_iteration=review_iteration,
             review_loop_id=review_loop_id, transcript=transcript)
         return
-    window_name = f"review-{_pr_display_id(pr_entry)}"
-    with _review_window_launch_lock(pm_session, window_name):
+    with _review_window_launch_lock(pm_session, pr_entry["id"]):
         _launch_review_window_unlocked(
             data, pr_entry, fresh=fresh, background=background,
             review_loop=review_loop, review_iteration=review_iteration,
