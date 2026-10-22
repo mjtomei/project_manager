@@ -481,6 +481,15 @@ export class App {
 
   // ---- sessions -------------------------------------------------------
   originDoc() { return [...this.stack].reverse().find(x => x.type === 'doc'); }
+  // The reading context a message to this session carries: the originating
+  // document only when it belongs to the session (its linked session, or the
+  // same PR). A session reached from an unrelated document gets no context.
+  contextDoc(sessionId) {
+    const v = this.originDoc();
+    if (!v) return undefined;
+    const d = this.pm.doc(v.docId), s = this.pm.session(sessionId);
+    return d.session === sessionId || s.doc === d.id || (d.pr && d.pr === s.pr) ? v : undefined;
+  }
   returnTo(target) { while (this.view !== target && this.stack.length > 1) this.stack.pop(); }
   jumpTo(v) {
     // Reuse an equivalent list already on the stack instead of growing it.
@@ -514,7 +523,7 @@ export class App {
   target() {
     const v = this.view;
     if (v.type === 'doc') return { session: this.pm.doc(v.docId).session, doc: v };
-    if (v.type === 'session') return { session: v.id, doc: this.originDoc() };
+    if (v.type === 'session') return { session: v.id, doc: this.contextDoc(v.id) };
     return null;
   }
   startListening(purpose = 'discuss') {

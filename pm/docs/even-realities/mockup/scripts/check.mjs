@@ -55,5 +55,26 @@ for (const j of JOURNEYS) {
     if (!quiet || errs.length) console.log(show({ ...built.shown, panel: frame.panel }));
   }
 }
+// Rules outside the scripted shots. A message carries the originating
+// document's reading context only into a session that document belongs to.
+if (!only.length) {
+  const spoken = (from, sessionId) => {
+    const app = new App(new SimPM());
+    app.openDoc(from);
+    app.openSession(sessionId);
+    app.nextUtterance = 'rule check';
+    for (const i of ['hold', 'release', 'select']) app.intent(i);
+    return app.pm.session(sessionId).transcript.at(-1).context?.doc ?? null;
+  };
+  for (const [from, to, want] of [
+    ['spec:pr-214:impl', 'pr-214/impl', 'spec:pr-214:impl'],
+    ['spec:pr-215:qa', 'pr-215/qa/run2/s2/verifier', 'spec:pr-215:qa'],
+    ['plan:plan-sync', 'plan-sync/review', 'plan:plan-sync'],
+    ['spec:pr-214:impl', 'pr-216/impl', null],
+  ]) {
+    const got = spoken(from, to);
+    if (got !== want) { failures++; console.log(`FAIL rule: ${from} → ${to} context ${got}, expected ${want}`); }
+  }
+}
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);
