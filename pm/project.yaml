@@ -29398,7 +29398,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-13T22:18:20.648960+00:00'
+  updated_at: '2026-10-22T22:50:53.679278+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29411,6 +29411,25 @@ prs:
       This time no QA PASS PR note was persisted. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA/pm-log-stale-run.txt.'
     created_at: '2026-10-13T22:18:20Z'
     last_edited: '2026-10-13T22:18:20Z'
+  - id: note-935e8a3
+    text: 'More evidence 2026-10-22 (pr-592e4bd QA S8, b6cec11a, local backend; captures
+      /pm-captures/scenarios/8, see story3/debug-log-excerpt.log + snapshots.log).
+      (1) Stop during the work-route wait: zz t at 22:18:03.9 while scenarios 3/4
+      waited (router down). The stopping loop still logged "Running 2 scenario(s)...",
+      launched a qa-finalize pane (fake-claude FINALIZE_DONE pid 3975 stayed alive
+      in the qa-<pr> window), then "QA finalize: pane vanished or stop_check fired"
+      and "QA complete: INPUT_REQUIRED (finalize=None)". The 0b1edfca unverdicted
+      state still held. (2) A z t superseding a waiting run did the same (orphan finalize
+      pane pid 9589 seen in story8 snapshots). (3) Production, operator report: in
+      the real parent PM session at 18:56Z 2026-10-22, native QA stop was sent for
+      #236 #237 #243 #244 #239 #234 (pause every QA except #249). Finalizer turns
+      started anyway and had to be interrupted separately after the scenario workers
+      were paused. Pre-stop snapshots are on the host at /home/matt/.local/state/pm-pr-shepherd/qa-pause-20261022T185639Z;
+      recorded in checkpoint.qa_pause.native_stop_side_effect. The fix should skip
+      _run_qa_finalize_pane (and the "Running N scenario(s)" phase) when state.stop_requested.
+      Related: pr-4296808, pr-31413e8 (superseded-run reporting).'
+    created_at: '2026-10-22T22:50:53Z'
+    last_edited: '2026-10-22T22:50:53Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
@@ -31451,7 +31470,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T21:15:00.634164+00:00'
+  updated_at: '2026-10-22T22:50:38.491731+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31594,6 +31613,16 @@ prs:
       source hashes match 81cebf17.'
     created_at: '2026-10-22T20:02:41Z'
     last_edited: '2026-10-22T20:02:41Z'
+  - id: note-42e237e
+    text: 'QA S8 (2026-10-22): all 11 triples held on b6cec11a, no code changes, captures
+      /pm-captures/scenarios/8. Covered: router-down/expired/bad-launcher/unconfigured-worker-provider
+      waits with auto-recovery; 0b1edfca stop-during-wait rechecked live (no verdict,
+      no verdict.md); refresh_command cooldown 300 s exact; two PRs released by one
+      router start. Harness gotcha: never record via an extra grouped tmux session
+      (tmux new-session -t <pm session>); pm then resolves that session, fake-claude
+      config stops applying, and killing it crashes running QA loops.'
+    created_at: '2026-10-22T22:50:38Z'
+    last_edited: '2026-10-22T22:50:38Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -31639,11 +31668,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T20:39:48.696543+00:00'
-  updated_at: '2026-10-22T20:39:48.696543+00:00'
+  updated_at: '2026-10-22T22:50:54.517722+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-54d9506
+    text: 'Related: pr-f8acf21 covers the stop/supersede side effect that runs before
+      this one. The stopped or superseded loop still launches a finalizer pane (seen
+      live in pr-592e4bd QA S8, 2026-10-22, and in production at 18:56Z 2026-10-22
+      when native QA stop was sent for #236 #237 #243 #244 #239 #234; evidence /home/matt/.local/state/pm-pr-shepherd/qa-pause-20261022T185639Z).
+      Fixing them together keeps a stopped or superseded run from finalizing or reporting.'
+    created_at: '2026-10-22T22:50:54Z'
+    last_edited: '2026-10-22T22:50:54Z'
 - id: pr-3c7ce04
   plan: bugs
   title: 'Bug: QA loop waits silently forever when a Claude pane is blocked on login
