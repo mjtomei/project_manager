@@ -43,6 +43,13 @@ R3 — Semantic highlighting
   their reasons say what to do (`answer in the … window`, `press V`, `press g`).
 - Given a still-running PR under a wait-for-merge target, Then its label is
   green `RUNNING`, not red; the wait policy is a magenta label only.
+- Given a PR whose QA ended INPUT_REQUIRED (e.g. no QA spec) and then got a
+  pending QA spec, Then the row reads `QA SPEC REVIEW` with no trailing
+  `qa` / `qa INPUT_REQUIRED` token (the label already names the phase).
+- Given the popup in a 16-colour pane (pm's default tmux, TERM=screen),
+  Then attention labels use the same SGR as the CLI (bold white on red,
+  `1;37;41`), WAITING is yellow, and the selected attention row keeps its red
+  label (selection is a gray bar, not reverse video).
 - Given a failed run, Then `FAILED` is red text without the red background.
 - Given human-action PRs exist, Then the header reads `⚠ K need you: #a, #b, …`
   listing each such PR once, even if it appears under several targets.
@@ -57,7 +64,11 @@ R4 — Width and wrapping
   truncated, and no line starts or ends with a `·` separator.
 - Given titles with wide Unicode (CJK/emoji), Then wrapping counts display cells.
 - Given the popup in a narrow terminal, When the terminal is resized,
-  Then the popup re-wraps to the new width with the header also bounded.
+  Then the popup re-wraps to the new width with the header also bounded, and
+  the footer key-hint line wraps without any line starting or ending in `·`.
+- Given a reason containing newlines or tabs (a multi-line QA error), Then it
+  is laid out as words on hanging-indent continuation lines within width,
+  never breaking back to column 0.
 
 R5 — Shared presentation, color control
 - Given an interactive terminal, Then CLI output is colored.
@@ -73,6 +84,7 @@ R5 — Shared presentation, color control
 R6 — No behavior change
 - Scheduling order, merge holds, policy changes (`add --…`, `remove`), merge via
   `g` / `pm pr merge`, and lifecycle transitions behave as on master; only text changes.
+  (`pm autostart add` prints the pre-existing `policy_changed:` line, not `changed:`.)
 
 ## 2. Setup
 
@@ -82,9 +94,22 @@ R6 — No behavior change
 - Configure fake-claude (`pm fake-claude config set`) so review/QA/sign-off sessions
   reach deterministic verdicts (NEEDS_WORK with delay for "running review",
   INPUT_REQUIRED for human waits, SIGNOFF_MERGE for manual-merge waits).
-- Spec-review waits: set the global `spec-mode` to `prompt` so generated specs
-  pause for approval, or (bootstrap only) set `spec_pending: {phase: impl|qa}` on a PR
-  in `pm/project.yaml` before starting the session.
+- Spec-review waits: `pm set spec-mode review`, then run `pm pr spec <pr> impl|qa`
+  while the PR is already in_progress (hold impl with fake `impl: {"delay":3600}`;
+  `pm pr start` refuses a PR with a pending spec), or (bootstrap only) set
+  `spec_pending: {phase: impl|qa}` in `pm/project.yaml` before starting the
+  session.  `prompt` mode never pends with fake-claude.
+- Policies: `pm autostart add` defaults to stop-before-merge; use
+  `--wait-for-merge` / `--auto-merge` / `--stop-before-merge`.  `remove` keeps a
+  stop mark (a way to stop-mark a dep).  Merged targets are pruned.
+- Fake-claude traps (see PR notes): fake impl makes no commit, so sign-off is
+  BLOCKED until a commit lands in the PR workdir; fake review INPUT_REQUIRED
+  self-resolves in ~2 s, so use a recorded QA INPUT_REQUIRED (`qa_scenario`
+  INPUT_REQUIRED) for a stable red row; fake QA needs `pm/specs/<pr>/qa.md` or
+  ends INPUT_REQUIRED; scripted cursors reset on `config set`, so stage targets
+  one at a time.  Start `pm session` with `/usr/bin` ahead of `~/.local/bin`
+  (git proxy) but keep `~/.local/bin` on PATH; commit `pm/` before autostart;
+  `export EDITOR=true` (or install vim-tiny) before V.
 - Use GitHub-number-less local PRs or set `gh_pr_number` at bootstrap if `#N`
   display ids are wanted.
 - Create several targets: one `--wait-for-merge` chain, one `--auto-merge` target
@@ -99,8 +124,10 @@ R6 — No behavior change
 
 - Given auto-start off (no targets), When status is run, Then "auto-start off"
   message, no crash, no ANSI when piped.
-- Given `autostart all` (backlog) mode, Then rows are flat and blocker reasons keep
-  hold annotations (no group implies them).
+- Given `autostart all` (backlog) mode, Then rows are flat; backlog lists only
+  active PRs and pending PRs whose deps are all merged, so holds appear as row
+  labels (`[stop-before-merge]`, `[wait-for-merge ← X]`) rather than in blocker
+  reasons.  Closed/missing blockers are exercised in targets mode.
 - Given `--width 10`, Then width clamps to 30; `--width 500` → 99; `--width 0` → terminal default.
 - Given an unbreakable token longer than the width (long branch/title word),
   Then it is hard-split, never overflows.
