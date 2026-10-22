@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T17:32:43.777153+00:00'
+  updated_at: '2026-10-22T18:52:47.226716+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30725,6 +30725,19 @@ prs:
       [project.yaml signoff'' / ''    record]''. S42 drivers: /pm-captures/scenarios/42/run2/scripts.'
     created_at: '2026-10-22T17:32:43Z'
     last_edited: '2026-10-22T17:32:43Z'
+  - id: note-a6447cb
+    text: 'QA S46 (2026-10-22) PASS on 95d8d990 (app b28d2f62), no edits: z d in loop-1
+      i2 grace (15 s left) -> loop+i2 cancelled KILLED +0.88 s, i2 grace cancelled
+      never elapsed; loop 2 superseded; one folded start row; router 1 throttle 60
+      s falling/released; restart 5.5 s into router 2 with \xff line -> >6s interrupted
+      + lost throttle -> same id done SIGNOFF_BLOCKED (adopted); BLOCKED hold head
+      wraps "[project.yaml signoff" / "    record]" TTY==cat; stale router 3 MERGE,
+      re-armed row; no-TUI merges released at merged in 351 polls; merged popups [11
+      runs]/[4 runs] word-equal; today/TZ/+2d/+365d all <=80, TTY==cat, wraps only
+      >80. Obs: one read 0.27 s after z d still had the i2 grace active (before the
+      0.88 s cancel journal). Captures /pm-captures/scenarios/46.'
+    created_at: '2026-10-22T18:52:47Z'
+    last_edited: '2026-10-22T18:52:47Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
