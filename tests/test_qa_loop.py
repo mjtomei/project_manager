@@ -1738,6 +1738,55 @@ class TestScenarioRetryLogic:
         mock_relaunch.assert_not_called()
         assert 1 not in state.scenario_verdicts
 
+    def test_relaunch_snapshots_new_pane_before_next_poll(self, tmp_path):
+        """A TUI restart right after a relaunch must resume with the new
+        pane, so the resume snapshot is written before the next poll
+        sleep — otherwise the resumed run sees the dead pane, treats the
+        live retry as vanished and launches a duplicate worker."""
+        from pm_core.qa_loop import _poll_tmux_verdicts, _POLL_INTERVAL
+        import itertools
+        import time as _time
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.session_id = "sid-relaunch-snapshot"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        events = []
+
+        def relaunch(sc, *a, **k):
+            sc.pane_id = "%99"
+            events.append(("relaunch",))
+            return True
+
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": _time.time() + 1000,
+                      "session_id": scenario.session_id}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", side_effect=relaunch), \
+             patch("pm_core.qa_loop._write_resume_file",
+                   side_effect=lambda st, *a, **k: events.append(
+                       ("write", st.scenarios[0].pane_id))), \
+             patch("pm_core.qa_loop.time.sleep",
+                   side_effect=lambda s: events.append(("sleep", s))), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: None,
+            )
+
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        after = events[events.index(("relaunch",)) + 1:]
+        next_poll = after.index(("sleep", _POLL_INTERVAL))
+        assert ("write", "%99") in after[:next_poll]
+
     def test_retries_exhausted_gives_input_required(self, tmp_path):
         """When all retries are used, scenario gets INPUT_REQUIRED."""
         from pm_core.qa_loop import (

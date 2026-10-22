@@ -2748,6 +2748,11 @@ def _poll_tmux_verdicts(
             state.scenarios = orig
         if scenario.window_name:
             pending.add(scenario.index)
+            # Snapshot now, not on the next poll: a TUI restart in between
+            # would resume with this scenario still queued and launch a
+            # second worker beside the live one.
+            _write_resume_file(state, use_containers, concurrency_cap,
+                               _queued_indices)
         else:
             # Window creation failed — mark INPUT_REQUIRED so this
             # scenario isn't silently lost (which could cause a false
@@ -2936,6 +2941,12 @@ def _poll_tmux_verdicts(
                         session, workdir_path,
                     ):
                         observer.relaunched(scenario, True)
+                        # Snapshot the new pane now: a TUI restart before
+                        # the next poll would otherwise resume with the dead
+                        # pane, treat the live retry as vanished and launch
+                        # a duplicate worker.
+                        _write_resume_file(state, use_containers,
+                                           concurrency_cap, _queued_indices)
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         _arm_grace()
