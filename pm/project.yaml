@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T00:26:23.846535+00:00'
+  updated_at: '2026-10-22T01:17:46.426033+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8248,6 +8248,20 @@ prs:
       integrity gap from QA S7.'
     created_at: '2026-10-22T00:26:23Z'
     last_edited: '2026-10-22T00:26:23Z'
+  - id: note-a9813cc
+    text: 'QA S12 (integrate CLI) 6791411d: after 3fbd4abb, simultaneous checks on
+      git<2.38 still failed 6/50 (5 rounds x 10 right after master moved): fetch "bad
+      object worktrees/candidateN/HEAD" (fetch walks a peer''s half-created candidate
+      worktree) and "could not open .git/worktrees/candidate/gitdir" (same admin-dir
+      name + peer repo-wide worktree prune). Fix: per-repo flock (<git-common-dir>/pm-integration.lock)
+      around fetch_base + temp-worktree merge, unique worktree names, prune only if
+      remove fails; new multiprocess regression test. 100/100 post-fix. All S12 Thens
+      held post-fix. Pushed at finalize (push.sock was missing in the QA
+      container). Remaining limit: an agent''s
+      own git fetch in the PR workdir can still hit a transient bad-object while pm
+      holds a candidate worktree (git-level; the lock only covers pm). Captures /pm-captures/scenarios/12'
+    created_at: '2026-10-22T01:17:46Z'
+    last_edited: '2026-10-22T01:17:46Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
