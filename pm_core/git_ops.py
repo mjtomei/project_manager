@@ -173,8 +173,13 @@ def checkout_branch(workdir: Path, branch: str, create: bool = False) -> None:
 
 
 def pull_rebase(workdir: Path) -> subprocess.CompletedProcess:
-    """Pull with rebase."""
-    return run_git("pull", "--rebase", cwd=workdir, check=False)
+    """Pull with rebase, keeping local merge commits.
+
+    ``--rebase=merges``: a plain ``--rebase`` linearizes an unpushed merge
+    (e.g. pm's sign-off integration of the base into the PR branch), replaying
+    every base commit onto the branch as a new commit.
+    """
+    return run_git("pull", "--rebase=merges", cwd=workdir, check=False)
 
 
 def commit_and_push(workdir: Path, message: str, files: Optional[list[str]] = None) -> None:

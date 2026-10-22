@@ -97,7 +97,7 @@ SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "signoff":         ("SIGNOFF_MERGE", "SIGNOFF_REQA", "SIGNOFF_REVIEW",
                         "SIGNOFF_IMPL", "SIGNOFF_BLOCKED"),
     "watcher":         ("READY", "INPUT_REQUIRED"),
-    "merge":           (),   # merge conflict: no verdict, interactive
+    "merge":           (),   # post-merge repo update: no verdict, interactive
     # --- non-loop interactive sessions: no verdict, fake-claude routing only ---
     "plan":            (),   # pm plan: add / breakdown / review / deps / import
     "meta":            (),   # pm meta: work on pm itself

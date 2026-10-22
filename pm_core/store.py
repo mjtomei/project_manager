@@ -281,6 +281,72 @@ def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
             fd.close()
 
 
+@contextmanager
+def bounded_flock(path: Path, timeout: float):
+    """Exclusive advisory lock on *path*, waiting at most *timeout* seconds.
+
+    Yields True while the lock is held, or False when another holder still
+    has it at the deadline — the caller decides whether to skip or proceed.
+    """
+    deadline = time.monotonic() + timeout
+    with open(path, "a") as f:
+        while True:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.05)
+        yield True
+
+
+def merge_3way(base, ours, theirs):
+    """Three-way merge of parsed project.yaml values.
+
+    *theirs* (pm's live state) wins true conflicts; *ours* (e.g. a merged
+    branch's committed changes) is kept wherever *theirs* left the value as
+    it was in *base*.  Lists of ``id``-keyed entries (prs, plans, notes)
+    merge entry by entry.
+    """
+    if ours == theirs or ours == base:
+        return theirs
+    if theirs == base:
+        return ours
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        b = base if isinstance(base, dict) else {}
+        out = {}
+        for k in theirs:
+            if k in ours:
+                out[k] = merge_3way(b.get(k), ours[k], theirs[k])
+            elif k not in b or b[k] != theirs[k]:
+                out[k] = theirs[k]          # else: removed by *ours*
+        for k in ours:
+            if k not in theirs and k not in b:
+                out[k] = ours[k]            # added by *ours*
+        return out
+    if (_is_id_list(ours) and _is_id_list(theirs)
+            and (base is None or _is_id_list(base))):
+        b = {e["id"]: e for e in base or []}
+        o = {e["id"]: e for e in ours}
+        t = {e["id"] for e in theirs}
+        out = []
+        for e in theirs:
+            if e["id"] in o:
+                out.append(merge_3way(b.get(e["id"]), o[e["id"]], e))
+            elif b.get(e["id"]) != e:
+                out.append(e)
+        out.extend(e for e in ours if e["id"] not in t and e["id"] not in b)
+        return out
+    return theirs
+
+
+def _is_id_list(value) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(e, dict) and "id" in e for e in value)
+
+
 def locked_update(
     root: Path,
     fn: Callable[[dict], None],

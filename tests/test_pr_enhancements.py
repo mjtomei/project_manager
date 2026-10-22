@@ -405,318 +405,9 @@ class TestPrMerge:
         assert result.exit_code != 0
         assert "pending" in result.output
 
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_local_merge_pulls_into_repo(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """pr merge for local backend should merge in workdir then pull into repo dir."""
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "status":
-                return MagicMock(returncode=0, stdout="", stderr="")  # clean
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
+    # The publish path itself (gate, candidate, CAS per backend) is covered
+    # against real git repositories in tests/test_merge_publish.py.
 
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        # Workdir: capture tip, checkout, sync master from the main repo,
-        # merge, post-merge verify (no pre-dirty check)
-        assert ("rev-parse", "pm/pr-001") == git_calls[0][:2]
-        assert ("checkout", "master") == git_calls[1][:2]
-        repo = str(tmp_merge_project["pm_dir"].parent)
-        sync_fetch = git_calls.index(("fetch", repo, "master"))
-        assert git_calls[sync_fetch + 1][-1] == "FETCH_HEAD"
-        pr_merge = git_calls.index(next(c for c in git_calls if c[:2] == ("merge", "--no-ff")))
-        assert sync_fetch < pr_merge
-        assert ("merge-base", "--is-ancestor") == git_calls[pr_merge + 1][:2]
-        # Repo dir: check branch, fetch from workdir, ff-only merge
-        assert ("rev-parse", "--abbrev-ref", "HEAD") in git_calls
-        assert any(c[0] == "fetch" for c in git_calls)
-        assert ("merge", "--ff-only", "FETCH_HEAD") in git_calls
-        # No push for local backend
-        assert not any(c[:2] == ("push", "origin") for c in git_calls)
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_local_merge_main_repo_failure_reports_without_window(
-        self, mock_git_ops, mock_finalize, tmp_merge_project
-    ):
-        """A fast-forward blocked by the main repo itself (not divergence)
-        is reported for the user to fix; no Claude window is opened in the
-        main repo (pr-e835d8f), even with --resolve-window."""
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "status":
-                return MagicMock(returncode=0, stdout="", stderr="")
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args == ("merge", "--ff-only", "FETCH_HEAD"):
-                return MagicMock(returncode=1, stdout="",
-                                 stderr="Not possible to fast-forward")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]), \
-             mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--resolve-window",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code != 0
-        assert "Not possible to fast-forward" in result.output
-        assert "--propagation-only pr-001" in result.output
-        mock_launch.assert_not_called()
-        mock_finalize.assert_not_called()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_dirty_workdir_proceeds_when_no_overlap(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """pr merge should proceed when dirty files don't overlap with the merge."""
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "status":
-                return MagicMock(returncode=0, stdout=" M some_file.py\n", stderr="")
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_dirty_workdir_stashes_on_overlap(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """pr merge should stash and retry when dirty files overlap with checkout."""
-        checkout_call_count = 0
-
-        def run_git_side_effect(*args, **kwargs):
-            nonlocal checkout_call_count
-            if args[0] == "status":
-                return MagicMock(returncode=0, stdout=" M some_file.py\n", stderr="")
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args[:2] == ("checkout", "master"):
-                checkout_call_count += 1
-                if checkout_call_count == 1:
-                    # First attempt: fail due to dirty overlap
-                    return MagicMock(returncode=1, stdout="",
-                                     stderr="error: Your local changes to the following files would be overwritten by checkout")
-                # Second attempt after stash: succeed
-                return MagicMock(returncode=0, stdout="", stderr="")
-            if args[:2] == ("stash", "push"):
-                return MagicMock(returncode=0, stdout="", stderr="")
-            if args[:2] == ("stash", "pop"):
-                return MagicMock(returncode=0, stdout="", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        # Should have stashed and retried checkout
-        assert any(c[:2] == ("stash", "push") for c in git_calls)
-        assert any(c[:2] == ("stash", "pop") for c in git_calls)
-        assert checkout_call_count == 2
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_post_merge_verification_warns_on_failure(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """pr merge should warn (but not fail) when post-merge verification fails."""
-        def run_git_side_effect(*args, **kwargs):
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args[:3] == ("merge-base", "--is-ancestor", "abc1234"):
-                return MagicMock(returncode=1, stdout="", stderr="")  # verification fails
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        # Should still succeed (warning, not error)
-        assert result.exit_code == 0
-        assert "verification failed" in result.output
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_vanilla_merge_fetches_origin(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """pr merge for vanilla backend should fetch from origin before merging."""
-        # Change backend to vanilla
-        data = store.load(tmp_merge_project["pm_dir"])
-        data["project"]["backend"] = "vanilla"
-        store.save(data, tmp_merge_project["pm_dir"])
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        # Should have: fetch origin (vanilla), rev-parse, checkout, merge, ...
-        assert ("fetch", "origin") == git_calls[0][:2]  # vanilla fetches
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_vanilla_push_failure_launches_merge_window(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """Vanilla push failure with --resolve-window should launch merge window."""
-        data = store.load(tmp_merge_project["pm_dir"])
-        data["project"]["backend"] = "vanilla"
-        store.save(data, tmp_merge_project["pm_dir"])
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args[0] == "push":
-                return MagicMock(returncode=1, stdout="",
-                                 stderr="rejected: non-fast-forward")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]), \
-             mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--resolve-window",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        mock_launch.assert_called_once()
-        mock_finalize.assert_not_called()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_vanilla_push_failure_without_resolve_window(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """Vanilla push failure without --resolve-window should not finalize."""
-        data = store.load(tmp_merge_project["pm_dir"])
-        data["project"]["backend"] = "vanilla"
-        store.save(data, tmp_merge_project["pm_dir"])
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args[0] == "push":
-                return MagicMock(returncode=1, stdout="",
-                                 stderr="rejected: non-fast-forward")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        # Soft failure with manual instructions exits non-zero so the
-        # popup picker / TUI surfaces the error instead of closing
-        # silently.
-        assert result.exit_code != 0
-        assert "Push to origin failed" in result.output
-        mock_finalize.assert_not_called()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_local_pull_failure_without_resolve_window_exits_nonzero(
-        self, mock_git_ops, mock_finalize, tmp_merge_project,
-    ):
-        """When the post-merge pull into the main repo dir fails and no
-        resolve window was requested, exit non-zero so the popup picker
-        / TUI surfaces the manual instructions instead of vanishing."""
-        def run_git_side_effect(*args, **kwargs):
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args[0] == "fetch":
-                return MagicMock(returncode=1, stdout="",
-                                 stderr="fetch failed: connection refused")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-resolve-window",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code != 0
-        assert "fetch failed" in result.output
-        mock_finalize.assert_not_called()
-
-
-class TestGithubFallbackExitCode:
-    """When the GitHub backend cannot run gh CLI, pr merge prints manual
-    instructions. That is a soft failure — exit non-zero so the popup
-    picker / TUI surfaces it."""
-
-    @mock.patch("shutil.which", return_value=None)
-    def test_no_gh_cli_exits_nonzero_with_pr_url(
-        self, _mock_which, tmp_path,
-    ):
-        from pm_core import store
-        pm_dir = tmp_path / "pm"
-        pm_dir.mkdir()
-        data = {
-            "project": {"name": "p", "repo": str(tmp_path),
-                        "base_branch": "master", "backend": "github"},
-            "prs": [{
-                "id": "pr-001", "title": "t", "description": "",
-                "branch": "pm/pr-001", "status": "in_review",
-                "gh_pr": "https://github.com/x/y/pull/1",
-            }],
-            "plans": [],
-        }
-        store.save(data, pm_dir)
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code != 0
-        assert "GitHub PR" in result.output
-        assert "Merge via GitHub" in result.output
-
-
-# ---------------------------------------------------------------------------
-# GitHub merge: pull after merge with dirty-workdir detection
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def tmp_github_merge_project(tmp_path):
@@ -752,466 +443,90 @@ def tmp_github_merge_project(tmp_path):
     return {"pm_dir": pm_dir, "workdir": workdir, "data": data}
 
 
-class TestGitHubMergePull:
-    """Tests for pull-after-merge on the GitHub backend."""
+class TestPullAfterMerge:
+    """Post-publication update of the main repo checkout (recovery only)."""
 
-    @mock.patch.object(pr_mod, "trigger_tui_restart")
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_pulls_base_branch(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        mock_restart, tmp_github_merge_project,
-    ):
-        """After a successful gh merge, should fetch+merge (not pull --rebase)."""
-        # gh pr merge succeeds
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    def _pull(self, tmp_path, run_git, *, resolve_window=False):
+        data = {"project": {"name": "p", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "github"},
+                "prs": [{"id": "pr-001", "title": "T",
+                         "branch": "pm/pr-001", "status": "sign_off"}]}
+        with mock.patch("pm_core.cli.pr.git_ops") as g, \
+             mock.patch.object(pr_mod, "_launch_merge_window") as launch:
+            g.run_git.side_effect = run_git
+            ok = pr_mod._pull_after_merge(
+                data, data["prs"][0], str(tmp_path), "master",
+                resolve_window=resolve_window, background=False,
+                transcript=None)
+        return ok, [c[0] for c in g.run_git.call_args_list], \
+            [c[1].get("cwd") for c in g.run_git.call_args_list], launch
 
-        def run_git_side_effect(*args, **kwargs):
+    def test_fetches_and_fast_forwards_in_repo_dir(self, tmp_path):
+        def rg(*args, **kw):
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
+        ok, calls, cwds, launch = self._pull(tmp_path, rg)
+        assert ok
+        assert ("fetch", "origin") in calls
+        assert ("merge", "--ff-only", "origin/master") in calls
+        assert set(cwds) == {str(tmp_path)}
+        launch.assert_not_called()
 
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
+    def test_dirty_overlap_stashes_then_succeeds(self, tmp_path):
+        n = {"merge": 0}
 
-        assert result.exit_code == 0
-        assert "merged" in result.output.lower()
-
-        # Should have fetched and merged (not pull --rebase which needs clean tree)
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        assert ("fetch", "origin") in git_calls
-        assert ("merge", "--ff-only", "origin/master") in git_calls
-        mock_finalize.assert_called_once()
-
-        # Git ops must target the main repo dir, NOT the PR workdir
-        repo_dir = tmp_github_merge_project["pm_dir"].parent
-        workdir = tmp_github_merge_project["workdir"]
-        for call in mock_git_ops.run_git.call_args_list:
-            cwd = Path(call[1].get("cwd"))
-            assert cwd == repo_dir, f"git op cwd={cwd} should be repo dir, not workdir"
-            assert cwd != workdir
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch.object(pr_mod, "_pull_after_merge", return_value=True)
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("pm_core.gh_ops.merge_pr")
-    @mock.patch("pm_core.paths.fake_github_active", return_value=True)
-    @mock.patch("shutil.which", return_value=None)
-    def test_github_merge_uses_fake_when_gh_binary_absent(
-        self, _mock_which, _mock_active, mock_merge_pr, mock_git_ops,
-        mock_pull, mock_finalize, tmp_github_merge_project,
-    ):
-        """R9 parity: with the real gh binary absent but a session fake active,
-        `pm pr merge` still runs the merge against the fake (via run_gh's
-        session gate) instead of falling through to the manual-merge fallback."""
-        mock_merge_pr.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.return_value = MagicMock(
-            returncode=0, stdout="", stderr="")
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0, result.output
-        # The github merge block was entered and used the fake-backed gh_ops,
-        # not the "Merge via GitHub" manual fallback.
-        mock_merge_pr.assert_called_once()
-        mock_finalize.assert_called_once()
-        assert "Merge via GitHub" not in result.output
-
-    @mock.patch.object(pr_mod, "trigger_tui_restart")
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_restarts_tui_for_project_manager_repo(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        mock_restart, tmp_github_merge_project,
-    ):
-        """TUI restart should fire only when managing the project_manager repo."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="master", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        # Set repo to project_manager
-        data = store.load(tmp_github_merge_project["pm_dir"])
-        data["project"]["repo"] = "https://github.com/org/project_manager"
-        store.save(data, tmp_github_merge_project["pm_dir"])
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        mock_restart.assert_called_once()
-
-    @mock.patch.object(pr_mod, "trigger_tui_restart")
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_skips_tui_restart_for_other_repos(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        mock_restart, tmp_github_merge_project,
-    ):
-        """TUI restart should NOT fire for non-project_manager repos."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="master", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        mock_restart.assert_not_called()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_proceeds_with_dirty_non_overlapping(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        tmp_github_merge_project,
-    ):
-        """Dirty repo dir should proceed when dirty files don't overlap with merge."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="master", stderr="")
-            # merge --ff-only succeeds even with dirty files (no overlap)
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_launch_merge_window")
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_stashes_on_dirty_overlap_then_succeeds(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        mock_launch_window, tmp_github_merge_project,
-    ):
-        """Dirty overlap during pull should stash, retry merge, and succeed."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        merge_call_count = 0
-
-        def run_git_side_effect(*args, **kwargs):
-            nonlocal merge_call_count
+        def rg(*args, **kw):
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout=" M file.py\n", stderr="")
             if args[0] == "merge":
-                merge_call_count += 1
-                if merge_call_count == 1:
-                    return MagicMock(returncode=1, stdout="",
-                                     stderr="error: Your local changes to the following files would be overwritten by merge")
-                return MagicMock(returncode=0, stdout="", stderr="")
-            if args[:2] == ("stash", "push"):
-                return MagicMock(returncode=0, stdout="", stderr="")
-            if args[:2] == ("stash", "pop"):
-                return MagicMock(returncode=0, stdout="", stderr="")
+                n["merge"] += 1
+                if n["merge"] == 1:
+                    return MagicMock(returncode=1, stdout="", stderr=(
+                        "error: Your local changes to the following files "
+                        "would be overwritten by merge"))
             return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
+        ok, calls, _, launch = self._pull(tmp_path, rg)
+        assert ok
+        assert any(c[:2] == ("stash", "push") for c in calls)
+        assert any(c[:2] == ("stash", "pop") for c in calls)
+        launch.assert_not_called()
 
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        assert any(c[:2] == ("stash", "push") for c in git_calls)
-        assert any(c[:2] == ("stash", "pop") for c in git_calls)
-        mock_finalize.assert_called_once()
-        mock_launch_window.assert_not_called()
-
-    @mock.patch.object(pr_mod, "_launch_merge_window")
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_merge_ff_failure_launches_merge_window(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        mock_launch_window, tmp_github_merge_project,
-    ):
-        """Merge --ff-only failure should launch a merge resolution window."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        def run_git_side_effect(*args, **kwargs):
+    def test_ff_failure_opens_recovery_window_in_repo_dir(self, tmp_path):
+        def rg(*args, **kw):
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "merge":
                 return MagicMock(returncode=1, stdout="",
                                  stderr="Not possible to fast-forward, aborting.")
             return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
+        ok, _, _, launch = self._pull(tmp_path, rg, resolve_window=True)
+        assert ok is False
+        launch.assert_called_once()
+        assert launch.call_args.kwargs["cwd"] == str(tmp_path)
 
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--resolve-window",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        assert "pull failed" in result.output.lower()
-        mock_launch_window.assert_called_once()
-        _, lw_kwargs = mock_launch_window.call_args
-        assert lw_kwargs.get("cwd") == str(tmp_github_merge_project["pm_dir"].parent)
-        mock_finalize.assert_not_called()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    @mock.patch("pm_core.gh_ops.is_pr_merged", return_value=True)
-    def test_already_merged_pr_pulls_and_finalizes(
-        self, _mock_is_merged, _mock_which, mock_subprocess, mock_git_ops,
-        mock_finalize, tmp_github_merge_project,
-    ):
-        """Re-attempt on already-merged PR should still pull and finalize."""
-        # gh pr merge fails (already merged), but `gh auth status` (the
-        # gh_ops pre-flight check) must still succeed.
-        def gh_side_effect(*args, **kwargs):
-            argv = args[0] if args else []
-            if "auth" in argv:
-                return MagicMock(returncode=0, stdout="", stderr="")
-            return MagicMock(returncode=1, stdout="", stderr="already been merged")
-        mock_subprocess.side_effect = gh_side_effect
-
-        def run_git_side_effect(*args, **kwargs):
+    def test_skips_when_repo_not_on_base_branch(self, tmp_path):
+        def rg(*args, **kw):
             if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="master", stderr="")
+                return MagicMock(returncode=0, stdout="feature", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
+        ok, calls, _, _ = self._pull(tmp_path, rg)
+        assert ok
+        assert ("fetch", "origin") not in calls
 
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        assert "already merged" in result.output.lower()
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_clean_workdir_proceeds_with_pull(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        tmp_github_merge_project,
-    ):
-        """Clean workdir should proceed with fetch and merge --ff-only."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="master", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        assert ("fetch", "origin") in git_calls
-        assert ("merge", "--ff-only", "origin/master") in git_calls
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_skips_pull_when_not_on_base_branch(
-        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        tmp_github_merge_project,
-    ):
-        """Pull should be skipped when repo is on a feature branch."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="pm/pr-001", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--no-signoff-check"])
-
-        assert result.exit_code == 0
-        assert "skipping pull" in result.output.lower()
-
-        # Should NOT have fetched or pulled
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        assert ("fetch", "origin") not in git_calls
-        # But finalize should still run
-        mock_finalize.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# --propagation-only flag
-# ---------------------------------------------------------------------------
-
-class TestPropagationOnly:
-    """Tests for --propagation-only flag on pm pr merge."""
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_local_propagation_only_skips_merge(self, mock_git_ops, mock_finalize,
-                                                 tmp_merge_project):
-        """--propagation-only should skip workdir merge and go to pull."""
-        def run_git_side_effect(*args, **kwargs):
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--propagation-only"])
-
-        assert result.exit_code == 0
-        assert "propagation only" in result.output.lower()
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        # No checkout or merge in workdir
-        assert not any(c[0] == "checkout" for c in git_calls)
-        assert not any(c[0] == "merge" and "--no-ff" in c for c in git_calls)
-        # But should still do the pull-from-workdir propagation
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    def test_vanilla_propagation_only_skips_merge_and_push(self, mock_git_ops,
-                                                            mock_finalize,
-                                                            tmp_merge_project):
-        """--propagation-only for vanilla should skip merge and push, do pull."""
-        data = store.load(tmp_merge_project["pm_dir"])
-        data["project"]["backend"] = "vanilla"
-        store.save(data, tmp_merge_project["pm_dir"])
-
-        def run_git_side_effect(*args, **kwargs):
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--propagation-only"])
-
-        assert result.exit_code == 0
-        assert "propagation only" in result.output.lower()
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        # No checkout, merge --no-ff, or push in workdir
-        assert not any(c[0] == "checkout" for c in git_calls)
-        assert not any(c[:2] == ("push", "origin") for c in git_calls)
-        # But should do the pull_after_merge (fetch + merge --ff-only)
-        assert ("merge", "--ff-only", "origin/master") in git_calls
-        mock_finalize.assert_called_once()
-
-    @mock.patch.object(pr_mod, "_finalize_merge")
-    @mock.patch("pm_core.cli.pr.git_ops")
-    @mock.patch("subprocess.run")
-    @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_propagation_only_skips_gh_merge(self, _mock_which,
-                                                     mock_subprocess,
-                                                     mock_git_ops,
-                                                     mock_finalize,
-                                                     tmp_github_merge_project):
-        """--propagation-only for github should skip gh pr merge, do pull."""
-        def run_git_side_effect(*args, **kwargs):
-            if args[0] == "rev-parse":
-                return MagicMock(returncode=0, stdout="master", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-        mock_git_ops.run_git.side_effect = run_git_side_effect
-
-        runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root",
-                               return_value=tmp_github_merge_project["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
-                                               "--propagation-only"])
-
-        assert result.exit_code == 0
-        assert "propagation only" in result.output.lower()
-        # gh pr merge should NOT have been called
-        mock_subprocess.assert_not_called()
-        # But pull should have happened (fetch + merge --ff-only)
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        assert ("merge", "--ff-only", "origin/master") in git_calls
-        mock_finalize.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Two-step merge finalization (review_loop_ui integration)
-# ---------------------------------------------------------------------------
-
-class TestTwoStepMergePhaseTracking:
-    """Tests for _merge_propagation_phase tracking in review_loop_ui."""
-
-    def test_idle_fallback_passes_propagation_only(self):
-        """Idle fallback should pass propagation_only when PR is in phase 2."""
-        from pm_core.tui.review_loop_ui import _attempt_merge
-        from unittest.mock import call
-
-        app = MagicMock()
-        app._merge_propagation_phase = {"pr-001"}
-
-        with mock.patch("pm_core.tui.review_loop_ui._attempt_merge",
-                        return_value=True) as mock_attempt:
-            # Simulate calling _attempt_merge as the idle fallback would
-            prop_only = "pr-001" in app._merge_propagation_phase
-            mock_attempt(app, "pr-001", resolve_window=False,
-                        propagation_only=prop_only)
-            mock_attempt.assert_called_with(
-                app, "pr-001", resolve_window=False, propagation_only=True)
+    @pytest.mark.parametrize("repo,restarts", [
+        ("https://github.com/org/project_manager", True),
+        ("https://github.com/org/other", False)])
+    def test_tui_restart_only_for_project_manager_repo(self, tmp_path, repo,
+                                                       restarts):
+        data = {"project": {"repo": repo}}
+        with mock.patch.object(pr_mod, "_finalize_merge") as fin, \
+             mock.patch.object(pr_mod, "trigger_tui_restart") as rs:
+            pr_mod._after_publish(tmp_path, data, {"id": "pr-001"}, None)
+        fin.assert_called_once()
+        assert rs.called is restarts
 
 
 # _finalize_merge no longer manages auto-start state (it's in-memory on the TUI).

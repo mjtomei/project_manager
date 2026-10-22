@@ -732,7 +732,7 @@ def test_impl_idle_sweep_keeps_qa_tracker_keys(tmp_path):
     app = SimpleNamespace(
         _session_name="sess", _pane_idle_tracker=tracker,
         _data={"prs": []}, _review_loops={}, _pending_merge_prs=set(),
-        _merge_propagation_phase=set(), log_message=lambda *a, **k: None)
+        log_message=lambda *a, **k: None)
     with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
         review_loop_ui._poll_impl_idle(app)
     assert tracker.is_tracked("qa:pr-q:s1")
@@ -797,7 +797,7 @@ def test_impl_idle_sweep_accepts_orphan_review_pane_after_restart(
     app = SimpleNamespace(
         _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
         _data={"prs": [pr]}, _review_loops={}, _pending_merge_prs=set(),
-        _merge_propagation_phase=set(), _root=tmp_path / "pm",
+        _root=tmp_path / "pm",
         _auto_start_run_id=None, log_message=lambda *a, **k: None)
     with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
         review_loop_ui._poll_impl_idle(app)
@@ -863,7 +863,7 @@ def test_orphan_watch_skips_pane_already_reported_by_this_tui(
         app = SimpleNamespace(
             _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
             _data={"prs": [pr]}, _review_loops={}, _pending_merge_prs=set(),
-            _merge_propagation_phase=set(), _root=tmp_path / "pm",
+            _root=tmp_path / "pm",
             _auto_start_run_id=None,
             log_message=lambda msg, **k: logs.append(msg))
         return app, logs
@@ -1017,7 +1017,7 @@ def test_merge_window_in_unapproved_dir_names_the_remedy(home, approved,
         pr_mod._launch_merge_window({"project": {}}, {"id": "pr-001"},
                                      "conflict", cwd=str(root))
     out = capsys.readouterr().out
-    assert "Opened merge resolution window" in out
+    assert "Opened repo-update window" in out
     assert (f"pm trust add {root}" in out) is not approved
 
 

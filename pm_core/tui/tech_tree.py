@@ -57,6 +57,7 @@ VERDICT_STYLES = {
 # truth shared with `pm pr list`); re-exported here for the node renderer.
 from pm_core.signoff import (  # noqa: E402
     SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES, latest_signoff_verdict,
+    display_signoff_verdict,
 )
 
 SPINNER_FRAMES = "◐◓◑◒"
@@ -501,7 +502,9 @@ class PRNode(Widget):
                     if state.stop_requested:
                         return (f"⏹{state.iteration}{spinner}", "bold red")
                     return (f"⟳{state.iteration}{spinner}", "bold cyan")
-                if state.latest_verdict:
+                # A finished review loop's verdict must not mask the sign-off
+                # marker (▲ / re-run spinner) once the PR has moved on.
+                if state.latest_verdict and self._pr.get("status") != "sign_off":
                     v = state.latest_verdict
                     marker = VERDICT_MARKERS.get(v, v[:4])
                     style = VERDICT_STYLES.get(v, "")
@@ -608,6 +611,16 @@ class PRNode(Widget):
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold cyan"
                     status_text += f" {spinner}"
+        ret_offset, ret_style = -1, ""
+        if status in ("in_progress", "in_review", "qa"):
+            # Sent back by sign-off: show the return verdict until the
+            # PR's next sign-off decision (same marker as `pm pr list`),
+            # alongside the rework's own spinner / loop marker.
+            ret_verdict = display_signoff_verdict(pr)
+            if ret_verdict in SIGNOFF_VERDICT_ICONS:
+                ret_offset = 2 + len(status_text) + 1
+                ret_style = SIGNOFF_VERDICT_STYLES.get(ret_verdict, "bold blue")
+                status_text += f" {SIGNOFF_VERDICT_ICONS[ret_verdict]}"
         if pr.get("spec_pending") and not loop_marker:
             marker_offset = 2 + len(status_text) + 1
             loop_style = "bold yellow"
@@ -659,6 +672,8 @@ class PRNode(Widget):
             for dx in range(marker_offset, marker_offset + marker_len):
                 if 0 <= dx < NODE_W:
                     style_grid[3][dx] = f"{loop_style} {bg_style}".strip()
+        if 0 <= ret_offset < NODE_W:
+            style_grid[3][ret_offset] = f"{ret_style} {bg_style}".strip()
 
         return _grid_to_text(grid, style_grid)
 

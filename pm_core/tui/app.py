@@ -370,15 +370,14 @@ class ProjectManagerApp(App):
         # Pane idle tracker: detects when implementation windows go idle
         from pm_core.pane_idle import PaneIdleTracker
         self._pane_idle_tracker = PaneIdleTracker()
-        # PRs awaiting merge-conflict resolution (tracked by _poll_impl_idle)
+        # PRs whose post-publish main-repo update window is open (tracked
+        # by _poll_impl_idle; the merge itself never resolves conflicts)
         self._pending_merge_prs: set[str] = set()
         # Sign-off outcomes already acted on: {pr_id: (verdict, sha, policy)}
         # (signoff_ui — keeps the 5 s poll from repeating the ready line).
         self._signoff_acted: dict[str, tuple] = {}
         # PRs whose merge window needs human input (INPUT_REQUIRED verdict)
         self._merge_input_required_prs: set[str] = set()
-        # PRs currently in merge propagation phase (step 2 of two-step merge)
-        self._merge_propagation_phase: set[str] = set()
         # Animation frame counter for impl-pane idle polling throttle
         self._impl_poll_counter: int = 0
         # Auto-start state (in-memory; preserved only via the merge-restart

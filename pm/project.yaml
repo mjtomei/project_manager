@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8c1dd15
+  active_pr: pr-446cb83
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -167,6 +167,15 @@ prs:
   gh_pr: null
   created_at: null
   updated_at: null
+  integration:
+    checked_at: '2026-10-21T21:25:10.298419+00:00'
+    target_repo: https://github.com/mjtomei/project_manager.git
+    base_branch: master
+    status: error
+    error: no PR workdir
+    conflicts: []
+    overlap: []
+    base_files_count: 0
 - id: pr-002
   plan: plan-001
   title: Include cluster suggestions in import prompt
@@ -8039,53 +8048,416 @@ prs:
     last_edited: '2026-04-07T22:57:31Z'
 - id: pr-ac10f03
   plan: improvements
-  title: Merge abort verdict when master changes are too large for auto-merge
+  title: Sign-off integrates latest base and routes rework before gated merge
   branch: pm/pr-ac10f03-merge-abort-verdict-when-master-changes-are-too-la
   status: pending
   depends_on: []
-  description: 'Add an ABORT_MERGE verdict to the merge/conflict resolution flow.
-    When the merge prompt detects that changes on master since the PR branched are
-    too significant for a safe auto-merge, the agent should return ABORT_MERGE instead
-    of attempting to resolve conflicts it doesn''t fully understand.
+  description: 'Before expanding parallel PR execution, move integration checking
+    into sign-off. Sign-off can fetch/integrate the latest configured base (normally
+    master), assess conflicts and semantic changes, and send work back to the appropriate
+    step. Merge only publishes a conflict-free result with fresh sign-off. Deliver
+    this existing PR through the current auto-start/auto-sequence flow; it does not
+    depend on the future D3 watcher.
 
 
-    Current behavior: the merge agent always tries to complete the merge, even when
-    master has diverged substantially. This leads to subtle integration bugs where
-    conflicts are ''resolved'' by picking one side without understanding the implications.
+    - Give sign-off an integrate-latest-base action and require an integration check
+    before SIGNOFF_MERGE. Work in the PR branch or an isolated candidate, never the
+    shared base. Preserve the reviewed HEAD, fetched target revision, candidate and
+    conflict/decision context for the next agent; do not lose existing work or strand
+    an unexplained half-merge.
+
+    - Reuse SIGNOFF_IMPL for implementation needed to reconcile changes, SIGNOFF_REVIEW
+    for unreviewed changes, SIGNOFF_REQA for verification gaps, and SIGNOFF_BLOCKED
+    only for genuinely blocked decisions. Choose the earliest affected step, revalidate
+    affected evidence and return to sign-off. Preserve valid evidence with provenance;
+    code changes cannot be approved using stale review/QA results. Persist the routing
+    reason and resume automatically without a merge agent making new implementation
+    changes.
+
+    - Bind approval to the actual approved PR HEAD, target repository/branch and fetched
+    base revision, plus the candidate revision/tree when separate. If sign-off changes
+    HEAD, its earlier launch stamp or approval cannot certify the new candidate. Legacy
+    HEAD-only approvals need a fresh integration-aware sign-off.
+
+    - Gate all merge entry points and backends on matching revisions, conflict-free
+    integration and valid sign-off. If the PR or base changes after validation, including
+    during the final publish operation, refuse the stale merge and return to sign-off.
+    No conflict-resolution session may bypass this gate by pushing the base or invoking
+    the backend merge directly. Restrict --no-signoff-check/recovery paths to recovery
+    of an already-completed merge; they must not publish new unapproved code.
+
+    - Keep CLI/TUI status and automatic routing consistent across restarts and duplicate/idle
+    events. Preserve --wait-for-merge and stop-before-merge policies through every
+    return; re-signing does not release a manual merge hold. Coordinate with #219
+    (pr-8d8b360): reuse correct base-into-PR/backend handling, but replace its resolve-and-immediately-merge
+    path with this sign-off boundary. Post-merge metadata/checkout recovery remains
+    separate.
 
 
-    Desired behavior: the merge prompt evaluates the scope of changes (number of files,
-    lines changed, semantic overlap with the PR''s changes) and returns ABORT_MERGE
-    with an explanation when:
+    Verification: use two overlapping PRs so merging the first makes the second require
+    integration. Sign-off detects the conflict, returns to implementation, and the
+    revised candidate completes review, affected QA and fresh sign-off before merge
+    is permitted. Also exercise review-only and QA-only return decisions, a clean
+    integration, unchanged PR HEAD with a moved base, movement during publication,
+    legacy approvals, and restart after a return decision. Assert no unauthorized
+    base publication, duplicate workers, merge-time conflict resolution or loss of
+    manual holds across CLI/TUI and supported backends. Record a real end-to-end run
+    with the watcher off.
 
-    - Master changes touch the same subsystems as the PR in non-trivial ways
 
-    - Conflict resolution requires understanding architectural decisions made on master
-
-    - The combined diff is large enough that the merge result should go through review/QA
-    again
-
-
-    When ABORT_MERGE is returned:
-
-    - The merge loop stops cleanly (like PASS stops the review loop)
-
-    - The PR status is set back to in_review or a new ''merge_blocked'' status
-
-    - A note is added to the PR explaining what changed on master and why auto-merge
-    was unsafe
-
-    - The TUI shows the blocked state so the user can decide next steps (rebase manually,
-    re-review, etc.)'
+    Relevant code: pm_core/signoff.py, sign-off prompts/report verdicts, pm_core/cli/pr.py,
+    pm_core/tui/signoff_ui.py, pm_core/tui/review_loop_ui.py, pm_core/tui/auto_start.py,
+    backend merge operations and existing sign-off/merge tests. See pm/plans/plan-delivery.md
+    and pm/plans/plan-regression.md.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-03-14T04:21:40.677685+00:00'
+  updated_at: '2026-10-22T06:44:48.317007+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9a90e26
+    text: 'Impl done (ada2f8b3). Design: pm_core/integration.py does fetch + isolated
+      candidate (temp worktree on git<2.38, merge-tree otherwise); launch_signoff_window
+      records pr["integration"] and stamps HEAD+base; step_signoff binds the verdict
+      to it, coerces conflict->IMPL and MERGE-without-check->BLOCKED, merges a clean
+      moved base into the PR branch on bounces and writes pr["signoff_return"] (reason
+      from report meta pm-signoff-reason, awaiting=<hop> until the routed step launches).
+      pm pr merge = record gate + re-fetch + recompute + commit-tree + CAS publish
+      (local update-ref/ff, vanilla push --force-with-lease to the fetch URL, github
+      gh pr merge --match-head-commit + post-verify -> pr["merge_integrity"]); refusal
+      invalidates the record (driver re-runs sign-off). No conflict merge window anymore;
+      --no-signoff-check/--propagation-only only recover a merge already in base.
+      pm pr signoff integrate is read-only unless --record/--apply. Tests: tests/test_merge_publish.py,
+      tests/test_signoff_integration.py, new cases in test_tui_signoff_handoff.py.
+      Impl capture: $CAP/impl/signoff-integration-two-prs (real CLI, two overlapping
+      PRs). QA still owes the real TUI auto-start e2e run with the watcher off (real
+      router agent): two overlapping PRs, O hold across a return, restart after a
+      return decision. Known limit: GitHub has no base-revision precondition, a base
+      update between the ls-remote check and GitHub''s merge is detected afterwards,
+      not prevented.'
+    created_at: '2026-10-21T21:46:48Z'
+    last_edited: '2026-10-21T21:46:48Z'
+  - id: note-9c69588
+    text: 'QA S1 refine (real e2e, watcher off): real claude only works here with
+      ANTHROPIC_API_KEY unset (OAuth creds in ~/.claude); start the test tmux server
+      from a shell without it and with a git->/usr/bin/git shim first on PATH (local
+      backend fetch breaks through ~/.local/bin/git). There is no `pm pr show`: the
+      return record is visible via `pm pr list` ([in_progress ⇤]), `pm prompt <pr>`
+      / the live impl prompt file (<workdir>/pm/prompts/pm_prompt_*.txt, "Returned
+      from sign-off") and pr.signoff_return in project.yaml. Plain Ctrl+R drops auto-start
+      targets and O marks by design; restart with `pm tui restart --breadcrumb`. The
+      TUI relaunches impl immediately after an IMPL hop, so "restart before relaunch"
+      needs a 0.1 s poll on `awaiting: impl`. Fake QA needs pm/specs/<pr>/qa.md seeded.
+      Impl prompt asks for no captures, so put evidence requests in the test PR descriptions
+      or the real router may REQA on thin evidence.'
+    created_at: '2026-10-21T23:10:47Z'
+    last_edited: '2026-10-21T23:10:47Z'
+  - id: note-cd88dd5
+    text: 'QA S1 bbe142ad: local publish''s stash pop conflicted on pm/project.yaml
+      when the PR branch committed a cross-PR note (A''s agent noted B), leaving markers
+      + A unfinalized; _unstash_after_merge now 3-way merges a conflicted project.yaml
+      structurally (live wins, id lists merged) and drops the stash. Same naive stash
+      exists on master (_propagate_to_repo).'
+    created_at: '2026-10-21T23:27:41Z'
+    last_edited: '2026-10-21T23:27:41Z'
+  - id: note-9f1e672
+    text: 'QA S8: fixed pre-existing tech-tree marker bug b290ebcb: a finished review
+      loop (⟳1✓) masked the sign_off ▲ / stale re-run spinner, so the TUI disagreed
+      with pm pr list. Merge gate g / command bar / auto-merge refusals + O / wait-for-merge
+      holds all held. Remaining nit: up to 4 s after a refusal the TUI still shows
+      ▲ until the driver stale tick reloads.'
+    created_at: '2026-10-21T23:27:46Z'
+    last_edited: '2026-10-21T23:27:46Z'
+  - id: note-99a6f1d
+    text: 'QA S7 refine (github via fake-github), smoke-tested on 9cbb6c9b with manual
+      approvals: (1) fake `gh pr create` ignores the cwd branch -> PRs created by
+      `pm pr start` get head "branch-N" plus a bogus branch, so a --match-head-commit
+      merge can never pass. Seed PRs in `pm fake-github config set` before `pm init
+      --backend github` (import gives gh_pr_number + branch), and re-seed with state
+      MERGED to simulate a teammate merge. (2) There is no `pm pr show`. merge_integrity
+      is only in pm/project.yaml; the note shows in `pm pr note list`. (3) Base race:
+      a one-shot post-checkout hook in the fake remote.git commits to master inside
+      gh pr merge. Output: WARNING ... (the base moved during publication), merge_integrity
+      + note recorded, rc 0. (4) Likely gap: teammate pushes an unreviewed commit
+      onto the approved head and merges on GitHub. `pm pr merge` refuses (master moved),
+      then `pm pr merge --no-signoff-check` finalizes silently: no merge_integrity,
+      no note. _verify_github_merge runs only in the gh-merge-failed/already-merged
+      branch, which a moved base makes unreachable. The TUI background sync (5 min)
+      also finalizes teammate merges unverified.'
+    created_at: '2026-10-21T23:14:05Z'
+    last_edited: '2026-10-21T23:14:05Z'
+  - id: note-1c373f5
+    text: 'QA S7 (4e62b9d2): pm pr merge --no-signoff-check on github now verifies
+      a GitHub-side merge against the bound SIGNOFF_MERGE (WARNING + merge_integrity
+      + note; names the publishing merge commit). Not covered: the TUI background
+      GitHub sync (pm_core/tui/sync.py ~L142/L267) still marks a PR merged on GitHub
+      as merged with no integrity check, so a teammate merge that published unreviewed
+      commits is accepted silently if the sync finalizes it before anyone runs pm
+      pr merge.'
+    created_at: '2026-10-21T23:37:54Z'
+    last_edited: '2026-10-21T23:37:54Z'
+  - id: note-119de43
+    text: 'QA S3 (TUI REVIEW/REQA returns + restart/duplicates): fixed 125afe57. pm
+      pr auto-sequence and the TUI each relaunched the review --fresh on awaiting=review;
+      restart + 2 concurrent ticks left 2 review windows and killed the TUI loop window
+      (restarted TUI then adopted a pane of a CLI window with its dead transcript
+      -> stuck in_review). Now claim_return_launch (launch_claim under the yaml lock,
+      180 s expiry) gives one launcher. Robustness gap left: review_loop._adopt_in_flight_review
+      takes any pane named review-<pr> without checking it runs the transcript session.
+      Local backend needs pm push + merge before O. Captures /pm-captures/scenarios/3'
+    created_at: '2026-10-21T23:56:23Z'
+    last_edited: '2026-10-21T23:56:23Z'
+  - id: note-26c2b64
+    text: 'QA S1 dc20ad4c: tree drew the return icon (⇤/↻/↩) only when no spinner/loop
+      marker was shown, so during rework impl/review/QA the TUI node lacked ⇤ while
+      pm pr list showed it (R5.2); now drawn alongside. b8699d7c: TUI restart mid-rework-QA
+      handed B to sign-off on the PRE-return QA PASS (rework QA records nothing in
+      runtime_state until a scenario launches) -> router REQA''d; recorded_qa_verdict(pr_id,
+      pr) now ignores runs older than the open return.'
+    created_at: '2026-10-21T23:57:05Z'
+    last_edited: '2026-10-21T23:57:05Z'
+  - id: note-17cae28
+    text: 'QA S2 concretizer (integrate CLI): in this container ~/.local/bin/git proxies
+      fetch/ls-remote to the host — put /usr/bin first in PATH or every check errors.
+      Pre-observed on 6907bb40 (git 2.34 → temp-worktree path): (1) local backend,
+      `pm pr signoff integrate` run from the PR workdir (no PM_PROJECT/-C) resolves
+      state to the workdir''s tracked pm/ and targets the WORKDIR itself, so after
+      main-repo master moves it still says "up to date with master@<old>" (spec R1:
+      local target = main repo dir); (2) two checks fired right after master moves
+      race on refs/pm/integration/base: ~1 in 2 pairs one reports "integration check
+      failed: ... cannot lock ref refs/pm/integration/base" (no race once the ref
+      is current).'
+    created_at: '2026-10-21T23:06:02Z'
+    last_edited: '2026-10-21T23:06:02Z'
+  - id: note-e9c8062
+    text: 'QA S2 (integrate CLI): fixed 3fbd4abb (unreviewed) — local target from
+      a PR workdir resolved the clone itself (stale master) → now its origin; concurrent
+      checks raced on refs/pm/integration/base CAS ("cannot lock ref", 4/20 in simultaneous
+      bg starts; tmux send-keys rounds too staggered to hit it) → per-call fetch ref
+      + unconditional pin. All 6 stories held after fix.'
+    created_at: '2026-10-21T23:19:37Z'
+    last_edited: '2026-10-21T23:19:37Z'
+  - id: note-8eb9b0d
+    text: 'Review b592 i1 (eaf7e4fe): re-running pm pr merge after a published-but-unfinalized
+      merge now finalizes via recovery instead of invalidating (sign-off would BLOCK
+      a merged PR); IMPL return relaunch now takes claim_return_launch (CLI tick/hop,
+      TUI hop, TUI restart catch-up) like REVIEW. Filed pr-2e06289 for the TUI GitHub-sync
+      integrity gap from QA S7.'
+    created_at: '2026-10-22T00:26:23Z'
+    last_edited: '2026-10-22T00:26:23Z'
+  - id: note-a9813cc
+    text: 'QA S12 (integrate CLI) 6791411d: after 3fbd4abb, simultaneous checks on
+      git<2.38 still failed 6/50 (5 rounds x 10 right after master moved): fetch "bad
+      object worktrees/candidateN/HEAD" (fetch walks a peer''s half-created candidate
+      worktree) and "could not open .git/worktrees/candidate/gitdir" (same admin-dir
+      name + peer repo-wide worktree prune). Fix: per-repo flock (<git-common-dir>/pm-integration.lock)
+      around fetch_base + temp-worktree merge, unique worktree names, prune only if
+      remove fails; new multiprocess regression test. 100/100 post-fix. All S12 Thens
+      held post-fix. Pushed at finalize (push.sock was missing in the QA container).
+      Remaining limit: an agent''s own git fetch in the PR workdir can still hit a
+      transient bad-object while pm holds a candidate worktree (git-level; the lock
+      only covers pm). Captures /pm-captures/scenarios/12'
+    created_at: '2026-10-22T01:17:46Z'
+    last_edited: '2026-10-22T01:17:46Z'
+  - id: note-9c3adef
+    text: 'QA S13 (github via fake-github) on b867c62d: all 6 stories held, no code
+      changes. Story 5 first attempt was pre-empted by the TUI 300 s GitHub sync (finalized
+      #5 unverified = pr-2e06289); re-run in a fresh project right after a sync tick
+      held. Drive github recovery stories right after a sync tick (watch "gh pr view"
+      in ~/.pm/debug/<tag>.log). Captures /pm-captures/scenarios/13.'
+    created_at: '2026-10-22T01:38:55Z'
+    last_edited: '2026-10-22T01:38:55Z'
+  - id: note-5c83c16
+    text: 'QA S10 refine (launch claim): fake-claude scripted cursors are per session
+      type, not per PR. Sign-off verdicts go out in router launch order, and `pm fake-claude
+      config set` resets the cursor, so re-set it before each new sign-off run. A
+      hop always takes the claim atomically, so "awaiting set, no claim" never happens
+      through a hop. A dead launcher is reproduced deterministically with a one-shot
+      post-checkout hook in the PR workdir that kills its `pm_core.wrapper pr start`
+      ancestor: --fresh has already killed the old impl window, and the new one never
+      opens. The TUI has no periodic auto-start pass: after the 180 s claim expiry,
+      nothing relaunches until an event (`pm autostart add <pr>` re-arm, a loop completion,
+      restart) or a `pm pr auto-sequence` tick. A CLI loser prints `running: review`/`running:
+      impl`. Only the TUI loser logs "launch already claimed" (pm log grep).'
+    created_at: '2026-10-22T01:13:44Z'
+    last_edited: '2026-10-22T01:13:44Z'
+  - id: note-da43790
+    text: 'QA S10 49e2d30e (pushed at finalize; push.sock was missing in the s-10
+      container; commit is in the s-10 clone, patch at $CAP/scenarios/10/0001-qa-serialize-step_signoff-*.patch):
+      a pm pr auto-sequence tick that loaded project.yaml before the TUI hop saw the
+      bounce integration merge as "HEAD moved", retired the run and asked to relaunch
+      sign-off (pm pr signoff refused "PR is in_review — sign-off runs after QA",
+      exit 1; tighter timing launches a stray router). step_signoff now takes a per-PR
+      flock and re-reads the PR (left sign_off -> running). Post-fix story 1 rerun
+      clean; REVIEW restart race, REQA restart mid-planner and stranded IMPL claim
+      (T+60 skip / T+185 one launch) all held.'
+    created_at: '2026-10-22T01:59:35Z'
+    last_edited: '2026-10-22T01:59:35Z'
+  - id: note-4ab5e5d
+    text: 'QA S15 (real TUI e2e, watcher off) on 5d41309c PASS, no code changes: A
+      up_to_date→MERGE (parents/tree = bound candidate, branch-committed note intact);
+      B conflict→router SIGNOFF_IMPL, restart on awaiting:impl → exactly one fresh
+      impl (pane %18→%33, 650/650 samples ≤1 window), return prompt/record correct;
+      fresh review/QA/sign-off (Previous sign-off return section) → MERGE bound to
+      HEAD+master, O held ≥44 s; g published the exact candidate, no refs/pm/merge,
+      worktrees or merge windows left. Filed pr-9ee4d64 (run transcripts overwritten
+      across a return). Captures /pm-captures/scenarios/15.'
+    created_at: '2026-10-22T03:54:10Z'
+    last_edited: '2026-10-22T03:54:10Z'
+  - id: note-f8db129
+    text: 'QA S18 (CLI auto-sequence routing + TUI/CLI step-lock race) on 5d41309c:
+      all 4 stories held, no code changes. F REVIEW return (i2 transcript, Integrate
+      merge = applied.merge_sha, merge parents M1+HEAD, tree = candidate_tree); G
+      MERGE->IMPL conflict (fresh impl window, applied null); H fetch error MERGE->BLOCKED,
+      merge refused; I moved base w/ unchanged HEAD -> refused, sign_off_relaunched,
+      merged with no new impl/review/QA. Slow 10 s post-merge hook in the CLI bounce
+      tick: TUI stalls max 2.24 s twice (bounded step lock), hook ran once, one return.
+      Filed pr-ccdec71 (auto-sequence prints advanced: review_relaunched when the
+      review window cannot launch). Harness: recorder grouped session must be $S~1
+      (a non-pm- grouped name breaks QA "No pm session found"); pm switches $S~1 to
+      new QA windows so sample the TUI with capture-pane. Captures /pm-captures/scenarios/18'
+    created_at: '2026-10-22T03:54:23Z'
+    last_edited: '2026-10-22T03:54:23Z'
+  - id: note-de324b5
+    text: 'S16 refine (2026-10-22): live-checked on git 2.34 (temp-worktree path).
+      In this container ~/.local/bin/git proxies fetch, so local-path integrate fetches
+      fail with ''does not appear to be a git repository'' unless PATH=/usr/bin is
+      first (export it plus PYTHONPATH=/workspace in every test pane). Possible bug:
+      local backend, run from a PR workdir whose origin is not a directory (git remote
+      set-url origin /nonexistent) -> target_for falls back to the workdir itself
+      and fetches the clone''s own stale master. Output was ''up to date with master@<old
+      sha>'', exit 0, not error. --record writes to the project.yaml of whatever pm
+      dir it runs from (the clone''s copy when run from the workdir), so run --record/--apply
+      from the main repo.'
+    created_at: '2026-10-22T03:20:16Z'
+    last_edited: '2026-10-22T03:20:16Z'
+  - id: note-3a25523
+    text: 'QA S20 refine (github refusal/retry/integrity-once): fake gh is dispatched
+      in-process (gh_ops -> fake_github.dispatch_session), so a PATH gh wrapper cannot
+      intercept `gh pr merge`; inject the one-shot "old head" failure with a fake-github
+      re-seed "scripts" entry ({"match":"pr merge","returncode":1,"stderr":"...","times":1};
+      re-seed must list every PR in order with already-merged ones as MERGED). A second
+      `pm pr merge --no-signoff-check` on a PR the first run finalized just prints
+      "already merged" (rc 1); to see verification re-run, make the first recovery
+      fail at the main-repo pull (committed local divergence, run with env -u TMUX
+      -u PM_IN_TMUX_SESSION), fix with `git reset --keep HEAD~1`, then recover again.
+      The TUI 300 s GitHub sync can finalize teammate merges unverified (pr-2e06289):
+      drive github recovery right after a sync tick.'
+    created_at: '2026-10-22T03:21:38Z'
+    last_edited: '2026-10-22T03:21:38Z'
+  - id: note-aab65ae
+    text: 'QA S19 refine (gated publish local/vanilla), smoke-tested on 5d41309c:
+      approvals come from pm pr edit --status sign_off + pm pr auto-sequence ticks
+      with fake-claude signoff [SIGNOFF_MERGE] (re-set config before each new run).
+      Add ALL PRs and commit pm/ to master before pm pr start (else ''not committed
+      on master yet''). Races are deterministic via one-shot hooks: main-repo reference-transaction
+      on refs/pm/merge/* (git commit --allow-empty) -> ''master in <repo> moved during
+      the merge''; main-repo post-merge ''kill -9 grandparent'' -> published-unfinalized,
+      plain re-run prints ''already in master; recovering.''; vanilla PR-workdir pre-push
+      pushing a 2nd clone -> ''master moved during the merge (a -> b)''. Two panes
+      send-keys back-to-back reliably hit ''Waiting for another merge...''. Refusal
+      text is ''only recover an already-completed merge'' (not ''recovers''). cwd
+      and -C/PM_PROJECT both resolve symlinks, so a symlinked path reaches target_for
+      already resolved.'
+    created_at: '2026-10-22T03:23:30Z'
+    last_edited: '2026-10-22T03:23:30Z'
+  - id: note-da30291
+    text: 'QA S16 (integrate CLI, rerere/concurrent/agent) 11949f52: from a PR workdir
+      whose origin is unreachable, local target_for fell back to the clone itself
+      -> "up to date with master@<stale>" exit 0; now targets the origin and fails
+      "integration check failed: fetch master from <origin> failed", exit 1 (+ regression
+      test). All other S16 Thens held on 5d41309c: rerere resolution not replayed
+      into candidate, 30/30 (+50 extra) simultaneous checks clean with an agent loop
+      staging edits, vanilla unreachable origin errors. Pre-existing unrelated failure:
+      tests/test_hook_events.py::test_installer_writes_standalone_receiver. Captures
+      /pm-captures/scenarios/16'
+    created_at: '2026-10-22T03:32:40Z'
+    last_edited: '2026-10-22T03:32:40Z'
+  - id: note-41bb4d8
+    text: 'S22 refine (2026-10-22, HEAD 6dd086a4): fake-claude launches get no prompt
+      on this branch (build_claude_shell_cmd fake path writes no pm/prompts file;
+      the 809be0bf persist fix lives on pr-3ae2fc3), so prompt-content Thens (sign-off
+      Integration section, "Previous sign-off return") need a real sign-off router
+      run (claude works with ANTHROPIC_API_KEY unset). Refined S22 uses real router
+      for A sign-off and B post-rework sign-off and fake SIGNOFF_MERGE for the conflicted/stale/legacy
+      runs, switching `pm fake-claude config set` (signoff key present = fake) between
+      runs; impl prompt via `pm prompt <B>`. Fake impl makes no commits: pre-create
+      A/B/C branches with real commits. /opt/pm-src is pre-integration, so `PYTHONPATH=/opt/pm-src
+      pm pr signoff record` still makes a legacy approval.'
+    created_at: '2026-10-22T04:34:00Z'
+    last_edited: '2026-10-22T04:34:00Z'
+  - id: note-4afcfb5
+    text: 'QA S22 (real TUI e2e, watcher off) on 6dd086a4 PASS, no code changes: A
+      real router MERGE first try, g published parents M0+signoff.sha / tree=candidate;
+      B fake MERGE coerced to IMPL (app.py), restart on awaiting:impl → one fresh
+      impl (%19→%30, ≤1 window 300 s), pm prompt return block correct; manual merge
+      resolution → new review + QA run → real router MERGE with "Previous sign-off
+      return", ⇤ tree==pm pr list; g and command-bar refused on M2/M3 with stale re-runs,
+      O held; final g parents M3+HEAD / tree=bound candidate; C legacy g refused,
+      --wait-for-merge re-signs and holds. Recorder attach client gets switched to
+      QA/pm-home windows, so TUI evidence = capture-pane samples. Filed pr-446cb83
+      (fake-claude config ignores -C). Captures /pm-captures/scenarios/22'
+    created_at: '2026-10-22T05:11:55Z'
+    last_edited: '2026-10-22T05:11:55Z'
+  - id: note-d09c392
+    text: 'QA S22 re-run (run2, after a flag for a missing CLI cast): all 9 stories
+      held again on 6dd086a4, no code changes. The qa-sh shell, the fixture and the
+      restart watcher are now asciinema-recorded (/pm-captures/scenarios/22/run2/cli-*).
+      The TUI recorder stays on main because a pin loop reselects it on $S~1. B restart:
+      pane %20 -> %31, one window. Real router MERGE for A and for B after rework.'
+    created_at: '2026-10-22T06:14:35Z'
+    last_edited: '2026-10-22T06:14:35Z'
+  - id: note-4f02b94
+    text: 'S23 refine (2026-10-22): the fake gets no prompt, so check the return block
+      on REAL routed sessions (review for REVIEW, planner for REQA; claude -p works).
+      Snapshot <workdir>/pm/prompts/pm_prompt_*.txt while the window is open. Move
+      master only AFTER the PR workdir is cloned, otherwise the workdir master already
+      has the base commit and `git diff master...HEAD` is not stale. Local backend
+      usual diff = `git diff master...HEAD`. Run `pm pr spec <pr> qa` under the fake
+      config before the first QA, or the loop stops at "QA spec missing". QA scenario
+      prompt.md carries no return block (planner only).'
+    created_at: '2026-10-22T04:40:36Z'
+    last_edited: '2026-10-22T04:40:36Z'
+  - id: note-24a9e5f
+    text: 'QA S23 (review/QA-only returns, clean moved base) on 6dd086a4: all Thens
+      held, no code edits. CLI REVIEW bounce: Integrate merge (parents C+BASE), master
+      untouched, block names merge + `git diff <BASE12> HEAD` (app.py only vs master...HEAD
+      +other.txt), i1 PASS not adopted. Dirty tracked workdir: applied null, apply_error,
+      block says "did not merge", edit intact. TUI REQA: real planner prompt carries
+      the block; `pm tui restart --breadcrumb` mid-planner relaunched rework QA once
+      with no sign-off on the pre-return PASS; ↻ to ▲ and SIGNOFF_MERGE up_to_date.
+      Spec note: plain `pm tui restart` clears auto-start by design, so nothing relaunches;
+      use --breadcrumb. Captures /pm-captures/scenarios/23'
+    created_at: '2026-10-22T05:16:09Z'
+    last_edited: '2026-10-22T05:16:09Z'
+  - id: note-80191aa
+    text: 'QA S24 refine (integrate CLI lock/concurrency/unreachable origin), smoke-tested
+      on 6dd086a4 with git 2.34: CLI prints prose summaries ("up to date with master@<8>",
+      "merges cleanly with", "CONFLICTS with", "integration check failed: fetch master
+      from <origin> failed: ..."), not status keywords. _repo_lock lives in the PR
+      WORKDIR clone .git/pm-integration.lock (local workdirs are separate clones),
+      so 5 different PRs never contend; duplicate checks of one PR do. On git<2.38
+      a clean/conflict check takes the lock twice (fetch + candidate worktree), so
+      a >300 s stuck holder delays it ~600 s with two "busy; proceeding" lines; use
+      an up_to_date PR for the single ~300 s wait. Local-backend sign-off launched
+      from the main repo targets the main repo dir, so a broken workdir origin does
+      not error there; router MERGE->BLOCKED-on-fetch-error needs the vanilla backend
+      (move the bare away).'
+    created_at: '2026-10-22T04:30:42Z'
+    last_edited: '2026-10-22T04:30:42Z'
+  - id: note-f75a5e7
+    text: 'Sign-off (2026-10-22) SIGNOFF_MERGE at 9db48aba: QA S22-S27 PASS on 6dd086a4
+      (last code commit 291af156, reviewed). Suite 3342 pass / 1 fail (test_hook_events
+      installer, also fails on master). git>=2.38 merge-tree path, only covered by
+      mocks in QA (container git 2.34), checked by sign-off with a locally built git
+      2.45: 92 integration/publish tests pass, and merge-tree and the worktree merge
+      give the same trees and conflict lists. Latest master e4d6353d moved only pm/project.yaml
+      and merges cleanly. Report: $CAP/report.html'
+    created_at: '2026-10-22T06:44:48Z'
+    last_edited: '2026-10-22T06:44:48Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
@@ -22275,7 +22647,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-10-14T16:53:55.963293+00:00'
+  updated_at: '2026-10-21T23:45:02.916394+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -22368,6 +22740,15 @@ prs:
       /tmp/pm230-232-main-before-merge-20261014T175913Z.'
     created_at: '2026-10-14T18:09:10Z'
     last_edited: '2026-10-14T18:09:10Z'
+  - id: note-cf49fa4
+    text: 'pr-ac10f03 QA S1 (bbe142ad) hit this live: A''s agent committed a cross-PR
+      note on its branch, the local publish''s stash pop conflicted on pm/project.yaml.
+      pr-ac10f03 now resolves a conflicted project.yaml in _unstash_after_merge with
+      a structured 3-way merge (stash^1 base / merged HEAD / stashed live state; live
+      wins, id lists like notes merged per id) and drops the stash. Reconcile with
+      this PR''s lock/_NEVER_STASH approach when rebasing.'
+    created_at: '2026-10-21T23:45:02Z'
+    last_edited: '2026-10-21T23:45:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -23147,11 +23528,25 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/219
   gh_pr_number: 219
   created_at: '2026-05-25T02:12:54.366523+00:00'
-  updated_at: '2026-05-25T02:49:14.098738+00:00'
+  updated_at: '2026-10-21T21:39:28.476823+00:00'
   started_at: '2026-05-25T02:15:11.346775+00:00'
   reviewed_at: '2026-05-25T02:49:14.098738+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-79d797b
+    text: 'Coordination from pr-ac10f03 (sign-off integration): pm pr merge no longer
+      launches a conflict-resolution merge window on any backend, and generate_merge_prompt
+      now only produces the post-merge "update the main repo from origin" recovery
+      prompt (it forbids pushing the base or running a backend merge). Conflicts are
+      found by sign-off (pm_core/integration.py candidate check) and routed to implementation
+      (SIGNOFF_IMPL), whose agent merges the base INTO the PR branch — the direction
+      #219 asked for. GitHub publishing is `gh pr merge --match-head-commit <approved
+      head>` after re-verifying the base, so GitHub stays the merger. The resolve-and-immediately-merge
+      path #219 fixes is gone; when rebasing #219 onto master after pr-ac10f03 lands,
+      drop the standard merge-conflict prompt variant changes and keep only anything
+      still relevant to the pull-from-origin variant.'
+    created_at: '2026-10-21T21:39:28Z'
+    last_edited: '2026-10-21T21:39:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8d8b360-bug-merge-conflict-resolution-pushes-37062cb3
 - id: pr-8409c64
   plan: bugs
@@ -28639,11 +29034,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T13:38:20.751436+00:00'
-  updated_at: '2026-10-13T13:38:20.751436+00:00'
+  updated_at: '2026-10-21T22:43:41.355191+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d48e767
+    text: 'pr-ac10f03 changes vanilla `pm pr merge`: it now pushes the approved merge
+      commit only to the workdir origin FETCH url (git push <fetch-url> <merge>:refs/heads/<base>
+      --force-with-lease), never `git push origin` with the dual push URLs, and no
+      merge window is opened on a push failure. Once pr-ac10f03 merges, re-check whether
+      this bug still reproduces anywhere else (other `git push origin <base>` callers)
+      before working on it.'
+    created_at: '2026-10-21T22:43:41Z'
+    last_edited: '2026-10-21T22:43:41Z'
 - id: pr-d72df02
   plan: bugs
   title: 'Bug: tech-tree node keeps the cyan busy spinner after its impl pane is killed'
@@ -29736,13 +30140,20 @@ prs:
   description: 'Implement the catalog-to-draft-to-score workflow in pm/plans/plan-doc-eval.md
     using the case catalog, the rubric and `claude-mixed` model access. Add project-separated
     splits, blinded paired evaluation run as separate whole-document and continuation
-    tracks with the prefix shown to judges, frontier-model and JEV judge adapters
-    and comparable generation from the current planning prompts. Estimate the share
-    of weekly subscription limits taken by calibration runs of different sizes, pick
-    a size from that estimate under the twenty percent single-run ceiling, and run
-    it, including the style-continuity check for continuation cases and the separate
-    human-rated writing check; save a report identifying useful and unreliable measures
-    per rubric dimension. No manual corpus curation or code-task execution is required.
+    tracks with the prefix shown to judges, individual frontier, cross-lab panel,
+    open-model and JEV judge adapters and comparable generation from the current planning
+    prompts. Run the frozen-document scoring comparison and configured-open-model
+    coverage specified above; version model roles, panel membership and aggregation
+    rules. Estimate the share of weekly subscription limits taken by calibration runs
+    of different sizes, pick a size from that estimate under the twenty percent single-run
+    ceiling, and run it, including the style-continuity check for continuation cases
+    and the separate human-rated writing check; save a report identifying useful and
+    unreliable measures per rubric dimension. No manual corpus curation or code-task
+    execution is required. Extend the catalog with PM implementation and QA spec cases
+    from their original phase inputs, using current specs as production baselines.
+    Reuse the existing rubric and add spec examples that distinguish requirements,
+    design proposals, open questions and acceptance checks. Missing phase context
+    is reported rather than reconstructed from the finished spec.
 
 
     Tests: Verify split and duplicate isolation, identity masking, order reversal,
@@ -29750,16 +30161,23 @@ prs:
     evaluations. Use the rubric fixtures to check that results preserve distinct quality
     dimensions. Run a real sample at the chosen size through the selected evaluators
     and report observed agreement, uncertainty and the usage actually consumed against
-    the estimate; mocked responses alone do not establish evaluator quality.
+    the estimate; mocked responses alone do not establish evaluator quality. Verify
+    that implementation-spec inputs exclude subsequent implementation/review artifacts
+    and QA-spec inputs exclude later scenarios/results; record the source revisions
+    and report calibration separately by document family. Verify independent panel
+    judgments, the equal-count repeated-single-model control, model/route provenance,
+    and explicit failures instead of silent model substitution. Retain real open-model
+    generations and judgments and a model-by-role coverage report.
 
 
-    Files: experiments/plan-writing/, pm_core/cli/plan.py and narrowly extracted planning
-    prompt builders, relevant tests, calibration artifacts and report'
+    Files: experiments/plan-writing/, pm_core/cli/plan.py, pm_core/spec_gen.py and
+    narrowly extracted prompt builders, relevant tests, calibration artifacts and
+    report'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-21T03:24:58.479312+00:00'
+  updated_at: '2026-10-21T19:18:18.101700+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29812,7 +30230,12 @@ prs:
     regenerated PM plans against their original plan files on the rubric dimensions
     and on fidelity to the recovered conversations. Produce a reproducible candidate
     prompt diff and campaign evidence, or an explicit no-improvement result; the evaluator
-    stays fixed throughout.
+    stays fixed throughout. Include implementation and QA spec prompts in the campaign.
+    Keep candidates and baseline comparisons specific to each prompt family and writer
+    model, and report gains for plans and both spec types separately. Include representative
+    configured open models and measure prompt transfer. Run a bounded comparison of
+    single-judge versus cross-lab-panel feedback with the evaluator fixed within each
+    campaign and the same withheld measure for both winners.
 
 
     Tests: Exercise resume without duplicate completed calls, plateau stopping, panel
@@ -29829,6 +30252,11 @@ prs:
     with the count recorded, and that the chosen population size and generation count
     end the run. Run an actual campaign and retain repeated baseline/candidate comparisons,
     the original-plan comparison, failed attempts and usage consumed against the estimate.
+    Verify prompt-family assignment and phase-context provenance, and retain real
+    baseline/candidate spec generations and their evaluations. Verify that cached
+    evaluations distinguish writer and evaluator versions, including panel membership/aggregation,
+    and that fitness never pools incompatible scoring configurations. Retain real
+    open-model baseline/candidate comparisons and the panel-feedback comparison.
 
 
     Files: experiments/plan-writing/, reusable evaluation/optimization modules under
@@ -29837,7 +30265,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677755+00:00'
-  updated_at: '2026-10-21T00:16:14.380980+00:00'
+  updated_at: '2026-10-21T19:18:18.796438+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29868,22 +30296,35 @@ prs:
   - pr-8df6472
   description: 'Implement the iterative generator described in pm/plans/plan-doc-eval.md:
     draft, score with an in-loop critic, locate passages weak on particular rubric
-    dimensions, revise, repeat for a fixed round count. Run it on development and
-    validation cases with JEV as critic and with a frontier model as critic, against
-    one-shot generation from the same prompt. Score every round with the withheld
-    evaluation configuration and report quality by round and by critic, divergence
-    between critic and independent scores as the overfitting signal, and usage per
-    variant. Estimate the share of weekly subscription limits for different round
-    counts and case counts first, and keep every run under the twenty percent single-run
-    ceiling. Deliver a recommendation on whether iteration beats one-shot generation
-    and at how many rounds.
+    dimensions, revise, repeat for a fixed round count. Run the critic comparison
+    specified above: JEV, individual frontier models, repeated-single-model judgments,
+    cross-lab frontier panels and open models, against one-shot generation. Use the
+    same initial draft within each writer-model comparison, including open writers
+    with frontier-panel feedback and with open-model feedback. Score every round with
+    the fixed withheld evaluator outside the critic panel and report quality by round,
+    writer and critic, divergence between critic and independent scores as the overfitting
+    signal, and usage and latency per variant. Compare equal-round and comparable-budget
+    conditions so extra calls alone do not explain a panel advantage. Estimate the
+    share of weekly subscription limits for different round counts and case counts
+    first, and keep every run under the twenty percent single-run ceiling. Deliver
+    evidence on whether iteration beats one-shot generation, whether cross-lab feedback
+    improves independently judged quality over its single-model controls, and at how
+    many rounds. Include implementation and QA specs in the one-shot versus iterative
+    comparison, using the same phase inputs as their production baselines and preserving
+    instructions about unresolved questions and approval. Report outcomes by document
+    family.
 
 
     Tests: Verify that the critic never sees the independent evaluation configuration
     or final cases, that per-round drafts and scores are retained, that round count
-    and critic choice are configurable, and that one-shot and iterative outputs are
-    produced from the same prompt and cases. Run a real sample and retain per-round
-    independent scores alongside critic scores, with usage consumed against the estimate.
+    and critic choice are configurable, and that comparisons share the same prompt,
+    cases, writer and initial draft. Check that no critic is the withheld evaluator
+    and that independent scores never feed revisions; preserve individual panel feedback
+    and aggregation provenance. Run a real sample and retain per-round independent
+    scores alongside critic scores, with usage consumed against the estimate. Include
+    real comparisons for both spec types, cross-lab and repeated-single-model critics,
+    and the required open/local writer and critic combinations; check that revisions
+    preserve requirements and unresolved questions.
 
 
     Files: experiments/plan-writing/, iterative generation and critic modules under
@@ -29892,7 +30333,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677763+00:00'
-  updated_at: '2026-10-21T00:15:38.677763+00:00'
+  updated_at: '2026-10-21T19:18:19.513654+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29905,17 +30346,20 @@ prs:
   depends_on:
   - pr-09c4e8e
   - pr-eadd1b7
-  description: 'Apply campaign-supported improvements to the existing plan-development
-    and/or PR-breakdown prompts, following pm/plans/plan-doc-eval.md. Where iterative
+  description: 'Apply campaign-supported improvements to the plan-development, PR-breakdown,
+    implementation-spec and QA-spec prompt families in pm/plans/plan-doc-eval.md;
+    retain each family''s baseline when no improvement is supported. Where iterative
     generation beats one-shot generation on the independent measure, adopt it through
-    the same entry point with its round count and critic fixed. Validate the exact
-    rendered production prompt after integration, with held-out document comparisons
-    and fresh generation through normal PM commands in an isolated project. Carry
-    forward scope, user constraints, required fields and valid dependencies. Include
-    in the adoption report the comparison of regenerated plans against their originals.
-    Deliver the production prompt change and its evidence through the existing review
-    and acceptance flow; a standalone optimizer or demonstration rewrite does not
-    complete this PR.
+    the same entry point with its round count and critic or panel configuration fixed.
+    Report supported writer-model configurations, including open/local models, and
+    retain the baseline for unvalidated configurations; do not make a closed-model
+    panel mandatory for every backend. Validate the exact rendered production prompt
+    after integration, with held-out document comparisons and fresh generation through
+    normal PM commands in an isolated project. Carry forward scope, user constraints,
+    required fields and valid dependencies. Include in the adoption report the comparison
+    of regenerated plans against their originals. Deliver the production prompt change
+    and its evidence through the existing review and acceptance flow; a standalone
+    optimizer or demonstration rewrite does not complete this PR.
 
 
     Tests: Check that normal PM commands render the evaluated prompt version. Generate
@@ -29923,16 +30367,624 @@ prs:
     dependency graph. Compare fidelity and document quality with the unchanged baseline
     and with the original plan files using the reserved evaluators; retain examples
     and failures. Run affected prompt/parser tests and verify existing project state
-    is untouched by the experiment.
+    is untouched by the experiment. Exercise both inline and standalone spec-generation
+    paths where applicable, verify that spec review/approval behavior is preserved,
+    and report measured gains or retention of the baseline for every in-scope family
+    and evaluated writer model. Include production-entry-point checks with a configured
+    open/local model and preserve access to the baseline when panel routing is unavailable.
 
 
-    Files: pm_core/cli/plan.py, extracted planning prompt builders, tests/test_plan_parser.py
-    and affected planning tests, campaign evidence and adoption report'
+    Files: pm_core/cli/plan.py, pm_core/spec_gen.py, extracted prompt builders, tests/test_plan_parser.py
+    and affected planning/spec tests, campaign evidence and adoption report'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677768+00:00'
-  updated_at: '2026-10-21T00:15:38.677768+00:00'
+  updated_at: '2026-10-21T19:18:20.218999+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3ae2fc3
+  plan: improvements
+  title: Add spec-review pauses to autostart
+  branch: pm/pr-3ae2fc3-add-spec-review-pauses-to-autostart
+  status: pending
+  depends_on: []
+  description: 'Add `pm autostart add <final-pr> --review-specs` to pause for human
+    approval after the implementation spec and again after the QA spec. It composes
+    with the existing merge flags, for example `pm autostart add <final-pr> --review-specs
+    --wait-for-merge`.
+
+
+    Reuse the existing review-mode spec prompts and approval flow; this is one bounded
+    extension of auto-start, not a new spec workflow.
+
+
+    - Apply review mode to the target and its transitive prerequisites before their
+    next spec step, without changing the global spec-mode setting. Shared prerequisites
+    require review when any active target requests it. Preserve explicit per-PR review_spec
+    settings and the existing merge policies.
+
+    - Connect inline spec generation to the existing spec_pending state. An agent
+    waiting for approval must not be mistaken for completed implementation or completed
+    QA planning. Implementation work and QA scenario launch wait for explicit approval
+    through the existing controls; editing/rejecting keeps the phase paused, and approval
+    resumes the same flow. Cover already-present specs that have not been approved;
+    enabling the option does not rewind completed phases.
+
+    - Reuse the TUI S marker, V review action, and pm pr spec/spec-approve. Make pending
+    implementation versus QA spec review visible in the tree and auto-start popup,
+    and in pm autostart status (text and JSON), with the spec location and approval
+    action. Extend existing status output instead of adding a parallel listing command.
+
+    - Support the option in the CLI and TUI command bar, show it on target listings,
+    preserve it through the existing restart mechanism, and handle repeated adds and
+    target removal consistently with other target options. Removing inherited policy
+    must not silently approve a spec already waiting for review.
+
+
+    Verification: an auto-started dependency chain pauses at both spec steps, remains
+    paused across idle polling and restart, and advances after each explicit approval.
+    Exercise edit/reject, an already-present unapproved spec, shared dependencies,
+    CLI/TUI status agreement, and coexistence with manual merge holds. Existing default
+    auto-start behavior remains covered. Reuse current spec and auto-start tests plus
+    one end-to-end scenario.
+
+
+    Relevant code: pm_core/cli/autostart.py, pm_core/autostart_state.py, pm_core/tui/auto_start.py,
+    pm_core/spec_gen.py, existing spec approval and TUI status/phase-transition paths.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T14:05:49.183704+00:00'
+  updated_at: '2026-10-21T14:05:49.183704+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8020495
+  plan: improvements
+  title: PR action history and active timers in CLI and actions pane
+  branch: pm/pr-8020495-pr-action-history-and-active-timers-in-cli-and-act
+  status: pending
+  depends_on: []
+  description: 'Add `pm pr history <pr>` (text and `--json`) and a History entry in
+    the PR actions pane, so a user can tell what happened, how long it took, and what
+    PM is waiting for. The motivating case is an apparently stalled review: the display
+    should distinguish a finished agent turn, verdict processing, the next launch,
+    and a real wait.
+
+
+    - Show past action attempts with start/end times, elapsed duration, outcome, and
+    review/QA iteration or scenario identity. Include retries, failures, cancellations,
+    and approval waits. Separate waiting time from execution where the evidence permits;
+    concurrent QA scenarios must not be summed into a misleading wall-clock total.
+
+    - Show current PR-owned timers and scheduled checks: purpose, owning action, time
+    armed, next due time, remaining time, and expected transition. Cover the existing
+    idle/verdict grace periods, retry backoffs, planner deadlines, and relaunch throttles.
+    An indefinite human-review hold has no countdown; unavailable timing is shown
+    as unknown.
+
+    - Reuse runtime state, hook events, and loop records. Add durable action/timer
+    events only where needed: the current runtime mirror overwrites attempts and removes
+    vanished panes, so it cannot alone provide history. Preserve distinct attempts
+    across concurrent writers and restarts, and reconcile expired/cancelled timers
+    with their actual owners. This observes the existing scheduler rather than creating
+    another one.
+
+    - Use one history query/presentation model for the CLI and pane. Keep it available
+    after merge or pane removal, and expose it through the shared action catalog used
+    by the planned Even Realities interface. Reuse action-source context from pr-291e891
+    where available; do not introduce a competing attribution model.
+
+
+    Verify a real review/retry/QA sequence, overlapping scenarios, approval holds,
+    cancellation and restart. Check CLI/pane agreement, honest missing-history output,
+    and that timing instrumentation does not alter execution. Use controlled clocks
+    for timing tests.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T19:14:50.410487+00:00'
+  updated_at: '2026-10-21T21:40:00.306182+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9e7847d
+  plan: tui-ux
+  title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
+  branch: pm/pr-9e7847d-even-realities-pm-interface-constraints-interactio
+  status: pending
+  depends_on: []
+  description: 'Define first-class plan/spec review and PM session access on Even
+    Realities glasses before deciding how to refactor either codebase. The central
+    journey is: read a plan or spec, discuss it in its associated PM session, request
+    revisions or approve the current version, and let PM carry out implementation
+    without manually driving agent windows. PR actions and status support that journey.
+    This is the first of four PRs replacing the pending mobile web pane (pr-72c8695).
+
+
+    Review the actual glasses model, firmware/SDK and existing Pageborne app. The
+    user''s ~/even/reading is currently ~/even/reader on this host. Establish the
+    constraints affecting document readability, navigation/input, updates, feedback,
+    connection lifecycle, and glasses versus companion behavior. Cite SDK documentation
+    and distinguish verified behavior from assumptions.
+
+
+    Deliver a concise interaction proposal with runnable mockups and demo screenshots
+    at the glasses viewport. Make long-form plan/spec reading, discussion in the correct
+    existing session, revision/re-review and explicit approval first-class flows.
+    Show how reading context and document/session identity are retained when moving
+    between a document and its discussion; distinguish a changed document from the
+    version being reviewed. Demonstrate approval handing work back to unattended PM
+    execution. Include PR selection, action/status navigation, history/timers, manual-merge
+    waits and representative busy/error/reconnect states. Define the user-facing behavior
+    without presupposing a particular layout or gesture scheme.
+
+
+    Do not prescribe shared components, package boundaries, APIs or specific extractions.
+    Record open implementation questions for the two subsequent refactoring PRs. Their
+    scope will be determined from the reviewed mockups; they depend on this PR but
+    not on each other. The final PR implements the interface after both.
+
+
+    Acceptance: the reading/discussion/approval journey is reviewable and fits the
+    documented constraints. Screenshots come from a runnable mockup or simulator and
+    identify simulated behavior. Keep the proposal and screenshots easy to inspect
+    from PM''s report. Manual merge of this PR is the design checkpoint before refactoring
+    starts. No production Pageborne or PM refactor is part of this PR.
+
+
+    Session access must cover every session exposed by the current PM actions panel
+    and its related windows, not only the conversation attached to a document. Audit
+    that session list and mock selection/switching for implementation, review, sign-off,
+    any existing merge/recovery session, the QA planner and interactive session, each
+    individual QA scenario, and its refinement/execution/verifier sessions where present.
+    Show role, PR/scenario identity and current state so parallel sessions are distinguishable.
+    The demo must include opening a specific QA scenario and its verifier, inspecting
+    or discussing the ongoing work, and returning to the originating document or session
+    list without starting duplicates. Include other existing plan/project sessions
+    where the current panel exposes them. Keep this as a behavior requirement; do
+    not predetermine the navigation layout or refactoring.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T21:39:27.758092+00:00'
+  updated_at: '2026-10-21T23:22:18.897387+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9374887
+  plan: tui-ux
+  title: 'Even Realities document review: Pageborne sharing after mockup review'
+  branch: pm/pr-9374887-even-realities-pm-interface-pageborne-sharing-refa
+  status: pending
+  depends_on:
+  - pr-9e7847d
+  description: 'After the interface/mockup PR is reviewed and merged, inspect Pageborne
+    (currently ~/even/reader) and determine what functionality the approved PM glasses
+    experience should share with it, especially the first-class plan/spec reading
+    and linked-session discussion journey. The required refactoring is intentionally
+    undecided until those mockups exist.
+
+
+    Implement only the sharing/refactoring justified by that interface, preserving
+    Pageborne''s current behavior. Determine the appropriate ownership and reuse mechanism
+    from the design and actual code; do not assume a new package, service or generic
+    UI framework is needed. If existing reuse points suffice, demonstrate that and
+    document the no-refactor outcome rather than manufacturing architectural work.
+    Keep changes in the appropriate repository/worktree and record any cross-repository
+    revisions needed by the final implementation.
+
+
+    This PR depends only on the interface/mockup PR within this sequence. It is independent
+    of the PM actions-picker refactoring PR; neither should require the other to finish.
+    Coordinate against the same reviewed behavior and leave the actual PM glasses
+    feature to the final implementation PR.
+
+
+    Acceptance: explain the concrete reuse supported by the mockups, verify that the
+    relevant Pageborne document-reading and session behavior still works on its existing
+    surfaces, and provide a clear, tested handoff for the implementation PR. Choose
+    the specific refactoring and checks after reviewing the mockups, not from this
+    placeholder description.
+
+
+    The approved mockups must also support access to all PM session roles, including
+    individual QA scenarios and their helper sessions. Determine any Pageborne sharing
+    needed for that experience after mockup review; do not restrict reuse analysis
+    to document-linked chats or preselect an implementation.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T21:39:28.531325+00:00'
+  updated_at: '2026-10-21T23:22:19.573627+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e5873d7
+  plan: tui-ux
+  title: 'Even Realities PM interface: actions-picker sharing refactor after mockup
+    review'
+  branch: pm/pr-e5873d7-even-realities-pm-interface-actions-picker-sharing
+  status: pending
+  depends_on:
+  - pr-9e7847d
+  description: 'After the interface/mockup PR is reviewed and merged, inspect PM''s
+    existing actions picker and determine what functionality the approved glasses
+    experience should share with it. Include the PM side of the document-review journey:
+    finding the relevant plan/spec and discussion session, explicit review/approval
+    where applicable, and handing approved work back to unattended execution. The
+    required refactoring is intentionally undecided until those mockups exist.
+
+
+    Implement only the refactoring justified by the approved interface, preserving
+    the terminal picker and current workflow behavior. Determine shared ownership
+    and reuse points from the actual code, including the history/timers work in pr-8020495,
+    spec-review controls in pr-3ae2fc3 and the sign-off/merge boundary in pr-ac10f03
+    as available. Do not preselect a catalog, dispatcher, transport or package architecture.
+    If existing reuse points suffice, demonstrate that and document the no-refactor
+    outcome.
+
+
+    This PR depends only on the interface/mockup PR within this sequence. It is independent
+    of the Pageborne sharing refactor; neither should require the other to finish.
+    Base the handoff on the reviewed behavior and leave the actual glasses feature
+    to the final implementation PR.
+
+
+    Acceptance: show how the resulting reuse supports the approved interface without
+    duplicating PM workflow decisions. Verify the existing picker behavior, document/session/action
+    targeting and applicable approval/merge gates. An interface action must not approve
+    the wrong document version or require a human to shepherd ordinary implementation
+    after approval. Choose the concrete refactoring and tests after reviewing the
+    mockups.
+
+
+    Use the reviewed mockups to preserve access to all sessions available through
+    the current actions panel and related windows, including every QA scenario and
+    its refinement/execution/verifier sessions. Preserve role and PR/scenario/session
+    identity when selecting a running session; a single aggregate QA entry or document-linked
+    chat is not sufficient. Determine any required shared functionality only after
+    mockup review.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T21:39:29.331751+00:00'
+  updated_at: '2026-10-21T23:22:20.243762+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1e0772a
+  plan: tui-ux
+  title: Implement Even Realities plan/spec review and PM session interface
+  branch: pm/pr-1e0772a-implement-the-reviewed-even-realities-pm-glasses-i
+  status: pending
+  depends_on:
+  - pr-9374887
+  - pr-e5873d7
+  description: 'Implement the approved Even Realities interface using the results
+    of the two independent refactoring PRs. First-class plan/spec review and discussion
+    in the appropriate PM sessions are the main user journey: read, discuss or request
+    revisions, review the updated document, explicitly approve where required, then
+    let implementation proceed without manual agent-window intervention. Product and
+    architecture choices come from the reviewed mockups and subsequent refactoring
+    work.
+
+
+    Make plan/spec reading and navigation, document-version awareness, linked-session
+    discussion and return to reading work against live PM state. Reuse the correct
+    existing session or start the appropriate one through PM when needed; keep the
+    document and conversation context associated. Approval must apply to the version
+    actually reviewed, and changed documents must not silently inherit it. Use PM''s
+    existing workflow and review controls rather than interpreting a navigation or
+    discussion action as approval.
+
+
+    Implement the supporting PR actions/status views, history/timers and review/merge
+    waits specified by the design. Use the Pageborne and PM reuse points established
+    by the prerequisites. Preserve project/PR/document/action/session identity, existing-session
+    reuse, and approval/manual-merge gates. Handle repeated inputs, reconnects and
+    stale state without duplicate workers or actions on the wrong target. After approval,
+    ordinary implementation and subsequent automated phases proceed through PM; configured
+    review and manual merge holds remain explicit.
+
+
+    Deliver the actual glasses experience and companion behavior specified by the
+    design. Keep existing Pageborne and terminal-picker workflows working. Record
+    the exact revisions and setup needed across repositories.
+
+
+    Acceptance: demonstrate a complete live plan/spec reading-to-discussion-to-revision/approval
+    journey that hands off to unattended implementation and exposes its progress.
+    Exercise a document changed during review, session reconnection, relevant review/manual-merge
+    holds, history and repeated inputs. Retain screenshots/recordings and regression
+    evidence for shared behavior. Use the simulator for reproducible checks and record
+    actual-device results or an explicit remaining hardware-validation gap; do not
+    present mockups as proof of working integration. This PR depends on both refactoring
+    PRs.
+
+
+    Deliver full session-access parity with the current PM actions panel and related
+    windows alongside document review. Make implementation, review, sign-off, existing
+    recovery, QA planner/interactive, individual QA scenarios and their refinement/execution/verifier
+    sessions accessible where present, plus other plan/project sessions exposed by
+    the panel. Show enough role, PR/scenario identity and state to distinguish concurrent
+    sessions, open the selected existing session without duplicate launches, and retain
+    navigation context when returning. Demonstrate selecting a particular live QA
+    scenario and its verifier, accessing the ongoing session, and switching back to
+    a document or the session list; an aggregate QA status page alone does not satisfy
+    this requirement.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T21:39:30.108250+00:00'
+  updated_at: '2026-10-21T23:22:20.916518+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b2bd388
+  plan: bugs
+  title: 'Bug: TUI d on a PR returned to impl by sign-off switches to the stale pre-return
+    review window'
+  branch: pm/pr-b2bd388-bug-tui-d-on-a-pr-returned-to-impl-by-sign-off-swi
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pr_view.py review_pr fast path: when a review-<id> window
+    exists and fresh=False it just select_window()s and returns, regardless of PR
+    status. After sign-off routes a PR back (SIGNOFF_IMPL, pr-ac10f03) the pre-return
+    review window survives, so pressing d (or the rework agent running ''pm tui send
+    d'' as its prompt suggests) after the rework only shows the OLD review and leaves
+    the PR in_progress; no fresh review starts. Seen in pr-ac10f03 QA S1 (debug log
+    23:43:28 ''Switched to review window'', PR stayed in_progress until auto-review
+    on idle replaced the window at 23:44:39). Auto-start masks it; manual flow stalls.
+    Fix idea: skip the fast path when status is in_progress (or when signoff_return
+    is open) so pm pr review marks in_review and replaces the stale window.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T23:48:30.074151+00:00'
+  updated_at: '2026-10-22T03:54:04.112795+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-0b07bd5
+    text: 'Hit again in pr-ac10f03 QA S15 (2026-10-22): the real rework impl agent
+      itself ran `pm tui send d` to hand off to review; the TUI switched (incl. the
+      recorder client) to the stale pre-return review-<pr> window for ~70 s until
+      auto_review replaced it with a fresh loop. No stale verdict was reused.'
+    created_at: '2026-10-22T03:54:04Z'
+    last_edited: '2026-10-22T03:54:04Z'
+- id: pr-2e06289
+  plan: bugs
+  title: 'Bug: TUI background GitHub sync finalizes a GitHub-side merge without the
+    sign-off integrity check'
+  branch: pm/pr-2e06289-bug-tui-background-github-sync-finalizes-a-github-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/sync.py (do_normal_sync ~L142 / ~L267) marks a PR merged
+    as soon as GitHub reports it MERGED, with no check against the bound SIGNOFF_MERGE.
+    pr-ac10f03 added _verify_github_merge (cli/pr.py) to pm pr merge and its --no-signoff-check
+    recovery path (records pr["merge_integrity"] + a PR note when GitHub published
+    another head/base/tree), but the 5-minute sync bypasses it. Repro (fake-github,
+    see pr-ac10f03 QA S7 note): approve a PR, push an unreviewed commit onto its branch
+    on the remote and merge it there, wait for the TUI sync -> PR is merged, no merge_integrity,
+    no note. Fix: route sync-detected merges of a PR with a SIGNOFF_MERGE record through
+    the same verification.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T00:26:04.150027+00:00'
+  updated_at: '2026-10-22T01:38:54.583871+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-dbd2859
+    text: 'QA pr-ac10f03 S13 repro (2026-10-22): github via fake-github, #4/#5 held
+      SIGNOFF_MERGE, teammate commit on each head + fake re-seed MERGED; pm pr merge
+      4 --no-signoff-check verified (WARNING+merge_integrity), but the TUI 300 s background
+      sync tick 7 s later finalized #5 with no WARNING/merge_integrity/note ("[pr_sync]
+      PR pr-bbac94b detected as merged"). Evidence /pm-captures/scenarios/13/when5-plain-merge-pr5/tui-sync-finalized-pr5.log.'
+    created_at: '2026-10-22T01:38:54Z'
+    last_edited: '2026-10-22T01:38:54Z'
+- id: pr-0368986
+  plan: bugs
+  title: 'Bug: prompts tell sessions to run ''pm pr show'', which does not exist'
+  branch: pm/pr-0368986-bug-prompts-tell-sessions-to-run-pm-pr-show-which-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/plan.py:388-394 (plan review prompt: ''run `pm pr show
+    <id>` to read'' details) and pm_core/prompt_gen.py:1662 (''`pm pr show <id>` and
+    look for'' user feedback in notes) reference a ''pm pr show'' command; there is
+    no such subcommand (pm pr --help lists none; QA on pr-ac10f03 hit it too). Sessions
+    following the prompt get ''No such command''. Fix: add ''pm pr show <id>'' (description,
+    status, deps, notes, signoff/signoff_return/integration/merge_integrity records),
+    or point the prompts at existing commands (pm pr list / pm pr note list / pm prompt).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T00:51:48.437253+00:00'
+  updated_at: '2026-10-22T00:51:48.437253+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7e00786
+  plan: bugs
+  title: 'Bug: review loop adopts any review-<pr> pane without checking it runs the
+    iteration''s transcript session'
+  branch: pm/pr-7e00786-bug-review-loop-adopts-any-review-pr-pane-without-
+  status: pending
+  depends_on: []
+  description: 'pm_core/review_loop.py _adopt_in_flight_review (~L216): on a resumed
+    loop it finds the pane by window name review-<pr> and polls it for the iteration
+    transcript, but never checks that pane actually runs the Claude session of that
+    transcript (session_id_from_transcript). Repro (pr-ac10f03 QA S3): a CLI `pm pr
+    auto-sequence` tick and a restarted TUI both launch review --fresh; the restarted
+    TUI then adopted the pane of the CLI-launched window whose transcript was dead
+    -> PR stuck in_review. Fix idea: match the pane''s hook session id (hook_events
+    / pane registry) against the transcript''s session id before adopting; otherwise
+    relaunch.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T00:57:58.404926+00:00'
+  updated_at: '2026-10-22T00:57:58.404926+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9ee4d64
+  plan: bugs
+  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review
+    transcripts after a sign-off return'
+  branch: pm/pr-9ee4d64-bug-auto-start-run-transcripts-overwrite-pre-retur
+  status: pending
+  depends_on: []
+  description: 'pm/transcripts/<autostart-run>/ keeps one file per (step, pr): impl-<pr>.jsonl,
+    signoff-<pr>.jsonl, review-<pr>-i1.jsonl. When sign-off routes a PR back (SIGNOFF_IMPL/REVIEW)
+    within the same auto-start run, the rework impl, the fresh review loop (iteration
+    restarts at 1) and the fresh sign-off write the same paths, so the archived transcript
+    of the router that made the return decision (and the pre-return impl/review) is
+    lost from the run archive (the original ~/.claude/projects JSONL survives). Repro
+    (QA pr-ac10f03 S15, 2026-10-22): two overlapping PRs, B returned SIGNOFF_IMPL
+    at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl and
+    impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return
+    round (e.g. signoff-<pr>-r2.jsonl) or by session id.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-22T03:54:03.261607+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ccdec71
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the
+    review window could not be launched'
+  branch: pm/pr-ccdec71-bug-pm-pr-auto-sequence-reports-advanced-review-re
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_auto_sequence (in_review, no verdict, no review
+    window) calls _launch_review_iteration -> _launch_review_window, which only prints
+    "Review window requires tmux." (or "tmux session ... not found") and returns;
+    the tick then prints "advanced: review_relaunched" and exits 0. Repro (seen in
+    pr-ac10f03 QA S18): run `pm pr auto-sequence <pr>` from a shell with TMUX unset
+    after the PR reaches in_review -> every tick prints "Review window requires tmux."
+    + "advanced: review_relaunched" forever, nothing launches, no paused/error status.
+    Expected: report a launch failure (non-zero or "paused: review_launch_failed")
+    instead of claiming an advance.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T03:50:49.520900+00:00'
+  updated_at: '2026-10-22T03:50:49.520900+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-446cb83
+  plan: bugs
+  title: 'pm -C <proj> fake-claude config set ignores -C: session tag comes from cwd'
+  branch: pm/pr-446cb83-pm-c-proj-fake-claude-config-set-ignores-c-session
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/fake_claude.py _resolve_tag -> paths.get_session_tag()
+    uses cwd git root, not the -C/PM_PROJECT project. Repro (QA pr-ac10f03 S22): from
+    a PR workdir run `pm -C <main-repo>/pm fake-claude config set <json>` -> "Wrote
+    fake-claude config for session pm-pr-<id>-...-<hash>" (the workdir clone tag),
+    while the TUI session reads ~/.pm/sessions/<main-repo tag>/fake-claude, so the
+    config silently does not apply. Expected: derive the tag from the resolved project
+    root when -C/PM_PROJECT is given (or refuse). Workaround: run from the main repo
+    or pass --tag.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T05:10:36.683873+00:00'
+  updated_at: '2026-10-22T05:10:36.683873+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b530f8b
+  plan: improvements
+  title: Launch a check session when a GitHub merge lands on a base that moved after
+    sign-off
+  branch: pm/pr-b530f8b-file-a-follow-up-pr-when-a-github-merge-lands-on-a
+  status: pending
+  depends_on:
+  - pr-ac10f03
+  description: 'GitHub merges are pinned to the approved PR head (gh pr merge --match-head-commit),
+    but GitHub has no base-revision precondition. A commit pushed to the base between
+    pm''s ls-remote check and GitHub''s merge (a sneak-in merge) is not prevented.
+    If it textually conflicts, GitHub refuses and pm returns the PR to sign-off. If
+    it merges cleanly, the published tree is a combination nobody signed off. Usually
+    that is harmless, but semantic conflicts (a renamed function the PR calls, a changed
+    default) are possible. Today _verify_github_merge (pm_core/cli/pr.py) detects
+    this after the fact, prints a WARNING, records pr["merge_integrity"] and adds
+    a PR note. Keep that behavior and the current GitHub configuration (GitHub stays
+    the merger; no direct lease push, no required branch-protection change).
+
+
+    Add: when verification records a base-moved integrity problem (first parent !=
+    signed-off base, published tree != approved candidate_tree), launch a Claude check
+    session for the merged PR. The session assesses whether the sneaked-in commits
+    interact badly with the PR. It is given the merged PR id, the merge commit, the
+    signed-off base vs the actual first parent, the sneaked-in commit range (git log
+    <signed_off_base>..<actual_first_parent>), the files those commits changed that
+    overlap the PR''s changed files, the published vs approved tree, and the PR''s
+    sign-off report/spec. It can read the combined code on the base and run tests.
+    It ends with a verdict: no issue (recorded on merge_integrity, done), or potential
+    issue. On a potential issue it has the option to file a pending follow-up PR (pm
+    pr add, description with its findings and the evidence above), or to leave a note
+    and escalate to the user. Filing is the session''s judgment, not automatic. The
+    session never reverts or pushes the base.
+
+    - Launch at most one check session per merge (idempotent across recoveries: --propagation-only,
+    repeated --no-signoff-check, verification re-runs). Record the session''s outcome
+    on merge_integrity (e.g. check_verdict, followup_pr) and in the merged PR''s notes.
+
+    - Launch it like other pm sessions: a tmux window from the TUI or the CLI, background
+    when driven by auto-start. Show it in pm pr list / the TUI tree, e.g. a marker
+    on the merged PR while the check is pending or running. Its prompt follows the
+    existing prompt_gen conventions.
+
+    - Decide whether the other integrity cases (GitHub merged a different head; no
+    merge commit of the approved head) also launch the check. Those mean unsigned
+    commits on the PR branch, a related re-validation need. At minimum make the behavior
+    explicit.
+
+    - Project setting: launch the check automatically (default), only note, or ask
+    in the TUI.
+
+    - Coordinate with pr-2e06289: the TUI background GitHub sync currently finalizes
+    GitHub-side merges without the integrity check. Once it verifies, it must go through
+    the same check-session path.
+
+
+    Verification: fake-github with a one-shot hook that commits to master inside gh
+    pr merge (as in QA S27 story 5). Assert one check session launches with the commit
+    range and overlap in its prompt, and no second session on re-running recovery.
+    A fake-claude ''no issue'' verdict records only on merge_integrity. A ''potential
+    issue'' verdict where the session files a follow-up records the follow-up PR id.
+    A clean merge launches nothing. Record one real check-session run. Cover the pr-2e06289
+    sync path once it is fixed.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T13:47:46.255021+00:00'
+  updated_at: '2026-10-22T13:48:29.542174+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

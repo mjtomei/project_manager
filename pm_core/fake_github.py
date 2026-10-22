@@ -158,6 +158,12 @@ class FakeGitHubRepo:
                            f"refs/heads/{name}", check=False)
         return result.returncode == 0
 
+    def branch_sha(self, name: str) -> Optional[str]:
+        """Tip of branch ``name``, or None when it does not exist."""
+        result = self._git("rev-parse", "--verify", "--quiet",
+                           f"refs/heads/{name}", check=False)
+        return (result.stdout.strip() or None) if result.returncode == 0 else None
+
     def is_merged(self, head: str, base: Optional[str] = None) -> bool:
         """True if ``head``'s tip is an ancestor of ``base``."""
         base = base or self.default_branch
@@ -628,6 +634,14 @@ class FakeGitHubBackend:
         if pr.state == "CLOSED":
             return _completed(["pr", "merge"], 1, "",
                               f"X Pull request #{pr.number} is closed")
+        want = opts.get("--match-head-commit")
+        if want and self.git_repo is not None:
+            tip = self.git_repo.branch_sha(pr.head)
+            if tip != want:
+                return _completed(
+                    ["pr", "merge"], 1, "",
+                    f"X Pull request #{pr.number} head is {tip}, not "
+                    f"{want} (--match-head-commit)")
         ok, detail = self._do_merge(pr)
         if not ok:
             # A real git conflict in the backing repo -> conflict-shaped fail.
@@ -663,7 +677,7 @@ def _parse_opts(args: list[str]) -> tuple[list[str], dict]:
     with ``-`` is a boolean flag.
     """
     valued = {"--title", "--base", "--body", "--head", "--json",
-              "--state", "--repo", "-R"}
+              "--state", "--repo", "-R", "--match-head-commit"}
     pos: list[str] = []
     opts: dict = {}
     i = 0
