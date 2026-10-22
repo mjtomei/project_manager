@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T15:30:00.522386+00:00'
+  updated_at: '2026-10-22T15:33:13.659087+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30122,6 +30122,16 @@ prs:
       recapture. /pm-captures/even-realities synced.'
     created_at: '2026-10-22T15:30:00Z'
     last_edited: '2026-10-22T15:30:00Z'
+  - id: note-b913141
+    text: 'Review 450f i11: approving a QA-phase spec (real PM path, spec_pending.phase
+      qa) said "implementation resumes", set the QA planner to "implementing" and
+      showed an impl timeline — now phase-aware: confirmation says QA resumes, SimPM
+      marks QA running/planner planning scenarios, progress shows impl+review done,
+      QA running (opens the planner). Latent: no fixture has a pending QA spec. check.mjs
+      +1 rule (fails on old code); 186 journey frames byte-identical, no recapture.
+      Proposal Approve row updated; /pm-captures/even-realities synced.'
+    created_at: '2026-10-22T15:33:13Z'
+    last_edited: '2026-10-22T15:33:13Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
