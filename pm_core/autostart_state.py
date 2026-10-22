@@ -172,6 +172,22 @@ def held_by_text(h: dict | None) -> str:
     return "; ".join(parts)
 
 
+def blockers_text(blockers: list[dict], *, holds: bool = True,
+                  name=lambda pr_id: pr_id) -> str:
+    """``"c (pending, wait-for-merge ← f), d (qa)"`` for structured
+    blockers (``run["blockers"]``).  *name* maps a PR id to the text that
+    names it; *holds* False omits each blocker's hold cause."""
+    parts = []
+    for b in blockers:
+        tag = f"{name(b['pr_id'])} ({b.get('status')}"
+        hold = held_by_text({"explicit": b.get("explicit_hold"),
+                             "targets": [name(t) for t in b.get("held_by") or []]})
+        if holds and hold:
+            tag += ", " + hold
+        parts.append(tag + ")")
+    return ", ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Target records + breadcrumb
 # ---------------------------------------------------------------------------
@@ -343,16 +359,12 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
 
     if status == "pending":
         deps = pr.get("depends_on") or []
-        blocking, blockers = [], []
+        blockers = []
         for d in deps:
             dpr = pr_map.get(d)
             dstatus = (dpr or {}).get("status", "missing")
             if dstatus == "merged":
                 continue
-            tag = f"{d} ({dstatus}"
-            if d in holds:
-                tag += ", " + held_by_text(holds[d])
-            blocking.append(tag + ")")
             h = holds.get(d) or {}
             blockers.append({
                 "pr_id": d,
@@ -361,8 +373,9 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 "explicit_hold": bool(h.get("explicit")),
                 "held_by": list(h.get("targets") or []),
             })
-        if blocking:
-            return ("pending", "waiting", "blocked on " + ", ".join(blocking),
+        if blockers:
+            return ("pending", "waiting",
+                    "blocked on " + blockers_text(blockers),
                     _info(blockers=blockers))
         if pr_id in (inp.get("launching") or set()):
             return "implementation", "running", "launching implementation", plain
@@ -666,11 +679,10 @@ def _progress(run: dict) -> str:
 def status_rows(status: dict) -> list[dict]:
     """Flatten a status dict into display rows grouped by target.
 
-    Each row: ``{pr_id, depth, kind, run, also, progress, group,
-    group_policy}`` where *kind* is ``target`` (a target header, depth 0) or
-    ``dep`` (an unmerged closure PR, depth 1); ``also`` names other targets
-    that share this dep; ``group``/``group_policy`` are the owning target and
-    its own policy (what a dep row inherits).  In ``all`` mode every run is
+    Each row: ``{pr_id, depth, kind, run, also, progress, group}`` where
+    *kind* is ``target`` (a target header, depth 0) or ``dep`` (an unmerged
+    closure PR, depth 1); ``also`` names other targets that share this dep;
+    ``group`` is the owning target (whose policy a dep row inherits).  In ``all`` mode every run is
     a depth-0 ``run`` row with no group.  A shared dependency appears under
     each target that needs it but is one entry in ``runs`` — one worker.
     """
@@ -680,7 +692,7 @@ def status_rows(status: dict) -> list[dict]:
         for r in status.get("runs") or []:
             rows.append({"pr_id": r["pr_id"], "depth": 0, "kind": "run",
                          "run": r, "also": [], "progress": _progress(r),
-                         "group": None, "group_policy": None})
+                         "group": None})
         return rows
     for t in status.get("targets") or []:
         tid = t["pr_id"]
@@ -694,8 +706,7 @@ def status_rows(status: dict) -> list[dict]:
         }
         rows.append({"pr_id": tid, "depth": 0, "kind": "target", "run": run,
                      "also": [], "progress": _progress(run),
-                     "policy": t.get("policy"), "group": tid,
-                     "group_policy": t.get("policy")})
+                     "policy": t.get("policy"), "group": tid})
         for dep in t.get("pending") or []:
             r = runs.get(dep)
             if not r:
@@ -703,7 +714,7 @@ def status_rows(status: dict) -> list[dict]:
             also = [x for x in r.get("needed_by") or [] if x not in (tid, dep)]
             rows.append({"pr_id": dep, "depth": 1, "kind": "dep", "run": r,
                          "also": also, "progress": _progress(r),
-                         "group": tid, "group_policy": t.get("policy")})
+                         "group": tid})
     return rows
 
 
@@ -711,7 +722,8 @@ _POLICY_TEXT = {POLICY_STOP: "stop-before-merge", POLICY_AUTO: "auto-merge",
                 POLICY_WAIT: "wait-for-merge"}
 
 
-def policy_labels(row: dict) -> list[tuple[str, str]]:
+def policy_labels(row: dict,
+                  name=lambda pr_id: pr_id) -> list[tuple[str, str]]:
     """``[(label, kind)]`` naming a status row's merge policy — only what
     its group does not already imply.  Shared by the CLI report and the
     runs popup (via ``autostart_view``).
@@ -723,7 +735,8 @@ def policy_labels(row: dict) -> list[tuple[str, str]]:
     stop-before-merge mark; a dep that is itself a wait target; a hold by a
     wait target other than one already holding through the group (e.g. a
     shared dep of an auto-merge target held by wait target X →
-    ``wait-for-merge ← X``).
+    ``wait-for-merge ← X``).  *name* maps a holder's PR id to the text
+    that names it (the report uses display ids).
     """
     run = row.get("run") or {}
     pr_id = run.get("pr_id") or row.get("pr_id")
@@ -738,7 +751,8 @@ def policy_labels(row: dict) -> list[tuple[str, str]]:
             out.append(("stop-before-merge", "exception"))
         # A wait target holds itself; other holders add nothing to that.
         if others and own != POLICY_WAIT:
-            out.append(("wait-for-merge ← " + ", ".join(others), "exception"))
+            out.append(("wait-for-merge ← " + ", ".join(map(name, others)),
+                        "exception"))
         return out
     if explicit:
         out.append(("stop-before-merge", "exception"))
@@ -748,7 +762,8 @@ def policy_labels(row: dict) -> list[tuple[str, str]]:
     if pr_id in held_by:
         out.append(("wait-for-merge", "exception"))
     if others:
-        out.append(("wait-for-merge ← " + ", ".join(others), "exception"))
+        out.append(("wait-for-merge ← " + ", ".join(map(name, others)),
+                    "exception"))
     return out
 
 

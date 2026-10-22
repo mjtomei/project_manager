@@ -125,7 +125,7 @@ class TestDedupe:
         wait_group = text.split("◎ #238")[0]
         assert wait_group.count("wait-for-merge") == 2  # header + title word
         assert "[wait-for-merge]" in _row_block(text, "◎ #240")
-        assert "← pr-4a5b6c7" not in wait_group
+        assert "← #240" not in wait_group
         # Blockers name PRs and status only — no hold cause per blocker.
         assert "blocked on #233 (in_review), #231 (sign_off)" in wait_group
 
@@ -133,20 +133,22 @@ class TestDedupe:
         text = _text()
         # Shared dep of an auto-merge target held by the wait chain.
         auto_group = text.split("◎ #238")[1].split("◎ #239")[0]
-        assert "[wait-for-merge ← pr-4a5b6c7]" in auto_group
-        assert "also needed by pr-4a5b6c7" in auto_group
+        assert "[wait-for-merge ← #240]" in auto_group
+        assert "also needed by #240" in auto_group
         # Explicit stop mark on a dep under a stop-before-merge target.
         assert "[stop-before-merge]" in _row_block(text, "└ #241")
 
     def test_flat_mode_keeps_blocker_hold_causes(self):
-        run = next(r for r in mixed_status()["runs"]
-                   if r["pr_id"] == "pr-3f4a5b6")
-        assert view.reason_text(run, grouped=True) == \
+        status = mixed_status()
+        run = next(r for r in status["runs"] if r["pr_id"] == "pr-3f4a5b6")
+        names = view.display_names(status)
+        assert view.reason_text(run, grouped=True, names=names) == \
             "blocked on #233 (in_review), #231 (sign_off)"
-        # Without a group no row explains the hold, so the cause stays.
-        assert view.reason_text(run, grouped=False) == (
-            "blocked on #233 (in_review, wait-for-merge ← pr-4a5b6c7), "
-            "#231 (sign_off, wait-for-merge ← pr-4a5b6c7)")
+        # Without a group no row explains the hold, so the cause stays;
+        # the holding target is named by its display id, like its row.
+        assert view.reason_text(run, grouped=False, names=names) == (
+            "blocked on #233 (in_review, wait-for-merge ← #240), "
+            "#231 (sign_off, wait-for-merge ← #240)")
 
     def test_phase_and_progress_once(self):
         text = _text()

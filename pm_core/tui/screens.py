@@ -786,6 +786,7 @@ class AutoRunsScreen(ModalScreen):
             body_widget.update(body)
             return
         grouped = mode == "targets"
+        names = view.display_names(st)
         for i, row in enumerate(self._rows):
             r = row["run"]
             sel = i == self._selected
@@ -798,7 +799,7 @@ class AutoRunsScreen(ModalScreen):
                     notice = self._notice[1]
             texts = []
             for n, ln in enumerate(view.row_lines(row, width, grouped=grouped,
-                                                   notice=notice)):
+                                                   notice=notice, names=names)):
                 line = Text("▶ " if sel and n == 0 else "  ",
                             style="reverse" if sel else "")
                 line.append_text(view.to_rich(ln))

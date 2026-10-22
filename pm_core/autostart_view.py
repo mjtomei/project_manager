@@ -30,7 +30,7 @@ from rich.color import ColorSystem
 from rich.style import Style
 
 from pm_core.autostart_state import (
-    ATTENTION_LABELS, held_by_text, policy_labels, status_rows,
+    ATTENTION_LABELS, blockers_text, policy_labels, status_rows,
 )
 
 # Aim: every rendered line under 100 visible columns.
@@ -238,30 +238,41 @@ def phase_text(row: dict) -> str:
     return _PHASE_TOKENS.get(phase, phase)
 
 
-def reason_text(run: dict, grouped: bool) -> str:
+def display_names(status: dict) -> dict[str, str]:
+    """PR id → display id for every run: how the report names a target
+    holding or sharing a dependency, matching its own row (``#240``)."""
+    return {r["pr_id"]: str(r.get("display_id") or r["pr_id"])
+            for r in status.get("runs") or []}
+
+
+def reason_text(run: dict, grouped: bool,
+                names: dict[str, str] | None = None) -> str:
     """Compact reason.  Blockers name the blocking PRs and their status;
     inside a target group each blocker has its own row (with its hold
     labels), so hold causes are only spelled out in flat ``all`` mode."""
     blockers = run.get("blockers")
     if blockers:
-        parts = []
-        for b in blockers:
-            tag = f"{b.get('display_id') or b['pr_id']} ({b.get('status')}"
-            if not grouped:
-                hold = held_by_text({"explicit": b.get("explicit_hold"),
-                                     "targets": b.get("held_by") or []})
-                if hold:
-                    tag += ", " + hold
-            parts.append(tag + ")")
-        return "blocked on " + ", ".join(parts)
+        names = names or {}
+        disp = {b["pr_id"]: b.get("display_id") or b["pr_id"]
+                for b in blockers}
+        return "blocked on " + blockers_text(
+            blockers, holds=not grouped,
+            name=lambda p: disp.get(p) or names.get(p, p))
     short = run.get("short_reason")
     return (run.get("reason") or "") if short is None else short
 
 
 def row_lines(row: dict, width: int, *, grouped: bool = True,
-              notice: str | None = None) -> list[Line]:
-    """Wrapped lines for one status row (see module docstring)."""
+              notice: str | None = None,
+              names: dict[str, str] | None = None) -> list[Line]:
+    """Wrapped lines for one status row (see module docstring).  *names*
+    is :func:`display_names` of the report, for referenced targets."""
     run = row["run"]
+    names = names or {}
+
+    def name(pr_id: str) -> str:
+        return names.get(pr_id, pr_id)
+
     indent = "  " * row["depth"]
     cont = indent + "    "
     head: list[Seg] = [(indent, "")]
@@ -278,7 +289,7 @@ def row_lines(row: dict, width: int, *, grouped: bool = True,
     ph = phase_text(row)
     if ph:
         head += [(" ", ""), (ph, "phase")]
-    for text, kind in policy_labels(row):
+    for text, kind in policy_labels(row, name):
         head += [(" ", ""), (f"[{text}]", kind)]
     title = run.get("title") or ""
     if title:
@@ -292,14 +303,15 @@ def row_lines(row: dict, width: int, *, grouped: bool = True,
             detail.append(SEP)
         detail.append((text, role))
 
-    reason = reason_text(run, grouped)
+    reason = reason_text(run, grouped, names)
     if reason:
         add(reason, "attention_text" if run.get("attention") else "reason")
     win = run.get("window")
     if win:
         add(f"⧉ {win['name']}", "meta")
     if row.get("also"):
-        add("also needed by " + ", ".join(row["also"]), "secondary")
+        add("also needed by " + ", ".join(map(name, row["also"])),
+            "secondary")
     if notice:
         add(f"⚠ {notice}", "notice")
     if detail:
@@ -341,8 +353,9 @@ def report_lines(status: dict, width: int = MAX_WIDTH) -> list[Line]:
         lines.append([("No auto-start targets (auto-start off).", "")])
         return lines
     grouped = status.get("mode") == "targets"
+    names = display_names(status)
     for row in status_rows(status):
-        lines += row_lines(row, width, grouped=grouped)
+        lines += row_lines(row, width, grouped=grouped, names=names)
     return lines
 
 
