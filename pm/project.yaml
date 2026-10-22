@@ -3966,8 +3966,7 @@ prs:
       pr-271cb3a was reviewed in its workdir clone (setting started_at/reviewed_at/workdir)
       while the main repo concurrently added a note via pm pr note. The merge-propagation
       path (git stash + pop, used by pr-83b98d5 to merge notes across clones) bypassed
-      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream / =======
-      / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
+      the file lock from pr-f38005f and left literal       / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
       all pm commands until manually resolved. Resolution: keep timestamps + workdir
       from the workdir side, keep the new note from the main side. Likely shares root
       cause with this bug.'
@@ -31483,7 +31482,9 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
+<<<<<<< HEAD
   updated_at: '2026-10-22T22:50:38.491731+00:00'
+  updated_at: '2026-10-22T23:19:21.474948+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31636,6 +31637,18 @@ prs:
       config stops applying, and killing it crashes running QA loops.'
     created_at: '2026-10-22T22:50:38Z'
     last_edited: '2026-10-22T22:50:38Z'
+  - id: note-f72e392
+    text: 'QA S9 2026-10-22: all route Thens held live on b6cec11a (queued deferral
+      + drain, relaunch deferral w/o retry, worker and refiner stall -> nudge SUBMITTED
+      and resumed, c5d7d64f confirmed; captures /pm-captures/scenarios/9). Fixed in
+      b97c0e3d (CODE CHANGE, needs re-review; pre-existing on master): QA status dashboard
+      dropped queued scenarios after the initial capped launch ("0/1 complete") and
+      showed still-queued ones as pending during a queued launch; both launch paths
+      now pass the full list + queued indices (_status_queued). 3 mutation-checked
+      regressions. Note: with qa-max-scenarios 1 the QA spinner is (by design) absent
+      during a queued deferral since no pane is mid-turn.'
+    created_at: '2026-10-22T23:19:21Z'
+    last_edited: '2026-10-22T23:19:21Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
