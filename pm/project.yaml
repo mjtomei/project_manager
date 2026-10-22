@@ -31451,7 +31451,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T21:04:04.339257+00:00'
+  updated_at: '2026-10-22T21:15:00.634164+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31555,6 +31555,16 @@ prs:
       themselves all held on 81cebf17.'
     created_at: '2026-10-22T21:04:04Z'
     last_edited: '2026-10-22T21:04:04Z'
+  - id: note-8681b52
+    text: 'QA S6 (2026-10-22): all 6 triples held on 81cebf17, captures /pm-captures/scenarios/6.
+      Sandbox /etc/containers/containers.conf sets netns=host, so in-container 127.0.0.1:<router
+      port> IS the host router and route_bridge ensure exits 0 -- container traffic
+      bypasses the bridge and bridge tests pass vacuously. Put [containers] netns="slirp4netns"
+      in the scratch HOME ~/.config/containers/containers.conf for container-route
+      QA. Also: overlay fs reuses socket inode numbers (check birth time, not stat
+      %i); fake-claude list shorthand for qa_scenario is rejected (use {"verdicts":[...]}).'
+    created_at: '2026-10-22T21:15:00Z'
+    last_edited: '2026-10-22T21:15:00Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
