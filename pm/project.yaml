@@ -28418,6 +28418,16 @@ prs:
       active last; drive keys through the rec client (tmux -L rec send-keys -t base).'
     created_at: '2026-10-22T16:24:29Z'
     last_edited: '2026-10-22T16:24:29Z'
+  - id: note-81874ed
+    text: 'S8 refine: two clients attached to the SAME tmux session share its current
+      window, so a user select_window on $S moves both; "only the user client moves"
+      needs one client per session ($S user client typed via tmux -L rec send-keys,
+      plus $S~1/$S~2 from a 2nd/3rd `pm session`). auto-sequence on a closed PR prints
+      "unknown status: closed" exit 2 (merged: "merged" exit 0); qa-run-bg logs "is
+      closed; skipping QA". S5 scripts in /pm-captures/scenarios/5/scripts are a working
+      base.'
+    created_at: '2026-10-22T15:51:07Z'
+    last_edited: '2026-10-22T15:51:07Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
