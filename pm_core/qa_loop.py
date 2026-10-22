@@ -1701,6 +1701,11 @@ class _RouteStallWatch:
         try:
             if tmux_mod.pane_exists(pane):
                 tmux_mod.send_keys(pane, self.NUDGE)
+                # Extra Enters so the nudge is submitted: Claude can take
+                # the text+Enter burst as a paste and leave it unsent.
+                for _ in range(2):
+                    time.sleep(1)
+                    tmux_mod.send_keys(pane, "")
         except Exception:
             # Pane died in between: the caller's dead-pane handling
             # relaunches it.

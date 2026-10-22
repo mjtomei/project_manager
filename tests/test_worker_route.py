@@ -875,8 +875,9 @@ class TestPollLoopRouteGating:
              patch("pm_core.tmux.send_keys",
                    side_effect=lambda p, m: sent.append(m)):
             self._poll(state, tmp_path, [_status(False), _status(True)])
-        # No verdict reminder while the route was down; one resume nudge.
-        assert sent == [qa_loop._RouteStallWatch.NUDGE]
+        # No verdict reminder while the route was down; one resume nudge,
+        # followed by the Enters that submit it.
+        assert sent == [qa_loop._RouteStallWatch.NUDGE, "", ""]
         assert state.scenario_verdicts[1] == "PASS"
 
     def test_resumed_container_worker_checks_its_container(self, tmp_path):
