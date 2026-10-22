@@ -192,9 +192,10 @@ The model contains:
     `ended_at`, `elapsed_s`, `outcome`, `verdict`, identity
     (`iteration`/`scenario`/`retry`/`label`), `phases` (ordered spans),
     `exec_s` / `wait_s` split (wait = `queued`, `waiting_human`, `backoff`
-    phases; exec = the rest except `untracked` spans, E8), `open` flag, and `status` for open attempts
-    (`running`, or `interrupted (owner exited)` when the owner process is
-    gone).  A runtime-derived attempt (R3) that the live runtime mirror
+    phases; exec = the rest except `untracked` spans, E8), and an `open`
+    flag (shown `running`).  An unended attempt whose owner process is
+    gone is not open: `outcome` `interrupted`, `inferred` `owner-exited`,
+    unknown end, elapsed as a lower bound (`elapsed_lower_bound_s`).  A runtime-derived attempt (R3) that the live runtime mirror
     still shows in flight (`attempt_id` on an in-flight entry) is
     `running` regardless of its opener: any process clearing the entry
     ends it, so a short-lived CLI opener (e.g. `pm pr auto-sequence`)
@@ -214,8 +215,11 @@ The model contains:
     `expected`; `overdue` (`fires` timers past due, owner alive); and
     `recent` (cleared/elapsed/lost with resolution reason).
     Reconciliation: cleared → resolved; owner attempt ended → `cancelled
-    (owner ended)`; owner process dead → `lost (owner exited)`; `gate`
-    timer past due → `elapsed`; journaled hold still open on a
+    (owner ended)`; owner process dead → `lost (owner process exited)`,
+    except a `gate` that ran out while its owner was still alive (I9),
+    which stays `elapsed`; `gate` timer past due → `elapsed`; a re-armed
+    timer's earlier arm → `re-armed` (or its own clear reason when it was
+    cleared before the re-arm); journaled hold still open on a
     merged/closed PR → `released (PR merged|closed)` at `merged_at`
     (merges via `pm pr merge` / GitHub sync never reach the TUI's
     hold-release point).
