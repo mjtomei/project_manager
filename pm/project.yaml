@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-446cb83
+  active_pr: pr-b511dcf
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -23824,11 +23824,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/224
   gh_pr_number: 224
   created_at: '2026-05-25T03:31:48.369386+00:00'
-  updated_at: '2026-05-25T03:41:37.028145+00:00'
+  updated_at: '2026-10-22T15:15:27.819890+00:00'
   started_at: '2026-05-25T03:32:06.341060+00:00'
   reviewed_at: '2026-05-25T03:41:37.028145+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a3a8ffe
+    text: 'Overlap from pr-49ce773 QA s5 (ace617b4): popup-dispatched pm commands
+      now carry PM_CALLER_SESSION=<invoking ~N session>, and tmux.get_session_name()
+      returns it when TMUX_PANE is unset, so current_or_base_session() takes branch
+      1 (caller) instead of the any-attached-grouped-session fallback. Before it,
+      d in popup on client ~7 switched client ~8 to review-pr-<id> (keys typed into
+      a popup do not update client activity, so display-message -p named the other
+      client). Reconcile with your fallback change when rebasing tmux.py.'
+    created_at: '2026-10-22T15:15:27Z'
+    last_edited: '2026-10-22T15:15:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b4e1a9-bug-pr-start-window-switch-hijacks-a-bb78bd4e
 - id: pr-2d5f712
   plan: plan-regression
@@ -31017,6 +31027,58 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T15:04:10.979207+00:00'
   updated_at: '2026-10-22T15:04:10.979207+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f98ac63
+  plan: bugs
+  title: 'Bug: prefix+P popup dispatch from a PR window resolves the session tag from
+    the PR workdir cwd, so pm commands skip the fake-claude gate and split logs'
+  branch: pm/pr-f98ac63-bug-prefix-p-popup-dispatch-from-a-pr-window-resol
+  status: pending
+  depends_on: []
+  description: 'Found in pr-49ce773 QA scenario 5 (2026-10-22). _popup-show opens
+    display-popup with -d <pane_current_path>, so from a pr-<id> window the picker
+    and the commands _run_picker_command runs (pm pr review/start …) have cwd = the
+    PR workdir clone. paths.get_session_tag() hashes the git root of cwd, giving tag
+    pm-pr-<id>-…-<hash> instead of the project tag: ~/.pm/sessions/pm-pr-e9d66bc-delta-review-…/
+    was created empty, ~/.pm/debug/ grew one log per PR workdir, and with `pm fake-claude
+    config set {"_all":{}}` on the project tag the popup-dispatched `pr review` launched
+    REAL claude (debug log: [claude] cd …/pm-pr-e9d66bc… && claude "$(cat …)") while
+    TUI/CLI starts got fake-claude. Repro: local-backend project, pm session, fake-claude
+    config set, pm pr start A, select pr-A window, prefix+P, d. Expected: tag from
+    the session project root (popup already sets PM_PROJECT=root). Possible fix: run
+    the dispatched subprocess with cwd=root parent / resolve tag from PM_PROJECT.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:15:07.291305+00:00'
+  updated_at: '2026-10-22T15:15:07.291305+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b511dcf
+  plan: bugs
+  title: 'Bug: two clients pressing prefix+P near-simultaneously both get their popup
+    resolved to the same client'
+  branch: pm/pr-b511dcf-bug-two-clients-pressing-prefix-p-near-simultaneou
+  status: pending
+  depends_on: []
+  description: 'Found in pr-49ce773 QA s5 (2026-10-22, tmux 3.2a). _popup-show resolves
+    width/cwd with `tmux display-message -p` (no -t) and runs display-popup without
+    -c, so tmux picks the most recently active client. Sending C-b P to client ~7
+    and ~8 back-to-back: both _popup-show runs logged cwd of ~8, only ~8 got a popup,
+    and ~7 run-shell (synchronous) stayed blocked, so its next prefix+P did nothing
+    until ~8 popup closed, then ~7 popup appeared late. Possible fix: bind `run-shell
+    "pm _popup-show picker #{client_name}"` (run-shell expands formats) and pass -c/-t
+    to display-message and display-popup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:15:28.703729+00:00'
+  updated_at: '2026-10-22T15:15:28.703729+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
