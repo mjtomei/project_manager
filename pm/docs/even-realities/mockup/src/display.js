@@ -10,7 +10,7 @@
 // iteration. Its font is not the firmware font; screenshots for review come
 // from the official simulator instead.
 import { buildFrame, pageDefinition, CONTAINERS } from './frame.js';
-import { WIDTH, HEIGHT, LINE } from './text.js';
+import { WIDTH, HEIGHT, LINE, width } from './text.js';
 
 export function intentForEvent(event) {
   // Even Hub event values (OsEventTypeList): 0 click (often omitted),
@@ -81,7 +81,10 @@ export class CanvasDisplay {
     for (const t of page.textObject) {
       if (t.borderWidth) { ctx.strokeStyle = '#3c3'; ctx.lineWidth = 1; ctx.strokeRect(t.xPosition + .5, t.yPosition + .5, t.width, t.height); }
       ctx.fillStyle = t.textColor === 1 ? '#2a8a2a' : '#5f5';
-      t.content.split('\n').forEach((line, i) => ctx.fillText(line, t.xPosition, t.yPosition + i * LINE + 3));
+      // Lines are laid out (and right-aligned with space padding) in firmware
+      // widths; squeeze the wider browser font to that width so right-hand
+      // text and footer hints stay on the canvas as they do on glasses.
+      t.content.split('\n').forEach((line, i) => ctx.fillText(line, t.xPosition, t.yPosition + i * LINE + 3, Math.max(1, width(line))));
     }
     return Promise.resolve(built.problems);
   }
