@@ -244,10 +244,11 @@ def owner_token() -> dict:
 
 
 def _instance_alive(instance: str) -> bool | None:
-    path = _owners_dir() / f"{instance}.lock"
     try:
-        fd = os.open(path, os.O_RDWR)
-    except OSError:  # absent (pruned / never created) or unreadable
+        fd = os.open(_owners_dir() / f"{instance}.lock", os.O_RDWR)
+    except OSError:
+        # Absent (pruned / never created), unreadable, or no owners dir
+        # to create (read-only history dir): readers must not raise here.
         return None
     try:
         with _probe_mutex():

@@ -266,6 +266,17 @@ class TestJournal:
         assert ah.owner_alive({**me, "host": "elsewhere"}) is None
         assert ah.owner_alive(None) is None
 
+    def test_unusable_owners_dir_falls_back_to_pid(self, monkeypatch):
+        # A read-only history dir without owners/ makes the mkdir fail;
+        # the probe must fall back to the pid check, not raise.
+        me = ah.owner_token()
+
+        def _boom():
+            raise PermissionError("read-only")
+        monkeypatch.setattr(ah, "_owners_dir", _boom)
+        assert ah.owner_alive(me) is True
+        assert ah.owner_alive({**me, "pid": 2 ** 22 + 7}) is False
+
     def test_unreaped_zombie_owner_is_dead(self):
         # Without an owner lock, liveness falls back to /proc: a zombie
         # still has a stat entry with its original start time.
