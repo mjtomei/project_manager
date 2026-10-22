@@ -132,7 +132,7 @@ Then no client moves.
 The driver exits before creating a window (unchanged). No window is created
 and no client moves.
 
-## Incidental fixes carried on this branch (from QA rounds 1-2)
+## Incidental fixes carried on this branch (from QA rounds 1-3)
 
 These came out of earlier QA runs and were committed here, so they are in
 scope for re-verification:
@@ -155,6 +155,12 @@ instead of being overwritten in the same frame by "Starting QA".
 `L` pressed while "Review loop done ✓ PASS" (or another sticky message) holds
 the status line still paints "Launched/Focused existing log pane".
 
+**R14: The NEEDS_WORK bounce line can be seen (456c0830).** "QA NEEDS_WORK
+for <pr> — returning to review" is held for about 3 s (CONFIRM_HOLD_SECONDS)
+instead of being replaced in the same frame by "Review loop started". This
+applies to both the self-driving bounce and the plain-`t` / auto-start bounce,
+which goes back through auto-start's check_and_start.
+
 Out of scope, filed separately: pr-064fe5b (user `zz t` over a leftover
 `qa-<pr>` window replaces it without focusing). R6 for `zz t` applies only
 when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
@@ -176,6 +182,17 @@ when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
   `tmux -L rec send-keys`), since bare send-keys has no source client.
 * `pm pr auto-sequence` on a closed PR prints "unknown status: closed" (exit
   2). On a merged PR it exits 0. qa-run-bg logs "is closed; skipping QA".
+* `L` focuses the new log pane, so a second `L` needs `C-b Left` first.
+  Otherwise the keys go into `tail -f`.
+* A fake impl makes no commits, so a second sign-off MERGE is coerced to
+  BLOCKED. Commit a file in the PR workdir during impl if the run has to
+  reach SIGNOFF_MERGE.
+* Popup race (no fzf): type `t` ahead, send only Enter the moment "Starting
+  QA for <pr>" hits the debug log, then press `q` on "starting: qa". If you
+  don't, qa-<pr>-s0 matches first (a spinner prefix match) and the popup
+  closes on window_open.
+* Working scripts from round 3 are in /pm-captures/scenarios/{9,11,12}/scripts
+  (S11's drive.sh runs the self-driving triples unattended).
 
 ## Pass/fail criteria
 
