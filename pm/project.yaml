@@ -11855,6 +11855,17 @@ prs:
       TUI startup, in_progress), pr-ac12b47 (session stale-container cleanup).'
     created_at: '2026-05-25T22:43:55Z'
     last_edited: '2026-05-25T22:43:55Z'
+  - id: note-1943d8d
+    text: 'Manual recovery 2026-10-22: #236 s28 reached 2041 processes (1929 treesample.sh)
+      under its 2048 PID cap; podman exec sh failed Cannot fork. Restart of that exact
+      container cleared pressure while preserving its filesystem and evidence. PID
+      1 was sleep. Please account for process-limit exhaustion and zombie accumulation
+      when diagnosing/recovering unhealthy containers; never treat running state alone
+      as health. Coordinate collector retry fixes with pr-1ab9075. The interrupted
+      #241 implementation was explicitly assigned to the reviewer to complete from
+      WIP; preserve its work and finish integrations/tests.'
+    created_at: '2026-10-22T15:34:41Z'
+    last_edited: '2026-10-22T15:34:41Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -31042,6 +31053,47 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T15:01:50.214450+00:00'
   updated_at: '2026-10-22T15:01:50.214450+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1ab9075
+  plan: improvements
+  title: 'Bug: one failed QA worker blocks verdict collection during retry backoff'
+  branch: pm/pr-1ab9075-bug-one-failed-qa-worker-blocks-verdict-collection
+  status: pending
+  depends_on: []
+  description: 'Observed while manually recovering #236 on 2026-10-22: QA scenario
+    28 exhausted its container PID limit (2041 processes, including 1929 treesample.sh,
+    limit 2048); subsequent execs failed with Cannot fork. The host retried the vanished
+    worker ten times using time.sleep(5 * 2**retry) inside the single _poll_tmux_verdicts
+    loop. The final sleep was 2560 seconds. Healthy scenarios 27 and 29 had emitted
+    PASS and NEEDS_WORK at 15:12 UTC with valid idle hooks, yet the board remained
+    0/3 until a controller restart at ~15:29 UTC. Restarting only the failed container
+    preserved files and cleared process pressure; a native TUI restart then collected
+    both results and launched verification.
+
+
+    Make retry deadlines per scenario and nonblocking for verdict collection, verification,
+    other queued launches and cancellation. Bound retries and delays; distinguish
+    a window being created from a worker actually starting. Surface the runtime cause
+    (including PID/keyring exhaustion) without reporting it as an unexplained request
+    for human judgment. Preserve completed results and evidence across recovery. Coordinate
+    with pr-1139060 for container health/cleanup rather than duplicating its lifecycle
+    implementation. Do not change verdict criteria or skip verification.
+
+
+    Regression: one dead worker repeatedly fails launch while another finishes PASS
+    and a third NEEDS_WORK; healthy verdicts and verification advance promptly during
+    the failed worker''s retry interval, stop cancels promptly, and restart preserves
+    results and retry state. Exercise the PID-exhaustion case with bounded synthetic
+    failure rather than creating a real fork storm. Evidence: /tmp/pm-recovery-20261022.jsonl
+    and /home/matt/.pm/workdirs/qa/pr-3ae2fc3-0e4ccba946a8a6e1/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:34:40.862915+00:00'
+  updated_at: '2026-10-22T15:34:40.862915+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
