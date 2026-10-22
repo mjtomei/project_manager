@@ -3966,7 +3966,8 @@ prs:
       pr-271cb3a was reviewed in its workdir clone (setting started_at/reviewed_at/workdir)
       while the main repo concurrently added a note via pm pr note. The merge-propagation
       path (git stash + pop, used by pr-83b98d5 to merge notes across clones) bypassed
-      the file lock from pr-f38005f and left literal       / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
+      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream / =======
+      / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
       all pm commands until manually resolved. Resolution: keep timestamps + workdir
       from the workdir side, keep the new note from the main side. Likely shares root
       cause with this bug.'
@@ -31482,8 +31483,6 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-<<<<<<< HEAD
-  updated_at: '2026-10-22T22:50:38.491731+00:00'
   updated_at: '2026-10-22T23:19:21.474948+00:00'
   started_at: null
   reviewed_at: null
