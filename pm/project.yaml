@@ -11748,54 +11748,89 @@ prs:
   notes: []
 - id: pr-1139060
   plan: null
-  title: 'Bug: QA orphan-container cleanup is slow and containers leak across runs'
+  title: 'Bug: leaked and incomplete containers exhaust keyring quota and break session
+    startup'
   branch: pm/pr-1139060-bug-qa-orphan-container-cleanup-is-slow-and-contai
   status: pending
   depends_on: []
-  description: 'Every QA run starts with a ~100-second stall before planning can begin,
-    because cleanup_orphaned_qa_containers (pm_core/container.py:969) serially removes
-    stale containers from the previous run. With 11 orphans and podman inspect taking
-    ~10s per non-existent object on this host (remove_container loops inspect with
-    a 5s timeout inside a 10s deadline), that''s ~110s of pre-planning overhead —
-    during which the user sees no progress and scenarios don''t launch.
+  description: 'Repeated PM runs leave running containers behind until rootless Podman''s
+    session-keyring quota is exhausted. New review/QA sessions then fail to launch;
+    a setup timeout can also leave an incomplete container that the next launch reuses
+    without finishing configuration.
 
 
-    Two related issues:
+    Observed again on 2026-10-22 while restarting #237: 71 running PM containers,
+    including 23 belonging to merged PRs with no remaining host tmux pane. The container
+    subuid was at 198/200 keys, and podman exec failed with "unable to join session
+    keyring: unable to create session key: disk quota exceeded". PM hid that failure
+    behind its generic 30-second setup-timeout / memory-pressure message. Stopping
+    four orphaned QA containers brought usage to 184/200 and restored exec. Retrying
+    reused the incomplete review container and launched Claude onboarding because
+    /home/pm/.claude.json had never been copied. Removing that incomplete container
+    allowed a clean launch.
 
 
-    1. Sequential cleanup — the loop in cleanup_orphaned_qa_containers calls remove_container
-    one at a time. These removals are independent; a ThreadPoolExecutor (~8 workers)
-    would collapse 11 × 10s → ~15s.
+    Fix the lifecycle in the existing execution flow:
 
+    - Release owned containers and unused push proxies when runs finish, are superseded/cancelled,
+    or fail to launch; cover implementation, review, sign-off, and QA. Preserve artifacts,
+    transcripts, and workdirs. Preserve live sessions deliberately retained for discussion
+    or awaiting human input; INPUT_REQUIRED alone is not proof that a container is
+    abandoned.
 
-    2. Container leak at source — QA completion does not remove its own containers
-    when the loop exits (INPUT_REQUIRED, user-cancel, or pass). Every run therefore
-    starts by paying the previous run''s debt. Ideally the prior run cleans up on
-    finish so the next run has nothing to orphan-reap.
+    - Reconcile leftovers from merged/closed PRs, abandoned attempts, and dead sessions
+    on startup and periodically. Match the exact project/session, PR, attempt, and
+    pane ownership. The current QA orphan sweep treats any qa-* window with the same
+    -sN suffix as an owner, even across unrelated PRs/runs; fix that collision. Recheck
+    ownership before deleting so concurrent launch/restart cannot lose a live container
+    or shared proxy.
+
+    - Make setup failure clean up its partial container. Reuse must verify completed
+    setup, including required config and push-proxy readiness; "running" and a sentinel
+    written before config copy are insufficient. Recover by finishing setup or recreating
+    the incomplete container, without killing an unrelated live owner.
+
+    - Preserve the actual runtime error in the launch failure. Distinguish keyring
+    exhaustion from memory pressure and give an available recovery command; the current
+    message recommends pm session cleanup, which is absent on master. Provide scoped
+    cleanup with a preview and an outcome summary, sharing the same ownership checks
+    as automatic cleanup.
+
+    - Keep cleanup bounded and outside the TUI critical path. Use bounded parallel
+    cleanup and bounded launch concurrency/backpressure; failed cleanup must remain
+    visible and retryable. Increasing kernel quotas alone is not the fix.
 
 
     Acceptance:
 
-    - cleanup_orphaned_qa_containers parallelises remove_container across orphans.
+    - Repeated real-container execution through success, rework, cancellation, and
+    launch failure leaves no abandoned running containers; a second QA run does not
+    pay for the first run''s cleanup. Exercise session/TUI restart and already-merged
+    PR recovery.
 
-    - QA completion (success, INPUT_REQUIRED, stopped) removes its scenario containers
-    before returning, so the next run''s orphan sweep has nothing to do in the common
-    case.
+    - A human-waiting session, an explicitly retained discussion session, another
+    live PR/session, and a shared push proxy stay usable during cleanup. Cover identical
+    scenario numbers across PRs and repeated attempts, plus cleanup/launch races.
 
-    - A new QA run after a normal completion starts the planner in well under 30s
-    on a host with similar podman timings.
+    - Reproduce quota or setup failure, assert an explicit launch error with its real
+    cause, then retry successfully without a missing-config/onboarding detour. Do
+    not treat a failed launch as an agent verdict.
 
-    - Test: run QA twice in succession; assert second run''s cleanup_orphaned_qa_containers
-    removes 0 orphans (or near it).
+    - Verify captures, transcripts, and source changes survive cleanup. Record the
+    running-container/key counts before and after recovery where supported, and show
+    that repeated runs do not accumulate orphans.
 
 
-    Observed during pr-014f93f testing. The 100-second delay is user-visible as "QA
-    stuck" before the planner pane even appears.'
+    This is the existing pr-1139060 cleanup bug, updated rather than duplicated. Coordinate
+    with #143 (pr-ac12b47, stale session containers/proxies) and #155 (pr-cb2a29d,
+    merged-PR cleanup); reuse applicable work, but this fix does not wait on those
+    old PRs. Keep QA verdict/error presentation coordinated with pr-7ab0a99. Preserve
+    useful existing cleanup behavior and tests.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-05-25T22:43:55.409584+00:00'
+  updated_at: '2026-10-22T14:17:54.192707+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
