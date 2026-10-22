@@ -16020,6 +16020,17 @@ prs:
       No xxd: build SGR click hex with od -An -tx1. Captures in /pm-captures/scenarios/10.'
     created_at: '2026-10-22T16:53:01Z'
     last_edited: '2026-10-22T16:53:01Z'
+  - id: note-ed898e1
+    text: 'S12 refiner (2026-10-22): tmux 3.2a display-popup survives kill-window
+      of the window it was opened from (checked with a recorder client), so the "kill
+      all of A windows, then press 0" story is drivable live. The merged-mid-popup
+      action paths are three separate runs: shortcut key (d), Enter on an action row
+      (_still_has_action), and z then d. After the first one re-renders the notice,
+      Enter and z are ignored, so chaining them proves nothing. For "other PR actions
+      work" from a PR window, use e (tui:edit) instead of d (pr-f98ac63 runs real
+      claude from the PR-window cwd).'
+    created_at: '2026-10-22T16:47:07Z'
+    last_edited: '2026-10-22T16:47:07Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
