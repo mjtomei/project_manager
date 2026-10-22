@@ -216,7 +216,11 @@ def ensure_container_forwarder(sock_path: str, port: int,
             if os.fork() > 0:
                 os._exit(0)
 
-            _serve(listener, lambda: _connect_unix(sock_path), lambda: True)
+            # The socket file may be briefly absent while the host bridge
+            # restarts; the mounted directory only goes with the container.
+            sock_dir = os.path.dirname(sock_path)
+            _serve(listener, lambda: _connect_unix(sock_path),
+                   lambda: os.path.isdir(sock_dir))
         finally:
             os._exit(0)
     listener.close()

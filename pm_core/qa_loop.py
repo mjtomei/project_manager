@@ -1615,7 +1615,9 @@ class _RouteStallWatch:
         self._cached_at = 0.0
         self._shown = ""
 
-    def status(self, max_age: float = _ROUTE_RECHECK_INTERVAL):
+    def status(self, max_age: float | None = None):
+        if max_age is None:
+            max_age = _ROUTE_RECHECK_INTERVAL
         now = _route_clock()
         if self._cached is None or now - self._cached_at >= max_age:
             self._cached = self._check()
@@ -2879,12 +2881,16 @@ def _poll_tmux_verdicts(
 
     # A queued launch runs the refiner and then the worker, so both
     # routes must be usable before it is dequeued.
-    _queued_route = _RouteStallWatch(state, lambda: next(
-        (st for st in (
-            _route_checker(pr_data, data, t, session_tag=state.session_tag,
-                           container=use_containers)()
-            for t in ("qa_concretize", "qa_scenario")) if not st.ok),
-        None) or _ok_route(), "Queued scenario launch")
+    def _check_queued_routes():
+        for st_type in ("qa_concretize", "qa_scenario"):
+            st = _route_checker(pr_data, data, st_type,
+                                session_tag=state.session_tag,
+                                container=use_containers)()
+            if not st.ok:
+                return st
+        return _ok_route()
+    _queued_route = _RouteStallWatch(state, _check_queued_routes,
+                                     "Queued scenario launch")
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     # (but skip queued scenarios — they don't have windows yet by design)

@@ -344,8 +344,10 @@ def check_route(resolution, *, container: bool = False,
     Always ok for unrouted resolutions.  For a router provider checks the
     config, the router's TCP port, credential expiry, the launcher (host
     workers) and, for containers, the host bridge, the container's socket
-    mount and the in-container forwarder.
+    mount and the in-container forwarder.  *container_name* implies
+    *container*.
     """
+    container = container or bool(container_name)
     try:
         cfg = router_for(resolution)
     except ProviderNotFoundError as exc:

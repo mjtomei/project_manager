@@ -31441,7 +31441,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  updated_at: '2026-10-22T18:59:19.794806+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31457,3 +31457,15 @@ prs:
       preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
+  - id: note-52f983d
+    text: 'Impl state 2026-10-22: router provider type + worker_route preflight/bridge
+      + qa_interactive for s0; refiner (qa_concretize) and worker (qa_scenario) routed
+      via provider:<route>, gated at initial/queued/retry launch and idle-stall (no
+      verdict, no fallback). Bridge fixes from supervisor: stream has no timeout after
+      connect; bridge runs as python3 -I <file> (shadow pm_core in cwd). tests/test_worker_route.py.
+      Sandbox e2e (fake router, real claude, nested podman slirp4netns) PASS. Pending:
+      supervisor host container smoke on latest commit, then pm model set qa_concretize/qa_scenario
+      provider:claude-work --effort high --project after merge. Do not set launcher:
+      claude-mixed falls back to main when router down.'
+    created_at: '2026-10-22T18:59:19Z'
+    last_edited: '2026-10-22T18:59:19Z'
