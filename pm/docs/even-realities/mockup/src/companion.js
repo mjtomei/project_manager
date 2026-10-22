@@ -31,7 +31,19 @@ export function renderCompanion(root, app, pm, act) {
     if (v.kind === 'confirm') parts.push(`<ul>${v.confirm.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><p><button data-confirm>${esc(v.confirm.yes)}</button> <button data-i="back">${esc(v.confirm.no)}</button></p>`);
     else parts.push('<ul class="rows">' + app.items(v).map(it => `<li class="${it.act ? 'act' : ''}">${esc(Array.isArray(it.l) ? it.l.map(s => s.t).join(' ') : it.l)} <small>${esc(it.r?.t || '')}</small></li>`).join('') + '</ul>');
   }
+  // Re-rendering (an agent reply, a director event, a glasses gesture) must
+  // not wipe a message being typed: carry the draft and focus over while the
+  // same session stays open.
+  const prev = root.querySelector('form.compose input');
+  const session = v.type === 'session' ? v.id : '';
+  const draft = prev && root.dataset.session === session ? { value: prev.value, focused: document.activeElement === prev, at: prev.selectionStart } : null;
   root.innerHTML = parts.join('');
+  root.dataset.session = session;
+  const input = root.querySelector('form.compose input');
+  if (input && draft) {
+    input.value = draft.value;
+    if (draft.focused) { input.focus(); input.setSelectionRange(draft.at, draft.at); }
+  }
   root.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => act(b.dataset.i)));
   // Run the confirmation directly: "select" would pick whatever row the glasses cursor is on.
   root.querySelector('[data-confirm]')?.addEventListener('click', () => { v.confirm.run(); act('noop'); });
@@ -45,8 +57,9 @@ export function renderCompanion(root, app, pm, act) {
     const s = pm.session(v.id);
     if (r.ok) app.say(r.queued ? `Queued from phone in ${app.sessionName(s)} (${s.state === 'starting' ? 'starting' : 'busy'}) · same session` : `Sent from phone to ${app.sessionName(s)}`);
     else app.fail(r);
+    // A sent message clears the draft; a refused one was not sent, so the
+    // re-render keeps it for the user to send later.
+    if (r.ok) form.querySelector('input').value = '';
     act('noop');
-    // A refused message was not sent; keep it so the user can send it later.
-    if (!r.ok) { const again = root.querySelector('form.compose input'); if (again) again.value = text; }
   });
 }

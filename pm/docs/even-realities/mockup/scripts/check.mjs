@@ -128,6 +128,16 @@ if (!only.length) {
     const c = app.view.changes.find(x => x.key === 's2');
     rule(c && c.text.startsWith('Banner now clears'), `what changed s2 text "${c?.text}"`);
   }
+  // Leaving a voice review through the OS menu says the message was not sent.
+  {
+    const app = new App(new SimPM());
+    app.openDoc('spec:pr-214:impl');
+    app.nextUtterance = 'rule check';
+    for (const i of ['hold', 'release']) app.intent(i);
+    app.intent('menu', 2);
+    rule(!app.overlay && app.toast === 'Cancelled · nothing sent', `menu during voice review: toast ${app.toast}`);
+    rule(!app.pm.session('pr-214/impl').transcript.some(m => m.t === 'rule check'), 'menu during voice review sent the message');
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

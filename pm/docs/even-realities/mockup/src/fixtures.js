@@ -124,7 +124,7 @@ export const SESSIONS = [
   ...scenario(5, 'Token expiry', { queued: true }),
   // No finalize session yet: PM splits the qa-finalize pane only after every
   // scenario has a verdict (qa_loop.py _run_qa_finalize_pane), so the run lists it as absent.
-  { id: 'pr-215/signoff', pr: 'pr-215', role: 'Sign-off', short: 'sign-off', window: 'signoff-#215', pane: 'signoff-claude', state: 'none', stateText: 'not started', startable: true,
+  { id: 'pr-215/signoff', pr: 'pr-215', role: 'Sign-off', short: 'sign-off', window: 'signoff-#215', pane: 'signoff-claude', state: 'none', stateText: 'not started',
     effects: ['Moves #215 from qa to sign_off.'] },
   // ---- #216: review loop ----------------------------------------------
   { id: 'pr-216/impl', pr: 'pr-216', role: 'Implementation', short: 'impl', window: '#216', pane: 'impl', state: 'idle', stateText: 'idle',
@@ -143,9 +143,9 @@ export const SESSIONS = [
   { id: 'plan-sync/review', pr: null, group: 'Plans', role: 'Plan review', short: 'plan review', window: 'plan-sync', pane: 'plan-review', state: 'idle', stateText: 'idle',
     doc: 'plan:plan-sync', transcript: [T('agent', 'Plan v4 covers five PRs. #217 depends on #214. Anything to change before you approve?')] },
   { id: 'plan-sync/breakdown', pr: null, group: 'Plans', role: 'Plan breakdown', short: 'breakdown', window: 'plan-sync', pane: 'plan-breakdown', state: 'ended', stateText: 'ended' },
-  { id: 'plan-deps', pr: null, group: 'Plans', role: 'Plan deps', short: 'deps', window: 'plan-deps', pane: 'plan-deps', state: 'none', stateText: 'not running', startable: true, effects: ['Opens plan-deps; reviews the dependency graph.'] },
+  { id: 'plan-deps', pr: null, group: 'Plans', role: 'Plan deps', short: 'deps', window: 'plan-deps', pane: 'plan-deps', state: 'none', stateText: 'not running', effects: ['Opens plan-deps; reviews the dependency graph.'] },
   { id: 'meta', pr: null, group: 'Project', role: 'Meta', short: 'meta', window: 'meta', pane: 'meta', state: 'idle', stateText: 'idle' },
-  { id: 'guide', pr: null, group: 'Project', role: 'Guide', short: 'guide', window: '(TUI)', pane: 'guide', state: 'none', stateText: 'not running', startable: true, effects: ['Opens the guide pane in the TUI window.'] },
+  { id: 'guide', pr: null, group: 'Project', role: 'Guide', short: 'guide', window: '(TUI)', pane: 'guide', state: 'none', stateText: 'not running', effects: ['Opens the guide pane in the TUI window.'] },
   { id: 'watcher/discovery', pr: null, group: 'Watchers', role: 'Discovery watcher', short: 'discovery', window: 'discovery', pane: 'watcher', state: 'working', stateText: 'i4 running' },
   { id: 'watcher/bug-fix', pr: null, group: 'Watchers', role: 'Bug-fix watcher', short: 'bug-fix', window: 'bug-fix-impl', pane: 'watcher', state: 'idle', stateText: 'i2 READY' },
 ];

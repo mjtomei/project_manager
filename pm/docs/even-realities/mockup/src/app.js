@@ -115,6 +115,8 @@ export class App {
   menu(id) {
     const item = MENU.find(m => m.itemID === id);
     if (!item) return;
+    // Leaving through the OS menu drops an unsent message; say so, as Cancel does.
+    if (this.overlay) this.say('Cancelled · nothing sent');
     this.overlay = null;
     if (item.go === 'home') { this.stack = [this.stack[0]]; return; }
     this.push({ type: 'list', kind: item.go, cursor: 0, top: 0 });
