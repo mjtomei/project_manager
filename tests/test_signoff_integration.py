@@ -698,6 +698,29 @@ def test_local_target_from_pr_workdir_is_the_main_repo(w):
     assert rec["status"] == integration.CLEAN, rec
 
 
+def test_local_target_from_pr_workdir_with_unreachable_origin_errors(w):
+    """A PR workdir whose origin is unreachable reports a fetch error naming
+    the origin, not "up to date" against the clone's own stale master."""
+    from pm_core.paths import workdirs_base
+    wd = workdirs_base() / "p-12345678" / "pm-pr-001"
+    wd.parent.mkdir(parents=True)
+    git(w.tdir, "clone", "-q", str(w.repo), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    commit(wd, "feature.txt", "feature\n", "feature")
+    (wd / "pm").mkdir()
+    data = store.load(w.pm_dir)
+    commit(w.repo, "other.txt", "o\n", "base moved")
+    git(wd, "remote", "set-url", "origin", "/nonexistent/repo")
+    head = git(wd, "rev-parse", "HEAD")
+    p = dict(store.get_pr(data, PR), workdir=str(wd))
+    rec = integration.run_check(data, p, wd / "pm")
+    assert rec["status"] == integration.ERROR, rec
+    assert rec["target_repo"] == "/nonexistent/repo", rec
+    assert "/nonexistent/repo" in rec["error"], rec
+    assert rec["base_sha"] is None, rec
+    assert git(wd, "rev-parse", "HEAD") == head
+
+
 def test_concurrent_checks_do_not_race_on_the_base_ref(w):
     """Two checks on one workdir while the base moves: each fetch pins its
     own ref, so neither fails with "cannot lock ref" (compare-and-swap of

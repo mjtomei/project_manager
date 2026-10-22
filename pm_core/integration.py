@@ -147,6 +147,8 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
         repo_dir = _resolve_repo_dir(root or state_root(), data)
         # Run from a PR workdir (a pm clone of the main repo), the clone's
         # own base branch is stale: the main repo is the clone's origin.
+        # An unreachable origin stays the target so the fetch fails loudly
+        # instead of checking against the clone's own stale branch.
         try:
             in_workdirs = repo_dir.resolve().is_relative_to(
                 workdirs_base().resolve())
@@ -154,8 +156,7 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
             in_workdirs = False
         if in_workdirs:
             origin = _out(_git("remote", "get-url", "origin", cwd=repo_dir))
-            if origin and Path(origin).is_dir():
-                return origin, base_branch
+            return origin, base_branch
         return str(repo_dir), base_branch
     workdir = pr.get("workdir")
     url = (_out(_git("remote", "get-url", "origin", cwd=workdir))
