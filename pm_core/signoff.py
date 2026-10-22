@@ -1019,7 +1019,11 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
     read_verdict = read_verdict or signoff_transcript_verdict
     window_pane = window_pane or signoff_window_pane
     retire = retire or retire_signoff_run
-    with _step_lock(pr_entry["id"]):
+    with _step_lock(pr_entry["id"]) as locked:
+        if not locked:
+            # Another driver is mid-step on this PR; it acts on the verdict
+            # and the next tick re-evaluates whatever it left behind.
+            return SignoffStep("running")
         # Re-read under the lock: the caller's entry may predate another
         # driver's step (the TUI and every auto-sequence tick act on the same
         # verdict).  A bounce merges the clean base into the branch before it
@@ -1039,14 +1043,32 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
                                     window_pane=window_pane, retire=retire)
 
 
+# A step holds the lock for a few git/tmux calls; the TUI takes it on its
+# event loop, so a busy lock is waited on only briefly, never indefinitely.
+_STEP_LOCK_WAIT = 2.0
+
+
 @contextlib.contextmanager
 def _step_lock(pr_id: str):
-    """Exclusive per-PR lock serializing :func:`step_signoff` across drivers."""
+    """Per-PR lock serializing :func:`step_signoff` across drivers.
+
+    Yields False when another driver still holds it after _STEP_LOCK_WAIT.
+    """
     import fcntl
+    import time
     from pm_core.paths import workdirs_base
+    deadline = time.monotonic() + _STEP_LOCK_WAIT
     with open(workdirs_base() / f".signoff-step-{pr_id}.lock", "w") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        yield
+        while True:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    yield False
+                    return
+                time.sleep(0.05)
+        yield True
 
 
 def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,

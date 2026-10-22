@@ -875,3 +875,19 @@ def test_worktree_candidate_ignores_rerere_resolutions(w):
         cand = integration.compute_candidate(str(w.wd), head, base)
     assert cand["status"] == integration.CONFLICT, cand
     assert cand["conflicts"] == ["shared.txt"]
+
+
+def test_busy_step_lock_reports_running_instead_of_blocking(w):
+    """Another driver mid-step holds the per-PR lock: the TUI (event loop)
+    must not wait on it indefinitely — the step reports "running" and the
+    next tick re-evaluates."""
+    import fcntl
+    from pm_core.paths import workdirs_base
+    with open(workdirs_base() / f".signoff-step-{PR}.lock", "w") as held, \
+            patch.object(signoff, "_STEP_LOCK_WAIT", 0.1):
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        res, retired = step(w, SIGNOFF_REVIEW)
+    assert res.action == "running" and not retired
+    assert pr(w)["status"] == "sign_off" and "signoff" not in pr(w)
+    res, _ = step(w, SIGNOFF_REVIEW)                 # lock free again
+    assert res.action == "hop" and res.hop == "review"
