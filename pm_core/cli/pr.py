@@ -1955,7 +1955,8 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
     bound = approved["integration"]
     head = approved["sha"]
     target_repo, _ = integration.target_for(data, pr_entry, root)
-    if bound.get("target_repo") and target_repo != bound["target_repo"]:
+    if bound.get("target_repo") and not integration.same_target(
+            target_repo, bound["target_repo"]):
         _return_to_signoff(
             root, pr_entry, f"target repository changed "
             f"({bound['target_repo']} -> {target_repo})")
@@ -2189,9 +2190,17 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
     if remote_head != head:
         if remote_head and not integration.is_ancestor(
                 workdir, remote_head, head):
-            _return_to_signoff(root, pr_entry,
-                               f"the remote PR branch has commits that were "
-                               f"not signed off ({remote_head[:12]})")
+            # Not an invalidation: re-signing the workdir HEAD cannot cover
+            # commits it lacks, so the driver would re-run sign-off and hit
+            # this refusal forever.  Once they are pulled into the workdir,
+            # the moved HEAD makes the approval stale on its own.
+            click.echo(
+                f"PR {pr_id}: merge refused — the remote PR branch has "
+                f"commits that were not signed off ({remote_head[:12]}). "
+                f"Bring them into the PR workdir (or remove them from "
+                f"{branch}); the changed HEAD then gets a fresh sign-off.",
+                err=True)
+            raise SystemExit(1)
         lease = f"--force-with-lease=refs/heads/{branch}:{remote_head or ''}"
         push = git_ops.run_git("push", target_repo,
                                f"{head}:refs/heads/{branch}", lease,

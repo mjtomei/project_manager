@@ -192,6 +192,21 @@ def test_local_base_moving_before_fast_forward_is_refused(local):
     assert pr_entry(local)["signoff"]["invalidated"]
 
 
+def test_local_target_spelled_differently_is_the_same_target(local):
+    """An approval whose target names the main repo through another path
+    spelling (e.g. a symlink) is not a changed target."""
+    approve(local)
+    link = local.tmp / "repo-link"
+    link.symlink_to(local.repo)
+
+    def _respell(d):
+        store.get_pr(d, PR)["signoff"]["integration"]["target_repo"] = str(link)
+    store.locked_update(local.pm_dir, _respell)
+    result, _, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized
+
+
 def test_local_main_repo_on_other_branch_updates_ref(local):
     git(local.repo, "checkout", "-q", "-b", "user-work")
     rec = approve(local)
@@ -476,6 +491,9 @@ def test_github_unapproved_remote_commits_are_refused(github):
     assert "not signed off" in result.output
     assert github.pr.state == "OPEN"
     assert _gh_merge_calls(github.fake) == []
+    # Not invalidated: a re-sign-off of the workdir HEAD (which lacks the
+    # remote commits) would be refused the same way, forever.
+    assert not pr_entry(github)["signoff"].get("invalidated")
 
 
 def test_github_base_moved_after_approval_is_refused(github):

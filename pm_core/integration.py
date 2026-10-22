@@ -162,6 +162,21 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
     return (url or project.get("repo", "")), base_branch
 
 
+def same_target(a: str, b: str) -> bool:
+    """Whether two target repositories name the same repository.
+
+    Local paths compare resolved (a PR workdir's origin and the main repo
+    dir can spell one directory differently); URLs compare verbatim.
+    """
+    if a == b:
+        return True
+    try:
+        pa, pb = Path(a), Path(b)
+        return pa.is_dir() and pb.is_dir() and pa.resolve() == pb.resolve()
+    except (OSError, ValueError):
+        return False
+
+
 def fetch_base(workdir: str, target_repo: str, base_branch: str) -> tuple[str | None, str | None]:
     """Fetch *base_branch* from *target_repo* into :data:`BASE_REF`.
 

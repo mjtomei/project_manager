@@ -209,7 +209,14 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
        precondition, so a base update landing between the `ls-remote` check
        and GitHub's merge cannot be refused; it is detected, recorded on
        `pr["merge_integrity"]`, printed loudly and noted on the PR (see A3).
-  6. Any refusal at 2/3/5 (before publication) → `invalidate_signoff(root,
+  6. Exception: a GitHub PR branch holding commits the workdir HEAD lacks
+     refuses *without* invalidating — re-signing that HEAD could never
+     cover them, so the driver would loop sign-off runs; pulling them into
+     the workdir moves HEAD and the existing stale path re-runs sign-off.
+     The approved target compares resolved for local paths
+     (`integration.same_target`), so a respelled main-repo path is not a
+     "changed target".
+  7. Any other refusal at 2/3/5 (before publication) → `invalidate_signoff(root,
      pr_id, reason)` marks the record invalidated and exits 1 with "returned
      to sign-off"; the sign-off driver (TUI/CLI) relaunches the router on the
      next tick. No merge window is launched.
