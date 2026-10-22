@@ -88,12 +88,16 @@ R6. **Surface the runtime cause.**  Add
 `container.diagnose_exec_failure(name) -> str` (short-timeout
 `<runtime> inspect` + `<runtime> exec <name> true`, stderr classified).
 Classifier recognises:
-  - keyring/EDQUOT ("unable to create session key", "disk quota exceeded",
-    "EDQUOT") → "container keyring quota exhausted (… ) — reap orphaned
-    containers (pr-1139060) or raise kernel.keys.maxkeys/maxbytes",
-  - PID exhaustion ("Cannot fork", "fork: retry", "Resource temporarily
-    unavailable", "pids limit") → "container process (PID) limit exhausted —
-    restart the container `<runtime> restart <name>` (files are kept)",
+  - keyring/EDQUOT ("session key" — runc's "unable to create session key:
+    disk quota exceeded" —, "keyring" — crun's "create keyring `…`: Disk
+    quota exceeded" —, "EDQUOT") → "container keyring quota exhausted (… ) —
+    reap orphaned containers (pr-1139060) or raise
+    kernel.keys.maxkeys/maxbytes".  A bare "disk quota exceeded" is a
+    filesystem quota and stays unclassified (stderr tail passed through),
+  - PID exhaustion ("Cannot fork", "fork: retry", "fork: Resource temporarily
+    unavailable", "pids limit", "pids.max"; a bare EAGAIN is too generic) →
+    "container process (PID) limit exhausted — restart the container
+    `<runtime> restart <name>` (files are kept)",
   - container not running / missing.
 Unclassified output is passed through (stderr tail).  Container-create
 failures in `_prepare_scenario` record `container create failed: <cause>`

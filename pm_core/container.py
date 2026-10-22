@@ -368,7 +368,10 @@ def _run_runtime(*args: str, check: bool = True,
 # Resource-exhaustion signatures in runtime output.  A worker launch that
 # hits one of these is a host/container problem, not an agent verdict, so
 # callers surface the named cause and remediation instead of a bare failure.
-_KEYRING_MARKERS = ("session key", "session keyring", "edquot")
+# Keyring EDQUOT reads "unable to create session key: disk quota exceeded"
+# under runc but "create keyring `…`: Disk quota exceeded" under crun; a bare
+# "disk quota exceeded" is a filesystem quota and is left unclassified.
+_KEYRING_MARKERS = ("session key", "keyring", "edquot")
 _PID_MARKERS = ("cannot fork", "fork: retry", "fork: resource temporarily",
                 "pids limit", "pids.max")
 
@@ -381,8 +384,8 @@ def classify_runtime_error(text: str, name: str | None = None) -> str | None:
     """
     low = (text or "").lower()
     if any(m in low for m in _KEYRING_MARKERS):
-        return ("container keyring quota exhausted (unable to create session "
-                "key: disk quota exceeded) — reap orphaned containers "
+        return ("container keyring quota exhausted (kernel key quota, "
+                "EDQUOT) — reap orphaned containers "
                 "(see pr-1139060) or raise kernel.keys.maxkeys / "
                 "kernel.keys.maxbytes")
     if any(m in low for m in _PID_MARKERS):

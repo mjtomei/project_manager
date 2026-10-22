@@ -564,6 +564,13 @@ def test_retry_delays_are_bounded():
 def test_classify_runtime_error():
     keyring = container_mod.classify_runtime_error(KEYRING_STDERR)
     assert "keyring quota exhausted" in keyring and "maxkeys" in keyring
+    # crun (podman's default runtime) words the same EDQUOT differently.
+    crun = ("Error: OCI runtime error: crun: create keyring `abc123`: "
+            "Disk quota exceeded")
+    assert "keyring quota exhausted" in container_mod.classify_runtime_error(crun)
+    # A filesystem quota is not a keyring problem.
+    assert container_mod.classify_runtime_error(
+        "write /var/lib/x: disk quota exceeded") is None
     with patch("pm_core.container._get_runtime", return_value="podman"):
         pid = container_mod.classify_runtime_error(PID_STDERR, "pm-c")
     assert "PID" in pid and "podman restart pm-c" in pid
