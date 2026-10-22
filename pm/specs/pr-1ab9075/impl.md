@@ -77,7 +77,11 @@ session id.  Failure kinds, recorded separately:
 `create` failures retry through the full launcher (fresh clone/container
 create/concretize/split); `exec`/`exit` failures retry through
 `_relaunch_scenario_window` (keeps the clone and container, so worker
-commits/evidence survive).
+commits/evidence survive).  Before a `create` retry the previous attempt's
+leftover concretizer window and container are removed (the launcher
+re-clones the scenario dir, and `create_container` would otherwise reuse a
+running same-name container still mounting the deleted clone); no worker
+ran in them, so no evidence is lost.
 
 R6. **Surface the runtime cause.**  Add
 `container.classify_runtime_error(text) -> str | None` (pure) and

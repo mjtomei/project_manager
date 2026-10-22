@@ -418,6 +418,48 @@ def test_queued_launch_runs_off_the_poll_thread(tmp_path):
     assert state.scenario_verdicts == {1: VERDICT_PASS, 2: VERDICT_NEEDS_WORK}
 
 
+def test_create_retry_tears_down_previous_attempt(tmp_path):
+    """The worker split failed after the container and concretizer window
+    were created.  The full relaunch re-clones the scenario dir, so it must
+    first remove the old container (create_container would otherwise reuse
+    it, still mounting the deleted clone) and the leftover window."""
+    sc = QAScenario(index=1, title="t", focus="f", window_name="qa-x-s1",
+                    container_name="pm-qa-x-1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.scenario_verdict_reasons[1] = "worker pane creation failed: boom"
+    seen_at_launch = []
+    killed, removed = [], []
+
+    def fake_launch(st, data, pr_data, session, repo_root, wd, pm_root=None,
+                    scenarios=None, write_status=True, **kw):
+        target = scenarios[0]
+        seen_at_launch.append((target.window_name, target.container_name))
+        target.window_name, target.container_name = "qa-x-s1", "pm-qa-x-1"
+        target.pane_id, target.session_id = "%5", "sid-new"
+        target.transcript_path = "/t/s1"
+
+    clock = FakeClock()
+    patches = _base_patches(clock, {"sid-new": _idle("sid-new")},
+                            {"/t/s1": VERDICT_PASS}) + [
+        patch("pm_core.tmux.pane_exists", return_value=True),
+        patch("pm_core.tmux.find_window_by_name",
+              return_value={"id": "@1", "index": "1"}),
+        patch("pm_core.tmux.kill_window",
+              side_effect=lambda s, w: killed.append(w)),
+        patch("pm_core.container.remove_container", side_effect=removed.append),
+        patch("pm_core.qa_loop._launch_scenarios_in_containers",
+              side_effect=fake_launch),
+    ]
+    _run(state, tmp_path, patches, use_containers=True)
+
+    assert killed == ["qa-x-s1"]
+    assert removed == ["pm-qa-x-1"]
+    assert seen_at_launch == [(None, None)]
+    assert state.launch_retries[1]["kind"] == "create"
+    assert state.scenario_verdicts[1] == VERDICT_PASS
+
+
 # ---------------------------------------------------------------------------
 # Display, bounds and runtime-cause classification
 # ---------------------------------------------------------------------------

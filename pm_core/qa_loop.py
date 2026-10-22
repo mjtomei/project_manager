@@ -883,6 +883,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     """
     if not state.qa_workdir:
         return
+    # Background launch / verification threads may add keys while we
+    # serialise; ``dict()`` copies atomically under the GIL, iterating the
+    # live dict would raise "changed size during iteration".
+    verdicts = dict(state.scenario_verdicts)
+    reasons = dict(state.scenario_verdict_reasons)
     data = {
         "pr_id": state.pr_id,
         "loop_id": state.loop_id,
@@ -896,10 +901,8 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "use_containers": bool(use_containers),
         "concurrency_cap": int(concurrency_cap or 0),
         "finalize_verdict": state.finalize_verdict,
-        "scenario_verdicts": {str(k): v for k, v in state.scenario_verdicts.items()},
-        "scenario_verdict_reasons": {
-            str(k): v for k, v in state.scenario_verdict_reasons.items()
-        },
+        "scenario_verdicts": {str(k): v for k, v in verdicts.items()},
+        "scenario_verdict_reasons": {str(k): v for k, v in reasons.items()},
         "verified_scenarios": sorted(state.verified_scenarios),
         "planner_head": state.planner_head,
         "planner_code_changes": list(state.planner_code_changes),
@@ -2845,6 +2848,25 @@ def _poll_tmux_verdicts(
     def _launch_fresh(scenario: QAScenario) -> bool:
         """Full launch (workdir, container, concretizer, worker) of one
         scenario that has no worker yet.  Runs in a background thread."""
+        # Tear down what a failed earlier attempt left behind: the launcher
+        # re-clones the scenario dir, and create_container would reuse a
+        # running same-name container still mounting the deleted clone; a
+        # leftover concretizer window would duplicate the window name.
+        if scenario.window_name:
+            try:
+                if tmux_mod.find_window_by_name(session, scenario.window_name):
+                    tmux_mod.kill_window(session, scenario.window_name)
+            except Exception:
+                _log.debug("Could not kill stale window for scenario %d",
+                           scenario.index, exc_info=True)
+        if use_containers and scenario.container_name:
+            try:
+                container_mod.remove_container(scenario.container_name)
+            except Exception:
+                _log.debug("Could not remove stale container for scenario %d",
+                           scenario.index, exc_info=True)
+        scenario.window_name = None
+        scenario.container_name = None
         scenario.pane_id = None
         scenario.session_id = None
         launch = (_launch_scenarios_in_containers if use_containers
