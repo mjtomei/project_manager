@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T06:01:08.558182+00:00'
+  updated_at: '2026-10-22T06:21:16.109650+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30616,6 +30616,18 @@ prs:
       quote a POSIX TZ like <-0548>+05:48:30 inside script -qec. Captures /pm-captures/scenarios/33.'
     created_at: '2026-10-22T06:01:08Z'
     last_edited: '2026-10-22T06:01:08Z'
+  - id: note-63d2023
+    text: 'QA S35 (2026-10-22): fixed 76742637 — a TUI command-bar `/pr review <pr>`
+      launched the review pane without --transcript (only the d key passed one), so
+      the review was never tracked or journaled and history said "No recorded action
+      history". The command bar now adds --transcript like d. After the fix all S35
+      Thens held: #42/id/unknown/closed-PR/Actions-before note; 840 concurrent reads
+      over 2 TUI loops + qa-run-bg + CLI-opened F start with R rotation mid-loop;
+      garbage+fragment then cleanup --resources; 5 broken-store passes identical (NW→PASS,
+      QA PASS), owners-file kill -9 → interrupted pid. Setup nit: spec-mode auto alone
+      leaves QA INPUT_REQUIRED with the fake; also run pm pr spec R qa. Captures /pm-captures/scenarios/35.'
+    created_at: '2026-10-22T06:21:16Z'
+    last_edited: '2026-10-22T06:21:16Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
