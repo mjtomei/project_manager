@@ -217,7 +217,8 @@ loop owns the run.
 - E6. Verification follow-up path that finds the pane gone keeps its
   existing INPUT_REQUIRED behaviour (verification-specific, out of scope).
 - E7. Host (non-container) mode: `exec` diagnosis has no container to probe;
-  cause is "worker pane exited before Claude started".
+  cause is "pane died at startup; no runtime cause found" (fallback causes
+  complement the kind label rather than repeating it).
 - E8. Relaunch in container mode for a scenario whose `container_name` is
   None (create failure) goes through the full launcher, never
   `_relaunch_scenario_window`.

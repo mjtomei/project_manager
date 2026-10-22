@@ -2634,8 +2634,13 @@ _LAUNCH_FAILURE_LABELS = {
     "exec": "worker exited before Claude started",
     "exit": "worker exited before any verdict",
 }
-# Cause for an ``exit`` failure when no container diagnosis names one.
-_EXIT_CAUSE = "worker exited before any verdict (killed/crashed mid-run)"
+# Fallback causes when nothing more specific was recorded.  They complement
+# the kind label above (shown as "<label>: <cause>"), so don't repeat it.
+_CREATE_CAUSE = "launcher recorded no error (see the pm debug log)"
+_EXEC_CAUSE = "pane died at startup; no runtime cause found"
+_EXEC_TRANSIENT_CAUSE = ("pane died at startup; a probe exec into the "
+                         "container now succeeds (transient)")
+_EXIT_CAUSE = "pane died mid-run (killed or crashed); no runtime cause found"
 
 
 def _retry_delay(attempts: int) -> float:
@@ -3021,9 +3026,8 @@ def _poll_tmux_verdicts(
                 if _worker_has_started(scenario):
                     _record_failure(scenario, "exit", detail or _EXIT_CAUSE)
                 else:
-                    _record_failure(scenario, "exec", detail or (
-                        "worker pane exited before Claude started "
-                        "(container exec succeeds now)"))
+                    _record_failure(scenario, "exec",
+                                    detail or _EXEC_TRANSIENT_CAUSE)
                 continue
             if idx in state.scenario_verdicts:
                 # The relaunched concretizer settled it (rejected or
@@ -3045,7 +3049,7 @@ def _poll_tmux_verdicts(
                     else (rec or {}).get("kind", "exec"))
             _record_failure(scenario, kind, (
                 state.scenario_verdict_reasons.get(idx) or detail
-                or "worker window never created (launch failed)"))
+                or _CREATE_CAUSE))
 
         # Check for completed verifications
         with verification_lock:
@@ -3202,7 +3206,7 @@ def _poll_tmux_verdicts(
                     not scenario.pane_id and not scenario.session_id):
                 _record_failure(scenario, "create", (
                     state.scenario_verdict_reasons.get(idx)
-                    or "worker window never created (launch failed)"))
+                    or _CREATE_CAUSE))
                 continue
 
             pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
@@ -3226,8 +3230,7 @@ def _poll_tmux_verdicts(
                 elif _worker_has_started(scenario):
                     _record_failure(scenario, "exit", _EXIT_CAUSE)
                 else:
-                    _record_failure(scenario, "exec",
-                                    "worker pane exited before Claude started")
+                    _record_failure(scenario, "exec", _EXEC_CAUSE)
                 continue
 
             # Workers with no hook event yet may be sitting at the

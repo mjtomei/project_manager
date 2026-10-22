@@ -327,7 +327,7 @@ def test_exec_and_exit_failures_are_distinguished(tmp_path):
     assert "mid-run" in state.launch_retries[1]["cause"]
     assert state.launch_retries[1]["sessions"] == ["sid-1"]
     assert state.launch_retries[2]["kind"] == "exec"
-    assert "before Claude started" in state.launch_retries[2]["cause"]
+    assert "at startup" in state.launch_retries[2]["cause"]
     assert all(r["state"] == "waiting" for r in state.launch_retries.values())
     assert not state.scenario_verdicts
 
