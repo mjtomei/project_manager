@@ -451,6 +451,18 @@ class TestEnsureReusable:
         assert "Cannot fork" in str(ei.value) and "%5" in str(ei.value)
         assert not rt.ran("restart") and removed == []
 
+    def test_restart_timeout_does_not_claim_removal(self, monkeypatch):
+        monkeypatch.setattr(cm, "_run_runtime", _Runtime())
+
+        def _timeout(name):
+            raise cm.launch_error(name, "timeout", "sentinel missing",
+                                  stage="finish setup")
+        monkeypatch.setattr(cm, "_wait_for_setup", _timeout)
+        with pytest.raises(cm.ContainerLaunchError) as ei:
+            cm.restart_container("c")
+        assert "removed" not in str(ei.value)
+        assert "sentinel missing" in str(ei.value)
+
 
 class TestCreateFailureCleanup:
     def _patch(self, monkeypatch, rt):

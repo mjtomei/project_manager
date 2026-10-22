@@ -1041,6 +1041,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                         switch=not background,
                     )
                     if not claude_pane:
+                        # A window that exists (pane lookup failed) may
+                        # already run Claude in the container — keep it.
+                        window_created = bool(
+                            tmux_mod.find_window_by_name(pm_session, window_name))
                         raise RuntimeError(f"no pane returned for '{window_name}'")
                     window_created = True
                     win = tmux_mod.find_window_by_name(pm_session, window_name)

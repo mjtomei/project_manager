@@ -1141,7 +1141,15 @@ def restart_container(name: str) -> None:
         stderr = (r.stderr or "").strip()
         raise launch_error(name, classify_runtime_error(stderr), stderr,
                            stage="restart")
-    _wait_for_setup(name)
+    try:
+        _wait_for_setup(name)
+    except ContainerLaunchError as e:
+        if e.kind != "timeout":
+            raise
+        # The "timeout" message says the partial container was removed —
+        # true for a fresh create, not here: the restarted container stays.
+        raise launch_error(name, "runtime", e.stderr,
+                           stage="come back up after restart") from e
     if not _setup_complete(name):
         raise launch_error(name, "incomplete",
                            "setup markers missing after restart", stage="restart")
