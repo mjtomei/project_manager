@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-9ee4d64
+  active_pr: pr-446cb83
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T03:54:10.554794+00:00'
+  updated_at: '2026-10-22T05:11:55.939830+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8376,6 +8376,32 @@ prs:
       /pm-captures/scenarios/16'
     created_at: '2026-10-22T03:32:40Z'
     last_edited: '2026-10-22T03:32:40Z'
+  - id: note-41bb4d8
+    text: 'S22 refine (2026-10-22, HEAD 6dd086a4): fake-claude launches get no prompt
+      on this branch (build_claude_shell_cmd fake path writes no pm/prompts file;
+      the 809be0bf persist fix lives on pr-3ae2fc3), so prompt-content Thens (sign-off
+      Integration section, "Previous sign-off return") need a real sign-off router
+      run (claude works with ANTHROPIC_API_KEY unset). Refined S22 uses real router
+      for A sign-off and B post-rework sign-off and fake SIGNOFF_MERGE for the conflicted/stale/legacy
+      runs, switching `pm fake-claude config set` (signoff key present = fake) between
+      runs; impl prompt via `pm prompt <B>`. Fake impl makes no commits: pre-create
+      A/B/C branches with real commits. /opt/pm-src is pre-integration, so `PYTHONPATH=/opt/pm-src
+      pm pr signoff record` still makes a legacy approval.'
+    created_at: '2026-10-22T04:34:00Z'
+    last_edited: '2026-10-22T04:34:00Z'
+  - id: note-4afcfb5
+    text: 'QA S22 (real TUI e2e, watcher off) on 6dd086a4 PASS, no code changes: A
+      real router MERGE first try, g published parents M0+signoff.sha / tree=candidate;
+      B fake MERGE coerced to IMPL (app.py), restart on awaiting:impl → one fresh
+      impl (%19→%30, ≤1 window 300 s), pm prompt return block correct; manual merge
+      resolution → new review + QA run → real router MERGE with "Previous sign-off
+      return", ⇤ tree==pm pr list; g and command-bar refused on M2/M3 with stale re-runs,
+      O held; final g parents M3+HEAD / tree=bound candidate; C legacy g refused,
+      --wait-for-merge re-signs and holds. Recorder attach client gets switched to
+      QA/pm-home windows, so TUI evidence = capture-pane samples. Filed pr-446cb83
+      (fake-claude config ignores -C). Captures /pm-captures/scenarios/22'
+    created_at: '2026-10-22T05:11:55Z'
+    last_edited: '2026-10-22T05:11:55Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
@@ -30470,6 +30496,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T03:50:49.520900+00:00'
   updated_at: '2026-10-22T03:50:49.520900+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-446cb83
+  plan: bugs
+  title: 'pm -C <proj> fake-claude config set ignores -C: session tag comes from cwd'
+  branch: pm/pr-446cb83-pm-c-proj-fake-claude-config-set-ignores-c-session
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/fake_claude.py _resolve_tag -> paths.get_session_tag()
+    uses cwd git root, not the -C/PM_PROJECT project. Repro (QA pr-ac10f03 S22): from
+    a PR workdir run `pm -C <main-repo>/pm fake-claude config set <json>` -> "Wrote
+    fake-claude config for session pm-pr-<id>-...-<hash>" (the workdir clone tag),
+    while the TUI session reads ~/.pm/sessions/<main-repo tag>/fake-claude, so the
+    config silently does not apply. Expected: derive the tag from the resolved project
+    root when -C/PM_PROJECT is given (or refuse). Workaround: run from the main repo
+    or pass --tag.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T05:10:36.683873+00:00'
+  updated_at: '2026-10-22T05:10:36.683873+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
