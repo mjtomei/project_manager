@@ -105,6 +105,41 @@ E7. **Concurrency.** Two clients (grouped sessions), each focused on a different
     each child. A shell `pm which` running at the same moment in a workdir still
     resolves via cwd_walk.
 
+## Requirements added by QA fixes (re-plan, 2026-10-22)
+
+R7. **Claude windows launched from a popup follow the session's launch config**
+    (3dbd4f7c). Given session fake-claude config (`_all`) and a PR-workdir window,
+    When the picker starts / reviews / merges a PR (new window spawned from the popup
+    child), Then the new window runs fake-claude, not real claude. The tag passed to
+    `build_claude_shell_cmd` comes from the tmux session, not the workdir cwd. Other
+    launchers (qa_loop, signoff, guide, pane_ops) are tracked separately by pr-ea4fffa
+    and are out of scope.
+R8. **Popups target the pressing client** (2d126ac1, 47167ee3). The bindings pass
+    `#{q:client_name} #{q:session_name}`. `_popup-show` draws with `display-popup -c
+    <client> -t =<session>:`, with S/W pinned to that client's session and window.
+    The popup dispatchers export `PM_POPUP_SESSION`, so window switches done by
+    picker commands (e.g. `s` on a PR whose window already exists) land in the
+    pressing client's grouped session. Two clients pressing at the same time each get
+    their own popup and their own window switch. Sessions started before this fix
+    need a reattach (`pm session`) to pick up the new bindings. Old argument-less
+    bindings (`pm _popup-show picker`) still work.
+
+## Harness notes (from QA runs)
+
+- Popup child resolution lines go to `~/.pm/debug/<cwd-tag>.log` (the tag of the
+  popup's cwd, i.e. the workdir), not the session's log. Grep all of `~/.pm/debug/`
+  for `session_tag=`.
+- Drive popups with the venv console-script `pm` (`pm_core.wrapper:main`) first on the
+  tmux server PATH. A `/usr/local/bin/pm` that is `python3 -m pm_core.wrapper` imports
+  the cwd's pm_core for the *outer* `_popup-*` process. That is a launcher issue,
+  outside this PR.
+- The test project needs `pm_core/` and `bin/` (the fake-claude shim runs
+  `pm which | tail -n1`, so a `WORKDIR-CODE` marker must print *before* the path).
+  Put `/usr/bin/git` first on PATH before `pm session`.
+- A real merge needs a fresh SIGNOFF_MERGE (commit the decoy, `pm pr review`, then O in
+  the TUI with skip-qa plus a fake review PASS/signoff, about 30 s). The merge lands
+  the decoy on session master, so run it last.
+
 ## Pass / Fail criteria
 
 - PASS: every popup-dispatched child (picker direct route, prefix+M runner) runs the
