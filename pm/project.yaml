@@ -30898,7 +30898,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T14:04:42.745914+00:00'
-  updated_at: '2026-10-22T15:18:03.625209+00:00'
+  updated_at: '2026-10-22T15:56:00.908045+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30944,6 +30944,16 @@ prs:
       fix need a reattach (pm session) to pick up the new bindings.'
     created_at: '2026-10-22T15:18:03Z'
     last_edited: '2026-10-22T15:18:03Z'
+  - id: note-3b139a3
+    text: 'QA S5 refine: picker cannot start a never-started PR — its nav list only
+      holds PRs with an open window (plus the home PR), so the second PR is started
+      from the prefix+M runner (`pr start <beta>`). Picker start-launcher coverage
+      = `z s` on the home PR. fzf + vim-tiny are not preinstalled: `sudo apt-get update
+      && sudo apt-get install -y fzf vim-tiny` (z chords need fzf; picker e needs
+      an editor). Repro tests on f26610f0: 6 pass on branch, 5 fail with origin/master
+      session.py+wrapper.py.'
+    created_at: '2026-10-22T15:55:55Z'
+    last_edited: '2026-10-22T15:56:00Z'
 - id: pr-089af69
   plan: bugs
   title: 'Bug: TUI pr-edit pane vanishes silently when the editor fails to start'
@@ -30999,3 +31009,32 @@ prs:
       launches, and skip-permissions lookup.'
     created_at: '2026-10-22T15:07:29Z'
     last_edited: '2026-10-22T15:07:29Z'
+- id: pr-3f52b15
+  plan: bugs
+  title: 'Bug: pm-home window created from a PR workdir shows that clone''s stale
+    project.yaml'
+  branch: pm/pr-3f52b15-bug-pm-home-window-created-from-a-pr-workdir-shows
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/home_window/pr_list.py PrListProvider.ensure_window
+    uses store.find_project_root() from the caller cwd as the new window start dir,
+    and _render_content resolves the project from that cwd every tick. When the first
+    park_if_on happens from a PR working copy (e.g. picker `z s` / pr start --fresh
+    from the PR window, cwd ~/.pm/workdirs/.../pm-pr-X-.../), pm-home is created with
+    cwd <workdir>/pm and renders the clone''s branch-time project.yaml forever: QA
+    pr-24f022e S5 saw both PRs [pending] ("updated 6m ago") while the session project
+    had them in_review/merged; after the picker g merge killed the PR window, the
+    client was parked on this stale list. Repro: pm session in a test project, pm
+    pr start A, focus A window, prefix+P z s (no pm-home yet) -> tmux list-panes -t
+    <S>:pm-home -F "#{pane_current_path}" is the workdir pm/; change PR states ->
+    pm-home never updates. Fix idea: resolve the session pm_root (~/.pm/sessions/<tag>/pm_root)
+    for the window cwd / pass --project to the loop.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T16:09:51.542797+00:00'
+  updated_at: '2026-10-22T16:09:51.542797+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
