@@ -125,7 +125,10 @@ exactly once.
   8-gram with the body is dropped. Body = document text minus a recognised
   metadata header (PEP field list, Rust/Cockroach `- Field:` list, Go
   Author/Last updated/Discussion lines, rust-goals metadata table) and minus the
-  title heading line. Self-links to the document (its URL/path) are removed.
+  title heading line. Self-links to the document (its URL/path) are removed,
+  including from item headings, which otherwise cite each item's URL
+  (header metadata cites the document's own page); `--check` reports any
+  remaining as `brief_links_document`.
 - Only opening posts of issues/PRs/threads are used (the request), not later
   comments that review the finished document. Post-decision fields (PEP
   Status/Resolution, KEP status/stage/milestones, RFC current-status, RFD state)
@@ -192,7 +195,13 @@ exactly once.
   - charters: the revision approved on or before the source draft's -00
     submission; RFCs whose first draft predates datatracker events (about
     2001) get none. A WG draft that replaced an earlier individual draft is
-    dated by the WG draft's -00 (limitation).
+    dated by the WG draft's -00 (limitation). Charters older than the
+    datatracker's charter workflow (about 2011) were imported as one
+    revision stamped with the group's start date but holding the latest
+    legacy text (behave's imported 06 carries its 2008 IPv6 recharter under
+    a 2004 date); only a revision preceded by datatracker proposals
+    (`NN-xx`) is dated by its history, and an imported later revision is
+    replaced by revision 01, the original charter (review loop 05c5 i1).
   - Issue and PR bodies are their current text; checkbox and release-target
     lines, which record progress, are removed together with the lines nested
     under them (KEP issues list each stage's PRs there), and HTML comments

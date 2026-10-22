@@ -192,7 +192,7 @@ def catalog(tmp_path, monkeypatch):
     ctx.mkdir()
     pep_items = [
         context_item("peps", "metadata", pep["id"], "PEP: 9999\nTitle: Frobnicate the widget registry\nType: Standards Track", [pep["id"]],
-                     written="with_document"),
+                     written="with_document", url=pep["url"]),  # header metadata cites the document's own page
         context_item("peps", "discussion_thread", "t1",
                      "Title: Compacting the registry\n\nOur services leak memory through the widget table and we need a fix.\n"
                      # a sentence copied from the body, and a passage split across two lines
@@ -268,6 +268,13 @@ def test_briefs_never_contain_document_passages(catalog):
     for case in whole:
         doc = next(d for d in catalog["docs"].values() if d["id"] == case["document_id"])
         assert not cases.shared_ngrams(case["inputs"]["brief"], body_grams(doc, data, fmts[doc["source"]]), N), case["case_id"]
+
+
+def test_brief_never_links_its_document(catalog):
+    pep = catalog["docs"]["peps/pep-9999.rst"]
+    case = next(c for c in catalog["cases"] if c["case_id"] == "doc:" + pep["id"])
+    assert "## metadata\n" in case["inputs"]["brief"] and pep["url"] not in case["inputs"]["brief"]
+    assert pep["url"] in [p["url"] for p in case["provenance"]["brief_items"]]  # provenance still records it
 
 
 def test_brief_keeps_request_context_and_drops_copied_text(catalog):
@@ -512,6 +519,7 @@ def test_check_detects_violations(catalog):
     for row in rows:
         if row["case_type"] == "whole_document" and row["source"] == "peps":
             row["inputs"]["brief"] += "\nThe widget registry keeps every widget in a single global table that grows."
+            row["inputs"]["brief"] += "\nSee " + catalog["docs"]["peps/pep-9999.rst"]["url"]
         if row["case_type"] == "continuation":
             row["inputs"]["prefix_end"] += 1
         if row["case_type"] == "pm_plan":
@@ -520,7 +528,7 @@ def test_check_detects_violations(catalog):
     cov = json.loads((data / "cases" / "coverage.json").read_text())
     cov["documents"].pop(next(iter(cov["documents"])))
     counts = cases.check(data_dir=data, coverage=cov)["failure_counts"]
-    for key in ("brief_quotes_document_body", "prefix_not_at_section_boundary", "missing_split_group",
+    for key in ("brief_quotes_document_body", "brief_links_document", "prefix_not_at_section_boundary", "missing_split_group",
                 "documents_missing_from_coverage"):
         assert counts.get(key), key
 
@@ -742,6 +750,18 @@ def test_process_versions_predate_each_document(monkeypatch):
     assert errors == []
     used = {i["version"]["commit"]: i["applies_to"] for i in items}
     assert used == {"c3": ["a"], "c2": ["b"]}  # c: older than every version; undated: no attachment
+
+
+def test_imported_charter_revision_is_dated_as_original():
+    pytest.importorskip("bs4")
+    context = importlib.import_module("context")
+    # behave: 06 imported with the group's 2004 start date (latest legacy text), 07 approved in the datatracker
+    imported = [{"rev": "06", "time": "2004-09-27T19:00:00Z"}, {"rev": "06-00", "time": "2012-06-18T21:44:09Z"},
+                {"rev": "07", "time": "2012-06-21T19:31:39Z"}, {"rev": "06", "time": "2004-09-27T19:00:00Z"}]
+    assert context.charter_approvals(imported) == {"01": "2004-09-27T19:00:00Z", "07": "2012-06-21T19:31:39Z"}
+    tracked = [{"rev": "00-00", "time": "2015-01-05T10:00:00Z"}, {"rev": "01", "time": "2015-02-01T10:00:00Z"},
+               {"rev": "01-00", "time": "2017-03-01T10:00:00Z"}, {"rev": "02", "time": "2017-04-01T10:00:00Z"}]
+    assert context.charter_approvals(tracked) == {"01": "2015-02-01T10:00:00Z", "02": "2017-04-01T10:00:00Z"}
 
 
 def test_recorded_title_is_cut_from_plain_text_body():

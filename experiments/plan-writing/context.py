@@ -567,6 +567,33 @@ def first_draft_dates():
     return out
 
 
+def charter_approvals(history):
+    """Charter revision -> approval time, for the revisions whose text was written by that time.
+
+    `history` is the charter's datatracker dochistory. Revisions approved in
+    the datatracker follow proposals numbered after the previous revision
+    (`06-00`, then `07`). Charters older than that workflow (about 2011) were
+    imported as one revision stamped with the group's start date while its
+    text is the latest legacy revision (behave's imported 06 carries the 2008
+    IPv6 recharter under a 2004 date). Only the original charter, revision 01,
+    was written by that date, so an imported later revision is replaced by
+    01 (the legacy texts stay at www.ietf.org/charter/<name>-<rev>.txt).
+    """
+    times, proposed = {}, set()
+    for h in history:
+        if re.fullmatch(r"\d\d", h["rev"]):
+            times[h["rev"]] = min(times.get(h["rev"], h["time"]), h["time"])
+        elif re.fullmatch(r"\d\d-\d\d", h["rev"]):
+            proposed.add(h["rev"][:2])
+    out = {}
+    for rev, t in sorted(times.items()):
+        if rev == "01" or f"{int(rev) - 1:02d}" in proposed:
+            out[rev] = t
+        else:
+            out["01"] = min(out.get("01", t), t)
+    return out
+
+
 def collect_ietf(source, docs, cfg):
     index, stamp = rfc_index()
     items, errors = [], []
@@ -610,32 +637,35 @@ def collect_ietf(source, docs, cfg):
         if not group or not group.get("charter"):
             raise FetchError("no charter document recorded")
         name = group["charter"].rstrip("/").rsplit("/", 1)[-1]
-        history = datatracker_all(f"/api/v1/doc/dochistory/?format=json&limit=200&name={name}")
-        approved = {}
-        for h in history:
-            if re.fullmatch(r"\d\d", h["rev"]):
-                approved[h["rev"]] = min(approved.get(h["rev"], h["time"]), h["time"])
+        approved = charter_approvals(datatracker_all(f"/api/v1/doc/dochistory/?format=json&limit=200&name={name}"))
         out = []
         for doc_id, first in by_wg[wg]:
             # the charter in force when the source draft was first submitted, not a later revision
             usable = [rev for rev, t in approved.items() if docmeta.parse_date(t) <= first]
             if usable:
                 out.append((max(usable, key=lambda r: approved[r]), doc_id))
-        made = []
+        made, errs = [], []
         for rev in sorted({r for r, _ in out}):
             url = f"https://www.ietf.org/charter/{name}-{rev}.txt"
-            text, got = fetch(url)
-            made.append(make_item(source, "charter", f"{name}-{rev}", text, url, [d for r, d in out if r == rev], got,
+            applies = [d for r, d in out if r == rev]
+            try:
+                text, got = fetch(url)
+            except FetchError as exc:
+                errs.append({"collector": "ietf_charter", "group": wg, "url": url, "documents": len(applies), "error": str(exc)})
+                continue
+            made.append(make_item(source, "charter", f"{name}-{rev}", text, url, applies, got,
                                   label=f"working group charter ({wg}, revision {rev}, approved {approved[rev][:10]})",
                                   fields={"group": wg, "revision": rev, "approved": approved[rev]},
                                   written_at=docmeta.parse_date(approved[rev])))
-        return made
+        return made, errs
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures = {pool.submit(charter, wg): wg for wg in sorted(by_wg)}
         for future in concurrent.futures.as_completed(futures):
             try:
-                items.extend(future.result())
+                made, errs = future.result()
+                items.extend(made)
+                errors.extend(errs)
             except Exception as exc:
                 errors.append({"collector": "ietf_charter", "group": futures[future], "documents": len(by_wg[futures[future]]), "error": str(exc)})
     try:

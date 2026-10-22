@@ -321,7 +321,9 @@ def assemble_brief(doc, text, items, source_cfg, n, doc_date=None):
                            "url": item["url"], "retrieved_at": item["retrieved_at"], "sha256": item["sha256"],
                            "segments_total": total, "segments_dropped": sum(1 for x, h in zip(segs, hit) if x.strip() and h),
                            "truncated_at_quoted_document": bool(truncated), "progress_lines_dropped": progress_dropped})
-        blocks.append([f"## {item.get('label', item['kind'])}" + (f" ({item['url']})" if item.get("url") else ""), "\n"] + kept)
+        # the heading cites the item's source, unless that is the document itself (a header's or index entry's page)
+        cite = f" ({item['url']})" if item.get("url") and not is_self(item["url"]) else ""
+        blocks.append([f"## {item.get('label', item['kind'])}" + cite, "\n"] + kept)
     # Second pass over the assembled text: passages can straddle piece boundaries.
     while True:
         flat = [(bi, si) for bi, b in enumerate(blocks) for si in range(len(b))]
@@ -733,6 +735,8 @@ def check(catalog_path=None, data_dir=None, corpus=None, coverage=None):
                                case["provenance"].get("titles_excluded_from_body", []))
             if shared_ngrams(case["inputs"]["brief"], body, n):
                 failures["brief_quotes_document_body"].append(cid)
+            if any(m in case["inputs"]["brief"] for m in (doc["url"].rstrip("/"), doc["identity"]) if "/" in m):
+                failures["brief_links_document"].append(cid)
             if not case["provenance"].get("brief_items"):
                 failures["brief_without_item_provenance"].append(cid)
             doc_date = (dates.get(doc["id"]) or {}).get("date")
