@@ -579,7 +579,7 @@ export class App {
     // Refuse before listening, not after: a message to a session that is not
     // running would be dictated and reviewed only to be dropped on send.
     const s = this.pm.session(t.session);
-    if (['none', 'ended', 'queued'].includes(s.state)) { this.say(`! ${this.sessionName(s)} not running · Tap: actions to start it`); return; }
+    if (this.pm.notRunning(s)) { this.say(`! ${this.sessionName(s)} not running · Tap: actions to start it`); return; }
     this.overlay = { stage: 'listening', purpose, words: '', target: t, choice: 0 };
     this.toast = null; // the panel's own hints replace any earlier notice
   }

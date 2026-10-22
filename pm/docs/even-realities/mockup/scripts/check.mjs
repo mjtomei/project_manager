@@ -119,6 +119,12 @@ if (!only.length) {
     pm.start('pr-215/signoff');
     rule(pm.send('pr-215/signoff', 'rule check', null).queued, 'send to a starting session is not queued');
   }
+  // PM refuses a message to a session with no window (queued scenario,
+  // ended, never started), as hold-to-speak does before listening.
+  for (const s of new SimPM().sessions.filter(x => ['none', 'ended', 'queued'].includes(x.state))) {
+    const r = new SimPM().send(s.id, 'rule check', null);
+    rule(!r.ok && r.reason === 'not-running', `send to ${s.state} ${s.id} → ${JSON.stringify(r)}`);
+  }
   // What changed strips a scenario's own number (s2.) as it does R1. and #214.
   {
     const app = new App(new SimPM());

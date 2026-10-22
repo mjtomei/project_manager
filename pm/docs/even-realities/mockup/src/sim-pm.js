@@ -44,6 +44,9 @@ export class SimPM {
   prLabel(prId) { const p = this.pr(prId); return p ? `#${p.num}` : ''; }
   // A current MERGE verdict is what lets the user ask PM to merge a held PR.
   signedForMerge(p) { return p.signoff?.verdict === 'MERGE' && !p.signoff.stale; }
+  // No window to deliver a message to: never started, ended, or a QA scenario
+  // still waiting for a slot.
+  notRunning(s) { return !s || ['none', 'ended', 'queued'].includes(s.state); }
 
   needsYou() {
     const items = [];
@@ -69,7 +72,7 @@ export class SimPM {
   send(sessionId, text, context) {
     if (!this.connected()) return { ok: false, reason: 'offline' };
     const s = this.session(sessionId);
-    if (!s || s.state === 'none' || s.state === 'ended') return { ok: false, reason: 'not-running' };
+    if (this.notRunning(s)) return { ok: false, reason: 'not-running' };
     const id = `m${++this.seq}`;
     // A busy or still-starting session takes the message after its current turn.
     const queued = s.state === 'working' || s.state === 'starting';
