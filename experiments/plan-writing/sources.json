@@ -272,7 +272,7 @@
             "type": "discourse",
             "label": "discussion thread opening post",
             "written": "dated",
-            "written_note": "Discussions-To threads usually announce an already drafted PEP; a thread opened after the PEP's Created date is dropped."
+            "written_note": "Threads named in Discussions-To or Post-History. Discussions-To threads usually announce an already drafted PEP; Post-History can list earlier pre-PEP threads. A thread opened after the PEP's Created date is dropped."
           },
           {
             "type": "process",

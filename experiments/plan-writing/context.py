@@ -464,16 +464,23 @@ def collect_markdown_index(source, docs, cfg):
 
 # --- Python discussion threads -------------------------------------------
 
-DISCUSS = re.compile(r"https://discuss\.python\.org/t/[\w-]+/(\d+)")
+# topic URLs with or without the slug (/t/some-title/123, /t/123); a slug always has a non-digit
+DISCUSS = re.compile(r"https://discuss\.python\.org/t/(?:[\w-]*[^\W\d][\w-]*/)?(\d+)")
 
 
 def collect_discourse(source, docs, cfg):
+    """Opening posts of every discuss.python.org thread a PEP header names.
+
+    Discussions-To usually announces the drafted PEP, while Post-History can
+    also list pre-PEP threads that predate it; cases.py keeps only threads
+    opened on or before the PEP's Created date.
+    """
     groups = defaultdict(list)
     for doc in docs:
         fields, _ = docmeta.parse_header("rfc822", doc_text(doc))
-        m = DISCUSS.search(fields.get("Discussions-To", "")) or DISCUSS.search(fields.get("Post-History", ""))
-        if m:
-            groups[m.group(1)].append(doc["id"])
+        topics = DISCUSS.findall(fields.get("Discussions-To", "") + "\n" + fields.get("Post-History", ""))
+        for topic in dict.fromkeys(topics):
+            groups[topic].append(doc["id"])
     items, errors = [], []
 
     def one(topic):

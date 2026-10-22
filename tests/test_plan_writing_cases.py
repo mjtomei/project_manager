@@ -195,6 +195,11 @@ def catalog(tmp_path, monkeypatch):
                      written="with_document", url=pep["url"]),  # header metadata cites the document's own page
         context_item("peps", "discussion_thread", "t1",
                      "Title: Compacting the registry\n\nOur services leak memory through the widget table and we need a fix.\n"
+                     "Every long running service we operate shows the same growth over a week.\n"
+                     "Restarting is not an option for control plane processes holding registrations.\n"
+                     "We would like the interpreter to reclaim entries for widgets that are gone.\n"
+                     "Any design should keep registration cheap for short lived objects.\n"
+                     "Benchmarks from two production deployments are attached below.\n"
                      # a sentence copied from the body, and a passage split across two lines
                      "Large applications register thousands of transient widgets and the registry becomes the dominant source.\n"
                      "The proposal walks the registry after each garbage\ncollection cycle and removes entries whose widgets\n"
@@ -609,6 +614,49 @@ def test_table_only_request_text_is_thin(tmp_path):
     assert brief["context_strength"] == "thin"
     assert "goal-1234" not in brief["brief"]          # self link stripped
     assert "## Summary" not in brief["brief"]         # heading left without content is dropped
+
+
+def test_pasted_draft_in_short_lines_is_truncated_but_quoted_charter_is_not():
+    paras = [f"Paragraph {w} of the draft describes the {w} part of the widget protocol in plain words for readers."
+             for w in ("first", "second", "third", "fourth", "fifth", "sixth")]
+    text = "Widget Protocol\n\n" + "\n\n".join(paras)
+    doc = {"identity": "rfc9998.txt", "url": "https://example.org/rfc9998", "id": "p"}
+    # a post pasting the draft wrapped into lines too short to hold a whole 8-gram each
+    pasted = "Title: Draft posted\n\nHere is my draft for comment.\n" + "\n".join(
+        " ".join(para.split()[i:i + 5]) for para in paras for i in range(0, len(para.split()), 5))
+    thread = context_item("x", "discussion_thread", "t", pasted, ["p"])
+    _, prov = cases.assemble_brief(doc, text, [thread], {"context": {"request": "Write it."}}, N)
+    assert prov[0]["truncated_at_quoted_document"]
+    # a charter predates the document: shared text is the document quoting it, so only those passages go
+    charter = context_item("x", "charter", "c", "The group will define a widget protocol for hosts.\n" + paras[0] + "\n"
+                           "The group has the single task of specifying widget transfer between peers.", ["p"])
+    brief, prov = cases.assemble_brief(doc, text, [charter], {"context": {"request": "Write it."}}, N)
+    assert not prov[0]["truncated_at_quoted_document"]
+    assert "single task of specifying widget transfer" in brief["brief"] and "Paragraph first" not in brief["brief"]
+
+
+def test_markdown_link_to_document_keeps_its_text():
+    text = "# Widgets\n\n" + " ".join(["The design body explains its own words at length."] * 20)
+    doc = {"identity": "design/4321-widgets.md", "url": "https://example.org/design/4321-widgets.md", "id": "w"}
+    item = context_item("goprop", "tracking_issue", "i4321",
+                        "Title: Widgets\n\nWe need widgets for the allocator. Full design document [found here.]"
+                        "(https://example.org/design/4321-widgets.md) and <https://example.org/design/4321-widgets.md>.\n"
+                        "Related: [the old issue](https://example.org/issues/77).", ["w"])
+    brief, _ = cases.assemble_brief(doc, text, [item], {"context": {"request": "Write a design."}}, N)
+    assert "Full design document found here. and" in brief["brief"]     # no dangling "[found here.](" ...
+    assert "<" not in brief["brief"]                                       # ... or "<" of an autolink
+    assert "4321-widgets" not in brief["brief"]
+    assert "[the old issue](https://example.org/issues/77)" in brief["brief"]  # other links untouched
+
+
+def test_discourse_topic_urls_with_and_without_slug():
+    pytest.importorskip("bs4")
+    pytest.importorskip("yaml")
+    context = importlib.import_module("context")
+    for url, topic in [("https://discuss.python.org/t/103971", "103971"), ("https://discuss.python.org/t/99910/", "99910"),
+                       ("https://discuss.python.org/t/pep-800-solid-bases/99280", "99280"),
+                       ("https://discuss.python.org/t/pep-1-x/123/7", "123"), ("https://discuss.python.org/t/14141/4", "14141")]:
+        assert context.DISCUSS.search(url).group(1) == topic, url
 
 
 def test_progress_lines_and_linked_issue_heading(tmp_path):

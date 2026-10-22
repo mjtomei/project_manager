@@ -50,8 +50,10 @@ source) and fetch notes. Per source:
   `how_to/propose_a_goal.md`.
 - kubernetes-keps: `kep.yaml` metadata (pre-decision fields only), tracking
   issue `kubernetes/enhancements#<kep-number>`; process = KEP template README.
-- python-peps: PEP header fields (pre-decision subset), first post of a
-  discuss.python.org `Discussions-To` thread; process = PEP 1 and PEP 12.
+- python-peps: PEP header fields (pre-decision subset), first post of every
+  discuss.python.org thread named in `Discussions-To` or `Post-History`
+  (topic URLs with or without a slug; Post-History can list pre-PEP threads
+  that predate Created); process = PEP 1 and PEP 12.
 - cockroach-rfcs: header metadata, review thread from header "RFC PR"; process
   = `docs/RFCS/README.md`.
 - ietf-rfcs and quic-drafts: rfc-index.xml entry (title, authors, date, draft
@@ -122,7 +124,12 @@ exactly once.
   plan baseline) come only from `reference_text(case)`, which likewise refuses
   missing or changed files; `--check` reports those as `stale_reference`.
 - Leak filter: normalized lowercase word tokens; any context sentence sharing an
-  8-gram with the body is dropped. Body = document text minus a recognised
+  8-gram with the body is dropped, with n-grams matched across an item's
+  line and sentence pieces (wrapped lines of a pasted draft rarely hold a
+  whole 8-gram). An issue, PR or thread post quoting the body in 30% or more
+  of its word-bearing pieces is a pasted draft and is cut where the quote
+  starts; charters and study calls predate the document, so they only lose
+  the quoted passages. Markdown links to the document keep their link text. Body = document text minus a recognised
   metadata header (PEP field list, Rust/Cockroach `- Field:` list, Go
   Author/Last updated/Discussion lines, rust-goals metadata table) and minus the
   title heading line. Self-links to the document (its URL/path) are removed,
@@ -183,7 +190,7 @@ exactly once.
     acceptance, copying the goal summary), IETF milestones naming the draft,
     the Chromium index introduction, and Oxide RFD 1 (current text, no RFD
     dates);
-  - dated: Go proposal issues, PEP Discussions-To threads, KEP enhancement
+  - dated: Go proposal issues, PEP Discussions-To/Post-History threads, KEP enhancement
     issues and Cockroach linked issues, kept only when opened on or before
     the document's date;
   - identity only (user choice): index records written after the document

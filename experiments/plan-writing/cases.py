@@ -43,7 +43,10 @@ CONTINUATION_INSTRUCTION = ("Below is the beginning of a document, ending where 
 BRIEF_PREAMBLE = ("The following context was recovered from the project's own records: requests, metadata, "
                   "index entries and calls that state what the document is for. It does not contain the document.")
 URL = re.compile(r"https?://\S+")
+MD_LINK = re.compile(r"\[([^\]\n]*)\]\(\s*<?(https?://[^)\s>]+)>?\s*\)")
 PASTE_FRACTION = 0.3   # share of an item's segments quoting the body that marks a pasted draft
+# Only posts can paste a draft; charters and study calls predate the document, so shared text is the document quoting them.
+PASTE_KINDS = {"tracking_issue", "review_thread", "discussion_thread"}
 FRAGMENT_TOKENS = 6
 RICH_WORDS = 20         # prose words of request text that make a brief "rich"
 BOILERPLATE = re.compile(  # sections that are not authored content: never continuation targets
@@ -156,6 +159,25 @@ def record_titles(items):
 def shared_ngrams(text, body_grams, n):
     toks = tokens(text)
     return [i for i in range(len(toks) - n + 1) if tuple(toks[i:i + n]) in body_grams]
+
+
+def segment_hits(segs, body_grams, n):
+    """Per segment, whether it takes part in a run shared with the body, runs crossing segments included.
+
+    Wrapped lines and short sentences of a pasted draft rarely hold a whole
+    n-gram on their own, so the token stream is matched across segments.
+    """
+    owner, toks = [], []
+    for idx, seg in enumerate(segs):
+        t = tokens(seg)
+        toks.extend(t)
+        owner.extend([idx] * len(t))
+    hit = [False] * len(segs)
+    for i in range(len(toks) - n + 1):
+        if tuple(toks[i:i + n]) in body_grams:
+            for j in range(i, i + n):
+                hit[owner[j]] = True
+    return hit
 
 
 # --- corpus and context -------------------------------------------------------
@@ -297,15 +319,18 @@ def assemble_brief(doc, text, items, source_cfg, n, doc_date=None):
     blocks = [[request], [BRIEF_PREAMBLE]]
     provenance = []
     for item in sorted(items, key=lambda i: (i["kind"] not in ("index_entry", "metadata"), i["kind"], i["id"])):
-        text_in = URL.sub(lambda m: "" if is_self(m.group(0)) else m.group(0), item["text"])
+        # a markdown link to the document keeps its text; a bare or <angle> URL to it goes entirely
+        text_in = MD_LINK.sub(lambda m: m.group(1) if is_self(m.group(2)) else m.group(0), item["text"])
+        text_in = re.sub(r"<?https?://\S+", lambda m: "" if is_self(m.group(0)) else m.group(0), text_in)
         progress_dropped = 0
         if item["kind"] in ("tracking_issue", "review_thread"):
             text_in, progress_dropped = drop_progress(text_in)
         segs = segments(text_in)
-        hit = [bool(x.strip()) and bool(shared_ngrams(x, body_grams, n)) for x in segs]
-        total, dropped = sum(1 for x in segs if x.strip()), sum(hit)
+        hit = segment_hits(segs, body_grams, n)
+        # segments without words (rst adornment, "::", lone brackets) can never match, so they do not dilute the share
+        total, dropped = sum(1 for x in segs if tokens(x)), sum(hit)
         # Field records (metadata, index entries) are short, so one matching title line is no sign of a pasted draft.
-        truncated = item["kind"] in REQUEST_KINDS and total and dropped / total >= PASTE_FRACTION
+        truncated = item["kind"] in PASTE_KINDS and total and dropped / total >= PASTE_FRACTION
         if truncated:
             # The item quotes the document at length (a pasted draft); keep only what precedes the quote.
             first = hit.index(True)
@@ -327,16 +352,12 @@ def assemble_brief(doc, text, items, source_cfg, n, doc_date=None):
     # Second pass over the assembled text: passages can straddle piece boundaries.
     while True:
         flat = [(bi, si) for bi, b in enumerate(blocks) for si in range(len(b))]
-        owner, toks = [], []
-        for idx, (bi, si) in enumerate(flat):
-            t = tokens(blocks[bi][si])
-            toks.extend(t)
-            owner.extend([idx] * len(t))
-        hits = [i for i in range(len(toks) - n + 1) if tuple(toks[i:i + n]) in body_grams]
-        if not hits:
+        hit = segment_hits([blocks[bi][si] for bi, si in flat], body_grams, n)
+        if not any(hit):
             break
-        for idx in {owner[j] for i in hits for j in range(i, i + n)}:
-            bi, si = flat[idx]
+        for (bi, si), h in zip(flat, hit):
+            if not h:
+                continue
             if bi >= 2 and si == 0:
                 # An item heading: the document often links the same issue, so drop the URL first; a label the
                 # document quotes (e.g. a study call's title) gives way to the bare kind, so the item stays marked.
@@ -676,8 +697,9 @@ def write_summary(coverage):
     cont = prep["continuation"]
     lines += ["", "## Rules and limits", "",
               f"- Briefs never share a run of {prep['brief_leak_ngram']} words with the document body (body excludes the "
-              "metadata header and title line). A context item that quotes the body for 30% or more of its segments is "
-              "cut where the quote starts. Process documents and templates are attachments, not brief text, in the "
+              "metadata header and title line). An issue, pull request or thread post that quotes the body for 30% or more "
+              "of its word-bearing segments (a pasted draft) is cut where the quote starts; charters and study calls, "
+              "which predate the document, only lose the passages it quotes. Process documents and templates are attachments, not brief text, in the "
               "version committed on or before the document's date.",
               "- Context written after the document is excluded from briefs; see the section above.",
               "- Issue and pull request bodies are their current text, which authors may have edited after opening; "

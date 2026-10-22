@@ -1,15 +1,15 @@
 {
  "totals": {
   "documents": 18963,
-  "brief_rich": 3094,
-  "brief_thin": 9321,
-  "both_case_types": 11331,
+  "brief_rich": 3142,
+  "brief_thin": 9275,
+  "both_case_types": 11333,
   "whole_document_only": 1084,
-  "continuation_only": 3777,
+  "continuation_only": 3775,
   "dropped": 2771,
   "cases": {
    "continuation": 42765,
-   "whole_document": 12415,
+   "whole_document": 12417,
    "pm_plan": 24
   }
  },
@@ -96,8 +96,8 @@
   },
   "cockroach-rfcs": {
    "documents": 188,
-   "brief_rich": 68,
-   "brief_thin": 111,
+   "brief_rich": 67,
+   "brief_thin": 112,
    "both_case_types": 178,
    "whole_document_only": 1,
    "continuation_only": 8,
@@ -145,8 +145,8 @@
   },
   "go-proposals": {
    "documents": 128,
-   "brief_rich": 56,
-   "brief_thin": 31,
+   "brief_rich": 53,
+   "brief_thin": 34,
    "both_case_types": 85,
    "whole_document_only": 2,
    "continuation_only": 35,
@@ -371,24 +371,24 @@
   },
   "python-peps": {
    "documents": 759,
-   "brief_rich": 24,
-   "brief_thin": 715,
-   "both_case_types": 729,
+   "brief_rich": 76,
+   "brief_thin": 665,
+   "both_case_types": 731,
    "whole_document_only": 10,
-   "continuation_only": 14,
+   "continuation_only": 12,
    "dropped": 6,
    "cases": {
-    "whole_document": 739,
+    "whole_document": 741,
     "continuation": 2149
    },
    "context": {
-    "items": 1004,
+    "items": 1188,
     "by_kind": {
-     "discussion_thread": 118,
+     "discussion_thread": 302,
      "metadata": 746,
      "process": 140
     },
-    "fetch_errors": 3
+    "fetch_errors": 0
    }
   },
   "quic-drafts": {
@@ -17184,14 +17184,14 @@
   },
   "python-peps": {
    "discussion_thread": {
-    "excluded": 94,
-    "admitted": 26
+    "excluded": 213,
+    "admitted": 93
    },
    "metadata": {
     "admitted": 746
    },
    "process": {
-    "admitted": 1353
+    "admitted": 1357
    }
   },
   "quic-drafts": {
@@ -17669,10 +17669,10 @@
   }
  ],
  "check": {
-  "cases_checked": 55204,
+  "cases_checked": 55206,
   "by_type": {
    "continuation": 42765,
-   "whole_document": 12415,
+   "whole_document": 12417,
    "pm_plan": 24
   },
   "failures": {},
