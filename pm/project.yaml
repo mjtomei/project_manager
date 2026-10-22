@@ -28353,7 +28353,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-12T22:54:05.748558+00:00'
+  updated_at: '2026-10-22T15:14:44.648556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28373,6 +28373,13 @@ prs:
       select_window should also cover this.'
     created_at: '2026-10-12T22:54:05Z'
     last_edited: '2026-10-12T22:54:05Z'
+  - id: note-571f279
+    text: 'QA S2 (2026-10-22) setup gaps: spec PATH omits ~/.local/bin so fake-claude
+      shim is missing (panes die rc=127) — append it after /usr/bin; fake planner
+      writes no qa.md so runs end INPUT_REQUIRED — seed pm/specs/<pr>/qa.md in each
+      PR workdir before needing a QA PASS.'
+    created_at: '2026-10-22T15:14:44Z'
+    last_edited: '2026-10-22T15:14:44Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
