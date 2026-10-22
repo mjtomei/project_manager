@@ -402,7 +402,20 @@ def _resume_incomplete_qa(app) -> None:
     # actually found — this runs on the ~1s poll tick.
     project_data = None
 
-    for resume_file in qa_root.glob("*/qa_resume.json"):
+    # A fresh start (z t) stops the old loop without processing its
+    # completion, so its snapshot outlives it next to the new run's.  A
+    # live loop rewrites its snapshot every poll tick: take the newest per
+    # PR and drop the older ones as superseded, otherwise whichever the
+    # glob yields first wins and the live run is never resumed.
+    def _mtime(p):
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    seen_pr_ids: set[str] = set()
+    for resume_file in sorted(qa_root.glob("*/qa_resume.json"),
+                              key=_mtime, reverse=True):
         try:
             rdata = json.loads(resume_file.read_text())
         except (json.JSONDecodeError, OSError):
@@ -411,6 +424,12 @@ def _resume_incomplete_qa(app) -> None:
         pr_id = rdata.get("pr_id", "")
         if not pr_id:
             continue
+        if pr_id in seen_pr_ids:
+            _log.info("Dropping superseded QA resume snapshot for %s: %s",
+                      pr_id, resume_file.parent)
+            qa_loop.clear_resume_file(resume_file.parent)
+            continue
+        seen_pr_ids.add(pr_id)
         if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
             continue
         # Not orphaned: another live process (a `pm pr auto-sequence` QA

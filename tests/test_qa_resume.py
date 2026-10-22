@@ -161,9 +161,9 @@ def _make_app(tmp_path, *, pr_status="qa"):
     return app
 
 
-def _seed_run(home, *, overall="", pr_id="pr-001"):
+def _seed_run(home, *, overall="", pr_id="pr-001", loop="loop1"):
     """Create a qa workdir under <home>/.pm/workdirs/qa with resume+status."""
-    qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-loop1"
+    qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop}"
     qa_dir.mkdir(parents=True, exist_ok=True)
     state = _make_state(qa_dir)
     state.pr_id = pr_id
@@ -402,6 +402,31 @@ def test_resume_noop_when_no_qa_root(tmp_path):
          patch.object(qa_loop, "resume_qa_background") as resume_bg:
         qa_loop_ui._resume_incomplete_qa(app)
     resume_bg.assert_not_called()
+
+
+@pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])
+def test_resume_prefers_newest_snapshot_over_superseded_run(tmp_path,
+                                                            stale_loop):
+    """A fresh start leaves the stopped run's snapshot (overall written,
+    completion never processed) beside the live run's.  The restart must
+    resume the live (newest) run, whatever the directory order, and drop
+    the superseded snapshot."""
+    import os
+    app = _make_app(tmp_path)
+    stale = _seed_run(tmp_path, overall="INPUT_REQUIRED", loop=stale_loop)
+    os.utime(_resume_file_path(stale), (1_000_000, 1_000_000))
+    live = _seed_run(tmp_path, overall="", loop="live")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args[0][0].qa_workdir == str(live)
+    on_complete.assert_not_called()
+    assert _resume_file_path(live).is_file()
+    assert not _resume_file_path(stale).exists()
 
 
 # ---------------------------------------------------------------------------
