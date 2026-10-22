@@ -4096,6 +4096,13 @@ def run_qa_sync(
             f"  pm pr spec {state.pr_id} qa\n\n"
             "Then restart QA from the TUI."
         )
+        # Record it: `pm pr auto-sequence` reads only qa_status.json and
+        # would otherwise report "running: qa" for this ended run forever.
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts,
+                           overall=state.latest_verdict,
+                           scenario_0=state.scenario_0,
+                           error=state._error)
         _notify()
         state.running = False
         return state  # Do not launch scenarios without a QA spec

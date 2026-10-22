@@ -1,5 +1,6 @@
 """Tests for the QA loop orchestration."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -1946,6 +1947,11 @@ class TestSpecGateRunningFlag:
 
         assert not state.running, "state.running must be False after spec gate fires"
         assert state.latest_verdict == VERDICT_INPUT_REQUIRED
+        # `pm pr auto-sequence` reads only qa_status.json: the ended run must
+        # be recorded there, or every tick reports "running: qa".
+        status = json.loads((Path(state.qa_workdir) / "qa_status.json").read_text())
+        assert status["overall"] == VERDICT_INPUT_REQUIRED
+        assert "not generated during planning" in status["error"]
 
 
 class TestParseNewMocksFromPlan:

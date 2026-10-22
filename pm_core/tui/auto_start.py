@@ -1079,7 +1079,11 @@ async def check_and_start(app) -> None:
                               "claimed, skipping", pr_id)
                     _recheck_after_claim(app)
                     continue
-                await _start_pr_quiet(app, pr_id, fresh=True)
+                if await _start_pr_quiet(app, pr_id, fresh=True) is False:
+                    # Nothing launched (e.g. the impl spec went pending):
+                    # the next pass must not wait out our claim.
+                    from pm_core.signoff import release_return_launch
+                    release_return_launch(app._root, pr_id, "impl")
             else:
                 await _start_pr_quiet(app, pr_id)
             started = True
@@ -1266,8 +1270,8 @@ def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
     return return_awaiting(pr) == hop
 
 
-async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
-    """Start a PR without changing TUI focus.
+async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> bool:
+    """Start a PR without changing TUI focus; False when ``pr start`` failed.
 
     Runs ``pm pr start --background <pr_id>`` as a subprocess. The
     ``--background`` flag tells ``pr start`` to create the tmux window
@@ -1308,8 +1312,9 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
         _log.warning("auto_start: pm pr start %s failed: %s", pr_id, stderr_text[:200])
         if isinstance(quiet, dict):
             quiet.pop(pr_id, None)
-    else:
-        _log.info("auto_start: pm pr start %s succeeded", pr_id)
+        return False
+    _log.info("auto_start: pm pr start %s succeeded", pr_id)
+    return True
 
 
 # ---------------------------------------------------------------------------

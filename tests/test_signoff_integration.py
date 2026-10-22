@@ -894,6 +894,127 @@ def test_tui_skipped_return_claim_schedules_one_recheck(tmp_path):
     assert len(timers) == 1
 
 
+def _fresh_impl_claim():
+    return {"hop": "impl", "at": datetime.now(timezone.utc).isoformat()}
+
+
+def test_release_return_launch_frees_the_claim_for_the_next_driver(tmp_path):
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned("in_progress", "impl",
+                                  launch_claim=_fresh_impl_claim())]},
+               tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "impl") is False
+    signoff.release_return_launch(tmp_path, PR, "review")   # other hop: kept
+    assert signoff.claim_return_launch(tmp_path, PR, "impl") is False
+    signoff.release_return_launch(tmp_path, PR, "impl")
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["awaiting"] == "impl" and "launch_claim" not in ret
+    assert signoff.claim_return_launch(tmp_path, PR, "impl") is True
+
+
+def test_tui_refused_hop_relaunch_lets_the_approval_launch_at_once(tmp_path):
+    """SIGNOFF_IMPL while the impl spec is pending review: the hop's own
+    ``pm pr start --fresh`` is refused.  Its claim must not survive the
+    refusal, or the approval's scheduler pass skips the rework launch as
+    "already claimed" until the claim expires (~3 min)."""
+    from pm_core import autostart_state as st
+    from pm_core.tui import auto_start, signoff_ui
+    from tests.test_autostart_multi_target import FakeApp
+    p = _returned("in_progress", "impl", launch_claim=_fresh_impl_claim())
+    p["depends_on"] = []
+    p["spec_pending"] = {"phase": "impl"}
+    app = FakeApp([p], root=tmp_path)
+    app._auto_start = True
+    app._auto_start_targets = {PR: st.make_target_record("t")}
+    app._auto_start_run_id = "run"
+    store.save(app._data, tmp_path)
+    calls = []
+
+    async def refused(_app, pr_id, fresh=False):
+        calls.append((pr_id, fresh))
+        return False
+
+    with patch.object(auto_start, "_start_pr_quiet", refused):
+        asyncio.run(signoff_ui._relaunch_impl(app, PR))
+    assert calls == [(PR, True)]
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["awaiting"] == "impl" and "launch_claim" not in ret
+
+    # The approval clears spec_pending; its pass launches the rework once.
+    def _approve(data):
+        store.get_pr(data, PR).pop("spec_pending")
+    store.locked_update(tmp_path, _approve)
+    app._data = store.load(tmp_path)
+    calls.clear()
+
+    async def started(_app, pr_id, fresh=False):
+        calls.append((pr_id, fresh))
+        return True
+
+    with patch.object(auto_start, "_start_pr_quiet", started), \
+         patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+         patch("pm_core.runtime_state.get_action_state", return_value={}), \
+         patch("pm_core.tui.signoff_ui.advance_all"):
+        asyncio.run(auto_start.check_and_start(app))
+    assert calls == [(PR, True)]
+    assert not getattr(app, "_return_claim_recheck", False)
+
+
+def test_tui_failed_catch_up_relaunch_releases_its_claim(tmp_path):
+    from pm_core import autostart_state as st
+    from pm_core.tui import auto_start
+    from tests.test_autostart_multi_target import FakeApp
+    p = _returned("in_progress", "impl")
+    p["depends_on"] = []
+    app = FakeApp([p], root=tmp_path)
+    app._auto_start = True
+    app._auto_start_targets = {PR: st.make_target_record("t")}
+    app._auto_start_run_id = "run"
+    store.save(app._data, tmp_path)
+
+    async def refused(_app, pr_id, fresh=False):
+        return False
+
+    with patch.object(auto_start, "_start_pr_quiet", refused), \
+         patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+         patch("pm_core.runtime_state.get_action_state", return_value={}), \
+         patch("pm_core.tui.signoff_ui.advance_all"):
+        asyncio.run(auto_start.check_and_start(app))
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert "launch_claim" not in ret
+    assert signoff.claim_return_launch(tmp_path, PR, "impl") is True
+
+
+@pytest.mark.parametrize("claim", [True, False])
+def test_cli_refused_rework_start_releases_the_claim(tmp_path, claim):
+    """Hop tick (claim written by the hop) or catch-up tick (claim taken by
+    the tick): a refused ``pm pr start --fresh`` (impl spec pending review)
+    exits 1 and releases the claim, so the tick after the approval prints
+    "returning to impl (relaunched)" instead of "running: impl" until the
+    claim expires."""
+    import click
+    from pm_core.cli import pr as pr_cli
+    extra = {"launch_claim": _fresh_impl_claim()} if claim else {}
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned("in_progress", "impl", **extra)]},
+               tmp_path)
+    if not claim:
+        assert signoff.claim_return_launch(tmp_path, PR, "impl") is True
+    with patch.object(pr_cli, "pr_start",
+                      MagicMock(side_effect=SystemExit(1))), \
+         click.Context(pr_cli.pr_auto_sequence).scope():
+        with pytest.raises(SystemExit):
+            pr_cli._start_return_rework(tmp_path, PR, tmp_path)
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["awaiting"] == "impl" and "launch_claim" not in ret
+    with patch.object(pr_cli, "pr_start", MagicMock()) as start, \
+         click.Context(pr_cli.pr_auto_sequence).scope():
+        pr_cli._start_return_rework(tmp_path, PR, tmp_path)
+    assert start.call_args.kwargs["fresh"] is True
+
+
 @pytest.mark.parametrize("claimed", [True, False])
 def test_tui_review_catch_up_takes_the_return_launch_claim(tmp_path, claimed):
     """After a TUI restart the review loop's --fresh launch for a REVIEW

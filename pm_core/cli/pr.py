@@ -3529,11 +3529,7 @@ def pr_auto_sequence(pr_id: str):
             if not claim_return_launch(root, pr_id, "impl"):
                 click.echo("running: impl")
                 return
-            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
-                       background=True, transcript=str(impl_transcript),
-                       companion=False)
+            _start_return_rework(root, pr_id, tdir)
             click.echo("sign_off: returning to impl (relaunched)")
             return
         idle, gone = _check_impl_idle(pm_session, pr_entry, tdir)
@@ -3754,8 +3750,6 @@ def pr_auto_sequence(pr_id: str):
                 f"sign_off: returning to review (iteration {next_iter})")
             return
         if hop == "impl":
-            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
-            ctx = click.get_current_context()
             # fresh=True: a bounce must RELAUNCH the impl agent so it actually
             # reworks against the sign-off feedback.  With fresh=False the
             # pre-existing (idle) impl window short-circuits pr_start's
@@ -3764,9 +3758,7 @@ def pr_auto_sequence(pr_id: str):
             # in_review with zero rework.  fresh=True reuses the existing
             # workdir (status is in_progress) but kills the stale window and
             # starts a fresh session, mirroring the sign_off->review hop.
-            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
-                       background=True, transcript=str(impl_transcript),
-                       companion=False)
+            _start_return_rework(root, pr_id, tdir)
             click.echo("sign_off: returning to impl")
             return
         # hop == "unknown": verdict not actionable or PR moved concurrently.
@@ -3775,6 +3767,27 @@ def pr_auto_sequence(pr_id: str):
 
     click.echo(f"unknown status: {status}", err=True)
     raise SystemExit(2)
+
+
+def _start_return_rework(root: Path, pr_id: str, tdir: Path) -> None:
+    """``pm pr start --fresh --background`` for a sign-off IMPL return.
+
+    The caller holds the return's launch claim.  When the start is refused
+    (impl spec pending review) the claim is released, so the tick after
+    the approval launches the rework instead of waiting for the claim to
+    expire.
+    """
+    impl_transcript = tdir / f"impl-{pr_id}.jsonl"
+    ctx = click.get_current_context()
+    try:
+        ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
+                   background=True, transcript=str(impl_transcript),
+                   companion=False)
+    except (SystemExit, Exception) as e:
+        if not isinstance(e, SystemExit) or e.code:
+            from pm_core.signoff import release_return_launch
+            release_return_launch(root, pr_id, "impl")
+        raise
 
 
 def _launch_qa_detached(root: Path, pr_id: str) -> None:

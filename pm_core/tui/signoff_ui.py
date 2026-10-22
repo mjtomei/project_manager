@@ -350,7 +350,12 @@ async def _relaunch_impl(app, pr_id: str) -> None:
     launching = _auto_start._launching(app)
     launching.add(pr_id)
     try:
-        await _auto_start._start_pr_quiet(app, pr_id, fresh=True)
+        if await _auto_start._start_pr_quiet(app, pr_id, fresh=True) is False:
+            # Refused (impl spec pending review) or failed: release the
+            # claim the hop wrote, so the approval's scheduler pass launches
+            # the rework at once instead of skipping it as claimed.
+            from pm_core.signoff import release_return_launch
+            release_return_launch(app._root, pr_id, "impl")
     except Exception as e:
         _log.exception("signoff_ui: impl relaunch failed for %s", pr_id)
         app.log_message(f"Auto-start error: {e}")

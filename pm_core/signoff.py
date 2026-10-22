@@ -801,6 +801,29 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
     return won["ok"]
 
 
+def release_return_launch(root: Path, pr_id: str, hop: str) -> None:
+    """Drop the *hop* launch claim after its holder's launch failed.
+
+    E.g. the hop's own ``pm pr start --fresh`` refused because the impl
+    spec is pending review: nothing launched, so the next driver (the
+    approval's scheduler pass, an auto-sequence tick) must be able to take
+    the launch right away, not only once the claim expires
+    (RETURN_LAUNCH_CLAIM_SECONDS).  Only the failed launcher calls this,
+    while its claim is still fresh, so no other driver holds it.
+    """
+    def _apply(data):
+        pr = store.get_pr(data, pr_id)
+        rec = (pr or {}).get("signoff_return")
+        if isinstance(rec, dict) and rec.get("awaiting") == hop \
+                and (rec.get("launch_claim") or {}).get("hop") == hop:
+            rec.pop("launch_claim", None)
+
+    try:
+        store.locked_update(root, _apply)
+    except Exception as e:
+        _log.warning("release sign-off return launch for %s: %s", pr_id, e)
+
+
 def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
     """The routed *hop* launched a fresh session: stop forcing a relaunch."""
     def _apply(data):
