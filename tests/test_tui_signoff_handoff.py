@@ -726,37 +726,40 @@ def test_slow_launch_in_flight_is_not_duplicated(world_factory):
 def test_signoff_history_attempts_throttle_and_merge_hold(world_factory):
     """Router launches are journaled as sign-off attempts with the relaunch
     throttle as a timer; an O-held PR shows an indefinite manual-merge hold."""
-    from pm_core import history_query
-    app, w = world_factory(stop=True)
-    _qa_pass(app)
-    m = history_query.build_history(PR, pr=app.pr(), live=False)
-    (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
-    assert att["open"] and att["phases"][0]["phase"] == "launching"
-    (thr,) = m["timers"]["active"]
-    assert thr["purpose"] == "sign-off relaunch throttle"
-    assert 0 < thr["remaining_s"] <= 60
+    from pm_core import action_history, history_query
+    # Frozen clock: the throttle countdown and "newest first" ordering must
+    # not depend on how fast these steps run.
+    with action_history.use_clock(lambda: 1_800_000_000.0):
+        app, w = world_factory(stop=True)
+        _qa_pass(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
+        assert att["open"] and att["phases"][0]["phase"] == "launching"
+        (thr,) = m["timers"]["active"]
+        assert thr["purpose"] == "sign-off relaunch throttle"
+        assert 0 < thr["remaining_s"] <= 60
 
-    w.emit("SIGNOFF_MERGE")
-    _poll(app)
-    m = history_query.build_history(PR, pr=app.pr(), live=False)
-    (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
-    assert (att["outcome"], att["verdict"]) == ("done", "SIGNOFF_MERGE")
-    (hold,) = m["holds"]
-    assert hold["purpose"].startswith("manual merge hold")
-    assert hold["remaining_s"] is None
-    assert m["waiting_for"].startswith("human: manual merge hold")
+        w.emit("SIGNOFF_MERGE")
+        _poll(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
+        assert (att["outcome"], att["verdict"]) == ("done", "SIGNOFF_MERGE")
+        (hold,) = m["holds"]
+        assert hold["purpose"].startswith("manual merge hold")
+        assert hold["remaining_s"] is None
+        assert m["waiting_for"].startswith("human: manual merge hold")
 
-    # HEAD moves: the stale run is relaunched as a new, flagged attempt,
-    # and the previous SIGNOFF_MERGE's manual-merge hold no longer applies.
-    w.head = "f" * 40
-    _poll(app)
-    m = history_query.build_history(PR, pr=app.pr(), live=False)
-    runs = [a for a in m["attempts"] if a["action"] == "signoff"]
-    assert len(runs) == 2 and runs[0].get("stale") is True
-    assert m["holds"] == []
-    assert any(r["timer"] == f"merge-hold:{PR}"
-               and r["resolution"] == "superseded"
-               for r in m["timers"]["recent"])
+        # HEAD moves: the stale run is relaunched as a new, flagged attempt,
+        # and the previous SIGNOFF_MERGE's manual-merge hold no longer applies.
+        w.head = "f" * 40
+        _poll(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        runs = [a for a in m["attempts"] if a["action"] == "signoff"]
+        assert len(runs) == 2 and runs[0].get("stale") is True
+        assert m["holds"] == []
+        assert any(r["timer"] == f"merge-hold:{PR}"
+                   and r["resolution"] == "superseded"
+                   for r in m["timers"]["recent"])
 
 
 def test_terminal_signoff_hop_does_not_reread_journal_each_poll(

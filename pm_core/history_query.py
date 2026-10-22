@@ -91,8 +91,7 @@ def build_history(pr_id: str, *, pr: dict | None = None,
             if seen is not None:
                 a["last_seen_t"] = max(a["last_seen_t"], seen)
     # A parent was last seen no earlier than any of its descendants.
-    for a in sorted(attempts.values(), key=lambda a: a["started_t"],
-                    reverse=True):
+    for a in sorted(attempts.values(), key=_start_order, reverse=True):
         p = a.get("_parent_obj")
         if p is not None:
             p["last_seen_t"] = max(p["last_seen_t"], a["last_seen_t"])
@@ -148,12 +147,18 @@ def build_history(pr_id: str, *, pr: dict | None = None,
         "holds": holds,
         "runtime": runtime,
         "attempts": [_export(a) for a in
-                     sorted(roots, key=lambda a: a["started_t"],
-                            reverse=True)],
+                     sorted(roots, key=_start_order, reverse=True)],
         "milestones": _milestones(pr or {}),
         "missing": _missing_notes(pr or {}, events),
     }
     return model
+
+
+def _start_order(a: dict) -> tuple:
+    """Sort key for attempts by start: journal order breaks timestamp ties
+    (``t`` has millisecond resolution), so "newest first" stays right for
+    attempts started within the same millisecond."""
+    return a["started_t"], a["seq"]
 
 
 def _display_id(pr: dict, pr_id: str) -> str:
@@ -174,7 +179,8 @@ def _replay(events: list[dict]):
                 continue
             a = {k: v for k, v in ev.items()
                  if k not in ("v", "ts", "t", "kind", "attempt", "pr_id")}
-            a.update({"id": aid, "started_t": t, "last_seen_t": t,
+            a.update({"id": aid, "seq": len(attempts),
+                      "started_t": t, "last_seen_t": t,
                       "phases": [], "ended_t": None, "outcome": None,
                       "verdict": None, "detail": None, "inferred": None,
                       "children": []})
@@ -274,7 +280,7 @@ def _fold_retracked(attempts: dict[str, dict],
     """
     aliases: dict[str, str] = {}
     last: dict[str, dict] = {}  # action -> newest runtime attempt
-    for a in sorted(attempts.values(), key=lambda a: a["started_t"]):
+    for a in sorted(attempts.values(), key=_start_order):
         if a.get("source") != "runtime" or a.get("loop_id"):
             continue
         action = a.get("action") or ""
@@ -358,7 +364,7 @@ def _reconcile_attempts(attempts: dict[str, dict],
     # Close children of ended parents at the parent's end (start order, so
     # a closed parent propagates down the tree).  The linked parent also
     # covers iterations attached by loop_id in _link_children.
-    for a in sorted(attempts.values(), key=lambda a: a["started_t"]):
+    for a in sorted(attempts.values(), key=_start_order):
         parent = a.get("_parent_obj")
         if not parent or a["ended_t"] is not None:
             continue
@@ -378,7 +384,7 @@ def _reconcile_attempts(attempts: dict[str, dict],
 
 
 def _link_children(attempts: dict[str, dict]) -> None:
-    by_start = sorted(attempts.values(), key=lambda a: a["started_t"])
+    by_start = sorted(attempts.values(), key=_start_order)
     for a in by_start:
         parent = attempts.get(a.get("parent") or "")
         if parent is None and a.get("source") != "runtime" and a.get("loop_id"):
@@ -632,7 +638,7 @@ def _current_activity(attempts: dict[str, dict], timer_rows: dict,
     for row in timer_rows["active"] + timer_rows["overdue"]:
         if row.get("owner_attempt"):
             active_by_owner.setdefault(row["owner_attempt"], []).append(row)
-    for a in sorted(attempts.values(), key=lambda a: a["started_t"]):
+    for a in sorted(attempts.values(), key=_start_order):
         if not a["open"]:
             continue
         if any(c["open"] for c in a["children"]):
@@ -843,7 +849,7 @@ def _export(a: dict) -> dict:
                       "detail": s.get("detail"), "open": s["open"]}
                      for s in a.get("spans", [])]
     out["children"] = [_export(c) for c in
-                       sorted(a["children"], key=lambda c: c["started_t"])]
+                       sorted(a["children"], key=_start_order)]
     return out
 
 

@@ -944,6 +944,15 @@ class TestQARunJournal:
 # ---------------------------------------------------------------------------
 
 class TestReconciliation:
+    def test_same_millisecond_attempts_keep_journal_order(self, clock):
+        # ``t`` has millisecond resolution: attempts started within one
+        # millisecond must still list newest first.
+        first = ah.start_attempt(PR, "signoff", label="first")
+        ah.end_attempt(PR, first, "done")
+        second = ah.start_attempt(PR, "signoff", label="second")
+        m = hq.build_history(PR, now=clock.t, live=False)
+        assert [a["id"] for a in m["attempts"]] == [second, first]
+
     def test_timer_states(self, clock):
         owner = ah.start_attempt(PR, "review-loop")
         ah.arm_timer(PR, "g", purpose="grace", owner_action="review-loop",
