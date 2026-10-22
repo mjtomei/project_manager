@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-173e11e
+  active_pr: pr-f4db036
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31718,6 +31718,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T22:34:15.023090+00:00'
   updated_at: '2026-10-22T22:34:15.023090+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f4db036
+  plan: bugs
+  title: 'Bug: orphaned QA container cleanup keeps a PR''s old containers when another
+    PR has a qa window with the same -sN suffix'
+  branch: pm/pr-f4db036-bug-orphaned-qa-container-cleanup-keeps-a-pr-s-old
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py cleanup_orphaned_qa_containers (called at QA
+    start, qa_loop.py ~4046) keeps a container if ANY tmux window starting with "qa-"
+    ends with the container''s -sN suffix, not the window of that PR. Repro (pr-592e4bd
+    QA S10, container mode, 2 PRs): run QA on PR A and PR B (both get scenarios s3/s4),
+    then z t on A while B''s qa-<B>-s3/-s4 windows still exist: A''s previous-loop
+    containers pm-<tag>-qa-<A>-<oldloop>-s3/-s4 are never removed (still Up after
+    A''s new run completes), while B''s old ones are removed at its own z t. Fix:
+    compare against the window name for this PR (qa-<display_id>-s<N>), not any qa-*
+    window with the suffix. Evidence /pm-captures/scenarios/10/story2 (app.log 22:35:24-27).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T22:42:09.505150+00:00'
+  updated_at: '2026-10-22T22:42:09.505150+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
