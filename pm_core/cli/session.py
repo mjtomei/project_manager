@@ -1690,11 +1690,22 @@ def _session_pm_argv(session: str, args: list[str]) -> list[str]:
     """
     import sys
     import pm_core
-    base = pane_registry.base_session_name(session)
-    tag = base.removeprefix("pm-") if base.startswith("pm-") else ""
+    tag = _session_tag_from_name(session) or ""
     dispatcher_root = str(Path(pm_core.__file__).parent.parent)
     return [sys.executable, "-c", _SESSION_PM_BOOTSTRAP,
             dispatcher_root, tag] + list(args)
+
+
+def _session_tag_from_name(session: str) -> str | None:
+    """Return the ``~/.pm/sessions/<tag>`` key for tmux *session*.
+
+    The session name is ``pm-<tag>``, optionally with a grouped-session
+    ``~N`` suffix (see ``_get_session_name_for_cwd``).  None when the
+    name isn't a pm session.
+    """
+    base = pane_registry.base_session_name(session)
+    tag = base.removeprefix("pm-")
+    return tag if tag != base else None
 
 
 def _resolve_root_from_session(session: str) -> Path | None:
@@ -1704,9 +1715,8 @@ def _resolve_root_from_session(session: str) -> Path | None:
     Returns the persisted root if present and still on disk, else None.
     """
     from pm_core.paths import get_session_pm_root
-    base = pane_registry.base_session_name(session)
-    tag = base.removeprefix("pm-")
-    if tag == base:
+    tag = _session_tag_from_name(session)
+    if tag is None:
         return None
     return get_session_pm_root(tag)
 

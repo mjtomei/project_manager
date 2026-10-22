@@ -117,3 +117,44 @@ def test_direct_shell_invocation_still_cwd_walks(tmp_path, monkeypatch):
 
     assert "DECOY-CLI ran" in r.stdout, r.stderr
     assert "chosen_via=cwd_walk" in _wrapper_log(home)
+
+
+def _fake_pm_source(root: Path) -> Path:
+    (root / "pm_core" / "cli").mkdir(parents=True)
+    return root
+
+
+def _resolve_for_session(monkeypatch, tag):
+    """Run wrapper.main_for_session(tag) with _run_cli stubbed out."""
+    from pm_core import wrapper
+    seen = {}
+    monkeypatch.setattr(wrapper, "_run_cli",
+                        lambda root, front=False: seen.update(root=root, front=front) or 0)
+    wrapper.main_for_session(tag)
+    return seen
+
+
+def test_main_for_session_override_beats_pm_root(tmp_path, monkeypatch):
+    home, session_root = _setup(tmp_path, monkeypatch)
+    meta = _fake_pm_source(tmp_path / "meta")
+    (home / ".pm" / "sessions" / TAG / "override").write_text(f"{meta}\n")
+
+    assert _resolve_for_session(monkeypatch, TAG) == {"root": str(meta), "front": True}
+
+
+def test_main_for_session_never_cwd_walks(tmp_path, monkeypatch):
+    """No override/pm_root for the tag (or no tag at all): keep the
+    dispatcher's code rather than falling back to the cwd's pm_core."""
+    home, _ = _setup(tmp_path, monkeypatch)
+    (home / ".pm" / "sessions" / TAG / "pm_root").unlink()
+
+    for tag in (TAG, ""):
+        assert _resolve_for_session(monkeypatch, tag)["root"] is None
+
+
+def test_session_pm_argv_tag_from_grouped_session():
+    from pm_core.cli.session import _session_pm_argv
+    argv = _session_pm_argv(f"{SESSION}~2", ["pr", "list"])
+    assert argv[1] == "-c"
+    assert argv[3:] == [str(REPO_ROOT), TAG, "pr", "list"]
+    assert _session_pm_argv("not-a-pm-session", [])[4] == ""
