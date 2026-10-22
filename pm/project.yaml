@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T14:59:05.955041+00:00'
+  updated_at: '2026-10-22T15:02:03.440897+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30045,6 +30045,15 @@ prs:
       synced.'
     created_at: '2026-10-22T14:59:05Z'
     last_edited: '2026-10-22T14:59:05Z'
+  - id: note-3e403ae
+    text: 'Review 450f i2: fixed reading-context leak — a message to a session reached
+      via the menu from an unrelated document (e.g. #214 spec → Sessions → #216 impl)
+      carried #214 spec context. App.contextDoc now attaches the origin doc only to
+      its linked session or a same-PR session (glasses + phone compose). check.mjs
+      gains a rule check (4 cases); all 186 journey frames byte-identical, so no recapture.
+      Proposal "Context travels" row updated; /pm-captures/even-realities synced.'
+    created_at: '2026-10-22T15:02:03Z'
+    last_edited: '2026-10-22T15:02:03Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
