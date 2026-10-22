@@ -30268,6 +30268,20 @@ prs:
       window after Ctrl+R is ~1 s before the resume re-arms it. Drivers in /pm-captures/scenarios/13/scripts.'
     created_at: '2026-10-22T01:05:37Z'
     last_edited: '2026-10-22T01:05:37Z'
+  - id: note-0f1f9fb
+    text: 'S14 refine (dc41da83): (1) pm pr merge needs --no-signoff-check for an
+      un-signed-off PR. (2) Stale spec flag on a merged PR: `pm set spec-mode review`
+      + `pm pr spec <pr> qa` while in_review sets spec_pending (hold "qa spec awaiting
+      approval"); revert with `pm set spec-mode prompt` (global setting, would pause
+      later starts). Merge does not clear spec_pending; history drops it as a hold
+      once merged (9ad31733). (3) sign-off relaunch throttle (60 s gate) is never
+      released on a ready_to_merge hop, so once the router attempt ends done it reads
+      "cancelled (owner ended)" in Recent timers, not active. (4) Plain pm pr cleanup
+      rmtree of a workdir under a live fake pane: fake os.getcwd() raises in transcript
+      writes (idle hooks swallow it), so run the plain-cleanup check on a PR whose
+      fake panes already emitted (idle), never mid-iteration.'
+    created_at: '2026-10-22T00:41:31Z'
+    last_edited: '2026-10-22T00:41:31Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
