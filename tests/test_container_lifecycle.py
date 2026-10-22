@@ -287,6 +287,22 @@ class TestReaperOwnership:
         assert out.removed == [name]  # the other live-pane container is kept
         assert reaper.pending_failures() == {}
 
+    def test_failed_owner_release_does_not_take_a_recreated_container(self, fake_env):
+        """The retry marker is bound to the released container's id: a new
+        container launched under the same name keeps its live-pane owner."""
+        name = "pm-repo-ab12-qa-pr-aaaa-L-s1"
+        fake_env["containers"] = [_info(name)]
+        fake_env["panes"] = _Panes([f"podman exec -it {name} x"])
+        fake_env["fail"] = {name}
+        reaper.release_containers([name], owner_release=True)
+        assert reaper.pending_failures()[name]["id"] == "id-" + name
+
+        fake_env["fail"] = set()
+        fake_env["containers"] = [_info(name, id="id-replacement")]
+        out = reaper.reconcile(reason="periodic")
+        assert out.removed == []
+        assert "owned by live pane" in out.decisions[0].reason
+
     def test_pid_pressure_reported_for_kept(self, fake_env, monkeypatch):
         name = "pm-repo-ab12-qa-pr-aaaa-L-s28"
         fake_env["containers"] = [_info(name)]

@@ -455,14 +455,14 @@ class Outcome:
 
 def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
             prs: _PrStatus, now: float,
-            pending_release: frozenset[str] = frozenset()) -> Decision:
+            pending_release: dict[str, str] | None = None) -> Decision:
     if is_retained(info.name) and not scope.include_retained:
         return Decision(info, "keep", "explicitly retained (pm container retain)")
     if container_mod.launch_in_progress(info.name):
         return Decision(info, "keep", "launch in progress")
     if scope.owner_release:
         return Decision(info, "remove", "released by its run", released=True)
-    if info.name in pending_release:
+    if _is_pending_release(info, pending_release or {}):
         # Its run already let it go but the removal failed; the run's panes
         # are still exec'd into it and would otherwise "own" it forever.
         return Decision(info, "remove", "released by its run (retrying failed removal)",
@@ -485,6 +485,18 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
             return Decision(info, "remove", f"tmux session pm-{info.session_tag} gone")
     what = "QA run finished or superseded" if info.kind == "qa" else "attempt ended"
     return Decision(info, "remove", f"no owning pane ({what})")
+
+
+def _is_pending_release(info: ContainerInfo, pending: dict[str, str]) -> bool:
+    """True when *info* is the very container whose owner release failed.
+
+    Bound to the container id: a replacement created under the same name
+    belongs to a new launch and must go through the normal ownership checks.
+    """
+    if info.name not in pending:
+        return False
+    rec_id = pending[info.name]
+    return not rec_id or not info.id or rec_id == info.id
 
 
 def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
@@ -583,9 +595,9 @@ def plan(scope: Scope | None = None) -> Outcome:
         out.error = f"{container_mod._get_runtime()} is not available"
         return out
     cache, prs, now = _PaneCache(), _PrStatus(), time.time()
-    pending_release = frozenset(
-        n for n, f in pending_failures().items()
-        if isinstance(f, dict) and f.get("owner_release"))
+    pending_release = {
+        n: str(f.get("id") or "") for n, f in pending_failures().items()
+        if isinstance(f, dict) and f.get("owner_release")}
     for info in infos:
         if scope.matches(info):
             out.decisions.append(_decide(info, scope, cache, prs, now,
@@ -767,10 +779,13 @@ def _record(out: Outcome, scope: Scope, reason: str,
         failures = {k: v for k, v in failures.items() if k in inventory}
     for d in out.decisions:
         failures.pop(d.info.name, None)
+    ids = {d.info.name: d.info.id for d in out.decisions}
     for name, err in out.failures.items():
         failures[name] = {"error": err, "at": int(time.time()), "reason": reason}
         if name in out.released_failures:
             failures[name]["owner_release"] = True
+            if ids.get(name):
+                failures[name]["id"] = ids[name]
     state = {
         "last_run": int(time.time()),
         "last_reason": reason,
