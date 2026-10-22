@@ -850,7 +850,7 @@ async def check_and_start(app) -> None:
             # rework launch that finished meanwhile cleared the mark — a
             # second --fresh would kill that new session.
             if pr.get("status") == "in_progress" \
-                    and _awaiting_impl_on_disk(app, pr_id):
+                    and _awaiting_on_disk(app, pr_id, "impl"):
                 # One launcher: a concurrent `pm pr auto-sequence` tick (or
                 # our own sign-off hop) may already be relaunching it, and a
                 # second --fresh would kill that session.
@@ -908,6 +908,16 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
             continue
+        # A sign-off REVIEW return still waiting for its launch (TUI
+        # restart after the hop): the loop's --fresh launch would kill one
+        # a concurrent `pm pr auto-sequence` tick is starting, so take the
+        # return's launch claim first (as the impl catch-up does).
+        if _awaiting_on_disk(app, pr_id, "review"):
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(app._root, pr_id, "review"):
+                _log.info("auto_start: %s review return launch already "
+                          "claimed, skipping", pr_id)
+                continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
@@ -998,15 +1008,15 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         qa_loop_ui.start_qa(app, pr_id)
 
 
-def _awaiting_impl_on_disk(app, pr_id: str) -> bool:
-    """Whether the PR's sign-off IMPL return still waits for its launch."""
+def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
+    """Whether the PR's sign-off return to *hop* still waits for its launch."""
     from pm_core.signoff import return_awaiting
     try:
         pr = store.get_pr(store.load(app._root), pr_id)
     except Exception:
         _log.debug("auto_start: reload for %s failed", pr_id, exc_info=True)
         return False
-    return return_awaiting(pr) == "impl"
+    return return_awaiting(pr) == hop
 
 
 async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:

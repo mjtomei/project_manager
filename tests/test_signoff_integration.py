@@ -774,3 +774,30 @@ def test_tui_scheduler_leaves_a_claimed_impl_return_launch_alone(tmp_path):
          patch("pm_core.tui.signoff_ui.advance_all"):
         asyncio.run(auto_start.check_and_start(app))
     assert calls == []
+
+
+@pytest.mark.parametrize("claimed", [True, False])
+def test_tui_review_catch_up_takes_the_return_launch_claim(tmp_path, claimed):
+    """After a TUI restart the review loop's --fresh launch for a REVIEW
+    return is claim-guarded like the impl catch-up: a claimed launch (a
+    concurrent auto-sequence tick) is left alone; otherwise the TUI takes
+    the claim and starts the loop."""
+    from pm_core import autostart_state as st
+    from pm_core.tui import auto_start
+    from tests.test_autostart_multi_target import FakeApp
+    extra = ({"launch_claim": {"hop": "review", "at": datetime.now(
+        timezone.utc).isoformat()}} if claimed else {})
+    p = _returned("in_review", "review", **extra)
+    p["depends_on"] = []
+    app = FakeApp([p], root=tmp_path)
+    app._auto_start = True
+    app._auto_start_targets = {PR: st.make_target_record("t")}
+    app._auto_start_run_id = "run"
+    store.save(app._data, tmp_path)
+    with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
+         patch.object(auto_start, "get_transcript_dir", return_value=tmp_path):
+        auto_start._auto_start_review_loops(app, [p])
+    assert start.called is not claimed
+    if not claimed:
+        rec = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+        assert rec["launch_claim"]["hop"] == "review"
