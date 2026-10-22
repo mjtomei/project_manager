@@ -132,6 +132,51 @@ Then no client moves.
 The driver exits before creating a window (unchanged). No window is created
 and no client moves.
 
+## Incidental fixes carried on this branch (from QA rounds 1-2)
+
+These came out of earlier QA runs and were committed here, so they are in
+scope for re-verification:
+
+**R10: The first `zz t` on an in_review PR moves it to qa (cff91240).**
+The tree shows the PR as qa while the first self-driving run is going, not
+only after the first restart.
+
+**R11: A plain-`t` NEEDS_WORK with auto-start off repaints the tree
+(976b6f6a).** The PR shows in_review as soon as the verdict lands, without a
+manual refresh.
+
+**R12: QA verdicts get processed and the pass count can be seen (8b793611,
+59254fe1).** A QA start on a PR with no workdir at the last refresh still
+has its verdict handled, so the self-driving restart happens without `r`.
+"QA PASS (N/M consecutive) — restarting QA" stays on screen for about 3 s
+instead of being overwritten in the same frame by "Starting QA".
+
+**R13: Pane-launch confirmations show over a sticky message (af42a1d9).**
+`L` pressed while "Review loop done ✓ PASS" (or another sticky message) holds
+the status line still paints "Launched/Focused existing log pane".
+
+Out of scope, filed separately: pr-064fe5b (user `zz t` over a leftover
+`qa-<pr>` window replaces it without focusing). R6 for `zz t` applies only
+when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
+
+## Setup gotchas (from earlier rounds)
+
+* Append `~/.local/bin` to PATH after `/usr/bin`, or the fake-claude shim is
+  missing and panes die with rc=127.
+* A fake planner doesn't write qa.md. Seed `pm/specs/<pr>/qa.md` (or run `pm
+  pr spec <pr> qa`) in each PR before a QA PASS is needed, or the run stops
+  at INPUT_REQUIRED.
+* `qa-pass-count` is not a `pm set` setting. Write
+  `~/.pm/settings/qa-pass-count` directly.
+* The interactive Scenario 0 pane uses up the first scripted `qa_scenario`
+  verdict, so a bounce needs `["NEEDS_WORK","NEEDS_WORK","PASS"]`.
+* Clients attached to the same tmux session share its current window. Use
+  one client per session (base `$S`, plus `$S~1`/`$S~2` from more `pm
+  session` invocations) and drive keys through the user's own client (e.g.
+  `tmux -L rec send-keys`), since bare send-keys has no source client.
+* `pm pr auto-sequence` on a closed PR prints "unknown status: closed" (exit
+  2). On a merged PR it exits 0. qa-run-bg logs "is closed; skipping QA".
+
 ## Pass/fail criteria
 
 * **Pass:** Every Then holds when checked against the polled client/window
