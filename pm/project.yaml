@@ -15890,7 +15890,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T17:07:19.908645+00:00'
+  updated_at: '2026-10-22T17:17:09.010035+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16073,6 +16073,22 @@ prs:
       /pm-captures/report.html'
     created_at: '2026-10-22T17:07:19Z'
     last_edited: '2026-10-22T17:07:19Z'
+  - id: note-0960c73
+    text: 'Impl after SIGNOFF_IMPL (2026-10-22): merged master 4dcbff73 at 37637456.
+      One mechanism kept: master PM_POPUP_SESSION + _session_pm_argv; PM_CALLER_SESSION
+      removed; its stale guard ported (get_session_name honours PM_POPUP_SESSION only
+      while has-session -t =<name> succeeds). Popup/tmux tests 169 pass; full suite
+      has 60 failures (test_merge_publish, test_signoff_integration, test_git_ops,
+      test_hook_events), the same set as on a clean master worktree (container git
+      env). Live smoke on scratch socket: merged M excluded from TUI-opened nav, M
+      home shows notice and h/0/l work, s dispatch on a live PR switched the window
+      via the session argv. Seen, not fixed: several keys sent in ONE burst (send-keys
+      h 0 l) apply only the first, because fzf reads the rest and exits. The popup
+      stays open. Still TODO for QA: two-client dispatch (S14), one live action from
+      a PR window, and the before/after capture of the original symptom on master
+      vs the fix.'
+    created_at: '2026-10-22T17:17:08Z'
+    last_edited: '2026-10-22T17:17:08Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
