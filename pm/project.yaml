@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T06:14:35.489483+00:00'
+  updated_at: '2026-10-22T06:44:48.317007+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8448,6 +8448,16 @@ prs:
       (move the bare away).'
     created_at: '2026-10-22T04:30:42Z'
     last_edited: '2026-10-22T04:30:42Z'
+  - id: note-f75a5e7
+    text: 'Sign-off (2026-10-22) SIGNOFF_MERGE at 9db48aba: QA S22-S27 PASS on 6dd086a4
+      (last code commit 291af156, reviewed). Suite 3342 pass / 1 fail (test_hook_events
+      installer, also fails on master). git>=2.38 merge-tree path, only covered by
+      mocks in QA (container git 2.34), checked by sign-off with a locally built git
+      2.45: 92 integration/publish tests pass, and merge-tree and the worktree merge
+      give the same trees and conflict lists. Latest master e4d6353d moved only pm/project.yaml
+      and merges cleanly. Report: $CAP/report.html'
+    created_at: '2026-10-22T06:44:48Z'
+    last_edited: '2026-10-22T06:44:48Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
@@ -30565,6 +30575,78 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T05:10:36.683873+00:00'
   updated_at: '2026-10-22T05:10:36.683873+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b530f8b
+  plan: improvements
+  title: Launch a check session when a GitHub merge lands on a base that moved after
+    sign-off
+  branch: pm/pr-b530f8b-file-a-follow-up-pr-when-a-github-merge-lands-on-a
+  status: pending
+  depends_on:
+  - pr-ac10f03
+  description: 'GitHub merges are pinned to the approved PR head (gh pr merge --match-head-commit),
+    but GitHub has no base-revision precondition. A commit pushed to the base between
+    pm''s ls-remote check and GitHub''s merge (a sneak-in merge) is not prevented.
+    If it textually conflicts, GitHub refuses and pm returns the PR to sign-off. If
+    it merges cleanly, the published tree is a combination nobody signed off. Usually
+    that is harmless, but semantic conflicts (a renamed function the PR calls, a changed
+    default) are possible. Today _verify_github_merge (pm_core/cli/pr.py) detects
+    this after the fact, prints a WARNING, records pr["merge_integrity"] and adds
+    a PR note. Keep that behavior and the current GitHub configuration (GitHub stays
+    the merger; no direct lease push, no required branch-protection change).
+
+
+    Add: when verification records a base-moved integrity problem (first parent !=
+    signed-off base, published tree != approved candidate_tree), launch a Claude check
+    session for the merged PR. The session assesses whether the sneaked-in commits
+    interact badly with the PR. It is given the merged PR id, the merge commit, the
+    signed-off base vs the actual first parent, the sneaked-in commit range (git log
+    <signed_off_base>..<actual_first_parent>), the files those commits changed that
+    overlap the PR''s changed files, the published vs approved tree, and the PR''s
+    sign-off report/spec. It can read the combined code on the base and run tests.
+    It ends with a verdict: no issue (recorded on merge_integrity, done), or potential
+    issue. On a potential issue it has the option to file a pending follow-up PR (pm
+    pr add, description with its findings and the evidence above), or to leave a note
+    and escalate to the user. Filing is the session''s judgment, not automatic. The
+    session never reverts or pushes the base.
+
+    - Launch at most one check session per merge (idempotent across recoveries: --propagation-only,
+    repeated --no-signoff-check, verification re-runs). Record the session''s outcome
+    on merge_integrity (e.g. check_verdict, followup_pr) and in the merged PR''s notes.
+
+    - Launch it like other pm sessions: a tmux window from the TUI or the CLI, background
+    when driven by auto-start. Show it in pm pr list / the TUI tree, e.g. a marker
+    on the merged PR while the check is pending or running. Its prompt follows the
+    existing prompt_gen conventions.
+
+    - Decide whether the other integrity cases (GitHub merged a different head; no
+    merge commit of the approved head) also launch the check. Those mean unsigned
+    commits on the PR branch, a related re-validation need. At minimum make the behavior
+    explicit.
+
+    - Project setting: launch the check automatically (default), only note, or ask
+    in the TUI.
+
+    - Coordinate with pr-2e06289: the TUI background GitHub sync currently finalizes
+    GitHub-side merges without the integrity check. Once it verifies, it must go through
+    the same check-session path.
+
+
+    Verification: fake-github with a one-shot hook that commits to master inside gh
+    pr merge (as in QA S27 story 5). Assert one check session launches with the commit
+    range and overlap in its prompt, and no second session on re-running recovery.
+    A fake-claude ''no issue'' verdict records only on merge_integrity. A ''potential
+    issue'' verdict where the session files a follow-up records the follow-up PR id.
+    A clean merge launches nothing. Record one real check-session run. Cover the pr-2e06289
+    sync path once it is fixed.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T13:47:46.255021+00:00'
+  updated_at: '2026-10-22T13:48:29.542174+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
