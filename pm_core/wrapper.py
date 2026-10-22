@@ -204,7 +204,7 @@ def main():
     return _run_cli(selected_root)
 
 
-def main_for_session(session_tag: str) -> int:
+def main_for_session(session_tag: str):
     """Entry point for commands dispatched from a session's tmux popups.
 
     The prefix+P picker and prefix+M runner run their child pm command
