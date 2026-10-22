@@ -624,8 +624,10 @@ class AutoRunsScreen(ModalScreen):
 
     Renders ``auto_start.build_status(app)`` — the same
     ``pm.autostart.status/1`` dict that ``pm autostart status --json``
-    returns — flattened by ``autostart_state.status_rows``.  Refreshes every
-    2s while open; Enter/f focuses the selected run's tmux window.
+    returns — with the CLI report's layout (``autostart_view``: rows from
+    ``autostart_state.status_rows``, wrapped to at most 99 columns, human
+    waits in red).  Refreshes every 2s while open; Enter/f focuses the
+    selected run's tmux window.
     """
 
     REFRESH_SECONDS = 2.0
@@ -646,21 +648,21 @@ class AutoRunsScreen(ModalScreen):
         Binding("ctrl+r", "restart_app", "Restart", show=False),
     ]
 
+    # 99 report columns + 2 selection gutter + 1 scrollbar + padding/border.
     CSS = """
     AutoRunsScreen {
         align: center middle;
     }
     #runs-container {
-        width: 110;
+        width: 106;
         max-width: 95%;
         height: auto;
         max-height: 85%;
         background: $surface;
         border: solid $primary;
         padding: 0 1;
-    }
-    #runs-title {
-        text-style: bold;
+        scrollbar-gutter: stable;
+        scrollbar-size-vertical: 1;
     }
     #runs-body {
         width: 100%;
@@ -670,17 +672,8 @@ class AutoRunsScreen(ModalScreen):
     }
     """
 
-    _POLICY_STYLES = {"stop": "magenta", "wait": "bold magenta",
-                      "auto": "green"}
-
-    _STATE_STYLES = {
-        "running": "bold green",
-        "waiting": "bold yellow",
-        "paused": "bold magenta",
-        "failed": "bold red",
-        "queued": "cyan",
-        "completed": "green",
-    }
+    # Selection gutter ("▶ ") in front of every row line.
+    _GUTTER = 2
 
     def __init__(self) -> None:
         super().__init__()
@@ -691,6 +684,7 @@ class AutoRunsScreen(ModalScreen):
         self._timer = None
         # (row key, message) shown on the selected row's detail line.
         self._notice: tuple | None = None
+        self._width = 0  # report width the body was last rendered at
 
     def compose(self) -> ComposeResult:
         container = VerticalScroll(id="runs-container")
@@ -699,9 +693,10 @@ class AutoRunsScreen(ModalScreen):
         # selection.  The selected row is scrolled into view instead.
         container.can_focus = False
         with container:
-            yield Label("Auto-start runs", id="runs-title")
+            yield Static("Auto-start runs", id="runs-title")
             yield Static("", id="runs-body")
-            yield Label(
+            # Static (not Label) so the hint wraps in a narrow popup.
+            yield Static(
                 "j/k select · Enter/f focus window · r refresh · "
                 "Esc/q/a close · refreshes every 2s",
                 id="runs-footer")
@@ -715,6 +710,10 @@ class AutoRunsScreen(ModalScreen):
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
+
+    def on_resize(self, _event) -> None:
+        if self._status:
+            self._render_rows()
 
     @staticmethod
     def _row_key(rows: list[dict], idx: int) -> tuple | None:
@@ -749,23 +748,34 @@ class AutoRunsScreen(ModalScreen):
         self._selected_key = self._row_key(self._rows, self._selected)
         self._render_rows()
 
+    def _report_width(self) -> int:
+        """Columns available to the report (without the selection gutter):
+        the body's laid-out width, or before layout the container's CSS
+        width estimated from the screen; at most 99."""
+        from pm_core.autostart_view import MAX_WIDTH
+        width = self.query_one("#runs-body", Static).content_region.width
+        if width <= 0:
+            # width: 106 / max-width 95%, minus border, padding, scrollbar.
+            width = min(106, int(self.app.size.width * 0.95)) - 5
+        return max(20, min(MAX_WIDTH, width - self._GUTTER))
+
     def _render_rows(self) -> None:
         from rich.text import Text
-        from pm_core.autostart_state import policy_labels
+        from pm_core import autostart_view as view
         st = self._status
         mode = st.get("mode", "off")
-        title = "Auto-start runs"
-        if mode == "targets":
-            title += f" — {len(st.get('targets') or [])} target(s)"
-        elif mode == "all":
-            title += " — all ready PRs (backlog mode)"
-        if st.get("run_id"):
-            title += f"  [dim]{st['run_id']}[/]"
-        self.query_one("#runs-title", Label).update(title)
+        width = self._report_width()
+        self._width = width
+        # The header has no selection gutter, but still stays within 99.
+        title = Text("\n").join(
+            view.to_rich(ln) for ln in view.header_lines(
+                st, min(view.MAX_WIDTH, width + self._GUTTER),
+                "Auto-start runs"))
+        self.query_one("#runs-title", Static).update(title)
 
         body = Text()
         body_widget = self.query_one("#runs-body", Static)
-        row_texts: list[tuple[Text, Text]] = []
+        row_texts: list[list[Text]] = []
         if mode == "off" or not self._rows:
             if mode == "off":
                 body.append("No auto-start targets (auto-start off).\n", style="bold")
@@ -775,60 +785,43 @@ class AutoRunsScreen(ModalScreen):
                         "or `pm autostart add PR_ID`.", style="dim")
             body_widget.update(body)
             return
+        grouped = mode == "targets"
         for i, row in enumerate(self._rows):
             r = row["run"]
             sel = i == self._selected
-            indent = "  " * row["depth"]
-            prefix = "▶ " if sel else "  "
-            line = Text(prefix + indent, style="reverse" if sel else "")
-            if row["kind"] == "target":
-                line.append("◎ ", style="bold yellow")
-            elif row["kind"] == "dep":
-                line.append("└ ", style="dim")
-            line.append(str(r.get("display_id") or r["pr_id"]), style="bold")
-            if r.get("display_id") and r.get("display_id") != r["pr_id"]:
-                line.append(f" {r['pr_id']}", style="dim")
-            # Target headers always name their policy (R14); a dep shows
-            # only a hold — a stop mark or the wait target(s) holding it.
-            for label, kind in policy_labels(row):
-                line.append(f" [{label}]", style=self._POLICY_STYLES[kind])
-            state = r.get("state") or "?"
-            line.append(f"  {state.upper()}",
-                        style=self._STATE_STYLES.get(state, ""))
-            line.append(f"  {r.get('phase') or ''}", style="bold cyan")
-            if row.get("progress"):
-                line.append(f"  {row['progress']}")
-            win = r.get("window")
-            if win:
-                line.append(f"  ⧉ {win['name']}", style="blue")
-            body.append_text(line)
-            body.append("\n")
-            detail = Text("    " + indent)
-            detail.append((r.get("title") or "")[:60], style="italic")
-            if r.get("reason"):
-                detail.append(f" — {r['reason']}", style="dim")
-            if row.get("also"):
-                detail.append(f" (also needed by {', '.join(row['also'])})",
-                              style="dim yellow")
+            notice = None
             if sel and self._notice and self._notice[0] == self._selected_key:
                 if r.get("window"):
                     # A refresh found a window since: the notice is stale.
                     self._notice = None
                 else:
-                    detail.append(f"  ⚠ {self._notice[1]}", style="bold red")
-            body.append_text(detail)
-            body.append("\n")
-            row_texts.append((line, detail))
+                    notice = self._notice[1]
+            texts = []
+            for n, ln in enumerate(view.row_lines(row, width, grouped=grouped,
+                                                   notice=notice)):
+                line = Text("▶ " if sel and n == 0 else "  ",
+                            style="reverse" if sel else "")
+                line.append_text(view.to_rich(ln))
+                texts.append(line)
+            for t in texts:
+                if body:
+                    body.append("\n")
+                body.append_text(t)
+            row_texts.append(texts)
         body_widget.update(body)
         # After the refresh: the body's width and the container's scrollable
         # height are only known once the new content has been laid out.
         self.call_after_refresh(self._scroll_selected_into_view, row_texts,
                                 self._selected)
 
-    def _scroll_selected_into_view(self, row_texts: list[tuple], selected: int
+    def _scroll_selected_into_view(self, row_texts: list[list], selected: int
                                    ) -> None:
-        """Scroll the container so row *selected* (two Texts, either of
-        which may wrap) is visible."""
+        """Scroll the container so row *selected* (a list of line Texts) is
+        visible.  Re-renders first if the laid-out width differs from the
+        width the rows were wrapped to (e.g. the first paint)."""
+        if self._report_width() != self._width:
+            self._render_rows()
+            return
         if not (0 <= selected < len(row_texts)):
             return
         body = self.query_one("#runs-body", Static)
@@ -836,12 +829,12 @@ class AutoRunsScreen(ModalScreen):
         if width <= 0:
             return
 
-        def height(t) -> int:
-            return len(t.wrap(self.app.console, width))
+        def height(lines) -> int:
+            return sum(len(t.wrap(self.app.console, width)) for t in lines)
 
         top = body.virtual_region.y + sum(
-            height(a) + height(b) for a, b in row_texts[:selected])
-        h = sum(height(t) for t in row_texts[selected])
+            height(lines) for lines in row_texts[:selected])
+        h = height(row_texts[selected])
         if selected == 0:  # keep the title in view at the top
             top, h = 0, top + h
         self.query_one("#runs-container", VerticalScroll).scroll_to_region(

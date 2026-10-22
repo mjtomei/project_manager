@@ -1000,13 +1000,14 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
             assert isinstance(screen, AutoRunsScreen)
             text = str(screen.query_one("#runs-body", Static).render())
             assert "◎ a" in text and "◎ b" in text
-            assert "scenario 1/2 done" in text
-            assert "stop-before-merge" in text
+            # QA progress shown once, as the phase token.
+            assert "qa 1/2 PASS:1" in text
+            assert "scenario 1/2 done" not in text
             # Every target header names its policy, auto-merge included
             # (QA s19: U showed no policy); deps carry only a stop mark.
-            assert "◎ a [stop-before-merge]" in text
-            assert "◎ b [auto-merge]" in text
-            assert "d [auto-merge]" not in text
+            assert "◎ a WAITING pending [stop-before-merge]" in text
+            assert "◎ b RUNNING qa 1/2 PASS:1 [auto-merge]" in text
+            assert "[auto-merge] T d" not in text
             # j moves selection; Enter on a run without window keeps popup open
             await pilot.press("j")
             await pilot.press("enter")

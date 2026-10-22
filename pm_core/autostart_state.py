@@ -256,32 +256,60 @@ def _find_window(windows: dict[str, str], pr: dict, phase: str) -> dict | None:
     return None
 
 
-def _signed_off_reason(pr_id: str, holds: dict) -> str:
+# Human-action attention codes (``run["attention"]``) and their labels.
+ATTENTION_LABELS = {
+    "input_required": "INPUT_REQUIRED",
+    "spec_review": "SPEC REVIEW",
+    "manual_merge": "MANUAL MERGE",
+    "permission": "PERMISSION",
+    "decision": "DECISION NEEDED",
+}
+
+
+def _info(attention: str | None = None, short: str | None = None,
+          blockers: list | None = None, label: str | None = None) -> dict:
+    """Presentation extras for a derived run: *attention* (human action
+    needed now), *short* (reason minus what the phase/progress token and
+    labels already say; None → same as the full reason), *blockers*."""
+    return {"attention": attention, "short": short, "blockers": blockers,
+            "label": label or ATTENTION_LABELS.get(attention or "")}
+
+
+def _signed_off(pr_id: str, holds: dict) -> tuple[str, dict]:
     h = holds.get(pr_id)
     if h and h.get("explicit"):
-        return "signed off (fresh SIGNOFF_MERGE); stop-before-merge — press g"
+        return ("signed off (fresh SIGNOFF_MERGE); stop-before-merge — press g",
+                _info("manual_merge", "signed off — press g to merge"))
     if h:
         return ("signed off (fresh SIGNOFF_MERGE); waiting for manual merge "
-                f"(held by {', '.join(h['targets'])}) — press g")
-    return "signed off (fresh SIGNOFF_MERGE); auto-merge pending"
+                f"(held by {', '.join(h['targets'])}) — press g",
+                _info("manual_merge", "signed off — press g to merge"))
+    return ("signed off (fresh SIGNOFF_MERGE); auto-merge pending",
+            _info(short="signed off; auto-merge pending"))
 
 
-def _awaiting_signoff_reason(pr_id: str, inp: dict, holds: dict,
-                             passed: str) -> str:
+def _awaiting_signoff(pr_id: str, inp: dict, holds: dict,
+                      passed: str) -> tuple[str, dict]:
     """Reason for a PR whose last gate (*passed*) is done and that now
     needs sign-off before it can merge."""
     signoff = (inp.get("signoff") or {}).get(pr_id) or {}
     if signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE":
-        return _signed_off_reason(pr_id, holds)
-    return (f"{passed}; awaiting sign-off (hand-off on next scheduler "
-            "pass)")
+        return _signed_off(pr_id, holds)
+    return (f"{passed}; awaiting sign-off (hand-off on next scheduler pass)",
+            _info(short="awaiting sign-off (hand-off on next scheduler pass)"))
+
+
+# spec_pending phase → (reason prefix, attention label).
+_SPEC_REVIEW = {"impl": ("implementation ", "IMPL SPEC REVIEW"),
+                "qa": ("QA ", "QA SPEC REVIEW")}
 
 
 def _derive(pr: dict, inp: dict, pr_map: dict,
-            holds: dict) -> tuple[str, str, str]:
-    """Return ``(phase, state, reason)`` for one PR from live evidence.
+            holds: dict) -> tuple[str, str, str, dict]:
+    """Return ``(phase, state, reason, info)`` for one PR from live evidence.
 
-    *holds* is :func:`merge_holds` for the active targets."""
+    *holds* is :func:`merge_holds` for the active targets; *info* is
+    :func:`_info` (attention / short reason / blockers)."""
     pr_id = pr["id"]
     status = pr.get("status") or "pending"
     phase = _STATUS_PHASE.get(status, "pending")
@@ -290,27 +318,32 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
     windows = inp.get("windows") or {}
     names = _window_names(pr)
     win_live = lambda kind: names[kind] in windows  # noqa: E731
+    plain = _info()
 
     if status == "merged":
-        return "done", "completed", "merged"
+        return "done", "completed", "merged", plain
     if status == "closed":
-        return "done", "completed", "closed"
+        return "done", "completed", "closed", plain
 
     # Merge overlays — the merge step is live regardless of registry status.
     if pr_id in (inp.get("merge_input_required") or set()):
-        return "merge", "waiting", "merge INPUT_REQUIRED — answer in merge window"
+        return ("merge", "waiting",
+                "merge INPUT_REQUIRED — answer in merge window",
+                _info("input_required", "answer in the merge window"))
     if pr_id in (inp.get("pending_merge") or set()):
         if win_live("merge"):
-            return "merge", "running", "updating the main repo after the merge"
+            return ("merge", "running",
+                    "updating the main repo after the merge", plain)
         signoff = (inp.get("signoff") or {}).get(pr_id) or {}
         if not (signoff.get("fresh") and signoff.get("verdict") == "SIGNOFF_MERGE"):
             return (phase, "waiting",
-                    "merge blocked by sign-off gate (no fresh SIGNOFF_MERGE)")
-        return "merge", "failed", "merge attempt failed; no merge window"
+                    "merge blocked by sign-off gate (no fresh SIGNOFF_MERGE)",
+                    plain)
+        return "merge", "failed", "merge attempt failed; no merge window", plain
 
     if status == "pending":
         deps = pr.get("depends_on") or []
-        blocking = []
+        blocking, blockers = [], []
         for d in deps:
             dpr = pr_map.get(d)
             dstatus = (dpr or {}).get("status", "missing")
@@ -320,102 +353,139 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             if d in holds:
                 tag += ", " + held_by_text(holds[d])
             blocking.append(tag + ")")
+            h = holds.get(d) or {}
+            blockers.append({
+                "pr_id": d,
+                "display_id": _display_id(dpr) if dpr else d,
+                "status": dstatus,
+                "explicit_hold": bool(h.get("explicit")),
+                "held_by": list(h.get("targets") or []),
+            })
         if blocking:
-            return "pending", "waiting", "blocked on " + ", ".join(blocking)
+            return ("pending", "waiting", "blocked on " + ", ".join(blocking),
+                    _info(blockers=blockers))
         if pr_id in (inp.get("launching") or set()):
-            return "implementation", "running", "launching implementation"
-        return "pending", "queued", "ready; starts on next scheduler pass"
+            return "implementation", "running", "launching implementation", plain
+        return "pending", "queued", "ready; starts on next scheduler pass", plain
+
+    if pr.get("spec_pending") and status in ("in_progress", "in_review", "qa"):
+        pending = pr["spec_pending"]
+        what, label = _SPEC_REVIEW.get(
+            pending.get("phase") if isinstance(pending, dict) else None,
+            ("", "SPEC REVIEW"))
+        return (phase, "waiting", f"{what}spec awaiting review — press V",
+                _info("spec_review", "approve or edit the spec — press V",
+                      label=label))
 
     if status == "in_progress":
-        if pr.get("spec_pending"):
-            return phase, "waiting", "spec generation awaiting input"
         if pr_id in (inp.get("launching") or set()):
-            return phase, "running", "launching implementation"
+            return phase, "running", "launching implementation", plain
         if not win_live("implementation"):
-            return phase, "paused", "no implementation window"
+            return phase, "paused", "no implementation window", plain
         idle = (inp.get("impl_idle") or {}).get(pr_id)
         if idle == "waiting":
-            return phase, "waiting", "permission prompt in implementation window"
+            return (phase, "waiting",
+                    "permission prompt in implementation window",
+                    _info("permission",
+                          "answer the prompt in the implementation window"))
         if idle == "idle":
-            return phase, "running", "impl idle; review transition pending"
-        return phase, "running", "implementing"
+            return (phase, "running", "impl idle; review transition pending",
+                    plain)
+        return phase, "running", "implementing", _info(short="")
 
     if status == "in_review":
         if review:
             it = review.get("iteration") or 0
             last = review.get("verdict") or ""
             if review.get("input_required"):
-                return phase, "waiting", f"review INPUT_REQUIRED (iteration {it})"
+                return (phase, "waiting",
+                        f"review INPUT_REQUIRED (iteration {it})",
+                        _info("input_required", "answer in the review window"))
             if review.get("running"):
                 reason = f"review iteration {it}"
                 if last:
                     reason += f" (last {last})"
-                return phase, "running", reason
+                return (phase, "running", reason,
+                        _info(short=f"last {last}" if last else ""))
             if last in _REVIEW_PASS:
                 if inp.get("skip_qa"):
                     # No QA will run: the next step is sign-off/merge.
-                    return (phase, "waiting", _awaiting_signoff_reason(
-                        pr_id, inp, holds, "review passed; QA skipped (skip_qa)"))
-                return phase, "waiting", "review passed; QA transition pending"
+                    reason, info = _awaiting_signoff(
+                        pr_id, inp, holds, "review passed; QA skipped (skip_qa)")
+                    if not info["attention"]:
+                        info["short"] = "QA skipped; " + info["short"]
+                    return phase, "waiting", reason, info
+                return (phase, "waiting", "review passed; QA transition pending",
+                        _info(short="passed; QA transition pending"))
             if last in ("KILLED", "ERROR"):
-                return phase, "failed", f"review loop ended {last}"
+                return phase, "failed", f"review loop ended {last}", plain
             if last:
-                return phase, "paused", f"review loop stopped (last {last})"
+                return (phase, "paused", f"review loop stopped (last {last})",
+                        plain)
         if win_live("review"):
-            return phase, "running", "review window open (no loop)"
-        return phase, "queued", "review loop starts on next scheduler pass"
+            return phase, "running", "review window open (no loop)", plain
+        return phase, "queued", "review loop starts on next scheduler pass", plain
 
     if status == "qa":
         if qa:
             if qa.get("error"):
-                return phase, "failed", f"QA error: {qa['error']}"
+                return phase, "failed", f"QA error: {qa['error']}", plain
             verdict = qa.get("verdict") or ""
             total = qa.get("total") or 0
             done = qa.get("done") or 0
             if qa.get("running"):
                 if qa.get("planning"):
-                    return phase, "running", "planning scenarios"
-                return phase, "running", f"scenario {done}/{total} done"
+                    return phase, "running", "planning scenarios", _info(short="")
+                return (phase, "running", f"scenario {done}/{total} done",
+                        _info(short=""))
             if verdict == "INPUT_REQUIRED":
                 if qa.get("recorded"):
                     return (phase, "waiting",
                             "last QA run ended INPUT_REQUIRED (see QA note); "
-                            "press t / z t to re-run QA")
-                return phase, "waiting", "QA INPUT_REQUIRED — answer in QA window"
-            if verdict == "PASS":
+                            "press t / z t to re-run QA",
+                            _info("input_required",
+                                  "see the QA note; press t / z t to re-run QA"))
                 return (phase, "waiting",
-                        _awaiting_signoff_reason(pr_id, inp, holds, "QA passed"))
+                        "QA INPUT_REQUIRED — answer in QA window",
+                        _info("input_required", "answer in the QA window"))
+            if verdict == "PASS":
+                reason, info = _awaiting_signoff(pr_id, inp, holds, "QA passed")
+                return phase, "waiting", reason, info
             if verdict == "NEEDS_WORK":
-                return phase, "waiting", "QA NEEDS_WORK; returning to review"
+                return (phase, "waiting", "QA NEEDS_WORK; returning to review",
+                        _info(short="returning to review"))
             if verdict:
-                return phase, "paused", f"QA ended {verdict}"
+                return phase, "paused", f"QA ended {verdict}", _info(short="")
         if inp.get("skip_qa"):
             return (phase, "waiting",
-                    "skip_qa set; sign-off follows the review PASS")
-        return phase, "queued", "QA starts on next scheduler pass"
+                    "skip_qa set; sign-off follows the review PASS", plain)
+        return phase, "queued", "QA starts on next scheduler pass", plain
 
     if status == "sign_off":
         signoff = (inp.get("signoff") or {}).get(pr_id) or {}
         verdict = signoff.get("verdict")
         if not verdict:
             if win_live("sign_off"):
-                return phase, "running", "sign-off review running"
+                return phase, "running", "sign-off review running", _info(short="")
             return (phase, "queued", "no sign-off window; relaunches on next "
-                    "scheduler pass")
+                    "scheduler pass", plain)
         if not signoff.get("fresh"):
             why = signoff.get("stale_reason") or "HEAD moved"
             if why == "HEAD moved":
                 return (phase, "waiting", f"{verdict} stale (HEAD moved); "
-                        "sign-off relaunches against current HEAD")
+                        "sign-off relaunches against current HEAD", plain)
             return (phase, "waiting", f"{verdict} stale ({why}); sign-off "
-                    "re-runs against the current base")
+                    "re-runs against the current base", plain)
         if verdict == "SIGNOFF_MERGE":
-            return phase, "waiting", _signed_off_reason(pr_id, holds)
+            reason, info = _signed_off(pr_id, holds)
+            return phase, "waiting", reason, info
         if verdict == "SIGNOFF_BLOCKED":
-            return phase, "paused", "sign-off BLOCKED — needs human decision"
-        return phase, "waiting", f"routed {verdict}"
+            return (phase, "paused", "sign-off BLOCKED — needs human decision",
+                    _info("decision", "sign-off BLOCKED — read the sign-off "
+                          "report and decide"))
+        return phase, "waiting", f"routed {verdict}", plain
 
-    return phase, "queued", f"status {status}"
+    return phase, "queued", f"status {status}", plain
 
 
 def build_status(inp: dict) -> dict:
@@ -450,7 +520,7 @@ def build_status(inp: dict) -> dict:
 
     def run_entry(pr: dict) -> dict:
         pr_id = pr["id"]
-        phase, state, reason = _derive(pr, inp, pr_map, holds)
+        phase, state, reason, info = _derive(pr, inp, pr_map, holds)
         win = _find_window(windows, pr, phase)
         review = (inp.get("review_loops") or {}).get(pr_id)
         qa = (inp.get("qa_loops") or {}).get(pr_id)
@@ -463,6 +533,15 @@ def build_status(inp: dict) -> dict:
             "phase": phase,
             "state": state,
             "reason": reason,
+            # Presentation extras (additive): ``short_reason`` drops what the
+            # phase/progress token already says; ``attention`` is set when a
+            # human must act now (ATTENTION_LABELS); ``blockers`` structures
+            # the unmerged deps of a blocked pending PR.
+            "short_reason": (reason if info["short"] is None
+                             else info["short"]),
+            "attention": info["attention"],
+            "attention_label": info["label"],
+            "blockers": info["blockers"] or [],
             "is_target": pr_id in targets,
             "needed_by": nb.get(pr_id, []),
             "depends_on": list(pr.get("depends_on") or []),
@@ -541,6 +620,7 @@ def build_status(inp: dict) -> dict:
             "state": run["state"] if run else ("failed" if pr is None else "completed"),
             "phase": run["phase"] if run else "done",
             "reason": run["reason"] if run else ("PR not found" if pr is None else ""),
+            "attention": run["attention"] if run else None,
             "pending": pending,
         })
 
@@ -561,19 +641,24 @@ def build_status(inp: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def _progress(run: dict) -> str:
+    """Progress of the run's *current* phase (``review #3``, ``qa 2/5
+    PASS:2``, ``qa planning``, ``qa PASS``) or ``""``.  Loop state left over
+    from another phase (a finished QA loop once the PR is back in review, a
+    review iteration during QA) is not progress of this phase."""
+    phase = run.get("phase")
     qa = run.get("qa")
-    if qa and qa.get("total"):
-        counts = qa.get("counts") or {}
-        tally = " ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
-        return f"qa {qa.get('done', 0)}/{qa['total']}" + (f" {tally}" if tally else "")
-    # QA without a scenario count (still planning, or finished and its
-    # scenario list cleared) must not fall back to the stale review iteration.
-    if qa and qa.get("planning"):
-        return "qa planning"
-    if qa and qa.get("verdict"):
-        return f"qa {qa['verdict']}"
+    if phase == "qa" and qa:
+        if qa.get("total"):
+            counts = qa.get("counts") or {}
+            tally = " ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
+            return (f"qa {qa.get('done', 0)}/{qa['total']}"
+                    + (f" {tally}" if tally else ""))
+        if qa.get("planning"):
+            return "qa planning"
+        if qa.get("verdict"):
+            return f"qa {qa['verdict']}"
     rv = run.get("review")
-    if rv and rv.get("iteration"):
+    if phase == "review" and rv and rv.get("iteration"):
         return f"review #{rv['iteration']}"
     return ""
 
@@ -581,19 +666,21 @@ def _progress(run: dict) -> str:
 def status_rows(status: dict) -> list[dict]:
     """Flatten a status dict into display rows grouped by target.
 
-    Each row: ``{pr_id, depth, kind, run}`` where *kind* is ``target`` (a
-    target header, depth 0) or ``dep`` (an unmerged closure PR, depth 1),
-    plus ``also`` (other targets that share this dep) and ``progress``.
-    In ``all`` mode every run is a depth-0 row.  A shared dependency
-    appears under each target that needs it (with ``also`` naming the
-    others) but is one entry in ``runs`` — i.e. one worker.
+    Each row: ``{pr_id, depth, kind, run, also, progress, group,
+    group_policy}`` where *kind* is ``target`` (a target header, depth 0) or
+    ``dep`` (an unmerged closure PR, depth 1); ``also`` names other targets
+    that share this dep; ``group``/``group_policy`` are the owning target and
+    its own policy (what a dep row inherits).  In ``all`` mode every run is
+    a depth-0 ``run`` row with no group.  A shared dependency appears under
+    each target that needs it but is one entry in ``runs`` — one worker.
     """
     runs = {r["pr_id"]: r for r in status.get("runs") or []}
     rows: list[dict] = []
     if status.get("mode") == "all":
         for r in status.get("runs") or []:
             rows.append({"pr_id": r["pr_id"], "depth": 0, "kind": "run",
-                         "run": r, "also": [], "progress": _progress(r)})
+                         "run": r, "also": [], "progress": _progress(r),
+                         "group": None, "group_policy": None})
         return rows
     for t in status.get("targets") or []:
         tid = t["pr_id"]
@@ -607,80 +694,72 @@ def status_rows(status: dict) -> list[dict]:
         }
         rows.append({"pr_id": tid, "depth": 0, "kind": "target", "run": run,
                      "also": [], "progress": _progress(run),
-                     "policy": t.get("policy")})
+                     "policy": t.get("policy"), "group": tid,
+                     "group_policy": t.get("policy")})
         for dep in t.get("pending") or []:
             r = runs.get(dep)
             if not r:
                 continue
             also = [x for x in r.get("needed_by") or [] if x not in (tid, dep)]
             rows.append({"pr_id": dep, "depth": 1, "kind": "dep", "run": r,
-                         "also": also, "progress": _progress(r)})
+                         "also": also, "progress": _progress(r),
+                         "group": tid, "group_policy": t.get("policy")})
     return rows
 
 
-def policy_labels(row: dict) -> list[tuple[str, str]]:
-    """``[(label, kind)]`` naming a status row's effective merge policy and
-    what causes a hold — shared by ``format_text`` and the runs popup.
+_POLICY_TEXT = {POLICY_STOP: "stop-before-merge", POLICY_AUTO: "auto-merge",
+                POLICY_WAIT: "wait-for-merge"}
 
-    *kind* is ``stop`` / ``wait`` / ``auto``.  A wait target names its own
-    policy (``wait-for-merge``); a PR held by other wait targets names them
-    (``wait-for-merge ← T``).  Target rows always name a policy; an
-    auto-merge target that a hold overrides says so.
+
+def policy_labels(row: dict) -> list[tuple[str, str]]:
+    """``[(label, kind)]`` naming a status row's merge policy — only what
+    its group does not already imply.  Shared by the CLI report and the
+    runs popup (via ``autostart_view``).
+
+    *kind* is ``policy`` (a target header's own configured policy, always
+    named once per group) or ``exception`` (a hold the group's policy does
+    not explain).  A dep under a wait-for-merge target that the target
+    holds shows nothing: its hold is the group's.  Exceptions: an explicit
+    stop-before-merge mark; a dep that is itself a wait target; a hold by a
+    wait target other than one already holding through the group (e.g. a
+    shared dep of an auto-merge target held by wait target X →
+    ``wait-for-merge ← X``).
     """
     run = row.get("run") or {}
     pr_id = run.get("pr_id") or row.get("pr_id")
     held_by = list(run.get("held_by") or [])
-    out: list[tuple[str, str]] = []
-    if run.get("explicit_hold") or run.get("policy") == POLICY_STOP:
-        out.append(("stop-before-merge", "stop"))
-    # A target's own wait policy, even once nothing is left to hold (a
-    # completed target's closure is merged, so it is in no ``held_by``).
-    if pr_id in held_by or (row.get("kind") == "target"
-                            and row.get("policy") == POLICY_WAIT):
-        out.append(("wait-for-merge", "wait"))
+    explicit = bool(run.get("explicit_hold")) or run.get("policy") == POLICY_STOP
     others = [t for t in held_by if t != pr_id]
+    out: list[tuple[str, str]] = []
+    if row.get("kind") == "target":
+        own = row.get("policy") or run.get("policy") or POLICY_AUTO
+        out.append((_POLICY_TEXT.get(own, own), "policy"))
+        if explicit and own != POLICY_STOP:
+            out.append(("stop-before-merge", "exception"))
+        # A wait target holds itself; other holders add nothing to that.
+        if others and own != POLICY_WAIT:
+            out.append(("wait-for-merge ← " + ", ".join(others), "exception"))
+        return out
+    if explicit:
+        out.append(("stop-before-merge", "exception"))
+    group = row.get("group")
+    if group and group in held_by:
+        return out  # held by its own group's wait target: implied
+    if pr_id in held_by:
+        out.append(("wait-for-merge", "exception"))
     if others:
-        out.append(("wait-for-merge ← " + ", ".join(others), "wait"))
-    if row.get("kind") == "target" and row.get("policy") == POLICY_AUTO:
-        out.insert(0, ("auto-merge, held" if out else "auto-merge", "auto"))
+        out.append(("wait-for-merge ← " + ", ".join(others), "exception"))
     return out
 
 
-def format_text(status: dict) -> str:
-    """Human-readable rendering of a status dict (CLI ``status`` output)."""
-    mode = status.get("mode")
-    lines = []
-    owner = status.get("owner") or {}
-    head = f"Auto-start: {mode}"
-    if mode == "targets":
-        head += f" ({len(status.get('targets') or [])} target(s))"
-    if status.get("run_id"):
-        head += f"  run={status['run_id']}"
-    if owner.get("session"):
-        head += f"  owner={owner['session']}"
-    lines.append(head)
-    if mode == "off":
-        lines.append("No auto-start targets (auto-start off).")
-        return "\n".join(lines)
-    for row in status_rows(status):
-        r = row["run"]
-        indent = "  " * row["depth"]
-        mark = "◎ " if row["kind"] == "target" else "└ "
-        if row["kind"] == "run":
-            mark = ""
-        # The default policy goes unlabelled in text (only holds show).
-        labels = [lbl for lbl, _ in policy_labels(row) if lbl != "auto-merge"]
-        pol = f" [{'; '.join(labels)}]" if labels else ""
-        prog = f" {row['progress']}" if row.get("progress") else ""
-        win = f"  win={r['window']['name']}" if r.get("window") else ""
-        also = f"  also needed by {', '.join(row['also'])}" if row.get("also") else ""
-        lines.append(
-            f"{indent}{mark}{r['pr_id']}{pol} {r.get('state')}/{r.get('phase')}"
-            f"{prog} — {r.get('reason') or ''}{win}{also}")
-        title = r.get("title") or ""
-        if title:
-            lines.append(f"{indent}    {title[:70]}")
-    return "\n".join(lines)
+def format_text(status: dict, width: int | None = None,
+                color: bool = False) -> str:
+    """Human-readable rendering of a status dict (CLI ``status`` output);
+    see :mod:`pm_core.autostart_view` for the shared layout."""
+    from pm_core import autostart_view
+    lines = autostart_view.report_lines(
+        status, width or autostart_view.MAX_WIDTH)
+    return autostart_view.to_ansi(lines, color=color)
 
 
 def qa_progress_input(state) -> dict:

@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -361,16 +363,49 @@ def autostart_list(session, timeout, as_json):
     _finish(out if as_json else payload, as_json, text)
 
 
+def _status_color(flag: bool | None) -> bool:
+    """Color only for a terminal: an explicit --color/--no-color wins, then
+    NO_COLOR (any non-empty value) and TERM=dumb turn it off."""
+    if flag is not None:
+        return flag
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+        return False
+    return sys.stdout.isatty()
+
+
+def _status_width(width: int | None) -> int:
+    """Report width: --width, else the terminal's columns (COLUMNS, then
+    99 when redirected), capped at 99 visible columns."""
+    from pm_core.autostart_view import MAX_WIDTH, clamp_width
+    if width:
+        return clamp_width(width)
+    if sys.stdout.isatty() or os.environ.get("COLUMNS"):
+        return clamp_width(shutil.get_terminal_size((MAX_WIDTH, 24)).columns)
+    return MAX_WIDTH
+
+
 @autostart.command("status")
 @_session_opt
 @_timeout_opt
 @_json_opt
-def autostart_status(session, timeout, as_json):
+@click.option("--width", type=int, default=None,
+              help="Wrap the report to this many columns (default: the "
+                   "terminal width, at most 99)")
+@click.option("--color/--no-color", "color", default=None,
+              help="Force color on/off (default: on for a terminal unless "
+                   "NO_COLOR is set)")
+def autostart_status(session, timeout, as_json, width, color):
     """Show what each target and its dependency runs are doing.
 
     Same structured representation (schema pm.autostart.status/1) the TUI
-    runs popup (key `a`) renders: phase, running/waiting/paused/failed/
-    completed state, reason, review iteration / QA progress, tmux window.
+    runs popup (key `a`) renders, with the same layout: one row per PR with
+    its state, one phase/progress token, the merge policy only where the
+    target group does not already imply it, the title, and a compact
+    reason.  PRs waiting on a human now — INPUT_REQUIRED, implementation /
+    QA spec review, manual merge, a permission prompt, a blocked sign-off —
+    carry an explicit red label and are listed in the header ("need you").
+    --json returns the full structured data (reason, short_reason,
+    attention, blockers, review/QA progress, windows).
     """
     try:
         payload = _request(session, ["status"], timeout)
@@ -385,4 +420,6 @@ def autostart_status(session, timeout, as_json):
         if not payload.get("ok"):
             raise SystemExit(EXIT_INVALID)
         return
-    _finish(payload, False, lambda _p: click.echo(format_text(status)))
+    use_color = _status_color(color)
+    text = format_text(status, width=_status_width(width), color=use_color)
+    _finish(payload, False, lambda _p: click.echo(text, color=use_color))
