@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-446cb83
+  active_pr: pr-c8482a8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31041,7 +31041,41 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:01:50.214450+00:00'
-  updated_at: '2026-10-22T15:01:50.214450+00:00'
+  updated_at: '2026-10-22T16:15:09.951472+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-25fc3ab
+    text: 'QA S4 PASS on 8ef055ad: 4 parallel status formats + popup + X mutations,
+      0 problems in ~1700 captures. Setup traps: fake impl makes no commit -> sign-off
+      BLOCKED (commit on M branch + pm pr auto-sequence); fake review IR auto-resolves
+      in 2 s -> hold via /pm-captures/scenarios/4/scripts/freeze_ir.sh (filed pr-c8482a8).
+      Spec says "changed:" but CLI prints pre-existing "policy_changed:".'
+    created_at: '2026-10-22T16:15:09Z'
+    last_edited: '2026-10-22T16:15:09Z'
+- id: pr-c8482a8
+  plan: bugs
+  title: 'fake-claude cannot hold a review INPUT_REQUIRED: 2 s idle_prompt refresh
+    is read as the follow-up answer'
+  branch: pm/pr-c8482a8-fake-claude-cannot-hold-a-review-input-required-2-
+  status: pending
+  depends_on: []
+  description: 'pm_core/fake_claude.py _hold_open re-emits idle_prompt every _HOOK_REFRESH
+    (2 s); review_loop INPUT_REQUIRED follow-up (loop_shared.wait_for_follow_up_verdict)
+    takes the next event as the human answer, rereads the unchanged IR transcript
+    and coerces to NEEDS_WORK -> next iteration. A fake review IR hold lasts <=2 s,
+    so QA scenarios needing a steady "INPUT_REQUIRED … answer in the review window"
+    row cannot be built with config alone (pr-8700be3 S4 used /pm-captures scenarios/4/scripts/freeze_ir.sh:
+    replace ~/.pm/hooks/<sid>.json with a dir after the IR verdict is read). Suggest
+    a fake config knob (e.g. per-entry "hold_input": true) that stops refreshing after
+    an INPUT_REQUIRED verdict once the loop has consumed it. SIGSTOP on the fake has
+    no effect in review containers.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T16:15:04.011213+00:00'
+  updated_at: '2026-10-22T16:15:04.011213+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
