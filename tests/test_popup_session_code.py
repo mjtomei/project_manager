@@ -41,6 +41,8 @@ def _setup(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("TMUX", raising=False)
+    # popup_cmd_cmd exports PM_POPUP_SESSION; setenv so it is removed after.
+    monkeypatch.setenv("PM_POPUP_SESSION", "")
 
     # Session root: <root>/pm is pm_root, <root>/pm_core is the session's
     # code (a symlink to the code under test).
