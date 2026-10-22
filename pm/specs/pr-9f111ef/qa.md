@@ -49,8 +49,9 @@ per source is printed.
 R2 Context reruns are cached.
 Given a completed `context.py` run,
 When the user reruns it for the same sources,
-Then it finishes far faster without refetching, and the jsonl output keeps
-the same item ids and sha256s.
+Then it finishes far faster without refetching, the jsonl output keeps
+the same item ids and sha256s, and no existing file under `data/context/raw/`
+(including `raw/pdf/` copies) is rewritten (b769b725).
 
 R3 Full catalog build.
 Given context for some or all briefable sources,
@@ -63,8 +64,11 @@ R4 Briefs never quote the document.
 Given a built catalog,
 When the user (or harness) reads any whole_document case's generator input,
 Then the brief shares no 8-token passage with the document body (title line
-and recognised metadata header excepted), does not link the document's own
-URL/path, and process documents appear only as attachments with version
+and recognised metadata header excepted) — including passages wrapped across
+lines/pieces of a pasted draft in an issue/PR/thread post, which is truncated —
+does not link the document's own URL/path (a removed self link keeps its link
+text, leaves no dangling `[x](`, `(` or `<>`, and keeps sentence punctuation),
+and process documents appear only as attachments with version
 provenance (never attached to the document itself).
 
 R5 Briefs only use context written before the document.
@@ -74,7 +78,11 @@ python-peps, kubernetes-keps, IETF/QUIC and rust sources,
 Then no brief item is stamped `after` (Rust/Cockroach PR opening posts, Rust
 tracking issues, milestones, Chromium preamble, Oxide RFD 1 never appear);
 `dated` items (Go/PEP/KEP/Cockroach issues and threads) appear only when
-written on or before the document date; `identity` index items carry only
+written on or before the document date; PEP briefs draw on every discourse
+thread named in Discussions-To or Post-History, in slugged, slugless
+(`/t/<id>`) and post (`/t/<slug>/<id>/<post>`) forms, resolving to the topic id
+rather than the post number (7c552b45); a brief counts as rich only when its
+request items carry real words (bullets/punctuation-only pieces do not count); `identity` index items carry only
 identifying fields (no RFC publication date/category/obsoletes, no RFD labels,
 no index descriptions); attachment versions are committed on or before the
 document date.
