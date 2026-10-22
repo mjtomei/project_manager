@@ -75,7 +75,7 @@ R5. **Specific actionable holds** (INPUT_REQUIRED, no planning) for:
     (same L and U) that was already routed to review once and not
     reconciled (prevents an endless QA→review→QA loop when the reviewer
     does not merge).  The last one is detected via a small record on the
-    PR (`pr["qa_branch_sync"] = {local, upstream, at}`) written when R3
+    PR (`pr["qa_branch_sync"] = {local, upstream, routed_at}`) written when R3
     routes.  Only an unchanged / fast-forwarded sync clears it; a hold
     keeps it so the same heads still hold (no re-route) once fixed.
 

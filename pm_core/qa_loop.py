@@ -366,6 +366,29 @@ def _rev_parse(workdir: str | Path, ref: str) -> str | None:
     return r.stdout.strip() or None
 
 
+def _has_commit(workdir: str | Path, sha: str) -> bool:
+    return _git_capture(workdir, "cat-file", "-e",
+                        f"{sha}^{{commit}}").returncode == 0
+
+
+def _is_ancestor(workdir: str | Path, a: str, b: str) -> bool:
+    return _git_capture(workdir, "merge-base", "--is-ancestor",
+                        a, b).returncode == 0
+
+
+def _fetch_upstream_commit(workdir: str | Path, url: str, branch: str,
+                           sha: str) -> subprocess.CompletedProcess | None:
+    """Make upstream *sha* of *branch* available locally.
+
+    Fetches into FETCH_HEAD only (no local ref moves) when the commit is
+    missing.  Returns the fetch result, or ``None`` if no fetch was needed.
+    """
+    if _has_commit(workdir, sha):
+        return None
+    return _git_capture(workdir, "fetch", "--quiet", url,
+                        f"refs/heads/{branch}")
+
+
 def _remote_branch_sha(workdir: str | Path, url: str, branch: str) -> str | None:
     """Return the sha of *branch* at *url* (``None`` if absent)."""
     r = _git_capture(workdir, "ls-remote", url, f"refs/heads/{branch}")
@@ -418,26 +441,15 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
     if remote == head:
         return head
     if remote:
-        # An upstream commit that is an ancestor of head is necessarily in
-        # the local object store; absence means it cannot be an ancestor.
-        known = _git_capture(workdir_path, "cat-file", "-e",
-                             f"{remote}^{{commit}}").returncode == 0
-        if not known:
-            # Someone else pushed and the PR workdir never fetched.  Fetch
-            # the objects (FETCH_HEAD only, no local ref moves) so a
-            # workdir that is merely behind isn't reported as diverged.
-            _git_capture(workdir_path, "fetch", "--quiet", real_url,
-                         f"refs/heads/{branch}")
-            known = _git_capture(workdir_path, "cat-file", "-e",
-                                 f"{remote}^{{commit}}").returncode == 0
-        if not known or _git_capture(
-                workdir_path, "merge-base", "--is-ancestor",
-                remote, head).returncode != 0:
+        # Someone else pushed and the PR workdir never fetched: fetch the
+        # objects so a workdir that is merely behind isn't reported as
+        # diverged.
+        _fetch_upstream_commit(workdir_path, real_url, branch, remote)
+        known = _has_commit(workdir_path, remote)
+        if not known or not _is_ancestor(workdir_path, remote, head):
             # Behind (e.g. an earlier QA worker pushed a fix the PR workdir
             # never pulled) needs only a pull; diverged needs reconciling.
-            behind = known and _git_capture(
-                workdir_path, "merge-base", "--is-ancestor",
-                head, remote).returncode == 0
+            behind = known and _is_ancestor(workdir_path, head, remote)
             # QA synced the workdir before planning (_sync_pr_branch), so
             # either the upstream moved while the planner ran (another
             # writer pushed) or the sync was bypassed.  The plan was made
@@ -568,26 +580,16 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
     if not upstream or upstream == local:
         return BranchSync("unchanged", local=local, upstream=upstream)
 
-    def known(sha: str) -> bool:
-        return _git_capture(workdir_path, "cat-file", "-e",
-                            f"{sha}^{{commit}}").returncode == 0
+    # FETCH_HEAD only: no local branch moves except the ff below.
+    fetch = _fetch_upstream_commit(workdir_path, real_url, branch, upstream)
+    if fetch is not None and not _has_commit(workdir_path, upstream):
+        return hold(
+            f"Could not fetch {branch} at {upstream[:12]} from "
+            f"{real_url}: {(fetch.stderr or fetch.stdout).strip()}. "
+            "Restart QA once the remote is reachable.",
+            local=local, upstream=upstream)
 
-    if not known(upstream):
-        # FETCH_HEAD only: no local branch moves except the ff below.
-        fetch = _git_capture(workdir_path, "fetch", "--quiet", real_url,
-                             f"refs/heads/{branch}")
-        if not known(upstream):
-            return hold(
-                f"Could not fetch {branch} at {upstream[:12]} from "
-                f"{real_url}: {(fetch.stderr or fetch.stdout).strip()}. "
-                "Restart QA once the remote is reachable.",
-                local=local, upstream=upstream)
-
-    def is_ancestor(a: str, b: str) -> bool:
-        return _git_capture(workdir_path, "merge-base", "--is-ancestor",
-                            a, b).returncode == 0
-
-    if is_ancestor(upstream, local):
+    if _is_ancestor(workdir_path, upstream, local):
         # Local-only commits (e.g. an earlier planner's): the handoff
         # publishes them fast-forward.
         return BranchSync("unchanged", local=local, upstream=upstream)
@@ -611,7 +613,7 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
                 f"({marker}). Finish or abort it, then restart QA.",
                 local=local, upstream=upstream)
 
-    if not is_ancestor(local, upstream):
+    if not _is_ancestor(workdir_path, local, upstream):
         ahead = _count_commits(workdir_path, f"{upstream}..{local}")
         behind = _count_commits(workdir_path, f"{local}..{upstream}")
         detail = (
