@@ -1303,6 +1303,29 @@ class TestReconciliation:
         m = hq.build_history(PR, now=clock.t)
         assert "no verdict accepted yet" in m["current"][0]["text"]
 
+    def test_badge_shows_review_grace_only_once_turn_finished(
+            self, clock, monkeypatch):
+        """A review iteration owns its verdict grace; while the agent is
+        still working the badge must not read as time left for the work,
+        matching QA scenarios whose grace is the run's."""
+        it = ah.start_attempt(PR, "review-loop", iteration=1, loop_id="L",
+                              session_id="sess-r")
+        ah.phase(PR, it, "agent")
+        ah.arm_timer(PR, f"review-grace:{it}", purpose="review verdict grace",
+                     owner_action="review-loop", owner_attempt=it,
+                     duration=20, effect="gate")
+        clock.advance(5)
+        from pm_core import hook_events
+        events: dict = {}
+        monkeypatch.setattr(hook_events, "read_event",
+                            lambda sid: events.get(sid))
+        m = hq.build_history(PR, now=clock.t)
+        assert hq.summary_badge(m) == " [review-loop i1: working]"
+        events["sess-r"] = {"event_type": "idle_prompt",
+                            "timestamp": clock.t}
+        m = hq.build_history(PR, now=clock.t)
+        assert hq.summary_badge(m) == " [review-loop i1: turn done, 15s left]"
+
     def test_runtime_line_labels_in_flight_verdict_as_previous(self, clock):
         """A restarted loop keeps the old KILLED verdict while running;
         the Now section must not read as "running KILLED"."""

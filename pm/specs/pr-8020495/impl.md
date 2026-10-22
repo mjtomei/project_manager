@@ -98,9 +98,10 @@ R3. **Generic attempt capture from the runtime mirror** —
 `runtime_state.set_action_state` emits journal events from *inside its
 existing flock* so concurrent writers agree on one attempt:
   - entering `queued/launching/running` from a non-in-flight (or absent)
-    state, **or** with a changed `loop_id` → `attempt_start`; the new
-    `attempt_id` is stored in the runtime entry (`attempt_id` field). A
-    loop_id change first ends the old attempt as `superseded`.
+    state, **or** with a changed identity (`loop_id`, else `session_id`)
+    → `attempt_start`; the new `attempt_id` is stored in the runtime
+    entry (`attempt_id` field). An identity change first ends the old
+    attempt as `superseded`.
   - transition to `done`/`failed` → `attempt_end` (`outcome` = state, or an
     explicit `history_outcome=` keyword, e.g. `cancelled`), with `verdict`.
   - clearing an in-flight entry → `attempt_end` `vanished` (pane gone),
@@ -235,7 +236,9 @@ The model contains:
     holds, overdue `fires` timers, an activity row needing a human
     (permission prompt / INPUT_REQUIRED wait), the soonest `fires` timer,
     then the newest activity row. The pane badge uses the same
-    human-first activity row.
+    human-first activity row; its countdown is the row's own `fires`
+    timer, or the verdict grace (own or ancestor's `gate`) only once the
+    agent's turn has finished.
   - `milestones`: project.yaml timestamps (`created_at`, `started_at`,
     `reviewed_at`, `signed_off_at`, `merged_at`) as pre-journal evidence.
   - `missing`: honest notes (no journal file; journal starts after

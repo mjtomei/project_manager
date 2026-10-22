@@ -13336,11 +13336,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T15:42:10.423044+00:00'
-  updated_at: '2026-05-03T15:42:10.423044+00:00'
+  updated_at: '2026-10-22T04:25:14.880195+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-07d3e56
+    text: 'From pr-8020495 (PR action history): ~/.pm/history/<pr>.jsonl journals
+      persist the action name "start" (runtime_state action key, via runtime_state._journal_transition)
+      and history_query._ACTION_ORDER / _attempt_name / the badge render it as-is.
+      Journals written before the rename will keep "start"; when renaming the runtime
+      action key, map old "start" to "implement" at read time in history_query (e.g.
+      in _replay) rather than rewriting journals, and update _ACTION_ORDER.'
+    created_at: '2026-10-22T04:25:14Z'
+    last_edited: '2026-10-22T04:25:14Z'
 - id: pr-1cb6e15
   plan: bugs
   title: pm pr review silently regresses qa → in_review status

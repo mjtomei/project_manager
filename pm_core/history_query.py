@@ -1099,11 +1099,17 @@ def summary_badge(model: dict, width: int = 36) -> str:
     elif model.get("current"):
         row = _focus_row(model["current"])
         text = f"{row['name']}: {_BADGE_STATES.get(row['state'], row['state'])}"
+        # A countdown the row acts on (backoff, planner deadline).  A
+        # verdict-grace gate only matters once the turn finished, which
+        # _current_activity reports as grace_remaining_s whether the gate
+        # is the row's own (review) or its run's (QA): "working, 15s left"
+        # would read as time left for the agent's work.
         left = [t["remaining_s"] for t in model["timers"]["active"]
                 if t.get("owner_attempt") == row["attempt"]
+                and t.get("effect") != "gate"
                 and t.get("remaining_s") is not None]
         if not left and row.get("grace_remaining_s") is not None:
-            left = [row["grace_remaining_s"]]  # inherited shared grace
+            left = [row["grace_remaining_s"]]
         if left:
             text += f", {_dur(left[0])} left"
     elif model.get("attempts"):
