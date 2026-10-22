@@ -39,7 +39,7 @@
     <li><a href="pageborne-snapshot.md">Pageborne snapshot provenance</a></li>
     <li><a href="mockup/README.md">Run the mockup</a></li>
   </ul>
-  <p class="note"><b>What is simulated.</b> All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions. Each image is the simulator's 576×288 glasses framebuffer, shown at 2× on black with a caption strip; follow "raw" for the original PNG. Captured 2026-10-22 14:46 UTC with @evenrealities/evenhub-simulator 0.9.5, @evenrealities/even_hub_sdk 0.0.16 and @evenrealities/pretext 0.1.4 on linux-arm64. The simulator does not model firmware timing, Bluetooth or phone lifecycles; no constraint or SDK errors were logged during capture.</p>
+  <p class="note"><b>What is simulated.</b> All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions. Each image is the simulator's 576×288 glasses framebuffer, shown at 2× on black with a caption strip; follow "raw" for the original PNG. Captured 2026-10-22 16:04 UTC with @evenrealities/evenhub-simulator 0.9.5, @evenrealities/even_hub_sdk 0.0.16 and @evenrealities/pretext 0.1.4 on linux-arm64. The simulator does not model firmware timing, Bluetooth or phone lifecycles; no constraint or SDK errors were logged during capture.</p>
   <h2 id="journey-A">A. Read a spec, discuss it in its session, revise, approve, hand back to PM</h2>
   <div class="grid">
   <figure id="A01-needs-you">
@@ -570,8 +570,8 @@
     <figcaption>
       <b>C09</b> Actions fail visibly
       <span class="tag">SIMULATED PM</span>
-      <p>A send while disconnected is refused and not queued, so nothing goes out later by surprise.</p>
-      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/C09-not-sent-offline.png">raw 576×288</a></p>
+      <p>A send while disconnected is refused and not queued, so nothing goes out later by surprise. The dictated text stays in the review panel.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl:review</code> · <a href="screenshots/raw/C09-not-sent-offline.png">raw 576×288</a></p>
       <details><summary>4 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED speech result queued</code> <code class="">long_press</code> <code class="">long_press_release</code> <code class="">click</code></p></details>
       
     </figcaption>
@@ -581,8 +581,8 @@
     <figcaption>
       <b>C10</b> Reconnected in place
       <span class="tag">SIMULATED PM</span>
-      <p>Same document and page; nothing was resent.</p>
-      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/C10-reconnected.png">raw 576×288</a></p>
+      <p>Same document and page. Nothing was resent: the kept message waits for an explicit Send.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl:review</code> · <a href="screenshots/raw/C10-reconnected.png">raw 576×288</a></p>
       <details><summary>1 step before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:reconnect</code></p></details>
       
     </figcaption>

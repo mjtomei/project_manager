@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-22T14:46:03.307Z",
+  "generated": "2026-10-22T16:04:00.848Z",
   "simulated": "All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions.",
   "simulator": "@evenrealities/evenhub-simulator 0.9.5",
   "sdk": "@evenrealities/even_hub_sdk 0.0.16",
@@ -612,8 +612,8 @@
         {
           "id": "C09-not-sent-offline",
           "title": "Actions fail visibly",
-          "caption": "A send while disconnected is refused and not queued, so nothing goes out later by surprise.",
-          "scene": "doc:spec:pr-214:impl",
+          "caption": "A send while disconnected is refused and not queued, so nothing goes out later by surprise. The dictated text stays in the review panel.",
+          "scene": "doc:spec:pr-214:impl:review",
           "file": "C09-not-sent-offline.png",
           "raw": "raw/C09-not-sent-offline.png",
           "steps": [
@@ -626,8 +626,8 @@
         {
           "id": "C10-reconnected",
           "title": "Reconnected in place",
-          "caption": "Same document and page; nothing was resent.",
-          "scene": "doc:spec:pr-214:impl",
+          "caption": "Same document and page. Nothing was resent: the kept message waits for an explicit Send.",
+          "scene": "doc:spec:pr-214:impl:review",
           "file": "C10-reconnected.png",
           "raw": "raw/C10-reconnected.png",
           "steps": [

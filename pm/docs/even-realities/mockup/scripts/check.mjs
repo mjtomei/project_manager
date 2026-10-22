@@ -147,6 +147,22 @@ if (!only.length) {
     rule(!app.overlay && app.toast === 'Cancelled · nothing sent', `menu during voice review: toast ${app.toast}`);
     rule(!app.pm.session('pr-214/impl').transcript.some(m => m.t === 'rule check'), 'menu during voice review sent the message');
   }
+  // A send refused while offline keeps the dictated text for the user to send
+  // again after reconnecting; it goes out once, only when chosen.
+  {
+    const app = new App(new SimPM());
+    app.openDoc('spec:pr-214:impl');
+    app.nextUtterance = 'rule check';
+    for (const i of ['hold', 'release']) app.intent(i);
+    app.pmEvent({ type: 'disconnect' });
+    app.intent('select');
+    rule(app.overlay?.text === 'rule check' && /Not sent/.test(app.toast || ''), `offline send dropped the message (overlay ${app.overlay?.stage ?? 'none'}, toast ${app.toast})`);
+    app.pmEvent({ type: 'reconnect' });
+    const sent = () => app.pm.outbox.filter(m => m.text === 'rule check').length;
+    rule(sent() === 0, 'reconnect resent the refused message');
+    app.intent('select');
+    rule(sent() === 1 && !app.overlay, `send after reconnect: ${sent()} sent, overlay ${app.overlay?.stage ?? 'none'}`);
+  }
   // Merge now is offered only with a current MERGE verdict, the one PM accepts.
   {
     const app = new App(new SimPM());

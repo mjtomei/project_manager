@@ -60,8 +60,8 @@ Everything the PM actions panel and its related windows expose is reachable. See
 | Feedback is in place: a one-line notice in the footer, state glyphs, and a banner row for document or connection state. Replies never switch the view. | A06, B08 |
 | Messages are reviewed before sending and sent at most once. Busy sessions queue in place. | A05, B07, B08 |
 | Connection loss shows "↔ Reconnecting to PM · data N old" after repeated failures. Reading continues from the local copy. | C08 |
-| Actions while disconnected are refused, not queued for later ("Not sent: PM unreachable · nothing queued"). | C09 |
-| Reconnect restores the same place and resends nothing. | C10 |
+| Actions while disconnected are refused, not queued for later ("Not sent: PM unreachable · nothing queued"). A refused message keeps its text (in the glasses review panel, in the phone's compose box) for the user to send again. | C09 |
+| Reconnect restores the same place and resends nothing; a kept message goes out only when the user chooses Send. | C10 |
 | Starting is shown as in progress ("◐ starting…") and repeated taps do not duplicate it. | B17, B18 |
 | Root back hands off to the system exit dialog, as Even requires. | C11 |
 

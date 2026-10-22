@@ -608,8 +608,10 @@ export class App {
     const ctx = this.contextFor(o.target);
     const text = o.purpose === 'changes' ? `Please revise: ${o.text}` : o.text;
     const r = this.pm.send(o.target.session, text, ctx);
-    this.overlay = null;
+    // A refused message stays in the review panel, as typed text stays on the
+    // phone: nothing is queued, and the user sends it again, re-speaks or cancels.
     if (!r.ok) return this.fail(r);
+    this.overlay = null;
     const s = this.pm.session(o.target.session);
     this.say(r.queued ? `Queued in ${this.sessionName(s)} (${s.state === 'starting' ? 'starting' : 'busy'}) · same session` : `Sent to ${this.sessionName(s)} · ${GLYPH.idle} waiting for reply`);
   }
