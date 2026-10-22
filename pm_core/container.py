@@ -387,6 +387,16 @@ def _run_runtime(*args: str, check: bool = True,
     return result
 
 
+def current_container_id(name: str) -> str | None:
+    """Full id of the container now holding *name*; "" if none, None if unknown."""
+    result = _run_runtime("inspect", "-f", "{{.Id}}", name,
+                          check=False, timeout=10)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    err = (result.stderr or "").lower()
+    return "" if "no such" in err else None
+
+
 def container_is_running(name: str) -> bool:
     """Return True if a container with *name* exists and is running."""
     result = _run_runtime(
@@ -1197,9 +1207,7 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     """
     if not container_is_running(name):
         return None
-    result = _run_runtime("inspect", "-f", "{{.Id}}", name,
-                          check=False, timeout=10)
-    container_id = result.stdout.strip()
+    container_id = current_container_id(name) or ""
 
     complete, wedged, probe_err = _probe_setup(name)
     if wedged in ("pids", "memory"):
@@ -1239,7 +1247,7 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                 _log.warning("Finishing setup of %s failed", name, exc_info=True)
         if not finished:
             from pm_core import container_reaper
-            if container_reaper.live_owner_panes(name):
+            if container_reaper.live_owner_panes(name, container_id):
                 raise launch_error(
                     name, "incomplete",
                     "container setup is incomplete and a live pane still uses it",

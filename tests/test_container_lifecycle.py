@@ -156,6 +156,8 @@ def fake_env(monkeypatch):
         state["removed"].append(name)
         state["containers"] = [c for c in state["containers"] if c.name != name]
     monkeypatch.setattr(cm, "remove_container", _remove)
+    monkeypatch.setattr(cm, "current_container_id", lambda name: next(
+        (c.id for c in state["containers"] if c.name == name), ""))
     monkeypatch.setattr(cm, "running_container_count",
                         lambda: len(state["containers"]))
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
@@ -241,6 +243,16 @@ class TestReaperOwnership:
         out = reaper.reconcile(reason="manual")
         assert out.removed == []
         assert "attached concurrently" in out.decisions[0].reason
+
+    def test_recheck_under_lock_skips_replaced_container(self, fake_env, monkeypatch):
+        """A relaunch between plan and removal swapped in a new container of
+        the same name (no pane attached yet): removal by name must not hit it."""
+        name = "pm-repo-ab12-review-pr-aaaa"
+        fake_env["containers"] = [_info(name)]
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "id-replacement")
+        out = reaper.reconcile(reason="manual")
+        assert out.removed == [] and fake_env["removed"] == []
+        assert "replaced by a newer launch" in out.decisions[0].reason
 
     def test_dry_run_removes_nothing(self, fake_env):
         fake_env["containers"] = [_info("pm-repo-ab12-impl-pr-aaaa")]

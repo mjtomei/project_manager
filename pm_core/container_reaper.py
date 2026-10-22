@@ -507,6 +507,13 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             return False, "skipped: launch started concurrently"
         if is_retained(info.name) and not scope.include_retained:
             return False, "skipped: retained concurrently"
+        if info.id:
+            # A relaunch between plan() and now replaced the container under
+            # the same name; its pane may not exist yet, so the pane re-check
+            # below can't protect it.  Removal is by name, so compare ids.
+            current = container_mod.current_container_id(info.name)
+            if current and current != info.id:
+                return False, "skipped: replaced by a newer launch"
         if not d.released:
             owners, _ = _owner_panes(info, _PaneCache(), fresh=True)
             if owners:
