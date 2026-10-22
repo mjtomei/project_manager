@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T16:48:14.768673+00:00'
+  updated_at: '2026-10-22T17:10:44.932456+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30216,6 +30216,22 @@ prs:
       /pm-captures/even-realities/mockup/src/display.js synced. Captures /pm-captures/scenarios/17/{pre,post}-fix.'
     created_at: '2026-10-22T16:48:14Z'
     last_edited: '2026-10-22T16:48:14Z'
+  - id: note-ec92919
+    text: 'QA s20 (8f892fb6): fixed 4 mockup bugs found driving one 5180 preview with
+      3 tabs + curl actors. (1) one unknown-type director event (server accepts any
+      JSON object) threw in main.js pollDirector after directorSeq advanced, silently
+      dropping later events in the same batch in every tab — now per-event try, logged
+      "DIRECTOR ignored <type>: …"; server 400s non-object JSON. (2) npm run capture
+      with npm run serve on 5180 hijacked the user preview (reset/publish-revision
+      in their queue, tabs reset, exit 0 with screenshots) — now refuses busy MOCKUP_PORT/SIMULATOR_PORT
+      with "port 5180 (mockup server) is busy … Nothing was captured." exit 1. (3)
+      under host load simulator 0.9.5 sometimes never answers a bridge call (frame
+      lane stalls → "no new frame"); capture replays that journey once in a relaunched
+      simulator (forced-stall test passed; 5/5 loaded runs ok). (4) check.mjs process.exit()
+      truncated output through slow pipes (tee) — summary lost; now exitCode. No journey/frame/screenshot
+      changes. Captures /pm-captures/scenarios/20/{pre-fix,post-fix}.'
+    created_at: '2026-10-22T17:10:44Z'
+    last_edited: '2026-10-22T17:10:44Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
