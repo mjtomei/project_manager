@@ -301,11 +301,13 @@ export class App {
         return out;
       }
       case 'history': {
-        const h = pm.history[v.pr];
+        // A pending PR that never ran has no history yet.
+        const h = pm.history[v.pr] || { timers: [], attempts: [] };
         const out = [it([{ t: 'TIMERS', dim: true }], null, null)];
         for (const t of h.timers) out.push(it([{ t: t.what }, { t: ` · ${t.owner}`, dim: true }], { t: `${t.left} → ${t.then}`, dim: false }, null));
         if (!h.timers.length) out.push(it([{ t: 'No PR-owned timers', dim: true }], null, null));
         out.push(it([{ t: 'ATTEMPTS', dim: true }], null, null));
+        if (!h.attempts.length) out.push(it([{ t: 'No attempts yet', dim: true }], null, null));
         for (const [at, what, took, outcome] of h.attempts.slice(-5)) out.push(it([{ t: at, dim: true }, { t: what, x: 86 }], { t: `${took} ${outcome}`, dim: outcome !== 'running' }, null));
         return out;
       }
