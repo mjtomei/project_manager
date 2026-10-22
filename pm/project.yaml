@@ -8321,6 +8321,61 @@ prs:
       new QA windows so sample the TUI with capture-pane. Captures /pm-captures/scenarios/18'
     created_at: '2026-10-22T03:54:23Z'
     last_edited: '2026-10-22T03:54:23Z'
+  - id: note-de324b5
+    text: 'S16 refine (2026-10-22): live-checked on git 2.34 (temp-worktree path).
+      In this container ~/.local/bin/git proxies fetch, so local-path integrate fetches
+      fail with ''does not appear to be a git repository'' unless PATH=/usr/bin is
+      first (export it plus PYTHONPATH=/workspace in every test pane). Possible bug:
+      local backend, run from a PR workdir whose origin is not a directory (git remote
+      set-url origin /nonexistent) -> target_for falls back to the workdir itself
+      and fetches the clone''s own stale master. Output was ''up to date with master@<old
+      sha>'', exit 0, not error. --record writes to the project.yaml of whatever pm
+      dir it runs from (the clone''s copy when run from the workdir), so run --record/--apply
+      from the main repo.'
+    created_at: '2026-10-22T03:20:16Z'
+    last_edited: '2026-10-22T03:20:16Z'
+  - id: note-3a25523
+    text: 'QA S20 refine (github refusal/retry/integrity-once): fake gh is dispatched
+      in-process (gh_ops -> fake_github.dispatch_session), so a PATH gh wrapper cannot
+      intercept `gh pr merge`; inject the one-shot "old head" failure with a fake-github
+      re-seed "scripts" entry ({"match":"pr merge","returncode":1,"stderr":"...","times":1};
+      re-seed must list every PR in order with already-merged ones as MERGED). A second
+      `pm pr merge --no-signoff-check` on a PR the first run finalized just prints
+      "already merged" (rc 1); to see verification re-run, make the first recovery
+      fail at the main-repo pull (committed local divergence, run with env -u TMUX
+      -u PM_IN_TMUX_SESSION), fix with `git reset --keep HEAD~1`, then recover again.
+      The TUI 300 s GitHub sync can finalize teammate merges unverified (pr-2e06289):
+      drive github recovery right after a sync tick.'
+    created_at: '2026-10-22T03:21:38Z'
+    last_edited: '2026-10-22T03:21:38Z'
+  - id: note-aab65ae
+    text: 'QA S19 refine (gated publish local/vanilla), smoke-tested on 5d41309c:
+      approvals come from pm pr edit --status sign_off + pm pr auto-sequence ticks
+      with fake-claude signoff [SIGNOFF_MERGE] (re-set config before each new run).
+      Add ALL PRs and commit pm/ to master before pm pr start (else ''not committed
+      on master yet''). Races are deterministic via one-shot hooks: main-repo reference-transaction
+      on refs/pm/merge/* (git commit --allow-empty) -> ''master in <repo> moved during
+      the merge''; main-repo post-merge ''kill -9 grandparent'' -> published-unfinalized,
+      plain re-run prints ''already in master; recovering.''; vanilla PR-workdir pre-push
+      pushing a 2nd clone -> ''master moved during the merge (a -> b)''. Two panes
+      send-keys back-to-back reliably hit ''Waiting for another merge...''. Refusal
+      text is ''only recover an already-completed merge'' (not ''recovers''). cwd
+      and -C/PM_PROJECT both resolve symlinks, so a symlinked path reaches target_for
+      already resolved.'
+    created_at: '2026-10-22T03:23:30Z'
+    last_edited: '2026-10-22T03:23:30Z'
+  - id: note-da30291
+    text: 'QA S16 (integrate CLI, rerere/concurrent/agent) 11949f52: from a PR workdir
+      whose origin is unreachable, local target_for fell back to the clone itself
+      -> "up to date with master@<stale>" exit 0; now targets the origin and fails
+      "integration check failed: fetch master from <origin> failed", exit 1 (+ regression
+      test). All other S16 Thens held on 5d41309c: rerere resolution not replayed
+      into candidate, 30/30 (+50 extra) simultaneous checks clean with an agent loop
+      staging edits, vanilla unreachable origin errors. Pre-existing unrelated failure:
+      tests/test_hook_events.py::test_installer_writes_standalone_receiver. Captures
+      /pm-captures/scenarios/16'
+    created_at: '2026-10-22T03:32:40Z'
+    last_edited: '2026-10-22T03:32:40Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
