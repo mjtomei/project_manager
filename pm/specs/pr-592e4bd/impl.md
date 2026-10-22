@@ -233,6 +233,18 @@ a tools-disabled `claude -p` through the route, reporting requested models
     and left to pr-1ab9075 (#247, note added there): a queued launch still
     polls its refiner synchronously inside the verdict loop, so a long or
     stalled queued refiner blocks it as before this PR.
+  - Review loop 99cf i3: `claude_launcher._resolve_provider` (the
+    `launch_claude*` subprocess paths) also drops a router provider's
+    `unset_env_vars` from the child env, matching the shell command's
+    `env -u` (regression `TestResolveProvider`).
+  - Review loop 99cf i4: the bridge dir is created through
+    `worker_route._secure_bridge_dir`, which refuses anything but a real
+    directory owned by the user (lstat). This matters for the shared
+    `/tmp/pm-route-<uid>-<hash>` fallback: a planted symlink must not
+    redirect the container bind mount, and `container_mounts` now returns
+    no mount rather than an unsafe one (the gate then reports it).
+    Regression `TestBridge::test_symlinked_bridge_dir_is_refused`
+    (mutation-checked).
 
 ### Bugs found by live validation, with regressions
 1. *Stream cut off after 10 s* — the bridge's connect timeout stayed on the

@@ -573,6 +573,25 @@ class TestBridge:
             s.close()
             sock.unlink(missing_ok=True)
 
+    def test_symlinked_bridge_dir_is_refused(self, pm_home_dir, short_dir,
+                                             monkeypatch):
+        # A pre-planted symlink (e.g. the shared /tmp fallback) must not
+        # redirect the container bind mount to its target.
+        target = short_dir / "victim"
+        target.mkdir(mode=0o755)
+        link = short_dir / "planted"
+        link.symlink_to(target)
+        monkeypatch.setattr(worker_route, "bridge_dir", lambda route: link)
+        cfg = ProviderConfig(name=ROUTE, type="router",
+                             api_base="http://127.0.0.1:1", model=MODEL)
+        with pytest.raises(OSError, match="not a directory owned"):
+            worker_route.ensure_host_bridge(cfg)
+        with patch("pm_core.worker_route.get_provider", return_value=cfg):
+            assert worker_route.container_mounts(
+                ModelResolution(provider=ROUTE)) == {}
+        assert oct(target.stat().st_mode & 0o777) == "0o755"
+        assert not (target / route_bridge.SOCKET_NAME).exists()
+
     def test_long_route_name_socket_path_fits(self, pm_home_dir):
         p = worker_route.bridge_socket("r" * 200)
         assert len(str(p)) <= 100

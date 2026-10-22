@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import shlex
+import stat
 import subprocess
 import sys
 import threading
@@ -208,6 +209,22 @@ def bridge_socket(route: str) -> Path:
     return bridge_dir(route) / route_bridge.SOCKET_NAME
 
 
+def _secure_bridge_dir(route: str) -> Path:
+    """Create the route's bridge dir as a private (0700) directory.
+
+    Raises OSError unless it is a real directory owned by this user: it
+    is bind-mounted into containers, so a pre-planted symlink (possible
+    for the shared /tmp fallback) must never redirect that mount.
+    """
+    d = bridge_dir(route)
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    st = os.lstat(d)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise OSError(f"{d} is not a directory owned by uid {os.getuid()}")
+    os.chmod(d, 0o700)
+    return d
+
+
 def ensure_host_bridge(cfg: ProviderConfig) -> Path:
     """Start the host-side socket -> router bridge if it is not running.
 
@@ -215,11 +232,9 @@ def ensure_host_bridge(cfg: ProviderConfig) -> Path:
     every container on the route.  Returns the socket path; callers check
     :func:`route_bridge.unix_connectable` for liveness.
     """
-    d = bridge_dir(cfg.name)
-    sock = d / route_bridge.SOCKET_NAME
     with _bridge_lock:
-        d.mkdir(parents=True, exist_ok=True)
-        os.chmod(d, 0o700)
+        d = _secure_bridge_dir(cfg.name)
+        sock = d / route_bridge.SOCKET_NAME
         if route_bridge.unix_connectable(str(sock)):
             return sock
         host, port = router_address(cfg)
@@ -251,8 +266,10 @@ def ensure_host_bridge(cfg: ProviderConfig) -> Path:
 def container_mounts(resolution) -> dict[Path, str]:
     """Extra rw mounts a QA container needs for *resolution*'s route.
 
-    Empty when it is not a router provider.  Starts the host bridge so the
-    bind source exists before the container is created.
+    Empty when it is not a router provider, or when the bridge directory
+    is unsafe to mount (the launch gate then reports the problem).  Starts
+    the host bridge so the bind source exists before the container is
+    created.
     """
     try:
         cfg = router_for(resolution)
@@ -265,9 +282,14 @@ def container_mounts(resolution) -> dict[Path, str]:
     except (OSError, ValueError):
         _log.warning("could not start route bridge for %s", cfg.name,
                      exc_info=True)
-        d = bridge_dir(cfg.name)
-        d.mkdir(parents=True, exist_ok=True)
-        sock = d / route_bridge.SOCKET_NAME
+        # Still mount the (empty) dir so a bridge started later reaches
+        # this container -- but only a dir that is safe to mount.
+        try:
+            sock = _secure_bridge_dir(cfg.name) / route_bridge.SOCKET_NAME
+        except OSError:
+            _log.warning("route bridge dir for %s is unsafe to mount",
+                         cfg.name, exc_info=True)
+            return {}
     return {sock.parent: route_bridge.CONTAINER_SOCKET_DIR}
 
 
