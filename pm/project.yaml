@@ -31451,7 +31451,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T19:28:01.896684+00:00'
+  updated_at: '2026-10-22T20:33:29.061858+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31509,3 +31509,12 @@ prs:
       (#247).'
     created_at: '2026-10-22T19:28:01Z'
     last_edited: '2026-10-22T19:28:01Z'
+  - id: note-aa9f287
+    text: 'QA s3 (2026-10-22): fixed in 0b1edfca (CODE CHANGE, needs re-review) —
+      _poll_tmux_verdicts no-window INPUT_REQUIRED marking overwrote scenarios stopped
+      during the initial route wait (verdict INPUT_REQUIRED + verdict.md written);
+      now they stay unverdicted with reason "stopped while waiting for the work route",
+      overall INPUT_REQUIRED. Regression TestPollLoopRouteGating::test_stop_during_route_wait_leaves_scenario_unverdicted
+      (fails on 81cebf17). Live pre/post captures /pm-captures/scenarios/3/story3.'
+    created_at: '2026-10-22T20:33:29Z'
+    last_edited: '2026-10-22T20:33:29Z'
