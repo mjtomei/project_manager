@@ -11830,7 +11830,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T14:17:54.192707+00:00'
+  updated_at: '2026-10-22T23:00:47.948428+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11866,6 +11866,19 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-ed3de18
+    text: 'Fresh repro of the -sN suffix collision (pr-592e4bd QA S10, 2026-10-22;
+      was filed as pr-f4db036, closed as a duplicate of this PR): container.py cleanup_orphaned_qa_containers
+      (run at QA start, qa_loop.py ~4046) keeps a container when ANY qa-* window ends
+      with its -sN suffix. Two PRs A=pr-89fb8fc / B=pr-569831e in container mode both
+      ran scenarios s3/s4; z t on A at 22:35:24 while B still had qa-pr-569831e-s3/-s4
+      windows left A''s old pm-proj-add15215-qa-pr-89fb8fc-37bf502b0dd5cf70-s3/-s4
+      Up (never removed, still Up 10+ min after A''s new run completed), while B''s
+      own z t at 22:35:26 removed its old s3/s4. Fix idea: match the window name for
+      this PR (qa-<display_id>-s<N>), not any qa-* window with that suffix. Evidence:
+      /pm-captures/scenarios/10/story2 (app.log 22:35:24-27, before.txt/qa-ids-before.txt).'
+    created_at: '2026-10-22T23:00:47Z'
+    last_edited: '2026-10-22T23:00:47Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -31755,31 +31768,6 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T22:34:15.023090+00:00'
   updated_at: '2026-10-22T22:34:15.023090+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-f4db036
-  plan: bugs
-  title: 'Bug: orphaned QA container cleanup keeps a PR''s old containers when another
-    PR has a qa window with the same -sN suffix'
-  branch: pm/pr-f4db036-bug-orphaned-qa-container-cleanup-keeps-a-pr-s-old
-  status: pending
-  depends_on: []
-  description: 'pm_core/container.py cleanup_orphaned_qa_containers (called at QA
-    start, qa_loop.py ~4046) keeps a container if ANY tmux window starting with "qa-"
-    ends with the container''s -sN suffix, not the window of that PR. Repro (pr-592e4bd
-    QA S10, container mode, 2 PRs): run QA on PR A and PR B (both get scenarios s3/s4),
-    then z t on A while B''s qa-<B>-s3/-s4 windows still exist: A''s previous-loop
-    containers pm-<tag>-qa-<A>-<oldloop>-s3/-s4 are never removed (still Up after
-    A''s new run completes), while B''s old ones are removed at its own z t. Fix:
-    compare against the window name for this PR (qa-<display_id>-s<N>), not any qa-*
-    window with the suffix. Evidence /pm-captures/scenarios/10/story2 (app.log 22:35:24-27).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-10-22T22:42:09.505150+00:00'
-  updated_at: '2026-10-22T22:42:09.505150+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
