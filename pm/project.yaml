@@ -28353,7 +28353,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-22T16:24:29.577356+00:00'
+  updated_at: '2026-10-22T17:27:37.922879+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28428,6 +28428,16 @@ prs:
       base.'
     created_at: '2026-10-22T15:51:07Z'
     last_edited: '2026-10-22T15:51:07Z'
+  - id: note-d23d3d5
+    text: 'QA S12 (2026-10-22) PASS, no edits: 5 concurrent QA starts (autostart A/B/C
+      + CLI auto-sequence D + user t on E) → only select_window was $S:qa-E; closed/merged
+      auto-sequence + qa-run-bg skip cleanly. Story-3 background-first race: in the
+      no-fzf popup pre-type t, send only Enter the instant "Starting QA for <pr>"
+      hits the debug log, then q on "starting: qa" — otherwise qa-<pr>-s0 (spinner
+      prefix match) appears first and the popup closes on window_open. Scripts in
+      /pm-captures/scenarios/12/scripts.'
+    created_at: '2026-10-22T17:27:37Z'
+    last_edited: '2026-10-22T17:27:37Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
