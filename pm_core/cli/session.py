@@ -1780,9 +1780,12 @@ def _resolve_root_from_session(session: str) -> Path | None:
 def popup_picker_cmd(session: str, window_name: str):
     """Internal: action-based PR picker for tmux popup.
 
-    Lists all active PRs with available actions (start, review, qa, merge,
-    review-loop) based on PR status.  Selecting an action runs the
-    corresponding pm command.
+    Shows one PR at a time — the invoking window's PR, else the first
+    active PR with an open window — with its available actions (start,
+    review, qa, merge, review-loop) based on PR status.  h/l/0 step
+    through the other active PRs that have open windows; a merged/closed
+    or unresolvable PR shows a notice row instead of actions.  Selecting
+    an action runs the corresponding pm command.
     """
     import shutil
     import sys
