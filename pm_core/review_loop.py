@@ -292,7 +292,7 @@ def run_review_loop_sync(
     pr_data: dict,
     transcript_dir: str,
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
-    max_iterations: int = 10,
+    max_iterations: int = 50,
 ) -> ReviewLoopState:
     """Run the review loop synchronously (intended for a background thread).
 
@@ -441,7 +441,7 @@ def start_review_loop_background(
     transcript_dir: str,
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
     on_complete: Callable[[ReviewLoopState], None] | None = None,
-    max_iterations: int = 10,
+    max_iterations: int = 50,
 ) -> threading.Thread:
     """Start the review loop in a background thread.
 
