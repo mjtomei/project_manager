@@ -29980,7 +29980,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-22T14:40:01.248838+00:00'
+  updated_at: '2026-10-22T14:40:56.683567+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30176,6 +30176,20 @@ prs:
       hold if the merge only touches pm/project.yaml. Report: /pm-captures/report.html.'
     created_at: '2026-10-22T14:40:01Z'
     last_edited: '2026-10-22T14:40:01Z'
+  - id: note-ea208cf
+    text: 'Sign-off 2026-10-22 on 701898f0: SIGNOFF_IMPL for the fourth time, again
+      caused only by the integration conflict. The two previous IMPL returns (4ec71d0d,
+      e2f18667) were never acted on: the branch has merged master only up to 337d1266,
+      and everything after 48266e09 is notes in pm/project.yaml and pm/specs/pr-44f807f/qa.md.
+      The base is still master@660e43a2. A trial merge shows the same single hunk:
+      both sides appended a PR record at the end of prs: (ours pr-9ca240a, master
+      pr-24f022e). IMPL: run git merge master, keep BOTH records, optionally set project.active_pr
+      back to master value, commit, push. Do not just add a note: unless the merge
+      happens, sign-off will keep returning IMPL. Re-ran at 701898f0: tests/test_doc_rubric.py
+      151 passed; --write-doc leaves the tree clean. Review c56b4403 and QA r4 S13-S16
+      (b3529c34) still hold if the merge only touches pm/project.yaml. Report: /pm-captures/report.html.'
+    created_at: '2026-10-22T14:40:56Z'
+    last_edited: '2026-10-22T14:40:56Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
