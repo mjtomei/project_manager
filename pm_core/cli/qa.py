@@ -566,8 +566,12 @@ End with a summary of which steps work and which don't, then one of:
             write_dir=str(clone_path),
             session_type="qa_author",
         )
-        shell_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True,
-                                                 container_id=container_id)
+        # The debug container has its own (unshared, no PR) push proxy, so
+        # the exit trap stops it along with the container.
+        from pm_core.push_proxy import get_proxy_socket_path
+        shell_cmd = container_mod.build_exec_cmd(
+            cname, claude_cmd, cleanup=True, container_id=container_id,
+            proxy_socket_path=get_proxy_socket_path(cname))
         run_cwd = str(qa_workdir)
     else:
         shell_cmd = build_claude_shell_cmd(

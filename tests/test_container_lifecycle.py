@@ -477,6 +477,31 @@ class TestExecTrapById:
         assert "rm -f pm-t-review-pr-1" not in cmd
 
 
+class TestFileLock:
+    def test_lock_on_unlinked_inode_is_not_kept(self, monkeypatch):
+        """A lock won on a file the reaper just unlinked must be retaken on
+        the recreated path, or two launches could both 'hold' it."""
+        path = cm._lock_path("container-x")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+        real_flock = cm.fcntl.flock
+        state = {"swapped": False}
+
+        def _flock(fd, op):
+            real_flock(fd, op)
+            if op & cm.fcntl.LOCK_EX and not state["swapped"]:
+                state["swapped"] = True  # reaper prunes + a launcher recreates
+                path.unlink()
+                path.write_text("")
+        monkeypatch.setattr(cm.fcntl, "flock", _flock)
+        with cm.launch_lock("x", timeout=1) as got:
+            assert got
+            # The lock now held is on the current file: a second try fails.
+            monkeypatch.setattr(cm.fcntl, "flock", real_flock)
+            with cm.launch_lock("x", timeout=0) as again:
+                assert not again
+
+
 # ---------------------------------------------------------------------------
 # Shared push proxy release
 # ---------------------------------------------------------------------------

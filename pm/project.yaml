@@ -6849,7 +6849,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-04-07T22:44:24.695069+00:00'
+  updated_at: '2026-10-22T16:17:40.788248+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
   reviewed_at: '2026-04-07T22:44:24.695069+00:00'
   merged_at: null
@@ -6858,6 +6858,15 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-ac12b47-79d4f9af4b607a9b)'
     created_at: '2026-04-07T14:13:07Z'
     last_edited: '2026-04-07T14:13:07Z'
+  - id: note-64cc273
+    text: 'pr-1139060 supersedes the container/proxy parts of this PR: it adds `pm
+      session cleanup [--dry-run]` (= `pm container reap --session <tag>`, ownership-checked
+      via pm_core/container_reaper.py), runtime-checked shared-proxy release (push_proxy.release_proxy_if_unused)
+      and startup/periodic TUI reconcile. If this branch is revived, rebase onto it
+      and drop the duplicate session_cleanup command / window-liveness container sweep
+      rather than adding a second implementation.'
+    created_at: '2026-10-22T16:17:40Z'
+    last_edited: '2026-10-22T16:17:40Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
 - id: pr-53e47a1
   plan: tui-ux
@@ -9834,7 +9843,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/155
   gh_pr_number: 155
   created_at: '2026-04-06T18:53:56.850825+00:00'
-  updated_at: '2026-04-10T14:00:25.845943+00:00'
+  updated_at: '2026-10-22T16:17:41.696498+00:00'
   started_at: '2026-04-06T19:06:18.130597+00:00'
   reviewed_at: null
   merged_at: null
@@ -9847,6 +9856,14 @@ prs:
       fix from #155 into it and closing this PR.'
     created_at: '2026-04-10T14:00:25Z'
     last_edited: '2026-04-10T14:00:25Z'
+  - id: note-620f458
+    text: 'pr-1139060 supersedes the container part of this PR: container_mod.cleanup_pr_containers
+      now covers impl/review/signoff/QA for a PR (labels + name parse), merged-PR
+      TUI sync hands containers to a background PR-scoped reconcile (pr_cleanup.cleanup_pr_resources(background_containers=True)),
+      and CLI merge spawns a detached `pm container reap --pr`. If revived, keep only
+      the window-kill-on-startup part and reuse those helpers.'
+    created_at: '2026-10-22T16:17:41Z'
+    last_edited: '2026-10-22T16:17:41Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-cb2a29d-kill-tmux-windows-and-containers-for-29829145
 - id: pr-fc6db6a
   plan: bugs
@@ -11830,7 +11847,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T14:17:54.192707+00:00'
+  updated_at: '2026-10-22T15:57:45.386975+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11855,6 +11872,17 @@ prs:
       TUI startup, in_progress), pr-ac12b47 (session stale-container cleanup).'
     created_at: '2026-05-25T22:43:55Z'
     last_edited: '2026-05-25T22:43:55Z'
+  - id: note-2bf3c18
+    text: 'i2 (aac0e282): finished the i1 WIP wiring, added PID-exhaustion handling
+      (note-1943d8d), and added tests/test_container_lifecycle.py. Still not verified
+      on real podman (no image in the review sandbox), so QA must exercise these:
+      run-end release, the keyring-pressure path, and restart-in-place of a PID-exhausted
+      unowned container. Dead-worker retry scheduling stays with pr-1ab9075. Sandbox
+      gotcha: tests/test_git_ops::test_keeps_unpushed_merge fails while /workspace
+      is dirty, because the ~/.local/bin/git wrapper reports "unstaged changes"; it
+      is not a regression.'
+    created_at: '2026-10-22T15:57:45Z'
+    last_edited: '2026-10-22T15:57:45Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

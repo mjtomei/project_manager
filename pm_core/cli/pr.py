@@ -1040,11 +1040,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                         pm_session, window_name, cmd, str(work_path),
                         switch=not background,
                     )
-                    window_created = bool(claude_pane)
-                    if claude_pane:
-                        win = tmux_mod.find_window_by_name(pm_session, window_name)
-                        if win:
-                            _add_companion_pane(pm_session, win, str(work_path), "impl")
+                    if not claude_pane:
+                        raise RuntimeError(f"no pane returned for '{window_name}'")
+                    window_created = True
+                    win = tmux_mod.find_window_by_name(pm_session, window_name)
+                    if win:
+                        _add_companion_pane(pm_session, win, str(work_path), "impl")
                 else:
                     tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
                                         switch=not background)

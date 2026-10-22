@@ -463,6 +463,19 @@ def _file_lock(key: str, *, timeout: float | None = None):
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # The reaper unlinks stale lock files while holding them; a
+                # lock won on such an unlinked inode doesn't exclude whoever
+                # opens the recreated path — reopen and try again.
+                try:
+                    current = os.stat(path).st_ino
+                except FileNotFoundError:
+                    current = None
+                if current != os.fstat(fd).st_ino:
+                    new_fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                    fd = new_fd
+                    continue
                 acquired = True
                 break
             except BlockingIOError:
