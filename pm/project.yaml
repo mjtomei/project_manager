@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T05:17:00.162622+00:00'
+  updated_at: '2026-10-22T05:18:38.814376+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30492,6 +30492,36 @@ prs:
       [loop i1] while i2 runs (runtime iteration = completed count). Captures /pm-captures/scenarios/28.'
     created_at: '2026-10-22T05:17:00Z'
     last_edited: '2026-10-22T05:17:00Z'
+  - id: note-58164eb
+    text: 'S26 refine (653c26c6): (1) loop children (iterations) render oldest first
+      (start order) under a newest-first top-level list; (2) the review INPUT_REQUIRED
+      hold is in JSON holds[] (due_at/remaining_s null), not timers.active; text "armed
+      …, no countdown"; (3) TUI stop = z d, which also opens a plain fresh review
+      (a non-loop review row) that consumes a fake review cursor slot, so with [NW,NW,PASS]
+      wrap + z d + a superseded zz d loop the final zz d loop runs NW,NW,PASS; (4)
+      popup at an 80-col window is 95% wide (~74 inner), so pager vs COLUMNS=80 CLI
+      compares word-for-word, not line-for-line.'
+    created_at: '2026-10-22T04:53:34Z'
+    last_edited: '2026-10-22T04:53:34Z'
+  - id: note-007af98
+    text: 'QA S26 (2026-10-22): fixed c4e3f5b0. After z d (plain fresh review left
+      review-<pr>.jsonl naming its own session) and a later review loop ending, the
+      TUI non-loop review tracker paired the loop''s leftover iteration pane with
+      that stale symlink, so the runtime mirror journaled a phantom top-level "review
+      running" reading "agent working" forever (Waiting for: review: agent working
+      1m51s+, popup badge [review: working], runtime review=running). _poll_impl_idle
+      now compares the pane start-command --session-id with the transcript session
+      and treats a mismatch like an unregisterable pane (orphan trust watch); cached
+      per pane. Post-fix all S26 Thens held (badge working / turn done 12s vs R1 11.7s,
+      grace armed/due fixed + strictly falling, IR hold 5 reads, (last X) only, start
+      folded, pager==CLI at 74 cols, A cancelled 1.0 s after z d, B superseded, C
+      NW/NW/PASS, order C,B,A,S1). Obs: one R1 read caught an iteration as "running
+      for 0s" (phase start) in the 8 ms between attempt_start and its launching phase;
+      the z d plain review row appears (vanished) only when the 5 s tracker tick lands
+      before zz d replaces its window. Captures /pm-captures/scenarios/26 (pre-fix/
+      post-fix/).'
+    created_at: '2026-10-22T05:18:38Z'
+    last_edited: '2026-10-22T05:18:38Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
