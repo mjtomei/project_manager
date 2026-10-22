@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T18:46:06.427455+00:00'
+  updated_at: '2026-10-22T18:53:35.227290+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30287,6 +30287,31 @@ prs:
       — content identical). /pm-captures/even-realities synced. Captures /pm-captures/scenarios/25/{pre-fix,post-fix,simulator}.'
     created_at: '2026-10-22T18:46:06Z'
     last_edited: '2026-10-22T18:46:06Z'
+  - id: note-0e52344
+    text: 'QA s27 refiner: server.mjs parses req.url with WHATWG URL, so `curl --path-as-is
+      /../package.json` and `/%2e%2e/server.mjs` collapse to /package.json and /server.mjs
+      inside the mockup root and return 200 (not traversal, not 404); only an encoded-slash
+      escape like /..%2f..%2fetc%2fpasswd reaches the root check -> 404. Bad /director
+      bodies (non-JSON, [1,2], null, 5) all 400 with seq unchanged; MOCKUP_PORT busy
+      -> capture exit 1 "Nothing was captured." verified in a scratch copy. curl normalizes
+      /../ itself unless --path-as-is.'
+    created_at: '2026-10-22T17:33:55Z'
+    last_edited: '2026-10-22T17:33:55Z'
+  - id: note-fa8a232
+    text: 'QA s27 (ac3a3b5e, de50772f): concurrency Thens all held on one 5180 serve
+      with tabs A/B/C + concurrent curl actors (11 POSTs 200, identical A/B mirror+companion,
+      bogus ignored without dropping the batch, tick +5 in mirror/companion, message
+      sent once or refused+kept depending on interleave, late tab/reload no replay,
+      bad bodies 400 seq unchanged, path probes 200/404/400, reset clears B demo disconnect,
+      check/capture next to serve leave seq/tabs/manifest/tree untouched). Fixed:
+      (1) plain browser imported the Even SDK on load, so the console carried "[EvenAppBridge]
+      Bridge initialized" + ShadowTimers debug and the SDK wrapped page timers — main.js
+      now imports it only with window.flutter_inappwebview; (2) capture replays a
+      stalled journey up to twice (one replay still failed 2/3 journey-A runs at load
+      ~70). Journey-A override capture byte-identical to committed raw. /pm-captures/even-realities
+      synced. Captures /pm-captures/scenarios/27/{pre-fix,post-fix-rebased}.'
+    created_at: '2026-10-22T18:53:35Z'
+    last_edited: '2026-10-22T18:53:35Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
