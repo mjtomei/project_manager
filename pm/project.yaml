@@ -29980,7 +29980,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-22T14:12:38.538334+00:00'
+  updated_at: '2026-10-22T14:14:21.195644+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30129,6 +30129,13 @@ prs:
       still hold. Report: /pm-captures/report.html.'
     created_at: '2026-10-22T14:12:38Z'
     last_edited: '2026-10-22T14:12:38Z'
+  - id: note-e57026c
+    text: 'Impl 2026-10-22: merged master@337d1266 (only conflict pm/project.yaml
+      pr-8df6472 updated_at; took master timestamp, kept both sides notes/description).
+      tests/test_doc_rubric.py 151 passed; --write-doc leaves tree clean. Ready for
+      sign-off again.'
+    created_at: '2026-10-22T14:14:21Z'
+    last_edited: '2026-10-22T14:14:21Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
