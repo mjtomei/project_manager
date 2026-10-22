@@ -658,7 +658,9 @@ class TestPopupPickerNoActions:
         fzf, run_cmd = _run_picker(
             tmp_path, monkeypatch, prs, ["#238"], "#238", [(130, "")])
         (call,) = fzf.calls
-        assert not any(a.startswith("--expect") for a in call["cmd"])
+        # Only (unadvertised) nav keys are accepted — no action keys.
+        assert set(_expect(call)) == {"h", "l", "left", "right", "0"}
+        assert "h/l" not in _header(call)
         assert "enter:ignore" in next(a for a in call["cmd"]
                                       if a.startswith("--bind="))
         run_cmd.assert_not_called()
@@ -838,3 +840,48 @@ class TestPopupPickerMergedNavigation:
             [(0, "s\n")], on_launch=on_launch)
         run_cmd.assert_called_once()
         assert "pr-r" in run_cmd.call_args.args[0]
+
+    def test_merged_pr_reopened_while_alone_is_reachable(self, tmp_path, monkeypatch):
+        """Both live PRs merge, collapsing the nav list to one entry; one is
+        then reopened.  Nav keys still reload with a single entry, so the
+        reopened PR comes back into reach (QA edge case E4)."""
+        prs = self._prs()
+
+        def on_launch(n):
+            if n == 1:
+                prs[1]["status"] = "merged"
+                prs[2]["status"] = "closed"
+            if n == 2:
+                prs[2]["status"] = "qa"
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, self.WINDOWS, "tui",
+            [(0, "l\n"), (0, "l\n"), (0, "t\n")], on_launch=on_launch)
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — #240  (1/2)",
+            "PR Actions — #240",
+            # #240 itself is merged now, so only #242 remains.
+            "PR Actions — #242",
+        ]
+        assert "l" in _expect(fzf.calls[1])
+        run_cmd.assert_called_once()
+        assert "pr-q" in run_cmd.call_args.args[0]
+
+
+class TestPopupPickerEnterSelection:
+    PRS = [{"id": "pr-r", "status": "in_review", "title": "Review",
+            "gh_pr_number": 240}]
+
+    def test_enter_on_action_row_dispatches(self, tmp_path, monkeypatch):
+        """fzf prints an empty --expect key line for Enter; the selected
+        row on line 2 must be dispatched, not misread as the key."""
+        from pm_core.cli import session as sess
+
+        rows = sess._build_picker_lines(self.PRS, "#240", {"#240"})
+        row = next(d for d, c, _ in rows if c and "start" in d)
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, ["#240"], "#240",
+            [(0, f"\n{row}\n")])
+        run_cmd.assert_called_once()
+        assert run_cmd.call_args.args[0] == next(c for d, c, _ in rows
+                                                 if d == row)

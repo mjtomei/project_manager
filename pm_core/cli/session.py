@@ -2029,10 +2029,8 @@ def popup_picker_cmd(session: str, window_name: str):
                    # --height inhibits fzf's alt-screen mode so the
                    # picker contents stay visible after fzf exits and
                    # the spinner renders below them in the same pane.
-                   "--height=100%"]
-            if expect:
-                # fzf rejects an empty --expect= key list.
-                cmd.append(f"--expect={','.join(expect)}")
+                   "--height=100%",
+                   f"--expect={','.join(expect)}"]
             if no_input_supported:
                 cmd.append("--no-input")
             else:
@@ -2084,10 +2082,12 @@ def popup_picker_cmd(session: str, window_name: str):
                 if nav_hint:
                     header_lines.append(nav_hint)
                 header = "\n".join(header_lines)
-                if multi_pr:
-                    expect += ["h", "l", "left", "right"]
-                    if home_pr:
-                        expect.append("0")
+                # Nav keys are accepted even with a single PR (unadvertised):
+                # each press reloads, so a PR that becomes live or opens a
+                # window while the popup is open can still be reached.
+                expect += ["h", "l", "left", "right"]
+                if home_pr:
+                    expect.append("0")
             elif chord_state == "z":
                 header = (f"z — fresh start for {current_pr}\n"
                           f"s=fresh impl   d=fresh review   t=fresh qa   "
@@ -2119,14 +2119,17 @@ def popup_picker_cmd(session: str, window_name: str):
                 chord_state = "main"
                 continue
 
-            out_lines = stdout.strip().split("\n")
+            # Line 1 is the --expect key, empty for Enter/double-click —
+            # only drop the trailing newline, or the key line is lost and
+            # the selected row is misread as the key.
+            out_lines = stdout.rstrip("\n").split("\n")
             pressed_key = out_lines[0] if out_lines else ""
             selected = out_lines[1] if len(out_lines) > 1 else ""
 
             if chord_state == "main":
                 nav_delta = {"h": -1, "left": -1, "l": 1, "right": 1}
-                if multi_pr and (pressed_key in nav_delta
-                                 or (home_pr and pressed_key == "0")):
+                if (pressed_key in nav_delta
+                        or (home_pr and pressed_key == "0")):
                     current_pr = _step_target(nav_delta.get(pressed_key))
                     nav_index = _sync_index(current_pr, nav_index)
                     lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)

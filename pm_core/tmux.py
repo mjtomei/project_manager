@@ -311,8 +311,11 @@ def get_session_name() -> str:
     with several clients attached it can name another user's session.
     """
     pane = os.environ.get("TMUX_PANE")
-    if not pane and os.environ.get(CALLER_SESSION_ENV):
-        return os.environ[CALLER_SESSION_ENV]
+    caller = os.environ.get(CALLER_SESSION_ENV)
+    # The variable is inherited by anything the command spawns, so only
+    # trust it while that session still exists ("=" = exact name match).
+    if not pane and caller and session_exists(f"={caller}"):
+        return caller
     if pane:
         # Target the specific pane to get accurate session name
         result = _run(

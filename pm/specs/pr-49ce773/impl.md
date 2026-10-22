@@ -69,7 +69,11 @@
    position until the user navigates away, so the header `(i/n)` never
    names a different PR or indexes past the list.  `multi_pr`/`nav_hint`
    are recomputed every render since `n` can change.  A failed reload logs
-   a warning and keeps the previous state.
+   a warning and keeps the previous state.  h/l/←/→ (and 0 with a home
+   PR) stay in `--expect` even when the list has one entry — unadvertised,
+   they act as a reload, so a PR that is reopened or gains a window after
+   the list collapsed to one entry is still reachable (QA E4; observed by
+   the S3 refiner).
 
 ## Root cause audit (#193)
 
@@ -141,7 +145,13 @@ both the display id and the local id.
   into a popup don't update tmux client activity, so the command's
   "current client" lookup picked the other client (QA scenario 5, also on
   master).  `_run_picker_command` passes `PM_CALLER_SESSION=<session>` and
-  `tmux.get_session_name()` honours it when there is no pane.
+  `tmux.get_session_name()` honours it when there is no pane — only while
+  that session still exists (`has-session -t =<name>`, exact match), since
+  anything the command spawns inherits the variable.
+- Enter / double-click on an action row (pre-existing, also master): fzf
+  prints an empty `--expect` key line first; `stdout.strip()` dropped it so
+  the selected row was read as the key and nothing was dispatched.  Only
+  the trailing newline is stripped now.
 
 ## QA acceptance checks (carry into the QA spec)
 

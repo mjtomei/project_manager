@@ -363,13 +363,28 @@ class TestGetSessionName:
 
     @patch("pm_core.tmux.subprocess.run")
     def test_caller_session_env_without_tmux_pane(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
         env = os.environ.copy()
         env.pop("TMUX_PANE", None)
         env["PM_CALLER_SESSION"] = "proj~7"
         with patch.dict(os.environ, env, clear=True):
             result = get_session_name()
         assert result == "proj~7"
-        mock_run.assert_not_called()
+        cmd = mock_run.call_args[0][0]
+        assert "has-session" in cmd and "=proj~7" in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_caller_session_env_ignored_once_session_is_gone(self, mock_run):
+        """An inherited PM_CALLER_SESSION naming a dead session falls back
+        to the current client instead of returning a stale name."""
+        mock_run.side_effect = [MagicMock(returncode=1, stdout=""),
+                                MagicMock(returncode=0, stdout="proj~2\n")]
+        env = os.environ.copy()
+        env.pop("TMUX_PANE", None)
+        env["PM_CALLER_SESSION"] = "proj~7"
+        with patch.dict(os.environ, env, clear=True):
+            result = get_session_name()
+        assert result == "proj~2"
 
     @patch("pm_core.tmux.subprocess.run")
     def test_tmux_pane_beats_caller_session_env(self, mock_run):

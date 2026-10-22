@@ -110,7 +110,9 @@ E3. **Given** all navigable PRs get merged while the popup is open from a non-PR
 window, **When** the user presses nav keys, **Then** the popup shows a notice for
 the current PR and stays open; q/Esc quits.
 E4. **Given** a merged PR becomes live again (status back to in_review) while
-open, **When** user navigates, **Then** it reappears in the nav list.
+open, **When** user navigates, **Then** it reappears in the nav list — also
+when the list had collapsed to a single entry (h/l still reload then, though
+the nav hint is hidden).
 E5. **Given** a qa-scenario-only window (`qa-#N-s1`) is the PR's only window,
 **Then** the PR counts as navigable and its qa row is `[open]`.
 E6. **Given** project.yaml is momentarily unparsable while the popup is open,
@@ -118,6 +120,9 @@ E6. **Given** project.yaml is momentarily unparsable while the popup is open,
 log), does not crash.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
+E8. **Given** a live PR is shown, **When** the user moves to an action row and
+presses Enter (or double-clicks it), **Then** that action is dispatched (it
+used to close the popup without running anything — S2 refiner note).
 
 ## Concurrent use / shared resources
 
