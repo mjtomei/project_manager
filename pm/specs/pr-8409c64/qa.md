@@ -217,6 +217,19 @@ spins forever, no switch. Post-fix: switch fires.)
   `review-<display_id>`; the shared runtime_state entry and the single review
   window converge to a consistent state (no orphaned/duplicate review windows
   that strand a spinner).
+- Spec facts for writing E4 Thens (QA S8 round 2 found these Thens false as
+  written; all are by design, not product bugs):
+  - Launches serialise on `_review_window_launch_lock`
+    (`~/.pm/workdirs/.review-launch-<pm-session>-<pr_id>.lock`). The later
+    launch supersedes the earlier one, so exactly one `review-<display_id>`
+    survives. The superseded launch still uses up one fake-claude review
+    verdict slot, so to see NEEDS_WORK→PASS on the surviving loop, configure
+    a 3-entry sequence such as `[NEEDS_WORK, NEEDS_WORK, PASS]`.
+  - For a concurrent QA `t`, the spinner trace has **no** `select_window`
+    line, because the QA launch selects `qa-<id>` itself. Assert
+    `reason=window_open` and the client's window, not a spinner select.
+  - While QA is running, runtime_state has no `qa` entry. One appears only at
+    `done`, so check `qa_status.json` for liveness instead.
 
 ### E5 — Spinner dismissed mid-flight, then loop completes
 - **Given** the spinner is up and the user presses `q`/`Esc` before the review
