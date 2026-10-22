@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4fa69f1
+  active_pr: pr-9c5f1b5
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T06:21:16.109650+00:00'
+  updated_at: '2026-10-22T16:01:58.339527+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30628,6 +30628,19 @@ prs:
       leaves QA INPUT_REQUIRED with the fake; also run pm pr spec R qa. Captures /pm-captures/scenarios/35.'
     created_at: '2026-10-22T06:21:16Z'
     last_edited: '2026-10-22T06:21:16Z'
+  - id: note-6e898e4
+    text: 'QA S41 (2026-10-22): story 1 (rotation 22 s into the loop, 2846 reads,
+      no count dip across 18 reads near the rotation, B QA up to 2 at once and wall
+      < summed, C CLI start open in all reads) and story 2 (kill -9 in the i3 grace:
+      lost grace is recent[0] ahead of 14 elapsed graces, stale runtime line, swept
+      on tui-mount, new loop fresh i1) held. Fixed b29bcdfa: the E10 fold dropped
+      the re-tracked start attempt id from --json (runtime.start.attempt_id dangling);
+      the kept attempt now exports merged_ids. Spec nit: i3 text elapsed reads "unknown",
+      because the kill lands 0.38 s after i3 starts (the bound is shown only from
+      1 s). Filed pr-9c5f1b5 (pm session attach traceback inside a pane). Captures
+      /pm-captures/scenarios/41.'
+    created_at: '2026-10-22T16:01:58Z'
+    last_edited: '2026-10-22T16:01:58Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
@@ -30802,6 +30815,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T04:46:51.884122+00:00'
   updated_at: '2026-10-22T04:46:51.884122+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9c5f1b5
+  plan: bugs
+  title: 'Bug: pm session run inside a tmux pane prints a CalledProcessError traceback
+    when the final attach fails'
+  branch: pm/pr-9c5f1b5-bug-pm-session-run-inside-a-tmux-pane-prints-a-cal
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/session.py _session_start -> tmux_mod.attach(grouped)
+    (tmux.py attach, check=True). Repro (QA pr-8020495 S41): from a shell window inside
+    the pm session, with the TUI pane dead, run `pm session </dev/null`; it prints
+    "TUI pane missing — respawning..." and "Attaching to session <S>~1...", respawns
+    the TUI fine, then tmux attach-session exits 1 (nested client / no tty) and pm
+    prints a full Traceback ending in subprocess.CalledProcessError. Expected: a one-line
+    message (or switch-client when $TMUX is set) and a clean exit code, no traceback.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:57:27.860328+00:00'
+  updated_at: '2026-10-22T15:57:27.860328+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
