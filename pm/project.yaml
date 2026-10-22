@@ -31041,7 +31041,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:01:50.214450+00:00'
-  updated_at: '2026-10-22T17:03:16.267116+00:00'
+  updated_at: '2026-10-22T18:43:23.697882+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31152,6 +31152,29 @@ prs:
       /pm-captures/scenarios/3.'
     created_at: '2026-10-22T16:31:02Z'
     last_edited: '2026-10-22T16:31:02Z'
+  - id: note-a63b61e
+    text: 'S7 refine: measured popup widths (Textual pilot, d5f543db): at 140/70/50
+      cols the report width is 99/59/40 and body width (incl. 2-col gutter) is 101/61/42;
+      header wraps at min(99, width+2). Compare popup rows with `pm autostart status
+      --no-color --width 99|59|40` (strip the 2-col gutter); headers differ only by
+      the title "Auto-start runs:" vs "Auto-start:". Footer at 70 = 2 lines, at 50
+      = 3 lines, no leading/trailing ·. Stop-marked dep recipe: autostart add SD --stop-before-merge,
+      add the auto target that depends on SD, then autostart remove SD (keeps the
+      mark). Running review: after the other rows settle, re-set fake config with
+      review [{"verdict":"NEEDS_WORK","delay":3600}] and add the RV target.'
+    created_at: '2026-10-22T17:26:41Z'
+    last_edited: '2026-10-22T17:26:41Z'
+  - id: note-58c636b
+    text: 'QA S7 NEEDS_WORK→fixed 709c023c: runs popup key hint scrolled with the
+      rows, so it was never visible on short popups (140x20, 50x50) even on the last
+      row; now docked bottom + scroll_to_region(spacing=dock_gutter). All other S7
+      Thens held (popup==CLI rows at 99/59/40, 1;37;41/33/32 SGR in TERM=screen, gray
+      100 bar with no reverse label, Enter/f/notice/r/close). Traps: $S~1 showed qa-pr
+      window until select-window $S~1:0; fake review NEEDS_WORK delay still advanced
+      RV to review #2 later, so compare against same-moment CLI captures. Captures
+      /pm-captures/scenarios/7.'
+    created_at: '2026-10-22T18:43:23Z'
+    last_edited: '2026-10-22T18:43:23Z'
 - id: pr-c8482a8
   plan: bugs
   title: 'fake-claude cannot hold a review INPUT_REQUIRED: 2 s idle_prompt refresh
