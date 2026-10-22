@@ -30541,6 +30541,20 @@ prs:
       "re-armed" (qa.md e084185d rule), not "lost". Captures /pm-captures/scenarios/27.'
     created_at: '2026-10-22T05:03:15Z'
     last_edited: '2026-10-22T05:03:15Z'
+  - id: note-a42b8af
+    text: 'S29 refine (db9e04e5): offline render of the S23 journal predicts (1) under
+      faketime +1y the only raw `pm pr history` line >80 cols is the Recent-timers
+      "manual merge hold (stop-before-merge): released (PR merged) at YYYY-MM-DD HH:MM:SS"
+      (84 cols); the TTY wrapper splits it at " (" — attempt rows max 77-78. (2) Year-ahead
+      END times stay time-only (ref = attempt start), only starts/timers/milestones
+      get YYYY-. (3) A review-loop ROOT row straddling local midnight under +1y would
+      be 83 cols — S29 puts midnight inside the QA run. (4) _reconcile_timers marks
+      a merged PR merge-hold "lost (owner process exited) at unknown" once the TUI
+      owner is gone, before _release_terminal_holds can say "released (PR merged)"
+      — so a later-day read after TUI exit loses the released row; S29 keeps the TUI
+      alive. faketime installs via sudo apt-get install faketime.'
+    created_at: '2026-10-22T04:55:34Z'
+    last_edited: '2026-10-22T04:55:34Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
