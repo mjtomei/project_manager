@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T15:46:52.188177+00:00'
+  updated_at: '2026-10-22T15:49:44.835799+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30169,6 +30169,15 @@ prs:
       synced.'
     created_at: '2026-10-22T15:46:52Z'
     last_edited: '2026-10-22T15:46:52Z'
+  - id: note-6098f53
+    text: 'Review 450f i16: a message queued to a still-starting session (e.g. typed
+      to #215 sign-off during "starting…") vanished from its transcript once the session
+      started — SimPM.started replaced the transcript. It now keeps messages sent
+      while starting, shown (queued) after the start lines. check.mjs +1 rule (fails
+      on old code); 186 journey frames identical, no recapture. /pm-captures/even-realities
+      synced.'
+    created_at: '2026-10-22T15:49:44Z'
+    last_edited: '2026-10-22T15:49:44Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
