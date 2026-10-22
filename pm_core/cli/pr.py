@@ -1068,6 +1068,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     # companion split failed) — keep its container.
                     click.echo(f"Launched Claude in tmux window '{window_name}' "
                                f"(setup warning: {e})", err=True)
+                    from pm_core.signoff import clear_return_awaiting
+                    clear_return_awaiting(root, pr_id, "impl")
                     return
                 click.echo(f"Failed to create tmux window: {e}", err=True)
                 # No pane will ever exec into the container — release it.

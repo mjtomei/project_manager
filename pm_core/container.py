@@ -770,14 +770,8 @@ def keyring_summary() -> str:
 
 def running_container_count() -> int | None:
     """Number of running pm containers (the keyring-key holders); None if unknown."""
-    result = _run_runtime(
-        "ps", "--filter", f"name={CONTAINER_PREFIX}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
-        return None
-    return len([ln for ln in result.stdout.strip().splitlines() if ln.strip()])
+    names = _list_names(CONTAINER_PREFIX, running_only=True)
+    return None if names is None else len(names)
 
 
 _REMEDY_REAP = ("Preview leftover containers with 'pm container reap --dry-run' "
@@ -1848,17 +1842,12 @@ def containers_for_pr(session_tag: str, pr_id: str) -> set[str] | None:
     Used to decide whether a shared push proxy is still needed.  Returns
     None when the runtime can't be queried (caller must assume "in use").
     """
-    result = _run_runtime(
-        "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
+    names = _list_names(CONTAINER_PREFIX)
+    if names is None:
         return None
     users: set[str] = set()
-    for line in (result.stdout or "").splitlines():
-        cname = line.strip()
-        parsed = parse_container_name(cname) if cname else None
+    for cname in names:
+        parsed = parse_container_name(cname)
         if (parsed and parsed.session_tag == session_tag
                 and parsed.pr_id() == pr_id):
             users.add(cname)
@@ -2009,9 +1998,14 @@ def create_qa_container(
     )
 
 
-def _list_names(prefix: str) -> list[str] | None:
+def _list_names(prefix: str, *, running_only: bool = False) -> list[str] | None:
+    """Container names starting with *prefix*; None if the runtime failed.
+
+    The runtime's ``name=`` filter matches substrings (``npm-cache`` matches
+    ``pm-``), so the prefix is re-checked here.
+    """
     result = _run_runtime(
-        "ps", "-a", "--filter", f"name={prefix}",
+        "ps", *(() if running_only else ("-a",)), "--filter", f"name={prefix}",
         "--format", "{{.Names}}",
         check=False, timeout=30,
     )
@@ -2154,16 +2148,9 @@ def cleanup_session_containers(session_tag: str) -> int:
 
     Returns the number of containers removed.
     """
-    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
-    result = _run_runtime(
-        "ps", "-a", "--filter", f"name={prefix}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
+    names = _list_names(f"{CONTAINER_PREFIX}{session_tag}-")
+    if not names:
         return 0
-
-    names = [ln.strip() for ln in result.stdout.strip().splitlines() if ln.strip()]
     removed, _failures = remove_containers(names)
     if removed:
         _log.info("Cleaned up %d container(s) for session %s", len(removed), session_tag)
@@ -2172,14 +2159,8 @@ def cleanup_session_containers(session_tag: str) -> int:
 
 def cleanup_all_containers() -> int:
     """Remove all pm containers. Returns count removed."""
-    result = _run_runtime(
-        "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
+    names = _list_names(CONTAINER_PREFIX)
+    if not names:
         return 0
-
-    names = [ln.strip() for ln in result.stdout.strip().splitlines() if ln.strip()]
     removed, _failures = remove_containers(names)
     return len(removed)

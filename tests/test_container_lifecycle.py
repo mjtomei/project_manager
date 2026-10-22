@@ -793,3 +793,39 @@ class TestReapCLI:
         assert r.exit_code == 1
         assert removed == ["pm-a-impl-pr-1"]
         assert "FAILED" in r.output and "Removed 1 container(s)." in r.output
+
+    def test_cleanup_skips_non_pm_substring_matches(self, monkeypatch):
+        """The runtime's name filter matches substrings: a user's "npm-cache"
+        container must never be removed by `pm container cleanup`."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: _cp(
+            out="npm-cache\tUp\npm-a-impl-pr-1\tUp\n"))
+        removed = []
+        monkeypatch.setattr(cm, "remove_container", removed.append)
+        r = CliRunner().invoke(cli, ["container", "cleanup"])
+        assert r.exit_code == 0, r.output
+        assert removed == ["pm-a-impl-pr-1"]
+
+
+class TestListNamesPrefixGuard:
+    def test_substring_matches_are_dropped(self, monkeypatch):
+        calls = []
+
+        def _rt(*a, **k):
+            calls.append(a)
+            return _cp(out="npm-cache\npm-a-impl-pr-1\nmy-pm-thing\n")
+        monkeypatch.setattr(cm, "_run_runtime", _rt)
+        assert cm.running_container_count() == 1
+        assert "-a" not in calls[-1]  # running only
+        assert cm.containers_for_pr("a", "pr-1") == {"pm-a-impl-pr-1"}
+        removed = []
+        monkeypatch.setattr(cm, "remove_container", removed.append)
+        assert cm.cleanup_all_containers() == 1
+        assert removed == ["pm-a-impl-pr-1"]
+
+    def test_runtime_failure_is_unknown(self, monkeypatch):
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: _cp(rc=1))
+        assert cm.running_container_count() is None
+        assert cm.containers_for_pr("a", "pr-1") is None
+        assert cm.cleanup_all_containers() == 0

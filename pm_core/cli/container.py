@@ -324,6 +324,9 @@ def container_cleanup(pr_id: str | None):
         parts = line.split("\t", 1)
         name = parts[0].strip()
         status = parts[1].strip() if len(parts) > 1 else ""
+        # The name filter matches substrings — never touch e.g. "npm-cache".
+        if not name.startswith(CONTAINER_PREFIX):
+            continue
         if pr_id and pr_id not in name:
             continue
         click.echo(f"  Removing: {name} ({status})")
