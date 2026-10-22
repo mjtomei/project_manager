@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-089af69
+  active_pr: pr-33b65cd
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31373,6 +31373,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T17:19:46.224920+00:00'
   updated_at: '2026-10-22T17:19:46.224920+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-33b65cd
+  plan: bugs
+  title: 'Bug: headless auto-sequence QA (pr qa-run-bg) never records the QA result
+    note, so the follow-up review gets no QA feedback'
+  branch: pm/pr-33b65cd-bug-headless-auto-sequence-qa-pr-qa-run-bg-never-r
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_qa_run_bg calls run_qa_sync and exits; only the
+    TUI (_on_qa_complete -> tui/qa_loop_ui._record_qa_note) writes the "QA <verdict>:
+    ..." PR note. Auto-sequence status==qa NEEDS_WORK flips to in_review and launches
+    a fresh review iteration "with QA feedback", but no note carries the failing scenarios,
+    planner code changes, or (pr-62fdd54) the pre-planning branch-sync reason (diverged
+    heads / imported unreviewed code). Repro: drive a PR through pm pr auto-sequence
+    with a QA run that ends NEEDS_WORK; project.yaml gets no QA note and the review
+    prompt PR Notes section lacks the reason. Fix: move _record_qa_note into qa_loop
+    (shared) and call it from pr_qa_run_bg, avoiding duplicates when a TUI also observes
+    the run.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:38:30.761486+00:00'
+  updated_at: '2026-10-22T17:38:30.761486+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
