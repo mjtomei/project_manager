@@ -81,14 +81,16 @@ def build_history(pr_id: str, *, pr: dict | None = None,
         if p is not None:
             p["last_seen_t"] = max(p["last_seen_t"], a["last_seen_t"])
     tracked = _runtime_tracked_attempts(pr_id) if live else set()
-    _reconcile_attempts(attempts, {aliases.get(i, i) for i in tracked})
+    alive = _liveness_memo()
+    _reconcile_attempts(attempts, {aliases.get(i, i) for i in tracked},
+                        alive)
     for a in attempts.values():
         _compute_spans(a, t_now)
     roots = [a for a in attempts.values() if not a.get("_parent_obj")]
     for a in attempts.values():
         _compute_concurrency(a)
 
-    timer_rows = _reconcile_timers(timers, attempts, t_now)
+    timer_rows = _reconcile_timers(timers, attempts, t_now, alive)
     timer_rows["recent"] = (timer_history + timer_rows["recent"])
     _release_terminal_holds(pr or {}, timer_rows)
 
@@ -252,8 +254,29 @@ def _fold_retracked(attempts: dict[str, dict],
     return aliases
 
 
+def _liveness_memo():
+    """``owner_alive`` memoized per owner for one model build.
+
+    Every open attempt and uncleared timer of an owner gets the same
+    verdict (an owner exiting mid-build can't read alive for one attempt
+    and dead for its sibling), and each owner is probed once rather than
+    once per abandoned attempt the journal accumulates.
+    """
+    memo: dict[tuple, bool | None] = {}
+
+    def alive(owner) -> bool | None:
+        if not isinstance(owner, dict):
+            return _ah.owner_alive(owner)
+        key = (owner.get("host"), owner.get("pid"), owner.get("start"),
+               owner.get("instance"))
+        if key not in memo:
+            memo[key] = _ah.owner_alive(owner)
+        return memo[key]
+    return alive
+
+
 def _reconcile_attempts(attempts: dict[str, dict],
-                        tracked: set[str]) -> None:
+                        tracked: set[str], owner_alive) -> None:
     """Infer the fate of open attempts.
 
     *tracked* holds the ids of runtime-derived attempts the runtime mirror
@@ -272,7 +295,7 @@ def _reconcile_attempts(attempts: dict[str, dict],
         if a["id"] in tracked and not a.get("loop_id"):
             a["owner_alive"] = True
             continue
-        alive = _ah.owner_alive(a.get("owner"))
+        alive = owner_alive(a.get("owner"))
         a["owner_alive"] = alive
         if alive is False:
             pid = (a.get("owner") or {}).get("pid")
@@ -409,7 +432,7 @@ def _timer_row(tm: dict, resolution: str, resolved_t: float | None) -> dict:
 
 
 def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
-                      t_now: float) -> dict:
+                      t_now: float, owner_alive) -> dict:
     active: list[dict] = []
     overdue: list[dict] = []
     recent: list[dict] = []
@@ -425,7 +448,7 @@ def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
             recent.append(_timer_row(tm, "cancelled (owner ended)",
                                      owner_att["ended_t"]))
             continue
-        alive = _ah.owner_alive(tm.get("owner"))
+        alive = owner_alive(tm.get("owner"))
         if alive is False or (owner_att is not None
                               and owner_att.get("inferred") == "owner-exited"):
             recent.append(_timer_row(tm, "lost (owner process exited)",

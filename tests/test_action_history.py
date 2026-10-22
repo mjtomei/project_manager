@@ -885,6 +885,26 @@ class TestReconciliation:
         assert {r["resolution"] for r in m["timers"]["recent"]
                 if r["timer"] in ("a", "f")} == {"cancelled (owner ended)"}
 
+    def test_owner_probed_once_per_build(self, clock):
+        # Abandoned attempts and timers of one owner pile up in the journal;
+        # one build judges that owner once, so they can't disagree.
+        for i in range(3):
+            ah.start_attempt(PR, "review-loop", iteration=i)
+        ah.arm_timer(PR, "g", purpose="grace", owner_action="review-loop",
+                     duration=100)
+        calls = []
+        verdicts = iter([False, True, True, True])
+
+        def probe(owner):
+            calls.append(owner)
+            return next(verdicts)
+        with patch.object(ah, "owner_alive", side_effect=probe):
+            m = hq.build_history(PR, now=clock.t, live=False)
+        assert len(calls) == 1
+        assert {a["outcome"] for a in m["attempts"]} == {"interrupted"}
+        assert m["timers"]["recent"][0]["resolution"] == \
+            "lost (owner process exited)"
+
     def test_restart_dead_owner_interrupts_attempt_and_loses_timers(self,
                                                                     clock):
         ah.record(PR, "attempt_start", attempt="old", action="review-loop",
