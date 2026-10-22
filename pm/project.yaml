@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T15:00:51.822782+00:00'
+  updated_at: '2026-10-22T15:28:56.645682+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29623,6 +29623,15 @@ prs:
       cases.py --check clean (55204); 57 tests pass.'
     created_at: '2026-10-22T15:00:51Z'
     last_edited: '2026-10-22T15:00:51Z'
+  - id: note-b79adda
+    text: 'QA s3 (dc695f44): PM extractor counted <task-notification> wrappers (origin.kind
+      task-notification / queued_command commandMode task-notification) and peer-session
+      messages as human turns — 23 turns in 66d430f, corpus-v3, mind, sensorium; human_turns
+      now 26/19/30/6 and notification-named source gaps gone. Rebuild PM cases in
+      the PR workdir (cases.py, then cases.py --check) to refresh data/pm and the
+      catalog. Captures /pm-captures/scenarios/3/{pre-fix,post-fix}.'
+    created_at: '2026-10-22T15:28:56Z'
+    last_edited: '2026-10-22T15:28:56Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
