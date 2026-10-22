@@ -15879,7 +15879,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T16:53:01.520593+00:00'
+  updated_at: '2026-10-22T17:07:19.908645+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16045,6 +16045,23 @@ prs:
       log issue (pr-f98ac63).'
     created_at: '2026-10-22T16:47:22Z'
     last_edited: '2026-10-22T16:47:22Z'
+  - id: note-c5076f3
+    text: 'Sign-off (2026-10-22) -> SIGNOFF_IMPL on HEAD b878e150 vs master 4dcbff73:
+      conflicts in pm_core/cli/session.py, pm_core/tmux.py, pm/project.yaml. Master
+      #240 (pr-24f022e) fixed the same popup-dispatch wrong-client bug with PM_POPUP_SESSION
+      (set in os.environ at popup start, read by tmux.get_session_name) and replaced
+      the picker direct-dispatch argv with _session_pm_argv(session, ...). Keep ONE
+      mechanism: prefer master PM_POPUP_SESSION + _session_pm_argv, drop PM_CALLER_SESSION,
+      but port this PR has-session (=name) stale guard into get_session_name if still
+      needed. Re-check pr-f98ac63 (likely fixed by #240). Also add the missing bug-PR
+      before/after capture of the ORIGINAL symptom: on master, prefix+P from the TUI
+      with merged #238 windows first in project.yaml exits with "merged or closed",
+      and l off a merged entry exits; same steps on the fix. QA after reconciling:
+      redo two-client dispatch (S14) and one live action dispatch from a PR window
+      (S10 S4 / S15 t3); nav/notice/reload evidence on 85743dad still holds. Report:
+      /pm-captures/report.html'
+    created_at: '2026-10-22T17:07:19Z'
+    last_edited: '2026-10-22T17:07:19Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
