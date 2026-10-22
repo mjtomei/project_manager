@@ -616,6 +616,11 @@ def test_table_only_request_text_is_thin(tmp_path):
     assert "## Summary" not in brief["brief"]         # heading left without content is dropped
 
 
+def test_request_words_skip_bullets_and_link_leftovers():
+    # "-" bullets and the "," a removed link leaves behind are not words
+    assert cases.request_words("- Proposal: , https://example.org/pull/1\n- Owner: @someone\n-\n| a | b |") == 3
+
+
 def test_pasted_draft_in_short_lines_is_truncated_but_quoted_charter_is_not():
     paras = [f"Paragraph {w} of the draft describes the {w} part of the widget protocol in plain words for readers."
              for w in ("first", "second", "third", "fourth", "fifth", "sixth")]
@@ -641,12 +646,14 @@ def test_markdown_link_to_document_keeps_its_text():
     item = context_item("goprop", "tracking_issue", "i4321",
                         "Title: Widgets\n\nWe need widgets for the allocator. Full design document [found here.]"
                         "(https://example.org/design/4321-widgets.md) and <https://example.org/design/4321-widgets.md>.\n"
-                        "Related: [the old issue](https://example.org/issues/77).", ["w"])
+                        "Related: [the old issue](https://example.org/issues/77).\n"
+                        "- Proposal: (https://example.org/design/4321-widgets.md)\nDraft at https://example.org/design/4321-widgets.md.", ["w"])
     brief, _ = cases.assemble_brief(doc, text, [item], {"context": {"request": "Write a design."}}, N)
     assert "Full design document found here. and" in brief["brief"]     # no dangling "[found here.](" ...
     assert "<" not in brief["brief"]                                       # ... or "<" of an autolink
     assert "4321-widgets" not in brief["brief"]
     assert "[the old issue](https://example.org/issues/77)" in brief["brief"]  # other links untouched
+    assert "- Proposal:\n" in brief["brief"] and "Draft at ." in brief["brief"]  # no stray "(", sentence end kept
 
 
 def test_discourse_topic_urls_with_and_without_slug():

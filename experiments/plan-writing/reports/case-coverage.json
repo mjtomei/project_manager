@@ -1,8 +1,8 @@
 {
  "totals": {
   "documents": 18963,
-  "brief_rich": 3142,
-  "brief_thin": 9275,
+  "brief_rich": 3137,
+  "brief_thin": 9280,
   "both_case_types": 11333,
   "whole_document_only": 1084,
   "continuation_only": 3775,
@@ -202,8 +202,8 @@
   },
   "kubernetes-keps": {
    "documents": 699,
-   "brief_rich": 412,
-   "brief_thin": 278,
+   "brief_rich": 408,
+   "brief_thin": 282,
    "both_case_types": 688,
    "whole_document_only": 2,
    "continuation_only": 5,
@@ -371,8 +371,8 @@
   },
   "python-peps": {
    "documents": 759,
-   "brief_rich": 76,
-   "brief_thin": 665,
+   "brief_rich": 75,
+   "brief_thin": 666,
    "both_case_types": 731,
    "whole_document_only": 10,
    "continuation_only": 12,

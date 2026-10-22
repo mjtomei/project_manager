@@ -44,6 +44,8 @@ BRIEF_PREAMBLE = ("The following context was recovered from the project's own re
                   "index entries and calls that state what the document is for. It does not contain the document.")
 URL = re.compile(r"https?://\S+")
 MD_LINK = re.compile(r"\[([^\]\n]*)\]\(\s*<?(https?://[^)\s>]+)>?\s*\)")
+# a URL in (...) or <...> with its enclosing marks, else a bare URL without the punctuation that ends its sentence
+LINK_URL = re.compile(r"\(\s*<?(https?://[^\s()<>]+)>?\s*\)|<(https?://[^\s<>]+)>|(https?://\S+?)(?=[.,;:!?)\]]*(?:\s|$))")
 PASTE_FRACTION = 0.3   # share of an item's segments quoting the body that marks a pasted draft
 # Only posts can paste a draft; charters and study calls predate the document, so shared text is the document quoting them.
 PASTE_KINDS = {"tracking_issue", "review_thread", "discussion_thread"}
@@ -125,8 +127,11 @@ def drop_progress(text):
 
 
 def request_words(text):
-    """Words of prose in request text: not table rows, headings, bare URLs or the collector's header lines."""
-    return sum(len(URL.sub("", l).split()) for l in text.splitlines() if not NON_PROSE.match(l))
+    """Words of prose in request text: not table rows, headings, bare URLs or the collector's header lines.
+
+    Bullets and punctuation left by removed links are not words.
+    """
+    return sum(1 for l in text.splitlines() if not NON_PROSE.match(l) for w in URL.sub("", l).split() if re.search(r"\w", w))
 
 
 def body_ngrams(text, header_fmt, n, titles=()):
@@ -319,9 +324,9 @@ def assemble_brief(doc, text, items, source_cfg, n, doc_date=None):
     blocks = [[request], [BRIEF_PREAMBLE]]
     provenance = []
     for item in sorted(items, key=lambda i: (i["kind"] not in ("index_entry", "metadata"), i["kind"], i["id"])):
-        # a markdown link to the document keeps its text; a bare or <angle> URL to it goes entirely
+        # a markdown link to the document keeps its text; a bare, (parenthesised) or <angle> URL to it goes entirely
         text_in = MD_LINK.sub(lambda m: m.group(1) if is_self(m.group(2)) else m.group(0), item["text"])
-        text_in = re.sub(r"<?https?://\S+", lambda m: "" if is_self(m.group(0)) else m.group(0), text_in)
+        text_in = LINK_URL.sub(lambda m: "" if is_self(next(g for g in m.groups() if g)) else m.group(0), text_in)
         progress_dropped = 0
         if item["kind"] in ("tracking_issue", "review_thread"):
             text_in, progress_dropped = drop_progress(text_in)
