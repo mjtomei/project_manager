@@ -143,6 +143,13 @@ client session), the pm log file (warnings).
   PM_CALLER_SESSION, honoured only while that session exists — e699bd52).
   Open the two popups one after the other, not in the same instant (known
   race, pr-b511dcf).
+- C4. Type-ahead while the picker reloads (impl QA check 9, fix 634c82da):
+  with ≥2 navigable PRs, send nav keys in pairs ~10 ms apart (the second
+  lands while the picker reloads between fzf runs).  The popup never closes,
+  every captured frame shows a `PR Actions —` header (no empty-popup flash
+  between relaunches), and the header/(i/n) end on the PR the key count
+  predicts.  Then dispatch an action: the stale picker frame is cleared
+  before the command's output appears.
 
 ## Pass/Fail criteria
 
