@@ -28838,11 +28838,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T04:06:05.797085+00:00'
-  updated_at: '2026-10-13T04:06:05.797085+00:00'
+  updated_at: '2026-10-22T16:57:38.711537+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-959559f
+    text: 'Largely fixed by pr-f094946 af42a1d9: pane_ops.launch_pane "Launched/Focused
+      existing <role> pane" and _launch_in_plans_window "Launched <role> pane" now
+      log_message(force=True) (force bypasses sticky AND holds, the existing confirmation
+      convention, not the proposed user= flag). Test: tests/test_log_message_force.py::test_launch_pane_confirmation_shown_while_sticky.
+      Remaining unforced key reply of this class: qa_loop_ui.focus_or_start_qa "Focused
+      QA window for <pr>". Verify on master after pr-f094946 merges; close or narrow.'
+    created_at: '2026-10-22T16:57:38Z'
+    last_edited: '2026-10-22T16:57:38Z'
 - id: pr-adfdce3
   plan: bugs
   title: 'Bug: pm autostart CLI commands move focus from the plans/QA view to the

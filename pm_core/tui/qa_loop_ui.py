@@ -108,9 +108,11 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     """Start a QA session for a PR.
 
     Creates QALoopState, starts background QA thread.
-    Called by auto-start and internal callers (fresh_start, loop start).
-    *focus* selects the new QA window; only user-initiated starts pass it,
-    so scheduler-driven starts don't pull attached clients off the TUI.
+    Called by the user starts ``t`` / ``z t`` (with *focus*) and by
+    scheduler-driven callers: auto-start, review PASS → QA, sign-off REQA
+    and self-driving restarts.  *focus* selects the new QA window; only
+    user-initiated starts pass it, so scheduler-driven starts don't pull
+    attached clients off the TUI.
     """
     if not app._root:
         app.log_message("No project root")
