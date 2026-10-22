@@ -50,7 +50,11 @@ User-facing surfaces under test:
   right after master moves, Then all succeed (they serialize on
   `<git-common-dir>/pm-integration.lock`, each with its own fetch ref and a
   uniquely named temp worktree); none fails with ref-lock / bad-object /
-  worktree-admin errors and no temp worktrees are left behind.
+  worktree-admin errors and no temp worktrees are left behind. If another
+  holder keeps that lock past 300 s, the check proceeds unserialized with a
+  "integration lock ... busy; proceeding" log warning rather than hanging.
+  Lock handling is shared with the per-PR sign-off step lock
+  (`store.bounded_flock`, review 6d73 i1).
 
 ### Sign-off launch & routing
 - **R2.1** Given a PR reaches sign-off (TUI auto-start or `pm pr auto-sequence`),
@@ -66,6 +70,12 @@ User-facing surfaces under test:
   `qa`), a `signoff_return` record (verdict, hop, reason, reviewed head,
   integration, applied merge sha, awaiting=<hop>) is stored, and the next
   review/QA session prompt contains a "Returned from sign-off" block.
+- **R2.3a** Given pm merged a clean moved base into the PR branch on a bounce,
+  When the routed review/QA (or impl) session starts, Then its "Returned from
+  sign-off" block names the merge commit and a `git diff <base_sha> HEAD`
+  command; running that command in the workdir shows only the PR's own
+  changes, while the prompt's usual `origin/<base>...HEAD` diff (stale workdir
+  base ref) also lists the merged base commits (review 6d73 i1).
 - **R2.4** Given an integration check that failed (fetch error / missing workdir),
   When the router emits SIGNOFF_MERGE, Then pm records SIGNOFF_BLOCKED with the
   error as reason and does not offer the PR as ready to merge.
@@ -236,5 +246,11 @@ workdir by pm; temp worktrees leaked.
 - Run 3 (after review a52f i1–i8): R1.7, R4.7–R4.12, R5.4a/b added from those
   commits; prior runs' PASS areas are re-run as regression where those
   commits touched them.
+
+- Run 4 (after review 6d73 i1): bounded_flock now backs the integration repo
+  lock and the sign-off step lock, store.merge_3way backs the R5.5 project.yaml
+  unstash, and R2.3a adds the integrated-diff hint. Those paths (R1.8, R5.4b,
+  R5.5, R2.3) are re-run as regression together with the S16 fix (local
+  integrate from a PR workdir with an unreachable origin errors, exit 1).
 
 No [UNRESOLVED] ambiguities.
