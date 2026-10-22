@@ -194,6 +194,21 @@ a tools-disabled `claude -p` through the route, reporting requested models
     `~/.local/state/pm-pr-shepherd/249-bridge-timeout-{repro,postfix}.json`).
   - b7712d21 (after these runs) only adds the forwarder exit-on-dir-gone
     and `container_name ⇒ container` in `check_route`; QA re-exercises it.
+  - Final implementation 75f0dde6 (includes b7712d21 and the env-by-name
+    container fix), real work account, production config unchanged:
+    `/pm-captures/host-work-route-smoke-20261022T190834Z/{result.json,diagnostic.log}`
+    — real slirp4netns QA-style container PASS (requested
+    `work/claude-opus-5-5`, transcript `~/.claude/projects/-workspace/<sid>.jsonl`
+    with `claude-opus-5-5`, Stop hook); host + container pair PASS at
+    `/pm-captures/host-work-route-smoke-20261022T190309Z/`, whose
+    `router-tail.txt` shows the router sending the `work/` prefix to
+    `anthropic-work`.
+  - Review loop 99cf i1 (no behaviour change): router launch parts
+    (ensure prefix / env / executable) shared between
+    `build_claude_shell_cmd` and the live probe via
+    `worker_route.launch_parts`; `worker_route.ROUTED_SESSION_TYPES`
+    replaces the stale `WORKER_SESSION_TYPE`, and remedies name both routed
+    types.
 
 ### Bugs found by live validation, with regressions
 1. *Stream cut off after 10 s* — the bridge's connect timeout stayed on the

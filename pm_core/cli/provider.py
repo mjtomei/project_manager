@@ -297,6 +297,7 @@ def _test_router(provider, *, in_container: bool, live: bool) -> None:
         return
 
     import secrets
+    import shutil
     import tempfile
     from pathlib import Path
     from pm_core import container as container_mod
@@ -322,6 +323,7 @@ def _test_router(provider, *, in_container: bool, live: bool) -> None:
                           provider)
     finally:
         container_mod.remove_container(name)
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 def _report_probe(out: dict, provider) -> None:

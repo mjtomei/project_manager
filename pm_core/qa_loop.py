@@ -1549,7 +1549,7 @@ def _route_mounts(pr_data: dict, data: dict,
     from pm_core import worker_route
     from pm_core.paths import fake_claude_config_for_type
     mounts: dict = {}
-    for st in ("qa_concretize", "qa_scenario"):
+    for st in worker_route.ROUTED_SESSION_TYPES:
         if fake_claude_config_for_type(st, session_tag) is not None:
             continue
         mounts.update(worker_route.container_mounts(
@@ -1592,6 +1592,13 @@ def _await_route(state: QALoopState, check, what: str) -> bool:
             if state.stop_requested:
                 return False
             time.sleep(0.5)
+
+
+def _note_route_wait_stopped(state: QALoopState, scenario: "QAScenario") -> None:
+    """Record why a scenario never launched: QA stopped during its
+    route wait (no verdict is recorded)."""
+    state.scenario_verdict_reasons.setdefault(
+        scenario.index, "stopped while waiting for the work route")
 
 
 class _RouteStallWatch:
@@ -2246,8 +2253,7 @@ def _launch_scenarios_in_tmux(
                 pr_data, data, "qa_concretize",
                 session_tag=state.session_tag),
                 f"Scenario {scenario.index} refiner"):
-            state.scenario_verdict_reasons.setdefault(
-                scenario.index, "stopped while waiting for the work route")
+            _note_route_wait_stopped(state, scenario)
             return
 
         import uuid as _uuid
@@ -2338,6 +2344,7 @@ def _launch_scenarios_in_tmux(
                 pr_data, data, "qa_scenario",
                 session_tag=state.session_tag),
                 f"Scenario {scenario.index} worker"):
+            _note_route_wait_stopped(state, scenario)
             return
         child_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
@@ -2507,8 +2514,7 @@ def _launch_scenarios_in_containers(
                 pr_data, data, "qa_concretize",
                 session_tag=state.session_tag, container_name=cname),
                 f"Scenario {scenario.index} refiner"):
-            state.scenario_verdict_reasons.setdefault(
-                scenario.index, "stopped while waiting for the work route")
+            _note_route_wait_stopped(state, scenario)
             return
 
         import uuid as _uuid
@@ -2599,6 +2605,7 @@ def _launch_scenarios_in_containers(
                 pr_data, data, "qa_scenario",
                 session_tag=state.session_tag, container_name=cname),
                 f"Scenario {scenario.index} worker"):
+            _note_route_wait_stopped(state, scenario)
             return
         exec_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
@@ -2882,7 +2889,8 @@ def _poll_tmux_verdicts(
     # A queued launch runs the refiner and then the worker, so both
     # routes must be usable before it is dequeued.
     def _check_queued_routes():
-        for st_type in ("qa_concretize", "qa_scenario"):
+        from pm_core import worker_route
+        for st_type in worker_route.ROUTED_SESSION_TYPES:
             st = _route_checker(pr_data, data, st_type,
                                 session_tag=state.session_tag,
                                 container=use_containers)()

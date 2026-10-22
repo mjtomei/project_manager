@@ -835,20 +835,15 @@ def build_claude_shell_cmd(
     # Resolve provider configuration
     from pm_core.providers import get_provider
     provider_cfg = get_provider(provider, strict=bool(provider))
-    provider_env = provider_cfg.env_vars()
     model_flag = provider_cfg.model_flag()
 
     # Router providers (pm_core.worker_route): command-scoped, never global.
-    exe = "claude"
-    route_prefix = ""
     if provider_cfg.type == "router":
         from pm_core import worker_route
-        if container:
-            provider_env["ANTHROPIC_BASE_URL"] = (
-                worker_route.container_base_url(provider_cfg))
-            route_prefix = worker_route.container_ensure_cmd(provider_cfg) + " && "
-        elif provider_cfg.launcher:
-            exe = shlex.quote(os.path.expanduser(provider_cfg.launcher))
+        route_prefix, provider_env, exe = worker_route.launch_parts(
+            provider_cfg, container=container)
+    else:
+        route_prefix, provider_env, exe = "", provider_cfg.env_vars(), "claude"
 
     # Build env prefix for non-claude providers
     env_prefix = ""

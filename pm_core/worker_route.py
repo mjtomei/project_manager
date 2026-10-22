@@ -1,8 +1,10 @@
-"""Route QA execution workers through a host-local account router.
+"""Route QA scenario refiners and workers through a host-local account router.
 
 A *route* is a ``type: router`` provider in ``~/.pm/providers.yaml`` (see
-pm_core.providers) selected for the ``qa_scenario`` session type only:
+pm_core.providers) selected for the refiner (``qa_concretize``) and worker
+(``qa_scenario``) session types:
 
+    pm model set qa_concretize provider:claude-work --effort high --project
     pm model set qa_scenario provider:claude-work --effort high --project
 
 The router (e.g. the claude-mixed router on ``127.0.0.1:8790``) picks the
@@ -14,9 +16,9 @@ This module owns everything route-specific outside the launch command:
 
   * :func:`describe` -- the ``route=... model=... via=...`` line shown in QA
     logs and status so the selection is visible without credentials;
-  * :func:`check_route` -- preflight used before every worker launch,
-    retry and queued launch.  QA never launches a worker on a route that
-    fails it (no silent fallback to the main account);
+  * :func:`check_route` -- preflight used before every refiner / worker
+    launch, retry and queued launch.  QA never launches a session on a
+    route that fails it (no silent fallback to the main account);
   * the host side of the container bridge (pm_core.route_bridge): QA
     containers run under slirp4netns and cannot reach the host loopback,
     so the router is exposed to them only through a 0600 Unix socket in a
@@ -45,8 +47,11 @@ from pm_core.providers import ProviderConfig, ProviderNotFoundError, get_provide
 
 _log = configure_logger("pm.worker_route")
 
-# The only session type whose launches are routed / gated.
-WORKER_SESSION_TYPE = "qa_scenario"
+# Session types whose QA launches are gated on their route (refiner, worker).
+ROUTED_SESSION_TYPES = ("qa_concretize", "qa_scenario")
+# How to move them back to the main account, quoted in remedies.
+_MAIN_ACCOUNT_REMEDY = ("run them on the main account: " + "; ".join(
+    f"'pm model set {st} <model> --project'" for st in ROUTED_SESSION_TYPES))
 
 _BRIDGE_DIRNAME = "route-bridge"
 # Unix socket paths are limited to 107 bytes.
@@ -129,6 +134,24 @@ def container_ensure_cmd(cfg: ProviderConfig) -> str:
             f"ensure {sock} {port} {shlex.quote(cfg.name)}")
 
 
+def launch_parts(cfg: ProviderConfig, *,
+                 container: bool) -> tuple[str, dict[str, str], str]:
+    """``(prefix, env, exe)`` for a claude launch on router *cfg*.
+
+    In a container: the bridge-ensure step (``prefix`` ends in ``&&``),
+    ``ANTHROPIC_BASE_URL`` pointed at the in-container forwarder and plain
+    ``claude``.  On the host: no prefix, the router env and the route's
+    ``launcher`` when configured.
+    """
+    env = cfg.env_vars()
+    if container:
+        env["ANTHROPIC_BASE_URL"] = container_base_url(cfg)
+        return container_ensure_cmd(cfg) + " && ", env, "claude"
+    exe = (shlex.quote(os.path.expanduser(cfg.launcher)) if cfg.launcher
+           else "claude")
+    return "", env, exe
+
+
 def bridge_host_argv(sock: Path, host: str, port: int) -> list[str]:
     """argv for the detached host bridge: this install's bridge file in
     isolated mode, so neither the caller's cwd nor PYTHONPATH can swap in
@@ -138,7 +161,7 @@ def bridge_host_argv(sock: Path, host: str, port: int) -> list[str]:
 
 
 def describe(resolution, *, container: bool = False) -> str:
-    """One-line, credential-free description of where workers run."""
+    """One-line, credential-free description of where a session runs."""
     effort = getattr(resolution, "effort", None) or "(default)"
     try:
         cfg = router_for(resolution)
@@ -226,9 +249,9 @@ def ensure_host_bridge(cfg: ProviderConfig) -> Path:
 
 
 def container_mounts(resolution) -> dict[Path, str]:
-    """Extra rw mounts a QA container needs for the worker route.
+    """Extra rw mounts a QA container needs for *resolution*'s route.
 
-    Empty when workers are not routed.  Starts the host bridge so the
+    Empty when it is not a router provider.  Starts the host bridge so the
     bind source exists before the container is created.
     """
     try:
@@ -327,9 +350,8 @@ def _signin_remedy(cfg: ProviderConfig) -> str:
     hint = (f"run '{cfg.refresh_command}' or sign in again"
             if cfg.refresh_command else "sign in to that account again")
     return (f"{hint} so {cfg.credentials_file} holds a valid session; QA "
-            f"launches the worker automatically once it is valid "
-            f"(or run workers on the main account: 'pm model set "
-            f"{WORKER_SESSION_TYPE} <model> --project')")
+            f"launches the session automatically once it is valid "
+            f"(or {_MAIN_ACCOUNT_REMEDY})")
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +361,7 @@ def _signin_remedy(cfg: ProviderConfig) -> str:
 def check_route(resolution, *, container: bool = False,
                 container_name: str | None = None,
                 try_refresh: bool = True) -> RouteStatus:
-    """Validate that a worker can be launched on *resolution*'s route.
+    """Validate that a session can be launched on *resolution*'s route.
 
     Always ok for unrouted resolutions.  For a router provider checks the
     config, the router's TCP port, credential expiry, the launcher (host
@@ -353,9 +375,7 @@ def check_route(resolution, *, container: bool = False,
     except ProviderNotFoundError as exc:
         return RouteStatus(
             False, getattr(resolution, "provider", None), problem=str(exc),
-            remedy=(f"configure the provider on this host, or run workers on "
-                    f"the main account with 'pm model set "
-                    f"{WORKER_SESSION_TYPE} <model> --project'"))
+            remedy=f"configure the provider on this host, or {_MAIN_ACCOUNT_REMEDY}")
     if cfg is None:
         return RouteStatus(True)
 
@@ -380,7 +400,7 @@ def check_route(resolution, *, container: bool = False,
     if not route_bridge.tcp_connectable(host, port):
         return fail(f"router not reachable at {host}:{port}",
                     "start the router (e.g. the claude-mixed router "
-                    f"listening on {host}:{port}); QA launches the worker "
+                    f"listening on {host}:{port}); QA launches the session "
                     "automatically once it answers")
 
     if cfg.credentials_file:
@@ -440,14 +460,7 @@ PROBE_PROMPT = "Reply with exactly: ok"
 def _probe_shell_cmd(cfg: ProviderConfig, session_id: str, *,
                      container: bool) -> str:
     """Tools-disabled one-shot claude call through the route."""
-    env = cfg.env_vars()
-    exe = "claude"
-    prefix = ""
-    if container:
-        env["ANTHROPIC_BASE_URL"] = container_base_url(cfg)
-        prefix = container_ensure_cmd(cfg) + " && "
-    elif cfg.launcher:
-        exe = shlex.quote(os.path.expanduser(cfg.launcher))
+    prefix, env, exe = launch_parts(cfg, container=container)
     unset = "".join(f"-u {v} " for v in cfg.unset_env_vars())
     assigns = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
     return (f"{prefix}env {unset}{assigns} {exe} -p {shlex.quote(PROBE_PROMPT)}"
