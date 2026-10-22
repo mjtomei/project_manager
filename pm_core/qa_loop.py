@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from pm_core import action_history as _ah
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
 from pm_core.spec_gen import get_spec as _get_qa_spec
@@ -2652,7 +2653,6 @@ def _poll_tmux_verdicts(
                            queued_scenarios=_queued_indices,
                            verdict_reasons=state.scenario_verdict_reasons)
 
-    from pm_core import action_history as _ah
     observer = _ah.ScenarioObserver(state.pr_id, state.history_attempt or None,
                                     state.loop_id)
     _grace_timer = f"qa-grace:{state.loop_id}"
@@ -3568,8 +3568,6 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
 @contextlib.contextmanager
 def _journal_qa_run(state: QALoopState, *, resumed: bool):
     """Journal one QA run (or resume) as an action-history attempt."""
-    from pm_core import action_history as _ah
-
     state.history_attempt = _ah.start_attempt(
         state.pr_id, "qa", loop_id=state.loop_id,
         label="QA resume" if resumed else "QA run",
@@ -3722,8 +3720,7 @@ def _run_qa_sync(
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
-        from pm_core import action_history as _ah
-        _ah.phase(state.pr_id, state.history_attempt or None, "planning")
+        _ah.phase(state.pr_id, state.history_attempt, "planning")
         state._history_planner = _ah.start_attempt(
             state.pr_id, "qa", parent=state.history_attempt or None,
             loop_id=state.loop_id, label="planner")
@@ -4051,7 +4048,7 @@ def _run_qa_sync(
                 detail=(f"{len(state.scenarios)} scenario(s)"
                         if state.scenarios else state.latest_output[:300]))
         state._history_planner = ""
-        _ah.phase(state.pr_id, state.history_attempt or None, "launching",
+        _ah.phase(state.pr_id, state.history_attempt, "launching",
                   "spec gate, concretizing and launching scenarios")
         _notify()
 
@@ -4239,8 +4236,7 @@ def _execute_and_finalize(
     # restart can pick the run back up.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
-    from pm_core import action_history as _ah
-    _ah.phase(state.pr_id, state.history_attempt or None, "agent",
+    _ah.phase(state.pr_id, state.history_attempt, "agent",
               "collecting scenario verdicts")
     _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
                         status_path, notify,
@@ -4250,7 +4246,7 @@ def _execute_and_finalize(
                         repo_root=repo_root,
                         pm_root=pm_root)
 
-    _ah.phase(state.pr_id, state.history_attempt or None, "verdict",
+    _ah.phase(state.pr_id, state.history_attempt, "verdict",
               "aggregating verdicts and running the finalize pane")
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())

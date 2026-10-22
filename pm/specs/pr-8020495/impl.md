@@ -67,14 +67,21 @@ Kinds:
   - `phase` — `attempt`, `phase` (one of `launching`, `agent`, `verdict`,
     `verifying`, `queued`, `waiting_human`, `backoff`, `planning`), `detail`.
   - `attempt_end` — `attempt`, `outcome` (`done`, `failed`, `cancelled`,
-    `superseded`, `interrupted`, `vanished`), optional `verdict`, `detail`.
+    `superseded`, `interrupted`, `vanished`, `untracked`), optional
+    `verdict`, `detail`.
   - `timer_arm` — `timer` (stable id, e.g. `review-grace:<attempt>`),
     `purpose`, `owner_action`, `owner_attempt`, `armed_t`, `due_t` (null =
     indefinite hold), `effect` (`gate` = nothing happens at due, it only
     gates acceptance/relaunch; `fires` = the owner acts at due), `expected`
     (expected transition text).
   - `timer_clear` — `timer`, `reason` (`fired`, `elapsed`, `cancelled`,
-    `released`, `superseded`).
+    `released`, `superseded`).  A gate cleared `elapsed` after its due
+    time (e.g. the QA grace cleared at scenario end) resolves at
+    `min(clear, due)`: it elapsed when it ran out.
+  - `owner_exit` — `reason`: the writing process stops now (journaled by
+    `pane_ops.restart_app` before the in-place exec, to every PR where it
+    has open attempts).  Readers bound that owner's interrupted attempts
+    by its newest event of any kind, so they read `>Ns`, not `unknown`.
 The journal is never deleted by `pr_cleanup` (survives merge and pane
 removal). Every write is best-effort: exceptions are logged at debug and
 swallowed, so instrumentation can never change control flow.
@@ -310,7 +317,8 @@ supply `context` (session/window/task); leave a cross-PR note.
 ## 4. Edge cases
 
 - E1. TUI restart mid-iteration: old attempts stay open in the journal;
-  their owner pid is dead → shown `interrupted (owner exited)`; the sweep
+  their owner is dead → shown `interrupted (owner exited)` with an elapsed
+  lower bound from the owner's newest event (`owner_exit`, R1); the sweep
   also ends in-flight runtime attempts with `interrupted (tui-mount)`. The
   resumed loop/QA run starts new attempts flagged `resumed`/`adopted`.
 - E2. Superseded review loop: the old loop's callbacks are skipped by
