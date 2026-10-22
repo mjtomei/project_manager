@@ -11,7 +11,9 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
-from pm_core.paths import configure_logger
+from pathlib import Path
+
+from pm_core.paths import configure_logger, pm_home
 from pm_core import store
 from pm_core.autostart_state import held_by_text
 from pm_core.review_loop import (
@@ -910,6 +912,30 @@ def _prune_untracked_trust(app, seen: set[str]) -> None:
             app._untracked_trust_reported.discard(pane_id)
 
 
+def _impl_transcript(app, tdir: Path, pr_id: str) -> str:
+    """Transcript symlink of the session in *pr_id*'s impl window.
+
+    Normally this run's ``impl-<id>.jsonl``.  A ``pm pr auto-sequence``
+    tick can launch the session instead (e.g. it took a sign-off return's
+    rework launch) and records its symlink under the auto-sequence dir;
+    this run's symlink then still names the killed session, whose idle
+    event never comes, so the PR would never advance.  Every launch
+    writes a fresh symlink, so the newest one names the live session.
+    """
+    own = tdir / f"impl-{pr_id}.jsonl"
+    root = app._root or pm_home()
+    newest, newest_mtime = own, None
+    for path in (own, root / "transcripts" / "auto-sequence" / pr_id
+                 / f"impl-{pr_id}.jsonl"):
+        try:
+            mtime = path.lstat().st_mtime
+        except OSError:
+            continue
+        if newest_mtime is None or mtime > newest_mtime:
+            newest, newest_mtime = path, mtime
+    return str(newest)
+
+
 def _poll_impl_idle(app) -> None:
     """Poll implementation panes for idle detection.
 
@@ -972,7 +998,7 @@ def _poll_impl_idle(app) -> None:
             tdir = _auto_start.get_transcript_dir(app)
             if not tdir:
                 continue
-            impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
+            impl_transcript = _impl_transcript(app, tdir, pr_id)
             try:
                 tracker.register(pr_id, pane_id, impl_transcript)
             except ValueError:
