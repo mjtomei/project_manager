@@ -1406,6 +1406,26 @@ class TestReconciliation:
                              live=False)
         assert m["holds"] == []
 
+    def test_hold_rows_fit_80_columns(self, clock):
+        # The sign-off BLOCKED hold's head row with its source tag is 83
+        # columns, and a wait-for-merge hold lists its targets: both wrap.
+        ah.arm_timer(PR, f"merge-hold:{PR}",
+                     purpose="manual merge hold (wait-for-merge: "
+                             "pr-1111111, pr-2222222, pr-3333333, pr-4444444)",
+                     owner_action="merge", duration=None, effect="fires",
+                     expected="human presses g (or pm pr merge) to merge")
+        pr = {"id": PR, "status": "sign_off",
+              "signoff": {"verdict": "SIGNOFF_BLOCKED",
+                          "ts": "2027-01-15T08:00:00Z"}}
+        m = hq.build_history(PR, pr=pr, now=clock.t, live=False)
+        assert len(m["holds"]) == 2
+        lines = hq.render_text(m)
+        assert all(len(ln) <= 80 for ln in lines), "\n".join(lines)
+        text = " ".join(" ".join(lines).split())
+        assert ("sign-off BLOCKED (needs a human decision) (signoff) "
+                "[project.yaml signoff record]") in text
+        assert "pr-3333333, pr-4444444) (merge)" in text
+
     def test_merged_pr_releases_uncleared_hold(self, clock):
         # ``g`` merges via ``pm pr merge``, which never reaches the TUI's
         # release point: the hold's live owner leaves it uncleared.

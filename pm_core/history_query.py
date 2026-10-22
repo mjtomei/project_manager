@@ -1045,9 +1045,13 @@ def _render_timer(r: dict, t_now: float) -> list[str]:
                   f"{_dur(r.get('remaining_s'))} left")
     owner = r.get("owner_action") or "?"
     src = f" [{r['derived']}]" if r.get("derived") else ""
-    out = [f"  {r.get('purpose')} ({owner}){src}", f"      {timing}"]
+    # Word-wrapped: a derived hold's source tag (sign-off BLOCKED is 83
+    # columns) or a wait-for-merge hold naming several targets would
+    # otherwise overflow 80 columns in plain ``| cat`` output.
+    out = _wrap_words("  ", f"{r.get('purpose')} ({owner}){src}", "    ")
+    out += _wrap_words("      ", timing, "        ")
     if r.get("expected"):
-        out.append(f"      → {r['expected']}")
+        out += _wrap_words("      → ", r["expected"], "        ")
     return out
 
 
