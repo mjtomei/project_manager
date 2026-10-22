@@ -107,7 +107,7 @@ export const JOURNEYS = [
         title: '#215 sessions', caption: 'Implementation, review, the QA run and sign-off, each with its own state. QA is one entry per run that opens its sessions.' },
       ...down(2), click,
       { shot: 'B04-qa-run', expect: 'list:qa-run', contains: 's2',
-        title: 'QA run 2', caption: 'Planner, the interactive session s0, each scenario with its own state (verifying, needs input, retrying, queued), and finalize.' },
+        title: 'QA run 2', caption: 'Planner, the interactive session s0, each scenario with its own state (verifying, needs input, retrying, queued), and finalize, which PM launches only after every scenario has a verdict.' },
       ...down(3), click,
       { shot: 'B05-scenario-s2', expect: 'list:scenario', contains: 'Verifier',
         title: 'Scenario s2 sessions', caption: 'The refiner, execution worker and verifier are separate sessions in window qa-#215-s2. The verifier is working.' },

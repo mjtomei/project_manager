@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-21T23:54:11.817Z",
+  "generated": "2026-10-22T00:04:42.343Z",
   "simulated": "All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions.",
   "simulator": "@evenrealities/evenhub-simulator 0.9.5",
   "sdk": "@evenrealities/even_hub_sdk 0.0.16",
@@ -256,7 +256,7 @@
         {
           "id": "B04-qa-run",
           "title": "QA run 2",
-          "caption": "Planner, the interactive session s0, each scenario with its own state (verifying, needs input, retrying, queued), and finalize.",
+          "caption": "Planner, the interactive session s0, each scenario with its own state (verifying, needs input, retrying, queued), and finalize, which PM launches only after every scenario has a verdict.",
           "scene": "list:qa-run:pr-215",
           "file": "B04-qa-run.png",
           "raw": "raw/B04-qa-run.png",

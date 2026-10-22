@@ -247,7 +247,8 @@ export class App {
             () => (parts[0].helper == null ? this.openSession(parts[0].id) : this.push({ type: 'list', kind: 'scenario', pr: v.pr, run: v.run, k, cursor: 0, top: 0 }))));
         }
         const fin = one('finalize');
-        if (fin) out.push(it('Finalize', stateCell(fin), () => this.openSession(fin.id)));
+        // Finalize is launched by PM once every scenario has a verdict; it is not user-startable.
+        out.push(fin ? it('Finalize', stateCell(fin), () => this.openSession(fin.id)) : it('Finalize', { t: '· after all verdicts', dim: true }, null));
         return out;
       }
       case 'scenario': {

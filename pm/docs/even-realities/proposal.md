@@ -35,7 +35,7 @@ Everything the PM actions panel and its related windows expose is reachable. See
 | Required behavior | Shown in |
 |---|---|
 | A PR's sessions list implementation, review (with loop iteration), each QA run, sign-off, merge recovery when present, and ad-hoc Claude panes. Each row has a state. | B03 |
-| A QA run lists the planner, the interactive session s0, **every scenario** with its own state (verifying, needs input, retrying, queued) and finalize. A single aggregate QA entry is not enough. | B04 |
+| A QA run lists the planner, the interactive session s0, **every scenario** with its own state (verifying, needs input, retrying, queued) and finalize (listed before PM launches it). A single aggregate QA entry is not enough. | B04 |
 | A scenario lists its refiner, execution worker and verifier. Absent helpers say why: "pane gone" after a relaunch, "on first PASS", "not launched". | B05, B12, B13 |
 | A session view states PR, QA run, scenario, role, title, pane role and live state, so parallel sessions stay distinguishable. | B06, B09, B11, B14 |
 | Opening an existing session **attaches**; it never launches ("Opened existing qa-verify-s2 · nothing launched"). | B06, B11, B19 |

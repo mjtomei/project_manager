@@ -30,7 +30,7 @@ Code references were read on that revision. In-flight branches (none merged) are
 | QA scenario: refiner | `qa-#N-sK` / `qa-concretize-sK` (`qa_loop.py:2157`) | `#N QA run R · sK Refiner` + scenario title | QA run → sK → Refiner | via the status pane, then pane selection |
 | QA scenario: execution worker | `qa-#N-sK` / `qa-scenario-sK` (`qa_loop.py:2158`). On relaunch the window is recreated **without** the refiner pane (`qa_loop.py:2505` `_relaunch_scenario_window`) | `#N QA run R · sK Execution`, `retry n` | QA run → sK → Execution | same |
 | QA scenario: verifier | `qa-#N-sK` / `qa-verify-sK`, created lazily on the first PASS (`qa_loop.py:3393`) | `#N QA run R · sK Verifier`, `checking n/3`, `FLAGGED · retry n/3`, `VERIFIED` | QA run → sK → Verifier | **not directly reachable** |
-| QA finalize | `qa-#N` / `qa-finalize` (`qa_loop.py:700`) | `#N QA run R · QA finalize` | QA run → Finalize | — |
+| QA finalize | `qa-#N` / `qa-finalize` (`qa_loop.py:700`); split only after every scenario has a verdict (`qa_loop.py:4160`) | `#N QA run R · QA finalize`; `after all verdicts` until launched | QA run → Finalize | — (not user-startable) |
 | Sign-off | `signoff-#N` / `signoff-claude` | `#N Sign-off`; verdict from `pr.signoff` | PR sessions → Sign-off | Switch, or launch. **Side effect: qa → sign_off.** No runtime badge writer exists |
 | Merge / recovery | `merge-#N` / `merge-claude`. After pr-ac10f03 only the post-publish pull recovery remains | `#N Merge recovery` | PR sessions → Merge recovery (only when a window exists) | **Picking runs `pr merge --resolve-window`, i.e. attempts the merge** (`session.py:914`) |
 | Edit | pane `pr-edit` (editor, not Claude) | — | not mirrored. PR metadata editing is a companion task (open question) | `e` |
@@ -41,7 +41,7 @@ Code references were read on that revision. In-flight branches (none merged) are
 | Watchers (discovery, bug-fix, improvement-fix) | windows `watcher`, `discovery`, `bug-fix-impl`, `improvement-fix-impl`; recreated per iteration | `Discovery watcher`, `iN running` / `iN READY` | Plans and project → WATCHERS | TUI / CLI |
 | Ad-hoc Claude panes | roles `claude`, `discuss`, `watcher-review`, `qa-item`, `qa-author`, `qa-edit`, `qa-debug` | role + window, e.g. `Claude pane · #216` | PR sessions (when in a PR window) or Plans and project | TUI keys; per-window duplicate check only |
 
-The mockup's fixture covers one of each kind above except Edit, Spec review (V) and `qa-status`, which are not conversations. See `mockup/src/fixtures.js`.
+The mockup's fixture covers one of each kind above except Edit, Spec review (V) and `qa-status`, which are not conversations. Finalize appears in its pre-launch state, since the demo run still has scenarios without verdicts. See `mockup/src/fixtures.js`.
 
 ## Navigation shape demonstrated
 

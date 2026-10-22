@@ -25,12 +25,9 @@ export class SimPM {
     this.conn = { state: 'ok', since: null, staleFor: 0, failures: 0 };
     this.pendingStarts = new Map(); // sessionId -> request id
     this.outbox = []; // messages accepted by PM (sent exactly once)
-    this.listeners = new Set();
     this.seq = 0;
   }
 
-  on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
-  emit(kind, detail = {}) { for (const fn of this.listeners) fn(kind, detail); }
   now() { const [h, m] = this.clock; return `${h}:${String(m).padStart(2, '0')}`; }
   tick(minutes = 1) { let [h, m] = this.clock; m += minutes; h += Math.floor(m / 60); this.clock = [h, m % 60]; }
 
@@ -69,7 +66,6 @@ export class SimPM {
     const queued = s.state === 'working';
     s.transcript.push({ who: 'user', t: text, context, id, queued });
     this.outbox.push({ id, sessionId, text, context });
-    this.emit('sent', { id, sessionId, queued });
     return { ok: true, id, queued };
   }
 
@@ -89,7 +85,6 @@ export class SimPM {
       this.history[d.pr].timers = [];
       this.history[d.pr].attempts.push([this.now(), `spec approved v${version}`, '—', 'approved'], [this.now(), 'impl', '0m', 'running']);
     }
-    this.emit('approved', { docId, version });
     return { ok: true };
   }
 
@@ -102,7 +97,6 @@ export class SimPM {
     const id = `r${++this.seq}`;
     this.pendingStarts.set(sessionId, id);
     s.state = 'starting'; s.stateText = 'starting…';
-    this.emit('starting', { sessionId, id });
     return { ok: true, id };
   }
   started(sessionId) {
@@ -111,7 +105,6 @@ export class SimPM {
     s.state = 'working'; s.stateText = 'working';
     s.transcript = [{ who: 'pm', t: `Started from glasses at ${this.now()}` }, { who: 'agent', t: s.short === 'sign-off' ? `Reading the QA verdicts and evidence for ${this.prLabel(s.pr)}…` : `Loading context for ${s.role}…` }];
     if (s.pr && s.short === 'sign-off') { const p = this.pr(s.pr); p.status = 'sign_off'; p.activity = 'Sign-off running'; }
-    this.emit('started', { sessionId });
   }
 
   merge(prId, head) {
@@ -120,7 +113,6 @@ export class SimPM {
     if (!p.signoff || p.signoff.verdict !== 'MERGE') return { ok: false, reason: 'no-signoff' };
     if (p.currentHead && p.currentHead !== head) return { ok: false, reason: 'stale', head: p.currentHead };
     p.status = 'merged'; p.holds = []; p.activity = `Merged ${this.now()}`; p.needs = null;
-    this.emit('merged', { prId });
     return { ok: true };
   }
 
@@ -159,6 +151,5 @@ export class SimPM {
       case 'tick': this.tick(e.minutes || 1); break;
       default: throw new Error(`unknown director event ${e.type}`);
     }
-    this.emit('event', e);
   }
 }

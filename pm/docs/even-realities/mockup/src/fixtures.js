@@ -122,8 +122,8 @@ export const SESSIONS = [
   ...scenario(3, 'Offline at startup', { refiner: ['needs', 'REJECT · input'], worker: null, verifier: null }),
   ...scenario(4, 'Concurrent sync + refresh', { refiner: 'gone', worker: ['working', 'running · retry 1'], verifier: null }),
   ...scenario(5, 'Token expiry', { queued: true }),
-  { id: 'pr-215/qa/run2/finalize', pr: 'pr-215', role: 'QA finalize', short: 'finalize', window: 'qa-#215', pane: 'qa-finalize', run: 2, state: 'waiting', stateText: 'waits for 4 verdicts',
-    transcript: [T('pm', 'Finalize waits until every PASS is verified.')] },
+  // No finalize session yet: PM splits the qa-finalize pane only after every
+  // scenario has a verdict (qa_loop.py _run_qa_finalize_pane), so the run lists it as absent.
   { id: 'pr-215/signoff', pr: 'pr-215', role: 'Sign-off', short: 'sign-off', window: 'signoff-#215', pane: 'signoff-claude', state: 'none', stateText: 'not started', startable: true,
     effects: ['Moves #215 from qa to sign_off.'] },
   // ---- #216: review loop ----------------------------------------------

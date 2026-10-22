@@ -67,7 +67,6 @@ export class SdkDisplay {
     this.panelKey = panelKey; this.sent = { ...built.contents };
     this.log(`FRAME ${seq} ${scene}`);
   }
-  requestExit() { return this.bridge.shutDownPageContainer(1); }
 }
 
 export class CanvasDisplay {
@@ -85,5 +84,4 @@ export class CanvasDisplay {
     }
     return Promise.resolve(built.problems);
   }
-  requestExit() {}
 }
