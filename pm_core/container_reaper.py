@@ -358,6 +358,10 @@ class Scope:
     loop_id: str | None = None
     names: set[str] | None = None
     include_retained: bool = False
+    # The run that owns these containers is releasing them: its own panes
+    # don't count as owners and the launch grace doesn't apply (retention
+    # and in-flight launches still do).
+    owner_release: bool = False
 
     def matches(self, info: ContainerInfo) -> bool:
         if self.names is not None and info.name not in self.names:
@@ -384,6 +388,8 @@ class Scope:
             bits.append(f"QA loop {self.loop_id}")
         if self.names is not None:
             bits.append(f"{len(self.names)} named container(s)")
+        if self.owner_release:
+            bits.append("released by owner")
         return ", ".join(bits) or "all pm containers"
 
 
@@ -401,6 +407,8 @@ class Outcome:
     removed: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)
     proxies_released: list[str] = field(default_factory=list)
+    # Kept containers near their PID limit: (name, pids, limit, reason kept).
+    pid_pressure: list[tuple[str, int, int, str]] = field(default_factory=list)
     running_before: int | None = None
     running_after: int | None = None
     keyring_before: str = ""
@@ -435,6 +443,8 @@ class Outcome:
             after = ("" if not self.keyring_after or self.dry_run
                      else f" → {self.keyring_after}")
             counts.append(f"keyring {self.keyring_before}{after}")
+        if self.pid_pressure:
+            head += f", {len(self.pid_pressure)} near PID limit"
         return head + (f" ({'; '.join(counts)})" if counts else "")
 
 
@@ -442,19 +452,22 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
             prs: _PrStatus, now: float) -> Decision:
     if is_retained(info.name) and not scope.include_retained:
         return Decision(info, "keep", "explicitly retained (pm container retain)")
+    if container_mod.launch_in_progress(info.name):
+        return Decision(info, "keep", "launch in progress")
+    if scope.owner_release:
+        return Decision(info, "remove", "released by its run")
     owners, indeterminate = _owner_panes(info, cache)
     if owners:
         return Decision(info, "keep", f"owned by live pane {', '.join(owners)}")
     if info.created is not None and now - info.created < LAUNCH_GRACE:
         return Decision(info, "keep", "launching (no pane yet)")
-    with container_mod.launch_lock(info.name, timeout=0) as free:
-        if not free:
-            return Decision(info, "keep", "launch in progress")
+    if indeterminate:
+        # Unknown beats merged: a pane we can't see may still be in use.
+        # The next pass retries.
+        return Decision(info, "keep", "tmux server unreachable — ownership unknown")
     status = prs.status(info)
     if status in _TERMINAL_PR_STATES:
         return Decision(info, "remove", f"PR {info.pr_id} is {status}, no owning pane")
-    if indeterminate:
-        return Decision(info, "keep", "tmux server unreachable — ownership unknown")
     if info.session_tag:
         alive = _session_alive(info.session_tag, cache)
         if alive is False:
@@ -471,14 +484,67 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             return False, "skipped: launch started concurrently"
         if is_retained(info.name) and not scope.include_retained:
             return False, "skipped: retained concurrently"
-        owners, _ = _owner_panes(info, _PaneCache(), fresh=True)
-        if owners:
-            return False, f"skipped: pane {', '.join(owners)} attached concurrently"
+        if not scope.owner_release:
+            owners, _ = _owner_panes(info, _PaneCache(), fresh=True)
+            if owners:
+                return False, f"skipped: pane {', '.join(owners)} attached concurrently"
         try:
             container_mod.remove_container(info.name)
         except Exception as e:
             return False, f"error: {e}"
     return True, ""
+
+
+_LOCK_FILE_MAX_AGE = 3600
+
+
+def _prune_lock_files(inventory: set[str]) -> None:
+    """Drop launch-lock files of containers that no longer exist.
+
+    One file is created per launched container name (QA names embed the
+    loop id), so without pruning they accumulate forever.  A file is only
+    unlinked while we hold its lock and once it is old enough that no
+    launch of that name can still be starting.
+    """
+    lock_dir = container_mod.container_state_dir() / "locks"
+    try:
+        entries = list(lock_dir.glob("container-*.lock"))
+    except OSError:
+        return
+    now = time.time()
+    for path in entries:
+        name = path.name[len("container-"):-len(".lock")]
+        if name in inventory:
+            continue
+        try:
+            if now - path.stat().st_mtime < _LOCK_FILE_MAX_AGE:
+                continue
+        except OSError:
+            continue
+        with container_mod.launch_lock(name, timeout=0) as free:
+            if free:
+                path.unlink(missing_ok=True)
+
+
+def spawn_detached_reap(pr_id: str | None = None,
+                        session_tag: str | None = None) -> None:
+    """Run ``pm container reap`` for a scope in a detached process.
+
+    For short-lived CLI paths (e.g. a merge) that must not wait for
+    removals nor leave a daemon thread to be killed at exit.
+    """
+    import sys
+    cmd = [sys.executable, "-m", "pm_core.wrapper", "container", "reap"]
+    if pr_id:
+        cmd += ["--pr", pr_id]
+    if session_tag:
+        cmd += ["--session", session_tag]
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        _log.warning("could not spawn detached reap for %s", pr_id, exc_info=True)
 
 
 def _release_unused_proxies(scope: Scope) -> list[str]:
@@ -512,15 +578,25 @@ def plan(scope: Scope | None = None) -> Outcome:
     return out
 
 
+# Opportunistic passes skip when another process is already reconciling (it
+# covers them); explicit releases and manual runs wait their turn.
+_SKIP_IF_BUSY = frozenset({"auto", "startup", "periodic", "keyring-pressure"})
+
+
 def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
-    with container_mod._file_lock("reaper", timeout=0 if reason != "manual" else 60) as got:
+    timeout = 0 if reason in _SKIP_IF_BUSY else 120
+    with container_mod._file_lock("reaper", timeout=timeout) as got:
         if not got:
             return Outcome(scope=scope.describe(), skipped=True, dry_run=dry_run)
         out = plan(scope)
         out.dry_run = dry_run
+        if out.error:
+            return out
         out.running_before = container_mod.running_container_count()
         out.keyring_before = container_mod.keyring_summary()
-        if out.error or dry_run:
+        if dry_run:
+            if scope.names is None:
+                _note_pid_pressure(out)
             return out
         targets = out.to_remove
         if targets:
@@ -540,15 +616,43 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
             _log.warning("proxy sweep failed", exc_info=True)
         out.running_after = container_mod.running_container_count()
         out.keyring_after = container_mod.keyring_summary()
-        _record(out, scope, reason)
+        if scope.names is None:
+            _note_pid_pressure(out)
+        full_pass = scope == Scope()
+        inventory = {d.info.name for d in out.decisions}
+        _record(out, scope, reason, inventory=inventory if full_pass else None)
+        if full_pass:
+            _prune_lock_files(inventory)
         if out.removed or out.failures:
             _log.info("reconcile[%s] %s: %s — removed=%s failures=%s", reason,
                       out.scope, out.summary(), out.removed, out.failures)
         return out
 
 
+def _note_pid_pressure(out: Outcome) -> None:
+    """Flag kept containers close to their PID limit.
+
+    Unowned exhausted containers were just removed like any leftover; an
+    owned one may hold a live session, so it is reported (with the restart
+    command) rather than restarted behind the user's back.
+    """
+    kept = {d.info.name: d.reason for d in out.decisions
+            if d.action == "keep" and d.info.running}
+    if not kept:
+        return
+    try:
+        hot = container_mod.pids_pressure()
+    except Exception:
+        _log.debug("PID usage probe failed", exc_info=True)
+        return
+    out.pid_pressure = [(n, c, lim, kept[n]) for n, c, lim in hot if n in kept]
+    for n, c, lim, why in out.pid_pressure:
+        _log.warning("container %s at %d/%d PIDs (%s)", n, c, lim, why)
+
+
 _bg_lock = threading.Lock()
 _bg_running = False
+_bg_queue: list[tuple[Scope, bool, str, Callable[[Outcome], None] | None]] = []
 
 
 def reconcile(scope: Scope | None = None, *, dry_run: bool = False,
@@ -556,9 +660,10 @@ def reconcile(scope: Scope | None = None, *, dry_run: bool = False,
               on_done: Callable[[Outcome], None] | None = None) -> Outcome | None:
     """Remove unowned pm containers in *scope* (default: everything).
 
-    ``wait=False`` runs in a daemon thread (coalesced: a pass already
-    running in this process absorbs the request) and returns None.  Never
-    raises; problems are reported in the returned :class:`Outcome`.
+    ``wait=False`` queues the pass for one background daemon thread per
+    process (identical pending requests are coalesced, distinct scopes are
+    all run) and returns None.  Never raises; problems are reported in the
+    returned :class:`Outcome`.
     """
     scope = scope or Scope()
 
@@ -580,32 +685,44 @@ def reconcile(scope: Scope | None = None, *, dry_run: bool = False,
 
     global _bg_running
     with _bg_lock:
+        if not any(q[0] == scope and q[1] == dry_run and q[3] is None
+                   for q in _bg_queue) or on_done is not None:
+            _bg_queue.append((scope, dry_run, reason, on_done))
         if _bg_running:
             return None
         _bg_running = True
 
-    def _bg() -> None:
-        global _bg_running
-        try:
-            _go()
-        finally:
-            with _bg_lock:
-                _bg_running = False
-
-    threading.Thread(target=_bg, daemon=True, name="pm-container-reaper").start()
+    threading.Thread(target=_drain_bg_queue, daemon=True,
+                     name="pm-container-reaper").start()
     return None
 
 
-def release_containers(names: list[str], *, reason: str = "release",
-                       wait: bool = True) -> Outcome | None:
-    """Release specific containers a run owned and no longer needs.
+def _drain_bg_queue() -> None:
+    global _bg_running
+    while True:
+        with _bg_lock:
+            if not _bg_queue:
+                _bg_running = False
+                return
+            scope, dry_run, reason, on_done = _bg_queue.pop(0)
+        reconcile(scope, dry_run=dry_run, wait=True, reason=reason,
+                  on_done=on_done)
 
-    Goes through the same ownership checks, so a container a human is still
-    using (live pane) or retained is kept.
+
+def release_containers(names: list[str], *, reason: str = "release",
+                       wait: bool = True,
+                       owner_release: bool = False) -> Outcome | None:
+    """Release specific containers a run no longer needs.
+
+    By default goes through the full ownership checks, so a container a
+    human is still using (live pane) is kept.  ``owner_release=True`` is for
+    the run that launched them: its own panes are being ended on purpose,
+    so only retention and an in-flight relaunch keep a container.
     """
     if not names:
         return Outcome(scope="no containers")
-    return reconcile(Scope(names=set(names)), wait=wait, reason=reason)
+    return reconcile(Scope(names=set(names), owner_release=owner_release),
+                     wait=wait, reason=reason)
 
 
 # ---------------------------------------------------------------------------
@@ -623,9 +740,14 @@ def last_state() -> dict:
         return {}
 
 
-def _record(out: Outcome, scope: Scope, reason: str) -> None:
+def _record(out: Outcome, scope: Scope, reason: str,
+            inventory: set[str] | None = None) -> None:
+    """Persist the outcome; *inventory* (full-scope passes) prunes failures
+    for containers that no longer exist."""
     prev = last_state()
     failures = dict(prev.get("failures") or {})
+    if inventory is not None:
+        failures = {k: v for k, v in failures.items() if k in inventory}
     for d in out.decisions:
         failures.pop(d.info.name, None)
     for name, err in out.failures.items():

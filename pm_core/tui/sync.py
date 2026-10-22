@@ -41,7 +41,10 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
         pr = store.get_pr(app._data, pr_id)
         if not pr:
             continue
-        summary = pr_cleanup.cleanup_pr_resources(session, pr)
+        # Containers go to the background reaper: this runs on the event
+        # loop, and an automatic pass must keep retained containers.
+        summary = pr_cleanup.cleanup_pr_resources(session, pr,
+                                                  background_containers=True)
         for win_name in summary.get("windows", []):
             _log.info("Killed window '%s' for merged %s", win_name, pr_id)
         if summary.get("containers"):

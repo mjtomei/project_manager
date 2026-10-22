@@ -519,7 +519,7 @@ class TestCreateContainer:
         assert args[-3] == "bash"
         assert args[-2] == "-c"
         assert "useradd" in args[-1]
-        assert "sleep infinity" in args[-1]
+        assert "wait $!" in args[-1]  # reaping PID 1, not bare sleep
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
@@ -803,6 +803,7 @@ class TestCreateQAContainer:
             allowed_push_branch=None,
             session_tag=None,
             pr_id=None,
+            kind="qa", loop_id=None, scenario=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -824,6 +825,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag=None,
             pr_id=None,
+            kind="qa", loop_id=None, scenario=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -838,6 +840,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
+            kind="qa", loop_id=None, scenario=None,
         )
         mock_create.assert_called_once_with(
             name="pm-repo-abc-qa-test-s1",
@@ -847,6 +850,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
+            kind="qa", loop_id=None, scenario=None,
         )
 
 

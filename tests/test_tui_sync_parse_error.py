@@ -74,7 +74,8 @@ class TestKillMergedPrWindows:
                                  "runtime_state": True}) as mock_cleanup:
             sync_mod._kill_merged_pr_windows(app, {"pr-abc"})
 
-        mock_cleanup.assert_called_once_with("pm-test", pr)
+        mock_cleanup.assert_called_once_with("pm-test", pr,
+                                             background_containers=True)
 
 
 class TestLoadStateParseError:

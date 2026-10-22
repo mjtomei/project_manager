@@ -484,6 +484,17 @@ def launch_lock(name: str, *, timeout: float | None = 300):
     return _file_lock(f"container-{name}", timeout=timeout)
 
 
+def launch_in_progress(name: str) -> bool:
+    """True when a launch currently holds *name*'s launch lock.
+
+    Probes without creating a lock file for names never launched here.
+    """
+    if not _lock_path(f"container-{name}").exists():
+        return False
+    with launch_lock(name, timeout=0) as free:
+        return not free
+
+
 def proxy_lock(session_tag: str, pr_id: str, *, timeout: float | None = 120):
     """Per shared-proxy lock: held from proxy start until the container exists,
     and while deciding whether an unused proxy can be stopped."""
@@ -494,17 +505,26 @@ _create_semaphore: threading.BoundedSemaphore | None = None
 _create_semaphore_lock = threading.Lock()
 
 
-def _launch_concurrency() -> int:
+def _int_setting(name: str, default: int) -> int:
+    """Integer global setting; *default* when unset, invalid or unreadable."""
     from pm_core.paths import get_global_setting_value
     try:
-        val = int(get_global_setting_value("container-launch-concurrency", ""))
-    except ValueError:
-        return _DEFAULT_LAUNCH_CONCURRENCY
+        return int(get_global_setting_value(name, str(default)))
+    except (ValueError, OSError):
+        return default
+
+
+def _launch_concurrency() -> int:
+    val = _int_setting("container-launch-concurrency", _DEFAULT_LAUNCH_CONCURRENCY)
     return val if val > 0 else _DEFAULT_LAUNCH_CONCURRENCY
 
 
 def _create_slot() -> threading.BoundedSemaphore:
-    """Process-wide bound on concurrent container creates (run + setup)."""
+    """Process-wide bound on concurrent container creates (run + setup).
+
+    Sized from ``container-launch-concurrency`` on first use; a changed
+    setting applies to processes started afterwards.
+    """
     global _create_semaphore
     with _create_semaphore_lock:
         if _create_semaphore is None:
@@ -514,11 +534,7 @@ def _create_slot() -> threading.BoundedSemaphore:
 
 def max_running_containers() -> int:
     """``container-max-running`` setting (0 = unlimited)."""
-    from pm_core.paths import get_global_setting_value
-    try:
-        return max(0, int(get_global_setting_value("container-max-running", "")))
-    except ValueError:
-        return 0
+    return max(0, _int_setting("container-max-running", 0))
 
 
 def _current_tmux_socket() -> str:
@@ -644,6 +660,7 @@ _PIDS_SIGNATURES = (
     "pids limit",
     "resource temporarily unavailable",
     "fork: retry",
+    "cannot fork",
 )
 
 
@@ -665,6 +682,9 @@ def classify_runtime_error(text: str | None) -> str:
     return "runtime"
 
 
+_KEY_USERS_FILE = "/proc/key-users"
+
+
 def keyring_usage(uid: int | None = None):
     """Parse ``/proc/key-users``: ``uid: usage nkeys/nikeys qnkeys/maxkeys qnbytes/maxbytes``.
 
@@ -672,7 +692,7 @@ def keyring_usage(uid: int | None = None):
     *uid*), or None when unreadable (non-Linux / restricted).
     """
     try:
-        text = Path("/proc/key-users").read_text()
+        text = Path(_KEY_USERS_FILE).read_text()
     except OSError:
         return None
     rows: dict[int, dict[str, int]] = {}
@@ -767,8 +787,10 @@ def launch_error(name: str, kind: str, stderr: str = "", *,
                f"{_REMEDY_REAP} You can also lower 'pm container set memory-limit' "
                f"or 'pm set container-launch-concurrency'.{cause}")
     elif kind == "pids":
-        msg = (f"Container '{name}' could not {stage}: process/PID limit reached. "
-               f"{_REMEDY_REAP}{cause}")
+        msg = (f"Container '{name}' could not {stage}: its process/PID limit is "
+               f"exhausted (runaway or zombie processes). Once no session needs "
+               f"it, 'pm container restart {name}' clears it and keeps its files; "
+               f"raising the limit only postpones the next exhaustion.{cause}")
     elif kind == "image":
         msg = (f"Container '{name}' could not {stage}: image not available. "
                f"Run 'pm container build'.{cause}")
@@ -1052,17 +1074,101 @@ def create_container(
             )
 
 
+# Container PID 1 after setup: wait forever, reaping adopted children; exit
+# promptly on stop instead of waiting out the runtime's kill timeout.
+_PID1_REAPER = "trap 'exit 0' TERM; while :; do sleep 86400 & wait $!; done"
+
+
 def _host_claude_json() -> Path:
     return Path.home() / ".claude.json"
 
 
 def _setup_complete(name: str) -> bool:
     """True when the host-side post-setup finished (config copied)."""
+    return _probe_setup(name)[0]
+
+
+def _probe_setup(name: str) -> tuple[bool, str, str]:
+    """``(complete, exec_failure_kind, stderr)`` for a running container.
+
+    *exec_failure_kind* is non-empty when the probe could not even run
+    inside the container and the runtime said why (``pids``, ``memory``,
+    ``keyring``) — the container is wedged, not merely unfinished.
+    """
     check = f"test -f {SETUP_COMPLETE_SENTINEL}"
     if _host_claude_json().exists():
         check += f" && test -s {_CONTAINER_HOME}/.claude.json"
     r = _run_runtime("exec", name, "sh", "-c", check, check=False, timeout=15)
-    return r.returncode == 0
+    if r.returncode == 0:
+        return True, "", ""
+    stderr = (r.stderr or "").strip()
+    kind = classify_runtime_error(stderr)
+    return False, kind if kind in ("pids", "memory", "keyring") else "", stderr
+
+
+def restart_container(name: str) -> None:
+    """Restart *name* in place: ends every process inside (clearing PID or
+    memory exhaustion) but keeps the container's filesystem, id and mounts.
+
+    Setup state lives in the container filesystem, so a restarted container
+    is still fully set up; this re-verifies that before returning.
+    """
+    r = _run_runtime("restart", "-t", "5", name, check=False, timeout=90)
+    if r.returncode != 0:
+        stderr = (r.stderr or "").strip()
+        raise launch_error(name, classify_runtime_error(stderr), stderr,
+                           stage="restart")
+    _wait_for_setup(name)
+    if not _setup_complete(name):
+        raise launch_error(name, "incomplete",
+                           "setup markers missing after restart", stage="restart")
+
+
+def pids_usage() -> dict[str, tuple[int, int]] | None:
+    """``{name: (pids, limit)}`` for running pm containers (limit 0 = none).
+
+    Read from the runtime's cgroup stats, so it works even when the
+    container is too exhausted to ``exec`` into.  None if unavailable.
+    """
+    try:
+        st = _run_runtime("stats", "--no-stream", "--format",
+                          "{{.Name}}\t{{.PIDs}}", check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if st.returncode != 0:
+        return None
+    current: dict[str, int] = {}
+    for line in (st.stdout or "").splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) == 2 and parts[0].startswith(CONTAINER_PREFIX):
+            try:
+                current[parts[0]] = int(parts[1])
+            except ValueError:
+                continue
+    if not current:
+        return {}
+    try:
+        insp = _run_runtime("inspect", "--format",
+                            "{{.Name}}\t{{.HostConfig.PidsLimit}}", *current,
+                            check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        insp = None
+    limits: dict[str, int] = {}
+    for line in ((insp.stdout if insp else "") or "").splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) == 2:
+            try:
+                limits[parts[0].lstrip("/")] = max(0, int(parts[1]))
+            except ValueError:
+                continue
+    return {n: (c, limits.get(n, 0)) for n, c in current.items()}
+
+
+def pids_pressure(threshold: float = 0.9) -> list[tuple[str, int, int]]:
+    """Running pm containers at ≥ *threshold* of their PID limit."""
+    usage = pids_usage() or {}
+    return sorted((n, c, lim) for n, (c, lim) in usage.items()
+                  if lim > 0 and c >= threshold * lim)
 
 
 def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
@@ -1082,7 +1188,32 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                           check=False, timeout=10)
     container_id = result.stdout.strip()
 
-    if not _setup_complete(name):
+    complete, wedged, probe_err = _probe_setup(name)
+    if wedged in ("pids", "memory"):
+        # Can't exec: the container's own processes exhausted it.  Restart
+        # clears that and keeps its files, but ends every session inside —
+        # so only when nothing owns it.
+        from pm_core import container_reaper
+        owners = container_reaper.live_owner_panes(name, container_id)
+        if owners:
+            raise launch_error(
+                name, wedged,
+                f"{probe_err}\n(live pane(s) {', '.join(owners)} still use it, "
+                f"so pm will not restart it)", stage="be reused")
+        _log.warning("Container %s is exhausted (%s) and unowned — restarting "
+                     "it in place", name, wedged)
+        try:
+            restart_container(name)
+            complete = True
+        except ContainerError:
+            _log.warning("Restart of %s failed — recreating", name, exc_info=True)
+            remove_container(name)
+            return None
+    elif wedged == "keyring":
+        # Host-wide quota, not this container's fault: recreating won't help.
+        raise launch_error(name, "keyring", probe_err, stage="be reused")
+
+    if not complete:
         _log.warning("Container %s is running but its setup never completed", name)
         finished = False
         base = _run_runtime("exec", name, "test", "-f", _READY_SENTINEL,
@@ -1394,7 +1525,11 @@ def _create_fresh(
         # PYTHONPATH=/opt/pm-src.  No per-container install step — keeping
         # container startup fast enough to beat the QA grace period.
         setup_parts.append(f"touch {_READY_SENTINEL}")
-        setup_parts.append("exec sleep infinity")
+        # PID 1 must reap: processes orphaned inside the container are
+        # reparented to it, and ``sleep`` never waits on them, so zombies
+        # pile up against the PID limit until exec fails "Cannot fork".
+        # bash's SIGCHLD handling reaps any child while it sits in ``wait``.
+        setup_parts.append(_PID1_REAPER)
         setup = "; ".join(setup_parts)
         cmd.extend([config.image, "bash", "-c", setup])
 
@@ -1416,7 +1551,7 @@ def _create_fresh(
         # podman may leave a "created" container behind on failure.  Discard
         # outside the proxy lock: the removal re-takes it to decide whether
         # the shared proxy is now unused.
-        _discard_partial(name)
+        discard_container(name)
         raise run_error
     container_id = result.stdout.strip()
 
@@ -1426,7 +1561,7 @@ def _create_fresh(
     except BaseException:
         _log.error("Container %s setup failed — removing the partial container",
                    name, exc_info=True)
-        _discard_partial(name)
+        discard_container(name)
         raise
 
     _log.info("Created container %s (id=%s)", name, container_id[:12])
@@ -1569,16 +1704,24 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
                            stage="record completed setup")
 
 
-def _discard_partial(name: str) -> None:
-    """Best-effort removal of a container whose launch failed."""
+def discard_container(name: str) -> None:
+    """Best-effort removal of a container whose launch failed or was abandoned
+    before a pane attached to it (never raises)."""
+    if not name:
+        return
     try:
         remove_container(name)
     except Exception:
-        _log.warning("Could not remove partial container %s", name, exc_info=True)
+        _log.warning("Could not remove container %s", name, exc_info=True)
 
 
 def _relieve_keyring_pressure() -> None:
-    """Reap orphaned containers first when the kernel keyring is nearly full."""
+    """Reap orphaned containers first when the kernel keyring is nearly full.
+
+    Synchronous so the launch that follows benefits from the freed keys; the
+    pass skips immediately when another process is already reconciling, and
+    never touches the container being launched (its launch lock is held).
+    """
     pressure = keyring_pressure(0.9)
     if not pressure:
         return
@@ -1587,7 +1730,7 @@ def _relieve_keyring_pressure() -> None:
                  pressure["keys"], pressure["max_keys"])
     try:
         from pm_core import container_reaper
-        container_reaper.reconcile(wait=False)
+        container_reaper.reconcile(reason="keyring-pressure")
     except Exception:
         _log.warning("pre-launch reap failed", exc_info=True)
 

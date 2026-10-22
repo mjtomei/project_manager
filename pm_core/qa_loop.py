@@ -497,6 +497,24 @@ def _planner_code_changes(workdir_path: str, before: str | None,
                   if p and not p.startswith("pm/"))
 
 
+# Reason prefix for a scenario whose container/window never launched.  Such a
+# scenario gets no entry in ``scenario_verdicts`` — no agent ever judged it —
+# and the run aggregates to INPUT_REQUIRED through the "unverdicted" rule.
+LAUNCH_FAILED_PREFIX = "launch failed: "
+
+
+def _record_launch_failure(state: QALoopState, scenario: QAScenario,
+                           error: str) -> None:
+    """Record why *scenario* could not be launched (not an agent verdict)."""
+    detail = " ".join(error.split())
+    state.scenario_verdict_reasons[scenario.index] = LAUNCH_FAILED_PREFIX + detail
+
+
+def _is_launch_failure(state: QALoopState, index: int) -> bool:
+    return (state.scenario_verdict_reasons.get(index) or "").startswith(
+        LAUNCH_FAILED_PREFIX)
+
+
 def qa_outcome_detail(state: QALoopState) -> str:
     """Per-scenario verdict summary, or why no scenario ran.
 
@@ -508,7 +526,9 @@ def qa_outcome_detail(state: QALoopState) -> str:
     if state._error and not any(s.index in state.scenario_verdicts
                                 for s in state.scenarios):
         return " ".join(state._error.split())
-    parts = [f"{s.title}: {state.scenario_verdicts.get(s.index, '?')}"
+    parts = [f"{s.title}: "
+             + state.scenario_verdicts.get(
+                 s.index, "launch failed" if _is_launch_failure(state, s.index) else "?")
              for s in state.scenarios]
     return "; ".join(parts)
 
@@ -2061,6 +2081,8 @@ def _launch_scenarios_in_tmux(
         if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
+            _record_launch_failure(
+                state, scenario, f"tmux window '{win_name}' could not be created")
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -2279,11 +2301,14 @@ def _launch_scenarios_in_containers(
                 allowed_push_branch=branch or None,
                 session_tag=_session_tag,
                 pr_id=state.pr_id,
+                loop_id=state.loop_id,
+                scenario=scenario.index,
             )
             scenario.container_name = cname
-        except Exception:
+        except Exception as exc:
             _log.error("Failed to create container for scenario %d — aborting scenario",
                        scenario.index, exc_info=True)
+            _record_launch_failure(state, scenario, str(exc))
             return
 
         win_name = _scenario_window_name(pr_data, scenario.index)
@@ -2305,6 +2330,11 @@ def _launch_scenarios_in_containers(
         if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
+            # No pane will ever exec into the container — release it now.
+            container_mod.discard_container(cname)
+            scenario.container_name = None
+            _record_launch_failure(
+                state, scenario, f"tmux window '{win_name}' could not be created")
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -2502,6 +2532,35 @@ def _build_scenario_run_cmd(
 # Scenario retry helpers
 # ---------------------------------------------------------------------------
 
+def _ensure_scenario_container(scenario: QAScenario, state: QALoopState,
+                               pr_data: dict) -> bool:
+    """Make sure *scenario*'s container exists and finished setup."""
+    from pm_core import container as container_mod
+    if not scenario.worktree_path:
+        return False
+    clone_path = Path(scenario.worktree_path)
+    try:
+        container_mod.create_qa_container(
+            name=scenario.container_name,
+            config=container_mod.load_container_config(),
+            workdir=clone_path,
+            scratch_path=clone_path.parent / "scratch",
+            allowed_push_branch=pr_data.get("branch") or None,
+            session_tag=state.session_tag,
+            pr_id=state.pr_id,
+            loop_id=state.loop_id,
+            scenario=scenario.index,
+        )
+    except Exception as exc:
+        _log.warning("Scenario %d container could not be re-ensured: %s",
+                     scenario.index, exc)
+        _record_launch_failure(state, scenario, str(exc))
+        return False
+    if _is_launch_failure(state, scenario.index):
+        state.scenario_verdict_reasons.pop(scenario.index, None)  # recovered
+    return True
+
+
 def _relaunch_scenario_window(
     scenario: QAScenario,
     state: QALoopState,
@@ -2527,6 +2586,12 @@ def _relaunch_scenario_window(
 
     # New transcript for the relaunched session (old one is stale)
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
+    if use_containers and scenario.container_name:
+        # The container may have been reaped while unowned (e.g. the TUI was
+        # down) or left half set up — verified reuse, else recreate.
+        if not _ensure_scenario_container(scenario, state, pr_data):
+            return False
 
     try:
         run_cmd, pane_cwd = _build_scenario_run_cmd(
@@ -2631,6 +2696,10 @@ def _poll_tmux_verdicts(
     has_failed_creation = False
     for scenario in state.scenarios:
         if not scenario.window_name and scenario.index not in _queued_indices:
+            if _is_launch_failure(state, scenario.index):
+                # Reason already recorded; no verdict (nothing judged it).
+                has_failed_creation = True
+                continue
             _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
                          scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
@@ -2713,6 +2782,9 @@ def _poll_tmux_verdicts(
             state.scenarios = orig
         if scenario.window_name:
             pending.add(scenario.index)
+        elif _is_launch_failure(state, scenario.index):
+            _log.warning("Queued scenario %d failed to launch: %s", scenario.index,
+                         state.scenario_verdict_reasons[scenario.index])
         else:
             # Window creation failed — mark INPUT_REQUIRED so this
             # scenario isn't silently lost (which could cause a false
@@ -2903,11 +2975,12 @@ def _poll_tmux_verdicts(
                 _log.warning("Scenario %d window exited without verdict "
                              "(retries exhausted)",
                              scenario.index)
-                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                state.scenario_verdict_reasons[scenario.index] = (
-                    f"worker exited before any verdict; no recovery after "
-                    f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)"
-                )
+                if not _is_launch_failure(state, scenario.index):
+                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                    state.scenario_verdict_reasons[scenario.index] = (
+                        f"worker exited before any verdict; no recovery after "
+                        f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)"
+                    )
                 pending.discard(scenario.index)
                 verdicts_changed = True
                 _launch_next_queued()
@@ -3655,10 +3728,13 @@ def run_qa_sync(
 
         # Clean up orphaned containers from previous runs whose tmux
         # windows no longer exist.
+        # In the background: this run must not wait for the old run's
+        # removals (ownership checks keep anything still live).
         if use_containers:
             from pm_core import container as container_mod
             container_mod.cleanup_orphaned_qa_containers(
-                session, state.pr_id, session_tag=state.session_tag)
+                session, state.pr_id, session_tag=state.session_tag,
+                wait=False)
 
         # Final out-of-band status guard, immediately before any QA window is
         # created (scenario 0 / planner).  Re-load fresh: a concurrent merge
@@ -4003,6 +4079,8 @@ def run_qa_sync(
     # --- Phase 2: Execution ---
     # Determine concurrency cap (0 = launch all at once)
     concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
+    if use_containers:
+        concurrency_cap = _clamp_to_container_headroom(concurrency_cap)
     if concurrency_cap > 0:
         launch_scenarios = state.scenarios[:concurrency_cap]
         queued_scenarios = state.scenarios[concurrency_cap:]
@@ -4075,6 +4153,25 @@ def run_qa_sync(
     )
 
 
+def _clamp_to_container_headroom(cap: int) -> int:
+    """Clamp the scenario launch batch to ``container-max-running`` headroom.
+
+    0 means unlimited for both.  At least one scenario always launches; the
+    rest wait in the existing queue and start as running scenarios finish.
+    """
+    from pm_core import container as container_mod
+    limit = container_mod.max_running_containers()
+    if limit <= 0:
+        return cap
+    running = container_mod.running_container_count() or 0
+    headroom = max(1, limit - running)
+    if cap <= 0 or headroom < cap:
+        _log.info("QA launch batch clamped to %d (container-max-running=%d, "
+                  "%d running)", headroom, limit, running)
+        return headroom
+    return cap
+
+
 def _execute_and_finalize(
     state: QALoopState,
     pm_root: Path,
@@ -4099,9 +4196,10 @@ def _execute_and_finalize(
     :func:`_poll_tmux_verdicts` and is cleared by the TUI once the
     completed run has been processed (see qa_loop_ui).
 
-    Scenario windows AND containers are intentionally left alive after the
-    verdict so users can inspect results; orphaned containers are cleaned
-    up at the start of the next QA run.
+    Once the verdict is out, this run's scenario containers are released
+    (see :func:`_release_scenario_containers`) — except INPUT_REQUIRED ones
+    and windows being viewed, which the reconciler reclaims once their pane
+    is gone.  Transcripts, captures and scenario clones stay on the host.
     """
     queued_indices = {s.index for s in queued_scenarios}
 
@@ -4123,6 +4221,11 @@ def _execute_and_finalize(
     # that coverage PASS.
     unverdicted = [s.index for s in state.scenarios
                    if s.index not in state.scenario_verdicts]
+    launch_failed = [i for i in unverdicted if _is_launch_failure(state, i)]
+    if launch_failed and not state._error:
+        first = state.scenario_verdict_reasons[launch_failed[0]]
+        state._error = (f"{len(launch_failed)} scenario(s) failed to launch "
+                        f"(no verdict): {first[len(LAUNCH_FAILED_PREFIX):]}")
     if VERDICT_NEEDS_WORK in verdicts or state.planner_code_changes:
         # Application code the planner committed was never reviewed:
         # route back to review rather than on to sign-off.
@@ -4181,7 +4284,66 @@ def _execute_and_finalize(
     _log.info("QA complete for %s: %s (finalize=%s)",
               state.pr_id, state.latest_verdict, state.finalize_verdict)
     notify()
+    # After notify: the verdict is out; the next run must not pay for this
+    # run's cleanup.
+    if use_containers and _release_scenario_containers(state, session):
+        notify()
     return state
+
+
+def _viewed_window_ids(session: str) -> set[str]:
+    """Window ids an attached client is currently looking at (any grouped session)."""
+    from pm_core import tmux as tmux_mod
+    viewed: set[str] = set()
+    try:
+        for sess in [session] + list(tmux_mod.list_grouped_sessions(session)):
+            wid = tmux_mod.attached_active_window(sess)
+            if wid:
+                viewed.add(wid)
+    except Exception:
+        _log.debug("could not list viewed windows for %s", session, exc_info=True)
+    return viewed
+
+
+def _release_scenario_containers(state: QALoopState, session: str) -> bool:
+    """Release this run's scenario containers once it completed or stopped.
+
+    Containers hold kernel keyring keys while running, so leaving them for
+    "the next run" leaked them whenever there was no next run.  Kept:
+    INPUT_REQUIRED scenarios (a human may still answer in the pane), windows
+    a client is viewing right now, and retained containers.  Those are
+    reclaimed later by the reconciler once their pane is gone.  Transcripts,
+    captures and the scenario clones live on the host and are untouched.
+    Returns True when a removal failed (noted in ``state.latest_output``).
+    """
+    from pm_core import container_reaper
+    from pm_core import tmux as tmux_mod
+    viewed = _viewed_window_ids(session) if session else set()
+    names: list[str] = []
+    for sc in state.scenarios:
+        if not sc.container_name:
+            continue
+        if state.scenario_verdicts.get(sc.index) == VERDICT_INPUT_REQUIRED:
+            continue
+        if viewed and sc.pane_id:
+            try:
+                if tmux_mod.pane_window_id(sc.pane_id) in viewed:
+                    continue
+            except Exception:
+                pass
+        names.append(sc.container_name)
+    if not names:
+        return False
+    outcome = container_reaper.release_containers(
+        names, reason="qa-run-end", owner_release=True)
+    _log.info("QA %s/%s released containers: %s", state.pr_id,
+              state.loop_id, outcome.summary())
+    if outcome.failures:
+        state.latest_output += (
+            f" [container cleanup failed for {len(outcome.failures)}"
+            " — retry with 'pm container reap']")
+        return True
+    return False
 
 
 def resume_qa_sync(

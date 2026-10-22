@@ -546,14 +546,19 @@ End with a summary of which steps work and which don't, then one of:
         session_tag = session.removeprefix("pm-") if session else None
         cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
 
-        container_mod.create_qa_container(
-            name=cname,
-            config=config,
-            workdir=clone_path,
-            scratch_path=scratch_path,
-            allowed_push_branch=base_branch,
-            session_tag=session_tag,
-        )
+        try:
+            container_id = container_mod.create_qa_container(
+                name=cname,
+                config=config,
+                workdir=clone_path,
+                scratch_path=scratch_path,
+                allowed_push_branch=base_branch,
+                session_tag=session_tag,
+                kind="qa-debug",
+            )
+        except container_mod.ContainerError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
 
         claude_cmd = build_claude_shell_cmd(
             prompt=prompt,
@@ -561,7 +566,8 @@ End with a summary of which steps work and which don't, then one of:
             write_dir=str(clone_path),
             session_type="qa_author",
         )
-        shell_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True)
+        shell_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True,
+                                                 container_id=container_id)
         run_cwd = str(qa_workdir)
     else:
         shell_cmd = build_claude_shell_cmd(
@@ -577,10 +583,18 @@ End with a summary of which steps work and which don't, then one of:
         os.chdir(run_cwd)
         os.execvp("bash", ["bash", "-c", shell_cmd])
     else:
-        tmux_mod.new_window_get_pane(
-            session, window_name, shell_cmd,
-            cwd=run_cwd, switch=False,
-        )
+        try:
+            pane = tmux_mod.new_window_get_pane(
+                session, window_name, shell_cmd,
+                cwd=run_cwd, switch=False,
+            )
+        except Exception:
+            pane = None
+        if not pane:
+            if use_containers:
+                container_mod.discard_container(cname)
+            click.echo(f"Failed to create debug window '{window_name}'.", err=True)
+            raise SystemExit(1)
         click.echo(f"Launched debug session")
         click.echo(f"  Instruction: {item['title']}")
         click.echo(f"  Workdir: {qa_workdir}")

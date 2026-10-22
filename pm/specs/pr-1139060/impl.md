@@ -66,9 +66,9 @@ removed by automatic or scoped cleanup) when any of:
    has a `#{pane_start_command}` that contains the exact container name
    (token-boundary match, so `…-s1` ≠ `…-s10`) or its full id;
 2. it is explicitly retained (`pm container retain <name>`; marker file in
-   `~/.pm/container-retain/`);
+   `~/.pm/containers/retain/`);
 3. a launch holds its per-name launch lock (fcntl lock in
-   `~/.pm/locks/containers/<name>.lock`) or it was created < 120 s ago and
+   `~/.pm/containers/locks/container-<name>.lock`) or it was created < 120 s ago and
    no pane has attached yet (launch grace).
 
 Otherwise it is a candidate with a reason: `PR <id> is merged|closed`,
@@ -112,7 +112,7 @@ name are serialized.
 computes ownership (R2), removes candidates with a bounded thread pool
 (default 4 workers, per-remove timeout), releases unused proxies (socket dirs
 `/tmp/pm-push-proxy-*` whose tag+PR has no container), and records the
-outcome in `~/.pm/container-reaper.json` (last run, removed, failures).
+outcome in `~/.pm/containers/reaper.json` (last run, removed, failures).
 Single-flight across processes via an fcntl lock (a concurrent caller skips).
 - TUI: run in a background thread after `_deferred_startup` and every 10 min
   (`set_interval`, worker thread — never on the event loop).  Failures are
@@ -175,6 +175,31 @@ reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
   (bounded) runs first; the launch then proceeds and, if it still fails,
   surfaces R6's explicit error.
 
+### R9 — PID exhaustion and zombie reaping (note-1943d8d, 2026-10-22)
+Evidence: #236 QA s28 hit 2041/2048 PIDs (1929 `treesample.sh`), PID 1 was
+`sleep`, `podman exec` failed "Cannot fork"; restarting that unowned
+container cleared it and kept its files.  Running state is not health.
+- Container PID 1 is a reaping wait loop
+  (`trap 'exit 0' TERM; while :; do sleep 86400 & wait $!; done`) instead of
+  `exec sleep infinity`, so orphaned/zombie processes are reaped.  Limits are
+  not raised.
+- "cannot fork" classifies as `pids`; the pids launch error names
+  `pm container restart <name>` and says raising the limit only postpones it.
+- Reuse probe distinguishes "can't exec" (pids/memory/keyring) from
+  "unfinished setup": an exhausted container with **no** live owner pane is
+  restarted in place (`restart_container`, files/id/mounts kept, setup
+  re-verified; recreate on failure); with a live owner it raises the real
+  error and is not touched.  Keyring failures raise (host-wide; recreating
+  won't help).
+- `pids_usage()` reads cgroup stats (`stats --no-stream`, works when exec
+  can't) + `HostConfig.PidsLimit`.  Non-targeted reconcile passes report
+  kept containers ≥ 90 % of their limit (`Outcome.pid_pressure`; TUI log
+  line, `pm container reap` WARNING rows); `pm container status` lists
+  ≥ 80 %.  Unowned ones are simply reaped like any leftover.
+- `pm container restart NAME [--force]` refuses while a live pane uses the
+  container unless `--force`, takes the launch lock, prints PIDs before → after.
+- Retry scheduling of dead QA workers stays with pr-1ab9075.
+
 ## 2. Implicit requirements
 
 - IR1 Container names stay deterministic (existing names/tests and the reuse
@@ -231,5 +256,11 @@ reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
   removes it.
 - E8 Docker runtime: `podman exec --user 0` vs docker root semantics preserved;
   labels work identically.
+- E10 Automatic merged-PR sync (TUI event loop) hands containers to a
+  background PR-scoped reconcile (`cleanup_pr_resources(...,
+  background_containers=True)`) — non-blocking and retention-aware; explicit
+  `Y` / `pm pr cleanup --resources` still remove synchronously.
+- E11 `container-launch-concurrency` / `container-max-running` are registered
+  `pm set` int settings.
 - E9 Reaper running inside a pm container (pm-on-pm): it only sees the nested
   runtime's containers.

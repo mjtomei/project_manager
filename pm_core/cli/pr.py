@@ -1021,12 +1021,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          effort=_resolution.effort,
                                          session_type="impl")
             # Optionally wrap in a container for isolation
-            from pm_core.container import wrap_claude_cmd, ContainerError
+            from pm_core.container import (
+                wrap_claude_cmd, ContainerError, discard_container,
+            )
             _stag = pm_session.removeprefix("pm-") if pm_session else None
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
-                                              session_tag=_stag, pr_id=pr_id)
+                                              session_tag=_stag, pr_id=pr_id,
+                                              kind="impl")
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -1053,6 +1056,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 return
             except Exception as e:
                 click.echo(f"Failed to create tmux window: {e}", err=True)
+                # No pane will ever exec into the container — release it.
+                discard_container(_cname)
                 click.echo("Launching Claude in current terminal...")
 
     # Fall through: launch interactively in current terminal
@@ -1205,20 +1210,24 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # Removing it here (synchronously) closes that race regardless of whether
     # an existing tmux window was found above.
     branch = pr_entry.get("branch", "")
-    from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
-    if is_container_mode_enabled():
-        remove_container(_make_container_name(f"review-{pr_id}"))
+    from pm_core.container import (
+        wrap_claude_cmd, ContainerError, discard_container,
+        is_container_mode_enabled, _make_container_name,
+    )
     # Resolve a session_tag for the captures bind-mount so the review
     # container's /pm-captures points at the same per-PR captures dir
     # the impl and QA containers use (lets a reviewer read pre/post-fix
     # captures and scenario captures from inside their pane).
     _review_pm_session = _get_pm_session()
     _review_stag = _review_pm_session.removeprefix("pm-") if _review_pm_session else None
+    if is_container_mode_enabled():
+        # The tagged name is the one wrap_claude_cmd will create/reuse.
+        discard_container(_make_container_name(f"review-{pr_id}", _review_stag))
     try:
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
-                                              pr_id=pr_id)
+                                              pr_id=pr_id, kind="review")
     except ContainerError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -1229,6 +1238,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # window.  Background mode is used by auto-start to avoid stealing focus.
     switch = not review_loop and not background
 
+    claude_pane = ""
     try:
         # Build the diff pane command first.  We use git --no-pager
         # and pipe through less ourselves so that quitting the pager
@@ -1293,6 +1303,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 window_name, pm_session,
             )
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
+            discard_container(_cname)
             return
 
         # Explicit cwd: without -c tmux starts the split in the calling
@@ -1347,6 +1358,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     except Exception as e:
         _log.warning("Failed to launch review window: %s", e)
         click.echo(f"Review window error: {e}")
+        if not claude_pane:
+            discard_container(_cname)
 
 
 @pr.command("review")
@@ -1689,6 +1702,16 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
             kill_pr_windows(session, pr_entry)
     except Exception:
         pass
+
+    # Reclaim the merged PR's containers (impl/review/sign-off/QA) without
+    # holding up the merge; ownership checks keep anything still live.
+    try:
+        from pm_core.container import is_container_mode_enabled
+        if is_container_mode_enabled():
+            from pm_core import container_reaper
+            container_reaper.spawn_detached_reap(pr_id=pr_id)
+    except Exception:
+        _log.debug("detached container reap for %s failed", pr_id, exc_info=True)
 
     # Finalize merge transcript if provided
     if transcript:
