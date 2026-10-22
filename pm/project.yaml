@@ -31175,6 +31175,28 @@ prs:
       /pm-captures/scenarios/7.'
     created_at: '2026-10-22T18:43:23Z'
     last_edited: '2026-10-22T18:43:23Z'
+  - id: note-17fc270
+    text: 'S8 refine (2026-10-22): one project, 8 PRs (A; B dep A; W dep B wait target;
+      E dep B; Q; X; R; H), staged one target at a time with 4 fake configs (fake
+      reads config at pane launch, so per-PR delays stick): Q recorded QA IR -> A
+      MANUAL MERGE (commit in A workdir after sign-off BLOCKED) -> X impl delay 3600
+      + pm pr spec X impl in spec-mode review -> R review delay 3600 (qa_scenario
+      PASS delay 600 keeps Q green after z t). Spec approve via `EDITOR=true pm pr
+      spec-approve X` keeps popup open; z t needs popup closed. Story 2 acks: add
+      prints added:, flag flip prints policy_changed: (x; was y) + released merge
+      hold:, remove prints removed: (stop mark kept). Attention runs are never state=running
+      in JSON. Readers reuse /pm-captures/scenarios/4/scripts pattern.'
+    created_at: '2026-10-22T17:30:14Z'
+    last_edited: '2026-10-22T17:30:14Z'
+  - id: note-d5af659
+    text: 'QA S6 PASS on 5e081b97 (no edits): live mixed fixture (3 targets W/X/S,
+      A MANUAL MERGE, B review #2, C qa 1/3, E/F spec review, G QA IR) — header/need-you,
+      policies once, red 1;37;41 labels + 1;31 reasons, widths 99/60/40/30 (wcwidth),
+      --width 500 == wide, plain variants ESC-free == TTY, JSON reasons verbatim +
+      attention only A/E/F/G; S1 fix held (QA SPEC REVIEW no qa token). Staging ~7
+      min via /pm-captures/scenarios/6/scripts/{setup,stages}.'
+    created_at: '2026-10-22T18:41:04Z'
+    last_edited: '2026-10-22T18:41:04Z'
 - id: pr-c8482a8
   plan: bugs
   title: 'fake-claude cannot hold a review INPUT_REQUIRED: 2 s idle_prompt refresh
