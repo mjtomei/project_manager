@@ -1109,7 +1109,7 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
 
 @contextlib.contextmanager
 def _review_window_launch_lock(pm_session: str, window_name: str):
-    """Serialise concurrent fresh review-window launches for one window.
+    """Serialise concurrent review-window launches for one window.
 
     The review window for a PR is a single shared tmux window
     (``review-<display_id>``).  Each ``pm pr review --fresh`` runs in its
@@ -1121,11 +1121,13 @@ def _review_window_launch_lock(pm_session: str, window_name: str):
     sess:review-<display_id>`` ambiguous (it fails), so the popup spinner's
     focus switch silently no-ops.
 
-    An ``fcntl.flock`` on a per-(session, window) lock file makes the
-    find/kill/create sequence atomic across processes: the second launch
-    blocks until the first has created its window, then finds and
-    supersedes it (fresh-mode kill+recreate) instead of racing — the
-    session converges on exactly one review window.
+    An ``fcntl.flock`` on a per-(session, window) lock file, held by
+    :func:`_launch_review_window` across the whole launch (find, kill,
+    create, split, pane registration), makes it atomic across processes:
+    the second launch blocks until the first has created its window, then
+    finds it and either supersedes it (fresh: kill+recreate) or switches
+    to it (non-fresh fast path) instead of racing — the session converges
+    on exactly one review window.
     """
     import fcntl
     from pm_core.paths import pm_home
