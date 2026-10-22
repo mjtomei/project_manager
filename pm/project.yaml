@@ -28353,7 +28353,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-22T15:20:09.537869+00:00'
+  updated_at: '2026-10-22T15:26:49.700885+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28387,6 +28387,26 @@ prs:
       "(hidden by sticky message)"). Test: tests/test_log_message_force.py::test_launch_pane_confirmation_shown_while_sticky.'
     created_at: '2026-10-22T15:20:09Z'
     last_edited: '2026-10-22T15:20:09Z'
+  - id: note-50bda3a
+    text: 'S3 refine (zz t self-driving): PASS-short-of-count restarts always hit
+      the existing-window path (the main qa-<pr> window stays after a run), so they
+      never select, even on master. Only a run whose qa-<pr> window is gone before
+      the restart reaches the first-creation branch this PR gates. The refined S3
+      adds a review->QA bounce in which the user closes the qa-<pr>* windows during
+      the self-driving review. qa-pass-count is not a `pm set` setting ("Unknown setting"),
+      so write ~/.pm/settings/qa-pass-count directly. A fake planner cannot write
+      the QA spec: run `pm pr spec <pr> qa` first, or the run stops at INPUT_REQUIRED.'
+    created_at: '2026-10-22T15:07:56Z'
+    last_edited: '2026-10-22T15:07:56Z'
+  - id: note-1212844
+    text: 'QA S3 (2026-10-22) incidental fixes: (1) 8b793611 zz t / start_qa now arm
+      the shared 1 s poll timer — on a PR with no workdir at the last display refresh,
+      the run PASS was never processed (no self-driving restart) until a manual r;
+      (2) 59254fe1 "QA PASS (N/M consecutive) — restarting QA" now held 3 s (it was
+      overwritten in the same frame by "Starting QA", never painted). Focus Thens
+      of S3 all held post-fix.'
+    created_at: '2026-10-22T15:26:49Z'
+    last_edited: '2026-10-22T15:26:49Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
