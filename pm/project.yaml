@@ -15879,7 +15879,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-05-04T15:33:47.848571+00:00'
+  updated_at: '2026-10-22T14:41:46.590392+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15906,6 +15906,18 @@ prs:
       to exit, and other live PRs must remain reachable.'
     created_at: '2026-10-22T14:30:02Z'
     last_edited: '2026-10-22T14:30:02Z'
+  - id: note-fb8e429
+    text: 'Impl 8016b42f covers note-40057f4: nav excludes merged/closed unless home;
+      actionless PRs show a notice row (fzf always has an item — old code fed fzf
+      an empty list, and l off a merged entry exited, reproduced on master with fzf
+      0.56.3); reload project.yaml+windows on each nav key and before dispatch. QA
+      checks 1–8 are in pm/specs/pr-49ce773/impl.md "QA acceptance checks". Live harness
+      that worked: scratch HOME with ~/.pm/pane-registry/pm-qa.json "{}", standalone
+      project.yaml as cwd, PM_TMUX_SOCKET scratch socket, PYTHONPATH unset, run `pm
+      _popup-picker pm-qa <window>` in a tmux window and send-keys/capture-pane; mark
+      PRs merged mid-run by editing status in project.yaml. Merge hold stays manual.'
+    created_at: '2026-10-22T14:41:46Z'
+    last_edited: '2026-10-22T14:41:46Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
