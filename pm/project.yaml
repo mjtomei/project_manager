@@ -29398,7 +29398,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-13T22:18:20.648960+00:00'
+  updated_at: '2026-10-22T18:57:04.824263+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29411,6 +29411,15 @@ prs:
       This time no QA PASS PR note was persisted. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA/pm-log-stale-run.txt.'
     created_at: '2026-10-13T22:18:20Z'
     last_edited: '2026-10-13T22:18:20Z'
+  - id: note-5d9b45f
+    text: pr-3201ea8 persists state.stop_requested as qa_resume.json 'cancelled' (and
+      TUI stop paths / z t / zz t mark it immediately via qa_loop.mark_resume_cancelled),
+      so a restart never adopts a deliberately stopped run. It does NOT stop a stopped
+      run from launching workers/finalizer or recording PASS — that remains this PR's
+      scope; the launcher (_launch_scenarios) already checks stop_requested before
+      preparing, starting a refiner, and launching a worker.
+    created_at: '2026-10-22T18:57:04Z'
+    last_edited: '2026-10-22T18:57:04Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
@@ -30496,11 +30505,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T21:40:00.306182+00:00'
+  updated_at: '2026-10-22T18:57:03.837219+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d4a20dd
+    text: 'pr-3201ea8 changes _poll_tmux_verdicts._launch_next_queued: it no longer
+      swaps state.scenarios (launchers take scenarios=[...]) and the launcher checkpoints
+      every startup step (qa_resume.json via _checkpoint), so this branch''s post-dequeue/relaunch
+      _snapshot() calls become redundant but harmless; expect a small merge conflict
+      there and in _relaunch_scenario_window (now writes the new worker identity before
+      its window exists).'
+    created_at: '2026-10-22T18:57:03Z'
+    last_edited: '2026-10-22T18:57:03Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
