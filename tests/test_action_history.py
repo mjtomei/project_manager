@@ -70,6 +70,16 @@ class TestJournal:
         assert evs[1]["verdict"] == "PASS"
         assert evs[0]["owner"]["pid"] > 0
 
+    def test_attempt_context_is_exported(self, clock):
+        # pr-291e891 will pass action-source context; the model carries it
+        # through unchanged and omits it when absent.
+        ah.start_attempt(PR, "review", context={"window": "review-#7"})
+        ah.start_attempt(PR, "merge")
+        rows = {a["action"]: a for a in hq.build_history(
+            PR, now=clock.t, live=False)["attempts"]}
+        assert rows["review"]["context"] == {"window": "review-#7"}
+        assert "context" not in rows["merge"]
+
     def test_garbage_lines_are_skipped(self, clock):
         ah.start_attempt(PR, "review")
         with open(ah.journal_path(PR), "a") as f:

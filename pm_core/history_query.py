@@ -844,7 +844,10 @@ def _export(a: dict) -> dict:
             "retry", "parent", "source", "resumed", "adopted", "stale",
             "session_id", "outcome", "verdict", "detail", "inferred",
             "elapsed_s", "elapsed_lower_bound_s", "exec_s", "wait_s",
-            "open", "scenarios")
+            "open", "scenarios",
+            # Action-source context a writer passed (pr-291e891 supplies
+            # session/window/task); passed through, not interpreted.
+            "context")
     out = {k: a.get(k) for k in keep if a.get(k) is not None}
     # Timing keys are always present: None means unknown, not omitted.
     for k in ("outcome", "elapsed_s", "elapsed_lower_bound_s", "exec_s",

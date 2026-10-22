@@ -266,7 +266,9 @@ pr-72c8695 will move the session actions into this same module.
 
 R11. **Attribution** — events carry only `owner` (pid/start token) and an
 optional `context` dict. No competing attribution model: pr-291e891 will
-supply `context` (session/window/task); leave a cross-PR note.
+supply `context` (session/window/task); leave a cross-PR note.  The
+query passes an attempt's start-event `context` through to the JSON
+attempt rows uninterpreted (omitted when absent).
 
 ## 2. Implicit requirements
 
@@ -379,3 +381,15 @@ supply `context` (session/window/task); leave a cross-PR note.
   `merge` `done` + `MERGED` before killing the window, so the merge
   attempt ends `done MERGED`.  Killing the window first cleared the
   in-flight entry and journaled the successful merge as `vanished`.
+- E10. Command-bar review: a typed `/pr review <pr>` gets the same
+  `--transcript` as `d` (`pr_view._with_review_transcript`), so the
+  review pane is tracked and journaled; without it history said "No
+  recorded action history" for a review that ran (QA S35, 76742637).
+- E11. Stale review transcript: after a plain `z d` review, the
+  `review-<pr>.jsonl` symlink names that review's session while the
+  review window may later hold a finished loop iteration's pane.  The
+  non-loop review tracker registers a pane only when its start-command
+  `--session-id` matches the transcript's session
+  (`review_loop_ui._transcript_is_another_session`, cached per pane);
+  pairing them mirrored a phantom "review running" forever (QA S26,
+  c4e3f5b0).
