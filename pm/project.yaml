@@ -31509,6 +31509,23 @@ prs:
       (#247).'
     created_at: '2026-10-22T19:28:01Z'
     last_edited: '2026-10-22T19:28:01Z'
+  - id: note-d7cae2e
+    text: 'QA planner 2026-10-22: fixed supervisor finding host-work-route-smoke-20261022T194946Z/transcript-lookup-finding.json
+      in 81cebf17 (CODE CHANGE, needs normal re-review before sign-off). Real Claude
+      mangles every non-alphanumeric cwd char to "-"; claude_launcher._claude_project_dir
+      (pre-existing on master) only mapped "/" and ".", so probe cwd /tmp/pm-route-probe-020ea4s_
+      was looked up in the wrong dir and live_probe still printed Live OK with Transcript
+      (none), because an empty transcript model list passed vacuously. Fix: Claude-matching
+      mangling in launcher + fake-claude, session-id glob fallback, and live_probe
+      now fails with "missing evidence: ..." (naming expected paths) when the transcript,
+      its model or the pm hook event is missing. 5 mutation-checked regressions in
+      tests/test_worker_route.py (TestLiveProbe, test_transcript_path_matches_claude_mangling);
+      full suite 3412 passed. The mangling fix also affects every pm transcript lookup
+      whose cwd contains "_", spaces etc. (most already tolerated via verdict_transcript
+      session-id glob). QA plan covers it (RQ3a, E9a). Supervisor: rerun host --live
+      probe on the new head.'
+    created_at: '2026-10-22T19:57:06Z'
+    last_edited: '2026-10-22T19:57:06Z'
   - id: note-aa9f287
     text: 'QA s3 (2026-10-22): fixed in 0b1edfca (CODE CHANGE, needs re-review) —
       _poll_tmux_verdicts no-window INPUT_REQUIRED marking overwrote scenarios stopped
