@@ -2493,11 +2493,10 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
         raise SystemExit(1)
 
-    # Serialize concurrent `pm pr merge` of the SAME PR. Two invocations
-    # racing in the shared workdir would each run `git merge` / `git merge
-    # --abort` against the same index — the loser observes the winner's
-    # in-flight merge ("MERGE_HEAD exists"), aborts it (clobbering the
-    # winner), and spews a misleading "conflict" error. An exclusive per-PR
+    # Serialize concurrent `pm pr merge` of the SAME PR (the cross-PR
+    # publish lock is taken later, in _publish_approved: lock order PR ->
+    # repo). Two invocations racing would both publish, finalize and pull
+    # the main repo for one approval. An exclusive per-PR
     # lock makes the loser wait; once the winner finishes (status persisted
     # by _finalize_merge before the lock releases) the loser re-loads state
     # and exits cleanly with "already merged" — before the sign-off gate, so

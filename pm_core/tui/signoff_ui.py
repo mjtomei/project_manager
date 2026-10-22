@@ -264,7 +264,7 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
     if not _driven(app, pr_id):
         return
     if pr_id in (getattr(app, "_pending_merge_prs", None) or set()):
-        return  # merge-conflict tracking owns it now
+        return  # published; its post-merge update window owns it now
     session = getattr(app, "_session_name", None)
     if not session:
         return
