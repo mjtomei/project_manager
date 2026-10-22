@@ -258,9 +258,12 @@ def _heartbeat(fd: int) -> None:
     # a fake clock), and a background thread calling it would advance that
     # clock at random moments or spin on a no-op mock.
     while _owner_lock_fd == fd:
-        beat_t = time.time()  # the mtime utime leaves is at least this
+        beat_t = time.time()
         try:
-            os.utime(fd)
+            # Explicit times: a bare utime stamps the kernel's coarse clock,
+            # up to a jiffy behind time.time(), which could put the beat
+            # just after a gate's due time before that due time.
+            os.utime(fd, (beat_t, beat_t))
         except OSError:
             return
         _beat_wake.clear()
@@ -491,11 +494,29 @@ def read_events(pr_id: str) -> list[dict]:
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if isinstance(ev, dict) and ev.get("kind"):
+            if isinstance(ev, dict) and ev.get("kind") and _sane_times(ev):
                 events.append(ev)
     # Stable: file order breaks ties between equal timestamps.
     events.sort(key=lambda e: float(e.get("t") or 0))
     return events
+
+
+def _is_time(v: Any) -> bool:
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and v == v and abs(v) != float("inf"))
+
+
+def _sane_times(ev: dict) -> bool:
+    """Whether *ev*'s time fields are numbers readers can do math on.
+
+    A line that parses as JSON but carries e.g. ``"t": "abc"`` would
+    otherwise raise out of every reader (sorting, span math), sign-off
+    routing included, the way an undecodable line no longer does.
+    """
+    if not _is_time(ev.get("t")):
+        return False
+    return all(ev.get(k) is None or _is_time(ev.get(k))
+               for k in ("armed_t", "due_t"))
 
 
 def has_journal(pr_id: str) -> bool:

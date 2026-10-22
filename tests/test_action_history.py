@@ -97,6 +97,21 @@ class TestJournal:
         assert ah.newest_open_attempt(PR, "signoff") == a
         assert hq.build_history(PR, now=clock.t, live=False)["attempts"]
 
+    def test_valid_json_with_bad_times_is_skipped(self, clock):
+        # Parseable lines whose times are not numbers must not raise out of
+        # sorting / span math (pm pr history, sign-off routing).
+        a = ah.start_attempt(PR, "signoff")
+        with open(ah.journal_path(PR), "a") as f:
+            f.write('{"kind": "attempt_end", "attempt": "%s", "t": "abc"}\n'
+                    % a)
+            f.write('{"kind": "phase", "t": true}\n')
+            f.write('{"kind": "timer_arm", "timer": "x", "t": 1, '
+                    '"due_t": "soon"}\n')
+        assert [e["kind"] for e in ah.read_events(PR)] == ["attempt_start"]
+        assert ah.newest_open_attempt(PR, "signoff") == a
+        model = hq.build_history(PR, now=clock.t, live=False)
+        assert model["attempts"] and hq.render_text(model)
+
     def test_append_after_truncated_last_line_is_not_lost(self, clock):
         # A crash mid-write leaves a partial line with no trailing newline;
         # the next event must start on its own line, not be glued onto it.
@@ -1282,12 +1297,13 @@ class TestReconciliation:
         tok = ah.owner_token()
         ah.arm_timer(PR, "qa-grace:L", purpose="QA scenario verdict grace",
                      owner_action="qa", duration=0.3)
-        due = time.time() + 0.3
+        (arm,) = [e for e in ah.read_events(PR) if e["kind"] == "timer_arm"]
+        # Wait for the journaled due itself: an extra beat (another test's
+        # gate waking the heartbeat) may land just before it.
         deadline = time.time() + 5
-        while (ah.owner_last_alive(tok) or 0) < due - 0.01 \
+        while (ah.owner_last_alive(tok) or 0) < arm["due_t"] \
                 and time.time() < deadline:
             threading.Event().wait(0.02)
-        (arm,) = [e for e in ah.read_events(PR) if e["kind"] == "timer_arm"]
         assert ah.owner_last_alive(tok) >= arm["due_t"]
         assert ah.owner_last_alive(tok) < arm["due_t"] + 1.0
 
