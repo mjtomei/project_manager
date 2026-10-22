@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T05:11:55.939830+00:00'
+  updated_at: '2026-10-22T06:14:35.489483+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8402,6 +8402,14 @@ prs:
       (fake-claude config ignores -C). Captures /pm-captures/scenarios/22'
     created_at: '2026-10-22T05:11:55Z'
     last_edited: '2026-10-22T05:11:55Z'
+  - id: note-d09c392
+    text: 'QA S22 re-run (run2, after a flag for a missing CLI cast): all 9 stories
+      held again on 6dd086a4, no code changes. The qa-sh shell, the fixture and the
+      restart watcher are now asciinema-recorded (/pm-captures/scenarios/22/run2/cli-*).
+      The TUI recorder stays on main because a pin loop reselects it on $S~1. B restart:
+      pane %20 -> %31, one window. Real router MERGE for A and for B after rework.'
+    created_at: '2026-10-22T06:14:35Z'
+    last_edited: '2026-10-22T06:14:35Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
