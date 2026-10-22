@@ -394,15 +394,17 @@ def _await_input_resolution(state: ReviewLoopState, pr_data: dict,
     relaunching (which would kill the pane and drop the question).
     """
     while True:
-        state.input_required = True
         # Reset so each INPUT_REQUIRED round shows a notification.
         state._ui_notified_input = False
         follow_up_output = _wait_for_follow_up_verdict(pr_data, state, transcript)
-        state.input_required = False
         if follow_up_output is None:
+            state.input_required = False
             return None
 
         verdict = parse_review_verdict(follow_up_output)
+        # Set with the verdict, before on_iteration: a new question must
+        # never read as "answered; follow-up running" in between.
+        state.input_required = verdict == VERDICT_INPUT_REQUIRED
         state.latest_verdict = verdict
         state.latest_output = follow_up_output
         # Record the follow-up as part of this iteration's history
@@ -532,6 +534,7 @@ def run_review_loop_sync(
                     break
 
                 verdict = parse_review_verdict(output)
+                state.input_required = verdict == VERDICT_INPUT_REQUIRED
                 state.latest_verdict = verdict
                 state.latest_output = output
 

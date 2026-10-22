@@ -585,6 +585,24 @@ class TestInputRequired:
         assert state.running is False
         assert state.input_required is False
 
+    @patch("pm_core.review_loop._wait_for_follow_up_verdict")
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_input_required_set_before_on_iteration(self, mock_review, mock_follow_up):
+        """on_iteration (and any status read) never sees an unanswered
+        INPUT_REQUIRED with the flag down, which would read as answered."""
+        mock_review.return_value = "**INPUT_REQUIRED**\n\n1. Test it"
+        mock_follow_up.side_effect = ["**INPUT_REQUIRED**\n\n2. And this", "**PASS**"]
+        seen = []
+
+        state = ReviewLoopState(pr_id="pr-001")
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp",
+                             on_iteration=lambda s: seen.append(
+                                 (s.latest_verdict, s.input_required)))
+
+        assert seen == [(VERDICT_INPUT_REQUIRED, True),
+                        (VERDICT_INPUT_REQUIRED, True),
+                        (VERDICT_PASS, False)]
+
 class TestGenerateReviewPromptInputRequired:
     """Tests that the review prompt includes INPUT_REQUIRED instructions."""
 
