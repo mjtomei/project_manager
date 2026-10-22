@@ -164,7 +164,9 @@ uses the same `reconcile` (R2/R4): prints each container with action
 (`remove`/`keep`) and reason, then a summary (removed / kept / failed, plus
 running-container and keyring counts before → after).  `pm session cleanup
 [--dry-run]` = `reap --session <current tag>` (the command older messages
-referenced).  `pm container retain NAME [--release]` manages retention.
+referenced).  `pm container retain NAME [--release]` manages retention; a marker is bound
+to the retained container's id (a replacement under the same name is not
+retained) and full reconcile passes prune markers whose container is gone.
 `pm container status` shows running pm containers, keyring usage, and last
 reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
 

@@ -625,6 +625,10 @@ def start_push_proxy(container_name: str, workdir: str,
 
         # Reuse if an existing proxy is alive on this socket
         if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+            if not os.path.exists(os.path.join(sock_dir, _OWNER_FILE)):
+                # Started by an older pm: record the owner so the reaper's
+                # unused-proxy sweep can find it.
+                _write_owner_file(sock_dir, session_tag, pr_id, workdir)
             with _proxy_lock:
                 _proxy_refs.setdefault(key, set()).add(container_name)
                 _container_to_proxy_key[container_name] = key
@@ -738,14 +742,14 @@ def list_shared_proxies() -> list[dict]:
         try:
             owner = json.loads(Path(real, _OWNER_FILE).read_text())
         except (OSError, ValueError):
-            # Legacy dir without owner file: readable long name only.  A
-            # per-container proxy dir (``pm-push-proxy-<container name>``,
-            # e.g. an untagged ``pm-impl-pr-…``) has the same shape but
-            # serves only its own container — never treat it as shared.
+            # Legacy dir without owner file: only the readable long name
+            # (the dir itself, or the symlink to a hashed dir) says whose it
+            # is.  A per-container proxy dir (``pm-push-proxy-<container
+            # name>``, e.g. an untagged ``pm-impl-pr-…``) has the same shape
+            # but serves only its own container — never treat it as shared.
             from pm_core.container import parse_container_name
             base = os.path.basename(d)
-            if (not os.path.islink(d)
-                    and parse_container_name(base[len(_SOCKET_DIR_PREFIX):]) is None):
+            if parse_container_name(base[len(_SOCKET_DIR_PREFIX):]) is None:
                 m = re.match(rf"{re.escape(_SOCKET_DIR_PREFIX)}(.+)-(pr-[0-9a-f]+)$",
                              base)
                 if m:

@@ -197,6 +197,27 @@ class TestReaperOwnership:
         out = reaper.reconcile(Scope(include_retained=True), reason="manual")
         assert out.removed == [name]
 
+    def test_retention_does_not_carry_over_to_a_replacement(self, fake_env):
+        """A marker set on one container must not retain a later container
+        launched under the same name, and is pruned once its container is
+        gone (full passes)."""
+        name = "pm-repo-ab12-review-pr-aaaa"
+        reaper.retain(name, "discussion", container_id="old-id")
+        fake_env["containers"] = [_info(name, id="new-id")]
+        out = reaper.reconcile(reason="manual")
+        assert out.removed == [name]
+        assert not reaper.is_retained(name)  # pruned with its container
+
+    def test_retention_marker_pruned_when_container_gone(self, fake_env):
+        kept, gone = "pm-repo-ab12-impl-pr-aaaa", "pm-repo-ab12-impl-pr-bbbb"
+        fake_env["containers"] = [_info(kept)]
+        reaper.retain(kept, container_id="id-" + kept)
+        reaper.retain(gone, container_id="id-" + gone)
+        reaper.reconcile(Scope(pr_id="pr-aaaa"), reason="manual")
+        assert reaper.is_retained(gone)  # scoped passes don't prune
+        reaper.reconcile(reason="manual")
+        assert reaper.retained_names() == [kept]
+
     def test_launch_grace_and_launch_lock(self, fake_env):
         fresh = _info("pm-repo-ab12-impl-pr-aaaa", created=time.time())
         locked = _info("pm-repo-ab12-review-pr-aaaa")
@@ -626,6 +647,40 @@ class TestProxyRelease:
             shutil.rmtree(private, ignore_errors=True)
             shutil.rmtree(shared, ignore_errors=True)
 
+    def test_legacy_symlinked_shared_proxy_is_listed(self):
+        """A pre-owner-file shared proxy with a long tag lives in a hashed
+        dir behind a long-name symlink; the symlink identifies it."""
+        import secrets
+        import shutil
+        from pm_core import push_proxy
+        hx = secrets.token_hex(4)
+        real = Path(f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}{hx}hashed")
+        link = Path(f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}longtag{hx}-pr-{hx}")
+        try:
+            real.mkdir()
+            link.symlink_to(real)
+            found = [(p["session_tag"], p["pr_id"])
+                     for p in push_proxy.list_shared_proxies()]
+            assert found.count((f"longtag{hx}", f"pr-{hx}")) == 1
+        finally:
+            link.unlink(missing_ok=True)
+            shutil.rmtree(real, ignore_errors=True)
+
+    def test_reused_proxy_without_owner_file_gets_one(self, monkeypatch, tmp_path):
+        import json
+        from pm_core import push_proxy
+        sock_dir = tmp_path / "proxy"
+        sock_dir.mkdir()
+        (sock_dir / "push.sock").write_text("")
+        monkeypatch.setattr(push_proxy, "_shared_sock_dir", lambda t, p: str(sock_dir))
+        monkeypatch.setattr(push_proxy, "proxy_is_alive", lambda s: True)
+        push_proxy.start_push_proxy("pm-t-impl-pr-1", "/w", "b",
+                                    session_tag="t", pr_id="pr-1")
+        owner = json.loads((sock_dir / push_proxy._OWNER_FILE).read_text())
+        assert (owner["session_tag"], owner["pr_id"]) == ("t", "pr-1")
+        push_proxy._proxy_refs.pop(push_proxy._shared_proxy_key("t", "pr-1"), None)
+        push_proxy._container_to_proxy_key.pop("pm-t-impl-pr-1", None)
+
     def test_foreign_shared_container_leaves_private_paths_alone(self, monkeypatch, tmp_path):
         import tempfile
         from pm_core import push_proxy
@@ -758,11 +813,17 @@ class TestReapCLI:
         assert "removed 1" in r.output and "failed 1" in r.output
         assert "FAILED" in r.output
 
-    def test_retain_roundtrip(self):
+    def test_retain_roundtrip(self, monkeypatch):
         from click.testing import CliRunner
         from pm_core.cli import cli
+        monkeypatch.setattr(cm, "current_container_id",
+                            lambda name: "cid1" if name == "pm-x-impl-pr-1" else "")
+        r = CliRunner().invoke(cli, ["container", "retain", "pm-nope-impl-pr-2"])
+        assert r.exit_code == 1 and "No container" in r.output
+        assert not reaper.is_retained("pm-nope-impl-pr-2")
         r = CliRunner().invoke(cli, ["container", "retain", "pm-x-impl-pr-1"])
-        assert r.exit_code == 0 and reaper.is_retained("pm-x-impl-pr-1")
+        assert r.exit_code == 0 and reaper.is_retained("pm-x-impl-pr-1", "cid1")
+        assert not reaper.is_retained("pm-x-impl-pr-1", "cid2")
         r = CliRunner().invoke(cli, ["container", "retain", "--release", "pm-x-impl-pr-1"])
         assert r.exit_code == 0 and not reaper.is_retained("pm-x-impl-pr-1")
 

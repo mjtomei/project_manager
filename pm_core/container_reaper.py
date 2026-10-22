@@ -55,14 +55,32 @@ def _retain_dir() -> Path:
     return container_mod.container_state_dir() / "retain"
 
 
-def is_retained(name: str) -> bool:
-    return (_retain_dir() / name).exists()
+def _retain_record(name: str) -> dict | None:
+    try:
+        rec = json.loads((_retain_dir() / name).read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {}
+    return rec if isinstance(rec, dict) else {}
 
 
-def retain(name: str, note: str = "") -> None:
+def is_retained(name: str, container_id: str = "") -> bool:
+    """True when *name* is retained — and, when both ids are known, only for
+    the very container that was retained: a replacement launched later
+    under the same name is not."""
+    rec = _retain_record(name)
+    if rec is None:
+        return False
+    rec_id = str(rec.get("id") or "")
+    return not rec_id or not container_id or rec_id == container_id
+
+
+def retain(name: str, note: str = "", container_id: str = "") -> None:
     d = _retain_dir()
     d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(json.dumps({"note": note, "at": int(time.time())}))
+    (d / name).write_text(json.dumps(
+        {"note": note, "at": int(time.time()), "id": container_id}))
 
 
 def unretain(name: str) -> bool:
@@ -78,6 +96,18 @@ def retained_names() -> list[str]:
         return sorted(p.name for p in _retain_dir().iterdir())
     except OSError:
         return []
+
+
+def _prune_retain_markers(inventory: dict[str, str]) -> None:
+    """Drop retention markers whose container is gone or was replaced.
+
+    *inventory* maps every existing pm container name to its id (full
+    passes only), so a marker can't outlive the container it was set on.
+    """
+    for name in retained_names():
+        if name in inventory and is_retained(name, inventory[name]):
+            continue
+        unretain(name)
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +486,7 @@ class Outcome:
 def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
             prs: _PrStatus, now: float,
             pending_release: dict[str, str] | None = None) -> Decision:
-    if is_retained(info.name) and not scope.include_retained:
+    if is_retained(info.name, info.id) and not scope.include_retained:
         return Decision(info, "keep", "explicitly retained (pm container retain)")
     if container_mod.launch_in_progress(info.name):
         return Decision(info, "keep", "launch in progress")
@@ -505,7 +535,7 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
     with container_mod.launch_lock(info.name, timeout=0) as free:
         if not free:
             return False, "skipped: launch started concurrently"
-        if is_retained(info.name) and not scope.include_retained:
+        if is_retained(info.name, info.id) and not scope.include_retained:
             return False, "skipped: retained concurrently"
         if info.id:
             # A relaunch between plan() and now replaced the container under
@@ -659,6 +689,8 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
         _record(out, scope, reason, inventory=inventory if full_pass else None)
         if full_pass:
             _prune_lock_files(inventory)
+            _prune_retain_markers({d.info.name: d.info.id for d in out.decisions
+                                   if d.info.name not in out.removed})
         if out.removed or out.failures:
             _log.info("reconcile[%s] %s: %s — removed=%s failures=%s", reason,
                       out.scope, out.summary(), out.removed, out.failures)
