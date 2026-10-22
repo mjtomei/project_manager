@@ -1,6 +1,5 @@
 // Page entry: wires the simulated PM, the controller, a display backend, the
 // companion (phone) view and the director that injects simulated events.
-import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import { SimPM } from './sim-pm.js';
 import { App } from './app.js';
 import { SdkDisplay, CanvasDisplay, intentForEvent } from './display.js';
@@ -75,8 +74,11 @@ async function hasEvenHost(ms) {
   return Boolean(window.flutter_inappwebview);
 }
 
+// The SDK is loaded only for a host: on import it logs a bridge and wraps the
+// page's timers even in a plain browser, where there is nothing to bridge.
 async function connectGlasses() {
-  const bridge = await hasEvenHost(2500) && await Promise.race([waitForEvenAppBridge(), new Promise(r => setTimeout(() => r(null), 2500))]);
+  const sdk = await hasEvenHost(2500) && await import('@evenrealities/even_hub_sdk');
+  const bridge = sdk && await Promise.race([sdk.waitForEvenAppBridge(), new Promise(r => setTimeout(() => r(null), 2500))]);
   if (!bridge) { document.body.dataset.mode = 'browser'; log('No Even host: browser preview only'); return; }
   document.body.dataset.mode = 'even';
   glasses = new SdkDisplay(bridge, log);
@@ -106,5 +108,7 @@ draw();
 // Before the first glasses frame, so the capture script (which waits for that
 // frame before posting) cannot have its first event skipped.
 await pollDirector(true);
-connectGlasses();
+// With a host, the director interval starts after the SDK has wrapped the
+// WebView timers, as when the SDK was imported up front.
+await connectGlasses().catch(e => log(`GLASSES unavailable: ${e?.message || e}`));
 setInterval(pollDirector, 150);
