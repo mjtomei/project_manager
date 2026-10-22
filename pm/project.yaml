@@ -30295,7 +30295,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-22T16:30:25.142196+00:00'
+  updated_at: '2026-10-22T17:34:06.067314+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30581,6 +30581,20 @@ prs:
       s (S29 story 3 launched at hop + 180 s only because target churn drove passes).'
     created_at: '2026-10-22T14:55:35Z'
     last_edited: '2026-10-22T14:55:35Z'
+  - id: note-eb6f6b4
+    text: 'QA S32 PASS on 375c7313 (integrated), no app edits: K committed-spec hold
+      + mark.sh edit reached workdir/prompt/pm pr spec, regenerate re-held K 0.8 s
+      with no approval line, Q approve "No pending spec review" no editor, killed-window
+      approve -> exactly one relaunch then review, T1 removed past idle kept S held
+      and P1 out of review until re-add (+3 s), manual s/cmd-bar/shell holds 1.2/2.9/1.2
+      s, skip_qa only impl pause -> stop-before-merge, empty QA spec -> INPUT_REQUIRED
+      no relaunch, CLI+cmd-bar conflicting_flags. Driver gotchas: with "_all":{} the
+      fake review PASSes, so an in_review target moves to qa within ~20 s; K QA planner
+      opening moves the recorder client to qa-<id>, so verify the TUI is shown before
+      typing / commands; a backgrounded pm session in a pty attaches and eats keys
+      sent to that pane. Captures /pm-captures/scenarios/32.'
+    created_at: '2026-10-22T17:34:06Z'
+    last_edited: '2026-10-22T17:34:06Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
