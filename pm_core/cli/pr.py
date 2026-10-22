@@ -1192,6 +1192,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     else:
         _claude_cwd = workdir
         _claude_write_dir = None
+    # Session-scoped config (fake-claude, skip-permissions, the captures
+    # bind-mount below) follows the tmux session, not the cwd.
+    _review_stag = pm_session.removeprefix("pm-")
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
@@ -1199,7 +1202,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
-                                         session_tag=pm_session.removeprefix("pm-"),
+                                         session_tag=_review_stag,
                                          session_type="review")
     # Optionally wrap in a container for isolation.
     # Always remove any existing container for this review before creating a
@@ -1213,12 +1216,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
     if is_container_mode_enabled():
         remove_container(_make_container_name(f"review-{pr_id}"))
-    # Resolve a session_tag for the captures bind-mount so the review
+    # session_tag drives the captures bind-mount so the review
     # container's /pm-captures points at the same per-PR captures dir
     # the impl and QA containers use (lets a reviewer read pre/post-fix
     # captures and scenario captures from inside their pane).
-    _review_pm_session = _get_pm_session()
-    _review_stag = _review_pm_session.removeprefix("pm-") if _review_pm_session else None
     try:
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch,

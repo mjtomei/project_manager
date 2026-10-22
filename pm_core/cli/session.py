@@ -56,25 +56,25 @@ def _share_mode_options(f):
 # itself.  The trailing failure handler pauses on launch failure (e.g.
 # pm not on PATH) so the popup stays visible long enough to read the
 # error instead of vanishing instantly with display-popup -E.
-_POPUP_PICKER_BODY = (
-    'S=$(tmux display-message -p "#{session_name}");'
-    ' W=$(tmux display-message -p "#{window_name}");'
-    ' pm _popup-picker "$S" "$W"'
-    " || { echo; echo 'pm popup failed (exit '$?').';"
-    " read -n 1 -s -r -p 'Press any key to close...'; }"
-)
-_POPUP_CMD_BODY = (
-    'S=$(tmux display-message -p "#{session_name}");'
-    ' pm _popup-cmd "$S"'
-    " || { echo; echo 'pm popup failed (exit '$?').';"
-    " read -n 1 -s -r -p 'Press any key to close...'; }"
-)
-# The bare queries above resolve against tmux's "best" client (the most
+# The bare S/W queries resolve against tmux's "best" client (the most
 # recently active one), which is wrong when two clients open popups at
 # the same time.  When _popup-show knows the pressing client's session
 # it pins S and W to literal values instead (see _pin_popup_body).
 _POPUP_BODY_S = 'S=$(tmux display-message -p "#{session_name}");'
 _POPUP_BODY_W = ' W=$(tmux display-message -p "#{window_name}");'
+_POPUP_PICKER_BODY = (
+    _POPUP_BODY_S
+    + _POPUP_BODY_W
+    + ' pm _popup-picker "$S" "$W"'
+    " || { echo; echo 'pm popup failed (exit '$?').';"
+    " read -n 1 -s -r -p 'Press any key to close...'; }"
+)
+_POPUP_CMD_BODY = (
+    _POPUP_BODY_S
+    + ' pm _popup-cmd "$S"'
+    " || { echo; echo 'pm popup failed (exit '$?').';"
+    " read -n 1 -s -r -p 'Press any key to close...'; }"
+)
 
 
 _POPUP_KINDS = {

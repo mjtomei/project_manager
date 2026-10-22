@@ -32,8 +32,10 @@ override(tag) → pm_root(tag) → no cwd walk → keep the dispatcher's code
 R5. **`wrapper.main()` is unchanged** for every other caller: ad-hoc CLI, agents in workdirs,
 QA clone overrides, IPC commands, and TUI-spawned subprocesses. The only refactor is
 extracting shared helpers, with no behavior change. The new entry point is reachable only
-through the bootstrap that the two popup dispatchers build. No env var is added, so nothing
-leaks to grandchildren.
+through the bootstrap that the two popup dispatchers build. No env var is added for code
+resolution, so nothing about code selection leaks to grandchildren. (`PM_POPUP_SESSION`,
+added by the QA S4 fix in §6, only affects `tmux.get_session_name()` when there is no
+`TMUX_PANE`. The wrapper never reads it.)
 
 R6. **Keep cwd and PM_PROJECT.** The child keeps the popup's cwd (no `cwd=` passed) and
 inherits `PM_PROJECT=<session root>`, which both popups already export. Only code
@@ -87,3 +89,15 @@ resolution changes.
   and the child's debug log shows `chosen_via=pm_root selected_root=<session root>`. Both
   tests fail on pre-fix code.
 - Control: `python -m pm_core.wrapper` (plain `main`) from the decoy cwd still runs the decoy.
+
+## 6. Incidental fixes landed during QA (recorded as PR notes)
+
+- **S2 (3dbd4f7c):** `pr start`, `_launch_review_window` and `_launch_merge_window` pass
+  the tmux session's tag to `build_claude_shell_cmd`. Session-scoped launch config
+  (fake-claude, skip-permissions) then follows the session, not the workdir cwd. The other
+  launchers are tracked by pr-ea4fffa.
+- **S4 (2d126ac1, 47167ee3):** the prefix+P/M bindings pass `#{q:client_name}` and
+  `#{q:session_name}`. `_popup-show` targets that client/session (`display-popup -c/-t`, and
+  S/W are pinned in the popup body). The popup dispatchers export `PM_POPUP_SESSION`, which
+  `tmux.get_session_name()` uses when there is no `TMUX_PANE`. Old bindings (no args) keep the
+  previous behavior until the user reattaches.
