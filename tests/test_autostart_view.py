@@ -162,6 +162,12 @@ class TestDedupe:
         signed = _row_block(text, "└ #231")
         assert "signed off — press g to merge" in signed
         assert "held by" not in signed and "SIGNOFF_MERGE" not in signed
+        # A spec-review label names its phase; no bare phase token after it.
+        impl_spec = _row_block(text, "└ #236").splitlines()[0]
+        assert "IMPL SPEC REVIEW" in impl_spec
+        assert "REVIEW impl" not in impl_spec
+        qa_spec = _row_block(text, "└ #237").splitlines()[0]
+        assert "QA SPEC REVIEW" in qa_spec and "REVIEW qa" not in qa_spec
 
     def test_old_owner_without_short_reason_falls_back(self):
         s = mixed_status()

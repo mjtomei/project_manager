@@ -235,7 +235,12 @@ def phase_text(row: dict) -> str:
     if run.get("state") == "completed":
         return ""
     phase = run.get("phase") or ""
-    return _PHASE_TOKENS.get(phase, phase)
+    token = _PHASE_TOKENS.get(phase, phase)
+    # ``QA SPEC REVIEW qa``: the label already names the phase.
+    if run.get("attention") and state_label(run)[0].lower().startswith(
+            token + " "):
+        return ""
+    return token
 
 
 def display_names(status: dict) -> dict[str, str]:
