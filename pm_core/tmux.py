@@ -154,9 +154,11 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
               (win or {}).get("id"), (win or {}).get("index"), switch)
     if switch and win:
         current = current_or_base_session(session)
-        _run(
+        result = _run(
             _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
         )
+        _log.info("new_window: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
@@ -183,9 +185,11 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     if switch:
         # Switch the current grouped session to the new window
         current = current_or_base_session(session)
-        _run(
+        result = _run(
             _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
         )
+        _log.info("new_window_get_pane: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:

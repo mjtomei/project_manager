@@ -152,6 +152,15 @@ both the display id and the local id.
   prints an empty `--expect` key line first; `stdout.strip()` dropped it so
   the selected row was read as the key and nothing was dispatched.  Only
   the trailing newline is stripped now.
+- Type-ahead closed the popup (QA scenario 8): a nav key typed while the
+  picker reloads between fzf runs reached the next fzf before its rows
+  loaded; fzf exits 1 ("no match") but still prints the `--expect` key, and
+  the loop treated any non-zero exit as q/Esc.  fzf now runs with `--sync`
+  (keys wait for the rows), exit 1 is handled as a keypress (a bare exit 1
+  just relaunches), and only other non-zero codes (130 = q/Esc) quit.
+  `--no-clear` keeps the last frame up between relaunches so each nav key
+  no longer flashes an empty popup; the screen is cleared before a
+  dispatch so command output and errors don't print over the stale frame.
 
 ## QA acceptance checks (carry into the QA spec)
 
@@ -184,3 +193,7 @@ prefix+P (the `_popup-picker` popup) in a real tmux session with fzf.
    and nav keys reach other PRs.
 8. **Given** only one PR in the nav list and it is merged (home), **When**
    pressing Enter or action keys, **Then** popup stays open; q/Esc closes.
+9. **Given** the popup open with ≥2 navigable PRs, **When** nav keys are
+   sent in pairs ~10 ms apart (the second lands while the picker reloads),
+   **Then** the popup never closes and every frame shows a `PR Actions —`
+   header.

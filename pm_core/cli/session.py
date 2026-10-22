@@ -2026,10 +2026,16 @@ def popup_picker_cmd(session: str, window_name: str):
                    "--pointer=>",
                    "--no-info",
                    f"--bind={','.join(binds)}",
-                   # --height inhibits fzf's alt-screen mode so the
-                   # picker contents stay visible after fzf exits and
-                   # the spinner renders below them in the same pane.
+                   # --height inhibits fzf's alt-screen mode so fzf and
+                   # the dispatch spinner share the popup's one screen.
                    "--height=100%",
+                   # Keys typed while the picker reloads between fzf runs
+                   # are read before the rows arrive; without --sync fzf
+                   # then exits 1 ("no match") and the popup closes.
+                   "--sync",
+                   # Leave the last frame up between fzf runs instead of
+                   # flashing an empty popup on every nav key.
+                   "--no-clear",
                    f"--expect={','.join(expect)}"]
             if no_input_supported:
                 cmd.append("--no-input")
@@ -2110,7 +2116,11 @@ def popup_picker_cmd(session: str, window_name: str):
             )
             stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
 
-            if proc.returncode != 0:
+            # 1 is fzf's "no match": a key read before the rows loaded.
+            # The --expect key is still printed, so handle it as a press.
+            if proc.returncode == 1 and not stdout.strip():
+                continue
+            if proc.returncode not in (0, 1):
                 # fzf aborted (q/Esc).  In a chord state, that means
                 # "cancel chord, go back to main".  In main, it
                 # dismisses the popup.
@@ -2187,6 +2197,10 @@ def popup_picker_cmd(session: str, window_name: str):
             continue
 
         if cmd_to_run:
+            # --no-clear left the last picker frame up; wipe it so the
+            # command's progress and errors don't print over it.
+            sys.stdout.write("\033[H\033[2J")
+            sys.stdout.flush()
             _run_picker_command(cmd_to_run, session)
         # Always exit the popup process explicitly after dispatching —
         # display-popup -E ties the overlay to this process's lifetime,

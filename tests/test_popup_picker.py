@@ -885,3 +885,42 @@ class TestPopupPickerEnterSelection:
         run_cmd.assert_called_once()
         assert run_cmd.call_args.args[0] == next(c for d, c, _ in rows
                                                  if d == row)
+
+
+class TestPopupPickerTypeAhead:
+    """A key typed while the picker reloads reaches fzf before its rows:
+    fzf then exits 1 ("no match") but still prints the --expect key."""
+
+    PRS = [
+        {"id": "pr-r", "status": "in_review", "title": "Review",
+         "gh_pr_number": 240},
+        {"id": "pr-q", "status": "qa", "title": "QA", "gh_pr_number": 242},
+    ]
+    WINDOWS = ["#240", "qa-#242"]
+
+    def test_fzf_waits_for_rows_and_keeps_frame(self, tmp_path, monkeypatch):
+        fzf, _ = _run_picker(tmp_path, monkeypatch, self.PRS, self.WINDOWS,
+                             "#240", [(130, "")])
+        assert "--sync" in fzf.calls[0]["cmd"]
+        # No empty popup flashed between relaunches on each nav key.
+        assert "--no-clear" in fzf.calls[0]["cmd"]
+
+    def test_no_match_exit_with_nav_key_navigates(self, tmp_path, monkeypatch):
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#240",
+            [(1, "l\n"), (1, ""), (0, "h\n"), (130, "")])
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — #240  (1/2)",
+            "PR Actions — #242  (2/2)",
+            "PR Actions — #242  (2/2)",
+            "PR Actions — #240  (1/2)",
+        ]
+        run_cmd.assert_not_called()
+
+    def test_screen_cleared_before_dispatch(self, tmp_path, monkeypatch, capsys):
+        """The kept frame must not sit under the command's output/errors."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#240",
+            [(0, "s\n")])
+        run_cmd.assert_called_once()
+        assert "\033[2J" in capsys.readouterr().out
