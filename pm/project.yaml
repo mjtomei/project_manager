@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3c7ce04
+  active_pr: pr-173e11e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31696,6 +31696,28 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T20:11:29.998628+00:00'
   updated_at: '2026-10-22T20:11:29.998628+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-173e11e
+  plan: bugs
+  title: 'Bug: pm provider test --live leaves an empty pm-route-probe-* temp dir behind
+    on every host probe'
+  branch: pm/pr-173e11e-bug-pm-provider-test-live-leaves-an-empty-pm-route
+  status: pending
+  depends_on: []
+  description: 'pm_core/worker_route.py live_probe (host branch): run_cwd = cwd or
+    tempfile.mkdtemp(prefix="pm-route-probe-") is never removed. Repro (pr-592e4bd
+    QA S7): TMPDIR=/tmp/qa_s7/probe_tmp_ pm provider test claude-work --live -> /tmp/qa_s7/probe_tmp_/pm-route-probe-bfqa8zmk
+    (empty, 0700) remains after "Live: OK". Each probe adds one. Fix: rmtree the dir
+    after the transcript/hook lookup when pm created it (keep the Claude transcript
+    under ~/.claude/projects, which is what the probe reports).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T22:34:15.023090+00:00'
+  updated_at: '2026-10-22T22:34:15.023090+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
