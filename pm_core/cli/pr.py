@@ -2875,7 +2875,12 @@ def pr_history(pr_id: str, as_json: bool):
     if as_json:
         click.echo(_json.dumps(model, indent=2))
         return
-    emit_paged(history_query.render_text(model), indent="    ")
+    # A narrower TTY gets lines rendered at its width, not 80-column
+    # lines that the pager wrapper would break a second time.
+    width = 80
+    if sys.stdout.isatty():
+        width = min(80, shutil.get_terminal_size((80, 24)).columns)
+    emit_paged(history_query.render_text(model, width=width), indent="    ")
 
 
 @pr_note.command("list")

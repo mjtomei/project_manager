@@ -1530,6 +1530,21 @@ class TestReconciliation:
         assert ("Waiting for: review-loop i2: "
                 + "agent turn finished " * 5) in joined
 
+    def test_render_at_popup_width_wraps_once(self, clock):
+        # The popup pager is ~74 columns at an 80-column window: lines
+        # rendered at 80 and wrapped again there left one word ("first")
+        # alone on a line.  Rendered at the popup width they wrap once.
+        from pm_core.cli.helpers import _wrap_record_to_width
+        empty = hq.build_history(PR, pr={"id": PR}, now=clock.t, live=False)
+        lines = hq.render_text(empty, width=74)
+        assert all(len(ln) <= 74 for ln in lines), "\n".join(lines)
+        i = next(i for i, ln in enumerate(lines) if ln.startswith("Note: "))
+        assert lines[i + 1:] and all(
+            ln.startswith("      ") and ln[6] != " " for ln in lines[i + 1:])
+        assert [_wrap_record_to_width(ln, 74, "    ") for ln in lines] == lines
+        assert (" ".join(" ".join(lines).split())
+                == " ".join(" ".join(hq.render_text(empty)).split()))
+
     def test_missing_history_is_honest(self, clock):
         pr = {"id": PR, "status": "merged", "title": "Old",
               "created_at": "2026-01-01T00:00:00Z",

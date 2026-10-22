@@ -1259,14 +1259,15 @@ def _show_view_action(cmd: str, session: str = "") -> None:
     except Exception:
         pr = None
     try:
-        # Wrap at the popup width the way ``emit_paged`` does on a TTY,
-        # so the pager shows the same lines as ``pm pr history`` instead
-        # of less hard-breaking them mid-word.
+        # Render at the popup width (at most 80) and wrap the way
+        # ``emit_paged`` does on a TTY, so the pager shows the same lines
+        # as ``pm pr history`` instead of breaking 80-column lines again
+        # or less hard-breaking them mid-word.
         from pm_core.cli.helpers import _wrap_record_to_width
         width = shutil.get_terminal_size((80, 24)).columns
+        lines = action.render(action.query(pr_id, pr), width=min(80, width))
         text = "\n".join(
-            _wrap_record_to_width(line, width, "    ")
-            for line in action.render(action.query(pr_id, pr))) + "\n"
+            _wrap_record_to_width(line, width, "    ") for line in lines) + "\n"
     except Exception as e:
         _log.exception("view action %s failed for %s", key, pr_id)
         click.echo(f"{action.label} failed: {e}")

@@ -939,8 +939,11 @@ def _fmt_time(t: float | None, t_ref: float) -> str:
 # Text rendering
 # ---------------------------------------------------------------------------
 
-def render_text(model: dict, *, now: float | None = None) -> list[str]:
-    """Render :func:`build_history`'s model as plain text lines."""
+def render_text(model: dict, *, now: float | None = None,
+                width: int = 80) -> list[str]:
+    """Render :func:`build_history`'s model as plain text lines, wrapped
+    at *width* (80 for ``| cat``; narrower for a narrower TTY or popup, so
+    a pager does not break the 80-column lines again)."""
     t_now = _parse_iso(model.get("generated_at")) if now is None else now
     if t_now is None:
         t_now = _ah.now()
@@ -952,15 +955,16 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
         head += f"  [{model['status']}]"
     lines.append(head)
     if model.get("title"):
-        lines.extend(_wrap_words("  ", model["title"], "  "))
-    lines.extend(_wrap_words("Waiting for: ", model["waiting_for"], "    "))
+        lines.extend(_wrap_words("  ", model["title"], "  ", width=width))
+    lines.extend(_wrap_words("Waiting for: ", model["waiting_for"], "    ",
+                             width=width))
 
     lines.append("")
     lines.append("Now")
     if model["current"]:
         for row in model["current"]:
             lines.extend(_wrap_words(f"  {row['name']:<18} ", row["text"],
-                                     " " * 21))
+                                     " " * 21, width=width))
     else:
         lines.append("  no action running")
     runtime = model.get("runtime") or {}
@@ -979,7 +983,8 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
             if e.get("stale"):
                 bit += f" (stale: {e['stale']})"
             bits.append(bit)
-        lines.extend(_wrap_joined("  runtime: ", bits, "    ", sep=","))
+        lines.extend(_wrap_joined("  runtime: ", bits, "    ", sep=",",
+                                  width=width))
 
     lines.append("")
     lines.append("Timers and holds")
@@ -988,14 +993,14 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
     if not rows:
         lines.append("  none active")
     for r in rows:
-        lines.extend(_render_timer(r, t_now))
+        lines.extend(_render_timer(r, t_now, width))
 
     lines.append("")
     lines.append("Attempts (newest first)")
     if not model["attempts"]:
         lines.append("  none recorded")
     for a in model["attempts"]:
-        lines.extend(_render_attempt(a, t_now, depth=1))
+        lines.extend(_render_attempt(a, t_now, depth=1, width=width))
 
     recent = model["timers"]["recent"]
     if recent:
@@ -1009,7 +1014,7 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
             lines.extend(_wrap_joined(
                 "  ", [f"{r['purpose']}: {r['resolution']}", f"at {when}",
                        f"(armed {_fmt_time(r['armed_t'], t_now)})"],
-                "      ", sep=""))
+                "      ", sep="", width=width))
 
     if model["milestones"]:
         lines.append("")
@@ -1017,12 +1022,12 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
         lines.extend(_wrap_joined(
             "  ", [f"{m['event']} {_fmt_time(m['t'], t_now)}"
                    for m in model["milestones"] if m.get("t") is not None],
-            "  ", sep="  "))
+            "  ", sep="  ", width=width))
 
     if model["missing"]:
         lines.append("")
         for note in model["missing"]:
-            lines.extend(_wrap_words("Note: ", note, "      "))
+            lines.extend(_wrap_words("Note: ", note, "      ", width=width))
     return lines
 
 
@@ -1033,7 +1038,7 @@ def _action_key(action: str):
         return (len(_ACTION_ORDER), action)
 
 
-def _render_timer(r: dict, t_now: float) -> list[str]:
+def _render_timer(r: dict, t_now: float, width: int = 80) -> list[str]:
     armed = _fmt_time(r.get("armed_t"), t_now) if r.get("armed_t") else "unknown"
     if r.get("due_t") is None:
         timing = f"armed {armed}, no countdown"
@@ -1048,14 +1053,17 @@ def _render_timer(r: dict, t_now: float) -> list[str]:
     # Word-wrapped: a derived hold's source tag (sign-off BLOCKED is 83
     # columns) or a wait-for-merge hold naming several targets would
     # otherwise overflow 80 columns in plain ``| cat`` output.
-    out = _wrap_words("  ", f"{r.get('purpose')} ({owner}){src}", "    ")
-    out += _wrap_words("      ", timing, "        ")
+    out = _wrap_words("  ", f"{r.get('purpose')} ({owner}){src}", "    ",
+                      width=width)
+    out += _wrap_words("      ", timing, "        ", width=width)
     if r.get("expected"):
-        out += _wrap_words("      → ", r["expected"], "        ")
+        out += _wrap_words("      → ", r["expected"], "        ",
+                           width=width)
     return out
 
 
-def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
+def _render_attempt(a: dict, t_now: float, depth: int,
+                    width: int = 80) -> list[str]:
     ind = "  " * depth
     start = _fmt_time(a["started_t"], t_now)
     if a.get("ended_t") is not None:
@@ -1082,9 +1090,9 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     # Wrapped between parts: dated times (another day or year) plus a
     # flagged name can push the row past 80 columns.
     out = _wrap_joined(f"{ind}{start} → {end}  {dur:>7}  ",
-                       [name, outcome], sub, sep=" ")
+                       [name, outcome], sub, sep=" ", width=width)
     if a.get("detail") and outcome.split()[0] != "done":
-        out.extend(_wrap_words(sub, a["detail"], sub))
+        out.extend(_wrap_words(sub, a["detail"], sub, width=width))
     phases = [p for p in a.get("phases", []) if p["phase"] != "start"]
     if phases and a.get("exec_s") is not None:
         split = f"exec {_dur(a['exec_s'])}"
@@ -1093,7 +1101,7 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
         parts = [f"{_PHASE_LABELS.get(p['phase'], p['phase'])} "
                  f"{_dur(p['duration_s'])}" for p in a["phases"]]
         out.extend(_wrap_joined(f"{sub}{split}  [", parts, sub + "  ",
-                                sep=" ·", close="]"))
+                                sep=" ·", close="]", width=width))
     sc = a.get("scenarios")
     if sc and sc["sum_s"] >= 1:
         out.append(f"{sub}scenarios: {sc['count']} ({sc['attempts']} attempts), "
@@ -1102,7 +1110,7 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
         out.append(f"{sub}  summed scenario time {_dur(sc['sum_s'])} "
                    f"(not wall-clock)")
     for c in a.get("children", []):
-        out.extend(_render_attempt(c, t_now, depth + 1))
+        out.extend(_render_attempt(c, t_now, depth + 1, width))
     return out
 
 

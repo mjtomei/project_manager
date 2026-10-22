@@ -32,7 +32,7 @@ class ActionDef:
     # including merged/closed.
     statuses: tuple[str, ...] | None = None
     query: Callable[..., dict] | None = None
-    render: Callable[[dict], list[str]] | None = None
+    render: Callable[..., list[str]] | None = None
     badge: Callable[[dict], str] | None = None
 
     def available_for(self, status: str) -> bool:
@@ -44,9 +44,9 @@ def _history_query(pr_id: str, pr: dict | None = None) -> dict:
     return history_query.build_history(pr_id, pr=pr)
 
 
-def _history_render(model: dict) -> list[str]:
+def _history_render(model: dict, width: int = 80) -> list[str]:
     from pm_core import history_query
-    return history_query.render_text(model)
+    return history_query.render_text(model, width=width)
 
 
 def _history_badge(model: dict) -> str:
