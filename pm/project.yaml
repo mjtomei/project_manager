@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T17:10:44.932456+00:00'
+  updated_at: '2026-10-22T17:19:15.517263+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30232,6 +30232,15 @@ prs:
       changes. Captures /pm-captures/scenarios/20/{pre-fix,post-fix}.'
     created_at: '2026-10-22T17:10:44Z'
     last_edited: '2026-10-22T17:10:44Z'
+  - id: note-ea779ae
+    text: 'QA s22: gallery/docs Thens all held on a32277c4 and 3f71d5b8 (55 cards,
+      58 imgs, 119 links 200, md anchors OK, 390px light/dark OK, proposal ids/constraints
+      labels/inventory roles OK). Earlier s22 run fixed open-questions pr-1e0772a
+      to-do list → questions (a32277c4). s20 8f892fb6 had not synced 5 mockup files
+      to /pm-captures/even-realities; s22 copied them (diff now empty). report.html
+      absent (expected pre-finalize). Captures /pm-captures/scenarios/22/final.'
+    created_at: '2026-10-22T17:19:15Z'
+    last_edited: '2026-10-22T17:19:15Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
