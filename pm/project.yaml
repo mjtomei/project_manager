@@ -30232,6 +30232,18 @@ prs:
       to cat in drivers). Captures /pm-captures/scenarios/15.'
     created_at: '2026-10-22T01:15:20Z'
     last_edited: '2026-10-22T01:15:20Z'
+  - id: note-b5a8d4b
+    text: 'S12 refine (dc41da83): plain Ctrl+R (or pm tui restart without --breadcrumb)
+      writes no breadcrumb, so the review loop is NOT resumed (only swept interrupted).
+      A mid-loop restart that resumes needs ''pm tui restart --breadcrumb'' from a
+      shell pane in the test session. The resumed review-loop parent attempt is a
+      new runtime attempt (new id, same loop id) and is NOT flagged resumed; only
+      its first child (the in-flight iteration) is flagged ''(adopted)'', and adopted
+      iterations arm no grace timer. The ''start'' fold into one row shows only after
+      the loop ends and the impl pane is re-tracked; during the loop a separate ''start
+      untracked'' row is expected.'
+    created_at: '2026-10-22T00:39:39Z'
+    last_edited: '2026-10-22T00:39:39Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
