@@ -48,7 +48,7 @@ Cases by type: continuation 42765, pm_plan 24, whole_document 12415.
 | plan-002.md | not_located |  |  |  |  |  |  |
 | plan-003.md | not_located |  |  |  |  |  |  |
 | plan-3119574.md | recovered | pm:plan-3119574 | reformat | 0 | n/a | 1 | 0 |
-| plan-66d430f.md | edits_only | pm:plan-66d430f | edit | 40 | yes | 6 | 8 |
+| plan-66d430f.md | edits_only | pm:plan-66d430f | edit | 26 | yes | 3 | 2 |
 | plan-984dfeb.md | recovered | pm:plan-984dfeb | new | 7 | yes | 0 | 0 |
 | plan-ambient.md | recovered | pm:plan-ambient | new | 16 | yes | 0 | 0 |
 | plan-b6aac3d.md | not_located |  |  |  |  |  |  |
@@ -60,11 +60,11 @@ Cases by type: continuation 42765, pm_plan 24, whole_document 12415.
 | plan-e4fa5cb.md | not_located |  |  |  |  |  |  |
 | plan-ff4f1a7.md | recovered | pm:plan-ff4f1a7 | new | 1 | yes | 3 | 0 |
 | plan-jurisdiction.md | recovered | pm:plan-jurisdiction | new | 6 | yes | 0 | 0 |
-| plan-language-experiment-corpus-v3.md | revision_only | pm:plan-language-experiment-corpus-v3 | edit | 24 | yes | 0 | 1 |
+| plan-language-experiment-corpus-v3.md | revision_only | pm:plan-language-experiment-corpus-v3 | edit | 19 | yes | 0 | 1 |
 | plan-language-experiment.md | recovered | pm:plan-language-experiment | new | 3 | yes | 0 | 0 |
 | plan-litreview.md | recovered | pm:plan-litreview | new | 41 | yes | 0 | 0 |
 | plan-memory.md | recovered | pm:plan-memory | new | 3 | yes | 0 | 0 |
-| plan-mind.md | edits_only | pm:plan-mind | edit | 33 | yes | 3 | 12 |
+| plan-mind.md | edits_only | pm:plan-mind | edit | 30 | yes | 3 | 2 |
 | plan-momentum.md | recovered | pm:plan-momentum | new | 2 | yes | 0 | 0 |
 | plan-pulse.md | not_located |  |  |  |  |  |  |
 | plan-qa.md | edits_only | pm:plan-qa | edit | 2 | yes | 0 | 1 |
@@ -72,7 +72,7 @@ Cases by type: continuation 42765, pm_plan 24, whole_document 12415.
 | plan-radar.md | recovered | pm:plan-radar | new | 5 | yes | 0 | 0 |
 | plan-regression.md | recovered | pm:plan-regression | edit | 15 | yes | 2 | 2 |
 | plan-self-improve.md | recovered | pm:plan-self-improve | new | 2 | yes | 0 | 0 |
-| plan-sensorium.md | recovered | pm:plan-sensorium | new | 7 | yes | 0 | 0 |
+| plan-sensorium.md | recovered | pm:plan-sensorium | new | 6 | yes | 0 | 0 |
 | plan-simulation.md | recovered | pm:plan-simulation | new | 6 | yes | 0 | 0 |
 | plan-state.md | recovered | pm:plan-state | new | 2 | yes | 0 | 0 |
 | plan-user-model-training.md | recovered | pm:plan-user-model-training | new | 1 | yes | 0 | 0 |

@@ -17281,51 +17281,15 @@
    "status": "edits_only",
    "case_id": "pm:plan-66d430f",
    "task_kind": "edit",
-   "human_turns": 40,
+   "human_turns": 26,
    "human_turn_fidelity": true,
-   "source_files": 6,
+   "source_files": 3,
    "source_gaps": [
     {
      "path": "plan-66d430f.md",
      "reason": "earlier plan version not read in full in the window",
      "event_line": 6634,
      "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/bfe5a277-785c-484e-90b4-46024946e8b5.jsonl"
-    },
-    {
-     "path": "/home/matt/claude-work/project-manager/pm/docs/literature-review-user-model.md",
-     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
-     "event_line": 1442,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
-    },
-    {
-     "path": "/home/matt/claude-work/project-manager/pm/docs/literature-review.md",
-     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
-     "event_line": 1442,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
-    },
-    {
-     "path": "/home/matt/claude-work/project-manager/pm/docs/adversarial-review/REVIEW_CYCLE_1_USERMODEL.md",
-     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
-     "event_line": 1442,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
-    },
-    {
-     "path": "/home/matt/claude-work/project-manager/pm/docs/adversarial-review/REVIEW_CYCLE_2_USERMODEL.md",
-     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
-     "event_line": 1442,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
-    },
-    {
-     "path": "AGENTS.md/CLAUDE.md",
-     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
-     "event_line": 1442,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
-    },
-    {
-     "path": "/home/matt/claude-work/project-manager/pm/docs/adversarial-review/REVIEW_CYCLE_3_USERMODEL.md",
-     "reason": "named but not read with the Read tool in the window; mentioned in a shell command (output is not a file snapshot)",
-     "event_line": 1442,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager-pm/77a35d5c-1dbe-4973-a99c-6a37bc8ee29b.jsonl"
     },
     {
      "path": "plan-66d430f.md",
@@ -17481,7 +17445,7 @@
    "status": "revision_only",
    "case_id": "pm:plan-language-experiment-corpus-v3",
    "task_kind": "edit",
-   "human_turns": 24,
+   "human_turns": 19,
    "human_turn_fidelity": true,
    "source_files": 0,
    "source_gaps": [
@@ -17532,70 +17496,10 @@
    "status": "edits_only",
    "case_id": "pm:plan-mind",
    "task_kind": "edit",
-   "human_turns": 33,
+   "human_turns": 30,
    "human_turn_fidelity": true,
    "source_files": 3,
    "source_gaps": [
-    {
-     "path": "/pm_core/watcher_base.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/watchers/auto_start_watcher.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/watcher_manager.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/review_loop.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/qa_loop.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/claude_launcher.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/bridge.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/bridge_client.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "/pm_core/hook_install.py",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
-    {
-     "path": "~/.claude/settings.json",
-     "reason": "named but not read with the Read tool in the window",
-     "event_line": 778,
-     "record": "/home/matt/.claude/projects/-home-matt-claude-work-project-manager/6646635b-9331-4484-80b4-a8fcc27a7991.jsonl"
-    },
     {
      "path": "plan-mind.md",
      "reason": "earlier plan version not read in full in the window",
@@ -17713,7 +17617,7 @@
    "status": "recovered",
    "case_id": "pm:plan-sensorium",
    "task_kind": "new",
-   "human_turns": 7,
+   "human_turns": 6,
    "human_turn_fidelity": true,
    "source_files": 0,
    "source_gaps": [],
