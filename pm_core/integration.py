@@ -247,7 +247,12 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
                    str(wt), head, cwd=workdir)
         if add.returncode != 0:
             return None, [], f"candidate worktree failed: {_detail(add)}"
-        m = _git(*no_hooks, "-c", "user.name=pm", "-c", "user.email=pm@localhost",
+        # rerere off: the rr-cache is shared with the PR worktree, and a
+        # replayed resolution would make the candidate depend on local
+        # history (with rerere.autoUpdate it stages the replayed paths, so a
+        # conflict surfaces as an unexplained "candidate merge failed").
+        m = _git(*no_hooks, "-c", "rerere.enabled=false",
+                 "-c", "user.name=pm", "-c", "user.email=pm@localhost",
                  "merge", "--no-commit", "--no-ff", "--no-edit", base_sha, cwd=wt)
         if m.returncode == 0:
             tree = _out(_git("write-tree", cwd=wt))

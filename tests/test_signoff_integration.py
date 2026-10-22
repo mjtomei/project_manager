@@ -851,3 +851,27 @@ def test_tui_review_catch_up_takes_the_return_launch_claim(tmp_path, claimed):
     if not claimed:
         rec = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
         assert rec["launch_claim"]["hop"] == "review"
+
+
+def test_worktree_candidate_ignores_rerere_resolutions(w):
+    """git < 2.38: the candidate merge must not replay a resolution the
+    repository's (shared) rr-cache recorded — with rerere.autoUpdate that
+    would stage the conflicted path and turn the conflict into an error."""
+    git(w.wd, "config", "rerere.enabled", "true")
+    git(w.wd, "config", "rerere.autoUpdate", "true")
+    commit(w.repo, "shared.txt", "base side\n", "base edits shared")
+    head = commit(w.wd, "shared.txt", "pr side\n", "pr edits shared")
+    base, err = integration.fetch_base(str(w.wd), str(w.repo), "master")
+    assert err is None
+    # Record a resolution of exactly this conflict in the PR worktree.
+    subprocess.run(["git", "merge", "-q", base], cwd=w.wd,
+                   capture_output=True)
+    (w.wd / "shared.txt").write_text("resolved\n")
+    git(w.wd, "add", "shared.txt")
+    git(w.wd, "commit", "-q", "--no-edit")
+    git(w.wd, "reset", "-q", "--hard", head)
+
+    with patch.object(integration, "_git_version", return_value=(2, 34)):
+        cand = integration.compute_candidate(str(w.wd), head, base)
+    assert cand["status"] == integration.CONFLICT, cand
+    assert cand["conflicts"] == ["shared.txt"]

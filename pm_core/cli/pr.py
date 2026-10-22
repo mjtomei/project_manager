@@ -3397,6 +3397,20 @@ def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     return data.get("overall") or None, latest
 
 
+def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
+                             fresh: bool, review_loop: bool = True) -> None:
+    """Launch review *iteration* in the background for auto-sequence.
+
+    Its transcript lives under *tdir* with review-loop iteration naming so
+    a later tick finds the verdict (:func:`_check_review_verdict`).
+    """
+    transcript = tdir / f"review-{pr_id}-i{iteration}.jsonl"
+    click.get_current_context().invoke(
+        pr_review, pr_id=pr_id, fresh=fresh, background=True,
+        review_loop=review_loop, review_iteration=iteration,
+        review_loop_id="", transcript=str(transcript))
+
+
 @pr.command("auto-sequence")
 @click.argument("pr_id")
 def pr_auto_sequence(pr_id: str):
@@ -3485,12 +3499,8 @@ def pr_auto_sequence(pr_id: str):
         # the in_review tick waits on that window forever.
         _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         next_iter = latest_iter + 1
-        iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-        ctx = click.get_current_context()
-        ctx.invoke(pr_review, pr_id=pr_id, fresh=latest_iter > 0,
-                   background=True,
-                   review_loop=False, review_iteration=next_iter,
-                   review_loop_id="", transcript=str(iter_transcript))
+        _launch_review_iteration(pr_id, tdir, next_iter,
+                                 fresh=latest_iter > 0, review_loop=False)
         click.echo("advanced: in_review")
         return
 
@@ -3514,11 +3524,7 @@ def pr_auto_sequence(pr_id: str):
                 click.echo("running: review")
                 return
             next_iter = latest_iter + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
             click.echo(
                 f"sign_off: returning to review (iteration {next_iter})")
             return
@@ -3550,11 +3556,7 @@ def pr_auto_sequence(pr_id: str):
             # machinery in the launched window writes to the next
             # iteration transcript.
             next_iter = latest_iter + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
             click.echo(f"review: needs_work, retrying iteration {next_iter}")
             return
 
@@ -3562,11 +3564,7 @@ def pr_auto_sequence(pr_id: str):
         if _review_window_pane(pm_session, pr_entry) is None:
             # Review window absent — launch a review-loop iteration.
             next_iter = max(latest_iter, 0) + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=False)
             click.echo("advanced: review_relaunched")
             return
         click.echo("running: review")
@@ -3615,11 +3613,7 @@ def pr_auto_sequence(pr_id: str):
             trigger_tui_refresh()
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
             click.echo(
                 f"qa: needs_work, returning to review (iteration {next_iter})"
             )
@@ -3694,11 +3688,7 @@ def pr_auto_sequence(pr_id: str):
         if hop == "review":
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
             click.echo(
                 f"sign_off: returning to review (iteration {next_iter})")
             return

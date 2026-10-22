@@ -620,8 +620,10 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
             signoff_ui.start_signoff(app, pr_id)
         elif status == "sign_off" and (pr.get("signoff") or {}).get(
                 "verdict") == "SIGNOFF_MERGE":
-            # Signed off, yet the gate refuses (a manual approval whose
-            # report.html changed since): only a human can re-approve.
+            # Signed off, yet the gate refuses (e.g. a manual approval whose
+            # report.html changed since, or one targeting another base
+            # branch): only a human can re-approve.  Stale / invalidated /
+            # legacy approvals never get here — the driver re-runs those.
             # The sign-off driver calls here once per (verdict, sha, policy).
             _log.info("auto_merge: %s refused by sign-off gate: %s",
                       pr_id, refusal)
