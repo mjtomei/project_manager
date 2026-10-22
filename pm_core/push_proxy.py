@@ -738,10 +738,16 @@ def list_shared_proxies() -> list[dict]:
         try:
             owner = json.loads(Path(real, _OWNER_FILE).read_text())
         except (OSError, ValueError):
-            # Legacy dir without owner file: readable long name only.
-            if not os.path.islink(d):
+            # Legacy dir without owner file: readable long name only.  A
+            # per-container proxy dir (``pm-push-proxy-<container name>``,
+            # e.g. an untagged ``pm-impl-pr-…``) has the same shape but
+            # serves only its own container — never treat it as shared.
+            from pm_core.container import parse_container_name
+            base = os.path.basename(d)
+            if (not os.path.islink(d)
+                    and parse_container_name(base[len(_SOCKET_DIR_PREFIX):]) is None):
                 m = re.match(rf"{re.escape(_SOCKET_DIR_PREFIX)}(.+)-(pr-[0-9a-f]+)$",
-                             os.path.basename(d))
+                             base)
                 if m:
                     owner = {"session_tag": m.group(1), "pr_id": m.group(2)}
         if not owner or not owner.get("session_tag") or not owner.get("pr_id"):

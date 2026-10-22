@@ -593,6 +593,27 @@ class TestProxyRelease:
         push_proxy.stop_push_proxy(name)
         assert killed == [str(sock_dir / "push.sock")]
 
+    def test_legacy_listing_skips_per_container_proxy_dirs(self):
+        """An untagged container's private proxy dir (``…-pm-impl-pr-x``)
+        has the legacy shared-dir shape but must not be swept as shared —
+        its "session" would match no container and the live proxy die."""
+        import secrets
+        import shutil
+        from pm_core import push_proxy
+        hx = secrets.token_hex(4)
+        private = Path(f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}pm-impl-pr-{hx}")
+        shared = Path(f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}legacytag{hx}-pr-{hx}")
+        try:
+            private.mkdir()
+            shared.mkdir()
+            found = {(p["session_tag"], p["pr_id"])
+                     for p in push_proxy.list_shared_proxies()}
+            assert (f"legacytag{hx}", f"pr-{hx}") in found
+            assert ("pm-impl", f"pr-{hx}") not in found
+        finally:
+            shutil.rmtree(private, ignore_errors=True)
+            shutil.rmtree(shared, ignore_errors=True)
+
     def test_foreign_shared_container_leaves_private_paths_alone(self, monkeypatch, tmp_path):
         import tempfile
         from pm_core import push_proxy
