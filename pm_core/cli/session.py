@@ -1535,21 +1535,11 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 # 'pm pr review' subprocess, but review-loop iterations
                 # don't switch on first start, so we drive it from the
                 # popup.  qa keeps its own focus_or_start_qa switch
-                # path — and owns its own suppress_switch consume —
-                # so we leave the flag in place for action == "qa".
+                # path, which owns the suppress_switch consume.
+                # Reaching window_open means *this* popup was not
+                # dismissed (q/Esc exits the process below), so no
+                # suppress_switch flag applies to this invocation.
                 if action != "qa":
-                    # Reaching window_open means *this* popup was not
-                    # dismissed (q/Esc exits the process above), so any
-                    # suppress_switch flag here was left by an earlier,
-                    # dismissed invocation — a running→running restart
-                    # keeps it.  Clear it, but never let it swallow this
-                    # invocation's switch.
-                    try:
-                        if _rs.consume_suppress_switch(pr_id, action):
-                            _log.info("spinner: cleared stale suppress_switch "
-                                      "pr=%s action=%s", pr_id, action)
-                    except Exception:
-                        pass
                     try:
                         # A popup has no $TMUX_PANE, so select_window's
                         # current-session lookup falls back to the most
@@ -1601,13 +1591,17 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     ch = ""
                 if ch in ("q", "Q", "\x1b"):  # Esc
                     _log.info("spinner keypress: ch=%r", ch)
-                    # Tell the TUI to skip its window-switch for this
-                    # action — the user explicitly dismissed; don't
-                    # steal focus when the launch eventually completes.
-                    try:
-                        _rs.request_suppress_switch(pr_id, action)
-                    except Exception:
-                        pass
+                    # Tell the TUI's QA launch to skip its window-switch
+                    # — the user explicitly dismissed; don't steal focus
+                    # when the launch eventually completes.  Every other
+                    # action is switched only by this spinner, so exiting
+                    # is enough; a flag for them would have no consumer
+                    # and would linger to swallow a later popup's switch.
+                    if action == "qa":
+                        try:
+                            _rs.request_suppress_switch(pr_id, action)
+                        except Exception:
+                            pass
                     if old_attrs is not None:
                         try:
                             termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)

@@ -117,3 +117,20 @@ def test_launch_review_window_holds_lock_during_launch(tmp_path, monkeypatch):
     monkeypatch.setattr(pr_mod, "_launch_review_window_unlocked", body)
     pr_mod._launch_review_window({}, {"id": "pr-001"})
     assert seen == {"held": True}
+
+
+def test_launch_in_progress_probe(tmp_path, monkeypatch):
+    """``review_launch_in_progress`` is True only while a launch holds the
+    lock, and never creates or takes the lock itself."""
+    import pm_core.paths as paths_mod
+    from pm_core.cli.pr import review_launch_in_progress
+
+    monkeypatch.setattr(paths_mod, "pm_home", lambda: tmp_path)
+    # No lock file yet (no launch ever ran).
+    assert review_launch_in_progress("pm-sess", "pr-001") is False
+    assert not (tmp_path / "workdirs"
+                / ".review-launch-pm-sess-pr-001.lock").exists()
+    with _review_window_launch_lock("pm-sess", "pr-001"):
+        assert review_launch_in_progress("pm-sess", "pr-001") is True
+        assert review_launch_in_progress("pm-sess", "pr-002") is False
+    assert review_launch_in_progress("pm-sess", "pr-001") is False

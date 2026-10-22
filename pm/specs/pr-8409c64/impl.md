@@ -140,6 +140,11 @@ suppress-switch logic downstream is already correct (verified: with a valid
   runs the session's pm_core (pr-24f022e's debug log: `chosen_via=pm_root`),
   so the picker's spinner code is not affected by that PR's workdir-code
   resolution bug.
+- **EC4b — q/Esc suppress flag is QA-only.** Only the TUI QA launch reads
+  `suppress_switch`; every other action is switched solely by the spinner,
+  so on q/Esc the spinner requests suppression only for `qa` and never
+  consumes the flag itself. Writing it for review-loop left a flag with no
+  consumer that a later popup swallowed (QA S18 E6).
 - **EC5 — failed launch**: unchanged terminal-state short-circuit still prints
   `✗ <action>: failed` and waits via `_wait_dismiss`
   (`tests/test_picker_spinner_terminal.py`).

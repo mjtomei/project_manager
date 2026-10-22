@@ -148,10 +148,10 @@ def test_switch_fires_for_existing_window_fresh(fake_stdin):
 
 
 def test_stale_suppress_flag_does_not_swallow_switch(fake_stdin):
-    """A q/Esc on an *earlier* review-loop popup leaves ``suppress_switch``
-    on the runtime entry; a running→running restart keeps it.  The next,
-    non-dismissed ``zz d`` must still switch — reaching window_open means
-    this popup was not dismissed, so the flag is stale (QA s18 story 3).
+    """A q/Esc on an earlier review-loop popup used to leave
+    ``suppress_switch`` on the runtime entry, and a running→running restart
+    keeps it.  The next, non-dismissed ``zz d`` must still switch — reaching
+    window_open means this popup was not dismissed (QA s18 story 3).
     """
     W = "review-pr-001"
     select_window, echoed = _run_spinner(
@@ -273,3 +273,36 @@ def test_review_loop_switch_waits_for_inflight_launch(fake_stdin):
     # Every busy probe was consumed before the single switch fired.
     assert busy == [False]
     assert fake_tmux.select_window_in_session.call_count == 1
+
+
+def _dismiss_with_q(tui_cmd):
+    """Run the spinner until a 'q' keypress; return request_suppress mock."""
+    sys.stdin.read.return_value = "q"
+    fake_tmux = MagicMock()
+    fake_tmux.list_windows.return_value = []
+    with patch.object(session_mod, "tmux_mod", fake_tmux), \
+         patch.object(session_mod, "_session_project_root",
+                      return_value=_OWNER_ROOT), \
+         patch.object(session_mod.store, "load", side_effect=_load), \
+         patch("pm_core.runtime_state.get_action_state",
+               return_value={"state": "running"}), \
+         patch("pm_core.runtime_state.request_suppress_switch") as req, \
+         patch("select.select", return_value=([sys.stdin], [], [])), \
+         patch("click.echo"):
+        with pytest.raises(SystemExit):
+            session_mod._wait_for_tui_command("pm-sess", tui_cmd,
+                                              tick_s=0.0001)
+    return req
+
+
+def test_dismissed_review_loop_leaves_no_suppress_flag(fake_stdin):
+    """review-loop is switched only by the spinner, so q/Esc just exits; a
+    flag would have no consumer and would linger on the entry."""
+    assert not _dismiss_with_q("review-loop start pr-001").called
+
+
+def test_dismissed_qa_requests_suppress_switch(fake_stdin):
+    """The TUI's QA launch switches focus itself, so q/Esc must tell it not
+    to."""
+    req = _dismiss_with_q("pr qa pr-001")
+    assert req.call_args.args == ("pr-001", "qa")

@@ -239,9 +239,11 @@ spins forever, no switch. Post-fix: switch fires.)
   the dismiss path still works after the root-resolution change.
 
 ### E6 — A dismissed spinner's suppress flag must not swallow a later switch
-- **Given** the user dismissed a review-loop spinner with `q`/`Esc` (this
-  writes `suppress_switch` on the PR's `review-loop` runtime_state entry; for
-  review-loop no launcher consumes it, only a later spinner at `window_open`).
+- **Given** the user dismissed a review-loop spinner with `q`/`Esc`. Since
+  review-loop ae7d i1 the spinner writes `suppress_switch` only for `qa` (the
+  one action whose TUI launch switches focus itself); for review-loop it just
+  exits, and a spinner that reaches `window_open` never reads the flag, so a
+  flag left by older code cannot swallow the switch either.
 - **When** the user invokes `zz d` on the same PR again later — both after the
   first loop went terminal and while it is still running.
 - **Then** the second invocation still switches to `review-<display_id>`.
