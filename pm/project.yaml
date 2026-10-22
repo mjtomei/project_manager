@@ -15963,6 +15963,17 @@ prs:
       d on a qa PR flips it to in_review and opens review-<id>.'
     created_at: '2026-10-22T14:59:07Z'
     last_edited: '2026-10-22T14:59:07Z'
+  - id: note-798fd5a
+    text: 'Scenario 3 refiner (2026-10-22): container has no fzf → picker falls back
+      to numbered menu with no nav; install via `sudo apt-get update && sudo apt-get
+      install -y fzf` (0.29 works with the picker). project.yaml is 0444: break/restore
+      it by writing a temp file and `mv -f` over it. Refresh warning lands in ~/.pm/debug/<session-tag>.log
+      as "popup-picker: refresh failed, keeping state". Observed live: once every
+      navigable PR is merged the list collapses to 1 entry, nav keys become fzf ignore,
+      so no further reloads happen — a PR reopened afterwards is unreachable until
+      the popup is reopened (judge vs E3/E4).'
+    created_at: '2026-10-22T15:01:17Z'
+    last_edited: '2026-10-22T15:01:17Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
@@ -23416,7 +23427,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/216
   gh_pr_number: 216
   created_at: '2026-05-22T22:52:39.457111+00:00'
-  updated_at: '2026-10-22T14:45:56.986619+00:00'
+  updated_at: '2026-10-22T15:07:33.544720+00:00'
   started_at: '2026-05-24T21:56:02.396650+00:00'
   reviewed_at: '2026-05-24T22:22:02.164315+00:00'
   merged_at: null
@@ -23445,6 +23456,15 @@ prs:
       and drop the early-exit branch rather than restoring it.'
     created_at: '2026-10-22T14:45:56Z'
     last_edited: '2026-10-22T14:45:56Z'
+  - id: note-5d85294
+    text: 'From pr-49ce773 QA S3 (2026-10-22): after a PR gains gh_pr_number while
+      its window keeps the old pr-xxxx name, the popup picker nav still finds it (tolerant
+      _find_pr_for_window_id), but the action rows look up windows by the new display
+      id only (_action_window_matches with win_name=#N), so start loses its [open]
+      badge and per-session dot. Consider using the same drift-tolerant matcher for
+      [open]/dot when fixing display-id desync.'
+    created_at: '2026-10-22T15:07:33Z'
+    last_edited: '2026-10-22T15:07:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9b96145-bug-pr-actions-picker-reports-merged-904ede96
 - id: pr-3d1fa55
   plan: bugs
