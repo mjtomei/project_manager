@@ -15890,7 +15890,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T17:27:00.726267+00:00'
+  updated_at: '2026-10-22T18:48:18.527041+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16099,6 +16099,18 @@ prs:
       <root>; verify via popup-picker module= log line.'
     created_at: '2026-10-22T17:27:00Z'
     last_edited: '2026-10-22T17:27:00Z'
+  - id: note-207061f
+    text: 'Sign-off (2026-10-22) -> SIGNOFF_IMPL on HEAD 5d56991a vs master 859657d8:
+      the only conflict is pm/project.yaml. Both sides appended new PR entries at
+      the end of prs: (this branch: pr-00d5023 etc.; master: pr-a80bde5 etc., plus
+      a rewritten pr-3201ea8 description). Master changed no code. Resolve by keeping
+      both sides; no pm_core/tests change is needed. Review step: merge 37637456 (PM_CALLER_SESSION
+      -> master PM_POPUP_SESSION + has-session =name stale guard) has had no review-loop
+      iteration yet. Sign-off read it and found no issues; picker/tmux tests give
+      160 passed. QA: round 4 (S16-S18 on 6b0dd742) still covers the code if the merge
+      touches only project.yaml. Report: /pm-captures/report.html'
+    created_at: '2026-10-22T18:48:18Z'
+    last_edited: '2026-10-22T18:48:18Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
