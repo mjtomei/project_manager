@@ -30062,7 +30062,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-22T14:44:07.127788+00:00'
+  updated_at: '2026-10-22T15:01:05.140406+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30280,6 +30280,17 @@ prs:
       leaves tree clean. No rubric code change. Ready for sign-off.'
     created_at: '2026-10-22T14:44:07Z'
     last_edited: '2026-10-22T14:44:07Z'
+  - id: note-8f8ce86
+    text: 'QA S19 PASS on 1f65a6ee (captures /pm-captures/scenarios/19, drivers reusable):
+      runner T1-T5 0 failed checks (30 order + 15 subset renders, hostile slots verbatim,
+      qa.md spec pair w/ document_kind "PM QA spec", 11 ValueErrors exact, 17 malformed
+      replies flagged); genre fixture strong->2 PRs, weak->exit 1; merged project.yaml
+      lists pr-9ca240a + pr-24f022e, active_pr pr-446cb83, pr-8df6472 notes 4106e20/c30ff7b
+      present. Spec gotcha: `pm pr show` does not exist; build the brief from the
+      PR title+description. Start the recording tmux with cwd outside /workspace,
+      or `pm which` resolves /workspace/pm_core via cwd walk.'
+    created_at: '2026-10-22T15:01:05Z'
+    last_edited: '2026-10-22T15:01:05Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
