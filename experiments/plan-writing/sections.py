@@ -9,7 +9,9 @@ method depends on how collect.py produced the text:
   order of first appearance; also used for plain-text docs from git sources;
 - numbered: IETF RFC plain text and pdftotext output, using numbered headings
   (`3.2.`, `Appendix B.1`) that must continue a plausible numbering sequence,
-  rejecting table-of-contents lines, plus known unnumbered RFC headings;
+  rejecting table-of-contents lines (including a page number after a column
+  gap), table rows and runs of numbered list items, plus known unnumbered RFC
+  headings;
 - html: headings recovered from the retained raw HTML by replaying
   collect.page_text (needs bs4) with markers around each heading;
 - html-search: fallback when the replay is unavailable or does not reproduce
@@ -35,6 +37,10 @@ NUMBERED = re.compile(r"^(?P<indent>[ \t]{0,8})(?P<num>(?:\d{1,2})(?:\.\d{1,2}){
 APPENDIX = re.compile(r"^(?P<indent>[ \t]{0,8})(?:Appendix|APPENDIX)[ \t]+(?P<num>[A-Z](?:\.\d{1,2}){0,4})\.?(?:[ \t]*[:.\-]?[ \t]+(?P<title>\S[^\n]{0,90}))?$")
 COLUMN_GAP = re.compile(r"(?<=\S)[ \t]{3,}(?=\S)")
 TOC_LINE = re.compile(r"(\.\s?){4,}|\s\d{1,4}\s*$|_{4,}")
+FIGURE = r"[$£€]?\s*[-+–(]?[\d.,]*\d[\d.,]*[)%]?"
+NUMERIC_CELL = re.compile(rf"{FIGURE}(?:\s+{FIGURE})*|[ivxlc]{{1,6}}")
+WIDE_AFTER_NUMBER = re.compile(r"^\s*\S+[ \t]{3}")
+LIST_GAP = 4  # median line distance between items of a numbered list
 RFC_UNNUMBERED = {
     "abstract", "status of this memo", "copyright notice", "table of contents", "introduction", "references",
     "normative references", "informative references", "acknowledgements", "acknowledgments", "author's address",
@@ -119,23 +125,64 @@ def _follows(prev, cur):
     return len(cur) == 1 and cur[0] == 1000 and prev[0] < 1000
 
 
-def numbered_headings(text, unnumbered=True, max_indent=8):
-    """Numbered headings forming the longest plausible numbering sequence."""
+def _table_row(lines, n, cols, single_column):
+    """A line split into columns within two lines of another such line.
+
+    PDF text puts a heading beside the other page column, so there only
+    indented lines count; RFC text is one column, so a numbered line with
+    three columns, or a wide gap after its number, is a row there too.
+    """
+    full = lines[n][1]
+    if len(cols) < 2 or not (full[:1].isspace() or single_column and (len(cols) > 2 or WIDE_AFTER_NUMBER.match(full))):
+        return False
+    near = lines[max(0, n - 2):n] + lines[n + 1:n + 3]
+    return any(COLUMN_GAP.search(other.strip()) for _, other in near)
+
+
+def _without_list_runs(cands):
+    """Drop runs numbered 1, 2, 3, ... a few lines apart that restart the numbering: list items."""
+    drop, i = set(), 0
+    while i < len(cands):
+        j = i
+        if i and cands[i][0] == (1,):
+            while j + 1 < len(cands) and cands[j + 1][0] == (cands[j][0][0] + 1,):
+                j += 1
+        if j - i >= 2:
+            gaps = sorted(cands[k + 1][2] - cands[k][2] for k in range(i, j))
+            if gaps[len(gaps) // 2] <= LIST_GAP:
+                drop.update(range(i, j + 1))
+        i = j + 1
+    return [(key, h) for n, (key, h, _) in enumerate(cands) if n not in drop]
+
+
+def numbered_headings(text, unnumbered=True, max_indent=8, single_column=False):
+    """Numbered headings forming the longest plausible numbering sequence.
+
+    `single_column` marks RFC text, where any multi-column numbered line is
+    tabular (pdftotext keeps a page's columns side by side on one line).
+    """
     cands, extra = [], []
-    for start, full in line_offsets(text):
+    lines = list(line_offsets(text))
+    for n, (start, full) in enumerate(lines):
         head = re.match(r"^(\s*(?:Appendix\s+|APPENDIX\s+)?\S+\s+)(.*)$", full)
         line = head.group(1) + COLUMN_GAP.split(head.group(2), 1)[0] if head else full
         if not line.strip() or len(line) > 100 or TOC_LINE.search(line):
+            continue
+        cols = COLUMN_GAP.split(head.group(2).strip()) if head else [full]
+        if len(cols) > 1 and all(NUMERIC_CELL.fullmatch(c) for c in cols[1:]):
+            continue  # a table-of-contents entry (page number) or a row of figures
+        if _table_row(lines, n, cols, single_column):
             continue
         m = NUMBERED.match(line) or APPENDIX.match(line)
         if m and len(m.group("indent").expandtabs()) <= max_indent:
             title = (m.group("title") or "").strip()
             if title.endswith((",", ";")) or len(title.split()) > 14:
                 continue
-            cands.append((_key(m.group("num")), Heading(start, start + len(full), 0, line.strip())))
+            cands.append((_key(m.group("num")), Heading(start, start + len(full), 0, line.strip()), n))
             continue
         if unnumbered and not line[0].isspace() and line.strip().lower().rstrip(":") in RFC_UNNUMBERED:
             extra.append(Heading(start, start + len(full), 1, line.strip()))
+    cands = _without_list_runs(cands)
     # longest chain under _follows (O(n^2) over candidates, bounded window)
     best, back = [0] * len(cands), [-1] * len(cands)
     for i, (key, _) in enumerate(cands):
@@ -270,7 +317,7 @@ def headings(doc, text, raw):
     elif method == "numbered":
         rfc = bool(RFC_FILE.search(doc["identity"].lower()))
         # RFC headings start in column 0; indented numbered lines are TOC entries or lists.
-        found = numbered_headings(text, unnumbered=rfc, max_indent=0 if rfc else 8)
+        found = numbered_headings(text, unnumbered=rfc, max_indent=0 if rfc else 8, single_column=rfc)
     else:
         method, found = html_headings(text, raw)
     return method, sorted(found, key=lambda h: h.start)
