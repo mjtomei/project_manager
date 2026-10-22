@@ -675,6 +675,9 @@ class AutoRunsScreen(ModalScreen):
     # Selection gutter ("▶ ") in front of every row line.
     _GUTTER = 2
 
+    _HINTS = ["j/k select", "Enter/f focus window", "r refresh",
+              "Esc/q/a close", "refreshes every 2s"]
+
     def __init__(self) -> None:
         super().__init__()
         self._rows: list[dict] = []
@@ -695,11 +698,8 @@ class AutoRunsScreen(ModalScreen):
         with container:
             yield Static("Auto-start runs", id="runs-title")
             yield Static("", id="runs-body")
-            # Static (not Label) so the hint wraps in a narrow popup.
-            yield Static(
-                "j/k select · Enter/f focus window · r refresh · "
-                "Esc/q/a close · refreshes every 2s",
-                id="runs-footer")
+            # Wrapped by _render_rows (no line starts with "·").
+            yield Static(" · ".join(self._HINTS), id="runs-footer")
 
     def on_mount(self) -> None:
         self.action_refresh_runs()
@@ -772,6 +772,9 @@ class AutoRunsScreen(ModalScreen):
                 st, min(view.MAX_WIDTH, width + self._GUTTER),
                 "Auto-start runs"))
         self.query_one("#runs-title", Static).update(title)
+        self.query_one("#runs-footer", Static).update("\n".join(
+            view.plain(ln) for ln in view.hint_lines(
+                self._HINTS, width + self._GUTTER)))
 
         body = Text()
         body_widget = self.query_one("#runs-body", Static)

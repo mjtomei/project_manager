@@ -149,14 +149,16 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
             line.append((text, role))
         used += cell_len(text)
 
-    def newline() -> None:
-        nonlocal used
-        # Drop trailing spaces from the line being closed.
-        line = lines[-1]
+    def trim(line: Line) -> None:
+        """Drop trailing spaces and separators from a finished line."""
         while line and (not line[-1][0].strip() or line[-1][1] == "sep"):
             line.pop()
         if line and line[-1][0] != line[-1][0].rstrip():
             line[-1] = (line[-1][0].rstrip(), line[-1][1])
+
+    def newline() -> None:
+        nonlocal used
+        trim(lines[-1])
         lines.append([])
         used = 0
         put(indent, "")
@@ -187,9 +189,7 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
         if text:
             put(text, role)
         started = True
-    last = lines[-1]
-    while last and (not last[-1][0].strip() or last[-1][1] == "sep"):
-        last.pop()
+    trim(lines[-1])
     return [ln for ln in lines if ln]
 
 
@@ -348,6 +348,17 @@ def header_lines(status: dict, width: int,
     if owner:
         segs += [SEP, (f"owner {owner}", "meta")]
     return wrap(segs, width, "  ")
+
+
+def hint_lines(items: list[str], width: int) -> list[Line]:
+    """Key hints joined by `` · ``, wrapped so no line starts or ends with
+    a separator (the runs popup footer)."""
+    segs: list[Seg] = []
+    for item in items:
+        if segs:
+            segs.append(SEP)
+        segs.append((item, "meta"))
+    return wrap(segs, width, "")
 
 
 def report_lines(status: dict, width: int = MAX_WIDTH) -> list[Line]:

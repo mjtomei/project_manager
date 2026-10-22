@@ -405,6 +405,8 @@ def _popup(size, keys=()):
                 screen = app.screen
                 out["body"] = screen.query_one("#runs-body", Static).render()
                 out["title"] = screen.query_one("#runs-title", Static).render()
+                out["footer"] = screen.query_one(
+                    "#runs-footer", Static).render()
                 out["width"] = screen._width
                 out["selected"] = screen._selected_key
                 out["body_w"] = screen.query_one(
@@ -456,6 +458,14 @@ class TestPopup:
         assert _red_ids(out["body"]) == NEED_YOU
         assert all(cell_len(ln) <= out["body_w"]
                    for ln in out["title"].plain.splitlines())
+
+    @pytest.mark.parametrize("cols", [44, 64, 74])
+    def test_footer_hint_wraps_without_dangling_separators(self, cols):
+        lines = _popup((cols, 70))["footer"].plain.splitlines()
+        assert len(lines) > 1
+        for ln in lines:
+            assert not ln.strip().startswith("·"), lines
+            assert not ln.rstrip().endswith("·"), lines
 
     def test_navigation_moves_over_wrapped_rows(self):
         out = _popup((80, 70), keys=["j", "j"])
