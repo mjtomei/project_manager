@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T14:51:37.158816+00:00'
+  updated_at: '2026-10-22T15:00:51.822782+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29615,6 +29615,14 @@ prs:
       cases.py, cases.py --check (clean, 55204).'
     created_at: '2026-10-22T14:51:37Z'
     last_edited: '2026-10-22T14:51:37Z'
+  - id: note-cc409fe
+    text: 'Review loop 05c5 i3 (029849e9): context.charter_in_force picks the highest
+      charter revision known by the source draft -00, not the latest known-by date
+      (28 concluded groups stamp 01 later than imported 02+, e.g. btns 01=2010-03-16).
+      Latent: rebuilt ietf-rfcs/quic-drafts context has identical charter items/applies_to;
+      cases.py --check clean (55204); 57 tests pass.'
+    created_at: '2026-10-22T15:00:51Z'
+    last_edited: '2026-10-22T15:00:51Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
