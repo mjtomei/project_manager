@@ -282,6 +282,24 @@ class TestHighlight:
                       "INPUT_REQUIRED"):
             assert label in text
 
+    def test_popup_colours_round_to_the_cli_colours(self):
+        # Textual swaps named ANSI colours for theme RGB, which a 16-colour
+        # pane (TERM=screen) showed as magenta labels and red WAITING.
+        from rich.color import Color, ColorSystem
+        from rich.style import Style
+
+        def ansi(style, attr):
+            c = getattr(Style.parse(style), attr)
+            return c and c.downgrade(ColorSystem.STANDARD).number
+
+        for role, style in view.ROLE_STYLES.items():
+            popup = view.POPUP_STYLES[role]
+            assert "red" not in popup and "yellow" not in popup, role
+            for attr in ("color", "bgcolor"):
+                assert ansi(popup, attr) == ansi(style, attr), (role, attr)
+        assert ansi(view.POPUP_STYLES["attention"], "bgcolor") == 1
+        assert ansi(view.POPUP_STYLES["state_waiting"], "color") == 3
+
     def test_header_lists_who_needs_you(self):
         need = view.needs_human(mixed_status())
         assert {r["pr_id"] for r in need} == NEED_YOU
@@ -389,9 +407,9 @@ def _red_ids(text) -> set[str]:
     plain = text.plain
     for span in text.spans:
         # The popup body is Textual Content: the attention label is the
-        # only span with a red (ANSI 1) background.
+        # only span with a red background (explicit RGB, see POPUP_STYLES).
         bg = getattr(span.style, "background", None)
-        if getattr(bg, "ansi", None) == 1:
+        if bg is not None and (bg.r, bg.g, bg.b) == (0xd7, 0, 0):
             line = plain[:span.start].rsplit("\n", 1)[-1]
             ids.add(re.findall(r"pr-[0-9a-f]{7}", line)[-1])
     return ids

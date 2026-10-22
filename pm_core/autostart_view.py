@@ -387,10 +387,23 @@ def to_ansi(lines: list[Line], color: bool = False) -> str:
     return "\n".join(out)
 
 
+# The popup paints through Textual, which replaces the 16 named ANSI colours
+# with its theme's RGB (Monokai: red → rgb(244,0,95), yellow → orange); in a
+# 16-colour pane (pm's default TERM=screen) those round to magenta and bright
+# red, so human waits stopped looking red and WAITING did.  Explicit RGB
+# that rounds back to the same ANSI colour the CLI uses, at any depth.
+_POPUP_RGB = {"red": "#d70000", "yellow": "#d7af00", "green": "#00af00",
+              "cyan": "#00afaf", "magenta": "#af00af", "white": "#c0c0c0"}
+
+POPUP_STYLES = {
+    role: " ".join(_POPUP_RGB.get(word, word) for word in style.split())
+    for role, style in ROLE_STYLES.items()}
+
+
 def to_rich(line: Line, base_style: str = ""):
     """A ``rich.text.Text`` for one line (the runs popup)."""
     from rich.text import Text
     t = Text(style=base_style)
     for text, role in line:
-        t.append(text, style=ROLE_STYLES.get(role, "") if role else "")
+        t.append(text, style=POPUP_STYLES.get(role, "") if role else "")
     return t
