@@ -558,8 +558,11 @@ export class App {
       const lead = { agent: '', user: '› ', tool: '· ', pm: '— ' }[m.who];
       const dim = m.who !== 'agent';
       const text = m.who === 'user' && m.context ? `${m.t}  [${m.context.label}]` : m.t;
-      const lines = wrap(text + (m.streaming ? ' …' : '') + (m.queued ? '  (queued)' : ''), TEXT_WIDTH - (lead ? 16 : 0));
-      lines.forEach((t, i) => out.push(lead ? [{ t: i ? '' : lead.trim(), dim }, { t, x: 16, dim }] : [{ t }]));
+      // Text starts at 16 px, or one space past a wider lead: the firmware
+      // em dash is 15 px, so at 16 it touched the text ("—Started").
+      const x = lead ? Math.max(16, width(lead)) : 0;
+      const lines = wrap(text + (m.streaming ? ' …' : '') + (m.queued ? '  (queued)' : ''), TEXT_WIDTH - x);
+      lines.forEach((t, i) => out.push(lead ? [{ t: i ? '' : lead.trim(), dim }, { t, x, dim }] : [{ t }]));
     }
     return out;
   }

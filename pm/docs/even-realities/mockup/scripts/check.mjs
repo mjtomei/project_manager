@@ -301,6 +301,18 @@ if (!only.length) {
     rule(app.view.type === 'session' && app.view.id === 'pr-215/signoff' && !/undefined|^Starting/.test(app.toast || ''),
       `confirm Start after PM started it: ${app.sceneId()} toast ${app.toast}`);
   }
+  // A transcript lead (› user, · tool, — PM) keeps a space before its text on
+  // the glasses, including the 15 px em dash ("—Started" read as one word).
+  {
+    const pm = new SimPM();
+    pm.start('pr-215/impl'); pm.started('pr-215/impl');
+    for (const s of pm.sessions.filter(x => x.transcript?.some(m => m.who !== 'agent'))) {
+      const app = new App(pm);
+      app.openSession(s.id);
+      const glued = buildFrame(app.render()).contents.leftDim.split('\n').filter(l => /^[›·—]\S/.test(l));
+      rule(!glued.length, `${s.id} transcript lead touches its text: ${glued.join(' | ')}`);
+    }
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 // exitCode, not process.exit(): exiting drops whatever a slow pipe (tee, less, CI)
