@@ -84,7 +84,8 @@ R6. **Early exits are visible to every driver.** Each sync exit writes
     `overall`), sets `state.running = False`, `planning_phase = False`,
     and notifies.  The existing Phase 1.25 handoff-failure exit did not
     write `overall`, leaving auto-sequence reporting "running: qa" forever
-    — fix it the same way.
+    — fix it the same way, and the QA-spec gate exit after planning (same
+    "running: qa" symptom).  All go through `_end_qa_without_scenarios`.
 
 R7. **Planner/worker revision consistency.** `pre_plan_head` is taken after
     the sync, so it is the revision the planner reads (recorded as

@@ -4236,22 +4236,19 @@ def run_qa_sync(
     if pr_entry and not _get_qa_spec(pr_entry, "qa") and not state._error:
         _log.warning("QA spec missing for %s after planning — "
                      "planner did not generate spec in Step 0", state.pr_id)
-        state.latest_verdict = VERDICT_INPUT_REQUIRED
         state.latest_output = (
             "QA spec was not generated during planning. "
             "Run `pm pr spec %s qa` to generate it, then restart QA."
             % state.pr_id
         )
-        state._error = (
+        _end_qa_without_scenarios(
+            state, VERDICT_INPUT_REQUIRED,
             "QA spec was not generated during planning.\n\n"
             "The planner session should have generated a spec in Step 0,\n"
             "but no spec file was found.\n\n"
             "To fix:\n"
             f"  pm pr spec {state.pr_id} qa\n\n"
-            "Then restart QA from the TUI."
-        )
-        _notify()
-        state.running = False
+            "Then restart QA from the TUI.", status_path, _notify)
         return state  # Do not launch scenarios without a QA spec
 
     # --- Phase 1.25: Planner handoff ---
