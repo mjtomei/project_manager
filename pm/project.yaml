@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T16:21:20.798365+00:00'
+  updated_at: '2026-10-22T16:22:23.758456+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29691,6 +29691,19 @@ prs:
       limit). Captures /pm-captures/scenarios/2/{pre-fix,post-fix}.'
     created_at: '2026-10-22T16:21:20Z'
     last_edited: '2026-10-22T16:21:20Z'
+  - id: note-a5723df
+    text: 'QA s1 (b769b725): fixed context.extract rewriting data/context/raw/pdf/<key>.pdf
+      on every cached rerun (an existing cache file was newer than the marker). Post-fix
+      and on head, cached reruns add 0 raw files, touch 0 existing ones, and keep
+      ids/sha256 identical. A fresh uncached run can hit GitHub 429 on process-doc
+      history (cockroach README, PEP process); these are not cached, so the next run
+      recovers them. rust-project-goals issues 103/104/105/256/... now really 404,
+      so a rebuilt report shows rust-goals 348 (14). The scenario 8-gram Then omits
+      the qa.md:65 title-line/metadata-header exception: all 5111 overlaps are title
+      or header lines. The RFD 1 own case is excluded as "the document itself", which
+      is correct.'
+    created_at: '2026-10-22T16:22:23Z'
+    last_edited: '2026-10-22T16:22:23Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
