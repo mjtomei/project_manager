@@ -49,7 +49,7 @@ _HAIKU_PATTERNS = ("haiku",)
 
 SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario",
                  "qa_concretize", "qa_verification", "qa_finalize",
-                 "watcher", "merge")
+                 "signoff", "watcher", "merge")
 
 DEFAULT_SESSION_MODELS: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
@@ -66,6 +66,7 @@ _FALLBACK_TYPES: dict[str, str] = {
     "qa_concretize": "qa",
     "qa_verification": "qa",
     "qa_finalize": "qa",
+    "signoff": "review",
 }
 
 # Valid effort levels for the Claude CLI --effort flag.

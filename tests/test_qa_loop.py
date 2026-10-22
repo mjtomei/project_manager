@@ -266,6 +266,41 @@ QA_PLAN_END
         assert scenarios[1].title == "CLI Integration"
         assert scenarios[1].instruction_path is None
 
+    def test_real_plan_not_numbered_from_one_ignores_prompt_spec(self):
+        """A committed qa.md echoed in the prompt can hold its own
+        "SCENARIO 1:" line.  When the planner numbers its plan from 2, the
+        body must still start at the planner's QA_PLAN_START, not at that
+        earlier spec line (pr-b53bfe2 QA r5 S10: planned 1, launched 2)."""
+        output = """You are a QA planner analyzing PR pr-001: "Add yellow.txt"
+
+## QA Spec
+
+SCENARIO 1: yellow.txt content
+- GIVEN a fresh clone of the PR branch
+- WHEN the user prints yellow.txt with cat
+- THEN the output is yellow
+
+## Output Format
+
+QA_PLAN_START
+SCENARIO 2: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+STEPS: <concrete test steps>
+QA_PLAN_END
+
+The spec asks for one scenario, so the plan has one.
+
+QA_PLAN_START
+SCENARIO 2: Fresh clone shows yellow.txt containing exactly "yellow"
+FOCUS: yellow.txt is a one-line file holding yellow
+INSTRUCTION: none
+STEPS: cat yellow.txt
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert [s.title for s in scenarios] == [
+            'Fresh clone shows yellow.txt containing exactly "yellow"']
+
     def test_pane_with_only_prompt_template(self):
         """When pane content only has the prompt template, placeholder
         scenarios are now rejected by parse_qa_plan itself, preventing
@@ -542,7 +577,7 @@ class TestOnQAComplete:
         app._root = pm_dir
         app._data = data
         app._auto_start = True
-        app._auto_start_target = "pr-001"
+        app._auto_start_targets = {"pr-001": {}}
         app._qa_loops = {}
         app._review_loops = {}
         app._self_driving_qa = {}
@@ -557,7 +592,7 @@ class TestOnQAComplete:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
@@ -573,15 +608,16 @@ class TestOnQAComplete:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
         mock_merge.assert_not_called()
-        # Should inform user to merge manually
+        # Should point the user at manual sign-off (never "ready to merge")
         app.log_message.assert_called()
         msg = app.log_message.call_args[0][0]
-        assert "merge manually" in msg
+        assert "press i to sign off" in msg
+        assert "ready to merge" not in msg
 
     def test_needs_work_transitions_to_in_review(self, tmp_path):
         """QA NEEDS_WORK should transition PR from qa → in_review."""
@@ -757,7 +793,7 @@ class TestMaybeStartQA:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = "pr-001"
+        app._auto_start_targets = {"pr-001": {}}
         app._qa_loops = {}
         app._self_driving_qa = {}
         return app
@@ -824,7 +860,8 @@ class TestMaybeStartQAScoping:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = target
+        app._auto_start_targets = {target: {}} if target else {}
+        app._auto_start_all = not target
         app._qa_loops = {}
         app._self_driving_qa = {}
         return app
@@ -954,7 +991,8 @@ class TestPollTriggersQA:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = target
+        app._auto_start_targets = {target: {}} if target else {}
+        app._auto_start_all = not target
         app._review_loops = {}
         app._qa_loops = {}
         app._self_driving_qa = {}
@@ -1047,7 +1085,8 @@ class TestSelfDrivingQALoop:
         app._root = pm_dir
         app._data = data
         app._auto_start = False  # Self-driving works independently of auto-start
-        app._auto_start_target = None
+        app._auto_start_targets = {}
+        app._auto_start_all = True
         app._qa_loops = {}
         app._review_loops = {}
         app._self_driving_qa = {
@@ -1130,7 +1169,7 @@ class TestSelfDrivingQALoop:
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_PASS}
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
@@ -1153,7 +1192,7 @@ class TestSelfDrivingQALoop:
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_PASS}
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
@@ -1671,6 +1710,34 @@ class TestScenarioRetryLogic:
         assert mock_relaunch.call_count == 2
         assert state.scenario_verdicts[1] == VERDICT_PASS
 
+    def test_stop_during_backoff_does_not_relaunch(self, tmp_path):
+        """A stop (``z t`` fresh start) kills the scenario windows; the
+        stopped loop must not relaunch them after its retry backoff."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        def sleep_side_effect(secs):
+            if secs >= 1:  # the retry backoff, not the poll interval
+                state.stop_requested = True
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep_side_effect), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=100), \
+             patch("pm_core.qa_loop._write_status_file"):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: None,
+            )
+
+        mock_relaunch.assert_not_called()
+        assert 1 not in state.scenario_verdicts
+
     def test_retries_exhausted_gives_input_required(self, tmp_path):
         """When all retries are used, scenario gets INPUT_REQUIRED."""
         from pm_core.qa_loop import (
@@ -1828,10 +1895,14 @@ class TestSpecGateRunningFlag:
     """The spec gate early-return must set state.running = False so that
     the QA loop UI's _on_qa_complete callback fires."""
 
-    def test_spec_gate_sets_running_false(self, tmp_path):
+    def test_spec_gate_sets_running_false(self, tmp_path, monkeypatch):
         """run_qa_sync must set state.running=False when spec gate fires."""
         from pm_core.qa_loop import run_qa_sync, QALoopState
         from pm_core import store
+
+        # The QA workdir lives under ~/.pm/workdirs/qa — keep it out of the
+        # real home (it leaked pr-specgate-* dirs into live QA sessions).
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
         pr_id = "pr-specgate"
         pm_dir = tmp_path / "pm"
@@ -1959,3 +2030,38 @@ STEPS: do something
 QA_PLAN_END"""
         scenarios = parse_qa_plan(output)
         assert scenarios[0].mock_ids == []
+
+
+class TestStoppedRunAggregation:
+    """A run stopped before every scenario has a verdict is not a PASS."""
+
+    def _finalize(self, state, tmp_path):
+        from pm_core import qa_loop
+        with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._write_status_file") as write_status, \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane", return_value=None):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+        return write_status.call_args.kwargs["overall"]
+
+    def test_missing_verdict_is_input_required(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.scenario_verdicts = {3: VERDICT_PASS}
+        state.stop_requested = True
+        overall = self._finalize(state, tmp_path)
+        assert state.latest_verdict == VERDICT_INPUT_REQUIRED
+        assert overall == VERDICT_INPUT_REQUIRED
+
+    def test_all_verdicts_pass(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.scenario_verdicts = {3: VERDICT_PASS, 4: VERDICT_PASS}
+        assert self._finalize(state, tmp_path) == VERDICT_PASS

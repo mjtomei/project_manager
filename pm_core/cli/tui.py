@@ -257,11 +257,21 @@ Views:
   L                View TUI log
   ?                Show help
 
+Auto-start (multiple targets; also `pm autostart --help`):
+  O                Add selected PR as target, stop before merge (repeat: re-arm)
+  A                Toggle selected PR as auto-merge target (no PR: all off)
+  a                Runs popup: targets + running/queued deps (Enter/f focus,
+                   r refresh, Esc/q/a close)
+  /autostart add|remove ID...   Command bar (also: list, status, clear, all)
+
 Other:
   r                Refresh / sync
   b                Rebalance panes
-  A                Toggle auto-start
   ctrl+b d         Detach from session
+
+Migration: targets are additive — A/O/`autostart target X` no longer replace
+the previous target. Bare `autostart` only turns auto-start off; the old
+"no target = all ready PRs" mode is now explicit: `autostart all`.
 """)
 
 

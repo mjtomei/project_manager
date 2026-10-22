@@ -53,6 +53,12 @@ _VERDICT_COLORS = {
     "INPUT_REQUIRED": _RED,
     "interactive": _DIM,
     "queued": _DIM,
+    # Sign-off router verdicts (shown when a sign-off verdict surfaces here).
+    "SIGNOFF_MERGE": _GREEN,
+    "SIGNOFF_REQA": _YELLOW,
+    "SIGNOFF_REVIEW": _YELLOW,
+    "SIGNOFF_IMPL": _YELLOW,
+    "SIGNOFF_BLOCKED": _RED,
 }
 
 _REFRESH_INTERVAL = 1.0  # seconds

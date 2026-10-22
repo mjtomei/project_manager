@@ -30,7 +30,7 @@ def guard_pr_action(app, action_desc: str) -> bool:
     if app._inflight_pr_action:
         _log.info("action blocked: %s (busy: %s)", action_desc, app._inflight_pr_action)
         app.log_message(f"Busy: {app._inflight_pr_action}", sticky=1.0)
-        app.set_timer(1.0, app._clear_log_message)
+        app.clear_log_message_later(1.0)
         return False
     return True
 
@@ -210,6 +210,47 @@ def review_pr(app, fresh: bool = False) -> None:
         transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
     fresh_arg = " --fresh" if fresh else ""
     cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
+    run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+
+def signoff_pr(app, fresh: bool = False) -> None:
+    """Launch sign-off for the selected PR (transitions qa->sign_off if needed)."""
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: signoff_pr selected=%s fresh=%s", pr_id, fresh)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    if not fresh:
+        from pm_core.loop_shared import get_pm_session
+        from pm_core import tmux as tmux_mod, store
+        session = get_pm_session()
+        if session and app._root:
+            try:
+                data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                data = None
+            if data:
+                pr_entry = store.get_pr(data, pr_id)
+                if pr_entry:
+                    from pm_core.cli.pr import _pr_display_id
+                    display_id = _pr_display_id(pr_entry)
+                    window_name = f"signoff-{display_id}"
+                    existing = tmux_mod.find_window_by_name(session, window_name)
+                    if existing:
+                        tmux_mod.select_window(session, existing["id"])
+                        app.log_message(f"Switched to sign-off window '{window_name}'")
+                        return
+
+    action_key = f"Sign-off {pr_id}" + (" (fresh)" if fresh else "")
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    fresh_arg = " --fresh" if fresh else ""
+    cmd = f"pr signoff{fresh_arg} {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
@@ -664,16 +705,25 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.query_one("#tech-tree", TechTree).focus()
         return
 
-    # Handle auto-start commands
-    if cmd in ("autostart", "auto-start", "auto start"):
-        from pm_core.tui.auto_start import toggle
-        app.run_worker(toggle(app))
-        app.query_one("#tech-tree", TechTree).focus()
-        return
-    if cmd.startswith("autostart target") or cmd.startswith("auto-start target") or cmd.startswith("auto start target"):
-        from pm_core.tui.auto_start import set_target
-        target_pr = cmd.split("target", 1)[1].strip()
-        set_target(app, target_pr if target_pr else None)
+    # Handle auto-start commands: ``autostart [verb] [ids…] [flags]``
+    # (also reached by ``pm autostart …`` via the SIGUSR2 command queue).
+    _as_cmd = cmd
+    for _alias in ("auto-start", "auto start"):
+        if _as_cmd == _alias or _as_cmd.startswith(_alias + " "):
+            _as_cmd = "autostart" + _as_cmd[len(_alias):]
+            break
+    if _as_cmd == "autostart" or _as_cmd.startswith("autostart "):
+        from pm_core.tui import auto_start as _auto_start
+        try:
+            _as_args = shlex.split(_as_cmd)[1:]
+        except ValueError as e:
+            app.log_message(f"Auto-start: bad command: {e}")
+        else:
+            _auto_start.handle_command(app, _as_args)
+        # Unconditional: focus() targets the tree's own (base) screen, so
+        # when ``autostart status`` pushed the runs popup this doesn't
+        # steal focus from it — it makes Esc return to the tree instead
+        # of the command bar the popup was opened from.
         app.query_one("#tech-tree", TechTree).focus()
         return
 

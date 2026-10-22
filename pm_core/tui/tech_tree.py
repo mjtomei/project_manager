@@ -29,6 +29,7 @@ STATUS_ICONS = {
     "in_progress": "◎",
     "in_review": "◉",
     "qa": "●",
+    "sign_off": "◆",
     "merged": "✓",
     "closed": "✗",
     "blocked": "✗",
@@ -51,6 +52,13 @@ VERDICT_STYLES = {
     "ERROR": "bold red",
     "INPUT_REQUIRED": "bold red",
 }
+
+# Sign-off verdict markers/styles live in pm_core.signoff (single source of
+# truth shared with `pm pr list`); re-exported here for the node renderer.
+from pm_core.signoff import (  # noqa: E402
+    SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES, latest_signoff_verdict,
+    display_signoff_verdict,
+)
 
 SPINNER_FRAMES = "◐◓◑◒"
 
@@ -81,6 +89,7 @@ STATUS_STYLES = {
     "in_progress": "bold yellow",
     "in_review": "bold cyan",
     "qa": "bold magenta",
+    "sign_off": "bold blue",
     "merged": "bold green",
     "closed": "dim red",
     "blocked": "bold red",
@@ -92,13 +101,14 @@ STATUS_BG = {
     "in_progress": "on #333300",  # subtle yellow
     "in_review": "on #003333",    # subtle cyan
     "qa": "on #330033",           # subtle magenta
+    "sign_off": "on #000033",     # subtle blue
     "merged": "on #003300",       # subtle green
     "closed": "on #220000",       # dim red
     "blocked": "on #330000",      # subtle red
 }
 
 # Status filter cycle order (None = show all)
-STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "merged", "closed"]
+STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"]
 
 # Node dimensions
 NODE_W = 24
@@ -492,7 +502,9 @@ class PRNode(Widget):
                     if state.stop_requested:
                         return (f"⏹{state.iteration}{spinner}", "bold red")
                     return (f"⟳{state.iteration}{spinner}", "bold cyan")
-                if state.latest_verdict:
+                # A finished review loop's verdict must not mask the sign-off
+                # marker (▲ / re-run spinner) once the PR has moved on.
+                if state.latest_verdict and self._pr.get("status") != "sign_off":
                     v = state.latest_verdict
                     marker = VERDICT_MARKERS.get(v, v[:4])
                     style = VERDICT_STYLES.get(v, "")
@@ -518,11 +530,11 @@ class PRNode(Widget):
         try:
             from pm_core.tui import auto_start as _auto_start
             auto_start_enabled = _auto_start.is_enabled(self.app)
-            auto_start_target = (_auto_start.get_target(self.app)
-                                 if auto_start_enabled else None)
+            auto_start_targets = (set(_auto_start.get_targets(self.app))
+                                  if auto_start_enabled else set())
         except Exception:
             auto_start_enabled = False
-            auto_start_target = None
+            auto_start_targets = set()
 
         if is_selected:
             top = "╔" + "═" * (NODE_W - 2) + "╗"
@@ -535,7 +547,7 @@ class PRNode(Widget):
         border = "bold white" if is_selected else "dim"
 
         display_id = f"#{pr.get('gh_pr_number')}" if pr.get("gh_pr_number") else pr_id
-        is_auto_target = (auto_start_enabled and auto_start_target == pr_id)
+        is_auto_target = (auto_start_enabled and pr_id in auto_start_targets)
         max_id_len = NODE_W - 4
         truncated_id = ""
         if is_auto_target:
@@ -586,6 +598,29 @@ class PRNode(Widget):
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold cyan"
                     status_text += f" {spinner}"
+            elif status == "sign_off":
+                # Sign-off is running until the router records a verdict: show
+                # the latest verdict icon if recorded, else animate the spinner.
+                verdict = latest_signoff_verdict(pr)
+                if verdict in SIGNOFF_VERDICT_ICONS:
+                    marker_offset = 2 + len(status_text) + 1
+                    loop_style = SIGNOFF_VERDICT_STYLES.get(verdict, "bold blue")
+                    status_text += f" {SIGNOFF_VERDICT_ICONS[verdict]}"
+                elif pr.get("workdir"):
+                    spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
+                    marker_offset = 2 + len(status_text) + 1
+                    loop_style = "bold cyan"
+                    status_text += f" {spinner}"
+        ret_offset, ret_style = -1, ""
+        if status in ("in_progress", "in_review", "qa"):
+            # Sent back by sign-off: show the return verdict until the
+            # PR's next sign-off decision (same marker as `pm pr list`),
+            # alongside the rework's own spinner / loop marker.
+            ret_verdict = display_signoff_verdict(pr)
+            if ret_verdict in SIGNOFF_VERDICT_ICONS:
+                ret_offset = 2 + len(status_text) + 1
+                ret_style = SIGNOFF_VERDICT_STYLES.get(ret_verdict, "bold blue")
+                status_text += f" {SIGNOFF_VERDICT_ICONS[ret_verdict]}"
         if pr.get("spec_pending") and not loop_marker:
             marker_offset = 2 + len(status_text) + 1
             loop_style = "bold yellow"
@@ -637,6 +672,8 @@ class PRNode(Widget):
             for dx in range(marker_offset, marker_offset + marker_len):
                 if 0 <= dx < NODE_W:
                     style_grid[3][dx] = f"{loop_style} {bg_style}".strip()
+        if 0 <= ret_offset < NODE_W:
+            style_grid[3][ret_offset] = f"{ret_style} {bg_style}".strip()
 
         return _grid_to_text(grid, style_grid)
 
@@ -821,20 +858,20 @@ class TechTree(Widget):
     # -- layout caching ------------------------------------------------------
 
     def _auto_start_sig(self) -> tuple:
-        """Auto-start ``(enabled, target)`` — drives the ◎ marker on the target.
+        """Auto-start ``(enabled, targets)`` — drives the ◎ marker on targets.
 
-        The target is often a *pending* node (so it isn't covered by
-        ``refresh_active_nodes``), and toggling auto-start changes no PR data,
-        so this must be part of the layout signature for the marker to appear
-        and clear when the user toggles auto-start or repoints the target.
+        Targets are often *pending* nodes (so not covered by
+        ``refresh_active_nodes``), and adding/removing targets changes no PR
+        data, so this must be part of the layout signature for the markers to
+        appear and clear when the target set changes.
         """
         try:
             from pm_core.tui import auto_start as _auto_start
             enabled = _auto_start.is_enabled(self.app)
-            target = _auto_start.get_target(self.app) if enabled else None
-            return (enabled, target)
+            targets = tuple(_auto_start.get_targets(self.app)) if enabled else ()
+            return (enabled, targets)
         except Exception:
-            return (False, None)
+            return (False, ())
 
     def _signature(self) -> tuple:
         """A hashable signature of every input that affects layout or display.
@@ -852,6 +889,7 @@ class TechTree(Widget):
                 bool(pr.get("spec_pending")),
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
+                (pr.get("signoff") or {}).get("verdict"),
                 tuple(pr.get("depends_on") or []),
                 pr.get("updated_at"), pr.get("created_at"), pr.get("started_at"),
                 pr.get("reviewed_at"), pr.get("merged_at"),
@@ -874,6 +912,9 @@ class TechTree(Widget):
         # Cached id->pr lookup reused by selection / navigation / refresh paths,
         # so they don't each rebuild a dict over all PRs on every keystroke.
         self._pr_map = {pr["id"]: pr for pr in self._prs}
+        prev_ids = getattr(self, "_ordered_ids", None) or []
+        prev_sel = (prev_ids[self.selected_index]
+                    if 0 <= self.selected_index < len(prev_ids) else None)
         sig = self._signature()
         layout_changed = sig != self._layout_sig
         if layout_changed:
@@ -896,6 +937,11 @@ class TechTree(Widget):
         self._hidden_label_ids = result.hidden_label_ids
         self._plan_group_order = result.plan_group_order
 
+        # A reorder (status change, auto-start target change) keeps the
+        # cursor on the same PR rather than on whatever took its slot.
+        if (prev_sel and prev_sel in self._ordered_ids
+                and self._ordered_ids.index(prev_sel) != self.selected_index):
+            self.selected_index = self._ordered_ids.index(prev_sel)
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
 
@@ -1153,7 +1199,7 @@ class TechTree(Widget):
     def _is_active_pr(self, pr: dict) -> bool:
         """True if *pr*'s node may be animating (spinner / loop / merge marker)."""
         pr_id = pr.get("id")
-        if pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir"):
+        if pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir"):
             return True
         try:
             if self.app._review_loops.get(pr_id):

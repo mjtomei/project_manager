@@ -2,9 +2,9 @@
 
 from typing import Literal
 
-PRStatus = Literal["pending", "in_progress", "in_review", "qa", "merged", "closed"]
+PRStatus = Literal["pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"]
 
-VALID_PR_STATES = {"pending", "in_progress", "in_review", "qa", "merged", "closed"}
+VALID_PR_STATES = {"pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"}
 
 
 def is_valid_pr_status(status: str) -> bool:

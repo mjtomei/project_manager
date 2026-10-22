@@ -119,6 +119,21 @@ suppress-switch logic downstream is already correct (verified: with a valid
   the target is literal). The fix is backend-agnostic — the failure was the
   same `target_window=None`, just with the `#N` form.
 
+- **EC4 — QA `t` popup stays open after a successful switch** (user report,
+  2026-10-22). For `qa` the spinner deliberately does *not* switch — the TUI's
+  QA launch (`focus_or_start_qa`) does — so the client lands on the QA window
+  even when the spinner's root resolution is wrong. But the spinner then never
+  matches `qa-<display_id>` (`target_window=None`, or a stale `pr-xxxx` vs
+  `#N` display id read from another PR's workdir-clone `project.yaml`), so it
+  keeps spinning until the QA run reaches `done`/`failed`, holding the popup
+  open over the QA window. Same root cause as the review-loop symptom, so the
+  session-root resolution fixes it too. Live real-surface confirmation of this
+  variant is owed by QA (qa.md R6/R7); the unit tests below pin the spinner
+  behavior.
+- **EC5 — failed launch**: unchanged terminal-state short-circuit still prints
+  `✗ <action>: failed` and waits via `_wait_dismiss`
+  (`tests/test_picker_spinner_terminal.py`).
+
 ## 5. Ambiguities
 
 None unresolved. The task description's claim "the spinner is watching the
@@ -136,3 +151,11 @@ addresses the actual observed cause and satisfies all acceptance criteria.
   replaced by a new id (existing-window/fresh case). On pre-fix code these
   fail (select_window never called; spinner would loop) because display_id
   resolves to None.
+- Same harness for QA (`pr qa <pr>`): (c) new `qa-<id>` window appears →
+  spinner exits on `window_open` before the run reaches `done`, without
+  issuing its own `select_window`; (d) existing `qa-<id>` + `qa-<id>-s1` →
+  immediate `window_open` exit. Both fail pre-fix (spinner only exits via the
+  terminal-state path).
+- Concurrent launch race (`_review_window_launch_lock`, QA scenario 4
+  incidental fix, overlaps pr-3f85ad7):
+  `tests/test_review_window_launch_lock.py`.

@@ -79,6 +79,35 @@ switch fires.
   review window, and focus is not later stolen when the launch completes (the
   suppress-switch flag is honored).
 
+### R6 — QA `t` from another window: switch AND popup dismissal (new QA window)
+Added 2026-10-22 (user report: `t` switched the client to the QA window but the
+picker popup stayed open over it).
+- **Given** a PR with **no** `qa-<display_id>` window open, and the user's
+  active pane sits in a window whose cwd is outside the PR's project (a
+  different PR's workdir clone is the realistic case — its `pm/project.yaml` is
+  a stale branch copy).
+- **When** the user opens the popup picker on that PR and presses `t`.
+- **Then**, verified **independently**: (a) the invoking client's active window
+  becomes `qa-<display_id>` (the TUI's QA launch performs this switch); and
+  (b) once that window exists the popup process/overlay is gone without any
+  extra `q`/`Esc` keypress — it must not wait for the QA run to finish — while
+  the QA run keeps running (runtime_state still `running`, scenario windows
+  appear afterwards).
+
+### R7 — QA `t` with an existing QA window/run (foreign cwd)
+- **Given** the same foreign-cwd starting pane, with a QA run already open
+  (`qa-<display_id>` and `qa-<display_id>-sN` windows, run still `running`).
+- **When** the user presses `t` on that PR in the picker.
+- **Then** (a) the client lands on the QA window and (b) the popup closes
+  promptly; the existing QA run is not stopped or restarted.
+
+### R8 — A failed launch still surfaces its error
+- **Given** an action whose launch fails (runtime_state reaches `failed`, or a
+  terminal verdict of ERROR/KILLED, without its window appearing).
+- **When** it is invoked from the picker.
+- **Then** the popup shows `✗ <action>: failed (...)` and waits for
+  `q`/`Esc`/Enter — it must not silently close as if it had succeeded.
+
 ## Setup
 
 Common setup for every requirement (per `tui-manual-test.md`):
@@ -156,9 +185,13 @@ spins forever, no switch. Post-fix: switch fires.)
   passes on this branch (and demonstrably fails when the fix is reverted).
 - `q`/`Esc` closes the popup without switching, and the launch does not later
   steal focus.
+- QA `t` from another window (new and existing QA window): the client is on
+  `qa-<display_id>` AND the popup process is gone while QA keeps running.
+- A failed launch shows its error and waits for dismissal.
 
 **Fail:**
-- The popup stays on the spinner frame after the review window has opened.
+- The popup stays on the spinner frame after the review (or QA) window has
+  opened.
 - Focus never moves to `review-<display_id>` (active window stays on the
   launching window).
 - The spinner crashes, or a regression breaks the nominal project-cwd path or

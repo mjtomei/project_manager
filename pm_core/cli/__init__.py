@@ -21,6 +21,7 @@ import click
 
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
+from pm_core.workspace_trust import DEFAULT_PROMPT_GRACE_SECONDS
 
 # Import helpers used directly in this module.  Submodules import from
 # ``pm_core.cli.helpers`` directly rather than via re-export.
@@ -260,7 +261,7 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
-                 "qa-verdict-reminder-timeout"}
+                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -274,6 +275,7 @@ _SETTING_DEFAULTS = {
     "qa-max-scenarios": "(unset)",
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
+    "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
     "spec-mode": "prompt",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
@@ -283,6 +285,7 @@ def _list_settings():
     """Print all settings and their current values."""
     from pm_core.paths import get_global_setting, get_global_setting_value
     all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
             val = "on" if get_global_setting(name) else "off"
@@ -291,7 +294,7 @@ def _list_settings():
             val = raw if raw else _SETTING_DEFAULTS.get(name, "(unset)")
         default = _SETTING_DEFAULTS.get(name, "")
         marker = " (default)" if val == default else ""
-        click.echo(f"  {name:<22} {val}{marker}")
+        click.echo(f"  {name:<{width}} {val}{marker}")
 
 
 @cli.command("set")
@@ -328,6 +331,9 @@ def set_cmd(setting, value):
                                    reminder to a scenario agent (0 or unset = disabled)
 
       qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
+
+      trust-prompt-grace-seconds  Seconds an unattended session may sit at Claude's
+                                  workspace-trust prompt before pm fails it (default 120)
 
       spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
     """
@@ -406,9 +412,9 @@ def status_cmd():
     click.echo(f"\nPRs: {len(prs)} total")
     status_icons = {
         "pending": "⏳", "in_progress": "🔨", "in_review": "👀",
-        "qa": "🧪", "merged": "✅", "closed": "🚫",
+        "qa": "🧪", "sign_off": "✔️", "merged": "✅", "closed": "🚫",
     }
-    for s in ("pending", "in_progress", "in_review", "qa", "merged", "closed"):
+    for s in ("pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"):
         if s in counts:
             click.echo(f"  {status_icons.get(s, '?')} {s}: {counts[s]}")
 
@@ -448,6 +454,25 @@ def prompt(pr_id: str | None):
         raise SystemExit(1)
 
     click.echo(prompt_gen.generate_prompt(data, pr_entry["id"]))
+
+
+@cli.command("md-render")
+@click.argument("md_path", type=click.Path(exists=True, dir_okay=False,
+                                           readable=True))
+def md_render(md_path: str):
+    """Render a ``.md`` file to body-only HTML on stdout.
+
+    Used by the sign-off agent to inline-embed `.md` evidence into
+    ``report.html`` inside a collapsed ``<details>`` block. Body-only output
+    inherits the embedding page's styling and stays in sync with the source
+    `.md` because rendering happens at report-write time.
+    """
+    from pathlib import Path
+    from pm_core.markdown_render import render_markdown_body
+    # Evidence files can carry stray binary bytes (e.g. NULs piped into a
+    # log) — decode with replacement rather than tracebacking mid-report.
+    text = Path(md_path).read_text(encoding="utf-8", errors="replace")
+    click.echo(render_markdown_body(text), nl=False)
 
 
 @cli.command("_check", hidden=True)
@@ -590,6 +615,10 @@ COMMANDS
   pm pr import-github           Import existing GitHub PRs into project yaml
   pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
   pm pr cleanup [pr-id]         Remove workdir for merged PR
+  pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html)
+  pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
+  pm pr signoff integrate <pr-id>  Check integration with the latest base (isolated candidate)
+  pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
   pm pr note list <pr-id>              List notes on a PR
@@ -633,9 +662,15 @@ COMMANDS
   pm guide                      Guided workflow (init → plan → PRs → start)
   pm notes                      Open session notes in editor
   pm prompt [pr-id]             Print Claude prompt for a PR
+  pm md-render <path>           Render a .md file to body-only HTML (report embedding)
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)
   pm watcher                    Run autonomous watcher loop (blocking)
+  pm autostart add <id>...      Add auto-start targets in the running TUI
+  pm autostart remove <id>...   Remove auto-start targets (never kills windows)
+  pm autostart list|status      Targets / per-run progress (--json)
+  pm trust status|list          Workspace trust for unattended Claude sessions
+  pm trust add|remove <path>    Authorize a non-pm directory for automatic trust
   pm rebalance                  Re-enable auto-balanced pane layout
   pm set <setting> <value>      Configure a global pm setting
   pm edit                       Open project.yaml in $EDITOR (with locking)
@@ -682,7 +717,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project, fake_claude, fake_github  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project, fake_claude, fake_github, autostart, trust  # noqa: E402, F401
 
 
 def main():

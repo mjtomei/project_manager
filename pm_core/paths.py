@@ -66,6 +66,27 @@ def workdirs_base() -> Path:
     return d
 
 
+def _resolve_session_tag(start_path: Path | None = None) -> str | None:
+    """Resolve the active session tag.
+
+    Only consults the pm-session helper when actually inside a tmux pm
+    session — its cwd-based fallback synthesises a bogus
+    "pm-<name>-00000000" tag for any cwd, which would silently route
+    captures to a fake session dir when run from a non-git cwd.
+    """
+    pm_sess = None
+    try:
+        from pm_core import tmux as tmux_mod
+        if tmux_mod.in_tmux():
+            from pm_core.cli.helpers import _get_pm_session
+            pm_sess = _get_pm_session()
+    except Exception:
+        pm_sess = None
+    if pm_sess:
+        return pm_sess.removeprefix("pm-")
+    return get_session_tag(start_path=start_path)
+
+
 def captures_dir(pr_id: str,
                  session_tag: str | None = None,
                  start_path: Path | None = None) -> Path | None:
@@ -80,7 +101,9 @@ def captures_dir(pr_id: str,
        tmux-derived tag, else the cwd-derived tag.
     2. Otherwise the container bind-mount at
        :data:`CONTAINER_CAPTURES_MOUNT` if it exists (set up by
-       :func:`container.create_container`).
+       :func:`container.create_container`) and belongs to *pr_id* — the
+       container's :data:`CAPTURES_PR_ENV` names the mounted PR; when it
+       is unset any PR may use the mount.
     3. Otherwise create and return the host path.
 
     The ``~/.pm`` path takes precedence so on the host we always land
@@ -91,27 +114,46 @@ def captures_dir(pr_id: str,
     present.
     """
     if session_tag is None:
-        try:
-            from pm_core.cli.helpers import _get_pm_session
-            pm_sess = _get_pm_session()
-        except Exception:
-            pm_sess = None
-        if pm_sess:
-            session_tag = pm_sess.removeprefix("pm-")
-        else:
-            session_tag = get_session_tag(start_path=start_path)
+        session_tag = _resolve_session_tag(start_path)
     host_path: Path | None = None
     if session_tag:
         host_path = sessions_dir() / session_tag / "captures" / pr_id
         if host_path.is_dir():
             return host_path
     mount = Path(CONTAINER_CAPTURES_MOUNT)
-    if mount.is_dir():
+    # The mount belongs to one PR (PM_CAPTURES_PR, set at container
+    # creation). A throwaway pm project driven inside the container
+    # (e.g. nested fake-Claude QA runs) must not write its own PRs'
+    # captures into it.
+    mount_pr = os.environ.get(CAPTURES_PR_ENV)
+    if mount.is_dir() and (not mount_pr or mount_pr == pr_id):
         return mount
     if host_path is not None:
         host_path.mkdir(parents=True, exist_ok=True)
         return host_path
     return None
+
+
+def captures_root(session_tag: str | None = None,
+                  start_path: Path | None = None) -> Path | None:
+    """Return the host captures *root* (``~/.pm/sessions/<tag>/captures/``).
+
+    This is the directory that holds every per-PR captures dir; it is also
+    the document root the ``pm pr dashboard`` HTTP server serves per-PR
+    ``report.html`` and evidence from. Tag resolution mirrors
+    :func:`captures_dir`: *session_tag* if supplied, else the pm-session
+    tag, else the cwd/tmux-derived tag. Returns ``None`` when no tag can
+    be derived (e.g. not inside a git repo). The directory is created if
+    it doesn't exist when a tag is available.
+    """
+    if session_tag is None:
+        session_tag = _resolve_session_tag(start_path)
+    if not session_tag:
+        return None
+    root = sessions_dir() / session_tag / "captures"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
 
 # Container-internal path where the host's captures_dir is bind-mounted
 # during container creation. Workers running in containers reference
@@ -120,6 +162,27 @@ def captures_dir(pr_id: str,
 # chance of colliding with anything the host repo might already have at
 # a top-level ``/captures`` path.
 CONTAINER_CAPTURES_MOUNT = "/pm-captures"
+
+# Env var naming the PR whose captures dir is mounted at
+# CONTAINER_CAPTURES_MOUNT (see captures_dir).
+CAPTURES_PR_ENV = "PM_CAPTURES_PR"
+
+
+def latest_qa_status_path(pr_id: str) -> Path | None:
+    """Return the most-recent ``qa_status.json`` for *pr_id*, or None.
+
+    Single source of truth for locating a PR's latest QA status file under
+    ``~/.pm/workdirs/qa/<pr_id>-*/qa_status.json`` (a fresh QA run gets a new
+    ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins).
+    Shared by the auto-sequence QA gate and the sign-off prompt/evidence
+    surfaces so they never drift.
+    """
+    qa_dir = workdirs_base() / "qa"
+    if not qa_dir.is_dir():
+        return None
+    candidates = sorted(qa_dir.glob(f"{pr_id}-*/qa_status.json"),
+                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    return candidates[-1] if candidates else None
 
 
 def sessions_dir() -> Path:

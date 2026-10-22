@@ -232,6 +232,58 @@ From the TUI:
 The loop runs in the background without stealing focus from your active window,
 so you can continue working while reviews iterate.
 
+## Auto-start targets
+
+Auto-start drives an explicit set of target PRs through implementation →
+review → QA → sign-off inside the running TUI, starting each target's
+dependencies as they become ready (a dependency shared by several targets runs
+once). Targets are additive: pressing `O` (stop before merge) or `A`
+(auto-merge) on another PR adds it without dropping the others. An empty set
+means auto-start is off.
+
+A QA PASS hands the PR to sign-off; the router's verdict is recorded against
+the branch HEAD and routed (re-QA, back to review, back to implementation, or
+blocked for a human). Only a fresh `SIGNOFF_MERGE` on the current HEAD
+finishes the sequence: `O` stops there ("ready to merge — press g"), `A`
+merges. With `skip_qa`, sign-off follows the review PASS.
+
+```bash
+pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)
+pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
+pm autostart add pr-final --wait-for-merge  # whole chain, every merge manual
+pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
+pm autostart status --json             # what every target and dependency is doing
+```
+
+`--stop-before-merge` holds only the named target, so its prerequisites still
+auto-merge. To walk an entire dependency chain with manual merges, add just the
+final PR with `--wait-for-merge`:
+
+1. The final PR stays the only target; every unmerged transitive prerequisite
+   is held for a manual merge (as is the target itself). Holds are derived from
+   the current dependency graph, so a prerequisite added later is held too.
+2. Each ready prerequisite runs implementation → review → QA → a fresh
+   sign-off, then waits: the log shows `✓ <pr> signed off … — waiting for
+   manual merge (wait-for-merge: pr-final)` and `pm autostart status` / the
+   `a` popup show `[wait-for-merge ← pr-final]` with the reason.
+3. Merge it yourself (`g` in the TUI or `pm pr merge <pr>`; the sign-off gate
+   still applies). The TUI reloads the merged state and the scheduler starts
+   the dependents that merge unblocked — no further `autostart` command.
+4. Repeat until the final PR signs off and waits; merging it completes the
+   target.
+
+A dependency shared by several targets is held while any active wait-for-merge
+target needs it or it carries its own stop mark; other targets keep their
+policy. Removing the wait target, or re-adding it with `--auto-merge` /
+`--stop-before-merge`, releases only the holds it caused (the command reports
+`released merge hold: …`). Re-adding without a flag keeps the policy; giving
+two policy flags is rejected without changing anything. The policy survives a
+merge-triggered TUI restart.
+
+Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
+phase, running/waiting/paused/failed state with a reason, review iteration or QA
+progress, and Enter to jump to the run's tmux window.
+
 ## Shared sessions
 
 By default, `pm session` creates a private tmux session. To let other users

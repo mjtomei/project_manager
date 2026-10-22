@@ -4,6 +4,10 @@ Run a population of pm variants in parallel, score them by an external fitness m
 
 This plan is intentionally underspecified. Many design choices should draw on prior work in evolutionary algorithms (selection pressure, population diversity, anchor strategies, novelty search, multi-objective fitness) and will be worked out collaboratively before phase breakdown.
 
+> **First experiment (2026-10-19):** [Document evaluation](plan-doc-eval.md) builds and runs a document-only prompt-improvement loop using the known-good corpus, then adopts measured improvements in existing PM planning prompts. [Execution evaluation](../docs/planning-evaluation.md) follows on existing benchmark tasks, comparing direct execution without a separate plan against current and improved planning under matched total budgets. Full PM orchestration comes afterward. Open/local backends are supported, and the full tournament prerequisites below do not block the document-only bootstrap.
+
+> **Cross-plan note (2026-08-31):** [[plan-jurisdiction]] Set B builds the seeded-bad-change **exam harness** as standing infrastructure — extending this plan's `signoff` two-evaluation-router A/B into the certification instrument for process grants; the appendix's A/B candidates get their measurement substrate from it plus #160's fixtures. The riscv-pareto campaign (`../riscv-pareto/pm/plans/plan-campaign.md`) is a natural future **target**: an external project exposing a numeric fitness with held-out structure (Pareto-front movement under a pinned eval pipeline).
+
 ## Goals
 
 - Use pm to improve any project that exposes a Claude-based fitness metric, including pm itself.
@@ -15,7 +19,7 @@ This plan is intentionally underspecified. Many design choices should draw on pr
 
 - Bug-fix loop demonstrably unsupervised — regression-loop Phase 7 evidence and coverage gates landed.
 - Benchmark loaders from plan-002 — held-out slices for variant evaluation come from here.
-- Per-plan auto-merge=false (`pr-b77702b`) so variant branches stage as candidates.
+- Per-plan gated-merge config on the plan auto-start watcher (`pr-ff9b728`, plan-regression Phase 11 — supersedes `pr-b77702b`'s auto_merge flag, which was rescoped) so variant branches stage as candidates.
 - Container isolation for variants (already in plan-qa).
 
 ## Core concepts
@@ -44,6 +48,19 @@ The tournament is a pm prompt. Variants can propose changes to it. The variant e
 
 Each target has a champion — the variant currently used for production work against it. Promotion is gated: a challenger must beat the champion by some margin for some duration before replacing it, with a human confirm step. The exact gate parameters are a design choice for later.
 
+## Prior art: open-ended search and the controlled-aberration mechanism
+
+The tournament is a search over intelligences; its hardest open question (novelty vs. fitness, diversity preservation) is the **open-endedness** problem, which has direct prior art to draw on (all `unverified` until audited):
+
+- **Open-endedness / objective deception** — Stanley & Lehman, *Why Greatness Cannot Be Planned*: objective-directed search cannot reach what isn't on the gradient toward the stated objective; reaching the genuinely new *requires* non-goal-directed exploration. The load-bearing reason the tournament needs more than fitness-maximization.
+- **Quality-diversity / novelty search** — Lehman & Stanley (novelty search); MAP-Elites (Mouret & Clune); POET (Wang et al.). Illuminate the *space* of variants by behavioral niche rather than collapsing to one scalar optimum — the concrete algorithms for "diversity preservation."
+- **Cultural evolution** — Henrich, *The Secret of Our Success* (adaptive practices no individual understands; the Naskapi divination example *randomizes* hunting to avoid over-exploitation — variation → capability beyond individual comprehension); Boyd & Richerson (transmission biases); Tomasello's **cultural ratchet** (retain + propagate winners so capability compounds — the third piece beyond variation + selection).
+- **Schizotypy ↔ creativity / bet-hedging** — populations apparently tolerate a *rate* of aberrant cognition because the rare innovation payoff justifies the common cost; the biological analogue of a controlled mutation/aberration rate.
+
+**The high-level mechanism (a candidate for the novelty axis).** To reach methods you can't conceive, allow individuals to operate **without justification at a controlled rate** — non-goal-directed variation. Most aberrations are useless and selected out; the rare useful ones are kept by the **external fitness itself** — no special "is-this-better" judge is required (the task fitness *is* the selection; a self-recognition judge is only a *large accelerant*, verify ≫ generate). The one hard requirement is that the fitness be **grounded and long-horizon** — a myopic fitness kills slow-burn innovations that look worse at first. A safe, focused form applies the aberration only to an **"aspirational simulation" line of thinking** (periodically simulate a higher intelligence; vary only there), gated by fitness before it acts.
+
+**Relation to the far-term framing.** This is the near-term, single-target version of the *search over minds / stream-compositions* sketched as the parked `mind-search` capstone. The aberration mechanism and these references apply to both; the in-reasoning version is the "aspirational simulation" branch-type in `literature-review-user-model-extension.md` §4.1 / [[plan-consult]].
+
 ## Open questions to work through before phase breakdown
 
 - Selection and population dynamics: tournament size, replacement strategy, diversity preservation, novelty vs. fitness tradeoff. The previous evolutionary-algorithms work should inform this directly.
@@ -60,3 +77,21 @@ Each target has a champion — the variant currently used for production work ag
 - Adding a new target is a configuration change plus a harness wrapper.
 - The tournament prompt is evolvable through the loop, bounded by anchors and held-out corpora.
 - The operator can ask "for target T, which variant is the current champion, why, and what is it working on" and get a coherent answer.
+
+## Appendix: Workflow A/B candidates (deferred)
+
+Multi-agent orchestration (Claude Code's Workflow tool, or an equivalent built in pm Python) is a candidate axis for variants once the tournament substrate exists. We are not adopting it now because we cannot yet measure whether it meaningfully improves output quality vs. the current single-prompt approach, and adopting it has real costs: reduced portability to non-Claude-Code backends (including local LLMs behind Claude) and reduced visibility (you cannot attach to a workflow mid-run the way you can attach to a tmux pane in the QA flow).
+
+Once regression-test infrastructure (plan-regression Phase 7 + plan-002 benchmarks) gives us a stable quantitative metric, the following sites are worth running as A/B variants — single-prompt champion vs. multi-agent challenger — and promoting only if the challenger wins by margin:
+
+- **`adversarial_review`** — current single-prompt review vs. parallel skeptic finders + independent voter quorum. Quality hypothesis: independent skeptics catch false positives a single review prompt rationalizes past. Measure: review precision/recall against curated bug fixtures.
+- **`review_qa_benchmark` harness** — sequential per-case scoring vs. fan-out per case with deterministic aggregation. Hypothesis: pure throughput win, not quality; promote only if dev-time to build the harness in pm Python is meaningfully higher than wiring it through Workflow.
+- **`adversary-runner` / `plan-gen-integration` / `spec-gen-integration`** — single plan/spec gen prompt vs. three-lens fan-out (internal-consistency / external-skeptic / cross-reference) with loop-until-quiescence. Hypothesis: lens diversity catches gaps a single prompt misses. Measure: held-out execution success, rework and total cost against direct execution and current planning. Human readability and reference-plan comparisons remain optional diagnostics; see [planning evaluation](../docs/planning-evaluation.md).
+- **`external-fitness` + `anchor-variants`** — this tournament's own scheduler. Whether the variant grid runs as Workflow vs. pm-Python orchestration is itself an A/B once the metric exists. Hypothesis: Workflow's built-in journaling/resume/concurrency-cap is a dev-time win; quality should be identical.
+- **`prior-work-survey` (plan-living-artifacts)** — single deep-research prompt (or the existing `deep-research` skill) vs. fan-out per-area + adversarial citation verifier. Hypothesis: citation hallucination rate drops with an independent verifier pass. Measure: cite-check precision against the produced bibliography.
+- **Citation audit loop (plan-litreview augmented cycle).** Per-citation fan-out vs. the current single sequential session walking the citation list. The audit already writes one entry per citation to disk as it runs, so visibility cost is low. Hypothesis: independent per-citation judgment is better calibrated than a single pass, especially for `over-characterizes` / `under-characterizes` verdicts. Measure: agreement with held-out human-graded verdicts on a fixture artifact; false-faithful rate on seeded mischaracterizations. See [[plan-quality#appendix-same-question-across-many-pieces-of-text]] for the per-citation framing.
+- **`signoff` two-evaluation router** — current single sign-off prompt vs. parallel (evidence-supports-diff) + (anti-shortcut/meta-QA) subagents gated by a deterministic Python router. Hypothesis: independent evaluations catch shortcuts the merged prompt rationalizes. Measure: false-PASS rate on injected shortcut fixtures.
+
+For each candidate, the A/B must control for token spend — a workflow that wins only because it spent 5× the tokens isn't a real win unless the cost ceiling explicitly allows it. The tournament's existing per-target cost ceiling is the right place to enforce this.
+
+Visibility cost is part of the cost side of the ledger: workflows that hide debuggable session state should clear a higher quality bar than ones (like batch eval harnesses) that nobody attaches to mid-run anyway.

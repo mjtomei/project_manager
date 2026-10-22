@@ -1,6 +1,8 @@
-"""Regression tests for pr-8409c64: the review-loop popup spinner must switch
-focus to the review window even when the popup process's cwd points at a
-*different* pm project than the one that owns the PR.
+"""Regression tests for pr-8409c64: the popup spinner must recognise the
+action's window — and, for review-loop, switch focus to it — even when the
+popup process's cwd points at a *different* pm project than the one that owns
+the PR (e.g. another PR's workdir clone, whose project.yaml is a stale branch
+copy).
 
 Root cause: ``_wait_for_tui_command`` resolved the PR's ``display_id`` via
 ``state_root()`` (cwd-/``_project_override``-based). When the popup runs from
@@ -9,6 +11,11 @@ a window whose cwd isn't the PR's project, ``state_root()`` loads the wrong
 ``target_window`` becomes ``None`` — so ``_find_target_window_ids()`` returns
 ``[]`` forever, ``window_open`` is never ``True`` and the spinner never fires
 ``select_window`` (it spins on the "starting" frame).
+
+For QA (``t`` in the picker) the same miss shows up differently: the TUI's QA
+launch performs the focus switch itself, so the client *does* move to the QA
+window, but the spinner never recognises that window and holds the popup open
+over it until the QA run reaches a terminal state.
 
 The fix resolves the root from the session (``_resolve_root_from_session``,
 matching the popup picker's own listing) before falling back to
@@ -47,12 +54,13 @@ def _load(root):
     return _OWNER_DATA if str(root) == _OWNER_ROOT else _FOREIGN_DATA
 
 
-def _run_spinner(window_seq, state_seq):
+def _run_spinner(window_seq, state_seq,
+                 tui_cmd="review-loop start pr-001"):
     """Drive _wait_for_tui_command with simulated tmux + runtime_state.
 
     Simulates the bug condition: state_root() resolves to a FOREIGN project
     (no PR), while the session resolves to the OWNER project (has PR).
-    Returns the fake select_window mock.
+    Returns (select_window mock, echoed lines).
     """
     wq = list(window_seq)
     sq = list(state_seq)
@@ -67,6 +75,7 @@ def _run_spinner(window_seq, state_seq):
     fake_tmux = MagicMock()
     fake_tmux.list_windows.side_effect = list_windows
     fake_tmux.select_window = MagicMock(return_value=True)
+    echoed: list[str] = []
 
     with patch.object(session_mod, "tmux_mod", fake_tmux), \
          patch.object(session_mod, "state_root", return_value=_FOREIGN_ROOT), \
@@ -78,13 +87,14 @@ def _run_spinner(window_seq, state_seq):
                return_value=False), \
          patch.object(session_mod, "_wait_dismiss"), \
          patch("select.select", return_value=([], [], [])), \
-         patch("click.echo"):
+         patch("click.echo",
+               side_effect=lambda msg="", **_kw: echoed.append(str(msg))):
         try:
             session_mod._wait_for_tui_command(
-                "pm-sess", "review-loop start pr-001", tick_s=0.0001)
+                "pm-sess", tui_cmd, tick_s=0.0001)
         except SystemExit:
             pass
-    return fake_tmux.select_window
+    return fake_tmux.select_window, echoed
 
 
 def test_switch_fires_for_new_window(fake_stdin):
@@ -96,7 +106,7 @@ def test_switch_fires_for_new_window(fake_stdin):
     terminal short-circuit *without switching*. This assertion then fails.
     """
     W = "review-pr-001"
-    select_window = _run_spinner(
+    select_window, _ = _run_spinner(
         # snapshot: no window; then the freshly launched window appears and
         # stays (post-fix switches here). A trailing 'done' bounds the
         # pre-fix loop (which never matches the window) via the
@@ -118,7 +128,7 @@ def test_switch_fires_for_existing_window_fresh(fake_stdin):
     logic waits for the old id to go and a new id to appear, then switches.
     """
     W = "review-pr-001"
-    select_window = _run_spinner(
+    select_window, _ = _run_spinner(
         # snapshot sees @5; then it's killed; then @9 appears and stays
         # (post-fix switches here). State stays 'running' until after @9 is
         # up, then 'done' bounds the pre-fix loop.
@@ -131,3 +141,44 @@ def test_switch_fires_for_existing_window_fresh(fake_stdin):
     )
     assert select_window.called, "spinner should switch to the rebuilt window"
     assert select_window.call_args.args == ("pm-sess", W)
+
+
+def _exited_on_window(echoed, window):
+    return any(f"window {window} is open" in line for line in echoed)
+
+
+def test_qa_spinner_dismisses_when_new_qa_window_opens(fake_stdin):
+    """``t`` from another window, no QA window yet → QA window appears →
+    the spinner exits (popup closes) while the run is still going.
+
+    Pre-fix the spinner never matched ``qa-pr-001`` and only exited once the
+    run reached 'done' — i.e. the popup stayed over the QA window for the
+    whole run.
+    """
+    W = "qa-pr-001"
+    select_window, echoed = _run_spinner(
+        window_seq=[[], [(W, "@9")], [(W, "@9")]],
+        state_seq=[{"state": "launching", "updated_at": "t0"},
+                   {"state": "running", "updated_at": "t1"},
+                   {"state": "done", "verdict": "PASS", "updated_at": "t2"}],
+        tui_cmd="pr qa pr-001",
+    )
+    assert _exited_on_window(echoed, W), echoed
+    assert not any("qa: done" in line for line in echoed), echoed
+    # The TUI's QA launch owns the focus switch for qa; the spinner must
+    # not issue a second one.
+    assert not select_window.called
+
+
+def test_qa_spinner_dismisses_for_existing_qa_window(fake_stdin):
+    """``t`` with a QA run already open (main + scenario windows) → the
+    spinner exits immediately instead of waiting for the run to finish."""
+    select_window, echoed = _run_spinner(
+        window_seq=[[("qa-pr-001", "@5"), ("qa-pr-001-s1", "@6")]],
+        state_seq=[{"state": "running", "updated_at": "t0"},
+                   {"state": "done", "verdict": "PASS", "updated_at": "t1"}],
+        tui_cmd="pr qa pr-001",
+    )
+    assert _exited_on_window(echoed, "qa-pr-001"), echoed
+    assert not any("qa: done" in line for line in echoed), echoed
+    assert not select_window.called

@@ -19,10 +19,17 @@ class CommandSubmitted(Message):
 class CommandBar(Input):
     """Command input bar at the bottom of the TUI."""
 
-    UNFOCUSED_PLACEHOLDER = "press / to type a command"
+    # The bottom hint doubles as the TUI's footer (no Footer widget, so no
+    # extra row): it advertises the auto-start runs popup key (R18).
+    UNFOCUSED_PLACEHOLDER = "press / to type a command · a Runs"
     FOCUSED_PLACEHOLDER = "Type command (e.g. pr start pr-001)..."
 
     def __init__(self, **kwargs):
+        # Focus comes back to the bar programmatically (e.g. after a queued
+        # ``pm autostart`` command refocuses the tree mid-typing); Input's
+        # default select-on-focus would then select the half-typed command
+        # so the next keystroke replaces it.
+        kwargs.setdefault("select_on_focus", False)
         super().__init__(placeholder=self.UNFOCUSED_PLACEHOLDER, **kwargs)
 
     def on_focus(self) -> None:

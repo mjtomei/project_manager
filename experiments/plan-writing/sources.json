@@ -1,0 +1,337 @@
+{
+  "selection": "Whole specified document collections; no manual quality curation. Individual public examples retained where no bulk collection was identified.",
+  "label": "known_good",
+  "label_basis": "User-directed working assumption for comparison against matched LLM drafts.",
+  "immediate_scope": "Bootstrap document-only evaluator calibration and automated prompt improvement using the known-good corpus without manual quality curation, then adopt measured improvements in PM's existing planning prompts. See pm/plans/plan-doc-eval.md.",
+  "later_scope": "Evaluate execution on existing benchmark tasks against direct prompting without a separate plan, then add full PM orchestration. The logged proposal/code/test pairs are additional tests; extend to FPGA correctness and resource/timing results and OpenROAD results under fixed constraints. See pm/docs/planning-evaluation.md.",
+  "sources": [
+    {
+      "id": "go-proposals",
+      "kind": "git",
+      "url": "https://github.com/golang/proposal.git",
+      "domain": "software",
+      "document_kind": "design_proposal",
+      "sparse": [
+        "/design/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "design/*.md"
+      ],
+      "split_group": "go-proposals"
+    },
+    {
+      "id": "rust-rfcs",
+      "kind": "git",
+      "url": "https://github.com/rust-lang/rfcs.git",
+      "domain": "software",
+      "document_kind": "design_proposal",
+      "sparse": [
+        "/text/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "text/*.md"
+      ],
+      "split_group": "rust"
+    },
+    {
+      "id": "rust-goals",
+      "kind": "git",
+      "url": "https://github.com/rust-lang/goals.git",
+      "domain": "software",
+      "document_kind": "project_plan",
+      "sparse": [
+        "/src/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "src/*.md"
+      ],
+      "split_group": "rust"
+    },
+    {
+      "id": "python-peps",
+      "kind": "git",
+      "url": "https://github.com/python/peps.git",
+      "domain": "software",
+      "document_kind": "enhancement_proposal",
+      "sparse": [
+        "/peps/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "peps/pep-*.rst",
+        "peps/pep-*.md"
+      ],
+      "split_group": "python-peps"
+    },
+    {
+      "id": "kubernetes-keps",
+      "kind": "git",
+      "url": "https://github.com/kubernetes/enhancements.git",
+      "domain": "software",
+      "document_kind": "enhancement_proposal",
+      "sparse": [
+        "/keps/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "keps/*.md"
+      ],
+      "split_group": "kubernetes-keps"
+    },
+    {
+      "id": "cockroach-rfcs",
+      "kind": "git",
+      "url": "https://github.com/cockroachdb/cockroach.git",
+      "domain": "software",
+      "document_kind": "design_proposal",
+      "sparse": [
+        "/docs/RFCS/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "docs/RFCS/*.md"
+      ],
+      "split_group": "cockroach-rfcs"
+    },
+    {
+      "id": "linux-docs",
+      "kind": "git",
+      "url": "https://github.com/torvalds/linux.git",
+      "domain": "software",
+      "document_kind": "design_and_reference",
+      "sparse": [
+        "/Documentation/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "Documentation/*.rst",
+        "Documentation/*.txt"
+      ],
+      "split_group": "linux"
+    },
+    {
+      "id": "quic-drafts",
+      "kind": "git",
+      "url": "https://github.com/quicwg/base-drafts.git",
+      "domain": "internet_protocols",
+      "document_kind": "protocol_draft",
+      "sparse": [
+        "*.md",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "*.md"
+      ],
+      "split_group": "ietf-quic"
+    },
+    {
+      "id": "opentitan",
+      "kind": "git",
+      "url": "https://github.com/lowRISC/opentitan.git",
+      "domain": "hardware",
+      "document_kind": "design_and_verification",
+      "sparse": [
+        "*.md",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "*.md"
+      ],
+      "split_group": "opentitan"
+    },
+    {
+      "id": "openroad",
+      "kind": "git",
+      "url": "https://github.com/The-OpenROAD-Project/OpenROAD.git",
+      "domain": "hardware_tools",
+      "document_kind": "design_and_flow_documentation",
+      "sparse": [
+        "*.md",
+        "*.rst",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "*.md",
+        "*.rst"
+      ],
+      "split_group": "openroad"
+    },
+    {
+      "id": "openroad-flow",
+      "kind": "git",
+      "url": "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git",
+      "domain": "hardware_tools",
+      "document_kind": "flow_documentation",
+      "sparse": [
+        "*.md",
+        "*.rst",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "*.md",
+        "*.rst"
+      ],
+      "split_group": "openroad"
+    },
+    {
+      "id": "f4pga",
+      "kind": "git",
+      "url": "https://github.com/chipsalliance/f4pga.git",
+      "domain": "fpga",
+      "document_kind": "toolchain_documentation",
+      "sparse": [
+        "*.md",
+        "*.rst",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "*.md",
+        "*.rst"
+      ],
+      "split_group": "f4pga"
+    },
+    {
+      "id": "ietf-rfcs",
+      "kind": "rsync",
+      "domain": "internet_protocols",
+      "document_kind": "rfc",
+      "url": "rsync.rfc-editor.org::rfcs-text-only/"
+    },
+    {
+      "id": "oxide-rfds",
+      "kind": "web",
+      "domain": "systems_and_hardware",
+      "document_kind": "request_for_discussion",
+      "index": "https://rfd.shared.oxide.computer/",
+      "oxide_index": true,
+      "link_pattern": "^https://rfd.shared.oxide.computer/rfd/[0-9]+$"
+    },
+    {
+      "id": "chromium-designs",
+      "kind": "web",
+      "domain": "software",
+      "document_kind": "design_document",
+      "index": "https://www.chromium.org/developers/design-documents/",
+      "link_pattern": "^https://www.chromium.org/developers/design-documents/",
+      "split_group": "chromium"
+    },
+    {
+      "id": "chromiumos-designs",
+      "kind": "web",
+      "domain": "systems_and_hardware",
+      "document_kind": "design_document",
+      "index": "https://www.chromium.org/chromium-os/chromiumos-design-docs/",
+      "link_pattern": "^https://www.chromium.org/chromium-os/",
+      "split_group": "chromium"
+    },
+    {
+      "id": "nasa-mission-concepts",
+      "kind": "web",
+      "domain": "physical_sciences",
+      "document_kind": "mission_concept_study",
+      "index": "https://science.nasa.gov/planetary-science/resources/documents/",
+      "index_start_heading": "NASA Planetary",
+      "index_end_heading": "Previous",
+      "link_pattern": "(?i)\\.pdf(?:\\?|$)",
+      "split_group": "nasa-planetary-concepts"
+    },
+    {
+      "id": "nasa-luvoir",
+      "kind": "web",
+      "domain": "physical_sciences",
+      "document_kind": "mission_concept_study",
+      "index": "https://asd.gsfc.nasa.gov/luvoir/reports/",
+      "link_pattern": "(?i)\\.pdf(?:\\?|$)"
+    },
+    {
+      "id": "nasa-lynx",
+      "kind": "web",
+      "domain": "physical_sciences",
+      "document_kind": "mission_concept_study",
+      "index": "https://wwwastro.msfc.nasa.gov/lynx/",
+      "link_pattern": "(?i)\\.pdf(?:\\?|$)"
+    },
+    {
+      "id": "cern-hl-lhc",
+      "kind": "web",
+      "domain": "physical_sciences",
+      "document_kind": "technical_design_report",
+      "index": "https://e-publishing.cern.ch/index.php/CYRM/issue/view/127",
+      "link_pattern": "/CYRM/article/view/[0-9]+/[0-9]+$",
+      "ojs_pdf": true
+    },
+    {
+      "id": "hs2-business-cases",
+      "kind": "web",
+      "domain": "business_and_infrastructure",
+      "document_kind": "business_case",
+      "urls": [
+        "https://assets.publishing.service.gov.uk/media/5fc51d7b8fa8f54755392863/full-business-case-hs2-phase-one.pdf",
+        "https://assets.publishing.service.gov.uk/media/5a74e9b740f0b65c0e845801/hs2-phase-2b-sobc-commercial-case.pdf"
+      ]
+    },
+    {
+      "id": "linux-proposals",
+      "kind": "web",
+      "domain": "software",
+      "document_kind": "proposal_cover_letter",
+      "urls": [
+        "https://lwn.net/Articles/916290/",
+        "https://lkml.iu.edu/hypermail/linux/kernel/2110.0/03137.html"
+      ],
+      "text_selector": "pre",
+      "split_group": "linux"
+    },
+    {
+      "id": "fpga-proposals",
+      "kind": "web",
+      "domain": "fpga",
+      "document_kind": "project_proposal",
+      "urls": [
+        "https://abhishekanand.hashnode.dev/gsoc-2023-the-proposal-that-got-me-in",
+        "https://github.com/chipsalliance/chisel/issues/3112",
+        "https://github.com/chipsalliance/chisel/issues/725"
+      ]
+    },
+    {
+      "id": "basecamp-pitches",
+      "kind": "web",
+      "domain": "product_planning",
+      "document_kind": "pitch_examples_and_guidance",
+      "urls": [
+        "https://basecamp.com/shapeup/1.5-chapter-06"
+      ]
+    },
+    {
+      "id": "aosa",
+      "kind": "git",
+      "url": "https://github.com/aosabook/aosabook.git",
+      "domain": "software",
+      "document_kind": "architecture_exposition",
+      "sparse": [
+        "/docs/en/",
+        "/LICENSE*",
+        "/COPYING*"
+      ],
+      "include": [
+        "docs/en/*.html"
+      ],
+      "license_note": "AOSA site states CC-BY-3.0; retain attribution and chapter notices."
+    }
+  ]
+}

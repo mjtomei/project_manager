@@ -40,7 +40,7 @@ class _TreeApp(App):
         self._merge_input_required_prs = set()
         self._pane_idle_tracker = PaneIdleTracker()
         self._auto_start = False
-        self._auto_start_target = None
+        self._auto_start_targets = {}
 
     def compose(self) -> ComposeResult:
         with ScrollableContainer(id="sc"):
@@ -281,7 +281,7 @@ async def test_auto_start_toggle_rebuilds_for_marker():
         tree = app.query_one(TechTree)
         before = [id(n) for n in app.query(PRNode)]
         app._auto_start = True
-        app._auto_start_target = "pr-a"
+        app._auto_start_targets = {"pr-a": {}}
         tree.update_prs([_pr("pr-a", status="pending")])  # identical PR data
         await pilot.pause()
         after = [id(n) for n in app.query(PRNode)]
@@ -497,3 +497,88 @@ async def test_jump_plan_bottom_selects_visual_bottom():
         assert sid != "root"  # not stuck on the root
         max_row = max(r for _, (c, r) in tree._node_positions.items())
         assert tree._node_positions[sid][1] == max_row
+
+
+@async_test
+async def test_reorder_keeps_cursor_on_same_pr():
+    # Auto-start starting a PR re-sorts the tree; the cursor must stay on
+    # the PR the user selected, not on whatever now occupies its slot.
+    prs = [_pr("pr-a"), _pr("pr-b"), _pr("pr-c")]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        tree.select_pr("pr-a")
+        before = list(tree._ordered_ids)
+        moved = [_pr("pr-a"), _pr("pr-b"), _pr("pr-c", status="in_progress")]
+        tree.update_prs(moved)
+        await pilot.pause()
+        assert tree._ordered_ids != before, "precondition: order changed"
+        assert tree.selected_pr_id == "pr-a"
+
+
+# ---------------------------------------------------------------------------
+# Sign-off marker vs a finished review loop
+# ---------------------------------------------------------------------------
+
+
+def _status_row(app, pr_id):
+    node = next(n for n in app.query(PRNode) if n.pr_id == pr_id)
+    return node.render().plain.splitlines()[3]
+
+
+def _finished_loop(pr_id, verdict="PASS"):
+    from pm_core.review_loop import ReviewLoopState
+    st = ReviewLoopState(pr_id=pr_id, iteration=1, latest_verdict=verdict)
+    st.running = False
+    return st
+
+
+@async_test
+async def test_sign_off_verdict_icon_not_masked_by_finished_review_loop():
+    pr = _pr("pr-a", status="sign_off", workdir="/w",
+             signoff={"verdict": "SIGNOFF_MERGE", "head": "abc"})
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "▲" in row and "⟳" not in row
+
+
+@async_test
+async def test_sign_off_rerun_spinner_not_masked_by_finished_review_loop():
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    pr = _pr("pr-a", status="sign_off", workdir="/w")  # no verdict: running
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert any(f in row for f in SPINNER_FRAMES) and "⟳" not in row
+
+
+@async_test
+async def test_in_review_keeps_finished_loop_marker():
+    app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_return_marker_shown_alongside_running_rework_markers():
+    """R5.2: a PR sent back by sign-off keeps ⇤ while its rework review
+    loop runs (CLI ``pm pr list`` shows it throughout)."""
+    from pm_core.review_loop import ReviewLoopState
+    ret = {"verdict": "SIGNOFF_IMPL", "hop": "impl", "reviewed_head": "abc"}
+    pr = _pr("pr-a", status="in_review", workdir="/w", signoff_return=ret)
+    app = _TreeApp([pr])
+    st = ReviewLoopState(pr_id="pr-a", iteration=2)
+    st.running = True
+    app._review_loops["pr-a"] = st
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "⟳2" in row and "⇤" in row
