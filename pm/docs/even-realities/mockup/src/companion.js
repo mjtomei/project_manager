@@ -2,12 +2,14 @@
 // screen, so the companion shows what the glasses cannot: full text, exact
 // diffs, typed input and confirmation details. It never becomes a second
 // source of truth: every button calls the same intents/PM commands.
+import { fmtAge } from './app.js';
+
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export function renderCompanion(root, app, pm, act) {
   const v = app.view;
   const parts = [];
-  const conn = pm.conn.state === 'ok' ? '' : `<p class="warn">↔ ${pm.conn.state === 'offline' ? 'PM offline' : 'Reconnecting to PM'} · data ${pm.conn.staleFor}s old · actions disabled</p>`;
+  const conn = pm.conn.state === 'ok' ? '' : `<p class="warn">↔ ${pm.conn.state === 'offline' ? 'PM offline' : 'Reconnecting to PM'} · data ${fmtAge(pm.conn.staleFor)} old · actions disabled</p>`;
   parts.push(`<header><b>PM on glasses</b> <span class="sim">SIMULATED PM data</span><br><small>${esc(pm.project.name)} · ${esc(pm.now())} · glasses view: <code>${esc(app.sceneId())}</code></small></header>${conn}`);
   if (v.type === 'doc') {
     const d = pm.doc(v.docId), shown = pm.version(v.docId, v.version), latest = pm.latest(v.docId);
@@ -37,7 +39,8 @@ export function renderCompanion(root, app, pm, act) {
     if (!text) return;
     // Typed messages carry the same reading context as spoken ones.
     const r = pm.send(v.id, text, app.contextFor({ session: v.id, doc: app.originDoc() }));
-    app.say(r.ok ? `Sent from phone to ${app.sessionName(pm.session(v.id))}` : `! Not sent: ${r.reason}`);
+    if (r.ok) app.say(`Sent from phone to ${app.sessionName(pm.session(v.id))}`);
+    else app.fail(r);
     act('noop');
   });
 }

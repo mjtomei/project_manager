@@ -265,10 +265,18 @@ export class App {
         const out = [];
         let group = null;
         for (const s of pm.projectSessions()) {
-          if (s.group !== group) { group = s.group; out.push(it([{ t: group.toUpperCase(), dim: true }], null, null)); }
+          if (s.group !== group) {
+            group = s.group;
+            out.push(it([{ t: group.toUpperCase(), dim: true }], null, null));
+            // Plan documents lead the PLANS group, ahead of their sessions.
+            if (group === 'Plans') {
+              for (const d of Object.values(pm.docs).filter(x => x.kind === 'plan')) {
+                out.push(it(`${d.label} v${pm.latest(d.id).n}`, { t: d.pending ? '? review' : 'read', dim: false }, () => this.openDoc(d.id)));
+              }
+            }
+          }
           out.push(it(s.role, stateCell(s), () => this.openSession(s.id)));
         }
-        out.splice(1, 0, it('Plan sync v' + pm.latest('plan:plan-sync').n, { t: pm.doc('plan:plan-sync').pending ? '? review' : 'read', dim: false }, () => this.openDoc('plan:plan-sync')));
         return out;
       }
       case 'prs': return pm.prs.filter(p => p.status !== 'merged').map(p => it(`#${p.num} ${p.title}`, { t: prState(p), dim: !p.needs }, () => this.push({ type: 'list', kind: 'pr', pr: p.id, cursor: 0, top: 0 })));
@@ -415,7 +423,7 @@ export class App {
         // does not land on stale actions.
         this.stack = this.stack.filter(x => x.type !== 'list' || x.kind !== 'doc-actions');
         if (r.ok) {
-          if (d.pr)this.push({ type: 'list', kind: 'progress', pr: d.pr, cursor: 1, top: 0 });
+          if (d.pr) this.push({ type: 'list', kind: 'progress', pr: d.pr, cursor: 1, top: 0 });
           else this.say(`◆ Plan v${shown.n} approved (simulated)`);
           return;
         }
@@ -686,6 +694,6 @@ function defaultTimeline(pm, p) {
     ['', 'Nothing needs you until merge.', '', true],
   ];
 }
-function fmtAge(s) { return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `0:${String(s).padStart(2, '0')}`; }
+export function fmtAge(s) { return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `0:${String(s).padStart(2, '0')}`; }
 
 export { formatDoc };

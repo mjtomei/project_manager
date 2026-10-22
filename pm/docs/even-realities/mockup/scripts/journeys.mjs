@@ -10,8 +10,10 @@
 //   {words}   SIMULATED live words while listening
 //   {shot}    capture a glasses screenshot; `expect` must match the scene id,
 //             `contains` must appear on the glasses
-//   {phone}   capture the companion (phone WebView) as well
-//   {reset}   restart the page state (capture reloads; check makes a new app)
+//   {reset}   restart with fresh SIMULATED state (a new SimPM and App, both
+//             in check and, via the director, in the simulator page)
+// PHONE_SHOTS (below) lists the shots that also capture the companion
+// (phone WebView).
 //
 // Every screenshot is labelled SIMULATED in the gallery: PM state, agent
 // replies, document revisions and speech recognition are all scripted.
