@@ -4,7 +4,7 @@ Requirement: every session reachable from PM's actions panel (the popup picker, 
 
 This document records what PM exposes on master `e4d6353d`, and how the [mockup](index.html) lists each session.
 
-Code references were read on that revision. In-flight branches (none merged) are noted where they change the panel:
+Code references were read on that revision; line numbers are pinned to it. In-flight branches (none merged at the time) are noted where they change the panel. pr-ac10f03 has since merged (master `b876dbcb`); the `session.py` references below still hold there:
 - `pm/pr-8020495`: history and timers
 - `pm/pr-3ae2fc3`: spec-review pauses
 - `pm/pr-ac10f03`: sign-off integration

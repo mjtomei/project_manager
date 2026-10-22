@@ -113,8 +113,17 @@ export class SimPM {
   merge(prId, head) {
     if (!this.connected()) return { ok: false, reason: 'offline' };
     const p = this.pr(prId);
-    if (!p.signoff || p.signoff.verdict !== 'MERGE') return { ok: false, reason: 'no-signoff' };
-    if (p.currentHead && p.currentHead !== head) return { ok: false, reason: 'stale', head: p.currentHead };
+    if (!p.signoff || p.signoff.verdict !== 'MERGE' || p.signoff.stale) return { ok: false, reason: 'no-signoff' };
+    if (p.currentHead && p.currentHead !== head) {
+      // PM's gate refuses and reruns sign-off on the new HEAD; the old verdict
+      // no longer authorizes a merge, but the manual merge hold stays.
+      p.signoff = { ...p.signoff, stale: true };
+      p.activity = `Sign-off rerunning on ${p.currentHead} · manual merge`;
+      const s = this.sessions.find(x => x.pr === prId && x.short === 'sign-off');
+      if (s) { s.state = 'working'; s.stateText = `rerun @${p.currentHead}`; s.transcript.push({ who: 'pm', t: `Merge refused: HEAD ${p.currentHead} ≠ signed ${head} · sign-off rerunning` }); }
+      this.historyFor(prId).attempts.push([this.now(), 'merge (glasses)', '—', 'refused'], [this.now(), 'sign-off', '0m', 'running']);
+      return { ok: false, reason: 'stale', head: p.currentHead };
+    }
     p.status = 'merged'; p.holds = []; p.activity = `Merged ${this.now()}`; p.needs = null;
     return { ok: true };
   }

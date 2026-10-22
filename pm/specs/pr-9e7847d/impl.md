@@ -23,7 +23,7 @@ Scope sources:
 | `mjtomei/even-terminal-patch` | GitHub (public) | Shared Codex/Claude Remote Control attachment |
 | Pageborne source snapshot | `/tmp/pm-design-context/pageborne-source` | Copied by the user from `/home/matt/even/reader` at upstream HEAD `4d769f60a77ab38ae327d715db777a702e8fb2bd`. 294 files; hashes in `SNAPSHOT-MANIFEST.json`. Excludes runtime config, `.env`, state, private library, git metadata, dependencies, builds and model weights. **Not committed to PM**; only provenance and citations are recorded. |
 | PM actions panel + related windows | `pm_core/cli/session.py`, `pm_core/qa_loop.py`, `pm_core/tui/*`, `pm_core/spec_gen.py`, `pm_core/cli/plan.py`, `pm_core/runtime_state.py` | Session inventory below |
-| In-flight PM branches | `pm/pr-8020495` (history/timers), `pm/pr-3ae2fc3` (spec-review pauses), `pm/pr-ac10f03` (sign-off integration) | None merged into master at `e4d6353d` |
+| In-flight PM branches | `pm/pr-8020495` (history/timers), `pm/pr-3ae2fc3` (spec-review pauses), `pm/pr-ac10f03` (sign-off integration) | None merged into master at `e4d6353d`. pr-ac10f03 merged later (`b876dbcb`); the audit stays pinned to `e4d6353d` and its `session.py` references are unchanged on master |
 
 ## 1. Requirements (grounded)
 
