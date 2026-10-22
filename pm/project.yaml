@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-21T21:39:29.556360+00:00'
+  updated_at: '2026-10-22T14:27:00.191573+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29594,6 +29594,16 @@ prs:
       55204 cases). Manual merge hold unchanged.'
     created_at: '2026-10-21T21:39:29Z'
     last_edited: '2026-10-21T21:39:29Z'
+  - id: note-3089899
+    text: 'Review loop 05c5 i1 (c6720d8d): IETF charters imported into the datatracker
+      before ~2011 carry the group start date but the latest legacy text; context.charter_approvals
+      now dates only revisions with NN-xx proposals and maps imported later revisions
+      to the original -01 (mptcp-01 404 recorded as error). Brief item headings no
+      longer cite the document own URL (1538 briefs did); --check adds brief_links_document.
+      Rebuild: context.py --sources ietf-rfcs quic-drafts, cases.py, cases.py --check
+      (clean, 55204 cases; 4660 rich).'
+    created_at: '2026-10-22T14:27:00Z'
+    last_edited: '2026-10-22T14:27:00Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
