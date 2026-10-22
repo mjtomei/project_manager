@@ -162,17 +162,21 @@ def _make_app(tmp_path, *, pr_status="qa"):
 
 
 def _seed_run(home, *, overall="", pr_id="pr-001", loop="loop1",
-              first_index=1):
+              first_index=1, indices=None):
     """Create a qa workdir under <home>/.pm/workdirs/qa with resume+status.
 
     *first_index* numbers the run's scenarios, as a later run of the same
-    PR continues from the earlier runs' indices."""
+    PR continues from the earlier runs' indices; *indices* replaces the
+    scenarios with bare ones numbered as given."""
     qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop}"
     qa_dir.mkdir(parents=True, exist_ok=True)
     state = _make_state(qa_dir)
     state.pr_id = pr_id
     for i, sc in enumerate(state.scenarios):
         sc.index = first_index + i
+    if indices is not None:
+        state.scenarios = [QAScenario(index=i, title=f"S{i}", focus="")
+                           for i in indices]
     # Incomplete by default: clear verdicts so it has pending work.
     state.scenario_verdicts = {}
     state.verified_scenarios = set()
@@ -527,6 +531,27 @@ def test_two_unfinished_runs_resume_the_newer_run(tmp_path):
     assert resume_bg.call_args[0][0].qa_workdir == str(new)
     on_complete.assert_not_called()
     assert _resume_file_path(new).is_file()
+    assert not _resume_file_path(old).exists()
+
+
+def test_newer_run_with_fewer_scenarios_outranks_queued_tail(tmp_path):
+    """An older run's queued scenarios never got workdirs, so a newer run
+    numbers on from its launched ones and can end below the older run's
+    queued tail (old 1-6 with cap 2 -> new 3-5).  The newer run is still
+    resumed, and the older run's stale stop verdict is not processed."""
+    app = _make_app(tmp_path)
+    old = _seed_run(tmp_path, overall="INPUT_REQUIRED", loop="old",
+                    indices=[1, 2, 3, 4, 5, 6])
+    new = _seed_run(tmp_path, overall="", loop="new", indices=[3, 4, 5])
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args[0][0].qa_workdir == str(new)
+    on_complete.assert_not_called()
     assert not _resume_file_path(old).exists()
 
 

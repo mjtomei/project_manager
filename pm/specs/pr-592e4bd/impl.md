@@ -340,13 +340,17 @@ inode, so a replacement socket cannot reuse the number.
    launch paths pass the full scenario list and queued indices
    (`_status_queued`).
 9. *TUI resume picked a stale snapshot* (60574f28, aea1fb8a; ordering
-   corrected in review loop acdb i1) — one candidate per PR, the newest
-   *run*, ordered by highest scenario index (runs of a PR continue each
-   other's numbering), then unfinished, then mtime. mtime alone is wrong
+   corrected in review loop acdb i1/i2) — one candidate per PR, the newest
+   *run*, ordered by the run's first scenario index (runs of a PR number on
+   from earlier runs' launched scenarios; the highest index is wrong
+   because queued scenarios get no workdir, so an older run's queued tail
+   can exceed a newer run's numbers — old 1-6 at cap 2, new 3-5), then
+   unfinished, then mtime. mtime alone is wrong
    both ways: a stopped run's late write, or an older orphan beside a run
    that completed while the TUI was down (the orphan was revived and the
    completed run's snapshot dropped unprocessed). Superseded snapshots,
    finished or not, are dropped unless an in-memory loop or a live process
    elsewhere drives them, so a later restart cannot revive them.
-   Regressions in `tests/test_qa_resume.py` (the two acdb cases fail on
-   aea1fb8a).
+   Regressions in `tests/test_qa_resume.py` (the two acdb i1 cases fail on
+   aea1fb8a; `test_newer_run_with_fewer_scenarios_outranks_queued_tail`
+   fails on 2dfd9768).

@@ -405,10 +405,13 @@ def _resume_incomplete_qa(app) -> None:
     # A fresh start (z t) stops the old loop without processing its
     # completion, so its snapshot outlives it next to the new run's.  Only
     # the newest run per PR is a candidate.  Runs of a PR number their
-    # scenarios on from earlier runs (_next_scenario_offset), so the highest
-    # scenario index orders them; mtime cannot (a late write from a stopped
-    # run, or an older orphan, may be newer).  Ties (no scenarios, runs
-    # started together) prefer unfinished, then the newest snapshot.
+    # scenarios on from the earlier runs' launched ones
+    # (_next_scenario_offset), so the run's first scenario index orders
+    # them.  Not the highest: queued scenarios get no workdir, so an older
+    # run's queued tail can exceed a newer run's numbers.  Nor mtime: a late
+    # write from a stopped run, or an older orphan, may be newer.  Ties (no
+    # scenarios, runs started together) prefer unfinished, then the newest
+    # snapshot.
     def _mtime(p):
         try:
             return p.stat().st_mtime
@@ -425,7 +428,7 @@ def _resume_incomplete_qa(app) -> None:
     def _run_order(rdata):
         idx = [s["index"] for s in rdata.get("scenarios") or []
                if isinstance(s, dict) and isinstance(s.get("index"), int)]
-        return max(idx, default=0)
+        return min(idx, default=0)
 
     by_pr: dict[str, list] = {}
     for resume_file in qa_root.glob("*/qa_resume.json"):
