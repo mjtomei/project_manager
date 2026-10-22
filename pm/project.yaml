@@ -29658,6 +29658,24 @@ prs:
       cases.py --check (clean, 55206).'
     created_at: '2026-10-22T16:19:27Z'
     last_edited: '2026-10-22T16:19:34Z'
+  - id: note-cb4877f
+    text: 'QA S2 refine (2026-10-22, 306e3409, corpus snapshot, no context): partial
+      build --sources aosa linux-docs opentitan cern-hl-lhc f4pga ietf-rfcs hs2-business-cases
+      ~95 s, --check ~40 s exit 0, full build ~105 s; reports untouched by partial,
+      per-source continuation counts equal the committed report (42765 total). Totals/--check
+      include 24 pm_plan cases even in partial builds. A scan of every numbered-method
+      cut line found cuts that are not headings: RFC TOC entries at column 0 whose
+      page number follows a wide gap (COLUMN_GAP strips it before TOC_LINE runs),
+      e.g. cont:41f3e3aa829a6509a7a938df:4231 "6.2.1.  Users  46", cont:4f6c1b8c8a5aedac85c155e0:1402,
+      cont:5ffb77002e4440ce59eaae70:2008, cont:619a01ac3c7aa4d3d64447b0:2287; HS2
+      TOC cont:93bab322d64b3e680957cea5:1938 "5. Management Case 100"; table rows
+      cont:ea6a09acdd32ad0560a0d517:32544/33000 (CERN), cont:33757d212e13704bf37effa9:18290
+      (RFC); RFC column-0 numbered list item cont:20359858a01d38cf568cc587:75845.
+      HS2 numbered paragraphs ("3.1 HS2 Ltd is subject to...") are the disclosed PDF
+      heuristic limit. No cut inside markdown fences or on RFC/PDF page header/footer
+      lines.'
+    created_at: '2026-10-22T15:27:36Z'
+    last_edited: '2026-10-22T15:27:36Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
