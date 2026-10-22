@@ -175,6 +175,41 @@ a tools-disabled `claude -p` through the route, reporting requested models
   router and is refused with the restart remedy; mounted container passes
   the in-container ensure and a live probe (also after the host bridge was
   restarted), with a shadow `pm_core` at `/workspace`.
-- Host (supervisor): real work route smoke succeeded on the host
-  (work/claude-opus-5-5, transcript, Stop hook); the container smoke on the
-  host is pending a rerun after the isolated-file bridge fix.
+- Real work account, host (supervisor, isolated provider
+  `pm249-work-smoke`; production provider/model config unchanged):
+  - `/pm-captures/host-work-route-smoke-20261022T184915Z/` — host probe
+    PASS (requested `work/claude-opus-5-5`, transcript
+    `~/.claude/projects/-tmp-pm-route-probe-…/<sid>.jsonl` with
+    `claude-opus-5-5`, Stop hook). Container preflight FAILED there: run
+    from the main checkout, `python -m pm_core.route_bridge` imported the
+    checkout's pm_core (no route_bridge) — bug 2 below.
+  - `/pm-captures/host-work-route-smoke-20261022T185245Z/` — run from the
+    main checkout (`cwd /home/matt/claude-work/project-manager`) on source
+    hashes matching commit dbf8878b (both fixes): real slirp4netns QA-style
+    container PASS — container route OK via the bridge socket, requested
+    `work/claude-opus-5-5`, transcript `~/.claude/projects/-workspace/<sid>.jsonl`
+    with `claude-opus-5-5`, Stop hook.
+  - Independent host 12 s idle-stream repro: closed at 10.02 s before the
+    fix, both chunks delivered after (host files
+    `~/.local/state/pm-pr-shepherd/249-bridge-timeout-{repro,postfix}.json`).
+  - b7712d21 (after these runs) only adds the forwarder exit-on-dir-gone
+    and `container_name ⇒ container` in `check_route`; QA re-exercises it.
+
+### Bugs found by live validation, with regressions
+1. *Stream cut off after 10 s* — the bridge's connect timeout stayed on the
+   upstream socket during splicing. Fix: `route_bridge._connect_tcp` /
+   `_connect_unix` use `CONNECT_TIMEOUT` for setup only, then
+   `settimeout(None)`. Regressions:
+   `TestBridge::test_stream_survives_pause_longer_than_connect_timeout`
+   (fails with the timeout left in place — checked by mutation) and
+   `TestBridge::test_unix_side_has_no_stream_timeout`.
+2. *Shadow pm_core* — `python -m pm_core.route_bridge` resolved pm_core from
+   the cwd (host main checkout; `/workspace` in containers) despite
+   PYTHONPATH. Fix: run the stdlib-only file in isolated mode,
+   `python3 -I <pm-src>/pm_core/route_bridge.py` (host:
+   `worker_route.bridge_host_argv`, cwd `/`; container:
+   `container_ensure_cmd`, `/opt/pm-src`). Regressions:
+   `TestBridge::test_host_bridge_and_container_forwarder_end_to_end`
+   (host bridge + ensure from a cwd and PYTHONPATH holding a pm_core that
+   raises on import; fails with `-m` — checked by mutation) and
+   `TestBuildShellCmd::test_container_cmd_ensures_bridge_first`.

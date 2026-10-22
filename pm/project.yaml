@@ -31441,7 +31441,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T18:59:19.794806+00:00'
+  updated_at: '2026-10-22T19:03:22.855576+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31469,3 +31469,15 @@ prs:
       claude-mixed falls back to main when router down.'
     created_at: '2026-10-22T18:59:19Z'
     last_edited: '2026-10-22T18:59:19Z'
+  - id: note-30d537f
+    text: 'Live work-account validation (supervisor, isolated provider, prod config
+      unchanged): host PASS /pm-captures/host-work-route-smoke-20261022T184915Z; real
+      slirp4netns container PASS from main checkout on dbf8878b /pm-captures/host-work-route-smoke-20261022T185245Z
+      (requested work/claude-opus-5-5, transcript, Stop hook); 12s idle-stream host
+      repro passes post-fix. Bugs + regressions (both mutation-checked): (1) bridge
+      stream timeout -> TestBridge::test_stream_survives_pause_longer_than_connect_timeout,
+      test_unix_side_has_no_stream_timeout; (2) -m shadow pm_core -> TestBridge::test_host_bridge_and_container_forwarder_end_to_end,
+      TestBuildShellCmd::test_container_cmd_ensures_bridge_first. Details in pm/specs/pr-592e4bd/impl.md
+      section 5. User paused other PR QA to prioritize #249; manual merge gate stays.'
+    created_at: '2026-10-22T19:03:22Z'
+    last_edited: '2026-10-22T19:03:22Z'
