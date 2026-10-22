@@ -104,6 +104,10 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   the same R2 path.
 - Stop requests during the wait still exit cleanly with `input_required=False`.
 - Pane death during the wait still ends the loop with KILLED.
+- A loop that exits any other way, including an unexpected exception during the
+  wait, clears `input_required` when it exits.  `_derive` checks the flag before
+  `running`, so a dead loop would otherwise report a wait nobody can answer.
+  (Added in review i4.)
 - The waiter must poll the transcript at a short cadence (~2 s) so status is
   close to real time.  It reads incrementally (byte offset) so large transcripts
   are not re-read on every tick.

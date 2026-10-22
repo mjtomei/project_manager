@@ -571,6 +571,20 @@ class TestInputRequired:
         assert result.running is False
 
 
+    @patch("pm_core.review_loop._wait_for_follow_up_verdict")
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_input_required_cleared_when_wait_raises(self, mock_review, mock_follow_up):
+        """A loop that dies mid-wait must not keep reporting INPUT_REQUIRED."""
+        mock_review.return_value = "**INPUT_REQUIRED**\n\n1. Test it"
+        mock_follow_up.side_effect = RuntimeError("tmux gone")
+
+        state = ReviewLoopState(pr_id="pr-001")
+        with pytest.raises(RuntimeError):
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+
+        assert state.running is False
+        assert state.input_required is False
+
 class TestGenerateReviewPromptInputRequired:
     """Tests that the review prompt includes INPUT_REQUIRED instructions."""
 

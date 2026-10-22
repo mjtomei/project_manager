@@ -577,6 +577,9 @@ def run_review_loop_sync(
 
     finally:
         state.running = False
+        # Status reads input_required before running: a loop that died
+        # mid-wait must not report a human request nobody can answer.
+        state.input_required = False
 
     return state
 
