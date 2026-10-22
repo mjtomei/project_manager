@@ -8433,6 +8433,21 @@ prs:
       use --breadcrumb. Captures /pm-captures/scenarios/23'
     created_at: '2026-10-22T05:16:09Z'
     last_edited: '2026-10-22T05:16:09Z'
+  - id: note-80191aa
+    text: 'QA S24 refine (integrate CLI lock/concurrency/unreachable origin), smoke-tested
+      on 6dd086a4 with git 2.34: CLI prints prose summaries ("up to date with master@<8>",
+      "merges cleanly with", "CONFLICTS with", "integration check failed: fetch master
+      from <origin> failed: ..."), not status keywords. _repo_lock lives in the PR
+      WORKDIR clone .git/pm-integration.lock (local workdirs are separate clones),
+      so 5 different PRs never contend; duplicate checks of one PR do. On git<2.38
+      a clean/conflict check takes the lock twice (fetch + candidate worktree), so
+      a >300 s stuck holder delays it ~600 s with two "busy; proceeding" lines; use
+      an up_to_date PR for the single ~300 s wait. Local-backend sign-off launched
+      from the main repo targets the main repo dir, so a broken workdir origin does
+      not error there; router MERGE->BLOCKED-on-fetch-error needs the vanilla backend
+      (move the bare away).'
+    created_at: '2026-10-22T04:30:42Z'
+    last_edited: '2026-10-22T04:30:42Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
