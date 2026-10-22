@@ -3690,10 +3690,9 @@ def pr_auto_sequence(pr_id: str):
             _launch_qa_detached(root, pr_id)
             click.echo("sign_off: re-qa")
             return
+        # A review/impl hop's return record already holds the launch claim
+        # for this driver (signoff.build_return_record).
         if hop == "review":
-            if not signoff_mod.claim_return_launch(root, pr_id, "review"):
-                click.echo("running: review")
-                return
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
             iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
@@ -3705,9 +3704,6 @@ def pr_auto_sequence(pr_id: str):
                 f"sign_off: returning to review (iteration {next_iter})")
             return
         if hop == "impl":
-            if not signoff_mod.claim_return_launch(root, pr_id, "impl"):
-                click.echo("running: impl")
-                return
             impl_transcript = tdir / f"impl-{pr_id}.jsonl"
             ctx = click.get_current_context()
             # fresh=True: a bounce must RELAUNCH the impl agent so it actually

@@ -331,9 +331,8 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         app.log_message(
             f"Sign-off routed {pr_id} back to review (SIGNOFF_REVIEW)")
         app._review_loops.pop(pr_id, None)
-        # Claim the return's review launch first, so a concurrent
-        # `pm pr auto-sequence` tick doesn't relaunch (kill) our window.
-        signoff_mod.claim_return_launch(app._root, pr_id, "review")
+        # (The hop's return record holds the launch claim, so a concurrent
+        # `pm pr auto-sequence` tick doesn't relaunch — kill — our window.)
         fresh = _load_pr(app, pr_id)
         from pm_core.tui.review_loop_ui import _start_loop
         _start_loop(app, pr_id, fresh, transcript_dir=str(tdir))
@@ -341,8 +340,6 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         app.log_message(
             f"Sign-off routed {pr_id} back to implementation (SIGNOFF_IMPL)")
         app._review_loops.pop(pr_id, None)
-        # Claim the rework launch (see the review hop above).
-        signoff_mod.claim_return_launch(app._root, pr_id, "impl")
         app.run_worker(_relaunch_impl(app, pr_id))
 
 

@@ -706,13 +706,18 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
         integ = {k: rec.get(k) for k in (
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
             "conflicts", "overlap", "error")}
+    now = datetime.now(timezone.utc).isoformat()
     out = {
         "verdict": verdict, "hop": hop,
         "reason": reason or coerced_reason or "see report.html and PR notes",
         "reviewed_head": reviewed_head, "integration": integ,
-        "applied": applied, "awaiting": hop,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "applied": applied, "awaiting": hop, "ts": now,
     }
+    if hop in _CLAIMED_RETURN_HOPS:
+        # The driver performing the hop owns the relaunch: the claim is
+        # written in the same locked update as the transition, so no other
+        # driver can take it in between (see claim_return_launch).
+        out["launch_claim"] = {"hop": hop, "at": now}
     if original_verdict and original_verdict != verdict:
         out["original_verdict"] = original_verdict
     if coerced_reason:
@@ -738,6 +743,9 @@ def return_awaiting(pr: dict | None) -> str | None:
 
 
 RETURN_LAUNCH_CLAIM_SECONDS = 180
+# Hops whose relaunch is ``--fresh`` (kills the window it finds) and so
+# needs one launcher; a QA return is guarded by the QA loop's running check.
+_CLAIMED_RETURN_HOPS = ("impl", "review")
 
 
 def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
@@ -748,7 +756,10 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
     impl and review relaunches are ``--fresh`` — each kills the window it
     finds — so two concurrent launchers kill each other's session and leave
     duplicates behind.  The first caller records a claim
-    and launches; later callers see it and leave the launch alone.
+    and launches; later callers see it and leave the launch alone.  The
+    driver that performs the hop holds the claim from the transition on
+    (:func:`build_return_record`), so only catch-up paths (restart, an
+    ``awaiting`` tick) call this.
     ``awaiting`` itself stays set until the session opens, and a claim
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
     """

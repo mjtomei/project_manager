@@ -147,6 +147,26 @@ def test_conflicted_integration_routes_merge_to_impl(w):
     assert retired                                # run retired for re-entry
 
 
+@pytest.mark.parametrize("verdict,hop", [(SIGNOFF_IMPL, "impl"),
+                                         (SIGNOFF_REVIEW, "review")])
+def test_hop_driver_holds_the_relaunch_claim(w, verdict, hop):
+    """The hop writes the launch claim with the transition: a concurrent
+    tick that sees ``awaiting`` right after it can't take the relaunch (and
+    kill the hop driver's --fresh session)."""
+    integration.check_integration(w.pm_dir, PR)
+    res, _ = step(w, verdict)
+    assert res.hop == hop
+    assert pr(w)["signoff_return"]["launch_claim"]["hop"] == hop
+    assert signoff.claim_return_launch(w.pm_dir, PR, hop) is False
+
+
+def test_reqa_hop_takes_no_launch_claim(w):
+    integration.check_integration(w.pm_dir, PR)
+    res, _ = step(w, SIGNOFF_REQA)
+    assert res.hop == "qa"
+    assert "launch_claim" not in pr(w)["signoff_return"]
+
+
 @pytest.mark.parametrize("verdict", [SIGNOFF_REVIEW, SIGNOFF_REQA])
 def test_conflict_coerces_review_and_reqa_to_impl(w, verdict):
     commit(w.wd, "shared.txt", "pr\n", "pr")
