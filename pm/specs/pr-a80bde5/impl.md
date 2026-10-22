@@ -136,5 +136,13 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   land between two polls.  Ordering is taken from the transcript scan done just
   before each idle evaluation, so a repeated INPUT_REQUIRED after an answer is
   still seen as genuine.
+- Answer and follow-up verdict both land during a TUI restart gap: Claude
+  won't idle again, so the resumed waiter starts from the current idle event
+  (not "newer than now") and accepts it when it is newer than the answer.
+  (Added in review.)
+- The back-scan only counts a human prompt found *after* the INPUT_REQUIRED
+  record.  If that record can't be found, the wait stays unanswered, so the
+  iteration's own review prompt is never taken as the answer.  (Added in
+  review.)
 - Transcript symlink slug mismatch: the response watch resolves the path with the
   same session-id fallback as `_read_transcript_text`.

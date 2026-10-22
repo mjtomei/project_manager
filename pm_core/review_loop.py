@@ -245,7 +245,7 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
         return None
     window_name = _compute_review_window_name(pr_data)
     pane_id = _find_claude_pane(session, window_name)
-    transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+    transcript = _iteration_transcript(state, transcript_dir)
     if not pane_id or not os.path.lexists(transcript):
         return None
     session_id = session_id_from_transcript(transcript)
@@ -334,7 +334,11 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     window_name = _compute_review_window_name(pr_data)
     watch = HumanResponseWatch(transcript, VERDICT_INPUT_REQUIRED)
     state.input_required = watch.answered_at is None
-    hook_baseline = time.time()
+    # Start from the current idle event, not from now: after a TUI restart
+    # the answer and the follow-up verdict may both have landed in the gap,
+    # and Claude won't idle again.  An idle older than the answer (e.g. the
+    # question's own) is ignored below.
+    hook_baseline = 0.0
     stop_check = lambda: state.stop_requested  # noqa: E731
 
     while not stop_check():

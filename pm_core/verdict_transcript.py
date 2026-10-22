@@ -98,23 +98,6 @@ def _resolve_transcript_path(transcript_path: str | Path | None) -> Path | None:
     return max(matches, key=lambda m: m.stat().st_mtime)
 
 
-def _verdict_patterns(verdicts: tuple[str, ...]) -> list[tuple[str, re.Pattern]]:
-    """``(verdict, pattern)`` pairs, longest verdict first, matching a
-    verdict keyword on its own text-line inside a raw JSONL record."""
-    ordered = sorted({v for v in verdicts if v}, key=len, reverse=True)
-    # Boundary: JSON newline-escape (``\n`` / ``\r``) or string quote.
-    # Between the boundary and the verdict we tolerate markdown bold/code
-    # markers (``*``, `` ` ``) so ``**PASS**`` on its own line still
-    # matches — the pane-scraping path used to strip those before
-    # comparing, and reviewers routinely wrap verdicts in bold.
-    return [
-        (v, re.compile(
-            r'(?:\\[nr]|")[*`]*' + re.escape(v) + r'[*`]*(?:\\[nr]|")'
-        ))
-        for v in ordered
-    ]
-
-
 def extract_verdict_from_transcript(
     transcript_path: str | Path | None,
     verdicts: tuple[str, ...],
@@ -129,9 +112,20 @@ def extract_verdict_from_transcript(
     if not text:
         return None
 
-    patterns = _verdict_patterns(verdicts)
-    if not patterns:
+    ordered = sorted({v for v in verdicts if v}, key=len, reverse=True)
+    if not ordered:
         return None
+    # Boundary: JSON newline-escape (``\n`` / ``\r``) or string quote.
+    # Between the boundary and the verdict we tolerate markdown bold/code
+    # markers (``*``, `` ` ``) so ``**PASS**`` on its own line still
+    # matches — the pane-scraping path used to strip those before
+    # comparing, and reviewers routinely wrap verdicts in bold.
+    patterns = [
+        (v, re.compile(
+            r'(?:\\[nr]|")[*`]*' + re.escape(v) + r'[*`]*(?:\\[nr]|")'
+        ))
+        for v in ordered
+    ]
 
     in_turn = False
     for line in reversed(text.splitlines()):
@@ -332,27 +326,32 @@ class HumanResponseWatch:
         self._offset = len(data)
         last_nl = data.rfind(b"\n")
         self._partial = data[last_nl + 1:]
+        # Only an answer *after* the question counts: if the question record
+        # can't be found, the latest human prompt may be the iteration's own
+        # review prompt, so stay unanswered rather than guess.
+        answer = None
         for line in reversed(data[:last_nl + 1].decode(errors="replace").splitlines()):
             if _ASSISTANT_RE.search(line):
                 if verdict in line and _assistant_text_has_verdict(line, verdict):
+                    self.answered_at = answer
                     break
-                continue
-            if _USER_RE.search(line) and self._consider(line):
-                break
+            elif answer is None and _USER_RE.search(line):
+                answer = self._answer_epoch(line)
 
-    def _consider(self, line: str) -> bool:
+    @staticmethod
+    def _answer_epoch(line: str) -> float | None:
+        """Epoch time of *line* when it is a human prompt, else None."""
         try:
             rec = json.loads(line)
         except json.JSONDecodeError:
-            return False
+            return None
         if not is_human_prompt_record(rec):
-            return False
+            return None
         at = _record_epoch(rec)
         if at is None:
             import time
             at = time.time()
-        self.answered_at = max(self.answered_at or 0.0, at)
-        return True
+        return at
 
     def poll(self) -> float | None:
         """Read newly appended records; return :attr:`answered_at`."""
@@ -372,8 +371,9 @@ class HumanResponseWatch:
         last_nl = data.rfind(b"\n")
         self._partial = data[last_nl + 1:]
         for line in data[:last_nl + 1].decode(errors="replace").splitlines():
-            if _USER_RE.search(line):
-                self._consider(line)
+            at = self._answer_epoch(line) if _USER_RE.search(line) else None
+            if at is not None:
+                self.answered_at = max(self.answered_at or 0.0, at)
         return self.answered_at
 
     def rearm(self) -> None:

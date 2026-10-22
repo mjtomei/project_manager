@@ -68,6 +68,9 @@ class Pane:
 
     def user(self, text: str) -> None:
         """The human submits a prompt in the pane."""
+        # Record timestamps are millisecond ISO strings; keep the answer
+        # strictly after a preceding idle event, as a human's would be.
+        time.sleep(0.01)
         self._rec({"type": "user", "message": {"role": "user", "content": text}})
 
     def say(self, text: str) -> None:
@@ -202,6 +205,13 @@ class TestHumanResponseWatch:
         pane = Pane(tmp_path, 1)
         pane.tool("x")
         pane.verdict("INPUT_REQUIRED")
+        assert HumanResponseWatch(pane.link, "INPUT_REQUIRED").answered_at is None
+
+    def test_back_scan_without_question_record_stays_unanswered(self, tmp_path):
+        """Question record not found (verdict not on its own line): the
+        review prompt must not be mistaken for an answer."""
+        pane = Pane(tmp_path, 1)
+        pane.say("Verdict: INPUT_REQUIRED")
         assert HumanResponseWatch(pane.link, "INPUT_REQUIRED").answered_at is None
 
     def test_rearm(self, tmp_path):
@@ -411,6 +421,36 @@ class TestRestartAdoption:
             t.join(5)
             assert state.latest_verdict == "PASS"
         finally:
+            state.stop_requested = True
+            p.stop()
+
+    def test_follow_up_verdict_landed_during_restart_gap(self, env):
+        """Answer + follow-up verdict both landed while the TUI restarted:
+        the idle event predates the resumed waiter but follows the answer."""
+        tdir, _ = env
+        pane2 = Pane(tdir, 2)
+        pane2.verdict("INPUT_REQUIRED")
+        pane2.user("option B")
+        pane2.verdict("NEEDS_WORK")
+        release3 = threading.Event()
+        panes = {}
+
+        def it3():
+            panes[3] = Pane(tdir, 3)
+            release3.wait(10)
+            return panes[3].verdict("PASS")
+
+        state = _restored(tdir, 2, ["NEEDS_WORK", "INPUT_REQUIRED"])
+        t, mock, p = _start(state, tdir, {3: it3})
+        try:
+            _until(lambda: 3 in panes, what="iteration 3 after gap verdict")
+            assert state.history[1].verdict == "NEEDS_WORK"
+            assert state.input_required is False
+            release3.set()
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            release3.set()
             state.stop_requested = True
             p.stop()
 
