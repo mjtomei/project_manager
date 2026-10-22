@@ -28353,7 +28353,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-22T17:27:37.922879+00:00'
+  updated_at: '2026-10-22T17:31:28.754953+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28438,6 +28438,15 @@ prs:
       /pm-captures/scenarios/12/scripts.'
     created_at: '2026-10-22T17:27:37Z'
     last_edited: '2026-10-22T17:27:37Z'
+  - id: note-cb892a1
+    text: 'QA S9 (2026-10-22) PASS on 6e2d15ef: auto-start impl→review→QA→SIGNOFF_REQA→QA→SIGNOFF_MERGE
+      with $S + $S~1 clients, 556/556 samples on main, 0 select_window lines; L over
+      sticky shows Launched/Focused. Spec gotchas: L focuses the new log pane, so
+      a 2nd L needs C-b Left first (else it lands in tail -f); fake impl makes no
+      commits → 2nd sign-off MERGE coerced to BLOCKED, so commit a file in the PR
+      workdir during impl (/pm-captures/scenarios/9/scripts/impl_commit.sh).'
+    created_at: '2026-10-22T17:31:28Z'
+    last_edited: '2026-10-22T17:31:28Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
