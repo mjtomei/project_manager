@@ -778,7 +778,7 @@ def _branch_sync_stops_qa(state: "QALoopState", sync: BranchSync,
         _retire_signoff(f"QA sync: {reason}")
     state.latest_output = f"QA returning to review: {reason}"
     _end_qa_without_scenarios(state, VERDICT_NEEDS_WORK, error,
-                            status_path, notify)
+                              status_path, notify)
     return True
 
 
