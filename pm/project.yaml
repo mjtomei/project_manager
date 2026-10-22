@@ -28353,7 +28353,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-22T15:14:44.648556+00:00'
+  updated_at: '2026-10-22T15:20:09.537869+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28380,6 +28380,13 @@ prs:
       PR workdir before needing a QA PASS.'
     created_at: '2026-10-22T15:14:44Z'
     last_edited: '2026-10-22T15:14:44Z'
+  - id: note-85ccf50
+    text: 'QA S1 incidental fix af42a1d9: launch_pane "Launched/Focused existing <role>
+      pane" now log_message(force=True). L pressed as auto-QA started landed in the
+      sticky "Review loop done ✓ PASS" window and the confirmation never painted (debug:
+      "(hidden by sticky message)"). Test: tests/test_log_message_force.py::test_launch_pane_confirmation_shown_while_sticky.'
+    created_at: '2026-10-22T15:20:09Z'
+    last_edited: '2026-10-22T15:20:09Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
@@ -30988,6 +30995,28 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T14:04:42.745914+00:00'
   updated_at: '2026-10-22T14:04:42.745914+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-154595f
+  plan: bugs
+  title: QA scenario numbering leaks across projects that share a PR id
+  branch: pm/pr-154595f-qa-scenario-numbering-leaks-across-projects-that-s
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _next_scenario_offset globs ~/.pm/workdirs/qa/{pr_id}-*/s-*
+    with no project scoping. PR ids are title-hash deterministic, so two projects
+    each with a PR titled "Add login feature" (pr-95325c4) share the namespace: the
+    second project''s first QA run logged "Renumbering 1 scenario(s) to start at 2
+    (planner used wrong numbering)" and created qa-<pr>-s2 instead of -s1. Repro:
+    two throwaway projects, same PR title, run QA in the first then the second. Seen
+    in pr-f094946 QA S1 (2026-10-22).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:20:10.391157+00:00'
+  updated_at: '2026-10-22T15:20:10.391157+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
