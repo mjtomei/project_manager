@@ -87,6 +87,16 @@ class TestJournal:
         ah.start_attempt(PR, "merge")
         assert [e["action"] for e in ah.read_events(PR)] == ["review", "merge"]
 
+    def test_non_utf8_bytes_only_spoil_their_line(self, clock):
+        # A corrupt byte must not raise out of readers (sign-off routing
+        # reads the journal via newest_open_attempt).
+        a = ah.start_attempt(PR, "signoff")
+        with open(ah.journal_path(PR), "ab") as f:
+            f.write(b'\xff\xfe{"kind": "phase"}\n')
+        assert [e["kind"] for e in ah.read_events(PR)] == ["attempt_start"]
+        assert ah.newest_open_attempt(PR, "signoff") == a
+        assert hq.build_history(PR, now=clock.t, live=False)["attempts"]
+
     def test_append_after_truncated_last_line_is_not_lost(self, clock):
         # A crash mid-write leaves a partial line with no trailing newline;
         # the next event must start on its own line, not be glued onto it.
@@ -1125,6 +1135,22 @@ class TestReconciliation:
         assert {a["outcome"] for a in m["attempts"]} == {"interrupted"}
         assert m["timers"]["recent"][0]["resolution"] == \
             "lost (owner process exited)"
+
+    def test_lost_timer_ordered_by_arming_in_recent(self, clock):
+        # A lost timer has no resolution time; it sorts by when it was
+        # armed instead of after every resolved row.
+        ah.arm_timer(PR, "old", purpose="old", owner_action="qa",
+                     duration=5)
+        clock.advance(10)
+        ah.clear_timer(PR, "old", "elapsed")
+        clock.advance(10)
+        ah.record(PR, "timer_arm", timer="lost", purpose="lost",
+                  owner_action="qa", armed_t=clock.t, due_t=clock.t + 100,
+                  effect="fires", owner=_dead_owner())
+        m = hq.build_history(PR, now=clock.t + 1, live=False)
+        assert [(r["timer"], r["resolution"])
+                for r in m["timers"]["recent"]] == [
+            ("lost", "lost (owner process exited)"), ("old", "elapsed")]
 
     def test_restart_dead_owner_interrupts_attempt_and_loses_timers(self,
                                                                     clock):

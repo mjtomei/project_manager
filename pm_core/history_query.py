@@ -141,8 +141,11 @@ def build_history(pr_id: str, *, pr: dict | None = None,
             "active": [t for t in timer_rows["active"]
                        if t["due_at"] is not None],
             "overdue": timer_rows["overdue"],
+            # A timer lost with its owner has no resolution time; order
+            # it by its arming so it is not the first row truncated away.
             "recent": sorted(timer_rows["recent"],
-                             key=lambda r: r.get("resolved_t") or 0,
+                             key=lambda r: (r.get("resolved_t")
+                                            or r.get("armed_t") or 0),
                              reverse=True)[:20],
         },
         "holds": holds,

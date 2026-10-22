@@ -454,7 +454,10 @@ def read_events(pr_id: str) -> list[dict]:
     events: list[dict] = []
     for p in (_rotated_path(path), path):
         try:
-            with open(p, "r") as f:
+            # errors="replace": a corrupt byte only spoils its own line
+            # (skipped below as bad JSON) instead of raising out of every
+            # reader, sign-off routing included.
+            with open(p, "r", errors="replace") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_SH)
                 try:
                     raw = f.read()
