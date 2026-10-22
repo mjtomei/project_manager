@@ -86,7 +86,10 @@ env-by-name).
   and the session starts.
 - **RQ10** Given QA waiting on the route, When the user stops QA, Then the
   loop stops promptly and the scenario carries the reason "stopped while
-  waiting for the work route" (not a PASS/FAIL/INPUT_REQUIRED verdict).
+  waiting for the work route" (not a PASS/FAIL/INPUT_REQUIRED verdict):
+  no per-scenario verdict and no `verdict.md` for it; the overall QA
+  result is INPUT_REQUIRED because a scenario is unverdicted (fixed in
+  0b1edfca after QA s3).
 - **RQ11** Given more scenarios than the concurrency cap, When the route
   fails while scenarios are queued, Then queued scenarios stay queued
   ("Queued scenario launch deferred — …"), other running scenarios keep
@@ -100,7 +103,9 @@ env-by-name).
   and the session idles without a verdict, Then the status shows
   "… stalled — <problem>; <remedy>", the usual verdict reminder is not
   sent, and when the router returns the session is nudged ("The model
-  route is available again…") and finishes with its verdict.
+  route is available again…"); the nudge is actually *submitted* (not left
+  typed in the prompt box — fixed in c5d7d64f after QA s4), a new request
+  reaches the router, and the session finishes with its verdict.
 - **RQ14** Given a QA run in container mode was interrupted (TUI restart),
   When QA resumes, Then adopted live panes keep running, and relaunches of
   dead/queued workers are gated against the adopted container's mount; a
@@ -145,6 +150,37 @@ env-by-name).
   token.
 - Set the concurrency cap (global setting `qa-max-scenarios`) to 1 for
   queue scenarios.
+- **Lessons from the first QA run (2026-10-22):**
+  - Use a scratch `HOME` (the host `~/.claude` may be bind-mounted rw) with
+    `PM_HOST_HOME` unset. Never copy `~/.claude/.credentials.json` into it
+    (forks the rotating refresh token and logs the real account out); give
+    real Claude a dummy `apiKeyHelper` in the scratch `settings.json`
+    instead (routed launches unset `ANTHROPIC_API_KEY`, so without a helper
+    Claude reports "Not logged in"). pm hooks are installed by `pm session`.
+  - The sandbox's `/etc/containers/containers.conf` sets `netns=host`, so
+    in-container `127.0.0.1:<port>` would reach the host directly and the
+    bridge would be bypassed. For container-route QA put
+    `[containers] netns="slirp4netns"` in the scratch
+    `~/.config/containers/containers.conf` and confirm with `podman inspect`.
+  - Overlay fs reuses socket inode numbers; compare birth time, not inode,
+    when checking whether the bridge socket was recreated.
+  - fake-claude `qa_scenario` entries must use `{"verdicts":[...]}`, not a
+    bare list.
+  - Starting QA again on the same PR continues scenario numbering (4–6,
+    7–9, …); marker-based holds in the stub router must target the real
+    index (or match on prompt text, not number).
+  - Optional: export `ANTHROPIC_BASE_URL` to a second "main" stub and a
+    dummy `ANTHROPIC_API_KEY` in the user environment to make main-account
+    traffic visible: unrouted roles must reach the main stub with that key,
+    routed roles must reach only the router stub and never with that key.
+  - `pm model set <type> <model>` without `--effort` applies the
+    `medium` default; pass `--effort high` explicitly.
+  - Out of scope (pr-3c7ce04): a pane idle on "Login expired · Please run
+    /login" is not detected by the route stall watch (it only rechecks the
+    router).
+  - The refresh-command cooldown is per process; it is only observable
+    inside a long-lived QA loop/TUI, not across separate `pm provider test`
+    runs.
 
 ## 3. Edge cases
 
