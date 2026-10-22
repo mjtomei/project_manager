@@ -164,6 +164,14 @@ if (!only.length) {
     app.intent('back');
     rule(app.view.type === under, `${label} then Back landed on ${app.sceneId()}`);
   }
+  // Holding to speak to a session that is not running is refused before
+  // listening, so nothing is dictated only to be dropped on send.
+  for (const [open, id] of [[a => a.openSession('pr-215/impl'), 'pr-215/impl'], [a => { a.pm.session('pr-214/impl').state = 'none'; a.openDoc('spec:pr-214:impl'); }, 'pr-214/impl']]) {
+    const app = new App(new SimPM());
+    open(app);
+    app.intent('hold');
+    rule(!app.overlay && /not running/.test(app.toast || ''), `hold on ${id} (not running) opened ${app.overlay?.stage ?? 'nothing'}, toast ${app.toast}`);
+  }
   // Choosing the OS menu item for the view already shown does not stack a copy.
   {
     const app = new App(new SimPM());
