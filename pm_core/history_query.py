@@ -304,6 +304,11 @@ def _fold_retracked(attempts: dict[str, dict],
         for k in ("ended_t", "outcome", "verdict", "detail", "owner"):
             prev[k] = a.get(k)
         prev["last_seen_t"] = max(prev["last_seen_t"], a["last_seen_t"])
+        # Keep the folded ids visible: they are journaled attempt ids (and
+        # the runtime mirror's attempt_id) that --json readers must be
+        # able to resolve to this attempt.
+        prev["merged_ids"] = (prev.get("merged_ids", []) + [a["id"]]
+                              + a.get("merged_ids", []))
         last[action] = prev
         aliases[a["id"]] = prev["id"]
         del attempts[a["id"]]
@@ -847,7 +852,7 @@ def _export(a: dict) -> dict:
             "retry", "parent", "source", "resumed", "adopted", "stale",
             "session_id", "outcome", "verdict", "detail", "inferred",
             "elapsed_s", "elapsed_lower_bound_s", "exec_s", "wait_s",
-            "open", "scenarios",
+            "open", "scenarios", "merged_ids",
             # Action-source context a writer passed (pr-291e891 supplies
             # session/window/task); passed through, not interpreted.
             "context")

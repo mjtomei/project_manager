@@ -541,9 +541,12 @@ class TestRuntimeCapture:
                                 session_id="s1")
             clock.advance(5)
             # The mirror tracks the re-opened id; it maps to the kept one.
+            reopened = rs.get_action_state(PR, "start")["attempt_id"]
             with patch.object(ah, "owner_alive", return_value=False):
                 (a,) = hq.build_history(PR, now=clock.t)["attempts"]
             assert a["id"] == first and a["open"]
+            # The re-opened id stays resolvable from --json output.
+            assert a["merged_ids"] == [reopened] and reopened != first
             rs.clear_action(PR, "start")
             # A different session is a new attempt.
             clock.advance(10)
@@ -558,6 +561,7 @@ class TestRuntimeCapture:
         assert [p["phase"] for p in folded["phases"]] == [
             "start", "untracked", "start"]
         assert new["open"] and new["session_id"] == "s2"
+        assert "merged_ids" not in new
         text = "\n".join(hq.render_text(m))
         assert "not tracked 10m00s" in text
 
