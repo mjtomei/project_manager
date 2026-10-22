@@ -275,8 +275,20 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
 - `apply_signoff_hop` must stay idempotent under duplicate ticks: the status
   guard (`status == sign_off`) also guards the return record and the
   integration apply (apply only when HEAD still equals the reviewed head).
+  `step_signoff` runs under a per-PR flock (`.signoff-step-<pr>.lock`,
+  bounded 2 s wait → "running") and re-reads the PR from disk, so a driver
+  acting on a pre-hop snapshot never mistakes pm's integration merge for a
+  moved HEAD (QA S10).
+- pm's integration fetches and candidate worktrees serialize per repository
+  (`<git-common-dir>/pm-integration.lock`, bounded wait); each check fetches
+  into its own ref and uses a uniquely named worktree, so concurrent checks
+  don't race on ref locks or worktree admin dirs (QA S2/S12).
+- Local publish restoring a stash that conflicts on `pm/project.yaml` (a PR
+  branch committed a cross-PR note) merges the file structurally — live
+  state wins, id-keyed lists merge — instead of leaving markers (QA S1).
 - `pm pr merge`'s existing same-PR lock and "already merged" short-circuit
   are kept; the new publish lock is taken after it (lock order: PR → repo).
+  A publisher waiting on another PR's publish says so.
 - Existing test patch points (`_check_signoff_verdict`, `_signoff_window_pane`,
   `_retire_signoff_window`, `head_sha`) keep working.
 - QA/regression instructions and fake backends: `FakeGitHub` must honor

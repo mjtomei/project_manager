@@ -1903,7 +1903,14 @@ def _publish_lock(data: dict):
     path = workdirs_base() / f".publish-{repo_id}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # Say why the command is silent (another PR's publish can take
+            # a while: fetches, gh merge retries).
+            click.echo("Waiting for another merge into this repository "
+                       "to finish...")
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         yield
 
 

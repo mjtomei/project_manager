@@ -807,3 +807,31 @@ def test_merge_yaml_3way_merges_id_lists_and_prefers_live_state():
         {"id": "a", "status": "sign_off", "notes": [{"id": "n1"}, {"id": "n2"}],
          "workdir": "/w"},
         {"id": "b", "status": "pending"}]}
+
+
+def test_publish_lock_says_it_waits_for_another_publisher(capsys):
+    import fcntl
+    import threading
+    from pm_core.paths import workdirs_base
+
+    data = {"project": {"repo_id": "rid"}}
+    held = open(workdirs_base() / ".publish-rid.lock", "w")
+    fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+    entered = threading.Event()
+
+    def _publisher():
+        with pr_mod._publish_lock(data):
+            entered.set()
+
+    t = threading.Thread(target=_publisher)
+    t.start()
+    assert not entered.wait(0.3)
+    held.close()  # releases the other publisher's lock
+    t.join(5)
+    assert entered.is_set()
+    assert "Waiting for another merge" in capsys.readouterr().out
+
+    # Uncontended: no message.
+    with pr_mod._publish_lock(data):
+        pass
+    assert "Waiting" not in capsys.readouterr().out
