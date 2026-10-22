@@ -26125,7 +26125,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-26T00:27:53.724681+00:00'
-  updated_at: '2026-10-22T14:44:07.505079+00:00'
+  updated_at: '2026-10-22T15:42:37.862804+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26157,6 +26157,16 @@ prs:
       holds.'
     created_at: '2026-10-22T14:44:07Z'
     last_edited: '2026-10-22T14:44:07Z'
+  - id: note-51beaa5
+    text: 'Correction to the earlier pr-8409c64 note: as of pr-8409c64 review-loop
+      230e i5 the review launch lock (_review_window_launch_lock in pm_core/cli/pr.py)
+      is keyed by (session, pr_id), not window name, and lives at workdirs_base()/.review-launch-<session>-<pr_id>.lock
+      (~/.pm/workdirs/), matching the sign-off launch lock in signoff.launch_signoff_window
+      — not ~/.pm/locks. It wraps all of _launch_review_window. Once pr-8409c64 merges,
+      this PR probably only needs to verify the registry-bookkeeping symptoms are
+      gone, then close.'
+    created_at: '2026-10-22T15:42:37Z'
+    last_edited: '2026-10-22T15:42:37Z'
 - id: pr-7ab0a99
   plan: bugs
   title: 'Bug: QA records spurious INPUT_REQUIRED when a scenario''s container exec
