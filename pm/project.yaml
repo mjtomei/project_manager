@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T16:14:41.218492+00:00'
+  updated_at: '2026-10-22T16:26:45.244748+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30655,6 +30655,33 @@ prs:
       tick), so early reads show only start. Captures /pm-captures/scenarios/40.'
     created_at: '2026-10-22T16:14:41Z'
     last_edited: '2026-10-22T16:14:41Z'
+  - id: note-50e61bf
+    text: 'S42 refine (05913801): in a plain O pipeline (no router window killed)
+      the SIGNOFF_REVIEW hop clears the throttle "released", so the next router arms
+      a cleared id and no "re-armed" row appears at BLOCKED time. "re-armed" appears
+      only after a relaunch while the throttle is uncleared, e.g. the stale relaunch
+      after the user moves HEAD (git commit in pm pr cd <pr>) to clear a BLOCKED record;
+      router 2 throttle then reads re-armed. ctrl+q only detaches (TUI keeps running);
+      use pm session kill for "no TUI". The auto-start target is lost without a breadcrumb,
+      so B needs O again after pm session. Review fake slots: A i1, the z d plain
+      review, the superseded i1 and each later iteration each take one.'
+    created_at: '2026-10-22T15:42:07Z'
+    last_edited: '2026-10-22T15:42:07Z'
+  - id: note-05664e9
+    text: 'QA S42 (2026-10-22): fixed 3ccea259. pm pr history attempt rows with a
+      dated start (shifted TZ / +365d) plus a flagged name (signoff router (adopted)/(stale),
+      review-loop (loop …) cancelled KILLED) were 84-89 cols in | cat, and only the
+      TTY wrapper re-wrapped them (TTY != cat). Rows now wrap between parts like Recent
+      timers. Run 2 on 3ccea259 held every Then: z d cancel 0.96 s, grace cancelled/never
+      elapsed, loop 2 superseded, one folded start row, router 1 throttle 60 s falling,
+      router 2 >5s interrupted + lost throttle → same id done SIGNOFF_BLOCKED (adopted)
+      with the \xff line in the journal, stale router 3 MERGE, re-armed/cancelled
+      throttles, holds, no-TUI merge released at merged in 466 reads, merged popup
+      [11 runs] word-equal, 80-col TZ/year reads <=80 and TTY==cat. Spec nits: TZ
+      <Q> is invalid POSIX (name needs >=3 chars; use <QQQ>); restart >=1 s into router
+      2 or the bound reads unknown. Captures /pm-captures/scenarios/42.'
+    created_at: '2026-10-22T16:26:45Z'
+    last_edited: '2026-10-22T16:26:45Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
