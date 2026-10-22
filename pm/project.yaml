@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T16:22:23.758456+00:00'
+  updated_at: '2026-10-22T17:09:49.145919+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29704,6 +29704,13 @@ prs:
       is correct.'
     created_at: '2026-10-22T16:22:23Z'
     last_edited: '2026-10-22T16:22:23Z'
+  - id: note-6a0abc8
+    text: 'Review loop 2870 i1: rebuilt real catalog with bs4 (scratch venv, PYTHONPATH
+      unset) on merged head 5e9f27cd; cases.py --check clean (55198 cases, continuation
+      42757 after 61bedfb5), 63/63 tests incl. real-catalog check; committed regenerated
+      reports/case-coverage.*. Code otherwise reviewed with no further changes.'
+    created_at: '2026-10-22T17:09:49Z'
+    last_edited: '2026-10-22T17:09:49Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
