@@ -216,6 +216,22 @@ if (!only.length) {
     app.intent('select');
     rule(app.view.type === 'session' && app.view.id === d.session, `QA progress row opened ${app.sceneId()}`);
   }
+  // Reopening a document that is already open further back returns to it at
+  // the same page instead of stacking a second copy at page 1.
+  for (const [via, reach] of [
+    ['doc actions › #214 status', a => { a.intent('select'); a.items(a.view).find(i => /status$/.test(i.l)).act(); }],
+    ['discussion › PRs menu › #214', a => { a.intent('select'); a.items(a.view).find(i => /^Discuss/.test(i.l)).act(); a.intent('menu', 3); a.push({ type: 'list', kind: 'pr', pr: 'pr-214', cursor: 0, top: 0 }); }],
+  ]) {
+    const app = new App(new SimPM());
+    app.openDoc('spec:pr-214:impl');
+    for (const i of ['next', 'next']) app.intent(i);
+    const reading = app.view, top = reading.top;
+    reach(app);
+    app.items(app.view).find(i => typeof i.l === 'string' && /^Read impl spec/.test(i.l)).act();
+    rule(app.view === reading && reading.top === top && app.stack.filter(x => x.type === 'doc').length === 1,
+      `${via} → Read spec: ${app.stack.map(x => x.kind || x.type).join(' › ')} top ${app.view.top} (was ${top})`);
+    rule(!buildFrame(app.render()).problems.length, `${via} → Read spec frame breaks limits`);
+  }
   // An ended QA run session is not user-startable (the QA loop owns it); any
   // other ended session's Start confirmation names what starting does.
   for (const s of new SimPM().sessions.filter(x => x.state === 'ended')) {

@@ -394,6 +394,10 @@ export class App {
   }
 
   openDoc(docId, version, anchorKey) {
+    // Opening a document already open further back (e.g. doc → #N status →
+    // Read spec) returns to it at the place left, not to a second copy at p1.
+    const open = version == null && !anchorKey ? this.stack.findLastIndex(x => x.type === 'doc' && x.docId === docId) : -1;
+    if (open >= 0) { this.stack.length = open + 1; this.say(`Back at ${this.docName(this.view)} · same place`); return; }
     const latest = this.pm.latest(docId);
     const d = this.pm.doc(docId);
     const n = version ?? (d.pending ? d.pending.version : latest.n);
