@@ -229,8 +229,10 @@ exactly once.
   write to a different plan in the same session; earlier writes to the same
   plan stay in the window) to the event line, unless a reviewed window in
   `pm_case_windows.json` sets the start; human turns are user text messages
-  that are not tool results, meta/command wrappers, compaction summaries or pm
-  injected prompts. Each PM case records the window, counts, and
+  that are not tool results, meta/command wrappers, compaction summaries, pm
+  injected prompts, background-task notifications (`<task-notification>`,
+  queued commands in task-notification mode) or messages from other sessions
+  (record `origin.kind` other than human). Each PM case records the window, counts, and
   `needs_review: true` because the map is not proof of assent.
 - *PM source files* (user decision, 2026-10-21, review loop 5956 i10). Tool
   results are left out of excerpts, so files the request pointed at were
@@ -269,8 +271,13 @@ exactly once.
 - Empty texts (3) and texts with no detectable headings: dropped from
   continuation; dropped entirely if also without a brief, and listed.
 - Numbered-heading detection (RFC text, PDFs) must reject TOC lines (dot
-  leaders/trailing page numbers), page headers/footers and numbered lists; a
-  monotonic numbering check filters false positives.
+  leaders, trailing page numbers, including a page number after a column
+  gap), table rows (a multi-column line beside another; in PDFs only indented
+  ones, since pdftotext puts a heading beside the other page column), page
+  headers/footers and numbered lists (dense 1, 2, 3 runs that restart the
+  numbering); a monotonic numbering check filters false positives. RFC
+  run-in headings in fully justified text can be lost to the table-row rule
+  (trade-off accepted in QA s2).
 - Markdown headings inside fenced code blocks are ignored; RST adornment
   underlines must be at least as long as the title.
 - Duplicate documents (same sha256) share split group; each still gets cases.
