@@ -361,6 +361,9 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
         idle_at = float(ev.get("timestamp") or 0) or time.time()
         hook_baseline = idle_at
         verdict = extract_verdict_from_transcript(transcript, ALL_VERDICTS)
+        # PASS / NEEDS_WORK ends the wait whatever the idle's age: an answer
+        # record without a ``timestamp`` is dated when we saw it, which can
+        # postdate the follow-up's idle when both land within one poll.
         if verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK):
             _log.info("review_loop: hook-driven follow-up verdict %s", verdict)
             return read_latest_assistant_text(transcript) or verdict
@@ -505,7 +508,7 @@ def run_review_loop_sync(
                     if output is None:
                         state.iteration += 1
                         _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
-                        iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+                        iter_transcript = _iteration_transcript(state, transcript_dir)
                         output = _run_claude_review(
                             state.pr_id, pm_root, pr_data,
                             iteration=state.iteration, loop_id=state.loop_id,
