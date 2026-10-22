@@ -101,8 +101,10 @@ export function buildFrame(frame) {
   if (new Set(menu.map(m => m.itemID)).size !== menu.length) problems.push('duplicate menu ids');
 
   const panel = frame.panel ? {
-    id: PANEL_ID, name: 'panel', x: 4, y: Math.max(0, frame.panel.top * LINE - 4),
-    w: WIDTH - 8, h: Math.min(FOOTER_Y - 2, frame.panel.rows * LINE + 8),
+    // The border sits on the row boundary: descenders of the row above reach
+    // 25 px into their 27 px row, so a higher border strikes through them.
+    id: PANEL_ID, name: 'panel', x: 4, y: frame.panel.top * LINE,
+    w: WIDTH - 8, h: Math.min(FOOTER_Y - 2, frame.panel.rows * LINE + 4),
   } : null;
   if (panel && panel.y + panel.h > FOOTER_Y) problems.push('panel overlaps footer');
   return { contents, panel, menu, problems };

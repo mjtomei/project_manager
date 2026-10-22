@@ -20,6 +20,7 @@ const stateCell = s => ({ t: `${glyphFor(s.state)} ${s.stateText}`, dim: !ATTENT
 const LIST_ROWS = BODY_ROWS - 1; // row 0 is the identity/header row
 const INDENT = 28; // label x after the cursor column (▶ is 20 px)
 const TEXT_WIDTH = 540; // wrap width; leaves room below the 552 px container
+const VOICE_CHOICES = ['Send', 'Speak again', 'Cancel'];
 
 // ---- document formatting ----------------------------------------------
 function formatDoc(text) {
@@ -500,7 +501,9 @@ export class App {
     const t = this.target();
     if (!t) { this.say('Open a document or session to speak'); return; }
     this.overlay = { stage: 'listening', purpose, words: '', target: t, choice: 0 };
+    this.toast = null; // the panel's own hints replace any earlier notice
   }
+  overlayRows() { return !this.overlay ? 0 : this.overlay.stage === 'listening' ? 2 : 4; }
   overlayIntent(name) {
     const o = this.overlay;
     if (o.stage === 'listening') {
@@ -508,14 +511,13 @@ export class App {
       else if (name === 'back') this.overlay = null;
       return;
     }
-    const choices = ['Send', 'Speak again', 'Cancel'];
-    if (name === 'next') o.choice = Math.min(choices.length - 1, o.choice + 1);
+    if (name === 'next') o.choice = Math.min(VOICE_CHOICES.length - 1, o.choice + 1);
     if (name === 'prev') o.choice = Math.max(0, o.choice - 1);
     if (name === 'back') { this.overlay = null; this.say('Cancelled · nothing sent'); return; }
     if (name === 'hold') { this.overlay = { ...o, stage: 'listening', words: '' }; return; }
     if (name !== 'select') return;
-    if (choices[o.choice] === 'Cancel') { this.overlay = null; this.say('Cancelled · nothing sent'); return; }
-    if (choices[o.choice] === 'Speak again') { this.overlay = { ...o, stage: 'listening', words: '', choice: 0 }; return; }
+    if (VOICE_CHOICES[o.choice] === 'Cancel') { this.overlay = null; this.say('Cancelled · nothing sent'); return; }
+    if (VOICE_CHOICES[o.choice] === 'Speak again') { this.overlay = { ...o, stage: 'listening', words: '', choice: 0 }; return; }
     const ctx = this.contextFor(o.target);
     const text = o.purpose === 'changes' ? `Please revise: ${o.text}` : o.text;
     const r = this.pm.send(o.target.session, text, ctx);
@@ -568,7 +570,9 @@ export class App {
     const banners = this.banners(v);
     const head = [row([{ t: this.sessionTitle(s) }], stateCell(s))];
     if (s.scenarioTitle) head.push(row([{ t: s.scenarioTitle, dim: true }], { t: s.pane, dim: true }));
-    const per = BODY_ROWS - head.length - banners.length;
+    // The voice panel displaces the oldest visible lines, so the newest reply
+    // stays readable while answering it.
+    const per = BODY_ROWS - head.length - banners.length - this.overlayRows();
     const lines = this.transcriptLines(s);
     const end = lines.length - v.scroll;
     const shown = lines.slice(Math.max(0, end - per), end);
@@ -644,18 +648,16 @@ export class App {
     const rows = frame.rows.slice();
     while (rows.length < BODY_ROWS) rows.push(row());
     const ctx = this.contextFor(o.target);
+    const top = BODY_ROWS - this.overlayRows();
     if (o.stage === 'listening') {
-      const top = BODY_ROWS - 2;
       rows.splice(top, 2,
         row([{ t: `Listening · to ${this.sessionName(s)}`, dim: true }], { t: ctx ? `about p${ctx.page}` : '', dim: true }),
         row([{ t: o.words || 'Speak now; release to review' }]));
       return { rows, panel: { top, rows: 2 }, footer: { left: o.purpose === 'changes' ? 'Request changes' : 'Speak', right: 'Release: review · 2×: cancel' } };
     }
     const text = wrap((o.purpose === 'changes' ? 'Revise: ' : '') + o.text, 528).slice(0, 2);
-    const choices = ['Send', 'Speak again', 'Cancel'];
-    const top = BODY_ROWS - 4;
     let x = 10;
-    const choiceSegs = choices.flatMap((c, i) => { const segs = [{ t: i === o.choice ? GLYPH.cursor : '', x }, { t: c, x: x + 22, dim: i !== o.choice }]; x += 22 + width(c) + 28; return segs; });
+    const choiceSegs = VOICE_CHOICES.flatMap((c, i) => { const segs = [{ t: i === o.choice ? GLYPH.cursor : '', x }, { t: c, x: x + 22, dim: i !== o.choice }]; x += 22 + width(c) + 28; return segs; });
     rows.splice(top, 4,
       row([{ t: `To ${this.sessionName(s)} · ${s.pane !== s.short ? s.pane : 'window ' + s.window}`, dim: true, x: 6 }], { t: s.state === 'working' ? '◐ busy: queues' : '', dim: true }),
       row([{ t: text[0] || '', x: 6 }]),
@@ -694,6 +696,6 @@ function defaultTimeline(pm, p) {
     ['', 'Nothing needs you until merge.', '', true],
   ];
 }
-export function fmtAge(s) { return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `0:${String(s).padStart(2, '0')}`; }
+export function fmtAge(s) { return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${s}s`; }
 
 export { formatDoc };

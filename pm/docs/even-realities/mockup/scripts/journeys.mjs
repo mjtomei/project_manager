@@ -119,7 +119,7 @@ export const JOURNEYS = [
       { speech: 'Is fifteen seconds the configured poll interval, and is the spec wrong or the code?' },
       hold, release,
       { shot: 'B07-verifier-draft', expect: 'review', contains: 'busy: queues',
-        title: 'Asking the busy verifier', caption: 'The verifier is busy, so the message joins its queue in the same session.' },
+        title: 'Asking the busy verifier', caption: 'The verifier is busy, so the message joins its queue in the same session. The panel displaces the oldest lines, keeping the latest reply readable.' },
       click,
       { shot: 'B08-queued', expect: 'session', contains: 'Queued in #215 s2 verify',
         title: 'Queued, not duplicated', caption: 'The follow-up is queued in the verifier’s own session. No second verifier.' },
