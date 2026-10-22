@@ -86,3 +86,34 @@ def test_launch_lock_distinct_windows_do_not_block(tmp_path, monkeypatch):
 
     # Distinct windows can hold their locks concurrently.
     assert overlap["max_concurrent"] == 2
+
+
+def test_launch_review_window_holds_lock_during_launch(tmp_path, monkeypatch):
+    """``_launch_review_window`` runs the whole launch under the lock: a
+    non-blocking flock on the same (session, window) lock file fails while
+    the launch body executes."""
+    import errno
+    import fcntl
+    import os
+
+    import pm_core.paths as paths_mod
+    from pm_core.cli import pr as pr_mod
+
+    monkeypatch.setattr(paths_mod, "pm_home", lambda: tmp_path)
+    monkeypatch.setattr(pr_mod, "_get_pm_session", lambda: "pm-sess")
+    lock_path = tmp_path / "locks" / "review-launch-pm-sess-review-pr-001.lock"
+    seen = {}
+
+    def body(*_a, **_kw):
+        fd = os.open(str(lock_path), os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            seen["held"] = False
+        except OSError as e:
+            seen["held"] = e.errno in (errno.EAGAIN, errno.EACCES)
+        finally:
+            os.close(fd)
+
+    monkeypatch.setattr(pr_mod, "_launch_review_window_unlocked", body)
+    pr_mod._launch_review_window({}, {"id": "pr-001"})
+    assert seen == {"held": True}
