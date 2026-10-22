@@ -69,8 +69,9 @@ export class SimPM {
     const s = this.session(sessionId);
     if (!s || s.state === 'none' || s.state === 'ended') return { ok: false, reason: 'not-running' };
     const id = `m${++this.seq}`;
-    const queued = s.state === 'working';
-    s.transcript.push({ who: 'user', t: text, context, id, queued });
+    // A busy or still-starting session takes the message after its current turn.
+    const queued = s.state === 'working' || s.state === 'starting';
+    (s.transcript ??= []).push({ who: 'user', t: text, context, id, queued });
     this.outbox.push({ id, sessionId, text, context });
     return { ok: true, id, queued };
   }
@@ -87,7 +88,7 @@ export class SimPM {
       const pr = this.pr(d.pr);
       pr.activity = 'Implementation running'; pr.needs = null; pr.approvedAt = this.now();
       const s = this.session(d.session);
-      if (s) { s.state = 'working'; s.stateText = 'implementing'; s.transcript.push({ who: 'pm', t: `Spec v${version} (${hash}) approved from glasses · implementation resumed` }); }
+      if (s) { s.state = 'working'; s.stateText = 'implementing'; (s.transcript ??= []).push({ who: 'pm', t: `Spec v${version} (${hash}) approved from glasses · implementation resumed` }); }
       const h = this.historyFor(d.pr);
       h.timers = [];
       h.attempts.push([this.now(), `spec approved v${version}`, '—', 'approved'], [this.now(), 'impl', '0m', 'running']);
@@ -124,7 +125,7 @@ export class SimPM {
       p.signoff = { ...p.signoff, stale: true };
       p.activity = `Sign-off rerunning on ${p.currentHead} · manual merge`;
       const s = this.sessions.find(x => x.pr === prId && x.short === 'sign-off');
-      if (s) { s.state = 'working'; s.stateText = `rerun @${p.currentHead}`; s.transcript.push({ who: 'pm', t: `Merge refused: HEAD ${p.currentHead} ≠ signed ${head} · sign-off rerunning` }); }
+      if (s) { s.state = 'working'; s.stateText = `rerun @${p.currentHead}`; (s.transcript ??= []).push({ who: 'pm', t: `Merge refused: HEAD ${p.currentHead} ≠ signed ${head} · sign-off rerunning` }); }
       this.historyFor(prId).attempts.push([this.now(), 'merge (glasses)', '—', 'refused'], [this.now(), 'sign-off', '0m', 'running']);
       return { ok: false, reason: 'stale', head: p.currentHead };
     }
@@ -138,7 +139,7 @@ export class SimPM {
     switch (e.type) {
       case 'agent-reply': {
         const s = this.session(e.session);
-        const last = s.transcript.at(-1);
+        const last = (s.transcript ??= []).at(-1);
         if (e.stream && last?.who === 'agent' && last.streaming) { last.t += e.text; if (e.done) delete last.streaming; }
         else s.transcript.push({ who: e.who || 'agent', t: e.text, ...(e.done === false ? { streaming: true } : {}) });
         if (e.state) { s.state = e.state; s.stateText = e.stateText || e.state; }

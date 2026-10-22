@@ -25,6 +25,12 @@ const VOICE_CHOICES = ['Send', 'Speak again', 'Cancel'];
 const CONFIRM_LINES = 5; // explanation rows above a confirmation's two choices
 
 // ---- document formatting ----------------------------------------------
+// Numbered items (R1., s2., #214) get stable keys so versions can be compared.
+const ITEM_KEY = /^([A-Z]\d+|s\d+|#\d+)$/;
+const ITEM_LEAD = /^([A-Z]\d+\.|s\d+\.|#\d+)\s*/;
+// An item's full text across its wrapped continuation rows.
+const itemText = (lines, key) => lines.filter(x => x.key === key || x.key.startsWith(`${key}+`)).map(x => x.segs.at(-1).t).join(' ');
+
 function formatDoc(text) {
   const out = [];
   let section = '';
@@ -423,21 +429,19 @@ export class App {
   }
   whatChanged(docId, from, to) {
     const a = this.lines(docId, from), b = this.lines(docId, to);
-    const before = new Map(a.map(l => [l.key, l.segs.map(s => s.t).join(' ')]));
     const changes = [];
     for (const l of b) {
-      if (!/^([A-Z]\d+|s\d+|#\d+)$/.test(l.key)) continue;
-      const text = b.filter(x => x.key === l.key || x.key.startsWith(`${l.key}+`)).map(x => x.segs.at(-1).t).join(' ');
-      const old = before.has(l.key) ? a.filter(x => x.key === l.key || x.key.startsWith(`${l.key}+`)).map(x => x.segs.at(-1).t).join(' ') : null;
+      if (!ITEM_KEY.test(l.key)) continue;
+      const text = itemText(b, l.key);
+      const old = a.some(x => x.key === l.key) ? itemText(a, l.key) : null;
       if (old === text) continue;
-      changes.push({ key: l.key, text: `${old == null ? 'Added: ' : ''}${text.replace(/^([A-Z]\d+\.|#\d+)\s*/, '')}` });
+      changes.push({ key: l.key, text: `${old == null ? 'Added: ' : ''}${text.replace(ITEM_LEAD, '')}` });
     }
     // Items dropped from the new version: listed, but there is nothing in it to jump to.
     const kept = new Set(b.map(l => l.key));
     for (const l of a) {
-      if (!/^([A-Z]\d+|s\d+|#\d+)$/.test(l.key) || kept.has(l.key)) continue;
-      const old = a.filter(x => x.key === l.key || x.key.startsWith(`${l.key}+`)).map(x => x.segs.at(-1).t).join(' ');
-      changes.push({ key: l.key, removed: true, text: `Removed: ${old.replace(/^([A-Z]\d+\.|#\d+)\s*/, '')}` });
+      if (!ITEM_KEY.test(l.key) || kept.has(l.key)) continue;
+      changes.push({ key: l.key, removed: true, text: `Removed: ${itemText(a, l.key).replace(ITEM_LEAD, '')}` });
     }
     this.push({ type: 'list', kind: 'whatchanged', docId, from, to, changes, cursor: 0, top: 0 });
   }
@@ -567,7 +571,7 @@ export class App {
     this.overlay = null;
     if (!r.ok) return this.fail(r);
     const s = this.pm.session(o.target.session);
-    this.say(r.queued ? `Queued in ${this.sessionName(s)} (busy) · same session` : `Sent to ${this.sessionName(s)} · ${GLYPH.idle} waiting for reply`);
+    this.say(r.queued ? `Queued in ${this.sessionName(s)} (${s.state === 'starting' ? 'starting' : 'busy'}) · same session` : `Sent to ${this.sessionName(s)} · ${GLYPH.idle} waiting for reply`);
   }
   contextFor(t) {
     if (!t.doc) return null;
@@ -709,7 +713,7 @@ export class App {
     const to = `To ${this.sessionName(s)}`;
     const where = `${to} · ${s.pane !== s.short ? s.pane : 'window ' + s.window}`;
     rows.splice(top, 4,
-      row([{ t: width(where) <= RIGHT_X - MARGIN - 14 ? where : to, dim: true, x: 6 }], { t: s.state === 'working' ? '◐ busy: queues' : '', dim: true }),
+      row([{ t: width(where) <= RIGHT_X - MARGIN - 14 ? where : to, dim: true, x: 6 }], { t: s.state === 'working' || s.state === 'starting' ? `◐ ${s.state === 'working' ? 'busy' : 'starting'}: queues` : '', dim: true }),
       row([{ t: text[0] || '', x: 6 }]),
       row([{ t: text[1] || (ctx ? `[${ctx.label}]` : ''), x: 6, dim: !text[1] }]),
       row(choiceSegs));

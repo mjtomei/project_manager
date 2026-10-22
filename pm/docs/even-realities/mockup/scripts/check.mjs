@@ -106,6 +106,28 @@ if (!only.length) {
     rule(removed?.removed && removed.text.startsWith('Removed: '), 'what changed omits a removed requirement');
     rule(app.items(app.view).every(i => !i.act || !i.l?.[0]?.t?.startsWith?.('R1')), 'removed change is selectable');
   }
+  // Every live session takes a message, also one PM shows without a transcript
+  // (meta, watchers); one still starting queues it instead of claiming delivery.
+  for (const s of new SimPM().sessions.filter(x => ['working', 'idle', 'waiting', 'needs'].includes(x.state))) {
+    try {
+      const r = new SimPM().send(s.id, 'rule check', null);
+      rule(r.ok && r.queued === (s.state === 'working'), `send to ${s.id} → ${JSON.stringify(r)}`);
+    } catch (e) { rule(false, `send to ${s.id} threw ${e.message}`); }
+  }
+  {
+    const pm = new SimPM();
+    pm.start('pr-215/signoff');
+    rule(pm.send('pr-215/signoff', 'rule check', null).queued, 'send to a starting session is not queued');
+  }
+  // What changed strips a scenario's own number (s2.) as it does R1. and #214.
+  {
+    const app = new App(new SimPM());
+    const d = app.pm.doc('spec:pr-215:qa'), v1 = d.versions[0];
+    d.versions.push({ ...v1, n: 2, hash: 'beef', text: v1.text.replace('- s2. Banner clears', '- s2. Banner now clears') });
+    app.whatChanged(d.id, 1, 2);
+    const c = app.view.changes.find(x => x.key === 's2');
+    rule(c && c.text.startsWith('Banner now clears'), `what changed s2 text "${c?.text}"`);
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

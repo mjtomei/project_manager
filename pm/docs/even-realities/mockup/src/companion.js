@@ -42,7 +42,8 @@ export function renderCompanion(root, app, pm, act) {
     if (!text) return;
     // Typed messages carry the same reading context as spoken ones.
     const r = pm.send(v.id, text, app.contextFor({ session: v.id, doc: app.contextDoc(v.id) }));
-    if (r.ok) app.say(r.queued ? `Queued from phone in ${app.sessionName(pm.session(v.id))} (busy) · same session` : `Sent from phone to ${app.sessionName(pm.session(v.id))}`);
+    const s = pm.session(v.id);
+    if (r.ok) app.say(r.queued ? `Queued from phone in ${app.sessionName(s)} (${s.state === 'starting' ? 'starting' : 'busy'}) · same session` : `Sent from phone to ${app.sessionName(s)}`);
     else app.fail(r);
     act('noop');
     // A refused message was not sent; keep it so the user can send it later.
