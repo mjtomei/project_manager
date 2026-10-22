@@ -89,7 +89,15 @@ the in-container ensure succeeds (`exec`). On failure, for refiner and
 worker alike:
 - initial launch: `_await_route` waits (stop-aware, rechecks every 15 s)
   with `latest_output` = problem + remedy, then launches by itself;
-- queued launch: stays queued (`… deferred — …`);
+- queued launch: stays queued (`… deferred — …`). Queued launches run
+  inside the verdict-collection loop (`_launch_next_queued`), so their
+  launch gates never wait there (`_route_gate(deferred=…)`): if the route
+  fails between the queue check and the refiner/worker gate, the scenario
+  is restored to its pre-launch state, put back at the front of the queue
+  and the failing status cached for the queue check; a refiner window
+  already opened is closed (the refiner reruns at relaunch). The poll loop
+  retries the queue every tick (cached check), so a deferred scenario also
+  launches when no other verdict event would refill its slot;
 - window-death retry: deferred without spending a retry slot;
 - session idle without its verdict/markers while the route is unhealthy
   (`_RouteStallWatch`, workers in the poll loop, refiners via
@@ -209,6 +217,22 @@ a tools-disabled `claude -p` through the route, reporting requested models
     `worker_route.launch_parts`; `worker_route.ROUTED_SESSION_TYPES`
     replaces the stale `WORKER_SESSION_TYPE`, and remedies name both routed
     types.
+  - Review loop 99cf i2: two queued-launch bugs (found by review 1 and
+    while assessing it), fixed in scope. (a) A route failure between
+    `_launch_next_queued`'s queue check and the in-launch gate entered the
+    blocking `_await_route` inside `_poll_tmux_verdicts`, stalling every
+    other scenario's verdicts, retries and stop until the route came back;
+    queued gates are now non-blocking (defer → restore → requeue).
+    (b) A queue deferred on the route was only retried on another verdict
+    event, so with nothing else running it never launched after the route
+    recovered; the loop now retries the queue every tick. Regressions
+    (mutation-checked): `TestPollLoopRouteGating::
+    test_route_failure_after_queue_check_requeues_without_blocking`,
+    `test_queued_launch_gate_does_not_create_windows`,
+    `test_queued_scenario_launches_once_route_recovers`. Not route-specific
+    and left to pr-1ab9075 (#247, note added there): a queued launch still
+    polls its refiner synchronously inside the verdict loop, so a long or
+    stalled queued refiner blocks it as before this PR.
 
 ### Bugs found by live validation, with regressions
 1. *Stream cut off after 10 s* — the bridge's connect timeout stayed on the

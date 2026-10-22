@@ -1601,6 +1601,36 @@ def _note_route_wait_stopped(state: QALoopState, scenario: "QAScenario") -> None
         scenario.index, "stopped while waiting for the work route")
 
 
+def _route_gate(state: QALoopState, pr_data: dict, data: dict,
+                scenario: "QAScenario", session_type: str, *,
+                container_name: str | None = None,
+                deferred: "dict[int, object] | None" = None) -> bool:
+    """Gate a refiner / worker launch on its route.  True to launch.
+
+    Initial launches (*deferred* None) wait in :func:`_await_route`.
+    Queued launches run inside the verdict-collection loop and must not
+    wait there (it would stall every other scenario's verdicts, retries
+    and stop handling), so an unusable route only records the failing
+    status in *deferred*; the caller puts the scenario back in the queue.
+    """
+    role = "refiner" if session_type == "qa_concretize" else "worker"
+    check = _route_checker(pr_data, data, session_type,
+                           session_tag=state.session_tag,
+                           container_name=container_name)
+    if deferred is None:
+        if _await_route(state, check, f"Scenario {scenario.index} {role}"):
+            return True
+        _note_route_wait_stopped(state, scenario)
+        return False
+    st = check()
+    if st.ok:
+        return True
+    _log.warning("Scenario %d %s launch deferred: %s",
+                 scenario.index, role, st.message())
+    deferred[scenario.index] = st
+    return False
+
+
 class _RouteStallWatch:
     """Recover a routed session that went idle without its verdict
     because the route failed mid-run (router down, sign-in expired).
@@ -1627,9 +1657,14 @@ class _RouteStallWatch:
             max_age = _ROUTE_RECHECK_INTERVAL
         now = _route_clock()
         if self._cached is None or now - self._cached_at >= max_age:
-            self._cached = self._check()
-            self._cached_at = now
+            self.remember(self._check())
         return self._cached
+
+    def remember(self, st) -> None:
+        """Cache *st* as the latest check result (e.g. a failure seen by
+        a launch gate), so it is not re-checked for a recheck interval."""
+        self._cached = st
+        self._cached_at = _route_clock()
 
     def surface(self, st, verb: str = "waiting") -> None:
         msg = f"{self.what} {verb} — {st.message()}"
@@ -1658,8 +1693,13 @@ class _RouteStallWatch:
         from pm_core import tmux as tmux_mod
         pane, self.stalled_pane = self.stalled_pane, None
         self._shown = ""
-        if tmux_mod.pane_exists(pane):
-            tmux_mod.send_keys(pane, self.NUDGE)
+        try:
+            if tmux_mod.pane_exists(pane):
+                tmux_mod.send_keys(pane, self.NUDGE)
+        except Exception:
+            # Pane died in between: the caller's dead-pane handling
+            # relaunches it.
+            _log.debug("route resume nudge to %s failed", pane, exc_info=True)
         self.state.latest_output = (f"{self.what}: work route '{st.route}' "
                                     "recovered — resumed")
         _log.info("%s", self.state.latest_output)
@@ -2175,6 +2215,21 @@ def _install_artifact_files(pm_root: Path, scenario: QAScenario,
     scenario.artifact_paths = new_paths
 
 
+def _drop_deferred_window(session: str, scenario: "QAScenario",
+                          win_name: str, deferred: dict | None) -> None:
+    """Close a queued scenario's refiner window when its worker launch was
+    deferred: the scenario goes back to the queue and is prepared afresh
+    (refiner included) once the route is usable."""
+    if deferred is None or scenario.index not in deferred:
+        return
+    from pm_core import tmux as tmux_mod
+    try:
+        tmux_mod.kill_window(session, win_name)
+    except Exception:
+        _log.debug("could not close deferred window %s", win_name,
+                   exc_info=True)
+
+
 def _launch_scenarios_in_tmux(
     state: QALoopState,
     data: dict,
@@ -2184,8 +2239,12 @@ def _launch_scenarios_in_tmux(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _route_deferred: dict | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
+
+    *_route_deferred* (queued launches): launch gates do not wait on an
+    unusable route, see :func:`_route_gate`.
 
     Both phases run in parallel: workdir cloning, concretizer window creation,
     and agent launch all happen concurrently across scenarios.  The scenario
@@ -2249,11 +2308,8 @@ def _launch_scenarios_in_tmux(
         transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
         win_name = _scenario_window_name(pr_data, scenario.index)
 
-        if not _await_route(state, _route_checker(
-                pr_data, data, "qa_concretize",
-                session_tag=state.session_tag),
-                f"Scenario {scenario.index} refiner"):
-            _note_route_wait_stopped(state, scenario)
+        if not _route_gate(state, pr_data, data, scenario, "qa_concretize",
+                           deferred=_route_deferred):
             return
 
         import uuid as _uuid
@@ -2340,11 +2396,9 @@ def _launch_scenarios_in_tmux(
         if refined_steps:
             scenario.steps = refined_steps
 
-        if not _await_route(state, _route_checker(
-                pr_data, data, "qa_scenario",
-                session_tag=state.session_tag),
-                f"Scenario {scenario.index} worker"):
-            _note_route_wait_stopped(state, scenario)
+        if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
+                           deferred=_route_deferred):
+            _drop_deferred_window(session, scenario, win_name, _route_deferred)
             return
         child_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
@@ -2409,8 +2463,11 @@ def _launch_scenarios_in_containers(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _route_deferred: dict | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
+
+    *_route_deferred*: as for :func:`_launch_scenarios_in_tmux`.
 
     Each scenario gets:
       1. A local clone of the repo (standalone .git, no worktree pointers)
@@ -2510,11 +2567,8 @@ def _launch_scenarios_in_containers(
 
         win_name = _scenario_window_name(pr_data, scenario.index)
 
-        if not _await_route(state, _route_checker(
-                pr_data, data, "qa_concretize",
-                session_tag=state.session_tag, container_name=cname),
-                f"Scenario {scenario.index} refiner"):
-            _note_route_wait_stopped(state, scenario)
+        if not _route_gate(state, pr_data, data, scenario, "qa_concretize",
+                           container_name=cname, deferred=_route_deferred):
             return
 
         import uuid as _uuid
@@ -2601,11 +2655,9 @@ def _launch_scenarios_in_containers(
         if refined_steps:
             scenario.steps = refined_steps
 
-        if not _await_route(state, _route_checker(
-                pr_data, data, "qa_scenario",
-                session_tag=state.session_tag, container_name=cname),
-                f"Scenario {scenario.index} worker"):
-            _note_route_wait_stopped(state, scenario)
+        if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
+                           container_name=cname, deferred=_route_deferred):
+            _drop_deferred_window(session, scenario, win_name, _route_deferred)
             return
         exec_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
@@ -2974,6 +3026,11 @@ def _poll_tmux_verdicts(
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
+        # Preparation rewrites the scenario (instruction / artifact paths,
+        # refined steps); a deferred launch restores it before requeueing.
+        import copy as _copy
+        snapshot = _copy.deepcopy(scenario)
+        deferred: dict = {}
         # Launch this single scenario by temporarily swapping state.scenarios
         orig = state.scenarios
         state.scenarios = [scenario]
@@ -2982,14 +3039,26 @@ def _poll_tmux_verdicts(
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _route_deferred=deferred,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _route_deferred=deferred,
                 )
         finally:
             state.scenarios = orig
+        if scenario.index in deferred:
+            # The route failed between the queue check and the launch:
+            # back to the front of the queue (no verdict, no retry spent)
+            # until the queue check passes again.
+            vars(scenario).update(vars(snapshot))
+            _launch_queue.insert(0, scenario)
+            _queued_indices.add(scenario.index)
+            _queued_route.remember(deferred[scenario.index])
+            _queued_route.surface(deferred[scenario.index], "deferred")
+            return
         if scenario.window_name:
             pending.add(scenario.index)
         else:
@@ -3020,6 +3089,12 @@ def _poll_tmux_verdicts(
         # (queued launches and verdicts both mutate it).
         _write_resume_file(state, use_containers, concurrency_cap,
                            _queued_indices)
+
+        # Slots are normally refilled on verdict events; a launch deferred
+        # on the route has none to wait for, so retry it every tick (the
+        # route check is cached for _ROUTE_RECHECK_INTERVAL).
+        if _launch_queue:
+            _launch_next_queued()
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
         verdicts_changed = False

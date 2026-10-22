@@ -31305,11 +31305,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-22T17:19:44.677099+00:00'
+  updated_at: '2026-10-22T19:28:01.060108+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8a985a7
+    text: 'From pr-592e4bd review (2026-10-22): route-gate waits in queued launches
+      are now nonblocking there (defer/requeue + per-tick queue retry). Remaining,
+      not route-specific: _launch_next_queued still runs the queued scenario refiner
+      synchronously (_concretize_scenario/poll_for_verdict) inside _poll_tmux_verdicts,
+      so a long or stalled queued refiner (incl. a routed refiner held by _RouteStallWatch
+      during a mid-run route outage) blocks verdict collection, retries, verification
+      and stop for its duration. Cover this with the nonblocking retry/launch work.'
+    created_at: '2026-10-22T19:28:01Z'
+    last_edited: '2026-10-22T19:28:01Z'
 - id: pr-a80bde5
   plan: bugs
   title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations
@@ -31441,7 +31451,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T19:08:00.521074+00:00'
+  updated_at: '2026-10-22T19:28:01.896684+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31490,3 +31500,12 @@ prs:
       Older pm.container log files may still hold such values and were not rewritten.'
     created_at: '2026-10-22T19:08:00Z'
     last_edited: '2026-10-22T19:08:00Z'
+  - id: note-4ed7792
+    text: 'Review 99cf i2: queued-launch route gate no longer blocks the verdict loop
+      (route failure after the queue check → scenario restored and requeued, refiner
+      window closed, no verdict); queue retried every poll tick so a route-deferred
+      queue launches after recovery even with no other verdict events. 3 mutation-checked
+      regressions. Residual synchronous queued-refiner blocking noted on pr-1ab9075
+      (#247).'
+    created_at: '2026-10-22T19:28:01Z'
+    last_edited: '2026-10-22T19:28:01Z'

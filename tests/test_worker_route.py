@@ -668,6 +668,124 @@ class TestPollLoopRouteGating:
         assert "deferred" in state.latest_output
         assert "start the router" in state.latest_output
 
+    def test_queued_scenario_launches_once_route_recovers(self, tmp_path):
+        """No other scenario is running, so no verdict event refills the
+        slot: the deferred queue is retried on every poll tick."""
+        from pm_core import qa_loop
+        queued = qa_loop.QAScenario(index=2, title="q", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [queued]
+        launched = []
+
+        def launch(st, *a, **k):
+            sc = st.scenarios[0]
+            launched.append(sc.index)
+            state.stop_requested = True  # done once it is launched
+            sc.window_name = "w2"
+        ticks = {"n": 0}
+
+        def sleep(_):
+            ticks["n"] += 1
+            if ticks["n"] > 50:  # fail rather than hang
+                state.stop_requested = True
+        with patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+                   side_effect=launch):
+            self._poll(state, tmp_path,
+                       [_status(False)] * 4 + [_status(True)],
+                       queued_scenarios=[queued], concurrency_cap=1)
+        assert launched == [2]
+        assert 2 not in state.scenario_verdicts
+
+    def test_route_failure_after_queue_check_requeues_without_blocking(
+            self, tmp_path):
+        """The route dies between the queue check and the launch gate: the
+        launch must not wait inside the verdict-collection loop.  The
+        scenario goes back to the queue unchanged while the running
+        scenario's verdict is still collected, and launches once the route
+        is back."""
+        from pm_core import qa_loop
+        running = qa_loop.QAScenario(index=1, title="r", focus="f")
+        running.window_name, running.session_id = "w1", "sid-1"
+        running.pane_id = "%5"
+        queued = qa_loop.QAScenario(index=2, title="q", focus="f",
+                                    instruction_path="instructions/q.md")
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [running, queued]
+        route = {"up": True}
+
+        def checker(*a, **k):
+            return lambda: _status(route["up"])
+        launches = []
+
+        def launch(st, *a, _route_deferred=None, **k):
+            sc = st.scenarios[0]
+            launches.append(sc.instruction_path)
+            sc.instruction_path = None  # preparation rewrites the scenario
+            if len(launches) == 1:
+                route["up"] = False  # router dies right after the check
+                with patch("pm_core.qa_loop._await_route",
+                           side_effect=AssertionError("blocking wait")):
+                    assert not qa_loop._route_gate(
+                        st, {}, {}, sc, "qa_concretize",
+                        deferred=_route_deferred)
+                return
+            sc.window_name, sc.session_id, sc.pane_id = "w2", "sid-2", "%6"
+
+        ticks = {"n": 0}
+
+        def sleep(_):
+            ticks["n"] += 1
+            if ticks["n"] == 3:
+                route["up"] = True
+            if ticks["n"] > 50:  # fail rather than hang
+                state.stop_requested = True
+        ev = {"event_type": "idle_prompt", "timestamp": time.time() + 1e4}
+        with patch("pm_core.qa_loop._route_checker", side_effect=checker), \
+             patch("pm_core.qa_loop._ROUTE_RECHECK_INTERVAL", 0), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=False), \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+                   side_effect=launch), \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.hook_events.read_event", return_value=ev), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/w", tmp_path / "status.json",
+                lambda *a: None, queued_scenarios=[queued],
+                concurrency_cap=2)
+        # Second launch saw the restored scenario, not the mutated one.
+        assert launches == ["instructions/q.md", "instructions/q.md"]
+        assert state.scenario_verdicts == {1: "PASS", 2: "PASS"}
+
+    def test_queued_launch_gate_does_not_create_windows(self, tmp_path):
+        """_launch_scenarios_in_tmux with a deferral dict never opens the
+        refiner window when the route is down."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=4, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [sc]
+        deferred = {}
+        with patch("pm_core.qa_loop._route_checker",
+                   return_value=lambda: _status(False)), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+             patch("pm_core.qa_loop._await_route",
+                   side_effect=AssertionError("blocking wait")), \
+             patch("pm_core.tmux.new_window_get_pane") as new_window:
+            qa_loop._launch_scenarios_in_tmux(
+                state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path),
+                _route_deferred=deferred)
+        new_window.assert_not_called()
+        assert list(deferred) == [4] and not deferred[4].ok
+        assert not sc.window_name and 4 not in state.scenario_verdicts
+
     def test_idle_without_verdict_on_down_route_then_resume(self, tmp_path):
         from pm_core import qa_loop
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")
