@@ -949,6 +949,32 @@ def _prune_untracked_trust(app, seen: set[str]) -> None:
             app._untracked_trust_reported.discard(pane_id)
 
 
+def _transcript_is_another_session(app, pane_id: str,
+                                   transcript: str) -> bool:
+    """Whether *transcript* names a different Claude session than *pane_id*.
+
+    The ``review-<pr>.jsonl`` symlink may belong to an earlier plain
+    review (z d) while the review window now holds a finished loop
+    iteration's pane.  Pairing them mirrors a phantom "review running"
+    that never sees its own hooks.  A mismatch is cached per pane so the
+    pane's start command is read once, not on every poll.
+    """
+    from pm_core.claude_launcher import (
+        pane_session_id, session_id_from_transcript)
+    if not hasattr(app, "_foreign_review_panes"):
+        app._foreign_review_panes = {}  # pane -> transcript session id
+    foreign = app._foreign_review_panes
+    t_sid = session_id_from_transcript(transcript)
+    if not t_sid:
+        return False
+    if foreign.get(pane_id) != t_sid:
+        pane_sid = pane_session_id(pane_id)
+        if not pane_sid or pane_sid == t_sid:
+            return False
+        foreign[pane_id] = t_sid
+    return True
+
+
 def _poll_impl_idle(app) -> None:
     """Poll implementation panes for idle detection.
 
@@ -1129,22 +1155,8 @@ def _poll_impl_idle(app) -> None:
                 continue
             review_transcript = str(tdir / f"review-{pr_id}.jsonl")
             try:
-                # The symlink may belong to an earlier plain review (z d)
-                # while the window now holds a finished loop iteration's
-                # pane.  Pairing them mirrors a phantom "review running"
-                # that never sees its own hooks, so only register a pane
-                # the transcript is about.
-                from pm_core.claude_launcher import (
-                    pane_session_id, session_id_from_transcript)
-                if not hasattr(app, "_foreign_review_panes"):
-                    app._foreign_review_panes = {}  # pane -> transcript sid
-                foreign = app._foreign_review_panes
-                t_sid = session_id_from_transcript(review_transcript)
-                if t_sid and foreign.get(pane_id) != t_sid:
-                    pane_sid = pane_session_id(pane_id)
-                    if pane_sid and pane_sid != t_sid:
-                        foreign[pane_id] = t_sid
-                if t_sid and foreign.get(pane_id) == t_sid:
+                if _transcript_is_another_session(app, pane_id,
+                                                  review_transcript):
                     raise ValueError("review transcript is another session")
                 tracker.register(review_key, pane_id, review_transcript)
             except ValueError:

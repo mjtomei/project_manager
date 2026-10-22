@@ -572,6 +572,38 @@ class TestRuntimeCapture:
         assert (end["outcome"], end["verdict"]) == ("done", "MERGED")
         assert rs.get_action_state(PR, "merge")["verdict"] == "MERGED"
 
+    def test_review_tracker_skips_pane_of_another_session(self, monkeypatch):
+        """After z d then a review loop, review-<pr>.jsonl still names the
+        plain review's session while the window holds the loop's last
+        iteration pane.  Registering that pair mirrored a phantom review
+        reading "agent working" forever; the guard refuses it and reads
+        the pane's start command once."""
+        from pm_core.tui import review_loop_ui
+        loop_sid = "11111111-2222-3333-4444-555555555555"
+        plain_sid = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+        cmds = {"%1": f"claude --session-id {loop_sid}",
+                "%2": f"claude --session-id {plain_sid}", "%3": "bash"}
+        calls: list[str] = []
+
+        def _start_cmd(pane):
+            calls.append(pane)
+            return cmds[pane]
+        monkeypatch.setattr("pm_core.tmux.pane_start_command", _start_cmd)
+        monkeypatch.setattr("pm_core.claude_launcher.session_id_from_transcript",
+                            lambda t: plain_sid)
+        app = SimpleNamespace()
+        check = review_loop_ui._transcript_is_another_session
+        for _ in range(3):
+            assert check(app, "%1", "review-pr-001.jsonl") is True
+        assert calls.count("%1") == 1  # mismatch cached per pane
+        assert check(app, "%2", "review-pr-001.jsonl") is False
+        # No session id in the pane command: nothing to compare, register.
+        assert check(app, "%3", "review-pr-001.jsonl") is False
+        # A newer review on the symlink is compared afresh.
+        monkeypatch.setattr("pm_core.claude_launcher.session_id_from_transcript",
+                            lambda t: loop_sid)
+        assert check(app, "%1", "review-pr-001.jsonl") is False
+
     def test_journal_failure_leaves_runtime_unchanged(self, tmp_path,
                                                      monkeypatch):
         blocker = tmp_path / "file"
