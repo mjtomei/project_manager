@@ -1035,8 +1035,8 @@ def create_container(
 ) -> str:
     """Create a detached container with the workdir and claude mounted.
 
-    The container runs ``sleep infinity`` and stays alive for
-    ``docker exec -it`` from a tmux window.
+    The container's PID 1 is a reaping wait loop (see ``_PID1_REAPER``) and
+    stays alive for ``docker exec -it`` from a tmux window.
 
     Automatically:
       - Bind-mounts the host's claude binary at /usr/local/bin/claude
