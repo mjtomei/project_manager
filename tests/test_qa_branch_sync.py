@@ -192,6 +192,20 @@ class TestSyncPrBranch:
         assert sync.outcome == "hold" and "refs/heads/master" in sync.detail
         assert _head(s) == s["L"]
 
+    def test_unfinished_merge_holds(self, repos):
+        """A reviewer's reconciliation stopped on conflicts: leave it."""
+        s = repos
+        c = _commit(s["wd"], "app.py", "v = 3  # local\n", "local fix")
+        _worker_push(s)
+        r = subprocess.run(["git", *GIT_ID, "pull", "--no-rebase", "--quiet",
+                            s["url"], BRANCH], cwd=s["wd"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold" and "MERGE_HEAD" in sync.detail
+        assert _head(s) == c
+        assert (s["wd"] / ".git" / "MERGE_HEAD").exists()
+
     def test_missing_local_branch_left_to_handoff_guard(self, repos):
         s = repos
         sync = qa_loop._sync_pr_branch(str(s["wd"]), "pm/no-such-branch")
