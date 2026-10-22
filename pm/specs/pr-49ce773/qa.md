@@ -136,6 +136,13 @@ client session), the pm log file (warnings).
   crash/exit, and dispatch from one popup doesn't corrupt the other's view.
 - C2. Rapid nav keypresses while project.yaml is being rewritten in a loop: no
   traceback, index never out of range, header id always matches rows.
+- C3. Two clients attached to grouped sessions (e.g. `<base>~1`, `<base>~2`):
+  an action dispatched from client 1's popup switches/creates the window in
+  client 1's session only — client 2 (even if it was the most recently active
+  client) keeps its current window (fix ace617b4: popup passes
+  PM_CALLER_SESSION, honoured only while that session exists — e699bd52).
+  Open the two popups one after the other, not in the same instant (known
+  race, pr-b511dcf).
 
 ## Pass/Fail criteria
 
