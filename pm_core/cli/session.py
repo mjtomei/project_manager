@@ -1929,7 +1929,7 @@ def popup_picker_cmd(session: str, window_name: str):
 
     if not lines:
         click.echo(f"PR Actions — {current_pr}")
-        click.echo("No actions available (PR is merged or closed).")
+        click.echo("No actions available.")
         _pause_and_exit(0)
 
     has_fzf = shutil.which("fzf") is not None

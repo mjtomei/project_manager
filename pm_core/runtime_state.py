@@ -243,7 +243,6 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                         _journal_transition(pr_id, action, cur, state,
                                             extras, False, history_outcome,
                                             history_reason)
-                    if state is not None:
                         prior_state = cur.get("state")
                         # A fresh launch of this action invalidates any
                         # suppress_switch flag set by a prior, now-orphaned

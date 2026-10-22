@@ -184,7 +184,11 @@ The model contains:
     still shows in flight (`attempt_id` on an in-flight entry) is
     `running` regardless of its opener: any process clearing the entry
     ends it, so a short-lived CLI opener (e.g. `pm pr auto-sequence`)
-    exiting does not interrupt it.
+    exiting does not interrupt it.  Loop entries (`loop_id`) are the
+    exception: only the opening process's loop thread advances or clears
+    them, so a dead owner (e.g. a SIGKILLed TUI before the next mount
+    sweep) interrupts them and the `runtime` line marks the entry
+    `(stale: owner exited)`.
   - For parents with two or more scenario children: a `scenarios` dict
     with `count` (distinct scenarios), `attempts` (incl. retries),
     `wall_s` (union of child execution intervals — a scenario's leading
@@ -258,7 +262,10 @@ supply `context` (session/window/task); leave a cross-PR note.
   on `history/owners/{instance}.lock` (opened close-on-exec, so exec,
   exit and crash all release it; a forked child takes its own instance).
   Liveness = that lock is still held. Fallback when the lock file is
-  absent: `/proc/<pid>/stat` start token, then `os.kill(pid, 0)`. A pid
+  absent: `/proc/<pid>/stat` start token, then `os.kill(pid, 0)`.
+  Probes take the owner lock exclusively for an instant, so concurrent
+  probes serialize on `history/owners/.probe` (two unserialized probes of
+  the same dead owner see each other's lock and call it alive). A pid
   reused by another process must not count as alive. Released lock files
   older than 30 days are pruned.
 - I5. Tests isolate `pm_home` (conftest autouse fixture for the history
@@ -309,7 +316,9 @@ supply `context` (session/window/task); leave a cross-PR note.
   `superseded`).
 - E3. Concurrent scenarios: parent wall time from parent start/end; the
   sum of scenario time is only shown labelled "sum across N scenarios".
-- E4. Merge: `cleanup_pr_resources` first clears in-flight runtime
+- E4. Merge: `cleanup_pr_resources` (and `pm pr merge`'s
+  `_finalize_merge`, via `pr_cleanup.end_in_flight_actions`, since local
+  merges kill windows without a resource cleanup) first clears in-flight runtime
   entries (ending their attempts `interrupted`, "PR resources cleaned
   up" — unlinking alone would leave them open and shown running after
   merge), then deletes runtime state; the journal remains, so `pm pr history` still works and the picker shows History for

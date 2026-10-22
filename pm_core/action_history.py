@@ -140,6 +140,8 @@ def _proc_start(pid: int) -> str | None:
     # comm (field 2) may contain spaces/parens: split after the last ')'.
     try:
         fields = raw[raw.rindex(")") + 2:].split()
+        if fields[0] == "Z":
+            return None  # exited, not yet reaped: as good as gone
         return fields[19]  # field 22 overall
     except (ValueError, IndexError):
         return None
@@ -245,9 +247,7 @@ def _instance_alive(instance: str) -> bool | None:
     path = _owners_dir() / f"{instance}.lock"
     try:
         fd = os.open(path, os.O_RDWR)
-    except FileNotFoundError:
-        return None
-    except OSError:
+    except OSError:  # absent (pruned / never created) or unreadable
         return None
     try:
         with _probe_mutex():

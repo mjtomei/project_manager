@@ -565,20 +565,20 @@ def _current_activity(attempts: dict[str, dict], timer_rows: dict,
                 grace = _gate_timers(a, active_by_owner)
                 row["state"] = "turn_finished"
                 row["turn_ended_at"] = _ah.iso(ev_t)
-                text = (f"agent turn finished at {_clock(ev_t, t_now)} "
+                text = (f"agent turn finished at {_fmt_time(ev_t, t_now)} "
                         f"(idle {_dur(t_now - ev_t)})")
                 if grace:
                     row["grace_due_at"] = grace[0]["due_at"]
                     row["grace_remaining_s"] = grace[0]["remaining_s"]
                     text += (f"; verdict grace until "
-                             f"{_clock(grace[0]['due_t'], t_now)}")
+                             f"{_fmt_time(grace[0]['due_t'], t_now)}")
                 elif a.get("action") in ("review-loop", "qa"):
                     text += "; no verdict accepted yet — waiting for the next turn"
                 row["text"] = text
             elif ev and etype == "permission_prompt":
                 row["state"] = "blocked_on_permission"
                 row["text"] = (f"agent waiting on a permission prompt since "
-                               f"{_clock(ev_t, t_now)} (needs a human)")
+                               f"{_fmt_time(ev_t, t_now)} (needs a human)")
             else:
                 row["state"] = "agent_working"
                 row["text"] = f"agent working for {_dur(t_now - since)}"
@@ -640,7 +640,9 @@ def _derived_hold(timer: str, purpose: str, owner_action: str, armed,
 def _derived_holds(pr_id: str, pr: dict, runtime: dict) -> list[dict]:
     holds = []
     sp = pr.get("spec_pending")
-    if sp:
+    # A merged/closed PR can't be waiting on spec approval, even if a
+    # stale spec_pending record survived.
+    if sp and pr.get("status") not in ("merged", "closed"):
         sp = sp if isinstance(sp, dict) else {}
         holds.append(_derived_hold(
             "spec-pending", f"{sp.get('phase') or 'spec'} spec awaiting approval",
@@ -720,7 +722,7 @@ def _missing_notes(pr: dict, events: list[dict]) -> list[str]:
     first = float(events[0].get("t") or 0)
     started = _parse_iso(pr.get("started_at")) or _parse_iso(pr.get("created_at"))
     if started is not None and started < first - 60:
-        notes.append(f"Actions before {_clock(first, first)} "
+        notes.append(f"Actions before {_fmt_time(first, first)} "
                      f"({_ah.iso(first)}) were not recorded; earlier "
                      "milestones come from project.yaml only.")
     return notes
@@ -789,7 +791,7 @@ def _dur(s: float | None) -> str:
     return f"{d}d{h:02d}h"
 
 
-def _clock(t: float | None, t_now: float) -> str:
+def _fmt_time(t: float | None, t_now: float) -> str:
     if t is None:
         return "unknown"
     lt = datetime.fromtimestamp(t)
@@ -864,10 +866,10 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
         lines.append("")
         lines.append("Recent timers")
         for r in recent[:10]:
-            when = (_clock(r["resolved_t"], t_now)
+            when = (_fmt_time(r["resolved_t"], t_now)
                     if r.get("resolved_t") else "unknown")
             line = f"  {r['purpose']}: {r['resolution']} at {when}"
-            armed = f"(armed {_clock(r['armed_t'], t_now)})"
+            armed = f"(armed {_fmt_time(r['armed_t'], t_now)})"
             if len(line) + 1 + len(armed) <= 80:
                 lines.append(f"{line} {armed}")
             else:
@@ -877,7 +879,7 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
         lines.append("")
         lines.append("Milestones (project.yaml)")
         lines.append("  " + "   ".join(
-            f"{m['event']} {_clock(m['t'], t_now)}" for m in model["milestones"]
+            f"{m['event']} {_fmt_time(m['t'], t_now)}" for m in model["milestones"]
             if m.get("t") is not None))
 
     if model["missing"]:
@@ -895,14 +897,14 @@ def _action_key(action: str):
 
 
 def _render_timer(r: dict, t_now: float) -> list[str]:
-    armed = _clock(r.get("armed_t"), t_now) if r.get("armed_t") else "unknown"
+    armed = _fmt_time(r.get("armed_t"), t_now) if r.get("armed_t") else "unknown"
     if r.get("due_t") is None:
         timing = f"armed {armed}, no countdown"
     elif r.get("resolution") == "overdue":
-        timing = (f"armed {armed}, due {_clock(r['due_t'], t_now)}, "
+        timing = (f"armed {armed}, due {_fmt_time(r['due_t'], t_now)}, "
                   f"overdue by {_dur(r.get('overdue_s'))}")
     else:
-        timing = (f"armed {armed}, due {_clock(r['due_t'], t_now)}, "
+        timing = (f"armed {armed}, due {_fmt_time(r['due_t'], t_now)}, "
                   f"{_dur(r.get('remaining_s'))} left")
     owner = r.get("owner_action") or "?"
     src = f" [{r['derived']}]" if r.get("derived") else ""
@@ -914,9 +916,9 @@ def _render_timer(r: dict, t_now: float) -> list[str]:
 
 def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     ind = "  " * depth
-    start = _clock(a["started_t"], t_now)
+    start = _fmt_time(a["started_t"], t_now)
     if a.get("ended_t") is not None:
-        end = _clock(a["ended_t"], t_now)
+        end = _fmt_time(a["ended_t"], t_now)
     elif a.get("open"):
         end = "now"
     else:

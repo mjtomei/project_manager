@@ -266,6 +266,25 @@ class TestJournal:
         assert ah.owner_alive({**me, "host": "elsewhere"}) is None
         assert ah.owner_alive(None) is None
 
+    def test_unreaped_zombie_owner_is_dead(self):
+        # Without an owner lock, liveness falls back to /proc: a zombie
+        # still has a stat entry with its original start time.
+        child = os.fork()
+        if child == 0:
+            os._exit(0)
+        try:
+            token = ah._start_token(os.getpid())
+            for _ in range(200):
+                if ah._proc_start(child) is None:
+                    break
+                threading.Event().wait(0.01)
+            owner = {"pid": child, "start": token,
+                     "host": socket.gethostname()}
+            assert ah._proc_start(child) is None
+            assert ah.owner_alive(owner) is False
+        finally:
+            os.waitpid(child, 0)
+
 
 # ---------------------------------------------------------------------------
 # runtime_state → attempts
@@ -914,6 +933,10 @@ class TestReconciliation:
         (hold,) = m["holds"]
         assert hold["remaining_s"] is None
         assert m["waiting_for"] == "human: impl spec awaiting approval"
+        # A stale spec_pending on a merged PR is not a live hold.
+        m = hq.build_history(PR, pr={**pr, "status": "merged"}, now=clock.t,
+                             live=False)
+        assert m["holds"] == []
 
     def test_merged_pr_releases_uncleared_hold(self, clock):
         # ``g`` merges via ``pm pr merge``, which never reaches the TUI's
