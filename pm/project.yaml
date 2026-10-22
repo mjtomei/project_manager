@@ -29799,53 +29799,118 @@ prs:
   notes: []
 - id: pr-3201ea8
   plan: bugs
-  title: 'Investigate: QA run in execution phase not resumed after kill -9 of the
-    TUI (S15 W3.4), though another hard-killed run was'
+  title: 'Bug: preserve and resume QA ownership during worker startup'
   branch: pm/pr-3201ea8-investigate-qa-run-in-execution-phase-not-resumed-
   status: pending
   depends_on: []
-  description: Found in pr-b53bfe2 sign-off (2026-10-14) from QA r7 S15 W3.4 (captures
-    scenarios/15/W3.4-interrupted-QA, timeline.txt + pm-log-excerpt.txt). Run 1b on
-    pr-983dd4a was in the execution phase (worker s2 launched 14:37:30). The TUI was
-    killed with kill -9 at 14:38:00, and pm session respawned it at 14:38:02. Over
-    the next 22s the new TUI logged no 'Resuming incomplete QA from disk' line, though
-    _resume_incomplete_qa scans every ~5 ticks. The tester then pressed z t, which
-    killed the stale windows. In the same run, W3.5-hardkill-container (also kill
-    -9, then pm session) resumed within 1s ('Resuming QA for pr-9ca965b after restart').
-    Not trust-related, and the W3.4 Thens (fresh trust on restart, planned=launched)
-    held. Check whether qa_resume.json existed for run 1b, the PR status at kill time
-    (resume requires status==qa), and whether the respawned TUI's HOME/qa_root matched.
-    If it is by design, close with the reason.
+  description: 'A TUI restart during QA scenario refinement/launch can forget workers
+    that are already running and start a second run for the same PR. Persist and recover
+    run ownership and per-scenario phase throughout startup, not only after every
+    refiner/launcher has finished.
+
+
+    Confirmed on #234 on 2026-10-22. During recovery of another PR, a native TUI restart
+    at15:29Z resumed #236/#243 but started new QA for #234 while its original workers
+    kept running. Those workers pushed fixes until16:22Z while replacement review/planning
+    used an older local head. The old run never finalized, and two later planner handoffs
+    stopped on divergent histories. Evidence: original run ~/.pm/workdirs/qa/pr-9f111ef-1bdecc72976987b7;
+    subsequent runs badbdc1291e2c454 and2531ab466c475517; intervention log/checkpoint
+    under ~/.local/state/pm-pr-shepherd. Commits dc695f44, b769b725 and61bedfb5 came
+    from the old QA workers; reconciliations0e6a5d2d and5e9f27cd preserve them.
+
+
+    Current code waits for all _launch_scenarios_in_containers/_launch_scenarios_in_tmux
+    refinement threads before _execute_and_finalize first writes qa_resume.json. _resume_incomplete_qa
+    discovers only that snapshot. Fix the ownership gap and recovery of partially
+    launched runs, including refiner vs execution-worker identity, queued/not-yet-launched
+    scenarios, and completed results. A restart must adopt the same run, launch only
+    missing work once, and reach its normal finalizer before lifecycle advancement.
+    Do not discard transcripts, captures, dirty work, or existing commits. Do not
+    infer PASS for unrun work or bypass manual merge/spec gates.
+
+
+    Regression coverage: restart or kill the controller while one scenario is executing,
+    another is still refining, and another has not launched; verify same run, no duplicate
+    writer/worker, correct result collection and branch reconciliation. Also cover
+    restart immediately after a worker launch/relaunch before the next normal poll.
+    Use bounded deterministic harness failures plus live PM workflow evidence.
+
+
+    Coordinate with #237/pr-8020495, which already adds snapshots after relaunch/dequeued
+    launches, but does not close initial startup''s snapshot gap. pr-f8acf21 tracks
+    stop/supersede races: recovery must distinguish an interrupted run to adopt from
+    a deliberately cancelled run; check current fixes before duplicating them. pr-1ab9075
+    owns nonblocking retries, and pr-62fdd54 owns upstream synchronization before
+    planning.
+
+
+    Original report (retain its repro as a regression):
+
+    Found in pr-b53bfe2 sign-off (2026-10-14) from QA r7 S15 W3.4 (captures scenarios/15/W3.4-interrupted-QA,
+    timeline.txt + pm-log-excerpt.txt). Run 1b on pr-983dd4a was in the execution
+    phase (worker s2 launched 14:37:30). The TUI was killed with kill -9 at 14:38:00,
+    and pm session respawned it at 14:38:02. Over the next 22s the new TUI logged
+    no ''Resuming incomplete QA from disk'' line, though _resume_incomplete_qa scans
+    every ~5 ticks. The tester then pressed z t, which killed the stale windows. In
+    the same run, W3.5-hardkill-container (also kill -9, then pm session) resumed
+    within 1s (''Resuming QA for pr-9ca965b after restart''). Not trust-related, and
+    the W3.4 Thens (fresh trust on restart, planned=launched) held. Check whether
+    qa_resume.json existed for run 1b, the PR status at kill time (resume requires
+    status==qa), and whether the respawned TUI''s HOME/qa_root matched. If it is by
+    design, close with the reason.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-14T15:49:43.888654+00:00'
+  updated_at: '2026-10-22T17:19:43.945696+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-62fdd54
   plan: bugs
-  title: 'Bug: QA start does not refresh the PR workdir from upstream, so a worker
-    fix pushed in an earlier QA round blocks the next planner handoff'
+  title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
   branch: pm/pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-workdir-from-
   status: pending
   depends_on: []
-  description: 'QA scenario workers push fixes straight to the upstream (origin swapped
-    in create_scenario_workdir), but nothing pulls them back into the PR workdir.
-    If QA is restarted without a review-loop pull in between (e.g. after INPUT_REQUIRED),
-    the PR workdir is behind the upstream. pr-b8561ac _publish_planner_head then refuses
-    the fan-out with "is behind upstream ... Pull the PR branch in the PR workdir
-    and restart QA", and the planner has also planned against a stale tree. Consider
-    fast-forwarding the PR workdir (ff-only, clean tree) to the upstream branch before
-    launching the planner in run_qa_sync. Repro: QA round 1 worker pushes qa: fix
-    and ends INPUT_REQUIRED, then restart QA.'
+  description: 'Before QA planning starts, reconcile the canonical PR workdir with
+    the PR''s actual upstream so the planner and workers use the same current revision.
+    Normal completed QA has a finalizer that imports worker pushes, but interrupted/INPUT_REQUIRED
+    runs can skip that finalizer. The planner currently edits the stale local branch
+    and _publish_planner_head later refuses the handoff.
+
+
+    Observed twice on #234 on2026-10-22: old QA workers pushed fixes while replacement
+    review/planning used older local heads. First d92b10a2 diverged from edc60832;
+    later planner f9954dc4 diverged from a18faeaf. Clean manual reconciliations0e6a5d2d/5e9f27cd
+    preserved both histories, then native review was restarted because application
+    code had been introduced. Underlying lost-worker ownership is separately tracked
+    by pr-3201ea8; synchronization must not race active writers or hide that defect.
+
+
+    Refresh the upstream before generating the plan. Clean behind-only branches should
+    fast-forward automatically. Preserve dirty files and local commits; divergent
+    or conflicting histories need an explicit native agent recovery/review route or
+    a specific actionable hold, never force-push, reset, silent overwrite or repeated
+    planning against a known-stale tree. If reconciliation imports application code
+    not covered by the prior review, invalidate that old review and route through
+    review/QA before sign-off. Preserve manual merge/spec-review gates and the existing
+    planner-head consistency guard.
+
+
+    Regression coverage: worker fix pushed in a previous QA round followed by interrupted/INPUT_REQUIRED
+    handoff, then new QA; local planner-only commits plus upstream fixes; dirty workdir;
+    conflict; upstream changes during handoff. Verify the revision read by the planner
+    and tested by every worker, and that code changes cannot inherit stale review/signoff
+    evidence. Evidence: ~/.local/state/pm-pr-shepherd/interventions.jsonl and #234
+    QA runs badbdc1291e2c454/2531ab466c475517.
+
+    '
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-13T06:08:05.900366+00:00'
+  updated_at: '2026-10-22T17:19:45.422450+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31446,12 +31511,24 @@ prs:
     the failed worker''s retry interval, stop cancels promptly, and restart preserves
     results and retry state. Exercise the PID-exhaustion case with bounded synthetic
     failure rather than creating a real fork storm. Evidence: /tmp/pm-recovery-20261022.jsonl
-    and /home/matt/.pm/workdirs/qa/pr-3ae2fc3-0e4ccba946a8a6e1/.'
+    and /home/matt/.pm/workdirs/qa/pr-3ae2fc3-0e4ccba946a8a6e1/.
+
+
+    Additional observed failure: #239 initial container creation hit key EDQUOT before
+    any pane existed; after quota recovery the current collector could not retry that
+    scenario. Cover creation failure, exec failure, and worker exit separately, including
+    no-pane initial failures. Existing pr-7ab0a99 records the launch-error/empty-INPUT_REQUIRED
+    reporting gap; reuse its evidence and actionable diagnostic requirements instead
+    of inventing another mechanism. Coordinate remaining scope with that backlog entry;
+    do not silently claim it closed. pr-3201ea8 owns initial-run persistence and restart
+    adoption. Keep all healthy workers/results moving while any one launch is retried.
+
+    '
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-22T15:34:40.862915+00:00'
+  updated_at: '2026-10-22T17:19:44.677099+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31479,6 +31556,57 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T15:04:10.979207+00:00'
   updated_at: '2026-10-22T15:04:10.979207+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a80bde5
+  plan: bugs
+  title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations
+    are working'
+  branch: pm/pr-a80bde5-bug-review-input-required-stays-visible-after-reco
+  status: pending
+  depends_on: []
+  description: 'During supervised autostart on2026-10-22, #241/pr-1139060 continued
+    reporting state=waiting, reason="review INPUT_REQUIRED (iteration N)", and review.input_required=true
+    across later active review iterations, even as reviewers ran tests, committed
+    fixes and advanced. For example at17:16Z iteration12''s pane reported347 targeted
+    tests passing and was actively fixing reaper bugs; the CLI still requested human
+    input. This causes false red attention markers and can mislead watchers into restarting
+    productive work.
+
+
+    Reproduce from a review that emits INPUT_REQUIRED, then answer/recover it and
+    let the same review proceed and advance through NEEDS_WORK into another iteration.
+    Check both pm autostart status --json/text and the TUI runs/actions views while
+    the agent is actually working. Investigate the live review loop, follow-up verdict
+    handling, callback timing and restored/serialized state; do not assume this is
+    only a formatting problem. A current unresolved human request must remain visible,
+    but a resolved wait must clear when the native flow has resumed or a new review
+    iteration owns the work. TUI, CLI and scheduler should agree. Preserve true spec-review
+    and manual merge holds and do not auto-answer user decisions.
+
+
+    Regression coverage should exercise INPUT_REQUIRED -> user response -> active
+    follow-up -> NEEDS_WORK -> next active iteration, plus restart/adoption and repeated
+    genuine INPUT_REQUIRED. Verify both state and displayed reason without depending
+    solely on a timer or treating any arbitrary tool output as approval. Keep the
+    genuine-wait negative case. Existing pr-7b085a9 covers a separate permission_prompt/PaneIdleTracker
+    stale-wait path; coordinate but do not conflate that with review-loop INPUT_REQUIRED.
+
+
+    Evidence: ~/.local/state/pm-pr-shepherd/checkpoint.json actual_progress_notes.241
+    and interventions.jsonl; native review-loop debe later iterations and pm autostart
+    status in pm-project_manager-c5a1006b. Related report presentation changes are
+    in #244/pr-8700be3; this PR owns correctness of the underlying wait state, not
+    the report redesign.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:19:46.224920+00:00'
+  updated_at: '2026-10-22T17:19:46.224920+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31535,3 +31663,99 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-592e4bd
+  plan: improvements
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
+  branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
+  status: pending
+  depends_on: []
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
+
+
+    Current integration points and gaps:
+
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
+
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    on each request. Keep account credentials on the host; do not embed them in project.yaml,
+    generated launch commands, logs or captures.
+
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
+
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
+
+
+    Acceptance:
+
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
+
+
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
+
+
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:26:01.208880+00:00'
+  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-da1f854
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
+    created_at: '2026-10-22T17:46:12Z'
+    last_edited: '2026-10-22T17:46:12Z'
