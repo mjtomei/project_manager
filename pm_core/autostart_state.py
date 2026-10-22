@@ -348,7 +348,9 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 return phase, "waiting", f"review INPUT_REQUIRED (iteration {it})"
             if review.get("running"):
                 reason = f"review iteration {it}"
-                if last:
+                if review.get("follow_up"):
+                    reason += " (INPUT_REQUIRED answered; follow-up running)"
+                elif last:
                     reason += f" (last {last})"
                 return phase, "running", reason
             if last in _REVIEW_PASS:
@@ -475,6 +477,7 @@ def build_status(inp: dict) -> dict:
                 "verdict": review.get("verdict") or "",
                 "running": bool(review.get("running")),
                 "input_required": bool(review.get("input_required")),
+                "follow_up": bool(review.get("follow_up")),
             } if review else None),
             "qa": ({
                 "planning": bool(qa.get("planning")),
@@ -698,10 +701,21 @@ def qa_progress_input(state) -> dict:
 
 
 def review_progress_input(state) -> dict:
-    """Summarise a ReviewLoopState-like object into a ``review_loops`` entry."""
+    """Summarise a ReviewLoopState-like object into a ``review_loops`` entry.
+
+    ``follow_up``: the current iteration ended INPUT_REQUIRED and the user
+    has answered — Claude is working on the follow-up in the same pane."""
+    running = bool(getattr(state, "running", False))
+    iteration = getattr(state, "iteration", 0) or 0
+    input_required = bool(getattr(state, "input_required", False))
+    history = getattr(state, "history", None) or []
+    last = history[-1] if history else None
     return {
-        "running": bool(getattr(state, "running", False)),
-        "iteration": getattr(state, "iteration", 0) or 0,
+        "running": running,
+        "iteration": iteration,
         "verdict": getattr(state, "latest_verdict", "") or "",
-        "input_required": bool(getattr(state, "input_required", False)),
+        "input_required": input_required,
+        "follow_up": bool(running and not input_required and last is not None
+                          and getattr(last, "iteration", None) == iteration
+                          and getattr(last, "verdict", "") == "INPUT_REQUIRED"),
     }
