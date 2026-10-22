@@ -78,7 +78,13 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     # the owner_exit an in-place restart journals): the owner was alive
     # then and had not ended it.
     alive = _liveness_memo()
-    owner_seen = _owner_last_seen(events, alive, t_now)
+    # Only owners with something unresolved need a liveness probe; a long
+    # journal accumulates one owner per TUI restart and CLI run.
+    unresolved = {_owner_key(a.get("owner")) for a in attempts.values()
+                  if a["ended_t"] is None}
+    unresolved |= {_owner_key(tm.get("owner")) for tm in timers.values()
+                   if tm.get("cleared") is None}
+    owner_seen = _owner_last_seen(events, alive, t_now, unresolved)
     for a in attempts.values():
         if a["ended_t"] is None:
             seen = owner_seen.get(_owner_key(a.get("owner")))
@@ -233,10 +239,12 @@ def _owner_key(owner) -> tuple | None:
             owner.get("instance"))
 
 
-def _owner_last_seen(events: list[dict], owner_alive,
-                     t_now: float) -> dict[tuple, float]:
+def _owner_last_seen(events: list[dict], owner_alive, t_now: float,
+                     probe: set | None = None) -> dict[tuple, float]:
     """When each owner was last known alive: its newest event of any kind,
-    or for an owner that has exited its last lock heartbeat if later."""
+    or for an owner that has exited its last lock heartbeat if later.
+
+    Only owners in *probe* (all when ``None``) are probed for liveness."""
     seen: dict[tuple, float] = {}
     owners: dict[tuple, dict] = {}
     for ev in events:
@@ -245,6 +253,8 @@ def _owner_last_seen(events: list[dict], owner_alive,
             seen[key] = max(seen.get(key, 0.0), float(ev.get("t") or 0))
             owners.setdefault(key, ev["owner"])
     for key, owner in owners.items():
+        if probe is not None and key not in probe:
+            continue
         if owner_alive(owner) is False:
             beat = _ah.owner_last_alive(owner)
             if beat is not None:

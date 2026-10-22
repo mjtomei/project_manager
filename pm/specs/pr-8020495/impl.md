@@ -111,7 +111,12 @@ existing flock* so concurrent writers agree on one attempt:
     its runtime entry is driven by per-pane registration and would
     otherwise produce attempts that start at the first scenario pane.
   The runtime file's public schema is unchanged except for the added
-  `attempt_id` field; `set_action_state` behaviour/return value unchanged.
+  `attempt_id` field and an `owner` token (R1 `owner`) on in-flight
+  entries; `set_action_state` behaviour/return value unchanged.
+  `sweep_stale_states` leaves in-flight entries whose `owner` is another
+  live process image alone (several projects' TUIs and CLI drivers share
+  one `~/.pm/runtime`), and the TUI's QA resume scan skips
+  `qa_resume.json` snapshots written under another session tag.
 
 R4. **Review-loop iterations** (`pm_core/review_loop.py`): each iteration
 is a child attempt (`action="review-loop"`, `iteration=N`, `loop_id`,
@@ -292,6 +297,10 @@ supply `context` (session/window/task); leave a cross-PR note.
   writer whose fd is still the current file (same inode) rotates, so a
   writer that opened the file just before another rotated it cannot
   replace the fresh journal over the previous generation.
+- I9. Live owners touch their lock file once a second (heartbeat); a
+  dead owner's last heartbeat bounds its interrupted attempts and keeps
+  a `gate` that ran out before it died `elapsed` rather than `lost`.
+  Only owners with an open attempt or uncleared timer are probed.
 
 ## 3. Ambiguities (resolved)
 

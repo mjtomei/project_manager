@@ -1057,6 +1057,20 @@ class TestReconciliation:
             (row,) = m["timers"]["recent"]
             assert row["resolution"] == "lost (owner process exited)"
 
+    def test_only_owners_with_unresolved_items_are_probed(self, clock):
+        # A finished attempt's owner needs no liveness probe: long journals
+        # accumulate one owner per TUI restart / CLI run.
+        done_owner = _dead_owner()
+        with patch.object(ah, "owner_token", return_value=done_owner):
+            a = ah.start_attempt(PR, "review")
+            ah.end_attempt(PR, a, "done", verdict="PASS")
+        ah.start_attempt(PR, "qa", loop_id="L")
+        probed = []
+        with patch.object(ah, "owner_alive",
+                          side_effect=lambda o: probed.append(o) or True):
+            hq.build_history(PR, now=clock.t, live=False)
+        assert probed and done_owner not in probed
+
     def test_owner_heartbeat_touches_lock(self, monkeypatch):
         monkeypatch.setattr(ah, "_HEARTBEAT_S", 0.05)
         monkeypatch.setattr(ah, "_owner_cache", None)
