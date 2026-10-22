@@ -740,9 +740,14 @@ def pane_opened_cmd(session: str, window: str, pane_id: str):
     pane_layout.handle_pane_opened(session, window, pane_id)
 
 
-def _pin_popup_body(body: str, session: str, window: str) -> str:
-    """Replace the body's tmux S/W queries with literal shell values."""
+def _pin_popup_body(body: str, session: str, window: str | None) -> str:
+    """Replace the body's tmux S/W queries with literal shell values.
+
+    W is left as a query when *window* is unknown.
+    """
     body = body.replace(_POPUP_BODY_S, f"S={shlex.quote(session)};")
+    if window is None:
+        return body
     return body.replace(_POPUP_BODY_W, f" W={shlex.quote(window)};")
 
 
@@ -767,14 +772,13 @@ def popup_show_cmd(kind: str, client: str | None = None,
         return
     height, body = _POPUP_KINDS[kind]
 
-    # Width is the *calling client's* current window width.  run-shell
-    # from a bind-key inherits the calling client's $TMUX context, so
-    # ``tmux display-message -p "#{window_width}"`` reports what we
-    # need — the actual size of the window we are about to overlay,
-    # not some min/max across the group.
-    # When the binding passed the pressing client's session, target its
-    # current window explicitly ("=name:") — that is what the client is
-    # showing, and it does not depend on which client was active last.
+    # Width is the pressing client's current window width — the size of
+    # the window we are about to overlay, not some min/max across the
+    # group.  run-shell has no client context of its own, so an untargeted
+    # display-message resolves to the most recently active client; when
+    # the binding passed the pressing client's session, target its current
+    # window explicitly ("=name:").  Old bindings (no args) keep the
+    # untargeted query.
     target = ["-t", f"={session}:"] if session else []
     result = subprocess.run(
         tmux_mod._tmux_cmd("display-message", *target, "-p", "#{window_width}"),
@@ -804,8 +808,9 @@ def popup_show_cmd(kind: str, client: str | None = None,
             tmux_mod._tmux_cmd("display-message", *target, "-p", "#{window_name}"),
             capture_output=True, text=True, check=False,
         )
-        if win_result.returncode == 0:
-            body = _pin_popup_body(body, session, win_result.stdout.rstrip("\n"))
+        window = (win_result.stdout.rstrip("\n")
+                  if win_result.returncode == 0 else None)
+        body = _pin_popup_body(body, session, window)
 
     _log.info("_popup-show: kind=%s client=%r session=%r window_width=%s threshold=%d"
               " -> width=%s cwd=%r",

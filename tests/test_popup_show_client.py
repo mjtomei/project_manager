@@ -107,3 +107,24 @@ def test_popup_cmd_exports_session(tmp_path, monkeypatch):
     # Empty input closes the runner right after the export.
     CliRunner().invoke(popup_cmd_cmd, [SESSION], input="\n")
     assert session_mod.os.environ[tmux_mod.POPUP_SESSION_ENV] == SESSION
+
+
+def test_popup_pins_session_when_window_query_fails():
+    """A failed #{window_name} query still pins S; W falls back to a query."""
+    calls = []
+    inner = _fake_tmux(calls)
+
+    def run(cmd, **kwargs):
+        if "#{window_name}" in cmd:
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        return inner(cmd, **kwargs)
+
+    with mock.patch.object(session_mod.subprocess, "run", run), \
+         mock.patch.object(session_mod.pane_layout,
+                           "_get_mobile_width_threshold", return_value=110):
+        result = CliRunner().invoke(popup_show_cmd, ["picker", CLIENT, SESSION])
+    assert result.exit_code == 0, result.output
+    body = next(c for c in calls if "display-popup" in c)[-1]
+    assert "S='pm-demo-c5a1006b~1';" in body
+    assert session_mod._POPUP_BODY_W in body

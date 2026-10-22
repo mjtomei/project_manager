@@ -158,5 +158,7 @@ def test_session_pm_argv_tag_from_grouped_session():
     from pm_core.cli.session import _session_pm_argv
     argv = _session_pm_argv(f"{SESSION}~2", ["pr", "list"])
     assert argv[1] == "-c"
-    assert argv[3:] == [str(REPO_ROOT), TAG, "pr", "list"]
+    # The dispatcher's import root as loaded (not resolved through symlinks).
+    assert argv[3:] == [str(Path(pm_core.__file__).parent.parent), TAG,
+                        "pr", "list"]
     assert _session_pm_argv("not-a-pm-session", [])[4] == ""
