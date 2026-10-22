@@ -23675,7 +23675,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/223
   gh_pr_number: 223
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-10-22T14:44:45.991417+00:00'
+  updated_at: '2026-10-22T15:29:07.767604+00:00'
   started_at: '2026-05-25T03:27:03.889385+00:00'
   reviewed_at: '2026-05-25T03:39:45.883451+00:00'
   merged_at: null
@@ -23877,6 +23877,16 @@ prs:
       AND popup gone while QA runs) still owed by QA.'
     created_at: '2026-10-22T14:44:45Z'
     last_edited: '2026-10-22T14:44:45Z'
+  - id: note-c420ce9
+    text: 'Review 230e i4 (owner direction 2026-10-22): QA t variant is NOT proven
+      by code/unit tests. qa.md R6/R7 now a live 8-cell matrix: new+existing QA x
+      C1 TUI/root PM_PROJECT unset, C2 root set, C3 stale PR workdir unset, C4 workdir
+      set. Assert separately: originating client on qa-<id>, picker pid exited + overlay
+      gone with spinner reason=window_open (not terminal_state), QA still running
+      / existing run untouched. Run pre-fix control; by code only C3 should reproduce
+      — any C1/C2/C4 or post-fix failure is a distinct cause to fix or file.'
+    created_at: '2026-10-22T15:29:07Z'
+    last_edited: '2026-10-22T15:29:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
