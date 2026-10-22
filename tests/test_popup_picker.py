@@ -779,3 +779,42 @@ class TestPopupPickerMergedNavigation:
         assert _shown(fzf.calls[1]) == "PR Actions — #240"
         assert "No actions — PR is merged." in fzf.calls[1]["input"]
         run_cmd.assert_not_called()
+
+    def test_gh_number_assigned_while_shown(self, tmp_path, monkeypatch):
+        """#240 is shown as pr-r (no GitHub PR yet, windows named pr-r) and
+        gets gh_pr_number while the popup is open: the reload must treat
+        pr-r and #240 as one PR — no duplicate nav entry, no 'Could not
+        load' — and dispatch its action."""
+        prs = self._prs()
+        prs[1].pop("gh_pr_number")
+
+        def on_launch(n):
+            if n == 1:
+                prs[1]["gh_pr_number"] = 240
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["review-pr-r", "qa-#242"], "tui",
+            [(0, "l\n"), (0, "h\n"), (0, "s\n")], on_launch=on_launch)
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — pr-r  (1/2)",
+            "PR Actions — #242  (2/2)",
+            "PR Actions — #240  (1/2)",
+        ]
+        run_cmd.assert_called_once()
+        assert "pr-r" in run_cmd.call_args.args[0]
+
+    def test_gh_number_assigned_before_action(self, tmp_path, monkeypatch):
+        """Same drift, but the first key is an action: the pre-dispatch
+        reload re-resolves the PR under its new id and still runs it."""
+        prs = self._prs()
+        prs[1].pop("gh_pr_number")
+
+        def on_launch(n):
+            if n == 1:
+                prs[1]["gh_pr_number"] = 240
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["review-pr-r", "qa-#242"], "tui",
+            [(0, "s\n")], on_launch=on_launch)
+        run_cmd.assert_called_once()
+        assert "pr-r" in run_cmd.call_args.args[0]

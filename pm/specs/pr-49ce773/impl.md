@@ -21,7 +21,7 @@
    `_actions_for_status`; additionally, while an actionless PR is shown,
    shortcut keys (s/e/d/t/i/g) and the `z` chord are not in fzf's
    `--expect` list (so they're bound to `ignore`), and Enter on the notice
-   row re-renders instead of exiting.  This also closes a latent hole where
+   row is bound to fzf `ignore` (with double-click) so it never exits.  This also closes a latent hole where
    `z s` on a merged PR would build a fresh-start command from
    `_MODIFIED_ACTION_CMDS` using `_picked_pr`.
 4. **Nav list skips terminal PRs** (user want #2) — when building
@@ -61,6 +61,9 @@
      `z`/`zz` chord key) via `_still_has_action(label)`: if the shown PR
      no longer has that action (merged/closed meanwhile), don't run
      anything — re-render it with its notice.
+   After each reload the shown id is canonicalized (`_canonical_id`, via
+   `_find_pr_for_window_id`) so a PR whose display id changed while open
+   (`gh_pr_number` assigned: `pr-abc` → `#12`) is not listed twice.
    `_sync_index(shown, prev)` keeps `nav_index` consistent: a PR that is on
    screen but dropped out of the rebuilt list is re-inserted at its old
    position until the user navigates away, so the header `(i/n)` never
@@ -123,7 +126,7 @@ window names built from both the display id and the local id.
 - QA scenario-only windows (`qa-#N-s1`) count as open windows for the nav
   list, matching `_build_picker_lines`' `[open]` matching.
 
-- Single PR in nav list and it's actionless: no nav keys; Enter re-renders;
+- Single PR in nav list and it's actionless: no nav keys; Enter is ignored;
   q/Esc quits.  No exit-on-keypress.
 - Home PR is merged and also has open windows: appears once (dedup by
   canonical display id).

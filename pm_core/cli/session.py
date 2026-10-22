@@ -1081,6 +1081,17 @@ def _session_active_windows(base: str) -> dict[str, str]:
     return result
 
 
+def _action_window_matches(label: str, win_name: str, name: str) -> bool:
+    """True if tmux window `name` is the `label` action's window `win_name`.
+
+    qa windows can have scenario suffixes (``qa-#158-s1``), so for qa the
+    bare name or any ``<win_name>-…`` variant matches.
+    """
+    if label == "qa":
+        return name == win_name or name.startswith(win_name + "-")
+    return name == win_name
+
+
 def _find_pr_for_window_id(prs: list[dict], window_pr_id: str) -> dict | None:
     """Resolve a PR id taken from a window name to its project.yaml entry.
 
@@ -1139,12 +1150,9 @@ def _build_nav_entries(
             for i in ids:
                 if not i:
                     continue
-                name = pat.format(display_id=i)
-                if name in open_windows:
-                    return True
-                # qa scenario windows: qa-#158-s1 (as in _build_picker_lines)
-                if label == "qa" and any(w.startswith(name + "-")
-                                         for w in open_windows):
+                win_name = pat.format(display_id=i)
+                if any(_action_window_matches(label, win_name, w)
+                       for w in open_windows):
                     return True
         return False
 
@@ -1253,11 +1261,8 @@ def _build_picker_lines(
         # bare name or any "<name>-…" variant for both [open] and the
         # per-session indicator below.
         def _matches(name: str) -> bool:
-            if not win_name:
-                return False
-            if label == "qa":
-                return name == win_name or name.startswith(win_name + "-")
-            return name == win_name
+            return bool(win_name) and _action_window_matches(
+                label, win_name, name)
 
         # Per-session window-selected indicator (●/○) when the caller
         # supplied the active-window map; otherwise fall back to the
@@ -1911,6 +1916,18 @@ def popup_picker_cmd(session: str, window_name: str):
         nav_pr_ids, pr_by_disp, home_pr = _build_nav_entries(
             prs, window_pr_id, open_windows)
 
+    def _canonical_id(pr_disp: str) -> str:
+        """Map a shown PR id to the PR's current display id.
+
+        The display id changes when ``gh_pr_number`` is assigned while the
+        popup is open (``pr-abc`` → ``#12``); without this the rebuilt nav
+        list would hold the PR twice.  Unresolvable ids are returned as-is.
+        """
+        from pm_core.cli.helpers import _pr_display_id
+
+        p = _find_pr_for_window_id(prs, pr_disp)
+        return _pr_display_id(p) if p is not None else pr_disp
+
     def _sync_index(shown: str, prev_index: int) -> int:
         """Return the nav index of `shown`, keeping it in the list.
 
@@ -1932,12 +1949,13 @@ def popup_picker_cmd(session: str, window_name: str):
         """
         old_list, old_cur = list(nav_pr_ids), current_pr
         _refresh_state()
+        cur = _canonical_id(old_cur)
         if not nav_pr_ids:
-            return old_cur
+            return cur
         if delta is None:
             return home_pr if home_pr in nav_pr_ids else nav_pr_ids[0]
-        if old_cur in nav_pr_ids:
-            i = nav_pr_ids.index(old_cur)
+        if cur in nav_pr_ids:
+            i = nav_pr_ids.index(cur)
             return nav_pr_ids[(i + delta) % len(nav_pr_ids)]
         if old_cur in old_list:
             k = old_list.index(old_cur)
@@ -2029,9 +2047,10 @@ def popup_picker_cmd(session: str, window_name: str):
             the action) since it was rendered, re-render it with its
             notice instead of running a stale command.
             """
-            nonlocal nav_index, lines, _picked_pr, _label_to_cmd
+            nonlocal current_pr, nav_index, lines, _picked_pr, _label_to_cmd
             nonlocal fzf_input_lines
             _refresh_state()
+            current_pr = _canonical_id(current_pr)
             nav_index = _sync_index(current_pr, nav_index)
             lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
             fzf_input_lines = [d for d, _, _ in lines]
