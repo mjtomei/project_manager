@@ -155,3 +155,9 @@ links, the genre fixture's claim not holding in pm.
   rationale_and_alternatives, risks_and_open_questions, verifiability) cover them, so rendering a
   real pm spec pair as `whole_document` must work without rubric changes. A spec-specific
   required-section list for `template_section_presence` is left to pr-8df6472, not a defect.
+- *Master merge (032aff53, master@660e43a2).* Between 337d1266 and 660e43a2 master changed only
+  `pm/project.yaml`; the merge kept both appended PR records (pr-9ca240a, pr-24f022e) and reset
+  `project.active_pr` to master's value. Nothing under `experiments/plan-writing/`,
+  `tests/test_doc_rubric.py` or `pm_core/` changed, so 151 tests and a clean `--write-doc` are
+  still expected. Re-check that `pm pr note list pr-8df6472` (R12) and `pm pr list` still read the
+  merged `project.yaml` (both PR records present, no YAML errors) after the merge.
