@@ -144,5 +144,9 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   record.  If that record can't be found, the wait stays unanswered, so the
   iteration's own review prompt is never taken as the answer.  (Added in
   review.)
+- An in-flight iteration adopted at a restart that then ends INPUT_REQUIRED
+  waits on the transcript it was launched under (the saved dir), not the
+  resumed loop's new dir — manual loops get a fresh `manual-<token>` dir.
+  (Added in review i3.)
 - Transcript symlink slug mismatch: the response watch resolves the path with the
   same session-id fallback as `_read_transcript_text`.
