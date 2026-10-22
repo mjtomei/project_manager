@@ -31451,7 +31451,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T20:54:31.376387+00:00'
+  updated_at: '2026-10-22T20:59:02.371019+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31528,6 +31528,19 @@ prs:
       numbering (4-6, 7-9, ...), so marker-based holds must target the real index.'
     created_at: '2026-10-22T20:54:31Z'
     last_edited: '2026-10-22T20:54:31Z'
+  - id: note-f7c9ff7
+    text: 'QA S5 2026-10-22: all 6 triples held on 81cebf17 (captures /pm-captures/scenarios/5).
+      Observation for supervisor: routed containers still authenticate to the router
+      with the main-account OAuth from the bind-mounted ~/.claude. If that login cannot
+      refresh, routed refiners/workers idle at "Login expired · Please run /login"
+      with no verdict and nothing surfaced (the route stall watch only checks the
+      router, which is healthy), and pm provider test --live still printed Live OK
+      in the same minute (-p run). Seen only because a nested test HOME held a copied
+      OAuth file (forked refresh token); on the real host it needs an expired main
+      login. Triple 6 spec slip: pm model set <t> sonnet applies the --effort medium
+      default, so the log shows effort=medium, not high.'
+    created_at: '2026-10-22T20:59:02Z'
+    last_edited: '2026-10-22T20:59:02Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
