@@ -423,6 +423,23 @@ def _popup(size, keys=()):
                 out["selected"] = screen._selected_key
                 out["body_w"] = screen.query_one(
                     "#runs-body", Static).content_region.width
+                container = screen.query_one("#runs-container")
+                out["viewport"] = container.content_region
+                out["footer_region"] = screen.query_one(
+                    "#runs-footer", Static).region
+                # Screen rows of the selected row's lines.
+                body_w = screen.query_one("#runs-body", Static)
+                lines = out["body"].plain.splitlines()
+                first = next(i for i, ln in enumerate(lines)
+                             if ln.startswith("▶"))
+                last = first
+                while (last + 1 < len(lines)
+                       and lines[last + 1].startswith("    ")
+                       and lines[last + 1].lstrip()[:1] not in ("◎", "└")):
+                    last += 1
+                y0 = (body_w.virtual_region.y + first
+                      - int(container.scroll_y) + out["viewport"].y)
+                out["selected_rows"] = (y0, y0 + last - first + 1)
 
     asyncio.run(body())
     return out
@@ -478,6 +495,17 @@ class TestPopup:
         for ln in lines:
             assert not ln.strip().startswith("·"), lines
             assert not ln.rstrip().endswith("·"), lines
+
+    @pytest.mark.parametrize("size", [(50, 50), (140, 20)])
+    def test_footer_hint_stays_in_view_when_rows_overflow(self, size):
+        # The rows scroll; the key hint is docked below them and the
+        # selected row is scrolled clear of it, down to the last row.
+        for keys in ((), ("j",) * 12):
+            out = _popup(size, keys=keys)
+            footer, viewport = out["footer_region"], out["viewport"]
+            assert footer.height and viewport.contains_region(footer)
+            y0, y1 = out["selected_rows"]
+            assert viewport.y <= y0 and y1 <= footer.y
 
     def test_navigation_moves_over_wrapped_rows(self):
         out = _popup((80, 70), keys=["j", "j"])

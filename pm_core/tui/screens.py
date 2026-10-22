@@ -667,7 +667,9 @@ class AutoRunsScreen(ModalScreen):
     #runs-body {
         width: 100%;
     }
+    /* Docked: the key hint stays in view while the rows scroll. */
     #runs-footer {
+        dock: bottom;
         color: $text-muted;
     }
     """
@@ -843,8 +845,10 @@ class AutoRunsScreen(ModalScreen):
         h = height(row_texts[selected])
         if selected == 0:  # keep the title in view at the top
             top, h = 0, top + h
+        # spacing: keep the row clear of the docked footer hint.
         self.query_one("#runs-container", VerticalScroll).scroll_to_region(
-            Region(0, top, 1, h), animate=False, immediate=True)
+            Region(0, top, 1, h), spacing=body.dock_gutter,
+            animate=False, immediate=True)
 
     def action_move(self, delta: int) -> None:
         if not self._rows:
