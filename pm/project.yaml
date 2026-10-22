@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T15:49:44.835799+00:00'
+  updated_at: '2026-10-22T15:57:38.104381+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30178,6 +30178,16 @@ prs:
       synced.'
     created_at: '2026-10-22T15:49:44Z'
     last_edited: '2026-10-22T15:49:44Z'
+  - id: note-223d48b
+    text: 'Review 450f i17: reopening a session already open further back (session
+      → actions → All #214 sessions → impl, or PRs → #214 → spec → Discuss into an
+      impl view opened earlier) stacked a second session view Back stepped through
+      — openSession now brings the open view forward (scroll kept, views above kept
+      so a doc opened since still supplies reading context and Back target). check.mjs
+      +2-case rule (fails on old code); 186 journey frames byte-identical, no recapture.
+      Proposal "Stay oriented" row updated; /pm-captures/even-realities synced.'
+    created_at: '2026-10-22T15:57:38Z'
+    last_edited: '2026-10-22T15:57:38Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
