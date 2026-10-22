@@ -774,6 +774,18 @@ def test_charter_revisions_dated_only_by_trustworthy_events():
     assert context.charter_written_by(tracked) == {"01": ("2015-02-01T10:00:00Z", "approved")}
 
 
+def test_charter_in_force_is_latest_revision_known_by_first_draft():
+    pytest.importorskip("bs4")
+    context = importlib.import_module("context")
+    ev = lambda rev, time: {"rev": rev, "time": time}
+    # btns: 02 imported first, 03 next, and the concluded group's 01 stamped later than both
+    btns = context.charter_written_by([ev("02", "2009-08-29T16:54:31Z"), ev("03", "2009-08-29T17:47:01Z"),
+                                       ev("01", "2010-03-16T19:00:00Z")])
+    assert context.charter_in_force(btns, "2010-06-01") == "03"
+    assert context.charter_in_force(btns, "2009-09-01") == "03"
+    assert context.charter_in_force(btns, "2009-08-28") is None
+
+
 def test_recorded_title_is_cut_from_plain_text_body():
     title = "Transition and Modernization of the Internet Registration Service"
     text = ("Network Working Group                          S. Williamson\n\n          Transition and Modernization\n"

@@ -574,8 +574,8 @@ def charter_written_by(events):
     the previous revision (`06-00`, then `07`; `00-00`, then `01` for a new
     group), and its event is the approval. Other revisions carry the day they
     were entered, mostly from the legacy charter archive imported on
-    2009-08-29, except the charter's first event, which is stamped with the
-    group's start date whatever its text (pppext's 01, stamped 1989, cites
+    2009-08-29, except the charter's first event, which is usually stamped
+    with the group's start date whatever its text (pppext's 01, stamped 1989, cites
     RFC 1661 from 1994; dhc's, stamped 1991, gives RFC 2131's status; dmm's
     cites a 2011 RFC). That revision is known to exist only by the charter's
     next event (a later revision or a proposal); without one it is left
@@ -601,6 +601,18 @@ def charter_written_by(events):
             if later:
                 out[rev] = (min(later), "entered")
     return out
+
+
+def charter_in_force(known, first):
+    """The latest charter revision whose text is known to exist by day `first`, or None.
+
+    Picked by revision number, not by date: a concluded group's 01 can be
+    stamped with a later date (btns' 01 carries 2010-03-16, after 02 and 03
+    were imported in 2009), which would otherwise outrank the revisions that
+    replaced it.
+    """
+    usable = [rev for rev, (t, _) in known.items() if docmeta.parse_date(t) <= first]
+    return max(usable, default=None)
 
 
 def collect_ietf(source, docs, cfg):
@@ -651,9 +663,9 @@ def collect_ietf(source, docs, cfg):
         out = []
         for doc_id, first in by_wg[wg]:
             # the charter in force when the source draft was first submitted, not a later revision
-            usable = [rev for rev, (t, _) in known.items() if docmeta.parse_date(t) <= first]
-            if usable:
-                out.append((max(usable, key=lambda r: (known[r][0], r)), doc_id))
+            rev = charter_in_force(known, first)
+            if rev:
+                out.append((rev, doc_id))
         made, errs = [], []
         for rev in sorted({r for r, _ in out}):
             url = f"https://www.ietf.org/charter/{name}-{rev}.txt"
