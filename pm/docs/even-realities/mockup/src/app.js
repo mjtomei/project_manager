@@ -206,8 +206,10 @@ export class App {
             ? it(`Approve v${shown.n}…`, { t: d.kind === 'plan' ? 'proposed' : `${shown.hash}`, dim: true }, () => this.confirmApprove(v.docId, shown))
             : it(`Approve: read v${latest.n} first`, { t: 'blocked', dim: true }, () => this.say(`v${shown.n} is not current · approval needs v${latest.n}`)));
         } else if (d.approved) out.push(it(`Approved v${d.approved.version}`, { t: d.approved.at, dim: true }, null));
-        if (d.pr) out.push(it(`Sessions for ${pm.prLabel(d.pr)}`, null, () => this.push({ type: 'list', kind: 'sessions-pr', pr: d.pr, cursor: 0, top: 0 })));
-        if (d.pr) out.push(it(`${pm.prLabel(d.pr)} status`, null, () => this.push({ type: 'list', kind: 'pr', pr: d.pr, cursor: 0, top: 0 })));
+        // Actions lead somewhere else: the actions list closes first, so Back
+        // from there returns to the document, not to a stale actions list.
+        if (d.pr) out.push(it(`Sessions for ${pm.prLabel(d.pr)}`, null, () => { this.pop(); this.push({ type: 'list', kind: 'sessions-pr', pr: d.pr, cursor: 0, top: 0 }); }));
+        if (d.pr) out.push(it(`${pm.prLabel(d.pr)} status`, null, () => { this.pop(); this.push({ type: 'list', kind: 'pr', pr: d.pr, cursor: 0, top: 0 }); }));
         out.push(it('Back to reading', null, () => this.pop()));
         return out;
       }
@@ -217,8 +219,8 @@ export class App {
         const out = [];
         if (s.state !== 'ended') out.push(it('Speak to this session', null, () => { this.pop(); this.startListening(); }));
         else out.push(it(`Start new ${s.short} session…`, null, () => { this.pop(); this.confirmStart({ ...s, state: 'none' }); }));
-        if (s.scenario != null && s.helper) out.push(it(`Other s${s.scenario} sessions`, null, () => this.jumpTo({ type: 'list', kind: 'scenario', pr: s.pr, run: s.run, k: s.scenario, cursor: 0, top: 0 })));
-        if (s.pr) out.push(it(`All ${pm.prLabel(s.pr)} sessions`, null, () => this.jumpTo({ type: 'list', kind: 'sessions-pr', pr: s.pr, cursor: 0, top: 0 })));
+        if (s.scenario != null && s.helper) out.push(it(`Other s${s.scenario} sessions`, null, () => { this.pop(); this.jumpTo({ type: 'list', kind: 'scenario', pr: s.pr, run: s.run, k: s.scenario, cursor: 0, top: 0 }); }));
+        if (s.pr) out.push(it(`All ${pm.prLabel(s.pr)} sessions`, null, () => { this.pop(); this.jumpTo({ type: 'list', kind: 'sessions-pr', pr: s.pr, cursor: 0, top: 0 }); }));
         if (origin) out.push(it(`Return to ${this.docName(origin)}`, null, () => this.returnTo(origin)));
         out.push(it('Back to session', null, () => this.pop()));
         return out;

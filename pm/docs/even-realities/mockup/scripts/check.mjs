@@ -149,6 +149,21 @@ if (!only.length) {
     app.fail(app.pm.merge(p.id, p.signoff.head));
     rule(!app.toast.includes('no-signoff'), `merge refusal shows raw reason: ${app.toast}`);
   }
+  // An action that leads elsewhere closes its actions list: Back returns to
+  // the document or session, not to a stale actions list.
+  for (const [open, label, under] of [
+    [a => a.openDoc('spec:pr-214:impl'), /^Sessions for/, 'doc'],
+    [a => a.openDoc('spec:pr-214:impl'), /status$/, 'doc'],
+    [a => a.openSession('pr-216/review'), /^All #216/, 'session'],
+    [a => a.openSession('pr-215/qa/run2/s2/verifier'), /^Other s2/, 'session'],
+  ]) {
+    const app = new App(new SimPM());
+    open(app);
+    app.intent('select');
+    app.items(app.view).find(i => label.test(i.l)).act();
+    app.intent('back');
+    rule(app.view.type === under, `${label} then Back landed on ${app.sceneId()}`);
+  }
   // Choosing the OS menu item for the view already shown does not stack a copy.
   {
     const app = new App(new SimPM());
