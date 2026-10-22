@@ -208,6 +208,13 @@ class TestWidth:
         assert len(head) > 1 and all(cell_len(ln) <= 60 for ln in head)
         assert head[1].startswith("  ")
 
+    def test_metadata_labels_are_not_split(self):
+        # "run X" / "owner X" / "⧉ window" wrap as a whole, not mid-label.
+        text = _text(40)
+        assert "  run 20261022-0915" in text
+        assert "owner pm-project_manager-c5a1006b" in text
+        assert "⧉ review-#233" in text
+
     def test_wide_characters_counted_by_cells(self):
         inp = mixed_inputs()
         for p in inp["prs"]:
@@ -385,6 +392,8 @@ class TestPopup:
         assert [ln[2:] for ln in lines] == cli.splitlines()[header_len:]
         assert _red_ids(body) == NEED_YOU
         assert "⚠ 5 need you" in out["title"].plain
+        assert all(cell_len(ln) <= 99
+                   for ln in out["title"].plain.splitlines())
 
     def test_narrow_popup_wraps_to_its_width(self):
         out = _popup((64, 70))

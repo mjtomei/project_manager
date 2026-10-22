@@ -26,6 +26,8 @@ Both wrap onto continuation lines indented under the row.
 from __future__ import annotations
 
 from rich.cells import cell_len
+from rich.color import ColorSystem
+from rich.style import Style
 
 from pm_core.autostart_state import (
     ATTENTION_LABELS, held_by_text, policy_labels, status_rows,
@@ -38,6 +40,7 @@ MIN_WIDTH = 30
 ROLE_STYLES = {
     "header": "bold",
     "secondary": "dim",
+    "meta": "dim",  # one secondary label (window, run, owner): kept whole
     "id": "bold",
     "id2": "dim",
     "marker_target": "bold yellow",
@@ -61,7 +64,7 @@ ROLE_STYLES = {
 
 # Roles whose text is a single label: never broken at its inner spaces
 # unless it alone is wider than the line.
-_ATOMIC = {"id", "id2", "attention", "phase", "policy", "exception",
+_ATOMIC = {"id", "id2", "meta", "attention", "phase", "policy", "exception",
            "marker_target", "marker_dep"} | {
                r for r in ROLE_STYLES if r.startswith("state_")}
 
@@ -282,7 +285,7 @@ def row_lines(row: dict, width: int, *, grouped: bool = True,
         add(reason, "attention_text" if run.get("attention") else "reason")
     win = run.get("window")
     if win:
-        add(f"⧉ {win['name']}", "secondary")
+        add(f"⧉ {win['name']}", "meta")
     if row.get("also"):
         add("also needed by " + ", ".join(row["also"]), "secondary")
     if notice:
@@ -311,10 +314,10 @@ def header_lines(status: dict, width: int,
                  (f"⚠ {len(need)} need{'s' if len(need) == 1 else ''} you: "
                   f"{ids}", "attention_text")]
     if status.get("run_id"):
-        segs += [(" · ", "secondary"), (f"run {status['run_id']}", "secondary")]
+        segs += [(" · ", "secondary"), (f"run {status['run_id']}", "meta")]
     owner = (status.get("owner") or {}).get("session")
     if owner:
-        segs += [(" · ", "secondary"), (f"owner {owner}", "secondary")]
+        segs += [(" · ", "secondary"), (f"owner {owner}", "meta")]
     return wrap(segs, width, "  ")
 
 
@@ -335,26 +338,6 @@ def report_lines(status: dict, width: int = MAX_WIDTH) -> list[Line]:
 # Renderers
 # ---------------------------------------------------------------------------
 
-_SGR_COLORS = {"black": 0, "red": 1, "green": 2, "yellow": 3, "blue": 4,
-               "magenta": 5, "cyan": 6, "white": 7}
-_SGR_ATTRS = {"bold": 1, "dim": 2, "italic": 3, "underline": 4, "reverse": 7}
-
-
-def _sgr(style: str) -> str:
-    codes: list[str] = []
-    words = style.split()
-    bg = False
-    for w in words:
-        if w == "on":
-            bg = True
-        elif w in _SGR_ATTRS:
-            codes.append(str(_SGR_ATTRS[w]))
-        elif w in _SGR_COLORS:
-            codes.append(str((40 if bg else 30) + _SGR_COLORS[w]))
-            bg = False
-    return ";".join(codes)
-
-
 def plain(line: Line) -> str:
     return "".join(text for text, _ in line)
 
@@ -367,12 +350,10 @@ def to_ansi(lines: list[Line], color: bool = False) -> str:
         if not color:
             out.append(plain(line))
             continue
-        parts = []
-        for text, role in line:
-            codes = _sgr(ROLE_STYLES.get(role, "")) if role else ""
-            parts.append(f"\x1b[{codes}m{text}\x1b[0m" if codes and text
-                         else text)
-        out.append("".join(parts))
+        out.append("".join(
+            Style.parse(ROLE_STYLES.get(role, "")).render(
+                text, color_system=ColorSystem.STANDARD)
+            for text, role in line))
     return "\n".join(out)
 
 

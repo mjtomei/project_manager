@@ -766,9 +766,11 @@ class AutoRunsScreen(ModalScreen):
         mode = st.get("mode", "off")
         width = self._report_width()
         self._width = width
+        # The header has no selection gutter, but still stays within 99.
         title = Text("\n").join(
-            view.to_rich(ln) for ln in
-            view.header_lines(st, width + self._GUTTER, "Auto-start runs"))
+            view.to_rich(ln) for ln in view.header_lines(
+                st, min(view.MAX_WIDTH, width + self._GUTTER),
+                "Auto-start runs"))
         self.query_one("#runs-title", Static).update(title)
 
         body = Text()

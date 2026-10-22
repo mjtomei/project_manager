@@ -80,16 +80,20 @@ R4 — Width and wrapping.
   are hard-split.  Width uses Unicode cell width (`rich.cells.cell_len`) and is
   computed on the plain text, so styling never counts.  Same for the header.
 - CLI: width = `min(99, terminal columns)` (redirected output → 99); new
-  `--width N` option overrides (clamped to ≥ 30).  TUI: popup container fits
-  99 + chrome (`width: 105; max-width: 95%`); render width is the body's
-  content width (fallback to the app width estimate before layout), minus the
-  2-column selection gutter, re-rendered on resize.
+  `--width N` option overrides (clamped to 30..99).  TUI: popup container fits
+  99 + chrome (`width: 106; max-width: 95%`: border, padding, a stable
+  1-column scrollbar gutter); render width is the body's content width
+  (fallback to the app width estimate before layout), minus the 2-column
+  selection gutter, re-rendered on resize.  The popup header (no selection
+  gutter) also stays within 99 columns.  Single secondary labels (`⧉ window`,
+  `run X`, `owner X`) wrap as a whole rather than mid-label.
 
 R5 — Shared presentation; colors.
 - New pure module `pm_core/autostart_view.py` (no Textual imports): row
   layout → list of lines, each a list of `(text, role)` segments.  Renderers:
-  `to_ansi(lines, color)` for the CLI and `to_rich(segments)` (lazy rich
-  import) for the popup.  `format_text(status, width=99, color=False)` in
+  `to_ansi(lines, color)` for the CLI (role styles rendered with
+  `rich.style.Style.render`, standard 16-color SGR) and `to_rich(segments)`
+  (lazy rich import) for the popup.  `format_text(status, width=99, color=False)` in
   `autostart_state` delegates to it (keeps CLI import).
 - CLI color: on when stdout is a TTY, `NO_COLOR` unset/empty, `TERM != dumb`;
   `--color/--no-color` overrides.  Plain output (redirect, `--no-color`,
