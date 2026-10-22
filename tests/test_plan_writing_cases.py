@@ -479,6 +479,27 @@ def test_pm_default_window_and_roles(tmp_path):
     assert window["event_tools"] == ["Write"] and window["written_content"] == "# Draft plan\n"
 
 
+def test_pm_notifications_and_peer_messages_are_not_human(tmp_path):
+    """Background-task notifications and other sessions' messages arrive as user records but nobody typed them."""
+    record = tmp_path / "sess.jsonl"
+    line = write_conversation(record, tmp_path / "pm" / "plans" / "plan-widgets.md")
+    rows = [json.loads(r) for r in record.read_text().splitlines()]
+    note = "<task-notification>\n<task-id>abc</task-id>\n<status>completed</status>\n</task-notification>"
+    rows[line - 1:line - 1] = [
+        {"type": "user", "origin": {"kind": "task-notification"}, "message": {"role": "user", "content": note}, "timestamp": "t7a"},
+        {"type": "user", "message": {"role": "user", "content": note}, "timestamp": "t7b"},  # older records carry no origin
+        {"type": "user", "origin": {"kind": "peer"}, "message": {"role": "user", "content": "Another Claude session sent a message:\nhi"},
+         "timestamp": "t7c"},
+        {"type": "attachment", "attachment": {"type": "queued_command", "prompt": note, "commandMode": "task-notification"}, "timestamp": "t7d"},
+        {"type": "user", "origin": {"kind": "human"}, "message": {"role": "user", "content": "Name it widgets."}, "timestamp": "t7e"},
+    ]
+    record.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    window = pm_cases.extract_window(pm_cases.load_records(record), len(rows), "plan-widgets.md")
+    human = [t["text"] for t in window["turns"] if t["role"] == "human"]
+    assert human[-1] == "Name it widgets." and len(human) == 4
+    assert not any("task-notification" in t["text"] or "Another Claude session" in t["text"] for t in window["turns"])
+
+
 def test_pm_plan_targets_ignore_string_content():
     assert pm_cases._plan_targets({"type": "user", "message": {"content": "edit pm/plans/plan-x.md"}}) == []
     write = {"type": "tool_use", "name": "Write", "input": {"file_path": "/r/pm/plans/plan-x.md", "content": "x"}}

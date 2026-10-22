@@ -46,7 +46,8 @@ INSTRUCTION = "Write the plan file this conversation asks for."
 SOURCE_NOTE = (" Files the session read are included as `source_file` turns, as the session saw them when it read them"
                " (a line range marks a partial read).")
 SKIP_PREFIXES = ("<local-command-stdout>", "<local-command-stderr>", "Caveat: The messages below",
-                 "[Request interrupted", "<command-message>", "<bash-input>", "<bash-stdout>", "<bash-stderr>")
+                 "[Request interrupted", "<command-message>", "<bash-input>", "<bash-stdout>", "<bash-stderr>",
+                 "<task-notification>")
 
 
 def sha256_file(path):
@@ -119,6 +120,8 @@ def classify_user(obj):
     """Role of a user-type record's text: human, injected, or None to skip."""
     if obj.get("isMeta") or obj.get("isCompactSummary") or obj.get("toolUseResult") is not None:
         return None
+    if (obj.get("origin") or {}).get("kind", "human") != "human":
+        return None  # background-task notifications and other sessions' messages: nobody typed them
     content = (obj.get("message") or {}).get("content")
     if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
         return None
@@ -243,7 +246,8 @@ def extract_window(records, event_line, plan, start_line=None):
                 turns.append({"line": number, "timestamp": obj.get("timestamp"), "role": "assistant", "text": text})
         elif kind == "attachment" and (obj.get("attachment") or {}).get("type") == "queued_command":
             prompt = obj["attachment"].get("prompt")
-            if isinstance(prompt, str) and prompt.strip():
+            if (obj["attachment"].get("commandMode", "prompt") == "prompt" and isinstance(prompt, str) and prompt.strip()
+                    and not prompt.lstrip().startswith(SKIP_PREFIXES)):
                 turns.append({"line": number, "timestamp": obj.get("timestamp"), "role": "human",
                               "text": prompt.strip(), "delivery": "queued_while_working"})
     sources, gaps = source_turns(records[start_line - 1: event_line - 1], turns, plan)
