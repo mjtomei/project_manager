@@ -16,6 +16,7 @@ export const MENU = Object.freeze([
 const STATE_GLYPH = { working: '◐', starting: '◐', idle: '○', waiting: '●', needs: '?', done: '■', ended: '□', queued: '□', none: '·', failed: '!' };
 const glyphFor = s => STATE_GLYPH[s] || '·';
 const ATTENTION = new Set(['needs', 'waiting', 'failed']);
+const LIVE = new Set(['working', 'idle', 'waiting', 'needs', 'starting']);
 const stateCell = s => ({ t: `${glyphFor(s.state)} ${s.stateText}`, dim: !ATTENTION.has(s.state) && s.state !== 'working' && s.state !== 'starting' });
 const LIST_ROWS = BODY_ROWS - 1; // row 0 is the identity/header row
 const INDENT = 28; // label x after the cursor column (▶ is 20 px)
@@ -133,6 +134,8 @@ export class App {
   openSession(id, how = 'open') {
     const s = this.pm.session(id);
     if (s.state === 'none' || s.state === 'starting') return this.confirmStart(s);
+    // A queued QA scenario has no window yet; PM launches it when a slot frees.
+    if (s.state === 'queued') { this.say(`${this.sessionName(s)} queued · PM launches it when a slot frees`); return; }
     this.push({ type: 'session', id, scroll: 0, opened: s.state === 'ended' ? 'ended' : how });
     if (s.state !== 'ended') this.say(`Opened existing ${s.pane} · nothing launched`);
   }
@@ -164,7 +167,7 @@ export class App {
       case 'home': {
         const needs = pm.needsYou();
         const out = needs.map(n => it(`${n.glyph} ${n.text}`, { t: n.state, dim: false }, () => this.openNeed(n)));
-        const running = pm.sessions.filter(s => ['working', 'idle', 'waiting', 'needs', 'starting'].includes(s.state)).length;
+        const running = pm.sessions.filter(s => LIVE.has(s.state)).length;
         out.push(it('Sessions', { t: `${running} live`, dim: true }, () => this.push({ type: 'list', kind: 'sessions', cursor: 0, top: 0 })));
         out.push(it('PRs and status', { t: `${pm.prs.filter(p => p.status !== 'merged').length} open`, dim: true }, () => this.push({ type: 'list', kind: 'prs', cursor: 0, top: 0 })));
         return out;
@@ -202,13 +205,13 @@ export class App {
         const out = [];
         for (const p of pm.prs.filter(p => pm.sessionsFor(p.id).length)) {
           const ss = pm.sessionsFor(p.id);
-          const live = ss.filter(s => ['working', 'idle', 'waiting', 'needs', 'starting'].includes(s.state));
+          const live = ss.filter(s => LIVE.has(s.state));
           const attn = ss.some(s => ATTENTION.has(s.state));
           out.push(it(`#${p.num} ${p.title}`, { t: `${attn ? '? ' : ''}${live.length}/${ss.length} live`, dim: !attn },
             () => this.push({ type: 'list', kind: 'sessions-pr', pr: p.id, cursor: 0, top: 0 })));
         }
         const proj = pm.projectSessions();
-        out.push(it('Plans and project', { t: `${proj.filter(s => ['working', 'idle'].includes(s.state)).length}/${proj.length} live`, dim: true },
+        out.push(it('Plans and project', { t: `${proj.filter(s => LIVE.has(s.state)).length}/${proj.length} live`, dim: true },
           () => this.push({ type: 'list', kind: 'project', cursor: 0, top: 0 })));
         return out;
       }
