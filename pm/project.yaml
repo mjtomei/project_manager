@@ -30206,6 +30206,32 @@ prs:
       synced.'
     created_at: '2026-10-22T16:04:42Z'
     last_edited: '2026-10-22T16:04:42Z'
+  - id: note-72a1b5f
+    text: 'QA s21 refiner: npm swallows flags given without "--" — `npm run capture
+      --out X` runs capture with X as a journey filter and the default out, overwriting
+      committed screenshots/manifest.json with 0 journeys; use `npm run capture --
+      --out X` / `npm run check -- --quiet A`. gallery.mjs has no input flag (always
+      ../screenshots/manifest.json -> ../index.html), so regenerate it in a scratch
+      copy of pm/docs/even-realities. On this aarch64 host the simulator needed `sudo
+      apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0
+      dbus dbus-x11 xvfb`; under load avg ~55 full capture stalled ("no new frame
+      after #N") 6 of 7 runs, the 7th was 54 shots, 0 problems, raw/labelled/phone
+      PNGs byte-identical to committed.'
+    created_at: '2026-10-22T16:37:21Z'
+    last_edited: '2026-10-22T16:37:21Z'
+  - id: note-801a9bf
+    text: 'QA s18 refine: sign-off never opens a session view while "starting…" (openSession
+      routes to confirmStart → "Already starting"), so a phone message to a starting
+      sign-off is unreachable from the UI. The refined scenario covers queued-while-starting
+      through the ended #215 impl instead (actions → Start new impl → confirm → speak/type
+      while starting → POST /director {"type":"pm","event":{"type":"started","session":"pr-215/impl"}}).
+      A queued scenario has no session view: hold gives "Open a document or session
+      to speak" and the phone has no compose box. Driving the browser preview: blur
+      the demo button before pressing Enter, and never use Space (its keyup clicks
+      the focused button). Minor, out of scope: after sign-off starts, PRs list still
+      says "#215 ? QA input".'
+    created_at: '2026-10-22T16:43:01Z'
+    last_edited: '2026-10-22T16:43:01Z'
   - id: note-9a2a7f8
     text: 'QA s17 (6d588cb4): all reading/discuss/v3-supersede/approve/single-send
       Thens held in plain Chromium, but the browser mirror drew space-padded right-aligned
