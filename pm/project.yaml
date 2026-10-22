@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T16:00:25.797310+00:00'
+  updated_at: '2026-10-22T16:04:42.934187+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30197,6 +30197,15 @@ prs:
       synced.'
     created_at: '2026-10-22T16:00:25Z'
     last_edited: '2026-10-22T16:00:25Z'
+  - id: note-1a99e5e
+    text: 'Review 450f i19 (73576daf): a voice message refused on glasses (PM unreachable
+      / session gone) was dropped while the phone keeps refused typed text — review
+      panel now keeps it for an explicit Send after reconnect (never queued/resent).
+      check.mjs +rule (fails on old code); recaptured C09/C10 only (others pixel-identical;
+      manifest merged, not replaced), captions + proposal §4 rows updated; /pm-captures/even-realities
+      synced.'
+    created_at: '2026-10-22T16:04:42Z'
+    last_edited: '2026-10-22T16:04:42Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
