@@ -410,9 +410,12 @@ export class App {
       run: () => {
         const r = this.pm.approve(docId, shown.n, shown.hash);
         this.pop();
+        // The actions list was for the version just confirmed; drop it either
+        // way so reading the new version replaces the document view and Back
+        // does not land on stale actions.
+        this.stack = this.stack.filter(x => x.type !== 'list' || x.kind !== 'doc-actions');
         if (r.ok) {
-          this.stack = this.stack.filter(x => x.type !== 'list' || x.kind !== 'doc-actions');
-          if (d.pr) this.push({ type: 'list', kind: 'progress', pr: d.pr, cursor: 1, top: 0 });
+          if (d.pr)this.push({ type: 'list', kind: 'progress', pr: d.pr, cursor: 1, top: 0 });
           else this.say(`◆ Plan v${shown.n} approved (simulated)`);
           return;
         }
