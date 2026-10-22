@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T01:59:35.318610+00:00'
+  updated_at: '2026-10-22T03:54:23.199360+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8296,6 +8296,20 @@ prs:
       (T+60 skip / T+185 one launch) all held.'
     created_at: '2026-10-22T01:59:35Z'
     last_edited: '2026-10-22T01:59:35Z'
+  - id: note-f8db129
+    text: 'QA S18 (CLI auto-sequence routing + TUI/CLI step-lock race) on 5d41309c:
+      all 4 stories held, no code changes. F REVIEW return (i2 transcript, Integrate
+      merge = applied.merge_sha, merge parents M1+HEAD, tree = candidate_tree); G
+      MERGE->IMPL conflict (fresh impl window, applied null); H fetch error MERGE->BLOCKED,
+      merge refused; I moved base w/ unchanged HEAD -> refused, sign_off_relaunched,
+      merged with no new impl/review/QA. Slow 10 s post-merge hook in the CLI bounce
+      tick: TUI stalls max 2.24 s twice (bounded step lock), hook ran once, one return.
+      Filed pr-ccdec71 (auto-sequence prints advanced: review_relaunched when the
+      review window cannot launch). Harness: recorder grouped session must be $S~1
+      (a non-pm- grouped name breaks QA "No pm session found"); pm switches $S~1 to
+      new QA windows so sample the TUI with capture-pane. Captures /pm-captures/scenarios/18'
+    created_at: '2026-10-22T03:54:23Z'
+    last_edited: '2026-10-22T03:54:23Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
