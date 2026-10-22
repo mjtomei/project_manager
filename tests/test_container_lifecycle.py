@@ -897,6 +897,33 @@ class TestReapCLI:
         r = CliRunner().invoke(cli, ["container", "restart", "pm-x-review-pr-1"])
         assert r.exit_code == 1 and "%4" in r.output and restarted == []
 
+    def test_restart_unowned_reports_pids(self, monkeypatch):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        name = "pm-x-review-pr-1"
+        monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+        usage = iter([{name: (2041, 2048)}, {name: (3, 2048)}])
+        monkeypatch.setattr(cm, "pids_usage", lambda: next(usage))
+        held = []
+        monkeypatch.setattr(cm, "restart_container",
+                            lambda n: held.append(cm.launch_in_progress(n)))
+        r = CliRunner().invoke(cli, ["container", "restart", name])
+        assert r.exit_code == 0, r.output
+        assert held == [True]  # restarted under its launch lock
+        assert "2041/2048 → 3/2048" in r.output
+
+    def test_session_cleanup_scopes_to_current_tag(self, fake_env, monkeypatch):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        from pm_core.cli import helpers
+        monkeypatch.setattr(helpers, "_get_pm_session", lambda: "pm-repo-ab12~2")
+        fake_env["containers"] = [_info("pm-repo-ab12-impl-pr-aaaa"),
+                                  _info("pm-other-cd34-impl-pr-aaaa")]
+        r = CliRunner().invoke(cli, ["session", "cleanup"])
+        assert r.exit_code == 0, r.output
+        assert "session repo-ab12" in r.output
+        assert fake_env["removed"] == ["pm-repo-ab12-impl-pr-aaaa"]
+
     def test_cleanup_continues_past_failure(self, monkeypatch):
         """`pm container cleanup` reports a stuck container instead of
         aborting the rest (remove_container now raises when it can't)."""
@@ -951,3 +978,61 @@ class TestListNamesPrefixGuard:
         assert cm.running_container_count() is None
         assert cm.containers_for_pr("a", "pr-1") is None
         assert cm.cleanup_all_containers() == 0
+
+
+class TestScenarioContainerReensure:
+    """QA resume re-ensures a scenario container the reaper may have taken."""
+
+    def _setup(self, tmp_path):
+        from pm_core import qa_loop
+        st = qa_loop.QALoopState(pr_id="pr-aaaa")
+        st.loop_id, st.session_tag = "L", "t"
+        clone = tmp_path / "s1" / "clone"
+        clone.mkdir(parents=True)
+        sc = qa_loop.QAScenario(index=1, title="s1", focus="",
+                                container_name="pm-t-qa-pr-aaaa-L-s1",
+                                worktree_path=str(clone))
+        st.scenarios = [sc]
+        return qa_loop, st, sc
+
+    def test_failure_recorded_then_cleared_on_recovery(self, tmp_path, monkeypatch):
+        qa_loop, st, sc = self._setup(tmp_path)
+        monkeypatch.setattr(cm, "load_container_config", lambda: MagicMock())
+        calls = []
+
+        def _create(**kw):
+            calls.append(kw)
+            if len(calls) == 1:
+                raise cm.launch_error(kw["name"], "keyring", "disk quota exceeded key")
+            return "cid"
+        monkeypatch.setattr(cm, "create_qa_container", _create)
+        assert qa_loop._ensure_scenario_container(sc, st, {"branch": "b"}) is False
+        assert qa_loop._is_launch_failure(st, 1) and 1 not in st.scenario_verdicts
+        assert qa_loop._ensure_scenario_container(sc, st, {"branch": "b"}) is True
+        assert not qa_loop._is_launch_failure(st, 1)
+        assert calls[-1]["loop_id"] == "L" and calls[-1]["scenario"] == 1
+        assert calls[-1]["scratch_path"] == Path(sc.worktree_path).parent / "scratch"
+
+
+class TestLockFilePrune:
+    def test_prunes_only_old_files_of_gone_containers(self, monkeypatch):
+        import os
+        lock_dir = cm.container_state_dir() / "locks"
+        lock_dir.mkdir(parents=True)
+        old = time.time() - reaper._LOCK_FILE_MAX_AGE - 10
+        paths = {}
+        for n in ("gone-old", "gone-new", "alive-old"):
+            p = lock_dir / f"container-pm-{n}.lock"
+            p.touch()
+            if n.endswith("old"):
+                os.utime(p, (old, old))
+            paths[n] = p
+        held = lock_dir / "container-pm-held-old.lock"
+        with cm.launch_lock("pm-held-old", timeout=0) as got:
+            assert got
+            os.utime(held, (old, old))
+            reaper._prune_lock_files({"pm-alive-old"})
+        assert not paths["gone-old"].exists()
+        assert paths["gone-new"].exists()  # a launch may still be starting
+        assert paths["alive-old"].exists()
+        assert held.exists()  # in use right now

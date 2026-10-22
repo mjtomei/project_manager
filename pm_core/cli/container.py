@@ -462,5 +462,7 @@ def container_restart(name: str, force: bool):
             click.echo(str(e), err=True)
             raise SystemExit(1)
     after = (container_mod.pids_usage() or {}).get(name)
-    fmt = lambda u: f"{u[0]}/{u[1]}" if u else "?"
+
+    def fmt(usage):
+        return f"{usage[0]}/{usage[1]}" if usage else "?"
     click.echo(f"Restarted {name} (PIDs {fmt(before)} → {fmt(after)}).")
