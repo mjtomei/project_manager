@@ -31361,3 +31361,99 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-592e4bd
+  plan: improvements
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
+  branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
+  status: pending
+  depends_on: []
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
+
+
+    Current integration points and gaps:
+
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
+
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    on each request. Keep account credentials on the host; do not embed them in project.yaml,
+    generated launch commands, logs or captures.
+
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
+
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
+
+
+    Acceptance:
+
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
+
+
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
+
+
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:26:01.208880+00:00'
+  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-da1f854
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
+    created_at: '2026-10-22T17:46:12Z'
+    last_edited: '2026-10-22T17:46:12Z'
