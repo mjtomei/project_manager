@@ -131,6 +131,12 @@ def start_qa(app, pr_id: str) -> None:
             app.log_message(f"QA already running for {pr_id}")
             return
 
+    # A run of this PR may still be going without a loop here: started
+    # before a restart (its workers keep running), or driven by another
+    # process.  Adopt it rather than start a second run beside it.
+    if pr.get("status") == "qa" and _adopt_or_defer_existing_run(app, pr_id):
+        return
+
     # A sign-off REQA return is now being re-verified.
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(app._root, pr_id, "qa")
@@ -160,6 +166,66 @@ def start_qa(app, pr_id: str) -> None:
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+
+
+def _adopt_or_defer_existing_run(app, pr_id: str) -> bool:
+    """True when an unfinished QA run of *pr_id* is already going.
+
+    An orphaned one (its driver died with a restart) is adopted; one a
+    live process still drives is left to it.  A run that was stopped on
+    purpose, or has finished, does not count.
+    """
+    from pm_core import qa_loop
+    snap = qa_loop.newest_resume_snapshots().get(pr_id)
+    if not snap:
+        return False
+    qa_dir, rdata = snap
+    if (rdata.get("cancelled")
+            or qa_loop.resume_snapshot_complete(rdata, qa_dir)
+            or rdata.get("phase") == "done"):
+        return False
+    if qa_loop.resume_owned_elsewhere(rdata):
+        app.log_message(
+            f"QA for {pr_id} is already running in another pm process "
+            f"(pid {rdata.get('owner_pid')}) — not starting a second run")
+        _log.info("start_qa: %s run %s owned by pid %s", pr_id,
+                  rdata.get("loop_id"), rdata.get("owner_pid"))
+        return True
+    _resume_incomplete_qa(app, only_pr=pr_id)
+    if pr_id in app._qa_loops:
+        _log.info("start_qa: adopted in-progress run %s for %s instead of "
+                  "starting a new one", rdata.get("loop_id"), pr_id)
+        return True
+    return False
+
+
+def _cancel_orphaned_run(pr_id: str) -> None:
+    """Mark the PR's unadopted, unfinished run cancelled before a
+    deliberate new run (``z t`` / ``zz t``) replaces it.
+
+    Its windows are killed by the new run's setup; without the mark a
+    restart before that run's first snapshot would adopt the old one.
+    A run another live process drives is left alone.
+    """
+    from pm_core import qa_loop
+    snap = qa_loop.newest_resume_snapshots().get(pr_id)
+    if not snap:
+        return
+    qa_dir, rdata = snap
+    if rdata.get("phase") == "done" or qa_loop.resume_owned_elsewhere(rdata):
+        return
+    qa_loop.mark_resume_cancelled(qa_dir)
+
+
+def _cancel_run(state: QALoopState | None) -> None:
+    """Stop *state*'s run and record that in its snapshot right away, so a
+    restart before its thread notices does not adopt it."""
+    if state is None:
+        return
+    state.stop_requested = True
+    if state.qa_workdir:
+        from pm_core import qa_loop
+        qa_loop.mark_resume_cancelled(state.qa_workdir)
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +258,9 @@ def fresh_start_qa(app, pr_id: str) -> None:
     # Stop any running QA for this PR
     existing = app._qa_loops.get(pr_id)
     if existing and existing.running:
-        existing.stop_requested = True
+        _cancel_run(existing)
         _log.info("fresh_start_qa: stopping running QA for %s", pr_id)
+    _cancel_orphaned_run(pr_id)
 
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)
@@ -232,7 +299,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # If a QA loop is running, stop it
     existing = app._qa_loops.get(pr_id)
     if existing and existing.running:
-        existing.stop_requested = True
+        _cancel_run(existing)
         # Also remove self-driving registration
         app._self_driving_qa.pop(pr_id, None)
         app.log_message(f"[bold]QA loop stopping[/] for {pr_id} (finishing current run)...")
@@ -242,6 +309,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # Remove stale loop state — run_qa_sync will clean up old windows
     # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
+    _cancel_orphaned_run(pr_id)
 
     # Register self-driving QA state
     app._self_driving_qa[pr_id] = {
@@ -276,7 +344,7 @@ def stop_qa(app, pr_id: str) -> None:
     """Request graceful stop of QA for a PR."""
     state = app._qa_loops.get(pr_id)
     if state and state.running:
-        state.stop_requested = True
+        _cancel_run(state)
         app.log_message(f"Stopping QA for {pr_id}...")
     else:
         app.log_message(f"No QA running for {pr_id}")
@@ -357,26 +425,32 @@ def poll_qa_state(app) -> None:
     app._qa_resume_poll_counter += 1
 
 
-def _resume_incomplete_qa(app) -> None:
+def _resume_incomplete_qa(app, only_pr: str | None = None) -> None:
     """Resume or finish QA runs orphaned by a TUI restart.
 
     The verdict-collection orchestration (run_qa_sync) runs in a daemon
     thread inside the TUI process.  A TUI restart kills that thread and
-    empties ``app._qa_loops``; the scenario tmux windows keep running but
-    nobody collects verdicts, computes the overall result, or drives the
-    lifecycle transition.
+    empties ``app._qa_loops``; the planner / refiner / worker panes keep
+    running but nobody collects their results, launches what is still
+    queued, computes the overall result, or drives the lifecycle
+    transition.
 
-    Each in-progress run leaves a ``qa_resume.json`` snapshot in its QA
-    workdir.  This scans for snapshots not tracked in memory and either:
+    Every run keeps a ``qa_resume.json`` snapshot in its QA workdir from the
+    moment it starts.  For each PR this considers only its most recently
+    started run (an older one was replaced) and:
 
-    * re-spawns the orchestration loop (``resume_qa_background``) when the
-      run is still incomplete (no ``overall`` in qa_status.json), or
+    * skips it when it was stopped on purpose (``cancelled``) or another
+      live process still drives it;
+    * re-spawns the orchestration loop (``resume_qa_background``), which
+      re-enters the run at its recorded phase, when it is still running —
+      including a run caught planning, refining or launching workers; or
     * feeds the completed-but-unprocessed result straight through
-      ``_on_qa_complete`` when the daemon finished writing the verdict but
-      the TUI died before processing it.
+      ``_on_qa_complete`` when the run finished (finalizer included)
+      while the TUI was down.
 
     The snapshot is removed once the run has been handled, so it is not
-    re-processed on a subsequent restart.
+    re-processed on a subsequent restart.  *only_pr* limits the scan to one
+    PR (``start_qa`` adopting instead of starting a second run).
 
     Limitation: self-driving QA state (``app._self_driving_qa``) lives only
     in memory and is *not* persisted, so a resumed run drives its lifecycle
@@ -387,31 +461,23 @@ def _resume_incomplete_qa(app) -> None:
     core goal is verdict survival, and auto-start (if enabled) still drives
     the loop forward.
     """
-    import json
-    from pathlib import Path
     from pm_core import qa_loop
 
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
-    if not qa_root.is_dir():
-        return
-
-    if not hasattr(app, "_resumed_qa_pr_ids"):
-        app._resumed_qa_pr_ids = set()
+    if not hasattr(app, "_resumed_qa_runs"):
+        app._resumed_qa_runs = set()
 
     # Defer the (relatively expensive) project load until a candidate is
     # actually found — this runs on the ~1s poll tick.
     project_data = None
 
-    for resume_file in qa_root.glob("*/qa_resume.json"):
-        try:
-            rdata = json.loads(resume_file.read_text())
-        except (json.JSONDecodeError, OSError):
+    for pr_id, (qa_dir, rdata) in qa_loop.newest_resume_snapshots().items():
+        if only_pr and pr_id != only_pr:
             continue
-
-        pr_id = rdata.get("pr_id", "")
-        if not pr_id:
+        run_key = str(qa_dir)
+        if pr_id in app._qa_loops or run_key in app._resumed_qa_runs:
             continue
-        if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
+        # Deliberately stopped (zz t / z t / stop): not ours to adopt.
+        if rdata.get("cancelled"):
             continue
         # Not orphaned: another live process (a `pm pr auto-sequence` QA
         # child) is driving it.  Re-checked each scan, so the run is still
@@ -431,22 +497,20 @@ def _resume_incomplete_qa(app) -> None:
             # resumed (resume requires status == "qa").  Drop it so it
             # doesn't linger on disk or get mistakenly picked up if the
             # PR ever returns to QA under a different loop_id.
-            app._resumed_qa_pr_ids.add(pr_id)
-            qa_loop.clear_resume_file(resume_file.parent)
+            app._resumed_qa_runs.add(run_key)
+            qa_loop.clear_resume_file(qa_dir)
             continue
 
-        # Is the run already complete (daemon wrote overall, TUI died
-        # before processing)?  Read the display status file.
-        overall = ""
-        try:
-            sdata = json.loads((resume_file.parent / "qa_status.json").read_text())
-            overall = sdata.get("overall", "")
-        except (json.JSONDecodeError, OSError):
-            overall = ""
-
         state = qa_loop.build_resume_state(rdata)
-        app._resumed_qa_pr_ids.add(pr_id)
+        app._resumed_qa_runs.add(run_key)
 
+        if rdata.get("phase") == "done" and not rdata.get("latest_verdict"):
+            # Ended without a verdict (e.g. aborted on a merged PR).
+            qa_loop.clear_resume_file(qa_dir)
+            continue
+
+        # Finished during downtime (finalizer included)?
+        overall = qa_loop.resume_snapshot_complete(rdata, qa_dir)
         if overall:
             # Completed during downtime — process and clear the snapshot.
             state.running = False
@@ -464,7 +528,8 @@ def _resume_incomplete_qa(app) -> None:
 
         app._qa_loops[pr_id] = state
         app.log_message(f"Resuming QA for {pr_id} after restart...")
-        _log.info("Resuming incomplete QA from disk: %s", pr_id)
+        _log.info("Resuming incomplete QA from disk: %s (run %s, phase %s)",
+                  pr_id, state.loop_id, state.run_phase)
         qa_loop.resume_qa_background(state, app._root, pr, _on_update)
 
 
