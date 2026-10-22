@@ -1118,6 +1118,26 @@ class TestReconciliation:
             time.sleep(0.05)
         assert ah.owner_last_alive(tok) > first
 
+    def test_owner_heartbeat_beats_at_gate_due_time(self, monkeypatch):
+        # kill -9 a few hundred ms after a gate ran out: the regular beat
+        # (up to _HEARTBEAT_S later) has not fired yet, so the lock must also
+        # be touched right after the due time or the gate reads "lost".
+        monkeypatch.setattr(ah, "_HEARTBEAT_S", 30.0)
+        monkeypatch.setattr(ah, "_owner_cache", None)
+        monkeypatch.setattr(ah, "_owner_lock_fd", None)
+        monkeypatch.setattr(ah, "_clock", time.time)
+        tok = ah.owner_token()
+        ah.arm_timer(PR, "qa-grace:L", purpose="QA scenario verdict grace",
+                     owner_action="qa", duration=0.3)
+        due = time.time() + 0.3
+        deadline = time.time() + 5
+        while (ah.owner_last_alive(tok) or 0) < due - 0.01 \
+                and time.time() < deadline:
+            threading.Event().wait(0.02)
+        (arm,) = [e for e in ah.read_events(PR) if e["kind"] == "timer_arm"]
+        assert ah.owner_last_alive(tok) >= arm["due_t"]
+        assert ah.owner_last_alive(tok) < arm["due_t"] + 1.0
+
     def test_owner_heartbeat_ignores_patched_sleep(self, monkeypatch):
         # Tests patch time.sleep (e.g. to advance a FakeClock); the
         # heartbeat thread must not call it, or it advances that clock at

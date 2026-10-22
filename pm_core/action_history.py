@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import heapq
 import json
 import os
 import secrets
@@ -118,10 +119,13 @@ _open_lock = threading.Lock()
 
 
 def _after_fork_in_child() -> None:
-    global _owner_mutex, _owner_lock_fd, _open_lock
+    global _owner_mutex, _owner_lock_fd, _open_lock, _gate_lock, _beat_wake
     _owner_mutex = threading.Lock()  # a thread may have held it at fork()
     _open_lock = threading.Lock()
+    _gate_lock = threading.Lock()
+    _beat_wake = threading.Event()
     _open_attempts.clear()  # the parent's attempts, not the child's
+    _gate_dues.clear()  # the parent's gates, not the child's
     # The inherited fd shares the parent's owner lock: holding it would keep
     # the parent looking alive after it exits.  The child takes its own
     # instance on its first write.
@@ -228,18 +232,47 @@ def _prune_owner_locks() -> None:
 # owner_last_alive), e.g. whether a gate elapsed before the owner died.
 _HEARTBEAT_S = 1.0
 
+# Due times of the gates this process armed.  The heartbeat also fires just
+# after each one, so a gate that ran out while its owner was alive reads
+# elapsed after a crash (due <= last heartbeat) even when the owner died
+# within _HEARTBEAT_S of the due time.
+_gate_dues: list[float] = []
+_gate_lock = threading.Lock()
+_GATE_BEAT_LAG_S = 0.01
+# Set when a gate is armed, so a sleeping heartbeat re-plans its next beat.
+_beat_wake = threading.Event()
+
+
+def _next_beat_wait(beat_t: float) -> float:
+    with _gate_lock:
+        while _gate_dues and _gate_dues[0] <= beat_t:
+            heapq.heappop(_gate_dues)
+        if not _gate_dues:
+            return _HEARTBEAT_S
+        return min(_HEARTBEAT_S,
+                   _gate_dues[0] - beat_t + _GATE_BEAT_LAG_S)
+
 
 def _heartbeat(fd: int) -> None:
     # Event.wait, not time.sleep: tests patch time.sleep (often to advance
     # a fake clock), and a background thread calling it would advance that
     # clock at random moments or spin on a no-op mock.
-    tick = threading.Event()
     while _owner_lock_fd == fd:
+        beat_t = time.time()  # the mtime utime leaves is at least this
         try:
             os.utime(fd)
         except OSError:
             return
-        tick.wait(_HEARTBEAT_S)
+        _beat_wake.clear()
+        _beat_wake.wait(_next_beat_wait(beat_t))
+
+
+def _beat_after(due: float) -> None:
+    if _owner_lock_fd is None:
+        return
+    with _gate_lock:
+        heapq.heappush(_gate_dues, due)
+    _beat_wake.set()
 
 
 def _hold_owner_lock(instance: str) -> None:
@@ -531,6 +564,8 @@ def arm_timer(pr_id: str, timer: str, *, purpose: str, owner_action: str,
            armed_t=round(t, 3), due_t=due, effect=effect,
            expected=expected or None,
            indefinite=True if duration is None else None)
+    if effect == "gate" and due is not None:
+        _beat_after(due)
 
 
 def clear_timer(pr_id: str, timer: str, reason: str = "cancelled") -> None:
