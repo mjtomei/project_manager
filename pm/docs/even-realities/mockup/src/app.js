@@ -318,7 +318,9 @@ export class App {
           out.push(it([{ t: `owner: ${t.owner}`, x: 18, dim: true }], null, null));
         }
         if (!h.timers.length) out.push(it([{ t: 'No PR-owned timers', dim: true }], null, null));
-        const room = Math.max(1, LIST_ROWS - out.length - 1);
+        // A connection banner takes a row from the list, so count it here or
+        // the newest attempt (the one that matters) is the one cut off.
+        const room = Math.max(1, LIST_ROWS - this.banners(v).length - out.length - 1);
         const shown = h.attempts.slice(-room);
         const earlier = h.attempts.length - shown.length;
         out.push(it([{ t: 'ATTEMPTS', dim: true }], earlier ? { t: `+${earlier} earlier`, dim: true } : null, null));
@@ -327,8 +329,8 @@ export class App {
         return out;
       }
       case 'whatchanged': {
-        const out = v.changes.map(c => it([{ t: c.key, dim: true }, { t: c.text, x: 52 }], null, () => { this.pop(); this.openDoc(v.docId, v.to, c.key); }));
-        out.push(it(`Read v${v.to} from the first change`, null, () => { this.pop(); this.openDoc(v.docId, v.to, v.changes[0]?.key); }));
+        const out = v.changes.map(c => it([{ t: c.key, dim: true }, { t: c.text, x: 52 }], null, c.removed ? null : () => { this.pop(); this.openDoc(v.docId, v.to, c.key); }));
+        out.push(it(`Read v${v.to} from the first change`, null, () => { this.pop(); this.openDoc(v.docId, v.to, v.changes.find(c => !c.removed)?.key); }));
         return out;
       }
       case 'confirm': {
@@ -379,7 +381,12 @@ export class App {
   }
   openNeed(n) {
     if (n.kind === 'doc') return this.openDoc(n.id);
-    if (n.kind === 'session') { const s = this.pm.session(n.id); return this.jumpTo({ type: 'list', kind: 'scenario', pr: s.pr, run: s.run, k: s.scenario, cursor: 0, top: 0 }); }
+    if (n.kind === 'session') {
+      const s = this.pm.session(n.id);
+      // A QA helper opens its scenario's sessions; any other session opens directly.
+      if (s.helper) return this.jumpTo({ type: 'list', kind: 'scenario', pr: s.pr, run: s.run, k: s.scenario, cursor: 0, top: 0 });
+      return this.openSession(s.id);
+    }
     if (n.kind === 'pr') return this.push({ type: 'list', kind: 'pr', pr: n.id, cursor: 0, top: 0 });
   }
   banners(v) {
@@ -424,6 +431,13 @@ export class App {
       const old = before.has(l.key) ? a.filter(x => x.key === l.key || x.key.startsWith(`${l.key}+`)).map(x => x.segs.at(-1).t).join(' ') : null;
       if (old === text) continue;
       changes.push({ key: l.key, text: `${old == null ? 'Added: ' : ''}${text.replace(/^([A-Z]\d+\.|#\d+)\s*/, '')}` });
+    }
+    // Items dropped from the new version: listed, but there is nothing in it to jump to.
+    const kept = new Set(b.map(l => l.key));
+    for (const l of a) {
+      if (!/^([A-Z]\d+|s\d+|#\d+)$/.test(l.key) || kept.has(l.key)) continue;
+      const old = a.filter(x => x.key === l.key || x.key.startsWith(`${l.key}+`)).map(x => x.segs.at(-1).t).join(' ');
+      changes.push({ key: l.key, removed: true, text: `Removed: ${old.replace(/^([A-Z]\d+\.|#\d+)\s*/, '')}` });
     }
     this.push({ type: 'list', kind: 'whatchanged', docId, from, to, changes, cursor: 0, top: 0 });
   }

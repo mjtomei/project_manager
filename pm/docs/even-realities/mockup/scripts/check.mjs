@@ -75,6 +75,37 @@ if (!only.length) {
     const got = spoken(from, to);
     if (got !== want) { failures++; console.log(`FAIL rule: ${from} → ${to} context ${got}, expected ${want}`); }
   }
+  const rule = (ok, what) => { if (!ok) { failures++; console.log(`FAIL rule: ${what}`); } };
+  // A connection banner never pushes the newest attempt off the history view.
+  {
+    const app = new App(new SimPM());
+    app.pm.apply({ type: 'head-moved', pr: 'pr-211', head: 'f00d123' });
+    app.pm.merge('pr-211', 'a1b2c3d');
+    app.pmEvent({ type: 'disconnect' });
+    app.push({ type: 'list', kind: 'history', pr: 'pr-211', cursor: 0, top: 0 });
+    const [at, what, took, outcome] = app.pm.historyFor('pr-211').attempts.at(-1);
+    const rows = app.render().rows.map(r => r ? [...r.l.map(s => s.t), r.r?.t || ''].join(' ') : '');
+    rule(rows.includes(`${at} ${what} ${took} ${outcome}`), `history under a banner hides newest attempt "${what}"`);
+  }
+  // Any session needing input (not only a QA helper) is listed and opens directly.
+  {
+    const app = new App(new SimPM());
+    app.pmEvent({ type: 'session', id: 'pr-216/impl', patch: { state: 'needs', stateText: 'question' } });
+    const need = app.pm.needsYou().find(n => n.id === 'pr-216/impl');
+    rule(need?.text === '#216 impl', `needs-you label ${need?.text}`);
+    if (need) app.openNeed(need);
+    rule(app.view.type === 'session' && app.view.id === 'pr-216/impl', `needs-you opened ${app.sceneId()}`);
+  }
+  // What changed lists removed items too, without a jump target.
+  {
+    const app = new App(new SimPM());
+    app.pm.apply({ type: 'publish-revision', doc: 'spec:pr-214:impl' });
+    app.lines('spec:pr-214:impl', 3).splice(0, Infinity, ...app.lines('spec:pr-214:impl', 3).filter(l => !/^R1(\+|$)/.test(l.key)));
+    app.whatChanged('spec:pr-214:impl', 2, 3);
+    const removed = app.view.changes.find(c => c.key === 'R1');
+    rule(removed?.removed && removed.text.startsWith('Removed: '), 'what changed omits a removed requirement');
+    rule(app.items(app.view).every(i => !i.act || !i.l?.[0]?.t?.startsWith?.('R1')), 'removed change is selectable');
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

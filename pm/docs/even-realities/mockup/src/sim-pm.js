@@ -50,7 +50,11 @@ export class SimPM {
       const latest = this.latest(d.id);
       items.push({ kind: 'doc', id: d.id, glyph: '?', text: `${d.label} v${latest.n}`, state: d.kind === 'plan' ? 'plan review' : 'spec review' });
     }
-    for (const s of this.sessions) if (s.state === 'needs') items.push({ kind: 'session', id: s.id, glyph: '?', text: `${this.prLabel(s.pr)} s${s.scenario} ${s.short}`, state: 'needs input' });
+    for (const s of this.sessions) {
+      if (s.state !== 'needs') continue;
+      const who = s.scenario != null ? `s${s.scenario} ${s.short}` : s.short;
+      items.push({ kind: 'session', id: s.id, glyph: '?', text: `${this.prLabel(s.pr)} ${who}`.trim(), state: 'needs input' });
+    }
     for (const p of this.prs) if (p.holds.length) items.push({ kind: 'pr', id: p.id, glyph: '◇', text: `#${p.num} merge`, state: 'manual merge' });
     return items;
   }
