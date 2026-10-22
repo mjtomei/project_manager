@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-c8482a8
+  active_pr: pr-626cb32
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31186,3 +31186,47 @@ prs:
       the phantom refresh.'
     created_at: '2026-10-22T16:59:36Z'
     last_edited: '2026-10-22T16:59:36Z'
+- id: pr-08b586d
+  plan: bugs
+  title: 'Bug: tech-tree node titles drop tab characters instead of showing a space
+    ("Tab\there" renders "Tabhere")'
+  branch: pm/pr-08b586d-bug-tech-tree-node-titles-drop-tab-characters-inst
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/tech_tree.py node title rendering. Repro: pm pr add $''Tab\there
+    and\ttabs in the title''; the tree box shows "Tabhere andtabs in …" (tabs deleted,
+    words glued). The autostart status report and runs popup (pr-8700be3) already
+    lay tabs/newlines out as single spaces; the tree node should do the same (check
+    newlines too). Found in pr-8700be3 QA scenario 9 (captures /pm-captures/scenarios/9/story2-backlog/tui60x24-closed.txt).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:33:33.198992+00:00'
+  updated_at: '2026-10-22T17:33:41.894503+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-626cb32
+  plan: bugs
+  title: 'Bug: autostart status JSON reports a pending target as state "completed"/phase
+    "done" in backlog (all) mode'
+  branch: pm/pr-626cb32-bug-autostart-status-json-reports-a-pending-target
+  status: pending
+  depends_on: []
+  description: 'pm_core/autostart_state.py build_status targets_out: in mode "all"
+    a target that is not in runs (backlog mode only lists PRs whose deps are all merged)
+    falls into "failed" if pr is None else "completed". Repro: pm pr add A; pm pr
+    add W --depends-on A; pm autostart add W --wait-for-merge; TUI "/autostart all";
+    pm autostart status --json -> targets[W] has state "completed", phase "done",
+    pending ["A"] although W is pending and never ran. Pre-existing on master (same
+    expression). Found in pr-8700be3 QA scenario 9 (/pm-captures/scenarios/9/story2-backlog/all.json).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:33:35.152926+00:00'
+  updated_at: '2026-10-22T17:33:35.152926+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
