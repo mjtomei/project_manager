@@ -514,7 +514,7 @@
             ],
             "written_note": {
               "index_entry": "The RFC Editor index entry is written at publication; only fields that identify the document are kept, and the publication date, category and obsoletes/updates are withheld.",
-              "charter": "Only the charter revision approved on or before the submission of the source draft's -00 revision; RFCs whose first draft cannot be dated (before the datatracker, about 2001) get no charter. Charters older than the datatracker's charter workflow (about 2011) were imported as one revision stamped with the group's start date but holding the latest legacy text, so only their original revision 01 is dated.",
+              "charter": "Only the charter revision approved on or before the submission of the source draft's -00 revision; RFCs whose first draft cannot be dated (before the datatracker, about 2001) get no charter. Revisions are dated by their datatracker approval, or for older charters by the day they were entered (the legacy archive was imported on 2009-08-29); a charter's first revision is stamped with the group's start date whatever its text, so it is dated only by the charter's next event, and RFCs whose first draft predates the import mostly get no charter.",
               "milestone": "A milestone can name a draft only once the draft exists, so milestones naming it are written after the document was started."
             }
           }
@@ -621,7 +621,7 @@
             ],
             "written_note": {
               "index_entry": "The RFC Editor index entry is written at publication; only fields that identify the document are kept, and the publication date, category and obsoletes/updates are withheld.",
-              "charter": "Only the charter revision approved on or before the submission of the source draft's -00 revision; RFCs whose first draft cannot be dated (before the datatracker, about 2001) get no charter. Charters older than the datatracker's charter workflow (about 2011) were imported as one revision stamped with the group's start date but holding the latest legacy text, so only their original revision 01 is dated.",
+              "charter": "Only the charter revision approved on or before the submission of the source draft's -00 revision; RFCs whose first draft cannot be dated (before the datatracker, about 2001) get no charter. Revisions are dated by their datatracker approval, or for older charters by the day they were entered (the legacy archive was imported on 2009-08-29); a charter's first revision is stamped with the group's start date whatever its text, so it is dated only by the charter's next event, and RFCs whose first draft predates the import mostly get no charter.",
               "milestone": "A milestone can name a draft only once the draft exists, so milestones naming it are written after the document was started."
             }
           }

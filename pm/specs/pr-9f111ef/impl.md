@@ -58,7 +58,7 @@ source) and fetch notes. Per source:
   name, stream, area, WG, publication category, obsoletes/updates; never the
   abstract), WG charter revision in effect when the source draft was first
   submitted (datatracker charter
-  history + `www.ietf.org/charter/charter-ietf-<wg>-<rev>.txt`), WG milestones
+  revision events + `www.ietf.org/charter/charter-ietf-<wg>-<rev>.txt`), WG milestones
   whose docs include the RFC's draft (current + history).
 - oxide-rfds: RFD API index entry (title, authors, labels); process = RFD 1.
 - chromium-designs / chromiumos-designs: index entry (link text, enclosing
@@ -195,13 +195,17 @@ exactly once.
   - charters: the revision approved on or before the source draft's -00
     submission; RFCs whose first draft predates datatracker events (about
     2001) get none. A WG draft that replaced an earlier individual draft is
-    dated by the WG draft's -00 (limitation). Charters older than the
-    datatracker's charter workflow (about 2011) were imported as one
-    revision stamped with the group's start date but holding the latest
-    legacy text (behave's imported 06 carries its 2008 IPv6 recharter under
-    a 2004 date); only a revision preceded by datatracker proposals
-    (`NN-xx`) is dated by its history, and an imported later revision is
-    replaced by revision 01, the original charter (review loop 05c5 i1).
+    dated by the WG draft's -00 (limitation). Revisions are dated by their
+    datatracker `new_revision` events: an approval when proposals (`NN-xx`)
+    preceded it, else the day it was entered (the legacy charter archive was
+    imported on 2009-08-29). A charter's first event is stamped with the
+    group's start date whatever its text (pppext's 01, stamped 1989, cites
+    RFC 1661 from 1994; dhc's 01 gives RFC 2131's status), so that revision
+    is dated by the charter's next event and left out when there is none;
+    revision 00 is a placeholder. RFCs whose first draft predates the import
+    therefore mostly get no charter (user decision, review loop 05c5 i2,
+    replacing i1's assumption that legacy revision 01 is the original
+    charter).
   - Issue and PR bodies are their current text; checkbox and release-target
     lines, which record progress, are removed together with the lines nested
     under them (KEP issues list each stage's PRs there), and HTML comments

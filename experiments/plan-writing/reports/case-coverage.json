@@ -1,8 +1,8 @@
 {
  "totals": {
   "documents": 18963,
-  "brief_rich": 4660,
-  "brief_thin": 7755,
+  "brief_rich": 3094,
+  "brief_thin": 9321,
   "both_case_types": 11331,
   "whole_document_only": 1084,
   "continuation_only": 3777,
@@ -180,8 +180,8 @@
   },
   "ietf-rfcs": {
    "documents": 9841,
-   "brief_rich": 4066,
-   "brief_thin": 5775,
+   "brief_rich": 2500,
+   "brief_thin": 7341,
    "both_case_types": 8896,
    "whole_document_only": 945,
    "continuation_only": 0,
@@ -191,13 +191,13 @@
     "continuation": 26175
    },
    "context": {
-    "items": 10619,
+    "items": 10631,
     "by_kind": {
-     "charter": 368,
+     "charter": 380,
      "index_entry": 9841,
      "milestone": 410
     },
-    "fetch_errors": 7
+    "fetch_errors": 6
    }
   },
   "kubernetes-keps": {
@@ -17129,7 +17129,7 @@
   },
   "ietf-rfcs": {
    "charter": {
-    "admitted": 4067
+    "admitted": 2500
    },
    "index_entry": {
     "admitted": 9841

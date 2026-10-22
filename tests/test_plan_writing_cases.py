@@ -752,16 +752,26 @@ def test_process_versions_predate_each_document(monkeypatch):
     assert used == {"c3": ["a"], "c2": ["b"]}  # c: older than every version; undated: no attachment
 
 
-def test_imported_charter_revision_is_dated_as_original():
+def test_charter_revisions_dated_only_by_trustworthy_events():
     pytest.importorskip("bs4")
     context = importlib.import_module("context")
-    # behave: 06 imported with the group's 2004 start date (latest legacy text), 07 approved in the datatracker
-    imported = [{"rev": "06", "time": "2004-09-27T19:00:00Z"}, {"rev": "06-00", "time": "2012-06-18T21:44:09Z"},
-                {"rev": "07", "time": "2012-06-21T19:31:39Z"}, {"rev": "06", "time": "2004-09-27T19:00:00Z"}]
-    assert context.charter_approvals(imported) == {"01": "2004-09-27T19:00:00Z", "07": "2012-06-21T19:31:39Z"}
-    tracked = [{"rev": "00-00", "time": "2015-01-05T10:00:00Z"}, {"rev": "01", "time": "2015-02-01T10:00:00Z"},
-               {"rev": "01-00", "time": "2017-03-01T10:00:00Z"}, {"rev": "02", "time": "2017-04-01T10:00:00Z"}]
-    assert context.charter_approvals(tracked) == {"01": "2015-02-01T10:00:00Z", "02": "2017-04-01T10:00:00Z"}
+    ev = lambda rev, time: {"rev": rev, "time": time}
+    # behave: 01 stamped with the 2004 group start, 02-06 entered from the legacy archive, 07 approved after proposals
+    behave = [ev("07", "2012-06-21T19:31:39Z"), ev("06-00", "2012-06-14T16:27:42Z"), ev("06", "2010-09-02T18:07:17Z"),
+              ev("02", "2009-08-29T16:55:59Z"), ev("01", "2004-09-27T19:00:00Z")]
+    assert context.charter_written_by(behave) == {
+        "01": ("2009-08-29T16:55:59Z", "entered"), "02": ("2009-08-29T16:55:59Z", "entered"),
+        "06": ("2010-09-02T18:07:17Z", "entered"), "07": ("2012-06-21T19:31:39Z", "approved")}
+    # only the group-start-stamped 01: no evidence of when its text was written
+    assert context.charter_written_by([ev("01", "1989-10-02T19:00:00Z")]) == {}
+    # nvo3: 00 placeholder carries the group start, so 01's own entry date stands
+    nvo3 = [ev("00", "2012-02-23T20:00:00Z"), ev("01", "2012-05-01T17:21:32Z"), ev("01-00", "2014-08-26T17:12:35Z"),
+            ev("02", "2014-10-17T15:34:33Z")]
+    assert context.charter_written_by(nvo3) == {"01": ("2012-05-01T17:21:32Z", "entered"),
+                                                "02": ("2014-10-17T15:34:33Z", "approved")}
+    # a new group chartered in the datatracker: 01 follows 00-xx proposals
+    tracked = [ev("00-00", "2015-01-05T10:00:00Z"), ev("01", "2015-02-01T10:00:00Z")]
+    assert context.charter_written_by(tracked) == {"01": ("2015-02-01T10:00:00Z", "approved")}
 
 
 def test_recorded_title_is_cut_from_plain_text_body():

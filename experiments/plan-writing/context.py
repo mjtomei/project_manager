@@ -567,30 +567,39 @@ def first_draft_dates():
     return out
 
 
-def charter_approvals(history):
-    """Charter revision -> approval time, for the revisions whose text was written by that time.
+def charter_written_by(events):
+    """Charter revision -> (time its text is known to exist by, basis), from its new_revision events.
 
-    `history` is the charter's datatracker dochistory. Revisions approved in
-    the datatracker follow proposals numbered after the previous revision
-    (`06-00`, then `07`). Charters older than that workflow (about 2011) were
-    imported as one revision stamped with the group's start date while its
-    text is the latest legacy revision (behave's imported 06 carries the 2008
-    IPv6 recharter under a 2004 date). Only the original charter, revision 01,
-    was written by that date, so an imported later revision is replaced by
-    01 (the legacy texts stay at www.ietf.org/charter/<name>-<rev>.txt).
+    A revision approved in the datatracker follows proposals numbered after
+    the previous revision (`06-00`, then `07`; `00-00`, then `01` for a new
+    group), and its event is the approval. Other revisions carry the day they
+    were entered, mostly from the legacy charter archive imported on
+    2009-08-29, except the charter's first event, which is stamped with the
+    group's start date whatever its text (pppext's 01, stamped 1989, cites
+    RFC 1661 from 1994; dhc's, stamped 1991, gives RFC 2131's status; dmm's
+    cites a 2011 RFC). That revision is known to exist only by the charter's
+    next event (a later revision or a proposal); without one it is left
+    undated. Revision 00 is a new group's placeholder with no charter text.
     """
     times, proposed = {}, set()
-    for h in history:
-        if re.fullmatch(r"\d\d", h["rev"]):
-            times[h["rev"]] = min(times.get(h["rev"], h["time"]), h["time"])
-        elif re.fullmatch(r"\d\d-\d\d", h["rev"]):
-            proposed.add(h["rev"][:2])
+    for e in events:
+        if re.fullmatch(r"\d\d", e["rev"]):
+            times[e["rev"]] = min(times.get(e["rev"], e["time"]), e["time"])
+        elif re.fullmatch(r"\d\d-\d\d", e["rev"]):
+            proposed.add(e["rev"][:2])
+    start = min((e["time"] for e in events), default=None)
     out = {}
-    for rev, t in sorted(times.items()):
-        if rev == "01" or f"{int(rev) - 1:02d}" in proposed:
-            out[rev] = t
+    for rev, t in times.items():
+        if rev == "00":
+            continue
+        if f"{int(rev) - 1:02d}" in proposed:
+            out[rev] = (t, "approved")
+        elif t != start:
+            out[rev] = (t, "entered")
         else:
-            out["01"] = min(out.get("01", t), t)
+            later = [e["time"] for e in events if e["time"] > t]
+            if later:
+                out[rev] = (min(later), "entered")
     return out
 
 
@@ -637,13 +646,14 @@ def collect_ietf(source, docs, cfg):
         if not group or not group.get("charter"):
             raise FetchError("no charter document recorded")
         name = group["charter"].rstrip("/").rsplit("/", 1)[-1]
-        approved = charter_approvals(datatracker_all(f"/api/v1/doc/dochistory/?format=json&limit=200&name={name}"))
+        known = charter_written_by(datatracker_all(
+            f"/api/v1/doc/docevent/?format=json&limit=200&type=new_revision&doc__name={name}"))
         out = []
         for doc_id, first in by_wg[wg]:
             # the charter in force when the source draft was first submitted, not a later revision
-            usable = [rev for rev, t in approved.items() if docmeta.parse_date(t) <= first]
+            usable = [rev for rev, (t, _) in known.items() if docmeta.parse_date(t) <= first]
             if usable:
-                out.append((max(usable, key=lambda r: approved[r]), doc_id))
+                out.append((max(usable, key=lambda r: (known[r][0], r)), doc_id))
         made, errs = [], []
         for rev in sorted({r for r, _ in out}):
             url = f"https://www.ietf.org/charter/{name}-{rev}.txt"
@@ -653,10 +663,12 @@ def collect_ietf(source, docs, cfg):
             except FetchError as exc:
                 errs.append({"collector": "ietf_charter", "group": wg, "url": url, "documents": len(applies), "error": str(exc)})
                 continue
+            t, basis = known[rev]
+            when = f"approved {t[:10]}" if basis == "approved" else f"on record by {t[:10]}"
             made.append(make_item(source, "charter", f"{name}-{rev}", text, url, applies, got,
-                                  label=f"working group charter ({wg}, revision {rev}, approved {approved[rev][:10]})",
-                                  fields={"group": wg, "revision": rev, "approved": approved[rev]},
-                                  written_at=docmeta.parse_date(approved[rev])))
+                                  label=f"working group charter ({wg}, revision {rev}, {when})",
+                                  fields={"group": wg, "revision": rev, "written_by": t, "dated_by": basis},
+                                  written_at=docmeta.parse_date(t)))
         return made, errs
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
