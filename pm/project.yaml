@@ -30825,3 +30825,81 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-24f022e
+  plan: bugs
+  title: 'Bug: popup picker / command-runner commands run the pm_core of the popup''s
+    cwd (a PR workdir) instead of the tmux session''s pm'
+  branch: pm/pr-24f022e-bug-popup-picker-command-runner-commands-run-the-p
+  status: pending
+  depends_on: []
+  description: 'pm commands dispatched from the tmux popups (prefix+P action picker
+    `_popup-picker` -> `_run_picker_command` direct route, and the prefix+M runner
+    `_popup-cmd`) must run the pm of the tmux session the popup belongs to: that session''s
+    persisted pm_root (`~/.pm/sessions/<tag>/pm_root`, via `_resolve_root_from_session(session)`).
+    Today they run whatever pm_core is found from the popup''s cwd. Scope is narrow:
+    change only how picker/popup-dispatched child commands resolve pm. Do NOT change
+    resolution for any other pm invocation (ad-hoc CLI, agents in workdirs, QA overrides,
+    IPC commands, TUI-spawned subprocesses).
+
+
+    Observed (2026-10-22): from the signoff-#238 window (pane cwd = the pr-ac10f03
+    workdir), picker ''merge'' ran `pr merge --resolve-window pr-ac10f03`. Debug log:
+    the parent `_popup-picker` resolved correctly (chosen_via=pm_root), but the child
+    logged argv0=<workdir>/pm_core/wrapper.py chosen_via=cwd_walk. It therefore ran
+    the PR branch''s unmerged code (#238''s new merge gate) against the main project.yaml
+    and refused master''s HEAD-only sign-off as a legacy approval, so the merge failed
+    from the picker while `g` in the TUI (main code) worked.
+
+
+    Root cause:
+
+    1. `_run_picker_command` (pm_core/cli/session.py ~1652) and `_popup-cmd` (~2079)
+    spawn `[sys.executable, ''-m'', ''pm_core.wrapper'', ...]` in the popup''s cwd.
+    `python -m` puts cwd first on sys.path, so even the wrapper module is imported
+    from the workdir clone.
+
+    2. `pr merge` etc. are not IPC commands, so `wrapper.main` derives the session
+    tag from the cwd git root (`_get_session_tag`: repo name + md5 of the path). A
+    workdir clone hashes to a different tag (here project_manager-74eb4d15 vs the
+    session''s project_manager-c5a1006b) with no pm_root, so it falls back to cwd_walk
+    and loads the workdir''s pm_core.
+
+    State is already handled: both popups export PM_PROJECT=<session root>, so the
+    child reads the main project.yaml. Only code resolution is wrong, which mixes
+    branch code with main state.
+
+
+    Fix constraints:
+
+    - The child must get the session''s pm_core no matter what the cwd contains. Don''t
+    rely on the workdir''s wrapper honoring a new flag or env var, because `-m` loads
+    the wrapper from cwd before any fix can run (use e.g. `python -P` with an explicit
+    import root, invoke the session root''s wrapper by path, or equivalent).
+
+    - Keep the child''s cwd and PM_PROJECT behavior unchanged, so cwd-dependent commands
+    typed in the prefix+M runner behave the same apart from which code runs.
+
+    - Leave `wrapper.main` priority order unchanged for every other caller. If the
+    wrapper needs a signal (such as the session tag), only the popup dispatchers may
+    set it.
+
+    - Audit the other popup-launched direct dispatches in session.py for the same
+    pattern. The `tui:` route goes through the TUI and is out of scope. #206 (spinner
+    reads project.yaml via cwd-walk) is related but separate.
+
+
+    Acceptance: from a window whose pane cwd is a PR workdir whose pm_core differs
+    from the session''s, running a picker action and a prefix+M command logs chosen_via=pm_root
+    (or equivalent) with the session''s pm_core, and behaves exactly as the TUI would.
+    The same commands run directly in a shell in that workdir still use cwd_walk.
+    Add a test that spawns the dispatcher from a fake workdir containing a decoy pm_core
+    and asserts the session''s code ran.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T14:04:42.745914+00:00'
+  updated_at: '2026-10-22T14:04:42.745914+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
