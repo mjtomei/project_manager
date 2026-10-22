@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -2156,6 +2157,10 @@ def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
     click.echo(f"Pushed merged {base_branch} to origin.")
 
 
+# Waits between ``gh pr merge`` retries after pushing the approved head.
+_GH_HEAD_SYNC_RETRY_DELAYS = (1.0, 2.0, 3.0)
+
+
 def _publish_github(root: Path, pr_entry: dict, workdir: str,
                     target_repo: str, base_branch: str, base_sha: str,
                     head: str, bound: dict) -> None:
@@ -2187,6 +2192,7 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
 
     remote_head = integration.remote_ref(workdir, target_repo,
                                          f"refs/heads/{branch}")
+    pushed = False
     if remote_head != head:
         if remote_head and not integration.is_ancestor(
                 workdir, remote_head, head):
@@ -2210,6 +2216,7 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
                        f"{_git_detail(push)}", err=True)
             raise SystemExit(1)
         click.echo(f"Pushed approved head {head[:12]} to {branch}.")
+        pushed = True
     now = integration.remote_ref(workdir, target_repo, f"refs/heads/{base_branch}")
     if now is None:
         # Unknown is not "moved": keep the approval, publish nothing.
@@ -2223,6 +2230,20 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
 
     click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
     merge_result = gh_ops.merge_pr(workdir, gh_pr_number, match_head_commit=head)
+    # GitHub updates a PR's head asynchronously after a push, so right after
+    # pushing the approved head --match-head-commit can still see the old
+    # one ("Head branch was modified").  Retry briefly — bounded, as the TUI
+    # runs this synchronously — while the PR is unmerged and the base holds.
+    for delay in (_GH_HEAD_SYNC_RETRY_DELAYS if pushed else ()):
+        if merge_result.returncode == 0 \
+                or gh_ops.is_pr_merged(workdir, branch) \
+                or integration.remote_ref(
+                    workdir, target_repo,
+                    f"refs/heads/{base_branch}") != base_sha:
+            break
+        time.sleep(delay)
+        merge_result = gh_ops.merge_pr(workdir, gh_pr_number,
+                                       match_head_commit=head)
     if merge_result.returncode != 0:
         if gh_ops.is_pr_merged(workdir, branch):
             # Merged by someone else (or a retried call): still check that

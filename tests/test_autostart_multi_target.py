@@ -1326,3 +1326,13 @@ class TestCursorFollowsActivePr:
         with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
             asyncio.run(auto_start._start_pr_quiet(app, "u"))
         assert "u" in app._quiet_activations
+
+
+def test_predates_open_return_accepts_z_suffix():
+    """runtime_state / return timestamps may end in "Z" (Python 3.10's
+    fromisoformat rejects it): an older run still predates the return."""
+    from pm_core.tui.auto_start import _predates_open_return
+    pr = {"signoff_return": {"verdict": "SIGNOFF_REQA",
+                             "ts": "2026-10-22T01:00:00Z"}}
+    assert _predates_open_return("2026-10-22T00:59:00Z", pr)
+    assert not _predates_open_return("2026-10-22T01:00:05+00:00", pr)

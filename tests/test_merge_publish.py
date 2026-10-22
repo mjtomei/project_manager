@@ -479,6 +479,44 @@ def test_github_pushes_unpushed_approved_head_first(github):
                "master") == ""
 
 
+def test_github_retries_merge_until_the_pushed_head_registers(github):
+    """Right after pm pushes the approved head, GitHub may still report the
+    old PR head to --match-head-commit; the merge is retried briefly instead
+    of failing (auto-merge would not try again)."""
+    import subprocess as sp
+    from pm_core import gh_ops
+    from pm_core.cli import pr as pr_mod
+    commit(github.wd, "more.txt", "more\n", "approved, not pushed")
+    approve(github)
+    orig = gh_ops.merge_pr
+    lagging = sp.CompletedProcess([], 1, "", "Head branch was modified")
+    calls = []
+
+    def merge_once_synced(*a, **kw):
+        calls.append(kw.get("match_head_commit"))
+        return lagging if len(calls) == 1 else orig(*a, **kw)
+
+    with mock.patch.object(gh_ops, "merge_pr", side_effect=merge_once_synced), \
+         mock.patch.object(pr_mod.time, "sleep") as slept:
+        result, _, finalized = merge(github)
+    assert result.exit_code == 0, result.output
+    assert finalized and github.pr.state == "MERGED"
+    assert len(calls) == 2 and slept.call_count == 1
+
+
+def test_github_no_retry_when_nothing_was_pushed(github):
+    import subprocess as sp
+    from pm_core import gh_ops
+    from pm_core.cli import pr as pr_mod
+    approve(github)
+    failed = sp.CompletedProcess([], 1, "", "Pull request is not mergeable")
+    with mock.patch.object(gh_ops, "merge_pr", return_value=failed) as m, \
+         mock.patch.object(pr_mod.time, "sleep") as slept:
+        result, _, _ = merge(github)
+    assert result.exit_code == 1
+    assert m.call_count == 1 and slept.call_count == 0
+
+
 def test_github_unapproved_remote_commits_are_refused(github):
     approve(github)
     other = github.wd.parent / "other-clone"

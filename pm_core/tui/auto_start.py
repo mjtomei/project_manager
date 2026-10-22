@@ -953,8 +953,11 @@ def _predates_open_return(at: str | None, pr: dict) -> bool:
     ts = (open_return(pr) or {}).get("ts")
     if not ts:
         return False
+    def _parse(s: str):
+        # Python 3.10's fromisoformat rejects a "Z" suffix.
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     try:
-        return not at or datetime.fromisoformat(at) < datetime.fromisoformat(ts)
+        return not at or _parse(at) < _parse(ts)
     except (TypeError, ValueError):
         return False
 

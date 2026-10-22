@@ -201,7 +201,9 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
        `_pull_after_merge` into the main repo.
      - **github**: push the approved PR head to the PR branch if the remote
        branch is behind it (fast-forward only); `git ls-remote` base must still
-       equal `base_sha`; `gh pr merge <n> --merge --match-head-commit <head>`;
+       equal `base_sha`; `gh pr merge <n> --merge --match-head-commit <head>`
+       (retried briefly after pm pushed the head — GitHub registers a pushed
+       PR head asynchronously — while the PR is unmerged and the base holds);
        then post-verify that the merge commit's first parent is `base_sha` and
        its tree is the approved tree (also when `gh pr merge` fails because
        the PR was already merged elsewhere; no merge commit of the approved
