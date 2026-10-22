@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T17:19:15.517263+00:00'
+  updated_at: '2026-10-22T17:24:42.914883+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30267,6 +30267,16 @@ prs:
       absent (expected pre-finalize). Captures /pm-captures/scenarios/22/final.'
     created_at: '2026-10-22T17:19:15Z'
     last_edited: '2026-10-22T17:19:15Z'
+  - id: note-ad38783
+    text: 'Review 62f9 i1: capture.mjs/check.mjs now refuse unknown journey ids (the
+      QA s21 ''npm run capture --out X'' footgun captured 0 journeys over the committed
+      manifest; check passed with 0 frames); a capture naming journeys merges them
+      into the existing manifest.json (osMenu kept) instead of replacing it; demo
+      buttons blur after click so Enter/Space tap the glasses (QA s18 gotcha). mockup
+      README documents ''--''. check 186/0; no recapture (simulator needs dbus-run-session,
+      absent here). /pm-captures/even-realities synced.'
+    created_at: '2026-10-22T17:24:42Z'
+    last_edited: '2026-10-22T17:24:42Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
