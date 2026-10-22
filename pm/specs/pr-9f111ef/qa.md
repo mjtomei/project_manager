@@ -160,13 +160,18 @@ completes, and briefs fall back to the remaining items.
 E7 Documents with neither context nor usable sections drop out and are listed
 in the report with a reason; empty texts are dropped.
 
+E8 `--check` before any catalog exists (fresh data/ with corpus only) fails
+with a non-zero exit rather than reporting clean.
+
 ## 3. Concurrency (shared resources)
 
 Shared on-disk resources: `data/context/raw/<host>/` fetch cache (written by
 every context.py worker/process, read by later runs);
 `data/context/<source>.{jsonl,status,dates}`; `data/cases/catalog.jsonl` and
-`coverage.json` (rewritten by every build, read by `--check` and harness);
-`reports/case-coverage.*` (committed); `data/pm/{conversations,baselines,drafts}`;
+`coverage.json` (rewritten by every build, read by the harness, and
+read-modified-written by `--check`, which stores its result under `check`);
+`reports/case-coverage.*` (committed; rewritten by full builds and by `--check`
+on a full catalog, never on a partial one); `data/pm/{conversations,baselines,drafts}`;
 `$HOME/.claude/projects` (read-only input).
 
 C1 Two `context.py` processes over overlapping sources sharing the cache both
@@ -178,6 +183,10 @@ on a truncated catalog; a `--check` after the build completes is clean.
 
 C3 Several harness workers reading generator inputs and references for
 different case types in parallel get identical results to a serial read.
+
+C5 Two `--check` runs at once over the same catalog both report the same
+result; coverage.json stays valid JSON and the committed reports match a
+serial `--check`.
 
 C4 A partial and a full build racing: afterwards the committed reports are not
 overwritten with partial data, and `--check` either passes on a consistent
