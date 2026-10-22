@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM glasses review</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f7f8f6; --fg: #1b1f1a; --muted: #5b6458; --line: #d6dbd3; --card: #fff; --accent: #1f7a33; --sim: #8a5a00; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111310; --fg: #e4e9e1; --muted: #9aa596; --line: #2a3128; --card: #181b17; --accent: #6fd27f; --sim: #e0b04a; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; } h2 { font-size: 20px; margin: 40px 0 8px; border-top: 1px solid var(--line); padding-top: 24px; }
+  a { color: var(--accent); }
+  .lede { color: var(--muted); max-width: 70ch; }
+  .docs { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0; list-style: none; }
+  .note { border-left: 3px solid var(--sim); padding: 8px 12px; background: var(--card); max-width: 90ch; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 20px; }
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  figure > a > img { display: block; width: 100%; height: auto; background: #000; image-rendering: pixelated; }
+  figcaption { padding: 10px 14px 14px; } figcaption p { margin: 6px 0; }
+  .tag { font-size: 11px; border: 1px solid var(--sim); color: var(--sim); border-radius: 4px; padding: 0 5px; margin-left: 6px; white-space: nowrap; }
+  .meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .steps code { font-size: 12px; margin-right: 4px; } .steps code.sim { color: var(--sim); }
+  .phone img { margin-top: 8px; width: 50%; max-width: 300px; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Plan/spec review and PM sessions on Even Realities G2</h1>
+  <p class="lede">Design checkpoint for pr-9e7847d: 54 glasses screenshots from a runnable mockup driven through Even's official simulator. Manual merge of this PR approves the behavior; the refactoring PRs decide how to build it.</p>
+  <ul class="docs">
+    <li><a href="proposal.md">Interaction proposal</a></li>
+    <li><a href="constraints.md">Constraints (cited)</a></li>
+    <li><a href="session-inventory.md">Session inventory and parity</a></li>
+    <li><a href="open-questions.md">Open questions</a></li>
+    <li><a href="pageborne-snapshot.md">Pageborne snapshot provenance</a></li>
+    <li><a href="mockup/README.md">Run the mockup</a></li>
+  </ul>
+  <p class="note"><b>What is simulated.</b> All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions. Each image is the simulator's 576×288 glasses framebuffer, shown at 2× on black with a caption strip; follow "raw" for the original PNG. Captured 2026-10-22 00:18 UTC with @evenrealities/evenhub-simulator 0.9.5, @evenrealities/even_hub_sdk 0.0.16 and @evenrealities/pretext 0.1.4 on linux-arm64. The simulator does not model firmware timing, Bluetooth or phone lifecycles; no constraint or SDK errors were logged during capture.</p>
+  <h2 id="journey-A">A. Read a spec, discuss it in its session, revise, approve, hand back to PM</h2>
+  <div class="grid">
+  <figure id="A01-needs-you">
+    <a href="screenshots/A01-needs-you.png"><img src="screenshots/A01-needs-you.png" alt="Needs you: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A01</b> Needs you
+      <span class="tag">SIMULATED PM</span>
+      <p>Root view lists what is waiting for the user: a spec and a plan to review, a QA scenario that needs input, a manual merge.</p>
+      <p class="meta">scene <code>list:home</code> · <a href="screenshots/raw/A01-needs-you.png">raw 576×288</a></p>
+      
+      
+    </figcaption>
+  </figure>
+  <figure id="A02-spec-v2-page1">
+    <a href="screenshots/A02-spec-v2-page1.png"><img src="screenshots/A02-spec-v2-page1.png" alt="Spec under review: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A02</b> Spec under review
+      <span class="tag">SIMULATED PM</span>
+      <p>Long-form reading in native text. The footer keeps document identity, version and review state on every page.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/A02-spec-v2-page1.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A03-spec-v2-ambiguities">
+    <a href="screenshots/A03-spec-v2-ambiguities.png"><img src="screenshots/A03-spec-v2-ambiguities.png" alt="Reading the ambiguities: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A03</b> Reading the ambiguities
+      <span class="tag">SIMULATED PM</span>
+      <p>Pages break at bullets and headings. Page 4 of 5 starts at the section the reviewer wants to discuss.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/A03-spec-v2-ambiguities.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">down</code> <code class="">down</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A04-listening">
+    <a href="screenshots/A04-listening.png"><img src="screenshots/A04-listening.png" alt="Speaking to the spec’s own session: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A04</b> Speaking to the spec’s own session
+      <span class="tag">SIMULATED PM</span>
+      <p>Hold to speak. The panel names the target session (#214 impl) and the page; the document above stays in place.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl:listening</code> · <a href="screenshots/raw/A04-listening.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED speech result queued</code> <code class="">long_press</code> <code class="sim">SIMULATED live words</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A05-review-draft">
+    <a href="screenshots/A05-review-draft.png"><img src="screenshots/A05-review-draft.png" alt="Review before sending: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A05</b> Review before sending
+      <span class="tag">SIMULATED PM</span>
+      <p>Recognized text is reviewed before it is sent. The message carries the document version, hash, section and page.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl:review</code> · <a href="screenshots/raw/A05-review-draft.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">long_press_release</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A06-sent-keep-reading">
+    <a href="screenshots/A06-sent-keep-reading.png"><img src="screenshots/A06-sent-keep-reading.png" alt="Sent; reading continues: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A06</b> Sent; reading continues
+      <span class="tag">SIMULATED PM</span>
+      <p>Sending returns to the same page. Nothing is resent automatically.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/A06-sent-keep-reading.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A07-doc-actions">
+    <a href="screenshots/A07-doc-actions.png"><img src="screenshots/A07-doc-actions.png" alt="Document actions: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A07</b> Document actions
+      <span class="tag">SIMULATED PM</span>
+      <p>Discuss opens the existing impl session. Approval is offered only for the version on screen.</p>
+      <p class="meta">scene <code>list:doc-actions:spec:pr-214:impl</code> · <a href="screenshots/raw/A07-doc-actions.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:agent-reply</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A08-discussion">
+    <a href="screenshots/A08-discussion.png"><img src="screenshots/A08-discussion.png" alt="Discussion in the existing session: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A08</b> Discussion in the existing session
+      <span class="tag">SIMULATED PM</span>
+      <p>The impl session that wrote the spec, not a new chat. The user’s message shows the context it was sent with; the reply streams.</p>
+      <p class="meta">scene <code>session:pr-214/impl</code> · <a href="screenshots/raw/A08-discussion.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A09-reply-v3">
+    <a href="screenshots/A09-reply-v3.png"><img src="screenshots/A09-reply-v3.png" alt="Revision delivered: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A09</b> Revision delivered
+      <span class="tag">SIMULATED PM</span>
+      <p>The session rewrote the spec. PM sees a new content hash (v3 · 9a07).</p>
+      <p class="meta">scene <code>session:pr-214/impl</code> · <a href="screenshots/raw/A09-reply-v3.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:agent-reply</code> <code class="sim">SIMULATED pm:publish-revision</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A10-back-changed-banner">
+    <a href="screenshots/A10-back-changed-banner.png"><img src="screenshots/A10-back-changed-banner.png" alt="Back on the same page; v2 is no longer current: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A10</b> Back on the same page; v2 is no longer current
+      <span class="tag">SIMULATED PM</span>
+      <p>Back returns to page 4 of v2. A banner says v3 exists. The reader does not jump to v3 on its own.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/A10-back-changed-banner.png">raw 576×288</a> · <a href="screenshots/phone/A10-back-changed-banner.png">phone companion</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">double_click</code></p></details>
+      <a class="phone" href="screenshots/phone/A10-back-changed-banner.png"><img src="screenshots/phone/A10-back-changed-banner.png" alt="Back on the same page; v2 is no longer current: phone companion view" loading="lazy" width="300" height="400"></a>
+    </figcaption>
+  </figure>
+  <figure id="A11-actions-approval-blocked">
+    <a href="screenshots/A11-actions-approval-blocked.png"><img src="screenshots/A11-actions-approval-blocked.png" alt="Approval needs the current version: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A11</b> Approval needs the current version
+      <span class="tag">SIMULATED PM</span>
+      <p>v2 cannot be approved once it has been replaced. &quot;What changed&quot; is offered instead.</p>
+      <p class="meta">scene <code>list:doc-actions:spec:pr-214:impl</code> · <a href="screenshots/raw/A11-actions-approval-blocked.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A12-what-changed">
+    <a href="screenshots/A12-what-changed.png"><img src="screenshots/A12-what-changed.png" alt="What changed v2 → v3: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A12</b> What changed v2 → v3
+      <span class="tag">SIMULATED PM</span>
+      <p>Changed and added items, by requirement or ambiguity id. Each one opens v3 at that item.</p>
+      <p class="meta">scene <code>list:whatchanged:spec:pr-214:impl</code> · <a href="screenshots/raw/A12-what-changed.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A13-spec-v3">
+    <a href="screenshots/A13-spec-v3.png"><img src="screenshots/A13-spec-v3.png" alt="Re-review v3 at the change: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A13</b> Re-review v3 at the change
+      <span class="tag">SIMULATED PM</span>
+      <p>v3 opens at A1. The footer shows v3 is the version under review.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/A13-spec-v3.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A14-actions-approve-v3">
+    <a href="screenshots/A14-actions-approve-v3.png"><img src="screenshots/A14-actions-approve-v3.png" alt="Approve the version read: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A14</b> Approve the version read
+      <span class="tag">SIMULATED PM</span>
+      <p>The approve row names the version and its content hash.</p>
+      <p class="meta">scene <code>list:doc-actions:spec:pr-214:impl</code> · <a href="screenshots/raw/A14-actions-approve-v3.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">click</code> <code class="">down</code> <code class="">down</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A15-confirm-approval">
+    <a href="screenshots/A15-confirm-approval.png"><img src="screenshots/A15-confirm-approval.png" alt="Explicit confirmation: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A15</b> Explicit confirmation
+      <span class="tag">SIMULATED PM</span>
+      <p>Confirmation states what approval does: implementation resumes unattended, the automated phases follow, and merge stays manual.</p>
+      <p class="meta">scene <code>list:confirm</code> · <a href="screenshots/raw/A15-confirm-approval.png">raw 576×288</a> · <a href="screenshots/phone/A15-confirm-approval.png">phone companion</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      <a class="phone" href="screenshots/phone/A15-confirm-approval.png"><img src="screenshots/phone/A15-confirm-approval.png" alt="Explicit confirmation: phone companion view" loading="lazy" width="300" height="400"></a>
+    </figcaption>
+  </figure>
+  <figure id="A16-handed-back">
+    <a href="screenshots/A16-handed-back.png"><img src="screenshots/A16-handed-back.png" alt="Handed back to PM: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A16</b> Handed back to PM
+      <span class="tag">SIMULATED PM</span>
+      <p>Approval releases the spec hold. PM runs implementation, review, QA and sign-off with no agent windows to drive. Only the merge hold remains.</p>
+      <p class="meta">scene <code>list:progress:pr-214</code> · <a href="screenshots/raw/A16-handed-back.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="A17-unattended-progress">
+    <a href="screenshots/A17-unattended-progress.png"><img src="screenshots/A17-unattended-progress.png" alt="Progress without intervention: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>A17</b> Progress without intervention
+      <span class="tag">SIMULATED PM</span>
+      <p>47 minutes later (simulated): implementation and two review iterations finished, and QA is running. The user did nothing in between.</p>
+      <p class="meta">scene <code>list:progress:pr-214</code> · <a href="screenshots/raw/A17-unattended-progress.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:tick</code> <code class="sim">SIMULATED pm:progress</code></p></details>
+      
+    </figcaption>
+  </figure>
+  </div>
+<h2 id="journey-B">B. Every PM session: open a QA scenario and its verifier, discuss, return without duplicates</h2>
+  <div class="grid">
+  <figure id="B01-pr-215">
+    <a href="screenshots/B01-pr-215.png"><img src="screenshots/B01-pr-215.png" alt="PR status: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B01</b> PR status
+      <span class="tag">SIMULATED PM</span>
+      <p>PR #215 in QA. Its QA spec and every session are one step away.</p>
+      <p class="meta">scene <code>list:pr:pr-215</code> · <a href="screenshots/raw/B01-pr-215.png">raw 576×288</a></p>
+      <details><summary>4 steps before this shot</summary><p class="steps"><code class="">reset</code> <code class="">menu 3</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B02-qa-spec">
+    <a href="screenshots/B02-qa-spec.png"><img src="screenshots/B02-qa-spec.png" alt="Reading the QA spec: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B02</b> Reading the QA spec
+      <span class="tag">SIMULATED PM</span>
+      <p>An approved QA spec. Scenario s2 says the banner clears &quot;within two polls&quot;.</p>
+      <p class="meta">scene <code>doc:spec:pr-215:qa</code> · <a href="screenshots/raw/B02-qa-spec.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B03-pr-sessions">
+    <a href="screenshots/B03-pr-sessions.png"><img src="screenshots/B03-pr-sessions.png" alt="#215 sessions: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B03</b> #215 sessions
+      <span class="tag">SIMULATED PM</span>
+      <p>Implementation, review, the QA run and sign-off, each with its own state. QA is one entry per run that opens its sessions.</p>
+      <p class="meta">scene <code>list:sessions-pr:pr-215</code> · <a href="screenshots/raw/B03-pr-sessions.png">raw 576×288</a></p>
+      <details><summary>4 steps before this shot</summary><p class="steps"><code class="">click</code> <code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B04-qa-run">
+    <a href="screenshots/B04-qa-run.png"><img src="screenshots/B04-qa-run.png" alt="QA run 2: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B04</b> QA run 2
+      <span class="tag">SIMULATED PM</span>
+      <p>Planner, the interactive session s0, each scenario with its own state (verifying, needs input, retrying, queued), and finalize, which PM launches only after every scenario has a verdict.</p>
+      <p class="meta">scene <code>list:qa-run:pr-215</code> · <a href="screenshots/raw/B04-qa-run.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B05-scenario-s2">
+    <a href="screenshots/B05-scenario-s2.png"><img src="screenshots/B05-scenario-s2.png" alt="Scenario s2 sessions: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B05</b> Scenario s2 sessions
+      <span class="tag">SIMULATED PM</span>
+      <p>The refiner, execution worker and verifier are separate sessions in window qa-#215-s2. The verifier is working.</p>
+      <p class="meta">scene <code>list:scenario:pr-215:2</code> · <a href="screenshots/raw/B05-scenario-s2.png">raw 576×288</a></p>
+      <details><summary>4 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B06-verifier-open">
+    <a href="screenshots/B06-verifier-open.png"><img src="screenshots/B06-verifier-open.png" alt="Verifier session, opened not launched: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B06</b> Verifier session, opened not launched
+      <span class="tag">SIMULATED PM</span>
+      <p>Opening an existing session attaches to it. Nothing new starts. The header gives PR, run, scenario, role and live state.</p>
+      <p class="meta">scene <code>session:pr-215/qa/run2/s2/verifier</code> · <a href="screenshots/raw/B06-verifier-open.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B07-verifier-draft">
+    <a href="screenshots/B07-verifier-draft.png"><img src="screenshots/B07-verifier-draft.png" alt="Asking the busy verifier: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B07</b> Asking the busy verifier
+      <span class="tag">SIMULATED PM</span>
+      <p>The verifier is busy, so the message joins its queue in the same session. The panel displaces the oldest lines, keeping the latest reply readable.</p>
+      <p class="meta">scene <code>session:pr-215/qa/run2/s2/verifier:review</code> · <a href="screenshots/raw/B07-verifier-draft.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED speech result queued</code> <code class="">long_press</code> <code class="">long_press_release</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B08-queued">
+    <a href="screenshots/B08-queued.png"><img src="screenshots/B08-queued.png" alt="Queued, not duplicated: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B08</b> Queued, not duplicated
+      <span class="tag">SIMULATED PM</span>
+      <p>The follow-up is queued in the verifier’s own session. No second verifier.</p>
+      <p class="meta">scene <code>session:pr-215/qa/run2/s2/verifier</code> · <a href="screenshots/raw/B08-queued.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B09-verifier-reply">
+    <a href="screenshots/B09-verifier-reply.png"><img src="screenshots/B09-verifier-reply.png" alt="Inspecting the ongoing verification: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B09</b> Inspecting the ongoing verification
+      <span class="tag">SIMULATED PM</span>
+      <p>The reply arrives in place. The verifier flags the timing, and PM’s existing retry sends the worker back.</p>
+      <p class="meta">scene <code>session:pr-215/qa/run2/s2/verifier</code> · <a href="screenshots/raw/B09-verifier-reply.png">raw 576×288</a> · <a href="screenshots/phone/B09-verifier-reply.png">phone companion</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:agent-reply</code> <code class="sim">SIMULATED pm:session</code></p></details>
+      <a class="phone" href="screenshots/phone/B09-verifier-reply.png"><img src="screenshots/phone/B09-verifier-reply.png" alt="Inspecting the ongoing verification: phone companion view" loading="lazy" width="300" height="400"></a>
+    </figcaption>
+  </figure>
+  <figure id="B10-session-actions">
+    <a href="screenshots/B10-session-actions.png"><img src="screenshots/B10-session-actions.png" alt="Session actions: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B10</b> Session actions
+      <span class="tag">SIMULATED PM</span>
+      <p>From any session: speak, the scenario’s other sessions, all PR sessions, or straight back to the document it came from.</p>
+      <p class="meta">scene <code>list:session-actions:pr-215/qa/run2/s2/verifier</code> · <a href="screenshots/raw/B10-session-actions.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B11-worker-s2">
+    <a href="screenshots/B11-worker-s2.png"><img src="screenshots/B11-worker-s2.png" alt="Switch to the s2 worker: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B11</b> Switch to the s2 worker
+      <span class="tag">SIMULATED PM</span>
+      <p>Switching moves within scenario s2. The worker shows the re-capture the verifier asked for.</p>
+      <p class="meta">scene <code>session:pr-215/qa/run2/s2/worker</code> · <a href="screenshots/raw/B11-worker-s2.png">raw 576×288</a></p>
+      <details><summary>4 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">click</code> <code class="">up</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B12-scenario-s4">
+    <a href="screenshots/B12-scenario-s4.png"><img src="screenshots/B12-scenario-s4.png" alt="A relaunched scenario: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B12</b> A relaunched scenario
+      <span class="tag">SIMULATED PM</span>
+      <p>s4’s worker was relaunched (retry 1). Its refiner pane is gone, and its verifier appears only after the first PASS.</p>
+      <p class="meta">scene <code>list:scenario:pr-215:4</code> · <a href="screenshots/raw/B12-scenario-s4.png">raw 576×288</a></p>
+      <details><summary>5 steps before this shot</summary><p class="steps"><code class="">double_click</code> <code class="">double_click</code> <code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B13-scenario-s3-needs-input">
+    <a href="screenshots/B13-scenario-s3-needs-input.png"><img src="screenshots/B13-scenario-s3-needs-input.png" alt="A scenario that needs input: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B13</b> A scenario that needs input
+      <span class="tag">SIMULATED PM</span>
+      <p>s3’s refiner rejected the scenario. It needs a decision, so it is also listed in Needs you.</p>
+      <p class="meta">scene <code>list:scenario:pr-215:3</code> · <a href="screenshots/raw/B13-scenario-s3-needs-input.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">double_click</code> <code class="">up</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B14-refiner-s3">
+    <a href="screenshots/B14-refiner-s3.png"><img src="screenshots/B14-refiner-s3.png" alt="Refiner s3: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B14</b> Refiner s3
+      <span class="tag">SIMULATED PM</span>
+      <p>The refiner explains what it needs. The user could answer by voice here.</p>
+      <p class="meta">scene <code>session:pr-215/qa/run2/s3/refiner</code> · <a href="screenshots/raw/B14-refiner-s3.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B15-return-to-doc">
+    <a href="screenshots/B15-return-to-doc.png"><img src="screenshots/B15-return-to-doc.png" alt="Back to the originating document: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B15</b> Back to the originating document
+      <span class="tag">SIMULATED PM</span>
+      <p>One action returns to the QA spec at the same page, through any number of session switches.</p>
+      <p class="meta">scene <code>doc:spec:pr-215:qa</code> · <a href="screenshots/raw/B15-return-to-doc.png">raw 576×288</a></p>
+      <details><summary>5 steps before this shot</summary><p class="steps"><code class="">click</code> <code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B16-start-signoff-confirm">
+    <a href="screenshots/B16-start-signoff-confirm.png"><img src="screenshots/B16-start-signoff-confirm.png" alt="Starting a session is explicit: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B16</b> Starting a session is explicit
+      <span class="tag">SIMULATED PM</span>
+      <p>Sign-off is not running. Starting it names its side effect (qa → sign_off). Opening never starts anything.</p>
+      <p class="meta">scene <code>list:confirm</code> · <a href="screenshots/raw/B16-start-signoff-confirm.png">raw 576×288</a></p>
+      <details><summary>8 steps before this shot</summary><p class="steps"><code class="">click</code> <code class="">down</code> <code class="">down</code> <code class="">click</code> <code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B17-starting">
+    <a href="screenshots/B17-starting.png"><img src="screenshots/B17-starting.png" alt="Starting…: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B17</b> Starting…
+      <span class="tag">SIMULATED PM</span>
+      <p>One request is in flight. The row shows ◐ starting.</p>
+      <p class="meta">scene <code>list:sessions-pr:pr-215</code> · <a href="screenshots/raw/B17-starting.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B18-already-starting">
+    <a href="screenshots/B18-already-starting.png"><img src="screenshots/B18-already-starting.png" alt="Repeated taps join the request: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B18</b> Repeated taps join the request
+      <span class="tag">SIMULATED PM</span>
+      <p>Selecting it again does not launch a second sign-off.</p>
+      <p class="meta">scene <code>list:sessions-pr:pr-215</code> · <a href="screenshots/raw/B18-already-starting.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B19-signoff-open">
+    <a href="screenshots/B19-signoff-open.png"><img src="screenshots/B19-signoff-open.png" alt="Open when ready: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B19</b> Open when ready
+      <span class="tag">SIMULATED PM</span>
+      <p>Once PM reports the window, selecting it opens the running sign-off session.</p>
+      <p class="meta">scene <code>session:pr-215/signoff</code> · <a href="screenshots/raw/B19-signoff-open.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:started</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B20-project-sessions">
+    <a href="screenshots/B20-project-sessions.png"><img src="screenshots/B20-project-sessions.png" alt="Plan and project sessions: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B20</b> Plan and project sessions
+      <span class="tag">SIMULATED PM</span>
+      <p>Plan, meta, guide and watcher sessions are reachable too, with the same state column.</p>
+      <p class="meta">scene <code>list:project</code> · <a href="screenshots/raw/B20-project-sessions.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">menu 4</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B21-project-sessions-more">
+    <a href="screenshots/B21-project-sessions-more.png"><img src="screenshots/B21-project-sessions-more.png" alt="Scrolling a long list: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B21</b> Scrolling a long list
+      <span class="tag">SIMULATED PM</span>
+      <p>The footer shows the position in a list longer than one screen.</p>
+      <p class="meta">scene <code>list:project</code> · <a href="screenshots/raw/B21-project-sessions-more.png">raw 576×288</a></p>
+      <details><summary>9 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">down</code> <code class="">down</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="B22-all-sessions">
+    <a href="screenshots/B22-all-sessions.png"><img src="screenshots/B22-all-sessions.png" alt="All sessions: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>B22</b> All sessions
+      <span class="tag">SIMULATED PM</span>
+      <p>Every PR with sessions, with live/known counts and attention marks, plus plan and project sessions.</p>
+      <p class="meta">scene <code>list:sessions</code> · <a href="screenshots/raw/B22-all-sessions.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">menu 2</code></p></details>
+      
+    </figcaption>
+  </figure>
+  </div>
+<h2 id="journey-C">C. PRs, history and timers, manual merge, busy/error/reconnect</h2>
+  <div class="grid">
+  <figure id="C01-prs">
+    <a href="screenshots/C01-prs.png"><img src="screenshots/C01-prs.png" alt="PRs and status: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C01</b> PRs and status
+      <span class="tag">SIMULATED PM</span>
+      <p>Open PRs with the state that matters: spec review, QA input, review loop, manual merge, blocked.</p>
+      <p class="meta">scene <code>list:prs</code> · <a href="screenshots/raw/C01-prs.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="">reset</code> <code class="">menu 3</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C02-pr-216">
+    <a href="screenshots/C02-pr-216.png"><img src="screenshots/C02-pr-216.png" alt="A PR in its review loop: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C02</b> A PR in its review loop
+      <span class="tag">SIMULATED PM</span>
+      <p>Current activity, specs, sessions and history.</p>
+      <p class="meta">scene <code>list:pr:pr-216</code> · <a href="screenshots/raw/C02-pr-216.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C03-history-timers">
+    <a href="screenshots/C03-history-timers.png"><img src="screenshots/C03-history-timers.png" alt="History and timers: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C03</b> History and timers
+      <span class="tag">SIMULATED PM</span>
+      <p>PR-owned timers with what fires next (&quot;unknown&quot; when PM cannot tell), and recent attempts with elapsed time and outcome.</p>
+      <p class="meta">scene <code>list:history:pr-216</code> · <a href="screenshots/raw/C03-history-timers.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C04-pr-211-manual-merge">
+    <a href="screenshots/C04-pr-211-manual-merge.png"><img src="screenshots/C04-pr-211-manual-merge.png" alt="Manual merge wait: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C04</b> Manual merge wait
+      <span class="tag">SIMULATED PM</span>
+      <p>Signed off with MERGE and held for manual merge. The hold has no countdown.</p>
+      <p class="meta">scene <code>list:pr:pr-211</code> · <a href="screenshots/raw/C04-pr-211-manual-merge.png">raw 576×288</a></p>
+      <details><summary>4 steps before this shot</summary><p class="steps"><code class="">double_click</code> <code class="">double_click</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C05-history-hold">
+    <a href="screenshots/C05-history-hold.png"><img src="screenshots/C05-history-hold.png" alt="An indefinite hold: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C05</b> An indefinite hold
+      <span class="tag">SIMULATED PM</span>
+      <p>A hold waiting for the user shows &quot;no countdown&quot;, not a timer.</p>
+      <p class="meta">scene <code>list:history:pr-211</code> · <a href="screenshots/raw/C05-history-hold.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C06-merge-confirm">
+    <a href="screenshots/C06-merge-confirm.png"><img src="screenshots/C06-merge-confirm.png" alt="Merge from glasses: confirm: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C06</b> Merge from glasses: confirm
+      <span class="tag">SIMULATED PM</span>
+      <p>Merge names the signed-off HEAD and base. PM’s gate re-checks both.</p>
+      <p class="meta">scene <code>list:confirm</code> · <a href="screenshots/raw/C06-merge-confirm.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">double_click</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C07-merge-refused">
+    <a href="screenshots/C07-merge-refused.png"><img src="screenshots/C07-merge-refused.png" alt="Gate refusal (simulated head change): glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C07</b> Gate refusal (simulated head change)
+      <span class="tag">SIMULATED PM</span>
+      <p>The branch moved after sign-off. PM refuses, sign-off reruns, and the manual hold stays.</p>
+      <p class="meta">scene <code>list:confirm</code> · <a href="screenshots/raw/C07-merge-refused.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:head-moved</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C08-reconnecting">
+    <a href="screenshots/C08-reconnecting.png"><img src="screenshots/C08-reconnecting.png" alt="Connection lost: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C08</b> Connection lost
+      <span class="tag">SIMULATED PM</span>
+      <p>After three failed checks (Pageborne’s rule) a banner shows how old the data is. Reading continues from the local copy.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/C08-reconnecting.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">menu 1</code> <code class="">click</code> <code class="sim">SIMULATED pm:disconnect</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C09-not-sent-offline">
+    <a href="screenshots/C09-not-sent-offline.png"><img src="screenshots/C09-not-sent-offline.png" alt="Actions fail visibly: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C09</b> Actions fail visibly
+      <span class="tag">SIMULATED PM</span>
+      <p>A send while disconnected is refused and not queued, so nothing goes out later by surprise.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/C09-not-sent-offline.png">raw 576×288</a></p>
+      <details><summary>4 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED speech result queued</code> <code class="">long_press</code> <code class="">long_press_release</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C10-reconnected">
+    <a href="screenshots/C10-reconnected.png"><img src="screenshots/C10-reconnected.png" alt="Reconnected in place: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C10</b> Reconnected in place
+      <span class="tag">SIMULATED PM</span>
+      <p>Same document and page; nothing was resent.</p>
+      <p class="meta">scene <code>doc:spec:pr-214:impl</code> · <a href="screenshots/raw/C10-reconnected.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:reconnect</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="C11-root-back">
+    <a href="screenshots/C11-root-back.png"><img src="screenshots/C11-root-back.png" alt="Back at the root: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>C11</b> Back at the root
+      <span class="tag">SIMULATED PM</span>
+      <p>Double tap on the root page must open Even’s system exit dialog (an app-submission rule). The mockup only logs it.</p>
+      <p class="meta">scene <code>list:home</code> · <a href="screenshots/raw/C11-root-back.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="">menu 1</code> <code class="">double_click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  </div>
+<h2 id="journey-D">D. Plan review: changed during confirmation</h2>
+  <div class="grid">
+  <figure id="D01-plan-v4">
+    <a href="screenshots/D01-plan-v4.png"><img src="screenshots/D01-plan-v4.png" alt="Plan review: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>D01</b> Plan review
+      <span class="tag">SIMULATED PM</span>
+      <p>Plans use the same reader. Discussion goes to the plan’s review session (plan:review:plan-sync).</p>
+      <p class="meta">scene <code>doc:plan:plan-sync</code> · <a href="screenshots/raw/D01-plan-v4.png">raw 576×288</a></p>
+      <details><summary>3 steps before this shot</summary><p class="steps"><code class="">reset</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="D02-plan-approve-proposed">
+    <a href="screenshots/D02-plan-approve-proposed.png"><img src="screenshots/D02-plan-approve-proposed.png" alt="Plan approval is proposed: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>D02</b> Plan approval is proposed
+      <span class="tag">SIMULATED PM</span>
+      <p>PM has no plan approval gate today, so the confirmation labels the effect as proposed.</p>
+      <p class="meta">scene <code>list:confirm</code> · <a href="screenshots/raw/D02-plan-approve-proposed.png">raw 576×288</a></p>
+      <details><summary>4 steps before this shot</summary><p class="steps"><code class="">click</code> <code class="">down</code> <code class="">down</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="D03-changed-during-confirm">
+    <a href="screenshots/D03-changed-during-confirm.png"><img src="screenshots/D03-changed-during-confirm.png" alt="Changed while confirming: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>D03</b> Changed while confirming
+      <span class="tag">SIMULATED PM</span>
+      <p>The plan changed (v5) between reading and confirming, so nothing is approved and &quot;what changed&quot; is offered.</p>
+      <p class="meta">scene <code>list:confirm</code> · <a href="screenshots/raw/D03-changed-during-confirm.png">raw 576×288</a></p>
+      <details><summary>2 steps before this shot</summary><p class="steps"><code class="sim">SIMULATED pm:publish-revision</code> <code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  <figure id="D04-plan-what-changed">
+    <a href="screenshots/D04-plan-what-changed.png"><img src="screenshots/D04-plan-what-changed.png" alt="Plan diff: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>D04</b> Plan diff
+      <span class="tag">SIMULATED PM</span>
+      <p>v5 added #218.</p>
+      <p class="meta">scene <code>list:whatchanged:plan:plan-sync</code> · <a href="screenshots/raw/D04-plan-what-changed.png">raw 576×288</a></p>
+      <details><summary>1 step before this shot</summary><p class="steps"><code class="">click</code></p></details>
+      
+    </figcaption>
+  </figure>
+  </div>
+  <h2 id="os-menu">OS contextual menu</h2>
+  <div class="grid">
+  <figure id="X01-os-menu">
+    <a href="screenshots/X01-os-menu.png"><img src="screenshots/X01-os-menu.png" alt="OS contextual menu: glasses display" loading="lazy" width="1152" height="612"></a>
+    <figcaption>
+      <b>X01</b> OS contextual menu
+      <span class="tag">SIMULATED PM</span>
+      <p>Tap-then-hold opens Even’s menu with the app’s four items. On glasses the OS also adds Display off, Brightness and Close, which the simulator does not draw.</p>
+      <p class="meta">scene <code>OS menu (simulator)</code> · <a href="screenshots/raw/X01-os-menu.png">raw 576×288</a></p>
+      
+      
+    </figcaption>
+  </figure></div>
+</main>
+</body>
+</html>

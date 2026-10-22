@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM glasses mockup</title>
+<script type="importmap">
+{ "imports": {
+  "@evenrealities/even_hub_sdk": "./node_modules/@evenrealities/even_hub_sdk/dist/index.js",
+  "@evenrealities/pretext": "./node_modules/@evenrealities/pretext/dist/font_measure.js"
+} }
+</script>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f7f5; --fg: #1c1f1b; --muted: #5d665a; --line: #d5dad2; --accent: #1f7a33; --warn: #8a5a00; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #121411; --fg: #e3e8e0; --muted: #9aa596; --line: #2b3229; --accent: #6fd27f; --warn: #e0b04a; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  .wrap { display: grid; gap: 16px; grid-template-columns: minmax(0, 600px) minmax(0, 1fr); max-width: 1280px; }
+  @media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+  canvas { width: 100%; max-width: 576px; aspect-ratio: 2 / 1; background: #000; border-radius: 8px; image-rendering: pixelated; }
+  .sim { font-size: 12px; padding: 1px 6px; border: 1px solid var(--warn); color: var(--warn); border-radius: 4px; }
+  .warn { color: var(--warn); }
+  #companion { border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-wrap: anywhere; }
+  #companion pre.doc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, monospace; max-height: 60vh; overflow: auto; }
+  #companion .chat li { margin: 4px 0; } #companion .chat .user { color: var(--accent); } #companion .chat .tool, #companion .chat .pm { color: var(--muted); }
+  #companion .rows li.act { font-weight: 600; }
+  .compose { display: flex; gap: 8px; } .compose input { flex: 1; min-width: 0; padding: 8px; font: inherit; }
+  button { font: inherit; padding: 8px 12px; }
+  .demo button { margin: 2px; font-size: 13px; padding: 4px 8px; }
+  #problems { color: #c33; white-space: pre-wrap; font: 12px ui-monospace, monospace; }
+  small, .muted { color: var(--muted); }
+  body[data-mode="even"] .browser-only { display: none; }
+  /* Inside the Even app the glasses show the real page; the phone shows the companion. */
+  body[data-mode="even"] .wrap > section:first-child { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <canvas id="mirror" width="576" height="288" aria-label="Glasses mirror (approximate font)"></canvas>
+    <p class="muted">Mirror of the 576×288 glasses page (browser font, approximate). Review screenshots come from the official Even Hub simulator. <span class="sim">SIMULATED PM</span></p>
+    <p class="muted browser-only">Keys: ↑/↓ swipe · Enter tap · Esc double tap · hold A to speak, release to review · 1–4 OS menu items.</p>
+    <div class="demo browser-only">Simulated events:
+      <button data-demo='{"type":"speech","text":"Use full jitter, not equal jitter, and cap a delay at five minutes."}'>next speech</button>
+      <button data-demo='{"type":"pm","event":{"type":"publish-revision","doc":"spec:pr-214:impl"}}'>impl publishes spec v3</button>
+      <button data-demo='{"type":"pm","event":{"type":"disconnect"}}'>disconnect</button>
+      <button data-demo='{"type":"pm","event":{"type":"reconnect"}}'>reconnect</button>
+      <button data-demo='{"type":"pm","event":{"type":"started","session":"pr-215/signoff"}}'>sign-off started</button>
+    </div>
+    <pre id="problems"></pre>
+  </section>
+  <section id="companion" aria-live="polite"></section>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

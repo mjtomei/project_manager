@@ -30008,11 +30008,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-21T23:22:18.897387+00:00'
+  updated_at: '2026-10-21T23:55:39.653938+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-103693f
+    text: 'Design deliverable in pm/docs/even-realities/ (start at index.html; same
+      gallery copied to the PR captures dir as even-realities/index.html; report.html
+      should link it). 54 glasses screenshots + OS menu + 3 phone views captured with
+      official evenhub-simulator 0.9.5 (headless: apt libwebkit2gtk-4.1-0 libgtk-3-0
+      libsoup-3.0-0 dbus dbus-x11; xvfb-run + dbus-run-session). All PM state/replies/speech
+      SIMULATED. Re-run: cd pm/docs/even-realities/mockup && npm ci --ignore-scripts
+      && npm run check && npm run capture && npm run gallery. Pageborne reviewed from
+      user-provided snapshot HEAD 4d769f60 (not committed; provenance in pageborne-snapshot.md).
+      No pm_core changes. Manual merge = design checkpoint.'
+    created_at: '2026-10-21T23:55:39Z'
+    last_edited: '2026-10-21T23:55:39Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
