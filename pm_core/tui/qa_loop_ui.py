@@ -159,9 +159,23 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
         app.call_from_thread(_on_qa_update, app, s)
 
     app._qa_loops[pr_id] = state
+    _ensure_poll_timer(app)
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+
+
+def _ensure_poll_timer(app) -> None:
+    """Arm the shared 1 s poll timer that processes QA completion.
+
+    The timer is otherwise armed only by a display refresh that sees an
+    active PR with a workdir, or by a review loop.  A QA start on a PR
+    whose workdir QA itself creates would never have its verdict handled
+    (no self-driving restart, no lifecycle transition) until some
+    unrelated refresh.
+    """
+    from pm_core.tui.review_loop_ui import _ensure_poll_timer as _ensure
+    _ensure(app)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +272,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
         app.call_from_thread(_on_qa_update, app, s)
 
     app._qa_loops[pr_id] = state
+    _ensure_poll_timer(app)
 
     required = app._self_driving_qa[pr_id]["required_passes"]
     passes_label = f" ({required} pass{'es' if required > 1 else ''} required)" if required > 1 else ""

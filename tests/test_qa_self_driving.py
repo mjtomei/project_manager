@@ -74,6 +74,33 @@ class TestZZTStart:
         mock_bg.assert_called_once()
         assert "pr-001" in app._qa_loops
 
+    def test_arms_poll_timer(self, tmp_path):
+        """With no timer running (PR had no workdir at the last refresh),
+        zz t must arm it, or the completion is never processed and the
+        loop never restarts."""
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = _make_app(tmp_path)
+        app._review_loop_timer = None
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
+             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=3):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        app.set_interval.assert_called_once()
+        assert app._review_loop_timer is app.set_interval.return_value
+
+    def test_start_qa_arms_poll_timer(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_qa
+
+        app = _make_app(tmp_path)
+        app._review_loop_timer = None
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"):
+            start_qa(app, "pr-001")
+
+        app.set_interval.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # PASS increments pass_count; reaching required passes clears state and
