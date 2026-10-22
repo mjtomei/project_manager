@@ -749,6 +749,10 @@ def restart_app(app) -> None:
     wq = getattr(app, "_write_queue", None)
     if wq is not None:
         wq.flush_sync()
+    # The exec drops this image's history owner lock: journal when it
+    # stopped so its interrupted attempts read ">Ns", not "unknown".
+    from pm_core import action_history
+    action_history.mark_owner_exit("restart")
     # Restore terminal state (raw mode, alt screen, etc.) before
     # replacing the process so the new TUI starts clean.
     try:

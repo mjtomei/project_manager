@@ -74,6 +74,15 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     attempts, timers, timer_history = _replay(events)
     aliases = _fold_retracked(attempts, timers)
     _link_children(attempts)
+    # An open attempt ran at least as long as its owner kept writing (e.g.
+    # the owner_exit an in-place restart journals): the owner was alive
+    # then and had not ended it.
+    owner_seen = _owner_last_seen(events)
+    for a in attempts.values():
+        if a["ended_t"] is None:
+            seen = owner_seen.get(_owner_key(a.get("owner")))
+            if seen is not None:
+                a["last_seen_t"] = max(a["last_seen_t"], seen)
     # A parent was last seen no earlier than any of its descendants.
     for a in sorted(attempts.values(), key=lambda a: a["started_t"],
                     reverse=True):
@@ -209,6 +218,23 @@ def _replay(events: list[dict]):
     return attempts, timers, timer_history
 
 
+def _owner_key(owner) -> tuple | None:
+    if not isinstance(owner, dict):
+        return None
+    return (owner.get("host"), owner.get("pid"), owner.get("start"),
+            owner.get("instance"))
+
+
+def _owner_last_seen(events: list[dict]) -> dict[tuple, float]:
+    """Time of each owner's newest event, of any kind."""
+    seen: dict[tuple, float] = {}
+    for ev in events:
+        key = _owner_key(ev.get("owner"))
+        if key is not None:
+            seen[key] = max(seen.get(key, 0.0), float(ev.get("t") or 0))
+    return seen
+
+
 def _fold_retracked(attempts: dict[str, dict],
                     timers: dict[str, dict]) -> dict[str, str]:
     """Fold runtime attempts that re-track a pane into the earlier attempt.
@@ -267,8 +293,7 @@ def _liveness_memo():
     def alive(owner) -> bool | None:
         if not isinstance(owner, dict):
             return _ah.owner_alive(owner)
-        key = (owner.get("host"), owner.get("pid"), owner.get("start"),
-               owner.get("instance"))
+        key = _owner_key(owner)
         if key not in memo:
             memo[key] = _ah.owner_alive(owner)
         return memo[key]

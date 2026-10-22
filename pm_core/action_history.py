@@ -26,6 +26,8 @@ Event kinds (all carry ``v``, ``ts``, ``t``, ``pr_id``, ``kind``,
   gates acceptance / relaunch; ``fires``: the owner acts at the due time),
   ``expected``.
 * ``timer_clear`` — ``timer``, ``reason``.
+* ``owner_exit`` — ``reason``: the owner stops here (an in-place restart),
+  so readers bound its interrupted attempts by this moment.
 
 Every writer is best-effort: failures are logged at debug level and
 swallowed so timing instrumentation can never alter execution.  Time is
@@ -109,10 +111,17 @@ _owner_cache: dict | None = None
 # its own instance lock, making the earlier events' owner look dead.
 _owner_mutex = threading.Lock()
 
+# Attempts this process started and has not ended (attempt -> pr_id), so an
+# in-place restart can journal when it stopped owning them.
+_open_attempts: dict[str, str] = {}
+_open_lock = threading.Lock()
+
 
 def _after_fork_in_child() -> None:
-    global _owner_mutex, _owner_lock_fd
+    global _owner_mutex, _owner_lock_fd, _open_lock
     _owner_mutex = threading.Lock()  # a thread may have held it at fork()
+    _open_lock = threading.Lock()
+    _open_attempts.clear()  # the parent's attempts, not the child's
     # The inherited fd shares the parent's owner lock: holding it would keep
     # the parent looking alive after it exits.  The child takes its own
     # instance on its first write.
@@ -431,6 +440,9 @@ def start_attempt(pr_id: str, action: str, *, attempt: str | None = None,
     """Record an attempt start; returns its id (even if the write failed)."""
     attempt = attempt or new_attempt_id()
     record(pr_id, "attempt_start", attempt=attempt, action=action, **fields)
+    if pr_id:
+        with _open_lock:
+            _open_attempts[attempt] = pr_id
     return attempt
 
 
@@ -449,6 +461,23 @@ def end_attempt(pr_id: str, attempt: str | None, outcome: str, *,
         return
     record(pr_id, "attempt_end", attempt=attempt, outcome=outcome,
            verdict=verdict or None, detail=detail, **fields)
+    with _open_lock:
+        _open_attempts.pop(attempt, None)
+
+
+def mark_owner_exit(reason: str = "restart") -> None:
+    """Journal that this process stops now, in every PR it has open attempts.
+
+    Called just before an in-place exec (TUI Ctrl+R), which keeps the pid
+    but drops the owner lock.  Without it a reader can only bound an
+    interrupted attempt by its own last event, so e.g. a QA scenario that
+    ran for a while after its start reads "unknown" instead of ">Ns".
+    Never raises.
+    """
+    with _open_lock:
+        prs = sorted(set(_open_attempts.values()))
+    for pr_id in prs:
+        record(pr_id, "owner_exit", reason=reason)
 
 
 def arm_timer(pr_id: str, timer: str, *, purpose: str, owner_action: str,

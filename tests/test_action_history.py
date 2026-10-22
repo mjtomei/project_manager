@@ -948,6 +948,32 @@ class TestReconciliation:
         text = "\n".join(hq.render_text(m))
         assert "unknown" in text and ">50s" in text
 
+    def test_owner_exit_marker_bounds_interrupted_attempts(self, clock):
+        # TUI Ctrl+R mid-QA: the scenarios' last own event is their start,
+        # but they ran until the exec; its marker bounds them (">Ns").
+        ah._open_attempts.clear()
+        run = ah.start_attempt(PR, "qa", loop_id="L")
+        clock.advance(30)
+        kid = ah.start_attempt(PR, "qa", parent=run, scenario=1)
+        ah.phase(PR, kid, "agent")
+        clock.advance(10)
+        ah.mark_owner_exit("restart")
+        clock.advance(5)
+        with patch.object(ah, "owner_alive", return_value=False):
+            m = hq.build_history(PR, now=clock.t, live=False)
+        (a,) = m["attempts"]
+        (c,) = a["children"]
+        assert a["elapsed_lower_bound_s"] == 40
+        assert c["outcome"] == "interrupted" and c["ended_at"] is None
+        assert c["elapsed_lower_bound_s"] == 10
+        assert ">10s" in "\n".join(hq.render_text(m))
+        # Nothing left open: no marker.
+        ah.end_attempt(PR, kid, "done")
+        ah.end_attempt(PR, run, "done")
+        n = len(ah.read_events(PR))
+        ah.mark_owner_exit("restart")
+        assert len(ah.read_events(PR)) == n
+
     def test_open_child_closed_at_parent_end(self, clock):
         p = ah.start_attempt(PR, "qa", label="QA run")
         c = ah.start_attempt(PR, "qa", parent=p, scenario=1)
