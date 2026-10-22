@@ -573,6 +573,33 @@ class TestBridge:
             s.close()
             sock.unlink(missing_ok=True)
 
+    @pytest.mark.parametrize("replace", [False, True])
+    def test_host_bridge_exits_when_socket_removed_or_replaced(
+            self, short_dir, replace):
+        # A detached bridge must not outlive its socket: removal, or a
+        # newer bridge binding the same path, ends it.
+        sock = str(short_dir / "x.sock")
+        t = threading.Thread(target=route_bridge.run_host_bridge,
+                             args=(sock, "127.0.0.1", 1), daemon=True)
+        t.start()
+        for _ in range(50):
+            if route_bridge.unix_connectable(sock):
+                break
+            time.sleep(0.05)
+        assert route_bridge.unix_connectable(sock)
+        os.unlink(sock)
+        newer = None
+        if replace:
+            newer = socket.socket(socket.AF_UNIX)
+            newer.bind(sock)
+        try:
+            t.join(timeout=5)
+            assert not t.is_alive()
+        finally:
+            if newer is not None:
+                newer.close()
+                os.unlink(sock)
+
     def test_symlinked_bridge_dir_is_refused(self, pm_home_dir, short_dir,
                                              monkeypatch):
         # A pre-planted symlink (e.g. the shared /tmp fallback) must not

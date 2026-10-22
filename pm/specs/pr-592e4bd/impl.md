@@ -103,7 +103,13 @@ worker alike:
   (`_RouteStallWatch`, workers in the poll loop, refiners via
   `poll_for_verdict(on_idle_without_verdict=, on_tick=)`): remedy surfaced,
   the verdict reminder suppressed, and once the route is healthy the
-  session is nudged to continue.
+  session is nudged to continue (nudge text, then two bare Enters, as
+  the verdict follow-ups do: Claude can take one text+Enter burst as a
+  paste and leave it unsent);
+- QA stopped during an initial launch's route wait: the scenario has no
+  window and keeps reason `stopped while waiting for the work route`; the
+  poll loop's "no window → INPUT_REQUIRED" marking skips it, so it stays
+  unverdicted (overall INPUT_REQUIRED via the unverdicted check).
 None of these records a verdict. Fake-claude sessions skip the gate.
 
 R7. **Visibility.** Each refiner/worker launch logs
@@ -295,3 +301,32 @@ a tools-disabled `claude -p` through the route, reporting requested models
    `test_missing_hook_event_is_a_failure`,
    `test_cli_reports_missing_evidence`,
    `test_transcript_path_matches_claude_mangling`.
+5. *Stop during route wait recorded a verdict* (QA s3, 0b1edfca) —
+   `_poll_tmux_verdicts` marked every windowless scenario INPUT_REQUIRED
+   ("worker window never created") and wrote its verdict.md, including
+   scenarios stopped inside `_await_route`. Fix: skip scenarios whose
+   reason is `_ROUTE_WAIT_STOPPED_REASON`. Regression
+   `TestPollLoopRouteGating::test_stop_during_route_wait_leaves_scenario_unverdicted`
+   (fails on 81cebf17). Captures `/pm-captures/scenarios/3/story3`.
+6. *Recovery nudge typed but never submitted* (QA s4, c5d7d64f, real
+   Claude vs a stub router) — `_RouteStallWatch.tick` sent the nudge as
+   one text+Enter burst, which Claude took as a paste. Fix: two follow-up
+   Enters 1 s apart. Regression asserts `[NUDGE, "", ""]`
+   (mutation-checked). Captures `/pm-captures/scenarios/4`.
+
+### Post-81cebf17 live rerun
+`/pm-captures/host-work-route-smoke-20261022T195845Z/result.json`
+(19:59Z, real work account, production config unchanged): host probe from
+a forced-underscore cwd (`/tmp/pm-route-probe-under-score-…`) and a real
+rootless slirp4netns container probe both PASS — requested
+`work/claude-opus-5-5`, transcript with `claude-opus-5-5`, Stop hook. Its
+source hashes for worker_route.py, route_bridge.py, cli/provider.py and
+container.py match review head 1c92c9cb (0b1edfca/c5d7d64f touch only
+qa_loop.py and tests).
+
+Review loop 03db i1: added
+`TestBridge::test_host_bridge_exits_when_socket_removed_or_replaced`
+(host bridge exit on socket removal / replacement by a newer bridge was
+untested; both cases fail with the exit check disabled). The inode-only
+identity check is sound: the old bridge's open listener pins its socket
+inode, so a replacement socket cannot reuse the number.
