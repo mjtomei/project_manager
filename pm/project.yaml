@@ -15981,6 +15981,18 @@ prs:
       (S3 E4 gap) and PM_CALLER_SESSION is honoured only while that session exists.'
     created_at: '2026-10-22T15:39:30Z'
     last_edited: '2026-10-22T15:39:30Z'
+  - id: note-0372aea
+    text: 'S7 refiner (2026-10-22): with the popup on a live PR, fzf starts on the
+      PR title row; Enter there has no cmd and CLOSES the popup — press Down onto
+      an action row first. While project.yaml is unparsable, nav keys still STEP through
+      the last-good list (only the reload is skipped), so the screen changes; assert
+      count/statuses stay stale + "refresh failed, keeping state" in ~/.pm/debug/*.log.
+      After gh_pr_number is assigned the window stays pr-xxx, so s would do a full
+      pr start (new #N window, claude); use e (tui:edit) to prove dispatch. pm pr
+      edit --status merged only SIGUSR1-reloads the TUI (no window kill), so the windows
+      of a reopened PR survive.'
+    created_at: '2026-10-22T15:54:31Z'
+    last_edited: '2026-10-22T15:54:31Z'
   - id: note-12d8e08
     text: 'QA s8 (2026-10-22): fix 634c82da — fast nav keys typed while the picker
       reloads hit the next fzf before its rows loaded; fzf exits 1 (no match) and
