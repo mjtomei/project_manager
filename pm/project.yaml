@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-446cb83
+  active_pr: pr-341337e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -24110,6 +24110,22 @@ prs:
       /pm-captures/scenarios/18.'
     created_at: '2026-10-22T17:26:42Z'
     last_edited: '2026-10-22T17:26:42Z'
+  - id: note-5bbe77a
+    text: 'QA S19 (2 real attached clients, foreign-cwd prefix+P) NEEDS_WORK, fixed
+      in f8a2a204. (1) In a popup the spinner select_window used current_or_base_session;
+      with no $TMUX_PANE that resolves to the most recently active client, so with
+      two clients both popups switched the last typer and the other stayed put. The
+      popup session is now passed to _wait_for_tui_command, which uses select_window_in_session
+      when that session has a client. (2) When a second review-loop launch is queued
+      on the lock, the first window is superseded; a spinner that selected it after
+      the waiter snapshotted sessions_on_window was bounced back to pr-<id> (story
+      4 SIGKILL). The review-loop spinner now holds while review_launch_in_progress()
+      (LOCK_SH|LOCK_NB probe) is true. All 4 stories plus a reverse-order story 3
+      passed on f8a2a204. QA select targeted the t-presser ~2 in both orders, but
+      that is activity-based (pr-c41f029). Simultaneous prefix+P loses one popup:
+      filed pr-341337e, so open the popups one after the other. Captures /pm-captures/scenarios/19.'
+    created_at: '2026-10-22T17:29:53Z'
+    last_edited: '2026-10-22T17:29:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
@@ -31422,6 +31438,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T16:05:37.412983+00:00'
   updated_at: '2026-10-22T16:05:37.412983+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-341337e
+  plan: bugs
+  title: 'Bug: near-simultaneous prefix+P from two attached clients opens only one
+    popup (on the last-active client)'
+  branch: pm/pr-341337e-bug-near-simultaneous-prefix-p-from-two-attached-c
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py popup_show_cmd (_popup-show) and
+    _bind_popups. prefix+P is bound to run-shell "pm _popup-show picker", which runs
+    tmux display-popup with no -c/-t. In tmux 3.2a the popup goes to the most recently
+    active client, not the client that pressed the key. Repro (found in QA scenario
+    19 on pr-8409c64): attach two clients to grouped sessions <S>~1 and <S>~2, then
+    send C-b P to both within a few ms (tmux -L outer send-keys -t cliA C-b P; tmux
+    -L outer send-keys -t cliB C-b P). _popup-show logs twice, but only ONE pm _popup-picker
+    starts, on cliB; cliA gets no popup. Sequential presses are fine. The same activity-based
+    lookup also makes the popup body S=$(tmux display-message -p "#{session_name}")
+    racy. Inside a popup, tmux display-message with no -t returned the other client
+    session right after that client typed, even though the popup env TMUX=...,<session
+    id> named the right one. Fix idea: bind run-shell "pm _popup-show picker #{client_name}"
+    (formats expand in run-shell), pass display-popup -c <client>, and have the popup
+    body resolve its session from the client or from the $TMUX session id instead
+    of current-client.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:23:26.275881+00:00'
+  updated_at: '2026-10-22T17:23:26.275881+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
