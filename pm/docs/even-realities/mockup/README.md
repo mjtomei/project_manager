@@ -36,6 +36,7 @@ npm run gallery    # -> ../index.html
   - touchpad actions go through `/api/input`
   - simulated PM events and speech results go through the server's `/director` queue
 - It saves the glasses framebuffer after each step tagged as a shot.
+- It uses its own server on port 5180 and the simulator automation API on 9898, and refuses to start when either port is busy (for example while `npm run serve` is open). To capture next to a running preview: `MOCKUP_PORT=5181 SIMULATOR_PORT=9899 npm run capture`.
 - On Linux without a display it runs the simulator under `xvfb-run -a` and `dbus-run-session`. On Ubuntu 22.04 arm64 the simulator needed these packages: `libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0 dbus dbus-x11 xvfb`.
 - Labelled copies (2× scale, caption strip) need `ffmpeg` with drawtext.
 

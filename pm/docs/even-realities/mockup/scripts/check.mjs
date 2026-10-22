@@ -296,4 +296,6 @@ if (!only.length) {
   }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
-process.exit(failures ? 1 : 0);
+// exitCode, not process.exit(): exiting drops whatever a slow pipe (tee, less, CI)
+// has not read yet, including this summary.
+process.exitCode = failures ? 1 : 0;

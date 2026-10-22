@@ -20,8 +20,11 @@ http.createServer((req, res) => {
       let body = '';
       req.on('data', c => { body += c; });
       req.on('end', () => {
-        try { events.push(JSON.parse(body)); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ seq: events.length })); }
-        catch (e) { res.writeHead(400); res.end(String(e)); }
+        try {
+          const e = JSON.parse(body);
+          if (!e || typeof e !== 'object' || Array.isArray(e)) throw new Error('event must be a JSON object');
+          events.push(e); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ seq: events.length }));
+        } catch (e) { res.writeHead(400); res.end(String(e)); }
       });
       return;
     }

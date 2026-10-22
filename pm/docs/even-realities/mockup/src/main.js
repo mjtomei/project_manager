@@ -35,7 +35,8 @@ function applyDirector(e) {
   else if (e.type === 'speech') app.nextUtterance = e.text;
   else if (e.type === 'words') { if (app.overlay?.stage === 'listening') app.overlay.words = e.text; }
   else if (e.type === 'intent') { act(e.name, e.arg); return; }
-  else app.pmEvent(e.event);
+  else if (e.type === 'pm') app.pmEvent(e.event);
+  else throw new Error(`unknown director event ${e.type}`);
   draw();
 }
 
@@ -55,7 +56,12 @@ async function pollDirector(skip = false) {
     if (r.ok) {
       const { events, seq } = await r.json();
       directorSeq = seq;
-      if (!skip) for (const e of events) { log(`DIRECTOR ${e.type}`); applyDirector(e); }
+      // The server queues any JSON object, so one unknown or broken event is
+      // logged and skipped; it must not drop the rest of the batch.
+      if (!skip) for (const e of events) {
+        log(`DIRECTOR ${e.type}`);
+        try { applyDirector(e); } catch (err) { log(`DIRECTOR ignored ${e.type}: ${err?.message || err}`); }
+      }
     }
   } catch (e) { if (!directorFailed) log(`DIRECTOR unavailable: ${e?.message || e}`); directorFailed = true; }
   finally { clearTimeout(timer); polling = false; }

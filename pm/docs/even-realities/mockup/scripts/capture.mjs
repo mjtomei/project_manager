@@ -11,6 +11,7 @@
 // background, 2x, caption strip) are made with ffmpeg when it is available.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JOURNEYS, PHONE_SHOTS } from './journeys.mjs';
@@ -80,6 +81,16 @@ async function waitFrame(after, timeout = 5000) {
   throw new Error(`no new frame after #${after} (last ${lastFrame.scene})\nrecent console:\n  ${recent.join('\n  ')}`);
 }
 
+// A preview left running (`npm run serve` on 5180) or another capture must not
+// be borrowed: its director queue and open tabs belong to someone else.
+function portFree(port) {
+  return new Promise(resolve => {
+    const s = net.createServer().once('error', () => resolve(false)).once('listening', () => s.close(() => resolve(true)));
+    s.listen(port, '127.0.0.1');
+  });
+}
+class UsageError extends Error {}
+
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 function label(raw, dest, text) {
   if (!hasFfmpeg) return false;
@@ -92,32 +103,50 @@ function label(raw, dest, text) {
 }
 
 async function main() {
+  for (const [port, what, env] of [[PORT, 'mockup server', 'MOCKUP_PORT'], [SIM, 'simulator automation', 'SIMULATOR_PORT']]) {
+    if (!await portFree(port)) throw new UsageError(`port ${port} (${what}) is busy, e.g. by \`npm run serve\` or another capture; stop it or set ${env} to a free port. Nothing was captured.`);
+  }
   fs.mkdirSync(path.join(out, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(out, 'phone'), { recursive: true });
   const tmp = path.join(root, '.capture-tmp');
   fs.mkdirSync(tmp, { recursive: true });
-  start(process.execPath, ['server.mjs', String(PORT)], path.join(tmp, 'server.log'));
+  const server = start(process.execPath, ['server.mjs', String(PORT)], path.join(tmp, 'server.log'));
+  // Wait for this capture's own server; if it dies (port taken since the
+  // check), stop rather than drive whatever else answers on the port.
+  await new Promise((resolve, reject) => {
+    let exited = false;
+    server.once('exit', code => { exited = true; reject(new Error(`mockup server on port ${PORT} exited (${code}); see .capture-tmp/server.log`)); });
+    const poll = () => { if (!exited) fs.readFileSync(path.join(tmp, 'server.log'), 'utf8').includes('mockup on') ? resolve() : setTimeout(poll, 50); };
+    poll();
+  });
   const simArgs = [simulatorBinary(), `http://127.0.0.1:${PORT}/`, '--automation-port', String(SIM), '--no-glow'];
   // The first page creation occasionally never completes in simulator 0.9.5
   // on this host; relaunch the simulator rather than failing the capture.
-  for (let attempt = 1; ; attempt++) {
-    const sim = process.env.DISPLAY
-      ? start('dbus-run-session', ['--', ...simArgs], path.join(tmp, 'simulator.log'))
-      : start('xvfb-run', ['-a', '-s', '-screen 0 1280x1024x24', 'dbus-run-session', '--', ...simArgs], path.join(tmp, 'simulator.log'));
-    try {
-      for (let i = 0; ; i++) {
-        try { await api('GET', '/api/ping'); break; } catch { if (i > 120) throw new Error('simulator did not start'); await sleep(250); }
+  let sim = null;
+  async function launchSimulator() {
+    for (let attempt = 1; ; attempt++) {
+      consoleId = 0; lastFrame = { seq: 0, scene: '' };
+      sim = process.env.DISPLAY
+        ? start('dbus-run-session', ['--', ...simArgs], path.join(tmp, 'simulator.log'))
+        : start('xvfb-run', ['-a', '-s', '-screen 0 1280x1024x24', 'dbus-run-session', '--', ...simArgs], path.join(tmp, 'simulator.log'));
+      try {
+        for (let i = 0; ; i++) {
+          try { await api('GET', '/api/ping'); break; } catch { if (i > 120) throw new Error('simulator did not start'); await sleep(250); }
+        }
+        await waitFrame(0, 15000);
+        return;
+      } catch (e) {
+        if (attempt >= 3) throw e;
+        console.log(`simulator start attempt ${attempt} failed (${e.message.split('\n')[0]}); retrying`);
+        await stopSimulator();
       }
-      await waitFrame(0, 15000);
-      break;
-    } catch (e) {
-      if (attempt >= 3) throw e;
-      console.log(`simulator start attempt ${attempt} failed (${e.message.split('\n')[0]}); retrying`);
-      try { process.kill(-sim.pid, 'SIGTERM'); } catch { /* gone */ }
-      await sleep(1500);
-      consoleId = 0;
     }
   }
+  async function stopSimulator() {
+    try { process.kill(-sim.pid, 'SIGTERM'); } catch { /* gone */ }
+    await sleep(1500);
+  }
+  await launchSimulator();
   const manifest = {
     generated: new Date().toISOString(),
     simulated: 'All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions.',
@@ -128,10 +157,8 @@ async function main() {
     journeys: [],
   };
   let osMenuShot = false;
-  for (const j of JOURNEYS) {
-    if (only.length && !only.includes(j.id)) continue;
+  async function runJourney(j) {
     const jm = { id: j.id, title: j.title, shots: [] };
-    manifest.journeys.push(jm);
     const actions = [];
     for (const step of j.steps) {
       const before = lastFrame.seq;
@@ -176,6 +203,23 @@ async function main() {
         console.log(`shot ${step.shot}  [${lastFrame.scene}]`);
       }
     }
+    return jm;
+  }
+  for (const j of JOURNEYS) {
+    if (only.length && !only.includes(j.id)) continue;
+    // Under host load simulator 0.9.5 occasionally never answers one bridge
+    // call, so the page's frame lane stalls and no further frame arrives.
+    // Journeys start from fresh state (a fresh page, or reset), so replay the
+    // journey once in a relaunched simulator; its shots replace the partial ones.
+    for (let attempt = 1; ; attempt++) {
+      try { manifest.journeys.push(await runJourney(j)); break; }
+      catch (e) {
+        if (attempt >= 2 || !e.message.startsWith('no new frame')) throw e;
+        console.log(`journey ${j.id} stalled (${e.message.split('\n')[0]}); relaunching the simulator and replaying journey ${j.id}`);
+        await stopSimulator();
+        await launchSimulator();
+      }
+    }
   }
   await pollConsole();
   manifest.problems = problems;
@@ -184,4 +228,4 @@ async function main() {
   if (problems.length) { console.log(problems.join('\n')); process.exitCode = 1; }
 }
 
-main().catch(e => { console.error(e); process.exitCode = 1; }).finally(() => { stopAll(); setTimeout(() => process.exit(), 300); });
+main().catch(e => { console.error(e instanceof UsageError ? `capture: ${e.message}` : e); process.exitCode = 1; }).finally(() => { stopAll(); setTimeout(() => process.exit(), 300); });
