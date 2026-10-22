@@ -15879,7 +15879,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T15:24:06.548578+00:00'
+  updated_at: '2026-10-22T15:39:30.977689+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15974,6 +15974,13 @@ prs:
       the popup is reopened (judge vs E3/E4).'
     created_at: '2026-10-22T15:01:17Z'
     last_edited: '2026-10-22T15:01:17Z'
+  - id: note-cf378e8
+    text: 'Review aa41 i1 (e699bd52): incidental fix — Enter/double-click on a live
+      action row now dispatches (stdout.strip() ate fzf empty --expect key line; pre-existing
+      on master, from S2 refiner note). Also nav keys reload with a single nav entry
+      (S3 E4 gap) and PM_CALLER_SESSION is honoured only while that session exists.'
+    created_at: '2026-10-22T15:39:30Z'
+    last_edited: '2026-10-22T15:39:30Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
