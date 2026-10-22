@@ -15879,7 +15879,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T15:39:30.977689+00:00'
+  updated_at: '2026-10-22T16:21:10.620551+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15981,6 +15981,17 @@ prs:
       (S3 E4 gap) and PM_CALLER_SESSION is honoured only while that session exists.'
     created_at: '2026-10-22T15:39:30Z'
     last_edited: '2026-10-22T15:39:30Z'
+  - id: note-12d8e08
+    text: 'QA s8 (2026-10-22): fix 634c82da — fast nav keys typed while the picker
+      reloads hit the next fzf before its rows loaded; fzf exits 1 (no match) and
+      the picker took it as q/Esc, silently closing the popup (repro: nav key pairs
+      ~10ms apart closes within <10 pairs). Now fzf --sync, rc 1 handled as keypress,
+      --no-clear (no empty-popup flash between relaunches) + screen clear before dispatch.
+      Also new_window[_get_pane] log "select-window target=<session>". Popup from
+      a PR-workdir pane still logs under the wrong session tag (pr-f98ac63). Captures
+      /pm-captures/scenarios/8.'
+    created_at: '2026-10-22T16:21:10Z'
+    last_edited: '2026-10-22T16:21:10Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
