@@ -23371,7 +23371,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/216
   gh_pr_number: 216
   created_at: '2026-05-22T22:52:39.457111+00:00'
-  updated_at: '2026-05-24T22:22:02.164315+00:00'
+  updated_at: '2026-10-22T14:45:56.986619+00:00'
   started_at: '2026-05-24T21:56:02.396650+00:00'
   reviewed_at: '2026-05-24T22:22:02.164315+00:00'
   merged_at: null
@@ -23390,6 +23390,16 @@ prs:
       (workdir: /home/matt/.pm/workdirs/qa/pr-9b96145-59e921eb9d41f17e)'
     created_at: '2026-05-25T03:36:05Z'
     last_edited: '2026-05-25T03:36:05Z'
+  - id: note-2f9f764
+    text: 'Overlap with pr-49ce773 (#193 picker fix, in review): it deletes the early
+      "No actions available (PR is merged or closed)" exit in popup_picker_cmd that
+      this PR edits, replacing it with an in-fzf notice row (No actions — PR is <status>
+      / Could not load actions for <id>) and adds _find_pr_for_window_id (display
+      id → local id → #N vs gh_pr_number). Whichever merges second must re-apply its
+      change on the new structure: keep _try_relink_window self-heal before _build_nav_entries,
+      and drop the early-exit branch rather than restoring it.'
+    created_at: '2026-10-22T14:45:56Z'
+    last_edited: '2026-10-22T14:45:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9b96145-bug-pr-actions-picker-reports-merged-904ede96
 - id: pr-3d1fa55
   plan: bugs
