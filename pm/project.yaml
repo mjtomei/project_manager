@@ -29868,7 +29868,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T21:34:33.449911+00:00'
+  updated_at: '2026-10-22T14:12:16.864231+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30073,6 +30073,35 @@ prs:
       the planner pane that got the approval notice (the new run launches -s1 fine).'
     created_at: '2026-10-21T21:34:33Z'
     last_edited: '2026-10-21T21:34:33Z'
+  - id: note-7675c95
+    text: 'Sign-off 2026-10-21 → SIGNOFF_MERGE at 13a9175d. Last app-code commit 68d9aa47
+      (review 996c i6) == QA r5 885870ae (S22–S26 all PASS); full suite 3322 pass;
+      merges cleanly onto master (only pm/project.yaml in both). Report: $CAP/report.html
+      (14 delivered behaviours, each with timestamped video chapters). Non-blocking
+      known gaps: pr-74c4182 (shell/picker pm pr start uses plain spec prompt; hold
+      still applies), pr-2935ce2 (approval notice lost in copy mode).'
+    created_at: '2026-10-21T22:31:00Z'
+    last_edited: '2026-10-21T22:31:00Z'
+  - id: note-8d5b870
+    text: 'Sign-off 2026-10-22 → SIGNOFF_IMPL (forced: base conflict). HEAD 13a9175d
+      vs master@337d1266 (pr-ac10f03 sign-off-return machinery landed) conflicts in
+      pm/project.yaml, autostart_state.py (build_status docstring), tui/review_loop_ui.py
+      (_poll_impl_idle idle-edge: keep BOTH the in-scope `managed` guard from 76bc4ba3
+      AND base return_awaiting("impl") → mark_active), tui/tech_tree.py (PRNode marker
+      row: the PR spec_pending branch resets status_text, which would drop base return-verdict
+      icon ⇤/↩/↻; keep both and add a widget test). Also reconcile non-conflicting
+      semantic overlap: auto_start.sync-spec QA rule (_spec_phase_due ~L202) calls
+      recorded_qa_verdict(pr_id) without pr; base now passes pr so pre-return verdicts
+      are ignored, so pass pr there. check_and_start runs sync_spec_reviews/spec_pending
+      skip before the base return-launch claim + fresh relaunch; confirm a spec-paused
+      in_progress PR with an open IMPL return is not stranded (claim recheck timer).
+      The rest of the app code was signed off as MERGE-quality on 2026-10-21 (S22–S26
+      PASS at 885870ae == HEAD app code, 3322 tests). After reconciling, run the full
+      suite with /usr/bin first on PATH. Review then needs to cover the merged hunks,
+      and QA needs to re-run the tree marker (S impl next to a return icon) and impl-idle
+      → review transition on the integrated code. Report: $CAP/report.html.'
+    created_at: '2026-10-22T14:12:16Z'
+    last_edited: '2026-10-22T14:12:16Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
