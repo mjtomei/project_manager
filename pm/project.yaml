@@ -22873,7 +22873,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/220
   gh_pr_number: 220
   created_at: '2026-05-21T15:56:33.458586+00:00'
-  updated_at: '2026-05-25T03:05:18.047602+00:00'
+  updated_at: '2026-10-22T16:17:00.919777+00:00'
   started_at: '2026-05-25T02:46:34.752207+00:00'
   reviewed_at: '2026-05-25T03:05:18.047602+00:00'
   merged_at: null
@@ -22898,6 +22898,16 @@ prs:
       /home/matt/.pm/workdirs/qa/pr-c41f029-ef8ddb6d7a59a2ee)'
     created_at: '2026-05-27T12:17:17Z'
     last_edited: '2026-05-27T12:17:17Z'
+  - id: note-6d7d223
+    text: 'Live repro from pr-8409c64 QA scenario 7 (2026-10-22): picker z t (fresh
+      QA) on a PR whose QA run is open, pressed from a NON-QA window (client on ctx),
+      leaves the originating client on ctx on master/pr-8409c64 (sessions_on_window
+      of the old qa window = []). With this branch (8eef58f0) merged onto pr-8409c64
+      HEAD ce6cd54d, followers_for_window uses captured=[<base>~1] and the client
+      lands on the new qa-<id> in ~2.3 s. Please keep "z t from a non-QA window follows
+      the invoker" in this PR QA spec; pr-8409c64 depends on it for its z t Then.'
+    created_at: '2026-10-22T16:17:00Z'
+    last_edited: '2026-10-22T16:17:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c41f029-bug-capture-originating-tmux-session-07edf135
 - id: pr-5db0e85
   plan: plan-3119574
@@ -23675,7 +23685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/223
   gh_pr_number: 223
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-10-22T16:10:15.063328+00:00'
+  updated_at: '2026-10-22T16:16:59.884266+00:00'
   started_at: '2026-05-25T03:27:03.889385+00:00'
   reviewed_at: '2026-05-25T03:39:45.883451+00:00'
   merged_at: null
@@ -23913,6 +23923,46 @@ prs:
       chord keys (pr-d8b15e7).'
     created_at: '2026-10-22T16:10:14Z'
     last_edited: '2026-10-22T16:10:14Z'
+  - id: note-9287042
+    text: 'QA scenario 7 refiner (R7 t-existing matrix + z t/zz t), 2026-10-22: (1)
+      PM_PROJECT for a popup comes from the tmux SESSION environment (display-popup
+      job env = global+session env), NOT the pane shell; set/unset per context with
+      `tmux set-environment -t <client-sess> PM_PROJECT <root>/pm` / `-r PM_PROJECT`
+      (also base + check -g). (2) Pre-fix control = popups only: `tmux set-environment
+      -g PYTHONPATH <worktree of 660e43a2>` (master side of merge ac52a5de; pm_core
+      differs only by the spinner root fix + review launch lock); confirm via `popup-picker
+      invoked ... module=` log line. (3) Do NOT dismiss a held pre-fix popup with
+      q/Esc: request_suppress_switch(pr,"qa") lingers and the NEXT t (focus_or_start_qa)
+      consumes it and skips the focus switch -> false (a) failure; kill the picker
+      pid instead. (4) QA needs a qa spec beforehand (`pm pr spec <id> qa` under fake
+      config) or the run ends INPUT_REQUIRED after planning. (5) By code, z t from
+      a foreign window with an existing QA window has NO client switcher: the spinner
+      never select_windows for action qa, and run_qa_sync only switches sessions that
+      were on the old qa-<id> main window or selects on first-time creation -> expect
+      the client to stay put (real gap, fix or file). (6) zz t while a one-shot QA
+      run is running STOPS it (start_or_stop_qa_loop checks _qa_loops[pr].running),
+      so the zz t story uses a third never-QAed PR.'
+    created_at: '2026-10-22T15:53:53Z'
+    last_edited: '2026-10-22T15:53:53Z'
+  - id: note-460eebd
+    text: 'QA scenario 7 (R7 live matrix, 2026-10-22, HEAD ce6cd54d, real attached
+      client via tmux -L outer + real prefix+P): t on TARGET with QA already running
+      PASSED in all 4 post-fix cells C1-C4 (client on qa-<id> +0.26s with "Focused
+      QA window"; picker pid gone +0.26s, spinner reason=window_open; window ids/loop
+      id/scenario pids/runtime qa=running unchanged). Pre-fix control (660e43a2 popup
+      code): C1/C2/C4 pass; C3 reproduces (target_window=None, popup held qa: running…
+      ~78s, client still switched). zz t on a never-QA PR from C3 PASSED (client follows
+      +2.4s, loop keeps running). FAILED: z t (fresh) from a non-QA window (C3) —
+      spinner/popup/window replacement all correct, but the originating client stays
+      on ctx: qa_loop planning switches only sessions_on_window watchers of the OLD
+      qa window (result=[]) and the spinner never selects for action qa. Verified
+      live that merging pr-c41f029 (8eef58f0; merges cleanly except project.yaml)
+      fixes it via consume_origin_session/followers_for_window (client on new qa-<id>
+      +2.3s). Resolution needs either merging pr-c41f029 first / making it a dependency,
+      or an equivalent invoker-follow for fresh QA here. Captures: /pm-captures/scenarios/7
+      (zt-fresh vs zt-fresh-with-c41f029).'
+    created_at: '2026-10-22T16:16:59Z'
+    last_edited: '2026-10-22T16:16:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
