@@ -192,7 +192,7 @@ exactly once.
     obsoletes/updates withheld); Oxide RFD number, title and authors (labels
     withheld); Chromium and NASA index section and title (descriptions
     withheld);
-  - charters: the revision approved on or before the source draft's -00
+  - charters: the highest revision known to exist by the source draft's -00
     submission; RFCs whose first draft predates datatracker events (about
     2001) get none. A WG draft that replaced an earlier individual draft is
     dated by the WG draft's -00 (limitation). Revisions are dated by their
