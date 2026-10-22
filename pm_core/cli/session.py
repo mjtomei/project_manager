@@ -1511,9 +1511,8 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     click.echo(f"\r✓ {action}: done{suffix}{CLR_EOL}")
                 return
             if window_open:
-                # Switch the invoking session to the target window
-                # unless the user pre-emptively suppressed it.  Doing
-                # the switch here keeps review and review-loop
+                # Switch the invoking session to the target window.
+                # Doing the switch here keeps review and review-loop
                 # consistent: review's switch is performed by the
                 # 'pm pr review' subprocess, but review-loop iterations
                 # don't switch on first start, so we drive it from the
@@ -1521,19 +1520,26 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 # path — and owns its own suppress_switch consume —
                 # so we leave the flag in place for action == "qa".
                 if action != "qa":
+                    # Reaching window_open means *this* popup was not
+                    # dismissed (q/Esc exits the process above), so any
+                    # suppress_switch flag here was left by an earlier,
+                    # dismissed invocation — a running→running restart
+                    # keeps it.  Clear it, but never let it swallow this
+                    # invocation's switch.
                     try:
-                        suppressed = _rs.consume_suppress_switch(pr_id, action)
+                        if _rs.consume_suppress_switch(pr_id, action):
+                            _log.info("spinner: cleared stale suppress_switch "
+                                      "pr=%s action=%s", pr_id, action)
                     except Exception:
-                        suppressed = False
-                    if not suppressed:
-                        try:
-                            rc = tmux_mod.select_window(session, target_window)
-                            _log.info(
-                                "spinner select_window: target=%s:%s ok=%s",
-                                session, target_window, rc,
-                            )
-                        except Exception:
-                            _log.exception("spinner select_window failed")
+                        pass
+                    try:
+                        rc = tmux_mod.select_window(session, target_window)
+                        _log.info(
+                            "spinner select_window: target=%s:%s ok=%s",
+                            session, target_window, rc,
+                        )
+                    except Exception:
+                        _log.exception("spinner select_window failed")
                 _log.info("spinner exit: reason=window_open target=%s",
                           target_window)
                 click.echo(

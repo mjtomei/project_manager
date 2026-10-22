@@ -55,7 +55,7 @@ def _load(root):
 
 
 def _run_spinner(window_seq, state_seq,
-                 tui_cmd="review-loop start pr-001"):
+                 tui_cmd="review-loop start pr-001", stale_suppress=False):
     """Drive _wait_for_tui_command with simulated tmux + runtime_state.
 
     Simulates the bug condition: state_root() resolves to a FOREIGN project
@@ -84,7 +84,7 @@ def _run_spinner(window_seq, state_seq,
          patch.object(session_mod.store, "load", side_effect=_load), \
          patch("pm_core.runtime_state.get_action_state", side_effect=get_state), \
          patch("pm_core.runtime_state.consume_suppress_switch",
-               return_value=False), \
+               return_value=stale_suppress), \
          patch.object(session_mod, "_wait_dismiss"), \
          patch("select.select", return_value=([], [], [])), \
          patch("click.echo",
@@ -141,6 +141,25 @@ def test_switch_fires_for_existing_window_fresh(fake_stdin):
     )
     assert select_window.called, "spinner should switch to the rebuilt window"
     assert select_window.call_args.args == ("pm-sess", W)
+
+
+def test_stale_suppress_flag_does_not_swallow_switch(fake_stdin):
+    """A q/Esc on an *earlier* review-loop popup leaves ``suppress_switch``
+    on the runtime entry; a running→running restart keeps it.  The next,
+    non-dismissed ``zz d`` must still switch — reaching window_open means
+    this popup was not dismissed, so the flag is stale (QA s18 story 3).
+    """
+    W = "review-pr-001"
+    select_window, echoed = _run_spinner(
+        window_seq=[[(W, "@5")], [], [(W, "@9")], [(W, "@9")]],
+        state_seq=[{"state": "running", "suppress_switch": True,
+                    "updated_at": "t0"},
+                   {"state": "running", "updated_at": "t1"}],
+        stale_suppress=True,
+    )
+    assert select_window.called, "stale suppress flag swallowed the switch"
+    assert select_window.call_args.args == ("pm-sess", W)
+    assert _exited_on_window(echoed, W), echoed
 
 
 def _exited_on_window(echoed, window):
