@@ -23700,6 +23700,31 @@ prs:
       (workdir: /home/matt/.pm/workdirs/qa/pr-8409c64-2c35187964371a17)'
     created_at: '2026-05-25T04:12:27Z'
     last_edited: '2026-05-25T04:12:27Z'
+  - id: note-0905e6c
+    text: 'Additional user report, 2026-10-22: pressing t in the PR actions picker
+      successfully switches the invoking client to the QA window, but the picker popup
+      remains open over it. This differs from the already-recorded failure to switch
+      at all: focus transfer succeeds, dismissal does not. Include this variant in
+      #223; the cause has not yet been established.
+
+
+      Expected: once the requested QA window is ready and the invoking client has
+      switched to it, the picker/spinner closes automatically so the user can interact
+      with QA immediately. It must not wait for the QA run to finish or require an
+      extra q/Esc keypress. Closing the popup must leave the QA session/run alive
+      and preserve the successful focus switch.
+
+
+      Update the implementation and QA specs and add regression coverage for t from
+      another window with both a newly created QA window and an existing QA window/run.
+      Verify both outcomes independently: correct client/window selected AND popup
+      process/overlay gone while QA continues running. Retain the original review-loop
+      cases and early-dismissal behavior; a failed launch must still surface its error
+      rather than look like successful dismissal. Coordinate shared picker code with
+      #240 (popup command code resolution) and #242 (merged/no-action PR navigation),
+      without treating either as the assumed cause.'
+    created_at: '2026-10-22T14:36:15Z'
+    last_edited: '2026-10-22T14:36:15Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
