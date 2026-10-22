@@ -56,7 +56,11 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   scenario times.
 - **R6 — queued and retried scenarios.** Given a QA concurrency cap lower
   than the scenario count, when history is viewed, then waiting scenarios show
-  a `queued` phase counted as wait. Given a scenario window that dies mid-run,
+  a `queued` phase counted as wait, then `launching` while the worker is
+  prepared; once a dequeued worker runs, its row reads its own hook state
+  (agent working / turn finished with the shared grace) like any other
+  scenario, never stuck on "agent working" (058415a8). Given a scenario
+  window that dies mid-run,
   when PM relaunches it, then the original scenario attempt ends `vanished`,
   a new attempt for the same scenario with `retry=1` (shown
   `qa sN retry 1`) appears whose leading
@@ -192,7 +196,9 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   garbage lines, history still renders the valid events (no traceback).
   A non-UTF-8 byte spoils only its own line (c57cdda4): text, `--json`,
   the popup badge/pager and sign-off routing (which looks up the newest
-  open router attempt in the journal) keep working.
+  open router attempt in the journal) keep working. A parseable line whose
+  time fields are not numbers (e.g. `"t": "abc"`) is skipped like a
+  garbage line, never a traceback (78c6edcd).
 - **E4 — instrumentation must not change execution.** Given the history
   directory is unwritable (or the journal file is a directory), when the
   user runs a review loop / QA run, then the loop reaches the same verdicts
@@ -207,7 +213,14 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   between items, never inside one, and a Recent-timers row whose
   resolution time carries a full date wraps between its parts
   (`purpose: resolution` / `at …` / `(armed …)`) instead of exceeding 80
-  columns.
+  columns. An attempt row with a dated start plus a flagged name (e.g.
+  `signoff router (adopted)`, `review-loop (loop …) cancelled KILLED`)
+  wraps its outcome onto a sub-indented line (3ccea259); hold/timer head
+  rows (e.g. the derived sign-off BLOCKED hold) and free-text lines
+  (title, `Waiting for:`, `Now` rows, the runtime line, attempt details,
+  the missing-history `Note:`) word-wrap at 80 (e4d33439, 563c5618), so
+  plain `pm pr history | cat` stays within 80 columns and matches the
+  TTY output word for word.
 - **E6 — overdue.** A `fires` timer past due whose owner is alive shows
   `overdue by Xs`, never negative remaining.
 - **E7 — concurrent writers.** Two or more processes (TUI loop threads, a
@@ -228,7 +241,9 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   the impl pane while a review loop owns the PR and re-registers it when
   the loop ends, then history shows one `start` attempt continuing after a
   "not tracked" span (counted as neither exec nor wait), not an extra
-  "start untracked" row per review loop.
+  "start untracked" row per review loop. In `--json` the kept attempt
+  lists the folded ids as `merged_ids`, so the runtime mirror's
+  `attempt_id` for `start` always resolves to an attempt (b29bcdfa).
 - **E10b — command-bar review.** A review started by typing
   `/pr review <pr>` in the TUI command bar is tracked and journaled like
   one started with `d` (76742637); history never says "No recorded
@@ -245,7 +260,10 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   then history shows it running, not "interrupted — owner process exited".
 - **E13 — Now line verdicts.** An in-flight runtime entry shows its stale
   verdict as `(last X)` (e.g. `review-loop=running (last NEEDS_WORK)`),
-  never as if it were the running attempt's outcome.
+  never as if it were the running attempt's outcome. A finished entry
+  keeps its own state while its pane stays open: after a plain review
+  prints its verdict the line reads `review=done NEEDS_WORK`, not
+  `review=idle (last NEEDS_WORK)` (a07a4d46).
 - **E14 — history path not a directory.** If `~/.pm/history` is a regular
   file, `pm pr history` (text and `--json`) prints honest empty history and
   exits 0; loops are unaffected. The same holds for a read-only
