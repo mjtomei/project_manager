@@ -10652,7 +10652,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-04-09T22:11:09.274855+00:00'
+  updated_at: '2026-10-22T16:27:19.471210+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10722,6 +10722,17 @@ prs:
       matches correctly: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-eb2dbfc-92a70215734d8ef3)'
     created_at: '2026-04-10T13:33:17Z'
     last_edited: '2026-04-10T13:33:17Z'
+  - id: note-c70575a
+    text: 'pr-1139060 adds container launch backpressure your launch queue should
+      build on, not duplicate: a per-process create semaphore (container-launch-concurrency,
+      container.py _create_slot), a container-max-running clamp on the QA scenario
+      batch (qa_loop._clamp_to_container_headroom, reusing the queued-scenario mechanism),
+      ownership labels on every container (pm.kind/pm.pr_id/pm.loop_id...), per-name
+      launch locks (container.launch_lock), and ContainerLaunchError kinds (keyring|memory|pids|...).
+      Memory-pressure stop policy should go through container_reaper (ownership/retention
+      checks) rather than remove_container directly.'
+    created_at: '2026-10-22T16:27:19Z'
+    last_edited: '2026-10-22T16:27:19Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa

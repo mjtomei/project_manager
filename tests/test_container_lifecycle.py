@@ -269,6 +269,24 @@ class TestReaperOwnership:
         out = reaper.release_containers([a, b], owner_release=True)
         assert out.removed == [a]
 
+    def test_failed_owner_release_is_retried_despite_live_pane(self, fake_env):
+        """A run-end release that failed must not leave the container owned by
+        the run's own still-live pane: later passes retry it as released."""
+        name = "pm-repo-ab12-qa-pr-aaaa-L-s1"
+        other = "pm-repo-ab12-qa-pr-aaaa-L-s2"
+        fake_env["containers"] = [_info(name), _info(other)]
+        fake_env["panes"] = _Panes([f"podman exec -it {name} x",
+                                    f"podman exec -it {other} x"])
+        fake_env["fail"] = {name}
+        out = reaper.release_containers([name], owner_release=True)
+        assert name in out.failures
+        assert reaper.pending_failures()[name]["owner_release"] is True
+
+        fake_env["fail"] = set()
+        out = reaper.reconcile(reason="periodic")
+        assert out.removed == [name]  # the other live-pane container is kept
+        assert reaper.pending_failures() == {}
+
     def test_pid_pressure_reported_for_kept(self, fake_env, monkeypatch):
         name = "pm-repo-ab12-qa-pr-aaaa-L-s28"
         fake_env["containers"] = [_info(name)]

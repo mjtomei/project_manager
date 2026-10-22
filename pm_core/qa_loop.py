@@ -4314,7 +4314,9 @@ def _release_scenario_containers(state: QALoopState, session: str) -> bool:
     a client is viewing right now, and retained containers.  Those are
     reclaimed later by the reconciler once their pane is gone.  Transcripts,
     captures and the scenario clones live on the host and are untouched.
-    Returns True when a removal failed (noted in ``state.latest_output``).
+    Returns True when a removal failed (noted in ``state.latest_output``);
+    the reaper records such failures as owner releases, so its later passes
+    (and ``pm container reap``) retry them despite the still-live panes.
     """
     from pm_core import container_reaper
     from pm_core import tmux as tmux_mod

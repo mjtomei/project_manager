@@ -250,7 +250,8 @@ def _query_server(server: _Server) -> _PaneSnapshot:
         return _PaneSnapshot(panes=None)
     if r.returncode != 0:
         err = (r.stderr or "").lower()
-        if "no server running" in err or "error connecting" in err and "no such file" in err:
+        if "no server running" in err or ("error connecting" in err
+                                          and "no such file" in err):
             return _PaneSnapshot(panes=[])
         return _PaneSnapshot(panes=None)
     panes = []
@@ -398,6 +399,8 @@ class Decision:
     info: ContainerInfo
     action: str  # "remove" | "keep"
     reason: str
+    # Released by the run that launched it: its own panes don't keep it.
+    released: bool = False
 
 
 @dataclass
@@ -406,6 +409,8 @@ class Outcome:
     decisions: list[Decision] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)
+    # Failed removals of containers their run released (retried as released).
+    released_failures: set[str] = field(default_factory=set)
     proxies_released: list[str] = field(default_factory=list)
     # Kept containers near their PID limit: (name, pids, limit, reason kept).
     pid_pressure: list[tuple[str, int, int, str]] = field(default_factory=list)
@@ -449,13 +454,19 @@ class Outcome:
 
 
 def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
-            prs: _PrStatus, now: float) -> Decision:
+            prs: _PrStatus, now: float,
+            pending_release: frozenset[str] = frozenset()) -> Decision:
     if is_retained(info.name) and not scope.include_retained:
         return Decision(info, "keep", "explicitly retained (pm container retain)")
     if container_mod.launch_in_progress(info.name):
         return Decision(info, "keep", "launch in progress")
     if scope.owner_release:
-        return Decision(info, "remove", "released by its run")
+        return Decision(info, "remove", "released by its run", released=True)
+    if info.name in pending_release:
+        # Its run already let it go but the removal failed; the run's panes
+        # are still exec'd into it and would otherwise "own" it forever.
+        return Decision(info, "remove", "released by its run (retrying failed removal)",
+                        released=True)
     owners, indeterminate = _owner_panes(info, cache)
     if owners:
         return Decision(info, "keep", f"owned by live pane {', '.join(owners)}")
@@ -484,7 +495,7 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             return False, "skipped: launch started concurrently"
         if is_retained(info.name) and not scope.include_retained:
             return False, "skipped: retained concurrently"
-        if not scope.owner_release:
+        if not d.released:
             owners, _ = _owner_panes(info, _PaneCache(), fresh=True)
             if owners:
                 return False, f"skipped: pane {', '.join(owners)} attached concurrently"
@@ -572,9 +583,13 @@ def plan(scope: Scope | None = None) -> Outcome:
         out.error = f"{container_mod._get_runtime()} is not available"
         return out
     cache, prs, now = _PaneCache(), _PrStatus(), time.time()
+    pending_release = frozenset(
+        n for n, f in pending_failures().items()
+        if isinstance(f, dict) and f.get("owner_release"))
     for info in infos:
         if scope.matches(info):
-            out.decisions.append(_decide(info, scope, cache, prs, now))
+            out.decisions.append(_decide(info, scope, cache, prs, now,
+                                         pending_release))
     return out
 
 
@@ -608,6 +623,8 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
                     out.removed.append(d.info.name)
                 elif msg.startswith("error:"):
                     out.failures[d.info.name] = msg[len("error: "):]
+                    if d.released:
+                        out.released_failures.add(d.info.name)
                 else:
                     d.action, d.reason = "keep", msg
         try:
@@ -752,6 +769,8 @@ def _record(out: Outcome, scope: Scope, reason: str,
         failures.pop(d.info.name, None)
     for name, err in out.failures.items():
         failures[name] = {"error": err, "at": int(time.time()), "reason": reason}
+        if name in out.released_failures:
+            failures[name]["owner_release"] = True
     state = {
         "last_run": int(time.time()),
         "last_reason": reason,
