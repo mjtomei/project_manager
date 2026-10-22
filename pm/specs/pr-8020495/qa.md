@@ -42,8 +42,10 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   INPUT_REQUIRED and sign-off BLOCKED (R11/R12).
 - **R5 — QA run with overlapping scenarios.** Given a QA run with 3
   scenarios launched together, when the user views history, then the QA run
-  attempt has a planner child (label `planner`) and three scenario children
-  (`s1`..`s3`) with their verdicts, and the run shows a scenario summary with
+  attempt has a planner child (label `qa planner`) and three scenario
+  children (`qa s1`..`qa s3`) with their verdicts (a scenario attempt spans
+  agent + verification; its end matches the TUI "Scenario N (…): PASS
+  (verified)" line, after the shared 30 s verdict grace), and the run shows a scenario summary with
   scenario count, a wall-clock figure (union of execution intervals) and a
   sum labelled "not wall-clock"; the run's elapsed time is never the sum of
   scenario times.
@@ -51,14 +53,16 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   than the scenario count, when history is viewed, then waiting scenarios show
   a `queued` phase counted as wait. Given a scenario window that dies mid-run,
   when PM relaunches it, then the original scenario attempt ends `vanished`,
-  a new attempt for the same scenario with `retry=1` appears whose leading
+  a new attempt for the same scenario with `retry=1` (shown
+  `qa sN retry 1`) appears whose leading
   `backoff` phase owns a "relaunch backoff" timer (armed/due/remaining while
   active, then listed under "Recent timers" as `fired`).
 - **R7 — planner deadline.** Given the QA planner is still running, when the
-  user views history, then an active planner-deadline timer is shown with a
-  due time ~60 min after planning started and expected transition
-  "give up planning → INPUT_REQUIRED"; once planning finishes it moves to
-  "Recent timers" as cleared.
+  user views history, then an active "QA planner deadline" timer is shown
+  with a due time ~60 min after the planner pane launched and expected
+  transition "stop waiting for a plan → QA INPUT_REQUIRED"; once a plan is
+  found it moves to "Recent timers" as `cancelled`. (The timer is armed at
+  pane launch, so it is absent for the first ~2 s of the planner child.)
 - **R8 — actions pane History row.** Given any PR, when the user opens the
   PR actions popup, then a `history` row is listed with a compact badge
   (`no history`, `N runs`, `hold: …`, `review-loop i2: turn done, 8s left`…);
@@ -69,15 +73,19 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   merged (runtime state cleaned up, panes closed), when the user opens the
   actions popup, then only the History row is offered (not "No actions
   available"), and `pm pr history` still shows every attempt; any journaled
-  hold still open shows as `released (PR merged)`.
+  hold still open shows as `released (PR merged)`. A stale
+  spec-awaiting-approval flag on a merged/closed PR is not shown as a hold.
 - **R10 — sign-off router and throttle.** Given auto-start drives a PR into
   sign-off, when the router launches, then history shows a `signoff`
   attempt and a 60 s relaunch-throttle timer (gate); when the router's
   verdict is routed the attempt ends with that verdict.
-- **R11 — merge holds.** Given a merge whose fake session reports
-  INPUT_REQUIRED, or an auto-start merge hold, then an indefinite hold is
-  listed (no countdown) and `Waiting for: human: …`; when the merge
-  completes, the hold is released.
+- **R11 — merge holds.** Given an auto-start / auto-sequence
+  stop-before-merge hold (the PR signed off and waiting for the user to
+  press `g`), then an indefinite hold is listed (no countdown) and
+  `Waiting for: human: …`; when the merge completes, the hold is released.
+  *Live-test caveat:* merge INPUT_REQUIRED is not drivable with
+  fake-claude (merge sessions emit no verdicts), and a clean `g` merge
+  journals no merge attempt; use the stop-before-merge hold.
 - **R12 — derived holds.** Given a PR with a spec awaiting approval, QA
   ended INPUT_REQUIRED while status is `qa`, or sign-off BLOCKED, then a
   corresponding hold is shown without countdown even though nothing was
@@ -95,6 +103,15 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   their timers `lost (owner exited)`; the resumed loop/QA run creates *new*
   attempts flagged `resumed`/`adopted`; no attempt id is reused and no
   pre-restart attempt is shown as still running.
+- **R15 — hard-killed TUI.** Given a review loop running in a TUI that is
+  SIGKILLed (no breadcrumb, so a new TUI does not resume it), when the user
+  runs `pm pr history` before and after a new TUI mounts, then the killed
+  loop and its iteration read `interrupted` (owner exited; end unknown
+  before the new TUI's mount sweep), the `Now` runtime line marks the
+  stale loop entry `(stale: owner exited)` instead of "loop running", and
+  its grace timer reads `lost (owner exited)`. A loop the user restarts
+  afterwards is a new attempt. Concurrent readers never judge the dead
+  owner alive (owner probes serialize; zombie pids count as dead).
 
 ## 2. Setup
 
@@ -155,8 +172,9 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   "not tracked" span (counted as neither exec nor wait), not an extra
   "start untracked" row per review loop.
 - **E11 — cleanup ends in-flight attempts.** Given an action is in flight
-  (impl pane, review loop, merge pane), when `pm pr cleanup` (or merge
-  detection) tears down the PR's resources, then those attempts end
+  (impl pane, review loop, merge pane), when `pm pr cleanup
+  --resources`, TUI `Y`, `pm pr merge` or merge detection tears down the
+  PR's resources (plain `pm pr cleanup` only removes the workdir), then those attempts end
   `interrupted` with reason "PR resources cleaned up"; none is shown
   running afterwards and the history survives.
 - **E12 — short-lived CLI openers.** Given an attempt opened by a
@@ -168,7 +186,9 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   never as if it were the running attempt's outcome.
 - **E14 — history path not a directory.** If `~/.pm/history` is a regular
   file, `pm pr history` (text and `--json`) prints honest empty history and
-  exits 0; loops are unaffected.
+  exits 0; loops are unaffected. The same holds for a read-only
+  `~/.pm/history` that has no `owners/` subdirectory (the liveness probe
+  falls back to the pid check, never tracebacks).
 - **E15 — popup ergonomics.** At 80 columns the popup header wraps so the
   `H=history` hint is visible, Enter on any action row (including history)
   runs it, and the History pager wraps at word boundaries to the popup
