@@ -147,6 +147,11 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             verdict_display = (
                 f"{_YELLOW}{spinner} verifying{_RESET}{fail_hint}"
             )
+        elif "(launch-retry" in verdict:
+            # Worker launch failed and is being retried (not a verdict)
+            m = re.search(r'\(launch-retry:(\d+)/(\d+)\)', verdict)
+            count = f" {m.group(1)}/{m.group(2)}" if m else ""
+            verdict_display = f"{_YELLOW}launch retry{count}{_RESET}"
         elif "(retrying" in verdict:
             # Back to pending after verification flagged — show retry count
             m = re.search(r'\(retrying:(\d+)\)', verdict)
@@ -186,15 +191,20 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         done = sum(1 for s in scenarios
                    if s.get("verdict") and s.get("verdict") not in ("interactive", "queued")
                    and "(retrying" not in s.get("verdict", "")
+                   and "(launch-retry" not in s.get("verdict", "")
                    and "(verifying" not in s.get("verdict", ""))
         total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
         queued = sum(1 for s in scenarios if s.get("verdict") == "queued")
         verifying = sum(1 for s in scenarios if "(verifying" in s.get("verdict", ""))
+        relaunching = sum(1 for s in scenarios
+                          if "(launch-retry" in s.get("verdict", ""))
         progress = f"  {_DIM}Progress: {done}/{total} scenarios complete"
         if verifying:
             progress += f" ({verifying} verifying)"
         if queued:
             progress += f" ({queued} queued)"
+        if relaunching:
+            progress += f" ({relaunching} relaunching)"
         progress += f"{_RESET}"
         lines.append(progress)
 
