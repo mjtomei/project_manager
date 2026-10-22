@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T17:09:49.145919+00:00'
+  updated_at: '2026-10-22T17:21:08.359692+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29711,6 +29711,15 @@ prs:
       reports/case-coverage.*. Code otherwise reviewed with no further changes.'
     created_at: '2026-10-22T17:09:49Z'
     last_edited: '2026-10-22T17:09:49Z'
+  - id: note-45db92d
+    text: 'Review loop 2870 i2 (afeb8786): pm_cases now writes/reads plan baselines,
+      drafts and excerpts as explicit UTF-8 (reference_text/generator_input already
+      hashed them as UTF-8, so a non-UTF-8 locale would mark every PM case stale);
+      kep.yaml/markdown-index reads and the coverage .md write also name UTF-8. Byte-identical
+      outputs: full rebuild + --check clean (55198), 63 tests pass. Code otherwise
+      reviewed with no further changes.'
+    created_at: '2026-10-22T17:21:08Z'
+    last_edited: '2026-10-22T17:21:08Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
