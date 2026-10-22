@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T05:18:38.814376+00:00'
+  updated_at: '2026-10-22T05:55:11.056379+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30555,6 +30555,16 @@ prs:
       alive. faketime installs via sudo apt-get install faketime.'
     created_at: '2026-10-22T04:55:34Z'
     last_edited: '2026-10-22T04:55:34Z'
+  - id: note-37ae873
+    text: 'QA S31 (2026-10-22) PASS on aed1565b, no edits: S26 phantom re-check held
+      — after plain z d (ended done NEEDS_WORK before zz d) + 2-iteration loop, 88
+      s of reads show no open review row / review=running / stuck waiting_for, badges
+      [start: turn done]; story 1 (3 graces fixed+falling, IR hold 5 reads null due,
+      badge 12s vs R1 11.5s, R1/R2 0 mismatches), pager==CLI (only live start-row/idle
+      diffs, max 74/78 cols), cancel A ≤0.4 s, B superseded, C NW/NW/PASS all held.
+      Captures /pm-captures/scenarios/31.'
+    created_at: '2026-10-22T05:55:11Z'
+    last_edited: '2026-10-22T05:55:11Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
