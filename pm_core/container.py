@@ -412,7 +412,7 @@ def launch_error_summary(exc: BaseException, name: str | None = None) -> str:
 
 
 def diagnose_exec_failure(name: str) -> str:
-    """Probe why a worker ``exec`` into container *name* died at startup.
+    """Probe why a worker ``exec`` into container *name* died.
 
     Returns a cause string, or "" when the container is running and a
     trivial exec now succeeds (the failure was transient).  Bounded by

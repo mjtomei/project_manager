@@ -332,6 +332,33 @@ def test_exec_and_exit_failures_are_distinguished(tmp_path):
     assert not state.scenario_verdicts
 
 
+def test_container_exit_mid_run_names_diagnosed_cause(tmp_path):
+    """A started container worker that dies mid-run (the #236 fork storm)
+    is an ``exit`` failure, but still carries the probed runtime cause."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="ran", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1", transcript_path=str(tp),
+                    container_name="pm-qa-x-s1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+
+    def on_tick(clock):
+        if state.launch_retries:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.container._run_runtime", side_effect=_runtime(PID_STDERR)),
+    ]
+    _run(state, tmp_path, patches)
+
+    rec = state.launch_retries[1]
+    assert rec["kind"] == "exit"
+    assert "PID" in rec["cause"] and "podman restart pm-qa-x-s1" in rec["cause"]
+
+
 # ---------------------------------------------------------------------------
 # Restart and queue interplay
 # ---------------------------------------------------------------------------

@@ -2634,6 +2634,8 @@ _LAUNCH_FAILURE_LABELS = {
     "exec": "worker exited before Claude started",
     "exit": "worker exited before any verdict",
 }
+# Cause for an ``exit`` failure when no container diagnosis names one.
+_EXIT_CAUSE = "worker exited before any verdict (killed/crashed mid-run)"
 
 
 def _retry_delay(attempts: int) -> float:
@@ -2888,7 +2890,7 @@ def _poll_tmux_verdicts(
         *op* is ``launch`` (first launch of a queued scenario), ``create``
         (full relaunch after a creation failure), ``relaunch`` (new worker
         window in the existing clone/container) or ``diagnose`` (probe the
-        container for why its worker died before starting).
+        container for why its worker died).
         """
         idx = scenario.index
 
@@ -3011,12 +3013,17 @@ def _poll_tmux_verdicts(
             scenario = _scenario_by_index(idx)
             if scenario is None or idx not in pending:
                 continue
+            if state.stop_requested:
+                break
             verdicts_changed = True
             rec = retries.get(idx)
             if op == "diagnose":
-                _record_failure(scenario, "exec", detail or (
-                    "worker pane exited before Claude started "
-                    "(container exec succeeds now)"))
+                if _worker_has_started(scenario):
+                    _record_failure(scenario, "exit", detail or _EXIT_CAUSE)
+                else:
+                    _record_failure(scenario, "exec", detail or (
+                        "worker pane exited before Claude started "
+                        "(container exec succeeds now)"))
                 continue
             if idx in state.scenario_verdicts:
                 # The relaunched concretizer settled it (rejected or
@@ -3034,8 +3041,6 @@ def _poll_tmux_verdicts(
                 _trust_watches.pop(idx, None)
                 _log.info("Scenario %d worker window created (%s)", idx, op)
                 continue
-            if state.stop_requested:
-                break
             kind = ("create" if op in ("launch", "create")
                     else (rec or {}).get("kind", "exec"))
             _record_failure(scenario, kind, (
@@ -3212,14 +3217,14 @@ def _poll_tmux_verdicts(
                     verdicts_changed = True
                     _settle(scenario, state.scenario_verdicts[idx])
                     continue
-                if _worker_has_started(scenario):
-                    _record_failure(scenario, "exit", (
-                        "worker exited before any verdict "
-                        "(killed/crashed mid-run)"))
-                elif scenario.container_name:
-                    # Find out why exec died before scheduling the retry —
-                    # off this thread, the runtime may be slow to answer.
+                if scenario.container_name:
+                    # Find out why the worker died before scheduling the
+                    # retry — off this thread, the runtime may be slow to
+                    # answer.  An exhausted container (PID / keyring) kills
+                    # running workers too, not only fresh execs.
                     _start_op(scenario, "diagnose")
+                elif _worker_has_started(scenario):
+                    _record_failure(scenario, "exit", _EXIT_CAUSE)
                 else:
                     _record_failure(scenario, "exec",
                                     "worker pane exited before Claude started")

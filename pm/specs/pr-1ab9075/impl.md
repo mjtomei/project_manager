@@ -98,8 +98,10 @@ Classifier recognises:
 Unclassified output is passed through (stderr tail).  Container-create
 failures in `_prepare_scenario` record `container create failed: <cause>`
 (classified `CalledProcessError.stderr` / `ContainerError` text) in
-`scenario_verdict_reasons`.  Diagnosis of an `exec` failure runs in the
-scenario's background thread (never on the poll thread).
+`scenario_verdict_reasons`.  In container mode every dead worker pane
+(`exec` *and* `exit` — an exhausted container also kills running workers,
+as in #236) is diagnosed before its retry is scheduled; the diagnosis runs
+in the scenario's background thread (never on the poll thread).
 While retrying, `qa_status.json` shows the scenario as
 `(launch-retry:<n>/<max>)` with the cause as `verdict_reason`;
 `qa_status.py` renders it as "launch retry n/max" and does not count it as
