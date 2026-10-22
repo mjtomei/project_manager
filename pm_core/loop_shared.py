@@ -115,9 +115,15 @@ def poll_for_verdict(
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
     workdir: str | None = None,
+    on_idle_without_verdict: Callable[[], None] | None = None,
+    on_tick: Callable[[], None] | None = None,
 ) -> str | None:
     """Block until Claude signals idle, then extract a verdict from the
     JSONL transcript.
+
+    *on_idle_without_verdict* runs for each idle turn that ends without a
+    verdict and *on_tick* on every wait iteration (QA uses them to surface
+    and recover from a worker-route outage, see qa_loop._RouteStallWatch).
 
     Returns the assistant text from the latest turn when a verdict is
     found, or ``None`` when the pane disappears / ``stop_check`` fires.
@@ -170,6 +176,9 @@ def poll_for_verdict(
             _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
             return None
 
+        if on_tick:
+            on_tick()
+
         if trust_watch is not None:
             blocked = trust_watch.check()
             if blocked:
@@ -202,6 +211,8 @@ def poll_for_verdict(
             _log.info("%s: hook-driven verdict %s (session_id=%s)",
                       log_prefix, verdict, session_id)
             return read_latest_assistant_text(transcript_path) or verdict
+        if on_idle_without_verdict:
+            on_idle_without_verdict()
 
 
 def wait_for_follow_up_verdict(

@@ -284,7 +284,7 @@ def _resolve_provider(provider: str | None = None):
     launch_claude_print_background to avoid repeating the same pattern.
     """
     from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
+    provider_cfg = get_provider(provider, strict=bool(provider))
     provider_env = provider_cfg.env_vars()
     model_flag = provider_cfg.model_flag()
     run_env = {**os.environ, **provider_env} if provider_env else None
@@ -773,6 +773,7 @@ def build_claude_shell_cmd(
     effort: str | None = None,
     write_dir: str | None = None,
     session_type: str | None = None,
+    container: bool = False,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -806,6 +807,15 @@ def build_claude_shell_cmd(
             exist on the host, pass the corresponding host path here so
             the file can be written.  The command will still reference the
             file via ``cwd`` (the path claude sees at runtime).
+        container: The command runs inside a pm container.  Only matters
+            for ``router`` providers (pm_core.worker_route): the command
+            then starts the in-container bridge forwarder first and never
+            starts claude if it fails; on the host a router provider's
+            ``launcher`` replaces the ``claude`` executable.
+
+    An explicitly named *provider* that is not configured raises
+    :class:`~pm_core.providers.ProviderNotFoundError` instead of silently
+    launching on the built-in claude provider.
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -823,13 +833,33 @@ def build_claude_shell_cmd(
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
     # Resolve provider configuration
-    provider_env, model_flag, _ = _resolve_provider(provider)
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider, strict=bool(provider))
+    provider_env = provider_cfg.env_vars()
+    model_flag = provider_cfg.model_flag()
+
+    # Router providers (pm_core.worker_route): command-scoped, never global.
+    exe = "claude"
+    route_prefix = ""
+    if provider_cfg.type == "router":
+        from pm_core import worker_route
+        if container:
+            provider_env["ANTHROPIC_BASE_URL"] = (
+                worker_route.container_base_url(provider_cfg))
+            route_prefix = worker_route.container_ensure_cmd(provider_cfg) + " && "
+        elif provider_cfg.launcher:
+            exe = shlex.quote(os.path.expanduser(provider_cfg.launcher))
 
     # Build env prefix for non-claude providers
     env_prefix = ""
     if provider_env:
         parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
         env_prefix = " ".join(parts) + " "
+    if provider_cfg.unset_env_vars():
+        # Unset (not empty) so Claude authenticates the way the router
+        # expects rather than with a stray key from the environment.
+        env_prefix = "env " + "".join(
+            f"-u {v} " for v in provider_cfg.unset_env_vars()) + env_prefix
 
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)
@@ -861,7 +891,7 @@ def build_claude_shell_cmd(
             if os.path.isdir(cwd):
                 cd_prefix = f"cd {shlex.quote(cwd)} && "
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-        cmd = f"{cd_prefix}{env_prefix}claude{skip}"
+        cmd = f"{cd_prefix}{route_prefix}{env_prefix}{exe}{skip}"
 
     # Explicit model param overrides provider's model_flag
     effective_model = model or model_flag
