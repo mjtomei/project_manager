@@ -531,3 +531,32 @@ def test_prefix_timeout_clears_its_own_hint():
     app, shown = _prefix_app()
     ProjectManagerApp._cancel_w_mode(app)
     assert shown[-1] == ""
+
+
+# QA s1 (pr-f094946): ``L`` pressed as auto-QA started landed inside the
+# sticky "Review loop done … PASS" window, so the log pane opened but the
+# TUI never showed "Launched log pane".
+
+def test_launch_pane_confirmation_shown_while_sticky(monkeypatch):
+    from pm_core.tui import pane_ops
+    app, shown = _stub_app()
+    _log(app, "Review loop done: PASS", sticky=10)
+    monkeypatch.setattr(pane_ops, "get_session_and_window",
+                        lambda a: ("sess", "@0"))
+    monkeypatch.setattr(pane_ops.pane_registry, "find_live_pane_by_role",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(pane_ops.pane_registry, "load_registry",
+                        lambda s: {"generation": "1"})
+    monkeypatch.setattr(pane_ops.pane_layout, "preferred_split_direction",
+                        lambda *a: "h")
+    monkeypatch.setattr(pane_ops.pane_layout, "register_and_rebalance",
+                        lambda *a: None)
+    monkeypatch.setattr(pane_ops.tmux_mod, "split_pane", lambda *a, **k: "%8")
+    monkeypatch.setattr(pane_ops.tmux_mod, "select_pane_smart",
+                        lambda *a: None)
+    pane_ops.launch_pane(app, "tail -f log", "log")
+    assert shown[-1] == " Launched log pane"
+    monkeypatch.setattr(pane_ops.pane_registry, "find_live_pane_by_role",
+                        lambda *a, **k: "%8")
+    pane_ops.launch_pane(app, "tail -f log", "log")
+    assert shown[-1] == " Focused existing log pane"
