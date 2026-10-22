@@ -30556,6 +30556,31 @@ prs:
       and MERGE is coerced to BLOCKED; commit in the PR workdir first.'
     created_at: '2026-10-22T16:30:11Z'
     last_edited: '2026-10-22T16:30:25Z'
+  - id: note-dc05f70
+    text: 'S29 refine (2026-10-22): a SIGNOFF_IMPL hop writes signoff_return.launch_claim
+      in the same update as the transition (build_return_record). If the hop''s own
+      `pm pr start --fresh` is refused because the impl spec is pending, nothing releases
+      that claim. So an approval within 180 s of the hop makes the TUI log "rework
+      launch already claimed, skipping", and the rework launches on the re-check about
+      185 s after that pass. The paused scheduler/CLI never re-claim (spec_pending
+      is checked before claim_return_launch). Reproduce the pending-at-hop state with
+      `pm set spec-mode review` plus `pm pr spec P impl --regenerate` while P is in
+      sign_off; restore with `pm set spec-mode prompt`. Auto-start targets live in
+      the TUI (`pm autostart list`), not in project.yaml.'
+    created_at: '2026-10-22T14:31:53Z'
+    last_edited: '2026-10-22T14:31:53Z'
+  - id: note-52b6125
+    text: 'QA S29 (26603a96): returned+spec-paused PR held through breadcrumb restart
+      (claim never renewed, no start attempts 4+ min), approval -> exactly one --fresh
+      rework (TUI or CLI tick), 3 approvers + restart + 1969 churn calls all held.
+      Fixed: tree row "◎ in_progress ⇤ S impl" was 22 cells in the 20-cell box and
+      clipped the right border; the icon is dropped when the row overflows (widget
+      test asserts the border). Observation (not exercised, matches the S29 story
+      1 wording): with no other scheduler event, an approval before the hop claim
+      expires launches on _recheck_after_claim = skip time + 185 s, not hop + 185
+      s (S29 story 3 launched at hop + 180 s only because target churn drove passes).'
+    created_at: '2026-10-22T14:55:35Z'
+    last_edited: '2026-10-22T14:55:35Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
