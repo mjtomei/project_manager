@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7e00786
+  active_pr: pr-9ee4d64
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T03:54:23.199360+00:00'
+  updated_at: '2026-10-22T03:54:10.554794+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8296,6 +8296,17 @@ prs:
       (T+60 skip / T+185 one launch) all held.'
     created_at: '2026-10-22T01:59:35Z'
     last_edited: '2026-10-22T01:59:35Z'
+  - id: note-4ab5e5d
+    text: 'QA S15 (real TUI e2e, watcher off) on 5d41309c PASS, no code changes: A
+      up_to_date→MERGE (parents/tree = bound candidate, branch-committed note intact);
+      B conflict→router SIGNOFF_IMPL, restart on awaiting:impl → exactly one fresh
+      impl (pane %18→%33, 650/650 samples ≤1 window), return prompt/record correct;
+      fresh review/QA/sign-off (Previous sign-off return section) → MERGE bound to
+      HEAD+master, O held ≥44 s; g published the exact candidate, no refs/pm/merge,
+      worktrees or merge windows left. Filed pr-9ee4d64 (run transcripts overwritten
+      across a return). Captures /pm-captures/scenarios/15.'
+    created_at: '2026-10-22T03:54:10Z'
+    last_edited: '2026-10-22T03:54:10Z'
   - id: note-f8db129
     text: 'QA S18 (CLI auto-sequence routing + TUI/CLI step-lock race) on 5d41309c:
       all 4 stories held, no code changes. F REVIEW return (i2 transcript, Integrate
@@ -30265,11 +30276,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T23:48:30.074151+00:00'
-  updated_at: '2026-10-21T23:48:30.074151+00:00'
+  updated_at: '2026-10-22T03:54:04.112795+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0b07bd5
+    text: 'Hit again in pr-ac10f03 QA S15 (2026-10-22): the real rework impl agent
+      itself ran `pm tui send d` to hand off to review; the TUI switched (incl. the
+      recorder client) to the stale pre-return review-<pr> window for ~70 s until
+      auto_review replaced it with a fresh loop. No stale verdict was reused.'
+    created_at: '2026-10-22T03:54:04Z'
+    last_edited: '2026-10-22T03:54:04Z'
 - id: pr-2e06289
   plan: bugs
   title: 'Bug: TUI background GitHub sync finalizes a GitHub-side merge without the
@@ -30346,6 +30364,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T00:57:58.404926+00:00'
   updated_at: '2026-10-22T00:57:58.404926+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9ee4d64
+  plan: bugs
+  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review
+    transcripts after a sign-off return'
+  branch: pm/pr-9ee4d64-bug-auto-start-run-transcripts-overwrite-pre-retur
+  status: pending
+  depends_on: []
+  description: 'pm/transcripts/<autostart-run>/ keeps one file per (step, pr): impl-<pr>.jsonl,
+    signoff-<pr>.jsonl, review-<pr>-i1.jsonl. When sign-off routes a PR back (SIGNOFF_IMPL/REVIEW)
+    within the same auto-start run, the rework impl, the fresh review loop (iteration
+    restarts at 1) and the fresh sign-off write the same paths, so the archived transcript
+    of the router that made the return decision (and the pre-return impl/review) is
+    lost from the run archive (the original ~/.claude/projects JSONL survives). Repro
+    (QA pr-ac10f03 S15, 2026-10-22): two overlapping PRs, B returned SIGNOFF_IMPL
+    at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl and
+    impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return
+    round (e.g. signoff-<pr>-r2.jsonl) or by session id.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-22T03:54:03.261607+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
