@@ -8,7 +8,9 @@ Grounded in `pm/specs/pr-ac10f03/impl.md` and the diff (`pm_core/integration.py`
 User-facing surfaces under test:
 - CLI: `pm pr signoff integrate <pr> [--record] [--apply]`, `pm pr signoff record <pr>`,
   `pm pr merge [<pr>] [--no-signoff-check]`, `pm pr auto-sequence <pr>`,
-  `pm pr list` / `pm pr show` (status + sign-off/return verdict icons), `pm pr start`.
+  `pm pr list` (status + sign-off/return verdict icons), `pm pr note list`,
+  `pm prompt <pr>`, `pm pr start`. There is no `pm pr show`: per-PR records
+  (integration, signoff_return, merge_integrity) are read from `pm/project.yaml`.
 - TUI: auto-start / auto-sequence driving start → review → QA → sign-off → merge,
   merge key (`g`) / command bar merge, merge hold (`O`), wait-for-merge, the
   tech-tree sign-off/return marker, log messages for stale / coerced / refused.
@@ -32,7 +34,7 @@ User-facing surfaces under test:
   are listed, exit 1, and the PR workdir has no MERGE_HEAD, no conflict markers,
   and `git worktree list` shows no leftover temporary worktrees.
 - **R1.4** Given the same, When the user runs `--record` from the base pm dir, Then
-  `pm pr show` / project.yaml carries the integration record (head, base sha,
+  `pm/project.yaml` carries the integration record (head, base sha,
   status, conflicts) and `$CAP/integration.json` exists with full context.
 - **R1.5** Given a clean moved base, When the user runs `--apply`, Then a merge
   commit "Integrate master@<sha8> into <branch>" is added to the PR branch in the
@@ -48,7 +50,7 @@ User-facing surfaces under test:
   the rule that the agent must not merge/push the base itself.
 - **R2.2** Given a conflicted integration, When the router emits SIGNOFF_MERGE,
   SIGNOFF_REVIEW or SIGNOFF_REQA, Then pm records SIGNOFF_IMPL (coerced, reason
-  shown in TUI log / `pm pr show`) and the PR goes back to `in_progress`.
+  shown in TUI log / project.yaml `signoff_return`) and the PR goes back to `in_progress`.
 - **R2.3** Given a clean, moved base, When the router emits SIGNOFF_REVIEW (or REQA),
   Then pm merges the base into the PR branch, the PR moves to `in_review` (or
   `qa`), a `signoff_return` record (verdict, hop, reason, reviewed head,
@@ -97,6 +99,14 @@ User-facing surfaces under test:
   finalizes (status merged) without publishing anything new.
 - **R4.5** Given a github backend PR approved at head H, When the user merges, Then
   `gh pr merge --match-head-commit H` is used and the result is post-verified.
+  `--no-signoff-check` recovery of a merge done on GitHub is also verified against
+  the bound approval (WARNING + `merge_integrity` + PR note when it published
+  unreviewed commits). The TUI background GitHub sync is not yet verified
+  (tracked separately as pr-2e06289; out of scope).
+- **R4.6** Given a merge that already published to the base but did not finalize
+  (e.g. pm was killed after the publish), When the user re-runs `pm pr merge`,
+  Then it finalizes via recovery (status merged) instead of invalidating the
+  approval or sending the PR back to sign-off.
 
 ### Holds, status & restarts
 - **R5.1** Given a PR with a manual merge hold (O) or `--wait-for-merge`, When
@@ -108,6 +118,16 @@ User-facing surfaces under test:
 - **R5.3** Given a sign-off return was recorded, When the TUI is killed and restarted
   before the routed step launched, Then the routed step launches exactly once
   (fresh), with no duplicate impl/review/QA windows.
+- **R5.4** Given an IMPL or REVIEW return, When the TUI hop, a TUI restart catch-up
+  and `pm pr auto-sequence` ticks race to relaunch the routed step, Then exactly
+  one launcher wins (the hop records a launch claim atomically with the
+  transition; catch-up paths claim first and skip when claimed); no launcher
+  kills another's session. A QA (REQA) return takes no claim.
+- **R5.5** Given the local backend with the main repo's base checked out and a
+  PR branch that committed edits to `pm/project.yaml` (e.g. a cross-PR note),
+  When the merge fast-forwards with uncommitted project.yaml state in the main
+  repo, Then project.yaml ends with no conflict markers, live state wins, note
+  ids from both sides are kept, and the PR is finalized as merged.
 
 ## 2. Setup
 - Install pm from the PR clone (`./install.sh --local` or venv + `PYTHONPATH`, `pm which`).
@@ -146,8 +166,7 @@ User-facing surfaces under test:
 
 ## 4. Pass/Fail criteria
 Pass: every Then above observed on the real surface (CLI output/exit code, TUI
-render, tmux windows, git history of master and PR branch, project.yaml via
-`pm pr show`). Fail if any of: master/remote base receives a commit not equal to
+render, tmux windows, git history of master and PR branch, project.yaml). Fail if any of: master/remote base receives a commit not equal to
 `commit-tree(approved tree, approved base, approved head)`; a merge-resolution
 Claude window opens on the publish path; a stale/legacy/invalidated approval
 publishes; a PR is marked merged without its head in base; a hold is released by
@@ -163,7 +182,9 @@ workdir by pm; temp worktrees leaked.
   the test asserts detection + note, not refusal.
 - A held PR whose base moves is re-signed only when a merge is attempted (gate
   fetches); the driver does not poll the remote — tests attempt the merge.
-- `--companion` help still mentions a "merge resolution window"; it now applies only
-  to the post-publish recovery window — treated as cosmetic.
+- `--companion` help and merge-window messages now describe only the post-publish
+  repo-update recovery window (wording fixed in review b592 i5).
+- Restarted TUI adopting an unverified `review-<pr>` pane is a known gap filed as
+  pr-7e00786 — out of scope here.
 
 No [UNRESOLVED] ambiguities.
