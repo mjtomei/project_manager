@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T01:38:55.410835+00:00'
+  updated_at: '2026-10-22T01:59:35.318610+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8270,6 +8270,32 @@ prs:
       in ~/.pm/debug/<tag>.log). Captures /pm-captures/scenarios/13.'
     created_at: '2026-10-22T01:38:55Z'
     last_edited: '2026-10-22T01:38:55Z'
+  - id: note-5c83c16
+    text: 'QA S10 refine (launch claim): fake-claude scripted cursors are per session
+      type, not per PR. Sign-off verdicts go out in router launch order, and `pm fake-claude
+      config set` resets the cursor, so re-set it before each new sign-off run. A
+      hop always takes the claim atomically, so "awaiting set, no claim" never happens
+      through a hop. A dead launcher is reproduced deterministically with a one-shot
+      post-checkout hook in the PR workdir that kills its `pm_core.wrapper pr start`
+      ancestor: --fresh has already killed the old impl window, and the new one never
+      opens. The TUI has no periodic auto-start pass: after the 180 s claim expiry,
+      nothing relaunches until an event (`pm autostart add <pr>` re-arm, a loop completion,
+      restart) or a `pm pr auto-sequence` tick. A CLI loser prints `running: review`/`running:
+      impl`. Only the TUI loser logs "launch already claimed" (pm log grep).'
+    created_at: '2026-10-22T01:13:44Z'
+    last_edited: '2026-10-22T01:13:44Z'
+  - id: note-da43790
+    text: 'QA S10 49e2d30e (pushed at finalize; push.sock was missing in the
+      s-10 container; commit is in the s-10 clone, patch at $CAP/scenarios/10/0001-qa-serialize-step_signoff-*.patch):
+      a pm pr auto-sequence tick that loaded project.yaml before the TUI hop saw the
+      bounce integration merge as "HEAD moved", retired the run and asked to relaunch
+      sign-off (pm pr signoff refused "PR is in_review — sign-off runs after QA",
+      exit 1; tighter timing launches a stray router). step_signoff now takes a per-PR
+      flock and re-reads the PR (left sign_off -> running). Post-fix story 1 rerun
+      clean; REVIEW restart race, REQA restart mid-planner and stranded IMPL claim
+      (T+60 skip / T+185 one launch) all held.'
+    created_at: '2026-10-22T01:59:35Z'
+    last_edited: '2026-10-22T01:59:35Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
