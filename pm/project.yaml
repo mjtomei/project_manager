@@ -8256,10 +8256,10 @@ prs:
       name + peer repo-wide worktree prune). Fix: per-repo flock (<git-common-dir>/pm-integration.lock)
       around fetch_base + temp-worktree merge, unique worktree names, prune only if
       remove fails; new multiprocess regression test. 100/100 post-fix. All S12 Thens
-      held post-fix. Pushed at finalize (push.sock was missing in the QA
-      container). Remaining limit: an agent''s
-      own git fetch in the PR workdir can still hit a transient bad-object while pm
-      holds a candidate worktree (git-level; the lock only covers pm). Captures /pm-captures/scenarios/12'
+      held post-fix. Pushed at finalize (push.sock was missing in the QA container).
+      Remaining limit: an agent''s own git fetch in the PR workdir can still hit a
+      transient bad-object while pm holds a candidate worktree (git-level; the lock
+      only covers pm). Captures /pm-captures/scenarios/12'
     created_at: '2026-10-22T01:17:46Z'
     last_edited: '2026-10-22T01:17:46Z'
   - id: note-9c3adef
@@ -8285,8 +8285,8 @@ prs:
     created_at: '2026-10-22T01:13:44Z'
     last_edited: '2026-10-22T01:13:44Z'
   - id: note-da43790
-    text: 'QA S10 49e2d30e (pushed at finalize; push.sock was missing in the
-      s-10 container; commit is in the s-10 clone, patch at $CAP/scenarios/10/0001-qa-serialize-step_signoff-*.patch):
+    text: 'QA S10 49e2d30e (pushed at finalize; push.sock was missing in the s-10
+      container; commit is in the s-10 clone, patch at $CAP/scenarios/10/0001-qa-serialize-step_signoff-*.patch):
       a pm pr auto-sequence tick that loaded project.yaml before the TUI hop saw the
       bounce integration merge as "HEAD moved", retired the run and asked to relaunch
       sign-off (pm pr signoff refused "PR is in_review — sign-off runs after QA",
@@ -30332,6 +30332,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T00:57:58.404926+00:00'
   updated_at: '2026-10-22T00:57:58.404926+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ccdec71
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the
+    review window could not be launched'
+  branch: pm/pr-ccdec71-bug-pm-pr-auto-sequence-reports-advanced-review-re
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_auto_sequence (in_review, no verdict, no review
+    window) calls _launch_review_iteration -> _launch_review_window, which only prints
+    "Review window requires tmux." (or "tmux session ... not found") and returns;
+    the tick then prints "advanced: review_relaunched" and exits 0. Repro (seen in
+    pr-ac10f03 QA S18): run `pm pr auto-sequence <pr>` from a shell with TMUX unset
+    after the PR reaches in_review -> every tick prints "Review window requires tmux."
+    + "advanced: review_relaunched" forever, nothing launches, no paused/error status.
+    Expected: report a launch failure (non-zero or "paused: review_launch_failed")
+    instead of claiming an advance.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T03:50:49.520900+00:00'
+  updated_at: '2026-10-22T03:50:49.520900+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
