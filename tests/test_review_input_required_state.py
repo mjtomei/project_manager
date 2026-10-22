@@ -501,3 +501,44 @@ class TestRestartAdoption:
         finally:
             release.set()
             p.stop()
+
+    def test_adopted_in_flight_input_required_waits_on_saved_transcript(self, env):
+        """An iteration in flight at the restart ends INPUT_REQUIRED: the
+        follow-up wait reads the transcript it was launched under, even
+        when the resumed loop got a new transcript dir (manual loops)."""
+        tdir, _ = env
+        old_dir = tdir / "manual-old"
+        old_dir.mkdir()
+        new_dir = tdir / "manual-new"
+        new_dir.mkdir()
+        pane3 = Pane(old_dir, 3)
+        pane3.verdict("INPUT_REQUIRED", "Which option?")
+        release4 = threading.Event()
+        panes = {}
+
+        def it4():
+            panes[4] = Pane(new_dir, 4)
+            release4.wait(10)
+            return panes[4].verdict("PASS")
+
+        # Counter bumped to 3, no history entry yet: iteration 3 in flight.
+        state = _restored(old_dir, 3, ["NEEDS_WORK", "NEEDS_WORK"],
+                          input_required=False)
+        t, mock, p = _start(state, new_dir, {4: it4})
+        try:
+            _until(lambda: state.input_required, what="adopted question waiting")
+            assert mock.call_count == 0 and state.running
+            assert _status(state)[:2] == ("waiting", "review INPUT_REQUIRED (iteration 3)")
+            pane3.user("option B")
+            _until(lambda: not state.input_required, what="answer on adopted pane")
+            pane3.verdict("NEEDS_WORK")
+            _until(lambda: 4 in panes, what="iteration 4 launch")
+            assert state.history[2].verdict == "NEEDS_WORK"
+            assert mock.call_args.kwargs["transcript"].startswith(str(new_dir))
+            release4.set()
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            release4.set()
+            state.stop_requested = True
+            p.stop()

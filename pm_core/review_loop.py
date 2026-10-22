@@ -505,6 +505,12 @@ def run_review_loop_sync(
                         if output is None:
                             # Nothing live to adopt — rerun the same iteration.
                             state.iteration -= 1
+                        else:
+                            # Its follow-up (if INPUT_REQUIRED) lives in the
+                            # transcript it was launched under, not the new
+                            # dir (a manual loop gets a fresh one on restart).
+                            wait_transcript = _iteration_transcript(
+                                state, saved_transcript_dir)
                     if output is None:
                         state.iteration += 1
                         _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)

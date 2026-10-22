@@ -280,6 +280,7 @@ def _record_epoch(rec: dict) -> float | None:
 def _assistant_text_has_verdict(line: str, verdict: str) -> bool:
     """True when an assistant record's *text* blocks carry *verdict* on its
     own line (tool_use inputs such as ``grep INPUT_REQUIRED`` don't count)."""
+    from pm_core.loop_shared import match_verdict
     try:
         rec = json.loads(line)
     except json.JSONDecodeError:
@@ -293,7 +294,7 @@ def _assistant_text_has_verdict(line: str, verdict: str) -> bool:
     for block in content:
         if isinstance(block, dict) and block.get("type") == "text":
             for text_line in str(block.get("text") or "").splitlines():
-                if text_line.strip().strip("*`").strip() == verdict:
+                if match_verdict(text_line, (verdict,)):
                     return True
     return False
 
