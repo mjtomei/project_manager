@@ -99,17 +99,24 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   (`cancelled`/`cancelled (owner ended)`), not active.
 - **R14 — TUI restart.** Given a review loop or QA run in progress, when the
   user restarts the TUI in place (Ctrl+R / `pm tui restart`), then
-  pre-restart open attempts are shown `interrupted` (owner exited / tui-mount),
-  their timers `lost (owner exited)`; the resumed loop/QA run creates *new*
-  attempts flagged `resumed`/`adopted`; no attempt id is reused and no
-  pre-restart attempt is shown as still running.
+  pre-restart open attempts are shown `interrupted` (owner exited / tui-mount)
+  with an elapsed lower bound (`>Ns`, bounded by the owner's newest event;
+  `restart_app` journals `owner_exit`), not `unknown`; their timers read
+  `lost (owner process exited)` until a resumed owner re-arms the same timer
+  id (QA grace `qa-grace:<loop_id>`), after which Recent timers lists the old
+  entry as `re-armed`. Only `pm tui restart --breadcrumb` resumes a loop
+  (plain Ctrl+R just sweeps). The resumed loop/QA run creates *new* attempts:
+  a resumed review loop's parent is a new attempt (same loop id, not flagged)
+  whose first child is `iN (adopted)` (adopted iterations arm no grace); a
+  resumed QA run reads `qa (loop …) (resumed)` with plain `qa sN` children.
+  No attempt id is reused and no pre-restart attempt is shown running.
 - **R15 — hard-killed TUI.** Given a review loop running in a TUI that is
   SIGKILLed (no breadcrumb, so a new TUI does not resume it), when the user
   runs `pm pr history` before and after a new TUI mounts, then the killed
   loop and its iteration read `interrupted` (owner exited; end unknown
   before the new TUI's mount sweep), the `Now` runtime line marks the
   stale loop entry `(stale: owner exited)` instead of "loop running", and
-  its grace timer reads `lost (owner exited)`. A loop the user restarts
+  its grace timer reads `lost (owner process exited)`. A loop the user restarts
   afterwards is a new attempt. Concurrent readers never judge the dead
   owner alive (owner probes serialize; zombie pids count as dead).
 
