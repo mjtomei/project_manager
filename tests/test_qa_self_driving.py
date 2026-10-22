@@ -291,6 +291,11 @@ class TestNeedsWorkStrict:
             _on_qa_complete(app, state)
 
         mock_review.assert_called_once_with(app, "pr-001")
+        # Held, so the review loop's same-frame "Review loop started"
+        # doesn't hide it.
+        nw_line = [c for c in app.log_message.call_args_list
+                   if "returning to review" in c.args[0]]
+        assert nw_line and nw_line[0].kwargs.get("hold", 0) > 0
 
 
 # ---------------------------------------------------------------------------
