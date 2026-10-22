@@ -233,6 +233,10 @@ The model contains:
     next iteration", "waiting on human". The grace shown is the
     attempt's own `gate` timer or, failing that, the nearest ancestor's
     (the QA verdict grace is owned by the run and gates every scenario).
+    A finished (`done`/`failed`) runtime entry keeps its own state on the
+    `runtime` line even while its pane stays open: the pane's hook state
+    must not relabel `review=done NEEDS_WORK` as `idle (last NEEDS_WORK)`
+    (QA S40, a07a4d46).
   - `waiting_for`: one-line summary (what PM is waiting for now). Priority:
     holds, overdue `fires` timers, an activity row needing a human
     (permission prompt / INPUT_REQUIRED wait), the soonest `fires` timer,
@@ -303,6 +307,9 @@ attempt rows uninterpreted (omitted when absent).
   year), and an attempt's end dated only when it falls on another day
   than its start, so rows from earlier days (most of a merged PR's
   history) still fit unwrapped; durations `1h02m`, `3m05s`, `12s`.
+  Rows that still exceed 80 columns (a dated start plus a flagged name,
+  a dated Recent-timers resolution) wrap between their parts, so plain
+  `| cat` output fits and matches the TTY wrapper (QA S42, 3ccea259).
 - I7. The picker tests that assert the exact action label list / row count
   are updated for the History row.
 - I8. Journals are bounded: when a file exceeds 4 MB, the writer rotates it
@@ -380,7 +387,8 @@ attempt rows uninterpreted (omitted when absent).
   session (which ended `untracked`) into that attempt, with the gap as an
   `untracked` ("not tracked") span counted as neither exec nor wait; the
   runtime mirror's attempt id for the re-opened attempt maps to the kept
-  one.  A different session is a new attempt.  This removes the phantom
+  one, and the kept attempt lists the folded ids as `merged_ids` in JSON
+  so every journaled id resolves (QA S41, b29bcdfa).  A different session is a new attempt.  This removes the phantom
   "start untracked (5s)" rows seen in QA S4 without a runtime tombstone.
 - E9. Claude-resolved merge: when the TUI detects a merge window's
   `MERGED` verdict (`_finalize_detected_merge`) it records runtime
