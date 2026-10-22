@@ -87,13 +87,15 @@ export class SimPM {
     d.approved = { version, hash, at: this.now(), by: 'you · glasses' };
     d.pending = null;
     if (d.pr) {
+      // The approved spec's phase is what resumes: impl → implementation, qa → QA.
+      const qa = d.phase === 'qa';
       const pr = this.pr(d.pr);
-      pr.activity = 'Implementation running'; pr.needs = null; pr.approvedAt = this.now();
+      pr.activity = qa ? 'QA running' : 'Implementation running'; pr.needs = null; pr.approvedAt = this.now();
       const s = this.session(d.session);
-      if (s) { s.state = 'working'; s.stateText = 'implementing'; (s.transcript ??= []).push({ who: 'pm', t: `Spec v${version} (${hash}) approved from glasses · implementation resumed` }); }
+      if (s) { s.state = 'working'; s.stateText = qa ? 'planning scenarios' : 'implementing'; (s.transcript ??= []).push({ who: 'pm', t: `Spec v${version} (${hash}) approved from glasses · ${qa ? 'QA' : 'implementation'} resumed` }); }
       const h = this.historyFor(d.pr);
       h.timers = [];
-      h.attempts.push([this.now(), `spec approved v${version}`, '—', 'approved'], [this.now(), 'impl', '0m', 'running']);
+      h.attempts.push([this.now(), `${qa ? 'QA ' : ''}spec approved v${version}`, '—', 'approved'], [this.now(), qa ? 'qa' : 'impl', '0m', 'running']);
     }
     return { ok: true };
   }

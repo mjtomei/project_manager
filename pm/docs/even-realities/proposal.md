@@ -18,7 +18,7 @@ This document defines **behavior**. Layout and gestures in the mockup are one ca
 | Context travels | Each message carries document id, version, content hash, section and page, so the agent knows exactly what the user was reading. Context goes only to sessions the document belongs to (its own session or the same PR's); a session reached from an unrelated document gets none. | A08 (`[#214 impl spec v2 4c1e · Ambiguities · p4]`) |
 | Stay oriented | Moving between document and discussion keeps a navigation trail. Back returns to the same document version and page. From deep inside the session tree, one action returns to the originating document. | A10, B10, B15 |
 | Revise | A revision from the session creates a new version. The open document **does not switch on its own**. It shows "Changed: v3 · you are reading v2", and approval of v2 is blocked. "What changed" lists changed, added and removed items and opens the new version at each changed or added one. | A10–A13 |
-| Approve | Approval is a distinct, confirmed action. It names the version and content hash shown and states the consequences: implementation resumes unattended, the automated phases follow, and merge stays manual if configured. | A14, A15 |
+| Approve | Approval is a distinct, confirmed action. It names the version and content hash shown and states the consequences: the spec's phase resumes unattended (implementation for an impl spec, QA for a QA spec), the automated phases follow, and merge stays manual if configured. | A14, A15 |
 | Hand back | After approval the user sees PM progress without driving any agent window: implementation, review loop, QA, sign-off, then the remaining hold. | A16, A17 |
 
 **Approval binds to content.**

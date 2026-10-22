@@ -178,6 +178,28 @@ if (!only.length) {
     for (let i = 0; i < 3; i++) app.intent('menu', 2);
     rule(app.stack.length === 2, `menu Sessions ×3 stacked ${app.stack.map(x => x.kind || x.type).join(' › ')}`);
   }
+  // Approving a QA spec resumes QA in its planner, not implementation.
+  {
+    const app = new App(new SimPM());
+    const d = app.pm.doc('spec:pr-215:qa');
+    d.pending = { version: 1, since: '10:00' };
+    d.approved = null;
+    app.openDoc(d.id);
+    app.intent('select');
+    app.view.cursor = app.items(app.view).findIndex(i => /^Approve v1/.test(i.l));
+    const texts = [];
+    for (const i of ['select', 'select']) {
+      app.intent(i);
+      const built = buildFrame(app.render());
+      if (built.problems.length) rule(false, `QA spec approval ${app.sceneId()}: ${built.problems.join('; ')}`);
+      texts.push(frameText(built.shown));
+    }
+    const planner = app.pm.session(d.session);
+    rule(!/implementation/i.test(texts[0]) && /QA resumes/.test(texts[0]), `QA spec approve confirmation:\n${texts[0]}`);
+    rule(/QA spec v1 approved/.test(texts[1]) && planner.stateText !== 'implementing', `QA spec approval progress:\n${texts[1]}\nplanner ${planner.stateText}`);
+    app.intent('select');
+    rule(app.view.type === 'session' && app.view.id === d.session, `QA progress row opened ${app.sceneId()}`);
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

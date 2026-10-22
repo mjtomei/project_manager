@@ -359,9 +359,12 @@ export class App {
         return out;
       }
       case 'progress': {
-        const p = pm.pr(v.pr);
-        return (p.timeline || defaultTimeline(pm, p)).map(([g, label, state, dim]) => it([{ t: g }, { t: label, x: INDENT, dim: !!dim }], state ? { t: state, dim: !!dim } : null,
-          label.startsWith('Implementation') ? () => this.openSession(`${v.pr}/impl`) : label.startsWith('Merge') ? () => this.push({ type: 'list', kind: 'pr', pr: v.pr, cursor: 0, top: 0 }) : null));
+        const p = pm.pr(v.pr), d = v.doc && pm.doc(v.doc);
+        // After a QA spec approval the running phase is QA, in that spec's planner session.
+        const opens = label => label.startsWith('Implementation') ? () => this.openSession(`${v.pr}/impl`)
+          : label === 'QA' && d?.phase === 'qa' ? () => this.openSession(d.session)
+          : label.startsWith('Merge') ? () => this.push({ type: 'list', kind: 'pr', pr: v.pr, cursor: 0, top: 0 }) : null;
+        return (p.timeline || defaultTimeline(pm, p, d)).map(([g, label, state, dim]) => it([{ t: g }, { t: label, x: INDENT, dim: !!dim }], state ? { t: state, dim: !!dim } : null, opens(label)));
       }
       default: return [];
     }
@@ -463,7 +466,9 @@ export class App {
       title: `Approve ${d.label} v${shown.n}?`,
       lines: plan
         ? [`Content ${shown.hash} · the version you read`, 'PROPOSED: PM has no plan approval today.', 'Then: load new PRs; start nothing else.']
-        : [`Content ${shown.hash} · the version you read`, 'Then implementation resumes unattended:', 'review, QA and sign-off run automatically.', 'Merge stays manual (wait-for-merge).'],
+        : d.phase === 'qa'
+          ? [`Content ${shown.hash} · the version you read`, 'Then QA resumes unattended:', 'scenarios, verifiers and sign-off run.', 'Merge stays manual (wait-for-merge).']
+          : [`Content ${shown.hash} · the version you read`, 'Then implementation resumes unattended:', 'review, QA and sign-off run automatically.', 'Merge stays manual (wait-for-merge).'],
       yes: `Approve v${shown.n}`, no: 'Cancel',
       run: () => {
         const r = this.pm.approve(docId, shown.n, shown.hash);
@@ -473,7 +478,7 @@ export class App {
         // does not land on stale actions.
         this.stack = this.stack.filter(x => x.type !== 'list' || x.kind !== 'doc-actions');
         if (r.ok) {
-          if (d.pr) this.push({ type: 'list', kind: 'progress', pr: d.pr, cursor: 1, top: 0 });
+          if (d.pr) this.push({ type: 'list', kind: 'progress', pr: d.pr, doc: docId, cursor: d.phase === 'qa' ? 3 : 1, top: 0 });
           else this.say(`◆ Plan v${shown.n} approved (simulated)`);
           return;
         }
@@ -756,8 +761,17 @@ function prState(p, pm) {
   if (blockers.length) return `· blocked on ${blockers.map(d => `#${d.num}`).join(' ')}`;
   return { in_progress: '◐ impl', in_review: '◐ review loop', qa: '◐ QA', sign_off: '◐ sign-off', pending: '· pending', merged: '■ merged' }[p.status] || p.status;
 }
-function defaultTimeline(pm, p) {
-  const d = Object.values(pm.docs).find(x => x.pr === p.id && x.approved);
+function defaultTimeline(pm, p, approved) {
+  const d = approved || Object.values(pm.docs).find(x => x.pr === p.id && x.approved);
+  if (d?.phase === 'qa') return [
+    ['◆', `QA spec v${d.approved.version} approved`, `${d.approved.at} · you`, true],
+    ['■', 'Implementation', 'done', true],
+    ['■', 'Review loop', 'done', true],
+    ['◐', 'QA', 'running', false],
+    ['□', 'Sign-off', 'after QA', true],
+    ['◇', 'Merge', 'manual hold', false],
+    ['', 'Nothing needs you until merge.', '', true],
+  ];
   return [
     ['◆', `Spec v${d?.approved.version} approved`, `${d?.approved.at} · you`, true],
     ['◐', 'Implementation', 'running', false],
