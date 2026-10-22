@@ -32,7 +32,11 @@ def _find_active_override() -> str | None:
 
     Derives session tag from current git repo and checks for override file.
     """
-    session_tag = _get_session_tag()
+    return _override_for_tag(_get_session_tag())
+
+
+def _override_for_tag(session_tag: str | None) -> str | None:
+    """Return the override install root for *session_tag*, if one is set."""
     if not session_tag:
         return None
 
@@ -193,17 +197,69 @@ def main():
                 selected_root = local_root
                 chosen_via = "cwd_walk"
 
+    _log_resolution(
+        "wrapper: argv0=%s selected_root=%s chosen_via=%s is_ipc=%s",
+        sys.argv[0], selected_root, chosen_via, is_ipc,
+    )
+    return _run_cli(selected_root)
+
+
+def main_for_session(session_tag: str) -> int:
+    """Entry point for commands dispatched from a session's tmux popups.
+
+    The prefix+P picker and prefix+M runner run their child pm command
+    in the popup's cwd, which is often a PR workdir clone carrying
+    unmerged pm_core code.  Those commands must run the *session's* pm,
+    so resolution is keyed only on *session_tag* (taken from the tmux
+    session name) and never on cwd:
+
+    1. Session override for *session_tag*.
+    2. Session pm_root for *session_tag*.
+    3. The dispatcher's own pm_core (already first on sys.path).
+
+    Only reached through ``pm_core.cli.session._session_pm_argv``;
+    every other invocation goes through :func:`main`.
+    """
+    _mark_tmux_session(os.environ)
+
+    selected_root: str | None = None
+    chosen_via: str = "dispatcher"
+
+    override_root = _override_for_tag(session_tag)
+    if override_root:
+        selected_root = override_root
+        chosen_via = "override"
+    else:
+        pm_root_root = _pm_core_from_pm_root(session_tag)
+        if pm_root_root:
+            selected_root = pm_root_root
+            chosen_via = "pm_root"
+
+    _log_resolution(
+        "wrapper: argv0=%s selected_root=%s chosen_via=%s session_tag=%s",
+        sys.argv[0], selected_root, chosen_via, session_tag,
+    )
+    return _run_cli(selected_root, front=True)
+
+
+def _log_resolution(fmt: str, *args) -> None:
     try:
         from pm_core.paths import configure_logger
         _log = configure_logger("pm.wrapper")
-        _log.info(
-            "wrapper: argv0=%s selected_root=%s chosen_via=%s is_ipc=%s",
-            sys.argv[0], selected_root, chosen_via, is_ipc,
-        )
+        _log.info(fmt, *args)
     except Exception:
         pass
 
-    if selected_root and selected_root not in sys.path:
+
+def _run_cli(selected_root: str | None, front: bool = False):
+    """Put *selected_root* on sys.path (if given) and run the CLI.
+
+    By default a root already on sys.path is left where it is; with
+    *front* it is moved ahead of everything else (e.g. a PYTHONPATH
+    entry carrying another pm_core).
+    """
+    if selected_root and (selected_root not in sys.path
+                          or (front and sys.path[0] != selected_root)):
         sys.path.insert(0, selected_root)
         to_remove = [k for k in sys.modules
                      if k == 'pm_core' or k.startswith('pm_core.')]
