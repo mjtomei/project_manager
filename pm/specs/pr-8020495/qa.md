@@ -77,8 +77,16 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   spec-awaiting-approval flag on a merged/closed PR is not shown as a hold.
 - **R10 — sign-off router and throttle.** Given auto-start drives a PR into
   sign-off, when the router launches, then history shows a `signoff`
-  attempt and a 60 s relaunch-throttle timer (gate); when the router's
-  verdict is routed the attempt ends with that verdict.
+  attempt and a 60 s relaunch-throttle timer (gate, id
+  `signoff-throttle:<pr>`, one id per PR); when the router's verdict is
+  routed the attempt ends with that verdict. A relaunch re-arms the same
+  throttle id, so Recent timers keeps the earlier entry (`re-armed`, or
+  `released at …` when a SIGNOFF_REVIEW hop released it) instead of
+  dropping it. A BLOCKED hop does not release the throttle: once the router
+  attempt ends it reads `cancelled (owner ended)`. A router run picked up
+  across `pm tui restart --breadcrumb` keeps its attempt id, first reads
+  `interrupted` (>Ns) and then `done <verdict>` flagged `(adopted)` in text
+  and `"adopted": true` in JSON.
 - **R11 — merge holds.** Given an auto-start / auto-sequence
   stop-before-merge hold (the PR signed off and waiting for the user to
   press `g`), then an indefinite hold is listed (no countdown) and
@@ -110,6 +118,9 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   whose first child is `iN (adopted)` (adopted iterations arm no grace); a
   resumed QA run reads `qa (loop …) (resumed)` with plain `qa sN` children.
   No attempt id is reused and no pre-restart attempt is shown running.
+  A restart within seconds of a scenario relaunch or dequeue resumes the
+  live retry pane (no spurious `vanished` + duplicate worker in the resumed
+  run; the cap still holds).
 - **R15 — hard-killed TUI.** Given a review loop running in a TUI that is
   SIGKILLed (no breadcrumb, so a new TUI does not resume it), when the user
   runs `pm pr history` before and after a new TUI mounts, then the killed
