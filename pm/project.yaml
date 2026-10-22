@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T15:21:52.173727+00:00'
+  updated_at: '2026-10-22T15:24:30.513674+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30097,6 +30097,14 @@ prs:
       no recapture. /pm-captures/even-realities synced.'
     created_at: '2026-10-22T15:21:52Z'
     last_edited: '2026-10-22T15:21:52Z'
+  - id: note-0a0f82d
+    text: 'Review 450f i8: "Merge now…" on a held PR was gated on any non-stale sign-off
+      while SimPM.merge requires verdict MERGE (shared SimPM.signedForMerge now);
+      merge/approve refusals show readable text instead of raw reasons (no-signoff,
+      not-pending). check.mjs +1 rule (fails on old code); 186 journey frames unchanged,
+      no recapture. /pm-captures/even-realities synced.'
+    created_at: '2026-10-22T15:24:30Z'
+    last_edited: '2026-10-22T15:24:30Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'

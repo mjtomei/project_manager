@@ -138,6 +138,17 @@ if (!only.length) {
     rule(!app.overlay && app.toast === 'Cancelled · nothing sent', `menu during voice review: toast ${app.toast}`);
     rule(!app.pm.session('pr-214/impl').transcript.some(m => m.t === 'rule check'), 'menu during voice review sent the message');
   }
+  // Merge now is offered only with a current MERGE verdict, the one PM accepts.
+  {
+    const app = new App(new SimPM());
+    const p = app.pm.pr('pr-211');
+    const offered = () => app.items({ type: 'list', kind: 'pr', pr: p.id }).some(i => i.act && /^Merge #/.test(i.l));
+    rule(offered(), 'Merge now not offered with a MERGE sign-off');
+    p.signoff = { ...p.signoff, verdict: 'REVIEW' };
+    rule(!offered(), 'Merge now offered without a MERGE verdict');
+    app.fail(app.pm.merge(p.id, p.signoff.head));
+    rule(!app.toast.includes('no-signoff'), `merge refusal shows raw reason: ${app.toast}`);
+  }
   // Choosing the OS menu item for the view already shown does not stack a copy.
   {
     const app = new App(new SimPM());

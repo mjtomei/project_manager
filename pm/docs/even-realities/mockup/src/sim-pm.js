@@ -42,6 +42,8 @@ export class SimPM {
   // A PR that never ran has no history entry yet.
   historyFor(prId) { return (this.history[prId] ??= { timers: [], attempts: [] }); }
   prLabel(prId) { const p = this.pr(prId); return p ? `#${p.num}` : ''; }
+  // A current MERGE verdict is what lets the user ask PM to merge a held PR.
+  signedForMerge(p) { return p.signoff?.verdict === 'MERGE' && !p.signoff.stale; }
 
   needsYou() {
     const items = [];
@@ -118,7 +120,7 @@ export class SimPM {
   merge(prId, head) {
     if (!this.connected()) return { ok: false, reason: 'offline' };
     const p = this.pr(prId);
-    if (!p.signoff || p.signoff.verdict !== 'MERGE' || p.signoff.stale) return { ok: false, reason: 'no-signoff' };
+    if (!this.signedForMerge(p)) return { ok: false, reason: 'no-signoff' };
     if (p.currentHead && p.currentHead !== head) {
       // PM's gate refuses and reruns sign-off on the new HEAD; the old verdict
       // no longer authorizes a merge, but the manual merge hold stays.

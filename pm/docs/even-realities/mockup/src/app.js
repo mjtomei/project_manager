@@ -173,7 +173,12 @@ export class App {
   }
 
   fail(r) {
-    const why = { offline: '! Not sent: PM unreachable · nothing queued', 'not-running': '! Session not running · start it first' }[r.reason] || `! ${r.reason}`;
+    const why = {
+      offline: '! Not sent: PM unreachable · nothing queued',
+      'not-running': '! Session not running · start it first',
+      'no-signoff': '! No current sign-off MERGE · nothing merged',
+      'not-pending': '! No review pending · nothing approved',
+    }[r.reason] || `! ${r.reason}`;
     this.say(why);
   }
 
@@ -312,7 +317,7 @@ export class App {
         }
         out.push(it('Sessions', { t: `${pm.sessionsFor(p.id).length} ›`, dim: true }, () => this.push({ type: 'list', kind: 'sessions-pr', pr: p.id, cursor: 0, top: 0 })));
         out.push(it('History and timers', null, () => this.push({ type: 'list', kind: 'history', pr: p.id, cursor: 0, top: 0 })));
-        if (p.holds.length && p.signoff && !p.signoff.stale) out.push(it(`Merge #${p.num} now…`, { t: `signed ${p.signoff.head}`, dim: true }, () => this.confirmMerge(p)));
+        if (p.holds.length && pm.signedForMerge(p)) out.push(it(`Merge #${p.num} now…`, { t: `signed ${p.signoff.head}`, dim: true }, () => this.confirmMerge(p)));
         const signoff = pm.sessionsFor(p.id).find(s => s.short === 'sign-off' && s.state === 'none');
         if (signoff) out.push(it('Start sign-off…', { t: 'not started', dim: true }, () => this.confirmStart(signoff)));
         return out;
