@@ -30522,6 +30522,25 @@ prs:
       post-fix/).'
     created_at: '2026-10-22T05:18:38Z'
     last_edited: '2026-10-22T05:18:38Z'
+  - id: note-5b192f0
+    text: 'S27 refine (653c26c6): re-check of S22 d6d0987a reuses /pm-captures/scenarios/22/scripts
+      (bootstrap.sh/setup.sh/cfg-a.json/cfg-b.json/driver1.py/driver2.py/poller.py).
+      Adds E17 latency check: time pm pr history --json (median of 5) before QA and
+      after QA end; the journal grows, so expect a small rise, not a step per restart
+      owner (only owners with open attempts/uncleared timers are probed). Have the
+      rj reader log each call duration to see no step at each restart. Scenario summary
+      lives on resumed run 1 only (run 2 holds s3 only).'
+    created_at: '2026-10-22T04:50:43Z'
+    last_edited: '2026-10-22T04:50:43Z'
+  - id: note-82f11d3
+    text: 'QA S27 (2026-10-22) PASS on 653c26c6, no edits: S22 re-check held — restart
+      2 s after s1 relaunch + 1.2 s after "Launched scenario 3"; one done PASS per
+      scenario, no s1 re-verify, cap 2, QA PASS; IR hold agrees text/JSON/badge/pager;
+      latency flat (median 0.065→0.079 s, no step at restarts). Spec nit: after restart
+      2 the grace armed by resumed run 1 is long elapsed, so it stays "elapsed" then
+      "re-armed" (qa.md e084185d rule), not "lost". Captures /pm-captures/scenarios/27.'
+    created_at: '2026-10-22T05:03:15Z'
+    last_edited: '2026-10-22T05:03:15Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
