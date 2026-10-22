@@ -29956,7 +29956,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T01:15:20.334372+00:00'
+  updated_at: '2026-10-22T02:12:16.291897+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30282,6 +30282,101 @@ prs:
       fake panes already emitted (idle), never mid-iteration.'
     created_at: '2026-10-22T00:41:31Z'
     last_edited: '2026-10-22T00:41:31Z'
+  - id: note-076418b
+    text: 'S18 refine (00ffb399): (1) after a finished QA run the qa-<pr> window stays,
+      so plain t only logs ''Focused QA window'' — later runs need z t (logs ''Fresh
+      QA start for <pr>...''). (2) Fake config needs _all:{} + qa_finalize FINALIZE_DONE,
+      or the finalize pane never verdicts (also runs for an INPUT_REQUIRED run). (3)
+      Scenario numbering continues per PR across loops'' workdirs (~/.pm/workdirs/qa/<pr>-<loop>/s-N),
+      so after a 3-scenario run the next runs are s4 then s5. (4) TUI logs ''QA [<pr>]:
+      QA complete: INPUT_REQUIRED …'' then ''QA INPUT_REQUIRED for <pr> — paused for
+      human input''; the derived hold needs runtime qa done INPUT_REQUIRED (set on
+      the 2nd TUI poll tick after completion) + status qa; badge truncates to ''[hold:
+      QA INPUT_REQUIRED (auto-start…]''. (5) For a lost-then-re-armed grace, Ctrl+R
+      must land while the grace re-armed by the s1 relaunch still has >=10 s left;
+      ''scenario passed into grace'' is not needed.'
+    created_at: '2026-10-22T01:45:18Z'
+    last_edited: '2026-10-22T01:45:18Z'
+  - id: note-55b0a0d
+    text: 'S20 refine (00ffb399): verified in scratch HOMEs that read-only ~/.pm/history
+      (no owners/), ~/.pm/history as a regular file, and history/owners as a regular
+      file never raise. The first two give honest empty history (attempts [], missing
+      note). With owners as a file, writes still land and liveness falls back to the
+      pid start token: live attempts read open, and a dead writer reads interrupted.
+      A popup on a never-run PR needs a window named after its display id (the picker
+      home_pr comes from the window name). Break the store before `pm session` in
+      a fresh HOME per pass, never under a live TUI. The S16 driver lib (/pm-captures/scenarios/16/scripts)
+      fits this sweep.'
+    created_at: '2026-10-22T01:46:15Z'
+    last_edited: '2026-10-22T01:46:15Z'
+  - id: note-49f2b17
+    text: 'S17 refine (sign-off relaunch/restart): signoff_ui._end_attempt journals
+      adopted=True on the attempt_end of a router run that a restarted TUI picks up
+      (newest_open_attempt fallback), but history_query._replay stores it as end_adopted
+      and _export/_render_attempt never surface it. So after pm tui restart --breadcrumb
+      the pre-restart signoff attempt reads plain "done SIGNOFF_BLOCKED" (detail "routed
+      → blocked", same attempt id) with no (adopted) flag in text or JSON. The spec
+      (R10/R14) does not require the flag; export end_adopted as adopted if a flag
+      is wanted. Other S17 facts: throttle id signoff-throttle:<pr>, gate 60 s, re-armed
+      on relaunch (Recent timers lists the first one "re-armed"); SIGNOFF_REVIEW hop
+      releases it ("released"); the BLOCKED hop does not, so it reads "lost (owner
+      process exited)" then "cancelled (owner ended)". The fake signoff cursor advances
+      at launch, so a killed router consumes a script slot.'
+    created_at: '2026-10-22T01:46:21Z'
+    last_edited: '2026-10-22T01:46:21Z'
+  - id: note-18ed0c0
+    text: 'S19 refine (00ffb399): (1) Ctrl+R must land while A i2 "review verdict
+      grace (iteration 2)" AND B "QA scenario verdict grace (all scenarios)" are both
+      active: use review [NW delay 3, NW delay 20, PASS delay 5], press t on B first,
+      start /review-loop A as soon as B grace is armed. (2) After restart, A loop
+      row reads >Ns owner-exited only until the new TUI mount sweep, then interrupted
+      "swept on tui-mount" with an exact elapsed (end = mount time); A i2 + B qa run/sN
+      stay owner-exited >Ns (owner_exit bound). (3) Untested edge: an uncleared QA
+      grace that already read "elapsed" flips to "lost (owner process exited)" once
+      its owner dies (alive check precedes due check in _reconcile_timers), then "re-armed"
+      on resume; S19 avoids it by timing, it is not asserted. (4) The TUI review mirror
+      may hold an open review attempt on C (prep auto-seq review pane), so an owner_exit
+      line from the TUI owner can appear in C journal; it must not touch C qa-run-bg
+      attempts. (5) Text Recent timers lists only 10 rows; check elapsed-at on JSON
+      timers.recent.'
+    created_at: '2026-10-22T01:46:42Z'
+    last_edited: '2026-10-22T01:46:42Z'
+  - id: note-a2f8a26
+    text: 'QA S19 (2026-10-22) PASS on 00ffb399, no edits: one TUI ran A review loop
+      + B QA while a qa-run-bg wrote C; Ctrl+R at A i2 grace 19.7 s / B grace 6.7
+      s left. owner_exit bounded A i2 (>1s) and B run/children (>43s/>24s); A loop
+      swept on tui-mount; B resumed (same loop id), old grace lost then re-armed;
+      C 1932 qa-run-bg rows never interrupted; 1791 JSON reads all OK; late-cleared
+      graces keep resolved_at=due (6801b978); popup/CLI/JSON agree at 80 cols. Obs:
+      exec->mount sweep ~20 ms, so the pre-sweep owner-exited loop state is not catchable
+      by 0.3 s readers; the prep review launched by auto-sequence is never journaled
+      (no C review row). Captures /pm-captures/scenarios/19.'
+    created_at: '2026-10-22T02:03:58Z'
+    last_edited: '2026-10-22T02:03:58Z'
+  - id: note-eb374a5
+    text: 'QA S18 (2026-10-22): fixed 6813a7ec (qa_loop, pre-existing): qa_resume.json
+      was only refreshed at the top of each 5 s poll, so Ctrl+R within ~5 s of a scenario
+      relaunch (or dequeue) resumed with the dead pane id → resumed run marked the
+      live retry vanished, launched a duplicate s1 worker (3 live under cap 2) and
+      history showed a spurious vanished+retry in the resumed run. Now snapshotted
+      right after relaunch/dequeue. All S18 Thens held post-fix: >49s/>17s/>7s interrupted
+      bounds, grace lost→re-armed, planner deadline cancelled, backoff fired, IR hold
+      text/JSON/badge/pager agree, s4/s5. Filed pr-1b90b51 (new_window_get_pane resolves
+      by window name → wrong pane on duplicate names). Captures /pm-captures/scenarios/18.'
+    created_at: '2026-10-22T02:06:12Z'
+    last_edited: '2026-10-22T02:06:12Z'
+  - id: note-da86dc8
+    text: 'QA S17 (2026-10-22): fixed 26b2d1d1 — history_query._replay overwrote a
+      cleared timer when the same timer id was re-armed, so the sign-off relaunch
+      throttle "released at …" row of the SIGNOFF_REVIEW router vanished from Recent
+      timers once the next router armed the throttle (one id per PR). All other S17
+      Thens held live post-fix (superseded relaunch +3.99 s after due, re-armed/released/lost/cancelled
+      throttle, 3 distinct signoff rows, interrupted >9s across pm tui restart --breadcrumb
+      then done SIGNOFF_BLOCKED same id, derived BLOCKED hold, badges, pager==CLI
+      at 74 cols). Driver tip: Down keys sent <1 s after the popup appears may not
+      move the fzf cursor; wait ~2 s.'
+    created_at: '2026-10-22T02:12:16Z'
+    last_edited: '2026-10-22T02:12:16Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
@@ -30377,6 +30472,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T01:12:34.877341+00:00'
   updated_at: '2026-10-22T01:12:34.877341+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1b90b51
+  plan: bugs
+  title: 'Bug: tmux.new_window_get_pane returns the first same-named window pane,
+    not the window it just created'
+  branch: pm/pr-1b90b51-bug-tmux-new-window-get-pane-returns-the-first-sam
+  status: pending
+  depends_on: []
+  description: 'pm_core/tmux.py new_window_get_pane runs new-window then find_window_by_name(session,
+    name) and returns that window first pane. When a window with the same name already
+    exists (e.g. a QA scenario relaunch while the old qa-<pr>-sN window is still alive,
+    as seen in pr-8020495 QA S18 pre-fix: resumed run relaunched s1 into new window
+    @14 but got pane %16 of the old @13), the caller tracks the wrong pane and the
+    new worker is orphaned. Fix: new-window -P -F "#{window_id} #{window_index} #{pane_id}"
+    and use that output.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T01:55:36.713710+00:00'
+  updated_at: '2026-10-22T01:55:36.713710+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
