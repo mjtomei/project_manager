@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-089af69
+  active_pr: pr-e0f54ca
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31479,3 +31479,30 @@ prs:
       preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
+- id: pr-e0f54ca
+  plan: bugs
+  title: 'Bug: watcher INPUT_REQUIRED stays waiting after the user answers until the
+    next verdict'
+  branch: pm/pr-e0f54ca-bug-watcher-input-required-stays-waiting-after-the
+  status: pending
+  depends_on: []
+  description: 'pm_core/watcher_base.py WatcherBase._handle_input_required sets state.input_required=True
+    for the whole follow-up wait and clears it only when loop_shared.wait_for_follow_up_verdict
+    returns. After the user answers in the watcher pane, the watcher keeps showing
+    input_required (TUI status bar WCH input_required / watcher_manager.any_input_required)
+    while Claude works on the follow-up. It also has no restart/adoption of the wait.
+    pr-a80bde5 fixed the same class for the review loop: review_loop._wait_for_follow_up_verdict
+    clears the flag when verdict_transcript.HumanResponseWatch sees a human prompt
+    after the INPUT_REQUIRED turn, and re-raises it on a verdict-less idle or a repeated
+    INPUT_REQUIRED. Reuse that here. Repro: start a watcher whose iteration ends INPUT_REQUIRED,
+    answer in its pane, observe the status still says input_required until the next
+    verdict.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T19:24:23.700453+00:00'
+  updated_at: '2026-10-22T19:24:23.700453+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
