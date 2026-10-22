@@ -29687,7 +29687,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-22T17:34:08.264733+00:00'
+  updated_at: '2026-10-22T18:57:13.955949+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29708,6 +29708,13 @@ prs:
       during planning.'
     created_at: '2026-10-22T17:34:08Z'
     last_edited: '2026-10-22T17:34:08Z'
+  - id: note-c050c17
+    text: 'review i4 48d4d774: QA-spec gate exit now uses _end_qa_without_scenarios
+      (writes overall INPUT_REQUIRED; auto-sequence no longer sees "running: qa").
+      test_signoff_integration needs PATH=/usr/bin first in sandboxes (git proxy),
+      pre-existing.'
+    created_at: '2026-10-22T18:57:13Z'
+    last_edited: '2026-10-22T18:57:13Z'
 - id: pr-7b085a9
   plan: bugs
   title: 'Bug: permission-wait state remains stale after Claude resumes work'
