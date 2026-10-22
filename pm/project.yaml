@@ -29980,7 +29980,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-22T14:27:12.168953+00:00'
+  updated_at: '2026-10-22T14:38:43.418320+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30149,6 +30149,20 @@ prs:
       check (CPython swallows the signal). None of these involve rubric.py.'
     created_at: '2026-10-22T14:27:12Z'
     last_edited: '2026-10-22T14:27:12Z'
+  - id: note-8f0b52d
+    text: 'Sign-off 2026-10-22 on 4ec71d0d: SIGNOFF_IMPL again, forced by an integration
+      conflict only. Base moved to master@f939f06a (3 commits, pm/project.yaml only).
+      Conflict: both sides appended a PR record at the end of prs: (ours pr-9ca240a
+      BrokenPipe bug filed by QA S14, master pr-24f022e popup pm_core bug). Merge
+      master and keep BOTH records; optionally reset project.active_pr to master value
+      pr-446cb83 (3429a3d0 moved it to pr-9ca240a as a pm pr add side effect). Nothing
+      under experiments/plan-writing/, tests/test_doc_rubric.py, plan-doc-eval.md
+      or pm_core/plans changed on the base. Then run tests/test_doc_rubric.py (151
+      expected; re-ran at 4ec71d0d: 151 passed) and --write-doc (tree stays clean),
+      and return to sign-off. Review c56b4403 and QA round 4 S13-S16 PASS (b3529c34)
+      still hold if the merge touches only pm/project.yaml. Report: /pm-captures/report.html.'
+    created_at: '2026-10-22T14:38:43Z'
+    last_edited: '2026-10-22T14:38:43Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
