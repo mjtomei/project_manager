@@ -138,6 +138,12 @@ if (!only.length) {
     rule(!app.overlay && app.toast === 'Cancelled · nothing sent', `menu during voice review: toast ${app.toast}`);
     rule(!app.pm.session('pr-214/impl').transcript.some(m => m.t === 'rule check'), 'menu during voice review sent the message');
   }
+  // Choosing the OS menu item for the view already shown does not stack a copy.
+  {
+    const app = new App(new SimPM());
+    for (let i = 0; i < 3; i++) app.intent('menu', 2);
+    rule(app.stack.length === 2, `menu Sessions ×3 stacked ${app.stack.map(x => x.kind || x.type).join(' › ')}`);
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

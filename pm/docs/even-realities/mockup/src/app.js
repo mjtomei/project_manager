@@ -119,6 +119,8 @@ export class App {
     if (this.overlay) this.say('Cancelled · nothing sent');
     this.overlay = null;
     if (item.go === 'home') { this.stack = [this.stack[0]]; return; }
+    // Choosing the view already shown does not stack a copy Back must step through.
+    if (this.view.type === 'list' && this.view.kind === item.go) return;
     this.push({ type: 'list', kind: item.go, cursor: 0, top: 0 });
   }
 
