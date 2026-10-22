@@ -29956,7 +29956,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T23:58:47.413004+00:00'
+  updated_at: '2026-10-22T01:15:20.334372+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30221,6 +30221,17 @@ prs:
       typed in a session pane attaches a nested client there (detach it).'
     created_at: '2026-10-21T23:49:36Z'
     last_edited: '2026-10-21T23:49:36Z'
+  - id: note-631ff26
+    text: 'QA S15 (2026-10-22, dc41da83): every story-1 (SIGKILL TUI + qa-run-bg +
+      rotation + 3 readers, 5580 reads) and story-2 (zombie qa-run-bg owner, 300 dead-owner
+      attempts, z1/z2 polls) Then held. Fixed 6801b978: a gate cleared "elapsed" late
+      (QA grace cleared at scenario end) moved its "elapsed at" from the due time
+      to the clear time (00:47:00 -> 00:48:05 between reads); now min(clear, due).
+      Spec nits: scenario numbering continues across runs on one QA workdir (story-2
+      runs are s4-s6 / s7-s9, not s1-s3); with less installed `pm pr list` pages (pipe
+      to cat in drivers). Captures /pm-captures/scenarios/15.'
+    created_at: '2026-10-22T01:15:20Z'
+    last_edited: '2026-10-22T01:15:20Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
