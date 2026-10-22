@@ -29717,11 +29717,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T05:59:42.051758+00:00'
-  updated_at: '2026-10-13T05:59:42.051758+00:00'
+  updated_at: '2026-10-22T18:44:28.831109+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-725fd9a
+    text: 'FYI from pr-a80bde5: review-loop INPUT_REQUIRED wait state fixed separately
+      (ReviewLoopState.input_required + HumanResponseWatch in verdict_transcript).
+      No PaneIdleTracker/permission_prompt changes there; if you need "human answered"
+      detection from a transcript, verdict_transcript.is_human_prompt_record / HumanResponseWatch
+      exclude tool_result/meta records.'
+    created_at: '2026-10-22T18:44:28Z'
+    last_edited: '2026-10-22T18:44:28Z'
 - id: pr-31413e8
   plan: bugs
   title: 'Bug: fresh-start (z t) logs the superseded QA run as "QA complete: INPUT_REQUIRED
@@ -31356,11 +31364,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-22T17:19:46.224920+00:00'
+  updated_at: '2026-10-22T18:44:26.601277+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f9941b6
+    text: 'impl done (75a221df, master merged 423a560d). Root cause: breadcrumb restart
+      during review INPUT_REQUIRED relaunched next iteration (--fresh killed question
+      pane) and never reset ReviewLoopState.input_required; answered follow-up stayed
+      waiting; repeated/stale IR auto-converted to NEEDS_WORK. Fix in review_loop.py
+      (adopt live IR wait on resume, clear flag on new iteration, HumanResponseWatch-driven
+      follow-up waiter), verdict_transcript.HumanResponseWatch/is_human_prompt_record
+      (tool_result never counts), autostart_state follow_up reason. Tests: tests/test_review_input_required_state.py
+      (7 fail pre-fix). Live pre/post captures under captures impl/pre-fix + impl/post-fix
+      (interactive stub-claude harness + poll.sh). tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      fails in container on master too (env). Ready for review: press d / pm pr review
+      pr-a80bde5 from base dir.'
+    created_at: '2026-10-22T18:44:26Z'
+    last_edited: '2026-10-22T18:44:26Z'
 - id: pr-592e4bd
   plan: improvements
   title: Route QA scenario refinement and execution through claude-mixed work models;
