@@ -31825,3 +31825,36 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-8f8ae78
+  plan: bugs
+  title: 'Bug: worker launch after a dead refiner pane logs "Launched" but creates
+    no pane, then burns a retry'
+  branch: pm/pr-8f8ae78-bug-worker-launch-after-a-dead-refiner-pane-logs-l
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _concretize_and_launch (container ~2683-2701; host
+    path ~2424-2441 has the same shape): when the refiner pane/window is already gone
+    (user closed a stuck refiner, or the refiner process exited), tmux split_pane_at(concretize_pane)
+    raises -> "Failed to split scenario pane for scenario N", but scenario.window_name
+    was already set at refiner-window creation (~2612), so the "if scenario.window_name:"
+    branch logs "Launched scenario N ... (window qa-...-sN)" although no worker pane
+    exists. The poll loop then finds no pane and logs "Scenario N window died — retry
+    1/10 (backoff 5s)" (a blocking time.sleep inside the poll loop), spending a retry;
+    only the retry actually creates the worker window. Repro (pr-592e4bd QA S10 story
+    7, container mode, unrouted sonnet): z t, close the refiner windows at the API-key
+    prompt -> app log 23:31:10 Worker for scenario 18 / Failed to split / Launched
+    scenario 18; 23:31:15 window died — retry 1/10; 23:31:20 the only new_window_get_pane
+    for qa-...-s18 (@74) + Relaunched. Same in story 4 (22:56:09-25) and with a crashing
+    faked refiner (story4-attempt-a 22:52:29-34). Fix: when the split fails, create
+    the worker in a fresh window (as the relaunch path does) or leave window_name
+    unset so the launch is not logged as done; no retry should be spent. Evidence:
+    /pm-captures/scenarios/10/final/app-full.log, story4/, story7/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T23:36:34.815807+00:00'
+  updated_at: '2026-10-22T23:36:34.815807+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
