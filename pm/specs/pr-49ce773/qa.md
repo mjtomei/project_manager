@@ -143,8 +143,10 @@ client session), the pm log file (warnings).
 - C3. Two clients attached to grouped sessions (e.g. `<base>~1`, `<base>~2`):
   an action dispatched from client 1's popup switches/creates the window in
   client 1's session only — client 2 (even if it was the most recently active
-  client) keeps its current window (fix ace617b4: popup passes
-  PM_CALLER_SESSION, honoured only while that session exists — e699bd52).
+  client) keeps its current window (master #240: popup exports
+  PM_POPUP_SESSION and dispatches via _session_pm_argv; this PR adds the
+  guard that it is honoured only while that session exists).  Re-run after
+  the master merge, plus one live action dispatch from a PR window.
   Open the two popups one after the other, not in the same instant (known
   race, pr-b511dcf).
 - C4. Type-ahead while the picker reloads (impl QA check 9, fix 634c82da):

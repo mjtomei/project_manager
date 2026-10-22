@@ -410,16 +410,17 @@ class TestPickerMergeDispatch:
             _run_picker_command("pr start pr-123", "sess")
         assert not wait_mock.called
 
-    def test_run_picker_command_names_invoking_session(self):
-        """The popup has no pane, so the dispatched command must be told
-        which grouped session invoked it; otherwise tmux's most recently
-        active client decides and another client's view gets switched."""
+    def test_run_picker_command_runs_as_invoking_session(self):
+        """Direct dispatch runs the invoking session's pm (not the cwd's);
+        the popup's exported PM_POPUP_SESSION reaches it unchanged."""
+        from pm_core.cli.session import _session_pm_argv
         fake_result = MagicMock(returncode=0, stdout="", stderr="")
         with patch("pm_core.cli.session.subprocess.run",
                    return_value=fake_result) as run_mock:
             _run_picker_command("pr review pr-123", "proj~7")
-        env = run_mock.call_args.kwargs["env"]
-        assert env["PM_CALLER_SESSION"] == "proj~7"
+        assert run_mock.call_args[0][0] == _session_pm_argv(
+            "proj~7", ["pr", "review", "pr-123"])
+        assert "env" not in run_mock.call_args.kwargs
 
 
 class TestFindPrForWindowId:

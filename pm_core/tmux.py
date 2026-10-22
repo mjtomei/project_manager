@@ -298,9 +298,9 @@ def apply_layout(session: str, window: str, layout_string: str) -> bool:
     return True
 
 
-# Set by a pane-less caller (the prefix+P popup) on the pm commands it
-# runs, naming the grouped session whose client invoked it.
-CALLER_SESSION_ENV = "PM_CALLER_SESSION"
+# Set by the popup dispatchers to the session of the client that opened
+# the popup; read by get_session_name().
+POPUP_SESSION_ENV = "PM_POPUP_SESSION"
 
 
 def get_session_name() -> str:
@@ -308,18 +308,19 @@ def get_session_name() -> str:
 
     Uses $TMUX_PANE to target the specific pane, which is more reliable
     than display-message without a target (which uses "current client"
-    and can return wrong session in background processes).  Without a
-    pane (e.g. a command run from a display-popup) an explicit
-    $PM_CALLER_SESSION wins: tmux's "current client" is the most recently
-    active one, and keys typed into a popup don't count as activity, so
-    with several clients attached it can name another user's session.
+    and can return wrong session in background processes).
+
+    Popups have no pane, so the popup dispatchers (prefix+P / prefix+M)
+    export the opening client's session as $PM_POPUP_SESSION; without
+    it, "current client" is whichever client was active last, which is
+    another client's session when two clients use popups at once.
     """
     pane = os.environ.get("TMUX_PANE")
-    caller = os.environ.get(CALLER_SESSION_ENV)
-    # The variable is inherited by anything the command spawns, so only
+    popup_session = os.environ.get(POPUP_SESSION_ENV)
+    # The variable is inherited by anything the popup spawns, so only
     # trust it while that session still exists ("=" = exact name match).
-    if not pane and caller and session_exists(f"={caller}"):
-        return caller
+    if not pane and popup_session and session_exists(f"={popup_session}"):
+        return popup_session
     if pane:
         # Target the specific pane to get accurate session name
         result = _run(

@@ -56,16 +56,22 @@ def _share_mode_options(f):
 # itself.  The trailing failure handler pauses on launch failure (e.g.
 # pm not on PATH) so the popup stays visible long enough to read the
 # error instead of vanishing instantly with display-popup -E.
+# The bare S/W queries resolve against tmux's "best" client (the most
+# recently active one), which is wrong when two clients open popups at
+# the same time.  When _popup-show knows the pressing client's session
+# it pins S and W to literal values instead (see _pin_popup_body).
+_POPUP_BODY_S = 'S=$(tmux display-message -p "#{session_name}");'
+_POPUP_BODY_W = ' W=$(tmux display-message -p "#{window_name}");'
 _POPUP_PICKER_BODY = (
-    'S=$(tmux display-message -p "#{session_name}");'
-    ' W=$(tmux display-message -p "#{window_name}");'
-    ' pm _popup-picker "$S" "$W"'
+    _POPUP_BODY_S
+    + _POPUP_BODY_W
+    + ' pm _popup-picker "$S" "$W"'
     " || { echo; echo 'pm popup failed (exit '$?').';"
     " read -n 1 -s -r -p 'Press any key to close...'; }"
 )
 _POPUP_CMD_BODY = (
-    'S=$(tmux display-message -p "#{session_name}");'
-    ' pm _popup-cmd "$S"'
+    _POPUP_BODY_S
+    + ' pm _popup-cmd "$S"'
     " || { echo; echo 'pm popup failed (exit '$?').';"
     " read -n 1 -s -r -p 'Press any key to close...'; }"
 )
@@ -85,13 +91,16 @@ def _bind_popups() -> None:
     which resolves the right ``-w`` at trigger time based on the
     smallest attached-client width.  No rebinding on resize, no stale
     state, no tmux-parser quoting fragility.
+
+    run-shell expands the pressing client's name and session before
+    the job starts; the job itself has no client context, so without
+    them two clients pressing at once both resolve to the same one.
     """
-    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
-             "run-shell", "pm _popup-show picker"),
-            check=False)
-    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
-             "run-shell", "pm _popup-show cmd"),
-            check=False)
+    for key, kind in (("P", "picker"), ("M", "cmd")):
+        subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
+                 "run-shell",
+                 f"pm _popup-show {kind} #{{q:client_name}} #{{q:session_name}}"),
+                check=False)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -731,9 +740,23 @@ def pane_opened_cmd(session: str, window: str, pane_id: str):
     pane_layout.handle_pane_opened(session, window, pane_id)
 
 
+def _pin_popup_body(body: str, session: str, window: str | None) -> str:
+    """Replace the body's tmux S/W queries with literal shell values.
+
+    W is left as a query when *window* is unknown.
+    """
+    body = body.replace(_POPUP_BODY_S, f"S={shlex.quote(session)};")
+    if window is None:
+        return body
+    return body.replace(_POPUP_BODY_W, f" W={shlex.quote(window)};")
+
+
 @cli.command("_popup-show", hidden=True)
 @click.argument("kind")
-def popup_show_cmd(kind: str):
+@click.argument("client", required=False)
+@click.argument("session", required=False)
+def popup_show_cmd(kind: str, client: str | None = None,
+                   session: str | None = None):
     """Internal: launch a popup picking width by smallest attached client.
 
     Resolves popup width dynamically based on the smallest attached
@@ -749,13 +772,16 @@ def popup_show_cmd(kind: str):
         return
     height, body = _POPUP_KINDS[kind]
 
-    # Width is the *calling client's* current window width.  run-shell
-    # from a bind-key inherits the calling client's $TMUX context, so
-    # ``tmux display-message -p "#{window_width}"`` reports what we
-    # need — the actual size of the window we are about to overlay,
-    # not some min/max across the group.
+    # Width is the pressing client's current window width — the size of
+    # the window we are about to overlay, not some min/max across the
+    # group.  run-shell has no client context of its own, so an untargeted
+    # display-message resolves to the most recently active client; when
+    # the binding passed the pressing client's session, target its current
+    # window explicitly ("=name:").  Old bindings (no args) keep the
+    # untargeted query.
+    target = ["-t", f"={session}:"] if session else []
     result = subprocess.run(
-        tmux_mod._tmux_cmd("display-message", "-p", "#{window_width}"),
+        tmux_mod._tmux_cmd("display-message", *target, "-p", "#{window_width}"),
         capture_output=True, text=True, check=False,
     )
     win_width: int | None = None
@@ -772,16 +798,29 @@ def popup_show_cmd(kind: str):
     # popup's cwd can land outside any git repo, which makes
     # find_project_root() fail with a misleading 'No project.yaml found'.
     cwd_result = subprocess.run(
-        tmux_mod._tmux_cmd("display-message", "-p", "#{pane_current_path}"),
+        tmux_mod._tmux_cmd("display-message", *target, "-p", "#{pane_current_path}"),
         capture_output=True, text=True, check=False,
     )
     pane_cwd = cwd_result.stdout.strip() if cwd_result.returncode == 0 else ""
 
-    _log.info("_popup-show: kind=%s window_width=%s threshold=%d -> width=%s cwd=%r",
-              kind, win_width, threshold, width, pane_cwd)
+    if session:
+        win_result = subprocess.run(
+            tmux_mod._tmux_cmd("display-message", *target, "-p", "#{window_name}"),
+            capture_output=True, text=True, check=False,
+        )
+        window = (win_result.stdout.rstrip("\n")
+                  if win_result.returncode == 0 else None)
+        body = _pin_popup_body(body, session, window)
+
+    _log.info("_popup-show: kind=%s client=%r session=%r window_width=%s threshold=%d"
+              " -> width=%s cwd=%r",
+              kind, client, session, win_width, threshold, width, pane_cwd)
     popup_cmd = ["display-popup", "-E", "-w", width, "-h", height]
     if pane_cwd:
         popup_cmd[2:2] = ["-d", pane_cwd]
+    if client:
+        popup_cmd[1:1] = ["-c", client]
+    popup_cmd[1:1] = target
     popup_cmd.append(body)
     subprocess.run(
         tmux_mod._tmux_cmd(*popup_cmd),
@@ -1714,8 +1753,6 @@ def _wait_dismiss(prompt: str = "\nPress q/Esc/Enter to close...") -> None:
 
 def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
-    import sys
-
     route = "tui" if cmd.startswith("tui:") else "direct"
     _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
     if cmd.startswith("tui:"):
@@ -1739,14 +1776,8 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # them ourselves — display-popup -E's raw-mode TTY mangles bytes
         # streamed by the child, leaving the user staring at an empty
         # popup when something fails.
-        # Name the invoking session explicitly: the popup has no pane, so
-        # the command would otherwise resolve "its" session from tmux's
-        # most recently active client and could switch another client's
-        # session to the new window.
-        full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
-        env = {**os.environ, tmux_mod.CALLER_SESSION_ENV: session}
-        result = subprocess.run(full_cmd, text=True, capture_output=True,
-                                env=env)
+        full_cmd = _session_pm_argv(session, shlex.split(cmd))
+        result = subprocess.run(full_cmd, text=True, capture_output=True)
         if result.stdout:
             click.echo(result.stdout, nl=False)
         if result.returncode != 0:
@@ -1760,6 +1791,52 @@ def _run_picker_command(cmd: str, session: str) -> None:
             click.echo(result.stderr, nl=False, err=True)
 
 
+# Bootstrap for popup-dispatched pm commands (see _session_pm_argv).
+# ``python -c`` prepends '' (the cwd) to sys.path; drop it before any
+# pm_core import so a PR workdir's pm_core can never be picked up, then
+# hand off to the dispatcher's wrapper with the session tag.
+_SESSION_PM_BOOTSTRAP = (
+    "import sys\n"
+    "if sys.path and sys.path[0] == '':\n"
+    "    del sys.path[0]\n"
+    "root, tag = sys.argv[1:3]\n"
+    "del sys.argv[1:3]\n"
+    "sys.path.insert(0, root)\n"
+    "import pm_core.wrapper as w\n"
+    "sys.argv[0] = w.__file__\n"
+    "sys.exit(w.main_for_session(tag))\n"
+)
+
+
+def _session_pm_argv(session: str, args: list[str]) -> list[str]:
+    """Build the argv for running ``pm <args>`` as *session*'s pm.
+
+    Used by the popup dispatchers (picker direct route, ``_popup-cmd``).
+    The child keeps the popup's cwd (and inherited PM_PROJECT), but its
+    code is the session's — ``wrapper.main_for_session`` resolves the
+    override / pm_root for the session tag and never walks the cwd,
+    which is often a PR workdir carrying unmerged pm_core.
+    """
+    import sys
+    import pm_core
+    tag = _session_tag_from_name(session) or ""
+    dispatcher_root = str(Path(pm_core.__file__).parent.parent)
+    return [sys.executable, "-c", _SESSION_PM_BOOTSTRAP,
+            dispatcher_root, tag] + list(args)
+
+
+def _session_tag_from_name(session: str) -> str | None:
+    """Return the ``~/.pm/sessions/<tag>`` key for tmux *session*.
+
+    The session name is ``pm-<tag>``, optionally with a grouped-session
+    ``~N`` suffix (see ``_get_session_name_for_cwd``).  None when the
+    name isn't a pm session.
+    """
+    base = pane_registry.base_session_name(session)
+    tag = base.removeprefix("pm-")
+    return tag if tag != base else None
+
+
 def _resolve_root_from_session(session: str) -> Path | None:
     """Resolve a pm session's persisted project root from its name.
 
@@ -1767,9 +1844,8 @@ def _resolve_root_from_session(session: str) -> Path | None:
     Returns the persisted root if present and still on disk, else None.
     """
     from pm_core.paths import get_session_pm_root
-    base = pane_registry.base_session_name(session)
-    tag = base.removeprefix("pm-")
-    if tag == base:
+    tag = _session_tag_from_name(session)
+    if tag is None:
         return None
     return get_session_pm_root(tag)
 
@@ -1804,6 +1880,10 @@ def popup_picker_cmd(session: str, window_name: str):
     if not rp.exists():
         click.echo("Not a pm session.")
         _pause_and_exit(1)
+
+    # Commands run from here (and their children) switch windows in this
+    # client's session, not whichever client tmux considers current.
+    os.environ[tmux_mod.POPUP_SESSION_ENV] = session
 
     saved_root = _resolve_root_from_session(session)
     try:
@@ -2269,8 +2349,6 @@ def popup_picker_cmd(session: str, window_name: str):
 @click.argument("session")
 def popup_cmd_cmd(session: str):
     """Internal: pm command prompt for tmux popup."""
-    import sys
-
     base = pane_registry.base_session_name(session)
     rp = pane_registry.registry_path(base)
     _log.info("popup-cmd invoked: session=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
@@ -2280,6 +2358,8 @@ def popup_cmd_cmd(session: str):
         click.echo("Not a pm session.")
         _wait_dismiss()
         raise SystemExit(1)
+
+    os.environ[tmux_mod.POPUP_SESSION_ENV] = session
 
     # Inherit the session's persisted root so user commands resolve
     # project state correctly even if the popup's cwd is outside the
@@ -2309,7 +2389,7 @@ def popup_cmd_cmd(session: str):
         _run_picker_command(f"tui:{_cmd_norm}", session)
         return
 
-    full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
+    full_cmd = _session_pm_argv(session, parts)
 
     rc = _run_with_abort_keys(full_cmd)
 

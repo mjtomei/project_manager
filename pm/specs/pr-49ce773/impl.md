@@ -144,10 +144,17 @@ both the display id and the local id.
   invoking client's session.  The popup has no `$TMUX_PANE`, and keys typed
   into a popup don't update tmux client activity, so the command's
   "current client" lookup picked the other client (QA scenario 5, also on
-  master).  `_run_picker_command` passes `PM_CALLER_SESSION=<session>` and
-  `tmux.get_session_name()` honours it when there is no pane — only while
-  that session still exists (`has-session -t =<name>`, exact match), since
-  anything the command spawns inherits the variable.
+  master).  Master #240 (pr-24f022e) fixed the same bug in parallel:
+  `popup_picker_cmd` exports `PM_POPUP_SESSION=<session>` into
+  `os.environ` at popup start, `tmux.get_session_name()` honours it when
+  there is no pane, and direct dispatch runs `_session_pm_argv(session,
+  …)` (the session's pm code, not the cwd's — which also fixes the
+  wrong-session-tag issue pr-f98ac63).  This PR's earlier
+  `PM_CALLER_SESSION` was dropped when merging master so only one
+  mechanism remains; what is kept from it is the stale guard:
+  `PM_POPUP_SESSION` is honoured only while that session still exists
+  (`has-session -t =<name>`, exact match), since anything the popup
+  spawns inherits the variable.
 - Enter / double-click on an action row (pre-existing, also master): fzf
   prints an empty `--expect` key line first; `stdout.strip()` dropped it so
   the selected row was read as the key and nothing was dispatched.  Only
