@@ -1072,9 +1072,11 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     flags = [f for f in ("resumed", "adopted", "stale") if a.get(f)]
     if flags:
         name += f" ({', '.join(flags)})"
-    line = f"{ind}{start} → {end}  {dur:>7}  {name}  {outcome}"
-    out = [line]
     sub = ind + "    "
+    # Wrapped between parts: dated times (another day or year) plus a
+    # flagged name can push the row past 80 columns.
+    out = _wrap_joined(f"{ind}{start} → {end}  {dur:>7}  ",
+                       [name, outcome], sub, sep=" ")
     if a.get("detail") and outcome.split()[0] != "done":
         out.append(f"{sub}{a['detail']}")
     phases = [p for p in a.get("phases", []) if p["phase"] != "start"]

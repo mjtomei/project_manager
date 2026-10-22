@@ -1424,6 +1424,19 @@ class TestReconciliation:
         assert all(len(ln) <= 80 for ln in lines[i:i + 3])
         assert " ".join(lines[i:i + 3]).count("(armed ") == 1
 
+    def test_attempt_row_with_year_dates_and_flag_fits_80(self, clock):
+        a = ah.start_attempt(PR, "signoff", label="router")
+        clock.advance(31)
+        ah.end_attempt(PR, a, "done", verdict="SIGNOFF_BLOCKED",
+                       adopted=True)
+        m = hq.build_history(PR, pr={"id": PR, "status": "sign_off"},
+                             now=clock.t + 365 * 86400, live=False)
+        lines = hq.render_text(m)
+        i = next(i for i, ln in enumerate(lines) if "signoff router" in ln)
+        assert all(len(ln) <= 80 for ln in lines)
+        assert lines[i].endswith("signoff router (adopted)")
+        assert lines[i + 1].strip() == "done SIGNOFF_BLOCKED"
+
     def test_missing_history_is_honest(self, clock):
         pr = {"id": PR, "status": "merged", "title": "Old",
               "created_at": "2026-01-01T00:00:00Z",
