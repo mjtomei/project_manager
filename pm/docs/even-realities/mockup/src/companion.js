@@ -39,7 +39,7 @@ export function renderCompanion(root, app, pm, act) {
     if (!text) return;
     // Typed messages carry the same reading context as spoken ones.
     const r = pm.send(v.id, text, app.contextFor({ session: v.id, doc: app.originDoc() }));
-    if (r.ok) app.say(`Sent from phone to ${app.sessionName(pm.session(v.id))}`);
+    if (r.ok) app.say(r.queued ? `Queued from phone in ${app.sessionName(pm.session(v.id))} (busy) · same session` : `Sent from phone to ${app.sessionName(pm.session(v.id))}`);
     else app.fail(r);
     act('noop');
   });

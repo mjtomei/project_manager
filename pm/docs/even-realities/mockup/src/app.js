@@ -22,6 +22,7 @@ const LIST_ROWS = BODY_ROWS - 1; // row 0 is the identity/header row
 const INDENT = 28; // label x after the cursor column (▶ is 20 px)
 const TEXT_WIDTH = 540; // wrap width; leaves room below the 552 px container
 const VOICE_CHOICES = ['Send', 'Speak again', 'Cancel'];
+const CONFIRM_LINES = 5; // explanation rows above a confirmation's two choices
 
 // ---- document formatting ----------------------------------------------
 function formatDoc(text) {
@@ -142,7 +143,7 @@ export class App {
 
   confirmStart(s) {
     if (s.state === 'starting') { this.say(`Already starting ${s.short} · opens when ready`); return; }
-    this.push({ type: 'list', kind: 'confirm', cursor: 1, top: 0, confirm: {
+    this.pushConfirm({
       title: `Start ${this.pm.prLabel(s.pr)} ${s.role}?`.trim(),
       lines: [`${s.role} is not running.`, ...(s.effects || []), 'Repeated taps join this request.'],
       yes: `Start ${s.short}`, no: 'Cancel',
@@ -152,7 +153,13 @@ export class App {
         if (!r.ok) return this.fail(r);
         this.say(r.already === 'starting' ? `Already starting ${s.short}` : `Starting ${s.short} (${r.id}) · not opened twice`);
       },
-    } });
+    });
+  }
+
+  // Confirmation screen: dim explanation lines, then the confirming choice
+  // (selected) and the cancelling one.
+  pushConfirm(confirm) {
+    this.push({ type: 'list', kind: 'confirm', cursor: Math.max(CONFIRM_LINES, confirm.lines.length), top: 0, confirm });
   }
 
   fail(r) {
@@ -301,8 +308,7 @@ export class App {
         return out;
       }
       case 'history': {
-        // A pending PR that never ran has no history yet.
-        const h = pm.history[v.pr] || { timers: [], attempts: [] };
+        const h = pm.historyFor(v.pr);
         const out = [it([{ t: 'TIMERS', dim: true }], null, null)];
         for (const t of h.timers) out.push(it([{ t: t.what }, { t: ` · ${t.owner}`, dim: true }], { t: `${t.left} → ${t.then}`, dim: false }, null));
         if (!h.timers.length) out.push(it([{ t: 'No PR-owned timers', dim: true }], null, null));
@@ -319,7 +325,7 @@ export class App {
       case 'confirm': {
         const c = v.confirm;
         const out = c.lines.map(l => it([{ t: l, dim: true }], null, null));
-        while (out.length < 5) out.push(it('', null, null));
+        while (out.length < CONFIRM_LINES) out.push(it('', null, null));
         out.push(it(c.yes, null, c.run));
         out.push(it(c.no, null, () => this.pop()));
         return out;
@@ -415,7 +421,7 @@ export class App {
   confirmApprove(docId, shown) {
     const d = this.pm.doc(docId);
     const plan = d.kind === 'plan';
-    this.push({ type: 'list', kind: 'confirm', cursor: 5, top: 0, confirm: {
+    this.pushConfirm({
       title: `Approve ${d.label} v${shown.n}?`,
       lines: plan
         ? [`Content ${shown.hash} · the version you read`, 'PROPOSED: PM has no plan approval today.', 'Then: load new PRs; start nothing else.']
@@ -434,18 +440,18 @@ export class App {
           return;
         }
         if (r.reason === 'changed') {
-          this.push({ type: 'list', kind: 'confirm', cursor: 5, top: 0, confirm: {
+          this.pushConfirm({
             title: '! Not approved', lines: [`${d.label} changed to v${r.latest.n} (${r.latest.hash})`, `while you confirmed v${shown.n}.`, 'Nothing was approved.'],
             yes: `What changed v${shown.n} → v${r.latest.n}`, no: 'Back',
-            run: () => { this.pop(); this.whatChanged(docId, shown.n, r.latest.n); } } });
+            run: () => { this.pop(); this.whatChanged(docId, shown.n, r.latest.n); } });
           return;
         }
         this.fail(r);
       },
-    } });
+    });
   }
   confirmMerge(p) {
-    this.push({ type: 'list', kind: 'confirm', cursor: 5, top: 0, confirm: {
+    this.pushConfirm({
       title: `Merge #${p.num} now?`,
       lines: [`Sign-off MERGE at ${p.signoff.head}`, `Integration checked on ${p.signoff.base}`, 'PM re-checks both before merging.', 'This releases the manual merge hold.'],
       yes: `Merge #${p.num}`, no: 'Keep waiting',
@@ -454,14 +460,14 @@ export class App {
         this.pop();
         if (r.ok) return this.say(`■ #${p.num} merged`);
         if (r.reason === 'stale') {
-          this.push({ type: 'list', kind: 'confirm', cursor: 5, top: 0, confirm: {
+          this.pushConfirm({
             title: '! Merge refused by PM', lines: [`Head is ${r.head}; sign-off was ${p.signoff.head}.`, 'Sign-off runs again automatically.', 'The manual merge hold stays.'],
-            yes: 'History and timers', no: 'Back', run: () => { this.pop(); this.push({ type: 'list', kind: 'history', pr: p.id, cursor: 0, top: 0 }); } } });
+            yes: 'History and timers', no: 'Back', run: () => { this.pop(); this.push({ type: 'list', kind: 'history', pr: p.id, cursor: 0, top: 0 }); } });
           return;
         }
         this.fail(r);
       },
-    } });
+    });
   }
 
   // ---- sessions -------------------------------------------------------

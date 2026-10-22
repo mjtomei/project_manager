@@ -49,13 +49,15 @@ function layoutColumn(rows, pick, maxWidth) {
   return [join(bright), join(dim)];
 }
 
-// Build container contents for a frame. Returns {contents, panel, page, problems}.
+// Build container contents for a frame. Returns {contents, panel, menu,
+// problems, shown}; `shown` is the fitted rows and footer actually displayed.
+// The caller's frame is left unchanged.
 export function buildFrame(frame) {
   const rows = (frame.rows || []).slice();
   const problems = [];
   if (rows.length > BODY_ROWS) problems.push(`body has ${rows.length} rows > ${BODY_ROWS}`);
   while (rows.length < BODY_ROWS) rows.push(null);
-  const body = rows.slice(0, BODY_ROWS).map(r => r || row());
+  const body = rows.slice(0, BODY_ROWS).map(r => (r ? { ...r } : row()));
 
   // Left column: truncate to the space left of the right column when a row
   // has a right-hand state.
@@ -107,7 +109,7 @@ export function buildFrame(frame) {
     w: WIDTH - 8, h: Math.min(FOOTER_Y - 2, frame.panel.rows * LINE + 4),
   } : null;
   if (panel && panel.y + panel.h > FOOTER_Y) problems.push('panel overlaps footer');
-  return { contents, panel, menu, problems };
+  return { contents, panel, menu, problems, shown: { rows: body, footer: { left: footLeft, right: footRight } } };
 }
 
 export function pageDefinition(built) {

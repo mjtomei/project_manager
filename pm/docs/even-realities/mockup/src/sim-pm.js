@@ -39,6 +39,8 @@ export class SimPM {
   pr(id) { return this.prs.find(p => p.id === id); }
   sessionsFor(prId) { return this.sessions.filter(s => s.pr === prId); }
   projectSessions() { return this.sessions.filter(s => !s.pr); }
+  // A PR that never ran has no history entry yet.
+  historyFor(prId) { return (this.history[prId] ??= { timers: [], attempts: [] }); }
   prLabel(prId) { const p = this.pr(prId); return p ? `#${p.num}` : ''; }
 
   needsYou() {
@@ -82,8 +84,9 @@ export class SimPM {
       pr.activity = 'Implementation running'; pr.needs = null; pr.approvedAt = this.now();
       const s = this.session(d.session);
       if (s) { s.state = 'working'; s.stateText = 'implementing'; s.transcript.push({ who: 'pm', t: `Spec v${version} (${hash}) approved from glasses · implementation resumed` }); }
-      this.history[d.pr].timers = [];
-      this.history[d.pr].attempts.push([this.now(), `spec approved v${version}`, '—', 'approved'], [this.now(), 'impl', '0m', 'running']);
+      const h = this.historyFor(d.pr);
+      h.timers = [];
+      h.attempts.push([this.now(), `spec approved v${version}`, '—', 'approved'], [this.now(), 'impl', '0m', 'running']);
     }
     return { ok: true };
   }
@@ -140,7 +143,7 @@ export class SimPM {
         const p = this.pr(e.pr);
         Object.assign(p, e.patch || {});
         if (e.session) Object.assign(this.session(e.session), e.sessionPatch);
-        if (e.history) this.history[e.pr].attempts.push(e.history);
+        if (e.history) this.historyFor(e.pr).attempts.push(e.history);
         break;
       }
       case 'session': Object.assign(this.session(e.id), e.patch); break;

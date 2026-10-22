@@ -45,13 +45,14 @@ for (const j of JOURNEYS) {
     if (built.problems.length) { failures++; console.log(`  ! step ${n} ${frame.scene}: ${built.problems.join('; ')}`); }
     if (!step.shot) continue;
     shots++;
-    const text = frameText(frame);
+    // Match against the fitted text, so a truncated row or footer fails.
+    const text = frameText(built.shown);
     const errs = [];
     if (step.expect && !frame.scene.includes(step.expect)) errs.push(`scene ${frame.scene} lacks ${step.expect}`);
     if (step.contains && !text.includes(step.contains)) errs.push(`text lacks "${step.contains}"`);
     if (errs.length) failures++;
     console.log(`\n${errs.length ? 'FAIL' : 'ok  '} ${step.shot}  [${frame.scene}]${errs.length ? '\n  ' + errs.join('\n  ') : ''}`);
-    if (!quiet || errs.length) console.log(show(frame));
+    if (!quiet || errs.length) console.log(show({ ...built.shown, panel: frame.panel }));
   }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
