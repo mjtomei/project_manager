@@ -20,7 +20,12 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   `pm pr history <pr> --json`, then the output is valid JSON with schema
   `pm.pr.history/1` whose `attempts`, `timers`, `holds`, `waiting_for` and
   `milestones` contain the same facts (attempt count, outcomes, verdicts,
-  iteration numbers, durations) as the text output.
+  iteration numbers, durations) as the text output. An attempt row carries
+  a `context` key only when its writer passed one (pr-291e891 will supply
+  session/window/task; today no writer does, so it is absent, never null).
+  `timers.recent` (max 20; text shows 10) orders resolved timers by
+  resolution time and `lost` timers (no resolution time) by arming time,
+  so a just-lost timer is not the first row truncated away.
 - **R3 — live "what is PM waiting for".** Given a review iteration whose
   fake agent has emitted its verdict and the loop is inside the 20 s verdict
   grace, when the user runs `pm pr history`, then the "Now" section / the
@@ -185,6 +190,9 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   command still shows its history. `#N` display ids resolve.
 - **E3 — corrupted journal.** Given a journal with a truncated last line or
   garbage lines, history still renders the valid events (no traceback).
+  A non-UTF-8 byte spoils only its own line (c57cdda4): text, `--json`,
+  the popup badge/pager and sign-off routing (which looks up the newest
+  open router attempt in the journal) keep working.
 - **E4 — instrumentation must not change execution.** Given the history
   directory is unwritable (or the journal file is a directory), when the
   user runs a review loop / QA run, then the loop reaches the same verdicts
@@ -209,6 +217,8 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   `pm pr history --json` readers always get valid JSON.
 - **E8 — rotation.** Given a journal near 4 MB, further writes rotate it to
   `<pr>.1.jsonl`; history still shows attempts from both generations.
+  A reader racing a rotation never drops the generation just rotated
+  (d88abd95): attempt counts read by concurrent pollers never dip.
 - **E9 — superseded loop.** Given a review loop restarted while one is
   running, the old loop attempt ends `superseded`, not `done`.
   (The superseded loop's open iteration may first read `superseded`, then
@@ -219,6 +229,10 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   the loop ends, then history shows one `start` attempt continuing after a
   "not tracked" span (counted as neither exec nor wait), not an extra
   "start untracked" row per review loop.
+- **E10b — command-bar review.** A review started by typing
+  `/pr review <pr>` in the TUI command bar is tracked and journaled like
+  one started with `d` (76742637); history never says "No recorded
+  action history" for a review that ran.
 - **E11 — cleanup ends in-flight attempts.** Given an action is in flight
   (impl pane, review loop, merge pane), when `pm pr cleanup
   --resources`, TUI `Y`, `pm pr merge` or merge detection tears down the
