@@ -15941,6 +15941,17 @@ prs:
       not in the same instant (pr-b511dcf).'
     created_at: '2026-10-22T15:24:06Z'
     last_edited: '2026-10-22T15:24:06Z'
+  - id: note-dbb7cde
+    text: 'S2 refiner (2026-10-22): container has no fzf and apt only has 0.29 — install
+      0.56.3 aarch64 from GitHub releases (fzf-0.56.3-linux_arm64.tar.gz) to /usr/local/bin.
+      Real prefix+P works via a recorder client: tmux -u -L rec new-session -d -x
+      130 -y 40 "env -u TMUX tmux attach -t $S~1", then send C-b P. Double-click =
+      tmux set -g mouse on + send-keys -H SGR bytes. PRE-EXISTING (also /opt/pm-src
+      master): Enter/double-click on a LIVE action row closes the popup without dispatching
+      (stdout.strip() eats the empty --expect key line) — not this PR; drive live
+      actions by shortcut key. No-active-windows screen closes only on q/Esc/Enter.'
+    created_at: '2026-10-22T15:00:55Z'
+    last_edited: '2026-10-22T15:00:55Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
