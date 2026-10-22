@@ -724,9 +724,13 @@ class ScenarioObserver:
                 phase(self.pr_id, attempt, "verifying",
                       f"{verdicts.get(idx) or 'PASS'} under verification")
             elif status == "running":
+                # A queued scenario's attempt started before its worker
+                # had a session; the launch supplies it, so the live view
+                # can read the worker's hook events (turn finished, grace).
                 phase(self.pr_id, attempt, "agent",
                       "re-evaluating after verification flag"
-                      if prev == "verifying" else "launched")
+                      if prev == "verifying" else "launched",
+                      session_id=getattr(sc, "session_id", None) or None)
             elif status == "done":
                 end_attempt(self.pr_id, attempt, "done",
                             verdict=verdicts.get(idx))

@@ -1016,6 +1016,24 @@ class TestScenarioObserver:
             "queued", "launching", "agent"]
         assert kids[1]["wait_s"] == 50 and kids[1]["exec_s"] == 17
 
+    def test_dequeued_scenario_gets_its_launch_session(self, clock):
+        """A queued scenario has no session until its worker launches; the
+        attempt must pick it up then, or the live view never sees the
+        worker's hook events (turn finished / verdict grace)."""
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        s1, s2 = _sc(1), _sc(2)
+        s2.session_id = None
+        obs.observe([s1, s2], pending={1}, verifying=set(), queued={2},
+                    verdicts={})
+        obs.launching(s2)
+        s2.session_id = "sess-2-launched"
+        obs.observe([s1, s2], pending={1, 2}, verifying=set(), queued=set(),
+                    verdicts={})
+        kids = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert kids[1]["session_id"] == "sess-2-launched"
+
     def test_relaunched_without_backoff_attempt_tracks_status(self, clock):
         """If the backoff attempt was never opened, ``relaunched`` opens
         one and the observer keeps tracking it (no duplicate agent phase
