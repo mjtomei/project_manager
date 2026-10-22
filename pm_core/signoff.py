@@ -32,6 +32,7 @@ the step it returns to.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -1015,10 +1016,43 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
     helpers; the CLI passes its own module-level names so existing patch
     points keep working.
     """
-    from pm_core import integration as integ
     read_verdict = read_verdict or signoff_transcript_verdict
     window_pane = window_pane or signoff_window_pane
     retire = retire or retire_signoff_run
+    with _step_lock(pr_entry["id"]):
+        # Re-read under the lock: the caller's entry may predate another
+        # driver's step (the TUI and every auto-sequence tick act on the same
+        # verdict).  A bounce merges the clean base into the branch before it
+        # transitions, so a driver acting on the old snapshot would see "HEAD
+        # moved", retire the run and relaunch sign-off for a PR that already
+        # left it.
+        try:
+            disk_pr = store.get_pr(store.load(root), pr_entry["id"])
+        except Exception:
+            disk_pr = None
+        if disk_pr is not None:
+            if disk_pr.get("status") != "sign_off":
+                return SignoffStep("running")
+            pr_entry = disk_pr
+        return _step_signoff_locked(root, pr_entry, session=session,
+                                    tdir=tdir, read_verdict=read_verdict,
+                                    window_pane=window_pane, retire=retire)
+
+
+@contextlib.contextmanager
+def _step_lock(pr_id: str):
+    """Exclusive per-PR lock serializing :func:`step_signoff` across drivers."""
+    import fcntl
+    from pm_core.paths import workdirs_base
+    with open(workdirs_base() / f".signoff-step-{pr_id}.lock", "w") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,
+                         tdir: Path, read_verdict, window_pane,
+                         retire) -> SignoffStep:
+    from pm_core import integration as integ
     pr_id = pr_entry["id"]
     current_sha = head_sha(pr_entry.get("workdir"))
     record = pr_entry.get("signoff") or {}

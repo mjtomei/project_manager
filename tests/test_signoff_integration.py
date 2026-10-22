@@ -160,6 +160,31 @@ def test_hop_driver_holds_the_relaunch_claim(w, verdict, hop):
     assert signoff.claim_return_launch(w.pm_dir, PR, hop) is False
 
 
+@pytest.mark.parametrize("verdict,hop", [(SIGNOFF_IMPL, "impl"),
+                                         (SIGNOFF_REVIEW, "review"),
+                                         (SIGNOFF_REQA, "qa")])
+def test_driver_on_a_pre_hop_snapshot_leaves_the_bounce_alone(w, verdict, hop):
+    """The TUI and auto-sequence ticks act on the same verdict.  The bounce
+    merges the clean base into the branch (HEAD moves) before it transitions,
+    so a second driver holding a snapshot from before the hop must not read
+    that as "HEAD moved" and retire + relaunch sign-off."""
+    commit(w.repo, "other.txt", "other\n", "other PR merged")
+    integration.check_integration(w.pm_dir, PR)
+    snapshot = pr(w)                                # read before the hop
+    res, _ = step(w, verdict)
+    assert res.hop == hop
+    ret = pr(w)["signoff_return"]
+    retired = []
+    late = signoff.step_signoff(
+        w.pm_dir, snapshot, session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: verdict, window_pane=lambda s, p: None,
+        retire=lambda *a: retired.append(a))
+    assert late.action == "running"
+    assert retired == []
+    assert pr(w)["signoff_return"] == ret          # verdict/ts untouched
+    assert git(w.wd, "rev-parse", "HEAD") == ret["applied"]["merge_sha"]
+
+
 def test_reqa_hop_takes_no_launch_claim(w):
     integration.check_integration(w.pm_dir, PR)
     res, _ = step(w, SIGNOFF_REQA)
