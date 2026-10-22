@@ -178,6 +178,19 @@ env-by-name).
   - Out of scope (pr-3c7ce04): a pane idle on "Login expired · Please run
     /login" is not detected by the route stall watch (it only rechecks the
     router).
+  - Second-pass handoff: prior captures live under the PR capture root
+    `scenarios/1..6` (1,2,5,6 independently verified; 3/4 produced fixes
+    0b1edfca/c5d7d64f, since reviewed). Reuse/adapt their fixture scripts
+    (stand-in-only `apiKeyHelper`: `scenarios/5/scripts`) but write to NEW
+    scenario capture paths; inspect hardcoded output paths first and never
+    overwrite prior captures. Put fake-claude on the scratch HOME's PATH.
+  - Clean up fixtures by the exact PIDs / argv / socket paths you started;
+    broad `ps | awk` / `pkill -f` matching killed a QA executor.
+  - Probe/bridge sources (worker_route.py, route_bridge.py,
+    cli/provider.py, container.py) are unchanged since the real
+    host + rootless-container work-account smoke with underscore cwd
+    (`host-work-route-smoke-20261022T195845Z`) and still match a4cec139;
+    later product changes are qa_loop.py only (0b1edfca, c5d7d64f).
   - The refresh-command cooldown is per process; it is only observable
     inside a long-lived QA loop/TUI, not across separate `pm provider test`
     runs.
