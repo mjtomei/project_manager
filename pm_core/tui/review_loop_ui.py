@@ -1129,6 +1129,23 @@ def _poll_impl_idle(app) -> None:
                 continue
             review_transcript = str(tdir / f"review-{pr_id}.jsonl")
             try:
+                # The symlink may belong to an earlier plain review (z d)
+                # while the window now holds a finished loop iteration's
+                # pane.  Pairing them mirrors a phantom "review running"
+                # that never sees its own hooks, so only register a pane
+                # the transcript is about.
+                from pm_core.claude_launcher import (
+                    pane_session_id, session_id_from_transcript)
+                if not hasattr(app, "_foreign_review_panes"):
+                    app._foreign_review_panes = {}  # pane -> transcript sid
+                foreign = app._foreign_review_panes
+                t_sid = session_id_from_transcript(review_transcript)
+                if t_sid and foreign.get(pane_id) != t_sid:
+                    pane_sid = pane_session_id(pane_id)
+                    if pane_sid and pane_sid != t_sid:
+                        foreign[pane_id] = t_sid
+                if t_sid and foreign.get(pane_id) == t_sid:
+                    raise ValueError("review transcript is another session")
                 tracker.register(review_key, pane_id, review_transcript)
             except ValueError:
                 # e.g. a review-loop pane left in flight across a TUI

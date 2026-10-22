@@ -321,6 +321,58 @@ class TestRuntimeCapture:
                             session_id="s1")
         assert len(_attempts()) == 1
 
+    def test_review_pane_of_another_session_is_not_mirrored(
+            self, clock, tmp_path, monkeypatch):
+        """A finished loop leaves its last iteration pane in the review
+        window, and a plain review (z d) earlier left review-<pr>.jsonl
+        naming its own session.  Pairing the two mirrored a phantom
+        "review running" (agent working forever) once the loop ended.
+        Only a pane the transcript is about is tracked."""
+        from pm_core.pane_idle import PaneIdleTracker
+        from pm_core.tui import review_loop_ui
+        monkeypatch.setenv("HOME", str(tmp_path))
+        old = "6ca0ccf2-e478-4bbd-bdc2-b90ad8e2af11"
+        new = "6ca0ccf2-e478-4bbd-bdc2-b90ad8e2af12"
+        tdir = tmp_path / "pm" / "transcripts" / "manual-abc"
+        tdir.mkdir(parents=True)
+        (tdir / f"review-{PR}.jsonl").symlink_to(tmp_path / f"{old}.jsonl")
+        cmds = {"%4": f"fake-claude --verdict PASS --session-id {new}",
+                "%5": f"claude --session-id {old}"}
+        calls: list[str] = []
+
+        def _start_cmd(pane):
+            calls.append(pane)
+            return cmds.get(pane, "")
+        window = {"pane": "%4"}
+        monkeypatch.setattr("pm_core.tmux.pane_start_command", _start_cmd)
+        monkeypatch.setattr("pm_core.tmux.pane_exists", lambda pane: True)
+        monkeypatch.setattr(
+            review_loop_ui, "_find_impl_pane",
+            lambda session, name: (window["pane"]
+                                   if name == f"review-{PR}" else None))
+        monkeypatch.setattr(review_loop_ui, "_watch_untracked_trust",
+                            lambda *a: None)
+        app = SimpleNamespace(
+            _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
+            _data={"prs": [{"id": PR, "status": "in_review"}]},
+            _review_loops={}, _pending_merge_prs=set(),
+            _merge_propagation_phase=set(), _root=tmp_path / "pm",
+            _auto_start_run_id=None, _manual_transcript_run_id="manual-abc",
+            log_message=lambda *a, **k: None)
+        with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+            for _ in range(3):
+                review_loop_ui._poll_impl_idle(app)
+            assert not rs.get_action_state(PR, "review")
+            assert not [e for e in _attempts().values()
+                        if e["action"] == "review"]
+            assert calls.count("%4") == 1  # looked up once, then cached
+            # The review's own pane is tracked and mirrored as before.
+            window["pane"] = "%5"
+            review_loop_ui._poll_impl_idle(app)
+        entry = rs.get_action_state(PR, "review")
+        assert (entry["state"], entry["pane_id"], entry["session_id"]) == (
+            "running", "%5", old)
+
     def test_new_loop_id_supersedes(self, clock):
         rs.set_action_state(PR, "review-loop", "running", loop_id="aaaa")
         first = rs.get_action_state(PR, "review-loop")["attempt_id"]
