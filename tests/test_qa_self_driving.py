@@ -131,6 +131,10 @@ class TestPassCountAndAutoMerge:
         assert app._self_driving_qa["pr-001"]["pass_count"] == 1
         mock_merge.assert_not_called()
         mock_restart.assert_called_once_with(app, "pr-001")
+        # Held, so start_qa's same-frame "Starting QA" doesn't hide it.
+        restart_line = [c for c in app.log_message.call_args_list
+                        if "restarting QA" in c.args[0]]
+        assert restart_line and restart_line[0].kwargs.get("hold", 0) > 0
 
     def test_pass_triggers_auto_merge_when_enough(self, tmp_path):
         """Step 5: pass_count reaching required_passes triggers auto-merge."""
