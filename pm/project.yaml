@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-089af69
+  active_pr: pr-4296808
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31518,3 +31518,53 @@ prs:
       (fails on 81cebf17). Live pre/post captures /pm-captures/scenarios/3/story3.'
     created_at: '2026-10-22T20:33:29Z'
     last_edited: '2026-10-22T20:33:29Z'
+- id: pr-4edf491
+  plan: bugs
+  title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
+    as the spec'
+  branch: pm/pr-4edf491-bug-pm-pr-spec-saves-a-failed-claude-p-error-e-g-i
+  status: pending
+  depends_on: []
+  description: 'pm_core/spec_gen.py generate_spec: launch_claude_print output is written
+    to pm/specs/<pr>/<phase>.md without checking that claude succeeded. Repro (pr-592e4bd
+    QA s4, 2026-10-22): with an invalid ANTHROPIC_API_KEY in the env, `pm pr spec
+    <pr> qa` printed "Invalid API key · Fix external API key" and wrote exactly that
+    line as qa.md (39 bytes). A second `pm pr spec <pr> qa` just shows the bogus spec,
+    and the QA spec gate then passes with it, so planners/refiners get an error string
+    as the spec. Only --regenerate recovers. Expected: non-zero exit / error result
+    is not saved, the command reports the failure.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T20:39:47.848341+00:00'
+  updated_at: '2026-10-22T20:39:47.848341+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4296808
+  plan: bugs
+  title: 'Bug: after z t replaces a QA run, the TUI recovers the superseded run from
+    disk and logs INPUT_REQUIRED right after the new run PASS'
+  branch: pm/pr-4296808-bug-after-z-t-replaces-a-qa-run-the-tui-recovers-t
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.py resume scan ("Recovered completed QA from
+    disk"). Repro (pr-592e4bd QA s4, 2026-10-22, local backend): start QA on a PR
+    (t), then z t mid-run. The old loop finishes as INPUT_REQUIRED ("window gone during
+    verification") and leaves its qa_resume.json + qa_status.json overall. When the
+    new run completes, the log shows "QA PASS for <pr> - press i to sign off" and
+    one second later "Recovered completed QA from disk: <pr> -> INPUT_REQUIRED" then
+    "QA INPUT_REQUIRED for <pr> - paused for human input". The runtime state stays
+    PASS, but the TUI message and notification are wrong. The superseded run snapshot
+    should be cleared when z t supersedes it, or the scan should skip loop_ids that
+    are not the current run. Related: pr-f8acf21.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T20:39:48.696543+00:00'
+  updated_at: '2026-10-22T20:39:48.696543+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
