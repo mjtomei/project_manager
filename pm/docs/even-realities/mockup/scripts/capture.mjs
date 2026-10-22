@@ -219,11 +219,12 @@ async function main() {
     // Under host load simulator 0.9.5 occasionally never answers one bridge
     // call, so the page's frame lane stalls and no further frame arrives.
     // Journeys start from fresh state (a fresh page, or reset), so replay the
-    // journey once in a relaunched simulator; its shots replace the partial ones.
+    // journey in a relaunched simulator, at most twice (one replay still
+    // stalled 2 of 3 runs at load ~70); its shots replace the partial ones.
     for (let attempt = 1; ; attempt++) {
       try { manifest.journeys.push(await runJourney(j)); break; }
       catch (e) {
-        if (attempt >= 2 || !e.message.startsWith('no new frame')) throw e;
+        if (attempt >= 3 || !e.message.startsWith('no new frame')) throw e;
         console.log(`journey ${j.id} stalled (${e.message.split('\n')[0]}); relaunching the simulator and replaying journey ${j.id}`);
         await stopSimulator();
         await launchSimulator();
