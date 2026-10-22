@@ -3404,11 +3404,11 @@ def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bo
 
 def _older_than(path: Path | None, iso_ts: str | None) -> bool:
     """Whether *path* was last written before the ISO timestamp *iso_ts*."""
+    from pm_core.signoff import parse_ts
     if path is None or not iso_ts:
         return False
     try:
-        ts = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00"))
-        return path.stat().st_mtime < ts.timestamp()
+        return path.stat().st_mtime < parse_ts(iso_ts).timestamp()
     except (OSError, ValueError):
         return False
 

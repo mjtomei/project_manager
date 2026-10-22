@@ -42,6 +42,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -74,7 +75,7 @@ BINDING_KEYS = ("target_repo", "base_branch", "base_sha", "candidate_tree",
                 "status", "head")
 
 
-def _git(*args: str, cwd) -> "subprocess.CompletedProcess":  # noqa: F821
+def _git(*args: str, cwd) -> subprocess.CompletedProcess:
     return git_ops.run_git(*args, cwd=cwd, check=False)
 
 

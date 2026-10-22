@@ -743,6 +743,15 @@ def return_awaiting(pr: dict | None) -> str | None:
     return rec.get("awaiting") or None
 
 
+def parse_ts(value):
+    """An ISO timestamp as a datetime (Python 3.10 rejects a "Z" suffix).
+
+    Raises TypeError / ValueError like :func:`datetime.fromisoformat`.
+    """
+    from datetime import datetime
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
 RETURN_LAUNCH_CLAIM_SECONDS = 180
 # Hops whose relaunch is ``--fresh`` (kills the window it finds) and so
 # needs one launcher; a QA return is guarded by the QA loop's running check.
@@ -775,8 +784,7 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
             return
         claim = rec.get("launch_claim") or {}
         try:
-            age = (now - datetime.fromisoformat(
-                str(claim.get("at")).replace("Z", "+00:00"))).total_seconds()
+            age = (now - parse_ts(claim.get("at"))).total_seconds()
         except (TypeError, ValueError):
             age = None
         if claim.get("hop") == hop and age is not None \

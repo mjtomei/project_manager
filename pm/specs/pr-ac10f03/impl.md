@@ -341,6 +341,10 @@ No [UNRESOLVED] ambiguities.
   catch-up, `pm pr auto-sequence` ticks) take `claim_return_launch`
   (claim under the yaml lock, 180 s expiry) so only one driver launches;
   a QA return is guarded by the QA loop's own running check.
+  A TUI that skips a claimed launch schedules one more scheduler pass
+  for after the claim can expire, so a claim whose holder died (TUI
+  restart right after its hop) is taken over without waiting for an
+  unrelated event.
 - A merge window left from an old version for an `in_review` PR: its
   `MERGED` verdict now leads to `--propagation-only`, which only finalizes if
   the head is actually in the published base.

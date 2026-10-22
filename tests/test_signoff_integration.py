@@ -826,6 +826,51 @@ def test_tui_scheduler_leaves_a_claimed_impl_return_launch_alone(tmp_path):
     assert calls == []
 
 
+def test_tui_skipped_return_claim_schedules_one_recheck(tmp_path):
+    """The claim's holder may have died before launching (TUI restart right
+    after its hop) and the TUI has no periodic auto-start pass: a skipped
+    claim schedules one scheduler pass for after the claim can expire."""
+    from pm_core import autostart_state as st
+    from pm_core.tui import auto_start
+    from tests.test_autostart_multi_target import FakeApp
+    now = datetime.now(timezone.utc).isoformat()
+    impl = _returned("in_progress", "impl",
+                     launch_claim={"hop": "impl", "at": now})
+    impl["depends_on"] = []
+    app = FakeApp([impl], root=tmp_path)
+    app._auto_start = True
+    app._auto_start_targets = {PR: st.make_target_record("t")}
+    app._auto_start_run_id = "run"
+    store.save(app._data, tmp_path)
+    timers = []
+    app.set_timer = lambda delay, cb: timers.append((delay, cb))
+
+    async def fake_start(_app, pr_id, fresh=False):
+        raise AssertionError("claimed launch must be left alone")
+
+    with patch.object(auto_start, "_start_pr_quiet", fake_start), \
+         patch("pm_core.tui.signoff_ui.advance_all"):
+        asyncio.run(auto_start.check_and_start(app))
+        asyncio.run(auto_start.check_and_start(app))
+    assert len(timers) == 1                      # one pending re-check
+    delay, fire = timers[0]
+    assert delay > signoff.RETURN_LAUNCH_CLAIM_SECONDS
+    fire()
+    assert app._return_claim_recheck is False
+    assert len(app.workers) == 1                 # the re-check pass
+
+    # A REVIEW return's skipped claim schedules the same re-check.
+    timers.clear()
+    rev = _returned("in_review", "review",
+                    launch_claim={"hop": "review", "at": now})
+    rev["workdir"] = str(tmp_path)
+    store.save({"project": app._data["project"], "prs": [rev]}, tmp_path)
+    with patch("pm_core.tui.review_loop_ui._start_loop") as start:
+        auto_start._auto_start_review_loops(app, [rev])
+    start.assert_not_called()
+    assert len(timers) == 1
+
+
 @pytest.mark.parametrize("claimed", [True, False])
 def test_tui_review_catch_up_takes_the_return_launch_claim(tmp_path, claimed):
     """After a TUI restart the review loop's --fresh launch for a REVIEW

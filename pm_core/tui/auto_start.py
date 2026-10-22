@@ -858,6 +858,7 @@ async def check_and_start(app) -> None:
                 if not claim_return_launch(app._root, pr_id, "impl"):
                     _log.info("auto_start: %s rework launch already "
                               "claimed, skipping", pr_id)
+                    _recheck_after_claim(app)
                     continue
                 await _start_pr_quiet(app, pr_id, fresh=True)
             else:
@@ -917,6 +918,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             if not claim_return_launch(app._root, pr_id, "review"):
                 _log.info("auto_start: %s review return launch already "
                           "claimed, skipping", pr_id)
+                _recheck_after_claim(app)
                 continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
@@ -948,16 +950,12 @@ def recorded_qa_verdict(pr_id: str, pr: dict | None = None) -> str | None:
 
 
 def _predates_open_return(at: str | None, pr: dict) -> bool:
-    from datetime import datetime
-    from pm_core.signoff import open_return
+    from pm_core.signoff import open_return, parse_ts
     ts = (open_return(pr) or {}).get("ts")
     if not ts:
         return False
-    def _parse(s: str):
-        # Python 3.10's fromisoformat rejects a "Z" suffix.
-        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     try:
-        return not at or _parse(at) < _parse(ts)
+        return not at or parse_ts(at) < parse_ts(ts)
     except (TypeError, ValueError):
         return False
 
@@ -1009,6 +1007,28 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui
         qa_loop_ui.start_qa(app, pr_id)
+
+
+def _recheck_after_claim(app) -> None:
+    """Run one more scheduler pass once a skipped return claim can expire.
+
+    The claim's holder may have died before launching (e.g. a TUI restart
+    right after the hop it performed).  The TUI has no periodic auto-start
+    pass, so without this a stranded claim would stall the PR until some
+    unrelated event; with it the expired claim is taken over.  One pending
+    re-check covers every PR.
+    """
+    set_timer = getattr(app, "set_timer", None)
+    if set_timer is None or getattr(app, "_return_claim_recheck", False):
+        return
+    from pm_core.signoff import RETURN_LAUNCH_CLAIM_SECONDS
+
+    def _fire():
+        app._return_claim_recheck = False
+        app.run_worker(check_and_start(app))
+
+    app._return_claim_recheck = True
+    set_timer(RETURN_LAUNCH_CLAIM_SECONDS + 5, _fire)
 
 
 def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
