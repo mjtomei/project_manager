@@ -29980,7 +29980,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-22T14:14:21.195644+00:00'
+  updated_at: '2026-10-22T14:27:12.168953+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30136,6 +30136,19 @@ prs:
       sign-off again.'
     created_at: '2026-10-22T14:14:21Z'
     last_edited: '2026-10-22T14:14:21Z'
+  - id: note-9b6b0e2
+    text: 'QA S16 PASS on b3529c34 (captures /pm-captures/scenarios/16, scripts reusable):
+      5 waves (170 renders, 60 write-doc, 20 pytest 151 passed, 5x 16-thread importlib
+      runner) clean; 3000 SIGINT 0 temp leftovers, rubric.md never changed; 968 SIGKILL
+      at 10-40 ms left 8 real .rubric.md.* (4 empty, 2x32K, 2 full), all gitignored
+      via .gitignore:4, write-doc/pytest fine with them present. Spec drift: on Python
+      3.10 an unhandled KeyboardInterrupt from rubric.py exits 130 (SIGINT re-raised),
+      not 1; exit 1 comes from init_import_site/init_sys_streams or KeyboardInterrupt
+      chained to RuntimeError during import pathlib; rare exit 0 with stderr "Exception
+      ignored in threading._shutdown" or a KeyboardInterrupt in the argv[0] zipimport
+      check (CPython swallows the signal). None of these involve rubric.py.'
+    created_at: '2026-10-22T14:27:12Z'
+    last_edited: '2026-10-22T14:27:12Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
