@@ -310,6 +310,8 @@ attempt rows uninterpreted (omitted when absent).
   Rows that still exceed 80 columns (a dated start plus a flagged name,
   a dated Recent-timers resolution) wrap between their parts, so plain
   `| cat` output fits and matches the TTY wrapper (QA S42, 3ccea259).
+  Free-text lines (title, `Waiting for:`, `Now` rows, the runtime line,
+  attempt details, `Note:` lines) word-wrap at 80 the same way.
 - I7. The picker tests that assert the exact action label list / row count
   are updated for the History row.
 - I8. Journals are bounded: when a file exceeds 4 MB, the writer rotates it

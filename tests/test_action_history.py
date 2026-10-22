@@ -1453,6 +1453,29 @@ class TestReconciliation:
         assert lines[i].endswith("signoff router (adopted)")
         assert lines[i + 1].strip() == "done SIGNOFF_BLOCKED"
 
+    def test_free_text_lines_fit_80(self, clock):
+        # The missing-history note, a long waiting-for/activity text and a
+        # long detail wrap in plain (non-TTY) output too, words intact.
+        empty = hq.build_history(PR, pr={"id": PR, "title": "t " * 60},
+                                 now=clock.t, live=False)
+        a = ah.start_attempt(PR, "qa", label="QA run")
+        clock.advance(5)
+        ah.end_attempt(PR, a, "failed", detail="scenario " * 30)
+        m = hq.build_history(PR, now=clock.t, live=False)
+        m["waiting_for"] = "review-loop i2: " + "agent turn finished " * 6
+        m["current"] = [{"name": "review-loop i2", "attempt": "x",
+                         "state": "turn_finished",
+                         "text": "agent turn finished " * 6}]
+        for model in (empty, m):
+            lines = hq.render_text(model)
+            assert all(len(ln) <= 80 for ln in lines), "\n".join(lines)
+        text = " ".join(hq.render_text(empty))
+        assert "No recorded action history for this PR." in text
+        joined = " ".join(ln.strip() for ln in hq.render_text(m))
+        assert joined.count("scenario") == 30
+        assert ("Waiting for: review-loop i2: "
+                + "agent turn finished " * 5) in joined
+
     def test_missing_history_is_honest(self, clock):
         pr = {"id": PR, "status": "merged", "title": "Old",
               "created_at": "2026-01-01T00:00:00Z",

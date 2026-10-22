@@ -29,6 +29,7 @@ Nothing here infers durations it has no evidence for: unknown values are
 
 from __future__ import annotations
 
+import textwrap
 from datetime import datetime, timezone
 from typing import Any
 
@@ -951,14 +952,15 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
         head += f"  [{model['status']}]"
     lines.append(head)
     if model.get("title"):
-        lines.append(f"  {model['title']}")
-    lines.append(f"Waiting for: {model['waiting_for']}")
+        lines.extend(_wrap_words("  ", model["title"], "  "))
+    lines.extend(_wrap_words("Waiting for: ", model["waiting_for"], "    "))
 
     lines.append("")
     lines.append("Now")
     if model["current"]:
         for row in model["current"]:
-            lines.append(f"  {row['name']:<18} {row['text']}")
+            lines.extend(_wrap_words(f"  {row['name']:<18} ", row["text"],
+                                     " " * 21))
     else:
         lines.append("  no action running")
     runtime = model.get("runtime") or {}
@@ -977,7 +979,7 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
             if e.get("stale"):
                 bit += f" (stale: {e['stale']})"
             bits.append(bit)
-        lines.append("  runtime: " + ", ".join(bits))
+        lines.extend(_wrap_joined("  runtime: ", bits, "    ", sep=","))
 
     lines.append("")
     lines.append("Timers and holds")
@@ -1020,7 +1022,7 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
     if model["missing"]:
         lines.append("")
         for note in model["missing"]:
-            lines.append(f"Note: {note}")
+            lines.extend(_wrap_words("Note: ", note, "      "))
     return lines
 
 
@@ -1078,7 +1080,7 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     out = _wrap_joined(f"{ind}{start} → {end}  {dur:>7}  ",
                        [name, outcome], sub, sep=" ")
     if a.get("detail") and outcome.split()[0] != "done":
-        out.append(f"{sub}{a['detail']}")
+        out.extend(_wrap_words(sub, a["detail"], sub))
     phases = [p for p in a.get("phases", []) if p["phase"] != "start"]
     if phases and a.get("exec_s") is not None:
         split = f"exec {_dur(a['exec_s'])}"
@@ -1098,6 +1100,17 @@ def _render_attempt(a: dict, t_now: float, depth: int) -> list[str]:
     for c in a.get("children", []):
         out.extend(_render_attempt(c, t_now, depth + 1))
     return out
+
+
+def _wrap_words(first: str, text: str, cont: str,
+                width: int = 80) -> list[str]:
+    """*text* after *first*, word-wrapped at *width* with continuation
+    lines indented by *cont*: free text (waiting-for, activity, notes,
+    details) must fit 80 columns in plain ``| cat`` output too, not only
+    through the TTY wrapper."""
+    return textwrap.wrap(str(text), width, initial_indent=first,
+                         subsequent_indent=cont, break_long_words=False,
+                         break_on_hyphens=False) or [first.rstrip()]
 
 
 def _wrap_joined(head: str, parts: list[str], cont: str, *, sep: str,
