@@ -15879,7 +15879,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T14:58:46.258896+00:00'
+  updated_at: '2026-10-22T15:24:06.548578+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15930,6 +15930,17 @@ prs:
       not /opt/pm-src.'
     created_at: '2026-10-22T14:58:46Z'
     last_edited: '2026-10-22T14:58:46Z'
+  - id: note-df8c8c1
+    text: 'QA s5 (2026-10-22): qa fix ace617b4 — d/s dispatched from a popup switched
+      the most recently active OTHER client (~8) instead of the invoking one (~7):
+      popups have no TMUX_PANE and popup keystrokes do not update client activity.
+      _run_picker_command now passes PM_CALLER_SESSION and tmux.get_session_name()
+      honours it when no pane. Next QA: popup dispatch from a PR window runs with
+      cwd = PR workdir → wrong session tag → REAL claude for review panes despite
+      fake-claude config (filed pr-f98ac63); open prefix+P on two clients sequentially,
+      not in the same instant (pr-b511dcf).'
+    created_at: '2026-10-22T15:24:06Z'
+    last_edited: '2026-10-22T15:24:06Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
