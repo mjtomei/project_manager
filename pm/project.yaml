@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-21T23:57:05.571317+00:00'
+  updated_at: '2026-10-22T00:26:23.846535+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8240,6 +8240,14 @@ prs:
       + unconditional pin. All 6 stories held after fix.'
     created_at: '2026-10-21T23:19:37Z'
     last_edited: '2026-10-21T23:19:37Z'
+  - id: note-8eb9b0d
+    text: 'Review b592 i1 (eaf7e4fe): re-running pm pr merge after a published-but-unfinalized
+      merge now finalizes via recovery instead of invalidating (sign-off would BLOCK
+      a merged PR); IMPL return relaunch now takes claim_return_launch (CLI tick/hop,
+      TUI hop, TUI restart catch-up) like REVIEW. Filed pr-2e06289 for the TUI GitHub-sync
+      integrity gap from QA S7.'
+    created_at: '2026-10-22T00:26:23Z'
+    last_edited: '2026-10-22T00:26:23Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
