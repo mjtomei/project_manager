@@ -15890,7 +15890,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T18:48:18.527041+00:00'
+  updated_at: '2026-10-22T18:50:16.103529+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16111,6 +16111,17 @@ prs:
       touches only project.yaml. Report: /pm-captures/report.html'
     created_at: '2026-10-22T18:48:18Z'
     last_edited: '2026-10-22T18:48:18Z'
+  - id: note-d9e0a76
+    text: 'Impl r2 (2026-10-22): merged master 859657d8 at 6b7e02ba. The only conflict
+      was pm/project.yaml, both sides appending PRs. Kept both sides (this branch
+      pr-00d5023/pr-f98ac63/pr-b511dcf, master pr-a80bde5/pr-592e4bd). A per-entry
+      check shows every PR matches its one changed side and no PR was changed on both
+      sides. Master changed no code, and the merge diff outside project.yaml is empty,
+      so QA round 4 (S16-S18 on 6b0dd742) still covers the code. Picker/tmux tests:
+      177 passed. Review still has to cover merge 37637456, the PM_CALLER_SESSION
+      to PM_POPUP_SESSION move with the has-session =name stale guard in tmux.get_session_name.'
+    created_at: '2026-10-22T18:50:16Z'
+    last_edited: '2026-10-22T18:50:16Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
