@@ -2052,24 +2052,12 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
         prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-{loop_id}-")
     prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-{loop_id}-")
 
-    count = 0
+    names: list[str] = []
     for prefix in prefixes:
-        result = _run_runtime(
-            "ps", "-a", "--filter", f"name={prefix}",
-            "--format", "{{.Names}}",
-            check=False, timeout=30,
-        )
-        if result.returncode != 0:
-            continue
-
-        for line in result.stdout.strip().splitlines():
-            cname = line.strip()
-            if cname and cname not in (exclude or set()):
-                try:
-                    remove_container(cname)
-                    count += 1
-                except Exception:
-                    _log.warning("Failed to remove %s", cname, exc_info=True)
+        names += [c for c in _list_names(prefix) or []
+                  if c not in (exclude or set()) and c not in names]
+    removed, _failures = remove_containers(names)
+    count = len(removed)
 
     if count:
         _log.info("Cleaned up %d container(s) for %s/%s", count, pr_id, loop_id)

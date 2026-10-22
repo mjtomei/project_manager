@@ -197,12 +197,21 @@ class TestReaperOwnership:
         out = reaper.reconcile(Scope(include_retained=True), reason="manual")
         assert out.removed == [name]
 
+    @staticmethod
+    def _backdate_marker(name, seconds=60):
+        import json
+        f = reaper._retain_dir() / name
+        rec = json.loads(f.read_text())
+        rec["at"] -= seconds
+        f.write_text(json.dumps(rec))
+
     def test_retention_does_not_carry_over_to_a_replacement(self, fake_env):
         """A marker set on one container must not retain a later container
         launched under the same name, and is pruned once its container is
         gone (full passes)."""
         name = "pm-repo-ab12-review-pr-aaaa"
         reaper.retain(name, "discussion", container_id="old-id")
+        self._backdate_marker(name)
         fake_env["containers"] = [_info(name, id="new-id")]
         out = reaper.reconcile(reason="manual")
         assert out.removed == [name]
@@ -213,10 +222,25 @@ class TestReaperOwnership:
         fake_env["containers"] = [_info(kept)]
         reaper.retain(kept, container_id="id-" + kept)
         reaper.retain(gone, container_id="id-" + gone)
+        self._backdate_marker(gone)
         reaper.reconcile(Scope(pr_id="pr-aaaa"), reason="manual")
         assert reaper.is_retained(gone)  # scoped passes don't prune
         reaper.reconcile(reason="manual")
         assert reaper.retained_names() == [kept]
+
+    def test_marker_written_during_pass_is_not_pruned(self, fake_env, monkeypatch):
+        """A retain of a container launched after the pass listed containers
+        must survive that pass's marker pruning."""
+        late = "pm-repo-ab12-review-pr-cccc"
+        orig = reaper.plan
+
+        def _plan(scope=None):
+            out = orig(scope)
+            reaper.retain(late, container_id="id-" + late)  # concurrent retain
+            return out
+        monkeypatch.setattr(reaper, "plan", _plan)
+        reaper.reconcile(reason="manual")
+        assert reaper.is_retained(late, "id-" + late)
 
     def test_launch_grace_and_launch_lock(self, fake_env):
         fresh = _info("pm-repo-ab12-impl-pr-aaaa", created=time.time())
@@ -274,6 +298,22 @@ class TestReaperOwnership:
         out = reaper.reconcile(reason="manual")
         assert out.removed == [] and fake_env["removed"] == []
         assert "replaced by a newer launch" in out.decisions[0].reason
+
+    def test_id_recheck_timeout_fails_only_that_container(self, fake_env, monkeypatch):
+        """A runtime timeout while re-checking one container's id must not
+        abort the pass (and lose the record of the other removals)."""
+        import subprocess
+        slow, other = "pm-repo-ab12-review-pr-aaaa", "pm-repo-ab12-impl-pr-bbbb"
+        fake_env["containers"] = [_info(slow), _info(other)]
+
+        def _cid(name):
+            if name == slow:
+                raise subprocess.TimeoutExpired("podman inspect", 10)
+            return "id-" + name
+        monkeypatch.setattr(cm, "current_container_id", _cid)
+        out = reaper.reconcile(reason="manual")
+        assert out.removed == [other] and not out.error
+        assert slow in out.failures and slow in reaper.pending_failures()
 
     def test_dry_run_removes_nothing(self, fake_env):
         fake_env["containers"] = [_info("pm-repo-ab12-impl-pr-aaaa")]

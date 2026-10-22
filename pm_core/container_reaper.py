@@ -98,15 +98,23 @@ def retained_names() -> list[str]:
         return []
 
 
-def _prune_retain_markers(inventory: dict[str, str]) -> None:
+def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
     """Drop retention markers whose container is gone or was replaced.
 
     *inventory* maps every existing pm container name to its id (full
     passes only), so a marker can't outlive the container it was set on.
+    Markers written at or after *since* (the pass's listing time) are kept:
+    they may name a container launched after the listing.
     """
     for name in retained_names():
         if name in inventory and is_retained(name, inventory[name]):
             continue
+        rec = _retain_record(name) or {}
+        try:
+            if float(rec.get("at") or 0) >= int(since):
+                continue
+        except (TypeError, ValueError):
+            pass
         unretain(name)
 
 
@@ -541,7 +549,12 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             # A relaunch between plan() and now replaced the container under
             # the same name; its pane may not exist yet, so the pane re-check
             # below can't protect it.  Removal is by name, so compare ids.
-            current = container_mod.current_container_id(info.name)
+            try:
+                current = container_mod.current_container_id(info.name)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                # Raising here would abort the whole pass and lose the
+                # record of removals already done; fail just this one.
+                return False, f"error: could not re-check container id: {e}"
             if current and current != info.id:
                 return False, "skipped: replaced by a newer launch"
         if not d.released:
@@ -652,6 +665,7 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
     with container_mod._file_lock("reaper", timeout=timeout) as got:
         if not got:
             return Outcome(scope=scope.describe(), skipped=True, dry_run=dry_run)
+        listed_at = time.time()
         out = plan(scope)
         out.dry_run = dry_run
         if out.error:
@@ -690,7 +704,8 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
         if full_pass:
             _prune_lock_files(inventory)
             _prune_retain_markers({d.info.name: d.info.id for d in out.decisions
-                                   if d.info.name not in out.removed})
+                                   if d.info.name not in out.removed},
+                                  since=listed_at)
         if out.removed or out.failures:
             _log.info("reconcile[%s] %s: %s — removed=%s failures=%s", reason,
                       out.scope, out.summary(), out.removed, out.failures)
