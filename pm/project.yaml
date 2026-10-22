@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0368986
+  active_pr: pr-7e00786
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -30251,6 +30251,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T00:51:48.437253+00:00'
   updated_at: '2026-10-22T00:51:48.437253+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7e00786
+  plan: bugs
+  title: 'Bug: review loop adopts any review-<pr> pane without checking it runs the
+    iteration''s transcript session'
+  branch: pm/pr-7e00786-bug-review-loop-adopts-any-review-pr-pane-without-
+  status: pending
+  depends_on: []
+  description: 'pm_core/review_loop.py _adopt_in_flight_review (~L216): on a resumed
+    loop it finds the pane by window name review-<pr> and polls it for the iteration
+    transcript, but never checks that pane actually runs the Claude session of that
+    transcript (session_id_from_transcript). Repro (pr-ac10f03 QA S3): a CLI `pm pr
+    auto-sequence` tick and a restarted TUI both launch review --fresh; the restarted
+    TUI then adopted the pane of the CLI-launched window whose transcript was dead
+    -> PR stuck in_review. Fix idea: match the pane''s hook session id (hook_events
+    / pane registry) against the transcript''s session id before adopting; otherwise
+    relaunch.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T00:57:58.404926+00:00'
+  updated_at: '2026-10-22T00:57:58.404926+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
