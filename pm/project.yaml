@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T15:28:56.645682+00:00'
+  updated_at: '2026-10-22T15:44:38.422604+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29632,6 +29632,14 @@ prs:
       catalog. Captures /pm-captures/scenarios/3/{pre-fix,post-fix}.'
     created_at: '2026-10-22T15:28:56Z'
     last_edited: '2026-10-22T15:28:56Z'
+  - id: note-bebecbf
+    text: 'Review loop ac92 i1: committed reports/case-coverage.* predated the QA
+      s3 fix (dc695f44) and showed notification turns as human (66d430f 40 etc.);
+      regenerated with cases.py + --check (clean, 55204) — 26/19/30/6 human turns.
+      Code otherwise reviewed with no further changes; spec-case catalog extension
+      on master is assigned to pr-8df6472, not this PR.'
+    created_at: '2026-10-22T15:44:38Z'
+    last_edited: '2026-10-22T15:44:38Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
