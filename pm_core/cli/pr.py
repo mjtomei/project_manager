@@ -2335,17 +2335,23 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
                     f"{(bound.get('candidate_tree') or '?')[:12]}")
 
     # Recorded and noted on the PR (notes reach every later session and
-    # `pm pr note list`), not only printed.
+    # `pm pr note list`), not only printed.  Verification re-runs on every
+    # recovery (--propagation-only after a repo-update window, a repeated
+    # --no-signoff-check): note a given problem once.
     text = f"Merge integrity: {problem}."
     created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    note = {"id": store.generate_note_id(pr_id, text), "text": text,
-            "created_at": created, "last_edited": created}
 
     def _apply(d):
         p = store.get_pr(d, pr_id)
         if p is not None:
             p["merge_integrity"] = {"problem": problem, "merge_sha": merge_sha}
-            p["notes"] = (p.get("notes") or []) + [note]
+            notes = p.get("notes") or []
+            if not any(n.get("text") == text for n in notes):
+                note_id = store.generate_note_id(
+                    pr_id, text, {n.get("id") for n in notes})
+                p["notes"] = notes + [{
+                    "id": note_id, "text": text,
+                    "created_at": created, "last_edited": created}]
 
     store.locked_update(root, _apply)
     click.echo(f"WARNING: {problem}.", err=True)

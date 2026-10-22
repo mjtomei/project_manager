@@ -670,6 +670,20 @@ def test_github_recovery_of_an_unapproved_merge_is_recorded(github):
     assert any(t.startswith("Merge integrity:") for t in notes)
 
 
+def test_github_repeated_recovery_notes_an_integrity_problem_once(github):
+    """Recovery re-verifies on every run (a repo-update window's
+    --propagation-only, a repeated --no-signoff-check): the same problem is
+    noted once, not appended again under the same note id."""
+    approve(github)
+    _merge_on_remote(github, extra=True)
+    for _ in range(2):
+        result, _, _ = merge(github, "--no-signoff-check")
+        assert result.exit_code == 0, result.output
+    notes = [n for n in pr_entry(github).get("notes") or []
+             if n["text"].startswith("Merge integrity:")]
+    assert len(notes) == 1
+
+
 def test_two_overlapping_prs_second_needs_integration(local, tmp_path):
     """Merging the first PR makes the second's approval stale; its fresh
     integration check finds the conflict (-> implementation), and after the
