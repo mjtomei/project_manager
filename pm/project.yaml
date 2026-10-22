@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8c1dd15
+  active_pr: pr-2fed1ab
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -30296,3 +30296,27 @@ prs:
       model from `query()` instead of shelling out.'
     created_at: '2026-10-21T20:03:24Z'
     last_edited: '2026-10-21T20:03:24Z'
+- id: pr-2fed1ab
+  plan: bugs
+  title: 'Bug: picker review row keeps "[loop]" badge after the owning TUI is SIGKILLed'
+  branch: pm/pr-2fed1ab-bug-picker-review-row-keeps-loop-badge-after-the-o
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py _format_action_status (review-loop
+    branch) reads runtime_state.derive_action_status, which still has review-loop
+    state=running from a SIGKILLed TUI. Repro (found in pr-8020495 QA S16 story 3):
+    /review-loop <pr> in the TUI, kill -9 the TUI pid (~/.pm/tui-<session>.pid) during
+    iteration 1, open prefix+P from review-<pr>: the review row reads "● review [open]
+    [loop]" although nothing drives the loop. pm pr history already marks the same
+    runtime entry "(stale: owner exited)" via the owner-liveness probe (history_query);
+    the picker badge should use the same staleness check (or show [stale]) until the
+    next TUI mount sweep clears it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T01:12:34.877341+00:00'
+  updated_at: '2026-10-22T01:12:34.877341+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
