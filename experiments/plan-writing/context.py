@@ -364,7 +364,8 @@ def extract(data, url):
     if data.startswith(b"%PDF"):
         tmp = CTX / "raw" / "pdf" / (hashlib.sha256(url.encode()).hexdigest()[:24] + ".pdf")
         tmp.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(data)
+        if not tmp.exists() or tmp.read_bytes() != data:  # cached reruns leave raw/ untouched
+            tmp.write_bytes(data)
         return run(["pdftotext", "-layout", str(tmp), "-"], timeout=180)
     return page_text(data)[1]
 
