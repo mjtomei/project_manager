@@ -213,3 +213,17 @@ a tools-disabled `claude -p` through the route, reporting requested models
    (host bridge + ensure from a cwd and PYTHONPATH holding a pm_core that
    raises on import; fails with `-m` — checked by mutation) and
    `TestBuildShellCmd::test_container_cmd_ensures_bridge_first`.
+3. *Container env values in logs/errors* (found in the sandbox smoke) —
+   `create_container` passed host env vars as `-e NAME=value`
+   (`_CLAUDE_ENV_VARS`, which include API keys/tokens, and
+   `ContainerConfig.env`), and `_run_runtime` writes the full argv to the
+   pm.container debug log on every call, to the error log on failure and
+   into the raised `CalledProcessError`. Fixed in scope (this PR's
+   "no credentials in logs/captures" acceptance): variables are passed by
+   name (`-e NAME`) and their values through the runtime's process
+   environment (`_run_runtime(env=…)`); verified with real podman (values
+   arrive in the container, absent from its create argv). Regressions:
+   `tests/test_container.py::TestCreateContainer::test_passes_env_vars` and
+   `test_failed_create_does_not_expose_env_values` (fails on the old form —
+   checked by mutation). pm.container log files written before this fix
+   may still contain such values; they are not rewritten.

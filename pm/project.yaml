@@ -31441,7 +31441,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T19:03:22.855576+00:00'
+  updated_at: '2026-10-22T19:08:00.521074+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31481,3 +31481,12 @@ prs:
       section 5. User paused other PR QA to prioritize #249; manual merge gate stays.'
     created_at: '2026-10-22T19:03:22Z'
     last_edited: '2026-10-22T19:03:22Z'
+  - id: note-3914bc5
+    text: 'Fixed in scope: container create passed host env vars as -e NAME=value,
+      so API keys/tokens reached the pm.container debug/error logs and raised CalledProcessError
+      text whenever a container command ran or failed. Now -e NAME with values via
+      the runtime process env (_run_runtime(env=)); real podman verified; regressions
+      test_passes_env_vars + test_failed_create_does_not_expose_env_values (mutation-checked).
+      Older pm.container log files may still hold such values and were not rewritten.'
+    created_at: '2026-10-22T19:08:00Z'
+    last_edited: '2026-10-22T19:08:00Z'

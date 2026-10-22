@@ -345,14 +345,21 @@ def is_container_mode_enabled() -> bool:
 
 
 def _run_runtime(*args: str, check: bool = True,
-                 timeout: int | None = 30) -> subprocess.CompletedProcess:
-    """Run a container runtime command."""
+                 timeout: int | None = 30,
+                 env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """Run a container runtime command.
+
+    *env* is added to the runtime's environment.  Callers pass secret
+    values this way (with ``-e NAME`` in *args*) because *args* is logged
+    and embedded in raised errors.
+    """
     runtime = _get_runtime()
     cmd = [runtime, *args]
     _log.debug("container: %s", " ".join(cmd))
     result = subprocess.run(
         cmd, capture_output=True, text=True,
         check=False, timeout=timeout,
+        env={**os.environ, **env} if env else None,
     )
     if result.returncode != 0:
         _log.error("container runtime failed (rc=%d): %s\nstderr: %s\nstdout: %s",
@@ -776,10 +783,15 @@ def create_container(
             cmd.extend(["-v", f"{host_path}:{container_path}"])
 
     # --- Environment ---
+    # Passed by name (``-e NAME``): the runtime reads each value from its
+    # own environment (*run_env*), so API keys and tokens never appear in
+    # the command line, which is logged and embedded in raised errors.
+    run_env: dict[str, str] = {}
     for env_var in _CLAUDE_ENV_VARS:
         val = os.environ.get(env_var)
         if val:
-            cmd.extend(["-e", f"{env_var}={val}"])
+            cmd.extend(["-e", env_var])
+            run_env[env_var] = val
 
     # PM_HOST_HOME tells code inside the container (notably
     # pm_core.hook_install) to embed the host's home path in any file
@@ -789,7 +801,8 @@ def create_container(
     cmd.extend(["-e", f"PM_HOST_HOME={Path.home()}"])
 
     for k, v in config.env.items():
-        cmd.extend(["-e", f"{k}={v}"])
+        cmd.extend(["-e", k])
+        run_env[k] = v
 
     # Extra mounts from config (user-specified, e.g. data dirs)
     for mount in config.extra_mounts:
@@ -884,7 +897,7 @@ def create_container(
     setup = "; ".join(setup_parts)
     cmd.extend([config.image, "bash", "-c", setup])
 
-    result = _run_runtime(*cmd, timeout=60)
+    result = _run_runtime(*cmd, timeout=60, env=run_env)
     container_id = result.stdout.strip()
 
     # Wait for the setup script to finish (sentinel file appears).
