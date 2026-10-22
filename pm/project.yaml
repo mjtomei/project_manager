@@ -30132,6 +30132,84 @@ prs:
       use unique markers/clear-history.'
     created_at: '2026-10-21T23:58:47Z'
     last_edited: '2026-10-21T23:58:47Z'
+  - id: note-9b07de8
+    text: 'QA S7 refine (2026-10-21, head ae71ba0e): the "impl start folded into one
+      row" Then (E8, efa2cd57) needs P started with TUI `s`, not CLI `pm pr start`.
+      Only `s` passes --transcript, so only then is the impl pane tracked (a start
+      attempt). The loop then untracks it ("untracked"), and _poll_impl_idle re-registers
+      the same session after the loop ends (status stays in_review when autostart
+      is off). A CLI start gives no start row at all. After the loop, the popup History
+      badge is the open start row (e.g. [start: turn done]), not [N runs].'
+    created_at: '2026-10-21T23:20:40Z'
+    last_edited: '2026-10-21T23:20:40Z'
+  - id: note-1298545
+    text: 'QA S7 (2026-10-21): all review-loop/timer/hold/fold Thens held on ae71ba0e
+      (323 JSON + 99 text polls; hold caught 6x; start folded to one row with ''not
+      tracked''). Fixed 5edccb25: popup History pager (and pm pr history on a narrow
+      TTY) re-wrapped 8-space phase lines with a fixed 4-space continuation, so ''[launching
+      …'' looked like a sibling row; continuation now >= own indent + 2. Live env:
+      TUI s needs pm push + git merge of the sync branch first; popup client without
+      LANG renders → as _. Captures /pm-captures/scenarios/7.'
+    created_at: '2026-10-21T23:32:00Z'
+    last_edited: '2026-10-21T23:32:00Z'
+  - id: note-80c4836
+    text: 'S8 refine (QA run 2 re-check of S2): corrected draft predictions. The planner
+      timer is "QA planner deadline" with expected "stop waiting for a plan → QA INPUT_REQUIRED".
+      On a found plan it resolves "cancelled", not "cleared". Children are "qa planner"
+      and "qa sN"; a retry shows as "qa sN retry 1". A scenario attempt spans agent
+      + verifying, and a slot frees only after verification. A pane verdict is accepted
+      only after the shared 30 s "QA scenario verdict grace" and the verifier also
+      has 30 s grace, so a scenario end matches the TUI "Scenario N (...): PASS (verified)"
+      log line or the verifier VERIFIED, not the worker pane PASS. With 3 short scenarios
+      the run elapsed (planning + launching + finalize) can exceed the summed scenario
+      time; the safe check is summed > wall, wall <= run elapsed, and "up to 2 at
+      once" under cap 2. Relaunch backoff = 5 s (_SCENARIO_RETRY_BASE). Use a reader
+      poll of 0.5 s or less to catch it active.'
+    created_at: '2026-10-21T23:19:28Z'
+    last_edited: '2026-10-21T23:19:28Z'
+  - id: note-ff29c26
+    text: 'QA S8 (2026-10-21) PASS at ae71ba0e: S2 re-check after d2db746b held in
+      two fresh envs — s3 launching starts −0.35 s from s1 end, scenario ends within
+      1 s of TUI "PASS (verified)", planner deadline cancelled Δ0 s, backoff timer
+      counted 4.85→0.14 s then fired, popup pager rows == CLI. Notes: vanished end
+      is stamped at loop detection (5 s _POLL_INTERVAL → 0–5 s lag; saw 3.6 s); planner
+      timer absent for the first ~2 s of the planner child (armed at pane launch);
+      due time shows a date when it crosses UTC midnight. Drivers in /pm-captures/scenarios/8/scripts.'
+    created_at: '2026-10-21T23:35:08Z'
+    last_edited: '2026-10-21T23:35:08Z'
+  - id: note-dc16052
+    text: 'S11 refine (SIGKILL TUI): (1) a SIGKILLed TUI writes no breadcrumb (only
+      action_restart with the merge-restart marker does), so the new TUI never resumes/adopts
+      the killed review loop; the user restarts it with /review-loop, and its attempts
+      are new but not flagged resumed/adopted. (2) Predicted defect, verified with
+      a scratch-HOME repro (child sets runtime review-loop=running + iteration + grace,
+      then SIGKILL): before a new TUI mounts, history_query._reconcile_attempts treats
+      the runtime-derived loop attempt as tracked (stale runtime entry state=running),
+      so it shows open, and Now shows "loop running; next iteration launching", while
+      its iteration is interrupted owner-exited and the grace timer is lost. This
+      breaks the spec fail criterion "running after its owner process exited". E12
+      tracked-override should not apply when the opener is dead and it is a TUI-owned
+      loop (no pane), or the runtime entry should carry an owner token. (3) The new
+      TUI skips qa-run-bg QA because resume_owned_elsewhere is true, so there is no
+      resumed QA run.'
+    created_at: '2026-10-21T23:21:37Z'
+    last_edited: '2026-10-21T23:21:37Z'
+  - id: note-a0dfeaf
+    text: 'QA S11 (SIGKILL TUI + qa-run-bg + rotation + readers) fixed 2 bugs in cc2f86a5:
+      (1) review-loop runtime attempt of a SIGKILLed TUI read "running" + Now "loop
+      running; next iteration launching" until the next TUI mount sweep (runtime-tracked
+      exemption) — loop entries (loop_id) now follow owner liveness, runtime line
+      says "(stale: owner exited)"; (2) owner-lock liveness probe race: concurrent
+      readers probing the same dead owner saw each other LOCK_EX and reported it alive
+      (3-5% of probes; 2/1932 live post-kill reads) — probes serialize on history/owners/.probe.
+      Post-fix rerun: all S11 Thens held. Observations not fixed: after the new TUI
+      mount sweep the killed loop ends at the sweep time (elapsed includes TUI-down
+      time; before the sweep it read end unknown); E impl start mirror attempt (opened
+      by CLI auto-sequence) still reads running while no TUI is alive (pane-mirror
+      exemption). Setup: pm pr spec needs a fake-claude config set first; pm session
+      typed in a session pane attaches a nested client there (detach it).'
+    created_at: '2026-10-21T23:49:36Z'
+    last_edited: '2026-10-21T23:49:36Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
