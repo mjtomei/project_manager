@@ -567,9 +567,18 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
     import sys
     import time
 
+    # ``-m`` puts the cwd first on sys.path, so a project with its own
+    # top-level pm_core/ (the caller's cwd is usually the project) would
+    # shadow pm and the proxy would die on import.  Run from / with this
+    # process's pm_core root first on PYTHONPATH.
+    pm_root = str(Path(__file__).resolve().parent.parent)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [pm_root] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     proc = subprocess.Popen(
         [sys.executable, "-m", "pm_core.push_proxy",
          sock_path, workdir, allowed_branch],
+        cwd="/", env=env,
         start_new_session=True,  # detach from parent process group
         # Redirect stdin too: when spawned from a tmux popup (`display-popup
         # -E pm _popup-cmd ...`), an inherited pty FD keeps the popup

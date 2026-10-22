@@ -311,6 +311,31 @@ class TestPushProxyLifecycle:
         assert kwargs.get("stderr") is subprocess.DEVNULL
         assert kwargs.get("start_new_session") is True
 
+    def test_proxy_subprocess_ignores_shadow_pm_core_in_cwd(self, tmp_path,
+                                                            monkeypatch):
+        """A project's own top-level pm_core/ must not shadow pm.
+
+        ``python -m`` puts the cwd first on sys.path; the TUI's cwd is the
+        project, so the real proxy daemon imported the project's package
+        and never came up.  Spawns the real subprocess.
+        """
+        from pm_core.push_proxy import _start_proxy_subprocess, proxy_is_alive
+
+        proj = tmp_path / "proj"
+        (proj / "pm_core").mkdir(parents=True)
+        (proj / "pm_core" / "__init__.py").write_text(
+            "open(__file__ + '.imported', 'w').close()\n"
+            "raise ImportError('SHADOW pm_core imported')\n")
+        sock = str(tmp_path / "push.sock")
+        monkeypatch.chdir(proj)
+        _start_proxy_subprocess(sock, str(tmp_path), "pm/pr-x")
+        try:
+            assert proxy_is_alive(sock)
+            assert not (proj / "pm_core" / "__init__.py.imported").exists()
+        finally:
+            if os.path.exists(sock):
+                os.unlink(sock)  # the daemon exits once its socket is gone
+
     def test_container_socket_path(self):
         assert container_socket_path() == _CONTAINER_SOCKET_PATH
         assert container_socket_path() == "/run/pm-push-proxy/push.sock"
