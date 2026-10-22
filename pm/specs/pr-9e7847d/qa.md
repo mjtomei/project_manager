@@ -62,12 +62,13 @@ The user-facing surfaces are:
 - **R28** Given the plan review (plan-sync v4), when the user starts approval, then the confirmation labels it PROPOSED. If the plan changes (v5) before confirming, confirming yields "Not approved" with What changed showing #218.
 
 ### Mockup CLI
-- **R29** Given a fresh checkout, when the user runs `npm ci --ignore-scripts` and `npm run check`, then it prints `54 screenshots, N frames checked, 0 failure(s)` and exits 0. `check A` (one journey) and `--quiet` work.
-- **R30** Given the simulator dependencies are installed, when the user runs `npm run capture --out <dir>` and then `npm run gallery`, then:
+- **R29** Given a fresh checkout, when the user runs `npm ci --ignore-scripts` and `npm run check`, then it prints `54 screenshots, N frames checked, 0 failure(s)` and exits 0. `npm run check -- A` (one journey) and `npm run check -- --quiet A` work, and the summary survives a slow pipe such as `| tee` (s20). An unknown journey id (including the leftover value from `npm run check --quiet A` without `--`) is refused with the list of journeys and a non-zero exit; it never passes with 0 frames (review 62f9 i1).
+- **R30** Given the simulator dependencies are installed, when the user runs `npm run capture -- --out <dir>` (flags need `--` through npm) and then `npm run gallery` in a scratch copy of `pm/docs/even-realities` (gallery has no input flag: it always reads `../screenshots/manifest.json` and writes `../index.html`), then:
   - 54 glasses PNGs, X01 and 3 phone shots are written with a manifest;
-  - capture reports 0 problems;
+  - capture reports 0 problems; a journey whose simulator bridge stalls under load is replayed once in a relaunched simulator (s20);
   - the gallery lists every shot with a SIMULATED tag.
-- **R31** `npm run serve` binds to 127.0.0.1:5180 and serves the mockup. A malformed director POST returns 400. Path traversal or a bad path returns 404/400.
+  - `npm run capture -- C` recaptures only journey C and merges it into the existing manifest (other journeys and osMenu kept). `npm run capture --out X` (no `--`) is refused as unknown journey X with "Nothing was captured" and leaves committed screenshots and manifest untouched (review 62f9 i1).
+- **R31** `npm run serve` binds to 127.0.0.1:5180 and serves the mockup. A malformed or non-object director POST returns 400. Path traversal or a bad path returns 404/400. A well-formed director event of unknown type is accepted by the server, logged by each tab as "DIRECTOR ignored <type>: …", and does not drop later events in the same batch (s20).
 
 ### Review deliverable
 - **R32** Given the gallery (repo copy and captures-dir copy), when the reviewer opens it, then:
@@ -96,8 +97,8 @@ The user-facing surfaces are:
   - Esc = double tap
   - hold A = speak
   - 1–4 = OS menu items
-- Demo buttons and `curl -X POST /director -d '{"type":"pm","event":{...}}'` inject simulated events. Use `{"type":"speech","text":...}` before a hold/release to queue an utterance.
-- The simulator capture needs `libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0 dbus dbus-x11 xvfb`, plus `ffmpeg` for labelled copies. Use `--out` to a scratch dir so the committed screenshots are not overwritten.
+- Demo buttons release focus after a click, so Enter/Space after a click tap the glasses rather than re-clicking (review 62f9 i1). Demo buttons and `curl -X POST /director -d '{"type":"pm","event":{...}}'` inject simulated events. Use `{"type":"speech","text":...}` before a hold/release to queue an utterance.
+- The simulator capture needs `libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0 dbus dbus-x11 xvfb`, plus `ffmpeg` for labelled copies. Use `npm run capture -- --out <scratch dir>` (note the `--`) so the committed screenshots are not overwritten.
 - pm: `./install.sh --local` if pm is not on PATH.
 
 ## 3. Edge cases
@@ -108,7 +109,7 @@ The user-facing surfaces are:
 - **E5** Given a disconnect during a voice review, when Send is chosen, then the send is refused, not queued, and the draft stays in the review panel. After reconnect it is not resent automatically; an explicit Send then delivers it exactly once.
 - **E6** Given the OS menu is used from deep inside a session tree, when "Needs you" is chosen, then the stack resets to the root and back from there behaves as root back.
 - **E7** Given two preview tabs and director POSTs, then both apply the same simulated events in order. A tab opened or reloaded later starts from fresh fixture state and skips events already queued (it does not replay them; QA s3 fix). Demo buttons apply only to the tab they are clicked in.
-- **E8** Given port 5180 is already held by `npm run serve`, when `npm run capture` is run without `MOCKUP_PORT`/`SIMULATOR_PORT` overrides, then it fails clearly. It must not silently drive the user's running preview (capture's own server would hit EADDRINUSE while the simulator and director POSTs reach the user's server). With overrides it runs alongside the preview.
+- **E8** Given port 5180 is already held by `npm run serve`, when `npm run capture` is run without `MOCKUP_PORT`/`SIMULATOR_PORT` overrides, then it exits 1 with "port 5180 (mockup server) is busy … Nothing was captured." and the preview's tabs are not reset or driven (s20). It must not silently drive the user's running preview (capture's own server would hit EADDRINUSE while the simulator and director POSTs reach the user's server). With overrides it runs alongside the preview.
 - **E9** Given `npm run check` while the preview runs, then check is independent: it uses no ports and does not modify files.
 
 - **E10** Given a confirmation (Merge now…, Approve v…, Start…) or an actions list is showing, when the user picks an OS menu item, then the confirmation is dropped with "Cancelled · nothing changed" and Back from the chosen list never lands on it (i13). Choosing the menu item for the list already shown is a no-op (i7).
@@ -127,7 +128,7 @@ The user-facing surfaces are:
   - `git status` is clean after `check`.
 - **Fail** if any of the following happens:
   - a crash or uncaught error in the console;
-  - a truncated or clipped footer hint;
+  - a truncated or clipped footer hint, on the frame or in the browser mirror canvas (s17: mirror lines are squeezed to fit 576 px);
   - a view switches on its own after a reply or revision;
   - approval succeeds for a non-current version;
   - a refused offline message appears later;
@@ -141,3 +142,4 @@ The user-facing surfaces are:
 - "report.html should link it": PM's QA finalize step writes report.html. QA verifies that the gallery exists in the PR captures dir and is openable, and that report.html (if one exists) links it.
 - Layout and gestures are a candidate, not a requirement. QA checks behavior (identity, versions, no duplicates, explicit confirms), not exact rows or keys.
 - Spec refreshed 2026-10-22 after QA s3 and review 450f i1–i19: E7 (late tab no longer replays), E8 (port collision expectation made concrete), R23/R26/E5 (stale sign-off after merge refusal; refused drafts kept for explicit resend) updated; E10–E14 added for the review-loop fixes (menu cancels confirms, no stacked duplicates, not-running refusals, context scoping, phone draft kept).
+- Spec refreshed again 2026-10-22 after QA s17/s20/s21/s22 and review 62f9 i1: R29/R30 use `--` for npm flags, unknown journey ids are refused, partial capture merges the manifest, gallery regeneration uses a scratch copy, stalled journeys are replayed; R31 covers unknown director event types; E8 states the busy-port refusal; setup notes demo buttons release focus; the browser mirror must not overflow its canvas.
