@@ -104,8 +104,9 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     for a in attempts.values():
         _compute_concurrency(a)
 
-    timer_rows = _reconcile_timers(timers, attempts, t_now, alive,
-                                   owner_seen)
+    timer_rows = _reconcile_timers(
+        timers, attempts, t_now, alive, owner_seen,
+        terminal=(pr or {}).get("status") in ("merged", "closed"))
     timer_rows["recent"] = (timer_history + timer_rows["recent"])
     _release_terminal_holds(pr or {}, timer_rows)
 
@@ -503,7 +504,15 @@ def _cleared_row(tm: dict) -> dict:
 
 def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
                       t_now: float, owner_alive,
-                      owner_seen: dict[tuple, float] | None = None) -> dict:
+                      owner_seen: dict[tuple, float] | None = None, *,
+                      terminal: bool = False) -> dict:
+    """Sort uncleared timers into active / overdue / recent rows.
+
+    On a merged/closed PR (*terminal*) an uncleared hold is left active
+    whatever its owner's fate, so :func:`_release_terminal_holds` reports
+    it released by the merge: the TUI that armed it has usually exited by
+    the time anyone reads a merged PR's history.
+    """
     active: list[dict] = []
     overdue: list[dict] = []
     recent: list[dict] = []
@@ -516,6 +525,9 @@ def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
         if owner_att is not None and owner_att["ended_t"] is not None:
             recent.append(_timer_row(tm, "cancelled (owner ended)",
                                      owner_att["ended_t"]))
+            continue
+        if terminal and due is None:
+            active.append(_timer_row(tm, "active", None))
             continue
         alive = owner_alive(tm.get("owner"))
         if alive is False or (owner_att is not None
@@ -973,12 +985,12 @@ def render_text(model: dict, *, now: float | None = None) -> list[str]:
         for r in recent[:10]:
             when = (_fmt_time(r["resolved_t"], t_now)
                     if r.get("resolved_t") else "unknown")
-            line = f"  {r['purpose']}: {r['resolution']} at {when}"
-            armed = f"(armed {_fmt_time(r['armed_t'], t_now)})"
-            if len(line) + 1 + len(armed) <= 80:
-                lines.append(f"{line} {armed}")
-            else:
-                lines.extend([line, f"      {armed}"])
+            # Wrapped between parts: a dated resolution time (another
+            # year) can push even the first part past 80 columns.
+            lines.extend(_wrap_joined(
+                "  ", [f"{r['purpose']}: {r['resolution']}", f"at {when}",
+                       f"(armed {_fmt_time(r['armed_t'], t_now)})"],
+                "      ", sep=""))
 
     if model["milestones"]:
         lines.append("")

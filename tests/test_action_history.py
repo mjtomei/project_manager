@@ -1290,6 +1290,39 @@ class TestReconciliation:
         assert row["resolution"] == "released (PR merged)"
         assert row["resolved_t"] == clock.t
 
+    def test_merged_pr_releases_hold_of_exited_owner(self, clock):
+        # A merged PR's history is usually read after the TUI that armed
+        # the hold has exited: the merge released it, it was not lost.
+        with patch.object(ah, "owner_token", _dead_owner):
+            ah.arm_timer(PR, f"merge-hold:{PR}", purpose="manual merge hold",
+                         owner_action="merge", duration=None,
+                         effect="fires")
+        clock.advance(60)
+        pr = {"id": PR, "status": "merged", "merged_at": ah.iso(clock.t)}
+        m = hq.build_history(PR, pr=pr, now=clock.t + 86400, live=False)
+        assert m["holds"] == []
+        (row,) = m["timers"]["recent"]
+        assert row["resolution"] == "released (PR merged)"
+        assert row["resolved_t"] == clock.t
+        # Before the merge the same dead owner's hold reads lost.
+        m = hq.build_history(PR, pr={**pr, "status": "sign_off"},
+                             now=clock.t, live=False)
+        (row,) = m["timers"]["recent"]
+        assert row["resolution"] == "lost (owner process exited)"
+
+    def test_recent_timer_row_with_year_dates_fits_80(self, clock):
+        ah.arm_timer(PR, f"merge-hold:{PR}",
+                     purpose="manual merge hold (stop-before-merge)",
+                     owner_action="merge", duration=None, effect="fires")
+        pr = {"id": PR, "status": "merged", "merged_at": ah.iso(clock.t + 5)}
+        m = hq.build_history(PR, pr=pr, now=clock.t + 400 * 86400,
+                             live=False)
+        lines = [ln for ln in hq.render_text(m) if ln.strip()]
+        i = next(i for i, ln in enumerate(lines)
+                 if "released (PR merged)" in ln)
+        assert all(len(ln) <= 80 for ln in lines[i:i + 3])
+        assert " ".join(lines[i:i + 3]).count("(armed ") == 1
+
     def test_missing_history_is_honest(self, clock):
         pr = {"id": PR, "status": "merged", "title": "Old",
               "created_at": "2026-01-01T00:00:00Z",

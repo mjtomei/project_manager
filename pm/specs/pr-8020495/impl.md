@@ -221,9 +221,10 @@ The model contains:
     which stays `elapsed`; `gate` timer past due → `elapsed`; a re-armed
     timer's earlier arm → `re-armed` (or its own clear reason when it was
     cleared before the re-arm); journaled hold still open on a
-    merged/closed PR → `released (PR merged|closed)` at `merged_at`
-    (merges via `pm pr merge` / GitHub sync never reach the TUI's
-    hold-release point).
+    merged/closed PR → `released (PR merged|closed)` at `merged_at`,
+    whether or not its owner is still alive (merges via `pm pr merge` /
+    GitHub sync never reach the TUI's hold-release point, and the arming
+    TUI has usually exited by the time a merged PR's history is read).
   - `holds`: journaled + derived holds.
   - `now`: live per-action status (runtime `derive_action_status`) plus,
     for an open attempt in `agent` phase with a known session, the latest
