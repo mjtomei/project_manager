@@ -789,12 +789,37 @@ def handle_command_submitted(app, cmd: str) -> None:
         elif cmd.startswith("pr review"):
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
             working_message = f"Reviewing {pr_id}"
+            cmd = _with_review_transcript(app, cmd, parts)
 
         run_command(app, cmd, working_message=working_message, action_key=action_key)
     if app._plans_visible:
         app.query_one("#plans-pane", PlansPane).focus()
     else:
         app.query_one("#tech-tree", TechTree).focus()
+
+
+def _with_review_transcript(app, cmd: str, parts: list[str]) -> str:
+    """Add ``--transcript`` to a typed ``pr review <pr>`` like ``d`` does.
+
+    Without it the review pane writes no hook transcript, so the TUI never
+    tracks it: no [working]/[idle] marker, no verdict mirror and no action
+    history row for a review started from the command bar.
+    """
+    if (len(parts) < 3 or parts[1] != "review" or parts[-1].startswith("-")
+            or any(p in ("--transcript", "--no-window", "--background")
+                   or p.startswith("--transcript=") for p in parts)):
+        return cmd
+    from pm_core.cli.helpers import _resolve_pr_id
+    from pm_core.tui import auto_start as _auto_start
+    pr_entry = _resolve_pr_id(app._data or {}, parts[-1])
+    if not pr_entry:
+        return cmd
+    try:
+        tdir = _auto_start.get_transcript_dir(app)
+    except Exception:
+        return cmd
+    return shlex.join(parts[:-1] + [
+        "--transcript", f"{tdir}/review-{pr_entry['id']}.jsonl", parts[-1]])
 
 
 def run_command(app, cmd: str, working_message: str | None = None,
