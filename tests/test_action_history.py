@@ -885,6 +885,21 @@ class TestReconciliation:
         assert {r["resolution"] for r in m["timers"]["recent"]
                 if r["timer"] in ("a", "f")} == {"cancelled (owner ended)"}
 
+    def test_late_elapsed_clear_keeps_due_time(self, clock):
+        # The owner books an elapsed gate when it notices (QA: at scenario
+        # end, a minute later); the elapsed time must not move to that clear.
+        owner = ah.start_attempt(PR, "qa")
+        ah.arm_timer(PR, "g", purpose="grace", owner_action="qa",
+                     owner_attempt=owner, duration=30, effect="gate")
+        due = clock.t + 30
+        clock.advance(40)
+        (r,) = hq.build_history(PR, now=clock.t, live=False)["timers"]["recent"]
+        assert (r["resolution"], r["resolved_t"]) == ("elapsed", due)
+        clock.advance(25)
+        ah.clear_timer(PR, "g", "elapsed")
+        (r,) = hq.build_history(PR, now=clock.t, live=False)["timers"]["recent"]
+        assert (r["resolution"], r["resolved_t"]) == ("elapsed", due)
+
     def test_owner_probed_once_per_build(self, clock):
         # Abandoned attempts and timers of one owner pile up in the journal;
         # one build judges that owner once, so they can't disagree.

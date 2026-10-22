@@ -440,8 +440,14 @@ def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
         due = tm.get("due_t")
         if tm.get("cleared"):
             c = tm["cleared"]
+            resolved = c["t"]
+            # A gate is only cleared "elapsed" when its owner gets round to
+            # it (e.g. at scenario end), possibly long after it ran out; it
+            # elapsed at its due time, as the uncleared read below says.
+            if c.get("reason") == "elapsed" and due is not None:
+                resolved = min(resolved, due)
             recent.append(_timer_row(tm, c.get("reason") or "cleared",
-                                     c["t"]))
+                                     resolved))
             continue
         owner_att = attempts.get(tm.get("owner_attempt") or "")
         if owner_att is not None and owner_att["ended_t"] is not None:
