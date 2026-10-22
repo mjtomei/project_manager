@@ -23685,7 +23685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/223
   gh_pr_number: 223
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-10-22T16:17:48.074424+00:00'
+  updated_at: '2026-10-22T16:20:47.156081+00:00'
   started_at: '2026-05-25T03:27:03.889385+00:00'
   reviewed_at: '2026-05-25T03:39:45.883451+00:00'
   merged_at: null
@@ -23973,6 +23973,39 @@ prs:
       Thens or the code. All other S1-S5 Thens held on ce6cd54d (see /pm-captures/scenarios/8/manifest.md).'
     created_at: '2026-10-22T16:17:48Z'
     last_edited: '2026-10-22T16:17:48Z'
+  - id: note-e953468
+    text: 'QA scenario 6 refiner (2026-10-22): R6 C1-C4 setup facts verified in code.
+      (1) display-popup (tmux 3.2a) builds its env from the tmux GLOBAL env plus the
+      CLIENT SESSION env (pm-<tag>~1). It does NOT use the pane shell env. So ''PM_PROJECT
+      set/unset in the pane'' has to be done with ''tmux set-environment -t pm-<tag>~1
+      [-u] PM_PROJECT'' and checked with a probe popup. Start pm session with PM_PROJECT
+      unset, because the server global env comes from whatever started it. (2) The
+      pre-fix control only needs the popup''s code swapped: ''tmux set-environment
+      -t pm-<tag>~1 PYTHONPATH <origin/master tree>''. The PR diff touches only the
+      spinner (session.py) on the QA path. Prove which code ran from the ''popup-picker
+      invoked ... module='' log line. (3) Spinner lines are written to ~/.pm/debug/<tag-of-popup-cwd-git-root>.log.
+      For C3/C4 that is the other PR''s clone tag, not the session tag. (4) Use a
+      fresh never-QA''d target PR per cell (4 post-fix plus 4 pre-fix) instead of
+      stopping QA between cells. (5) QA needs ''pm pr spec <pr> qa'' pre-generated,
+      or the run halts at the spec gate. qa-<id>-s0 appears before qa-<id>, so the
+      spinner exits on s0. The client switch is TUI-side, after a sleep of about 2s.
+      (6) fzf is not installed; download the arm64 release.'
+    created_at: '2026-10-22T15:54:45Z'
+    last_edited: '2026-10-22T15:54:45Z'
+  - id: note-eb2d5cf
+    text: 'QA S6 (R6 live matrix, new QA window, 2026-10-22) PASS on ce6cd54d: real
+      attached client (tmux -L outer, prefix+P, l, t). Post-fix C1/C2/C3/C4 (+C1 rerun):
+      picker pid exited ~0.21s after t with no key, overlay gone, spinner exit reason=window_open
+      target=qa-<id> (C3/C4 in the OWD clone tag log, target_window=qa-<id>), client
+      on qa-<id> about 2s later via the TUI select_window, QA running with stable
+      window ids + s0/s1/s2 at +30/+90s. Pre-fix control (popup PYTHONPATH=origin/master
+      tree): C1/C2/C4 same as post-fix; ONLY C3 reproduced: target_window=None, client
+      on qa-<id> but the overlay spun "qa: running" for 3m15s until terminal_state.
+      Gotcha: on failure the spinner then waits on Press q/Esc/Enter. Unrelated: fake
+      QA runs crash to ERROR via send_keys on an exited pane (noted on pr-ae66f59).
+      Captures /pm-captures/scenarios/6.'
+    created_at: '2026-10-22T16:20:47Z'
+    last_edited: '2026-10-22T16:20:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
@@ -28977,7 +29010,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T01:50:20.375427+00:00'
-  updated_at: '2026-10-13T08:09:09.251179+00:00'
+  updated_at: '2026-10-22T16:15:54.193140+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28994,6 +29027,17 @@ prs:
       in the pr-b8561ac captures.'
     created_at: '2026-10-13T08:09:09Z'
     last_edited: '2026-10-13T08:09:09Z'
+  - id: note-61ede08
+    text: 'Also hits the NON-resume path (pr-8409c64 QA S6, 2026-10-22): fresh fake-claude
+      QA runs (scenario PASS delay 150, VERIFIED/FINALIZE_DONE 100%) crashed mid-run
+      with verdict=ERROR. Verification FLAGGED "verifier pane disappeared" -> _poll_tmux_verdicts
+      (qa_loop.py ~2817, follow-up extra Enters) tmux_mod.send_keys(pane_id, "") on
+      the exited scenario pane -> CalledProcessError "tmux send-keys -t %41  Enter"
+      exit 1 -> "QA background thread crashed". 6 of 9 parallel runs ended ERROR.
+      The same pane_exists check / CalledProcessError guard is needed in run_qa_sync
+      follow-up sends, not just resume.'
+    created_at: '2026-10-22T16:15:54Z'
+    last_edited: '2026-10-22T16:15:54Z'
 - id: pr-a75da60
   plan: bugs
   title: 'Bug: local-backend pm pr merge of a second PR always falls to the merge-resolution
