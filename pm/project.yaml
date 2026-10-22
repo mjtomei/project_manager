@@ -15890,7 +15890,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T17:17:09.010035+00:00'
+  updated_at: '2026-10-22T17:27:00.726267+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16089,6 +16089,16 @@ prs:
       vs the fix.'
     created_at: '2026-10-22T17:17:08Z'
     last_edited: '2026-10-22T17:17:08Z'
+  - id: note-52d2877
+    text: 'S16 refiner: master 4dcbff73 nav exit verified — merged entry renders an
+      EMPTY fzf list (header only, no notice); the next h/l makes fzf 0.56.3 exit
+      rc=1 → popup closes. Master TUI-window open shows "No actions available (PR
+      is merged or closed)." + "Press q/Esc/Enter to close..." (h/l ignored). Master
+      excludes qa-<id>-s1 windows from nav (exact-name match) so master counts are
+      /2. Switch builds per session: tmux set-environment -t "=$S" and "=$S~1" PYTHONPATH
+      <root>; verify via popup-picker module= log line.'
+    created_at: '2026-10-22T17:27:00Z'
+    last_edited: '2026-10-22T17:27:00Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
