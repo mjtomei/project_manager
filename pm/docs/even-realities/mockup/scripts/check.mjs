@@ -253,6 +253,21 @@ if (!only.length) {
     rule(app.view.kind === 'confirm' && app.view.confirm.lines.length > 2, `start ${s.id}: ${app.view.confirm ? 'no side effects named' : 'no confirmation'}`);
     rule(!buildFrame(app.render()).problems.length, `start ${s.id} confirmation breaks frame limits`);
   }
+  // Reopening a session already open further back reuses that view (scroll
+  // kept) instead of stacking a copy, and keeps a document opened since.
+  for (const [via, reach, keepsDoc] of [
+    ['session actions › All #214 sessions', a => { a.intent('select'); a.items(a.view).find(i => /^All #214/.test(i.l)).act(); a.items(a.view).find(i => /impl/i.test(i.l)).act(); }, false],
+    ['PRs menu › #214 › spec › Discuss', a => { a.intent('menu', 3); a.push({ type: 'list', kind: 'pr', pr: 'pr-214', cursor: 0, top: 0 }); a.items(a.view).find(i => typeof i.l === 'string' && /^Read impl spec/.test(i.l)).act(); a.intent('select'); a.items(a.view).find(i => /^Discuss/.test(i.l)).act(); }, true],
+  ]) {
+    const app = new App(new SimPM());
+    app.openSession('pr-214/impl');
+    const opened = app.view;
+    opened.scroll = 1;
+    reach(app);
+    const copies = app.stack.filter(x => x.type === 'session' && x.id === 'pr-214/impl').length;
+    rule(app.view === opened && opened.scroll === 1 && copies === 1, `${via}: ${app.stack.map(x => x.kind || x.type).join(' › ')} (${copies} copies)`);
+    if (keepsDoc) { app.intent('back'); rule(app.view.type === 'doc', `${via} → Back landed on ${app.sceneId()}, not the document`); }
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

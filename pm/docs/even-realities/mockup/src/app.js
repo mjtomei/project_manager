@@ -153,7 +153,12 @@ export class App {
     if (s.state === 'none' || s.state === 'starting') return this.confirmStart(s);
     // A queued QA scenario has no window yet; PM launches it when a slot frees.
     if (s.state === 'queued') { this.say(`${this.sessionName(s)} queued · PM launches it when a slot frees`); return; }
-    this.push({ type: 'session', id, scroll: 0 });
+    // A session already open further back (e.g. session → All #N sessions →
+    // same session) moves to the top with its scroll kept, so Back does not
+    // step through a second copy. Views above it stay, so a document opened
+    // since still gives Back and the reading context somewhere to return.
+    const open = this.stack.findLastIndex(x => x.type === 'session' && x.id === id);
+    this.push(open >= 0 ? this.stack.splice(open, 1)[0] : { type: 'session', id, scroll: 0 });
     if (s.state !== 'ended') this.say(`Opened existing ${s.pane} · nothing launched`);
   }
 
