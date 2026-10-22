@@ -29687,11 +29687,27 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-22T17:19:45.422450+00:00'
+  updated_at: '2026-10-22T17:34:08.264733+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5d019af
+    text: 'impl 04931ebf: run_qa_sync now calls qa_loop._sync_pr_branch before Scenario
+      0 / planner (after stale windows+containers are torn down). Behind-only → ff-only;
+      imported non-pm/ code or diverged → QA NEEDS_WORK before planning (route to
+      review) + signoff.invalidate_signoff; same diverged L/U already routed once
+      (pr["qa_branch_sync"]) → INPUT_REQUIRED; unreachable remote / other branch /
+      unfinished merge / refused ff / dirty divergence → INPUT_REQUIRED. pm never
+      merges/resets/pushes in the sync. Planner prompt now built after sync; state.planning_base
+      = revision planner reads. All no-scenario exits (incl. refused handoff) now
+      write overall to qa_status.json (auto-sequence previously saw "running: qa"
+      forever). Tests: tests/test_qa_branch_sync.py (real git). Captures: $CAP/impl/{pre,post}-fix/{worker-fix-stale-workdir,pm-only-upstream}
+      via repro_stale_qa.py driver (real git + run_qa_sync, fake tmux/Claude). Lost-worker
+      ownership (pr-3201ea8) untouched: handoff guard still refuses if upstream moves
+      during planning.'
+    created_at: '2026-10-22T17:34:08Z'
+    last_edited: '2026-10-22T17:34:08Z'
 - id: pr-7b085a9
   plan: bugs
   title: 'Bug: permission-wait state remains stale after Claude resumes work'
