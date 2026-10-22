@@ -42,7 +42,7 @@ Everything the PM actions panel and its related windows expose is reachable. See
 | The user can inspect ongoing work and speak to the session. A busy or still-starting session queues the message in the **same** session. | B07–B09 |
 | From any session: the scenario's other sessions, all of the PR's sessions, or return to the originating document. | B10, B11, B15 |
 | Plan, meta, guide and watcher sessions are listed with the same state column. | B20–B22 |
-| Starting a session that is not running needs confirmation naming PM's side effect (for example qa → sign_off). Repeated selections join the pending start; once ready, selection opens it. | B16–B19 |
+| Starting a session that is not running needs confirmation naming PM's side effect (for example qa → sign_off). Repeated selections join the pending start; once ready, selection opens it. Sessions PM's QA loop launches itself (planner, scenario helpers, finalize) are never user-startable, even once ended. | B16–B19 |
 
 ## 3. PR status, history and holds
 

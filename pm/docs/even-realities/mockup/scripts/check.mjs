@@ -200,6 +200,18 @@ if (!only.length) {
     app.intent('select');
     rule(app.view.type === 'session' && app.view.id === d.session, `QA progress row opened ${app.sceneId()}`);
   }
+  // An ended QA run session is not user-startable (the QA loop owns it); any
+  // other ended session's Start confirmation names what starting does.
+  for (const s of new SimPM().sessions.filter(x => x.state === 'ended')) {
+    const app = new App(new SimPM());
+    app.openSession(s.id);
+    app.intent('select');
+    const start = app.items(app.view).find(i => i.act && /^Start new/.test(i.l));
+    if (s.run != null) { rule(!start, `ended QA session ${s.id} offers "${start?.l}"`); continue; }
+    start?.act();
+    rule(app.view.kind === 'confirm' && app.view.confirm.lines.length > 2, `start ${s.id}: ${app.view.confirm ? 'no side effects named' : 'no confirmation'}`);
+    rule(!buildFrame(app.render()).problems.length, `start ${s.id} confirmation breaks frame limits`);
+  }
 }
 console.log(`\n${shots} screenshots, ${frames} frames checked, ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

@@ -218,6 +218,9 @@ export class App {
         const origin = this.originDoc();
         const out = [];
         if (s.state !== 'ended') out.push(it('Speak to this session', null, () => { this.pop(); this.startListening(); }));
+        // QA run sessions (planner, s0, scenario helpers, finalize) are launched
+        // by the QA loop; a user start would duplicate or race it.
+        else if (s.run != null) out.push(it([{ t: 'Ended · only the QA loop launches it', dim: true }], null, null));
         else out.push(it(`Start new ${s.short} session…`, null, () => { this.pop(); this.confirmStart({ ...s, state: 'none' }); }));
         if (s.scenario != null && s.helper) out.push(it(`Other s${s.scenario} sessions`, null, () => { this.pop(); this.jumpTo({ type: 'list', kind: 'scenario', pr: s.pr, run: s.run, k: s.scenario, cursor: 0, top: 0 }); }));
         if (s.pr) out.push(it(`All ${pm.prLabel(s.pr)} sessions`, null, () => { this.pop(); this.jumpTo({ type: 'list', kind: 'sessions-pr', pr: s.pr, cursor: 0, top: 0 }); }));

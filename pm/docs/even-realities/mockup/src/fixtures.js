@@ -110,6 +110,7 @@ export const SESSIONS = [
       T('pm', 'Spec review pending · implementation paused')] },
   // ---- #215: QA run 2 in progress -------------------------------------
   { id: 'pr-215/impl', pr: 'pr-215', role: 'Implementation', short: 'impl', window: '#215', pane: 'impl', state: 'ended', stateText: 'ended',
+    effects: ['Opens a new #215 impl window (pr start).', 'Status stays qa; the QA run continues.'],
     transcript: [T('agent', 'Implementation complete; tests pass (14 new).')] },
   { id: 'pr-215/review', pr: 'pr-215', role: 'Review', short: 'review', window: 'review-#215', pane: 'review-claude', state: 'done', stateText: 'i3 PASS',
     transcript: [T('agent', 'PASS. Banner wording and recovery path match the spec.')] },
@@ -142,7 +143,8 @@ export const SESSIONS = [
   // ---- Project / plan sessions ----------------------------------------
   { id: 'plan-sync/review', pr: null, group: 'Plans', role: 'Plan review', short: 'plan review', window: 'plan-sync', pane: 'plan-review', state: 'idle', stateText: 'idle',
     doc: 'plan:plan-sync', transcript: [T('agent', 'Plan v4 covers five PRs. #217 depends on #214. Anything to change before you approve?')] },
-  { id: 'plan-sync/breakdown', pr: null, group: 'Plans', role: 'Plan breakdown', short: 'breakdown', window: 'plan-sync', pane: 'plan-breakdown', state: 'ended', stateText: 'ended' },
+  { id: 'plan-sync/breakdown', pr: null, group: 'Plans', role: 'Plan breakdown', short: 'breakdown', window: 'plan-sync', pane: 'plan-breakdown', state: 'ended', stateText: 'ended',
+    effects: ['Opens plan breakdown in the plan-sync window.'] },
   { id: 'plan-deps', pr: null, group: 'Plans', role: 'Plan deps', short: 'deps', window: 'plan-deps', pane: 'plan-deps', state: 'none', stateText: 'not running', effects: ['Opens plan-deps; reviews the dependency graph.'] },
   { id: 'meta', pr: null, group: 'Project', role: 'Meta', short: 'meta', window: 'meta', pane: 'meta', state: 'idle', stateText: 'idle' },
   { id: 'guide', pr: null, group: 'Project', role: 'Guide', short: 'guide', window: '(TUI)', pane: 'guide', state: 'none', stateText: 'not running', effects: ['Opens the guide pane in the TUI window.'] },
