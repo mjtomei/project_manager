@@ -3929,6 +3929,8 @@ def _run_qa(
         for s in state.scenarios:
             s.launch_phase = s.launch_phase or "queued"
         _checkpoint(state, "planning" if planning else "planned")
+    else:
+        _checkpoint(state)  # claim the adopted run for this process
 
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if planning and adopt_planner:
@@ -4615,6 +4617,8 @@ def resume_qa_sync(
               len(in_flight), len(queued_scenarios))
     state.latest_output = "Resuming QA after restart..."
     _notify()
+    # Claim the run (owner pid) before anything blocks on adopted panes.
+    _checkpoint(state)
 
     if in_flight:
         state.run_phase = "launching"

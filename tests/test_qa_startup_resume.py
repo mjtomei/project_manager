@@ -679,3 +679,35 @@ def test_restart_during_planning_without_plan_does_not_replan(
     assert "during a restart" in resumed.latest_output
     finalize.assert_not_called()
     assert _load_resume_file(tmp_path / "qa")["phase"] == "done"
+
+
+def test_resume_claims_ownership_before_blocking_on_adopted_refiner(
+        world, tmp_path):
+    """While an adopted refiner is still running, the snapshot must already
+    name the resuming process as owner (not the dead controller)."""
+    (tmp_path / "wd").mkdir()
+    state = _new_state(tmp_path)
+    snap = _launch_with_restart_point(world, tmp_path, state)
+    snap["owner_pid"] = 999_999_999          # the killed controller
+    by = {s["index"]: s for s in snap["scenarios"]}
+    world.finish(by[1]["transcript_path"], "PASS", by[1]["session_id"])
+    owners = []
+    real_await = qa_loop._await_adopted_session
+
+    def _await(*a, **k):
+        owners.append(_load_resume_file(state.qa_workdir)["owner_pid"])
+        world.finish(world.native_transcript(by[2]["concretize_cwd"],
+                                             by[2]["concretize_session_id"]),
+                     REFINED, by[2]["concretize_session_id"])
+        return real_await(*a, **k)
+
+    def _on_launch(kind, window, pane, cmd):
+        if kind == "worker":
+            sid = cmd.split("--session-id ")[1].split()[0]
+            idx = int(window.rsplit("-s", 1)[1])
+            world.finish(Path(state.qa_workdir) / f"transcript-s{idx}.jsonl",
+                         "PASS", sid)
+    world.on_launch = _on_launch
+    with patch.object(qa_loop, "_await_adopted_session", _await):
+        _resume(world, tmp_path, snap)
+    assert owners == [os.getpid()]
