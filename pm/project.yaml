@@ -29956,7 +29956,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T02:12:16.291897+00:00'
+  updated_at: '2026-10-22T03:21:22.804546+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30377,6 +30377,99 @@ prs:
       move the fzf cursor; wait ~2 s.'
     created_at: '2026-10-22T02:12:16Z'
     last_edited: '2026-10-22T02:12:16Z'
+  - id: note-08becc4
+    text: 'S22 refine (0d3edf6d): (1) Neither relaunch nor dequeue has a TUI log line.
+      Trigger the restarts on ~/.pm/debug/<tag>.log "[qa_loop] Relaunched scenario
+      1 in window qa-<pr>-s1" and "[qa_loop] Launched scenario 3 (...) in window qa-<pr>-s3".
+      (2) A dequeue spends ~15 s in the concretizer (history "launching: slot free;
+      preparing worker", window qa-<pr>-s3 already exists) before the worker pane
+      splits; the 6813a7ec snapshot is written only after that split. A restart between
+      "Launching queued scenario 3" and "Launched scenario 3" is outside the fix and
+      may hit pr-1b90b51 (duplicate window name), so restart 2 must follow "Launched".
+      (3) A QA run ends INPUT_REQUIRED from a qa_scenario INPUT_REQUIRED verdict.
+      qa_finalize only offers FINALIZE_DONE/FINALIZE_BLOCKED and does not change the
+      overall verdict. (4) The grace timer qa-grace:<loop> is cleared only at loop
+      end, so after restart 2 the long-elapsed grace still reads "lost (owner process
+      exited)" (the owner check comes before the due check), then "re-armed". (5)
+      The second resumed run has children only for s1 and s3; s2 settled earlier and
+      gets no child.'
+    created_at: '2026-10-22T02:35:22Z'
+    last_edited: '2026-10-22T02:35:22Z'
+  - id: note-31db863
+    text: 'QA S22 (2026-10-22): fixed d6d0987a. A pm tui restart --breadcrumb within
+      ~2 s of a dequeued scenario launch resumed QA wrongly: (1) a verification pass
+      that landed during the dequeue concretizer (~16 s block) was missing from the
+      post-launch snapshot, so the resumed run re-verified s1; (2) resumed runs polled
+      already-settled scenarios again (second "qa s2 done PASS", "up to 3 at once"
+      under cap 2); (3) re-verifying into fake panes that had exited raised CalledProcessError
+      out of the poll loop, ending QA ERROR; (4) pre-existing ScenarioObserver zero-length
+      "settled without running" attempt re-journaled every tick. Post-fix all S22
+      Thens held (two restarts, grace lost→re-armed twice, one done PASS per scenario,
+      IR hold). With the spec timing s1 always settles before restart 2, so the final
+      run holds s3 only and has no scenario summary (needs ≥2 attempts); check the
+      summary on resumed run 1. Captures /pm-captures/scenarios/22.'
+    created_at: '2026-10-22T03:18:15Z'
+    last_edited: '2026-10-22T03:18:15Z'
+  - id: note-0409155
+    text: 'QA S23 (2026-10-22) PASS on 0d3edf6d, no edits: real O auto-start A→B (B
+      depends on A) to stop-before-merge, g merge A, B auto-starts, g merge B. All
+      history Thens held: one untracked start row, review i1 NW/i2 PASS, qa planner+s1/s2
+      (wall 65s < sum 130s, cap 2), signoff detail JSON-only, hold no countdown →
+      released (PR merged) = merged_at, merged-A popup single history row, A JSON
+      after B merge == post-A-merge minus generated_at, 970+972 reader files clean,
+      0 cross-PR ids. Obs: review launching phase ~0.2 s (A 0.5 s reader missed it,
+      B caught it); popup pager re-wraps rows wider than 74 cols collapsing column
+      spacing (signoff row, Milestones line), word-equal to CLI. Captures /pm-captures/scenarios/23.'
+    created_at: '2026-10-22T02:49:42Z'
+    last_edited: '2026-10-22T02:49:42Z'
+  - id: note-d8bb004
+    text: 'QA S25 (2026-10-22) PASS on 0d3edf6d, no edits: no-TUI CLI history held
+      — P via pm pr start/review: honest empty form (#7/7/id identical, JSON attempts
+      [] + missing note), pm pr qa rc=1 guidance, popup [no history]; Q via pm pr
+      auto-sequence: one open start row (→ now running, open true, no owner-exited),
+      prep review not journaled (absent), popup [start: turn done]; cleanup --resources
+      ended the same attempt interrupted "PR resources cleaned up", runtime gone,
+      popup [1 run]; pagers == COLUMNS=74 CLI. Spec nit: the runtime line reads "start=idle"
+      (runtime file state written by the auto-seq tick), not "start=running". Captures
+      /pm-captures/scenarios/25.'
+    created_at: '2026-10-22T02:42:31Z'
+    last_edited: '2026-10-22T02:42:31Z'
+  - id: note-d6a5d93
+    text: 'S24 refine (0d3edf6d, two projects one HOME): predicted cross-project defects
+      to watch, from code: (1) runtime_state.sweep_stale_states("tui-mount") clears
+      in-flight entries for EVERY PR in ~/.pm/runtime, so X Ctrl+R ends Y running
+      review-loop parent attempt "interrupted swept on tui-mount" (written by X);
+      Y loop keeps running and its next _on_iteration mirror opens a 2nd review-loop
+      attempt (same loop id). (2) _resume_incomplete_qa scans ~/.pm/workdirs/qa/*/qa_resume.json
+      of the whole HOME every ~5 s in every TUI; after X TUI SIGKILL, Y TUI finds
+      the dead-owner snapshot, store.get_pr(Y data) misses or status!=qa, and clear_resume_file
+      deletes X snapshot, so the respawned X TUI cannot resume. (3) _reconcile_timers
+      checks owner liveness before due, so an uncleared, already-elapsed QA grace
+      flips "elapsed" -> "lost (owner process exited) at unknown" after SIGKILL. (4)
+      Same title+desc => same id (sha256(title\n desc)), shared ~/.pm/history/<id>.jsonl
+      and ~/.pm/runtime/<id>.json, so Y never-run twin shows X attempts/running loop.
+      pm pr history <id-not-in-project> errors "PR ... not found" only while no journal
+      exists; once one exists it renders it with no title/status.'
+    created_at: '2026-10-22T02:35:59Z'
+    last_edited: '2026-10-22T02:35:59Z'
+  - id: note-24fad67
+    text: 'QA S24 (two projects, one HOME): fixed e084185d. (1) X TUI mount sweep
+      (Ctrl+R) cleared Y live review-loop runtime entry → Y PY loop "interrupted swept
+      on tui-mount" written by X pid, split into 2 attempts, i1 "parent run ended
+      first", grace "cancelled (owner ended)"; runtime entries now carry owner, sweep
+      skips other live owners. (2) Y _resume_incomplete_qa deleted X qa_resume.json
+      ~4 s after X kill -9 (PX not a Y PR) → X could not resume; scan now skips snapshots
+      with another session_tag. (3) already-elapsed QA grace flipped to "lost" after
+      owner kill -9; owners heartbeat their lock (1 s mtime), a gate due <= owner
+      last-alive stays elapsed, heartbeat also bounds owner-exited attempts (qa s1
+      >30s, was unknown). Not fixed, filed pr-c64eb04: same title => same PR id across
+      projects, so Y never-run "History demo" shows X loop/grace/[1 run], picker review
+      [loop]/[done i2 PASS], and pm pr history <X-only id> in Y renders X attempts
+      once a journal exists. Captures /pm-captures/scenarios/24 (pre-fix/post-fix).
+      Env gotcha: run pm session with </dev/null from the recorded boot pane (nested
+      attach deadlocked tmux -L server); pm pr start </dev/null outside a session.'
+    created_at: '2026-10-22T03:21:22Z'
+    last_edited: '2026-10-22T03:21:22Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
@@ -30495,6 +30588,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T01:55:36.713710+00:00'
   updated_at: '2026-10-22T01:55:36.713710+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c64eb04
+  plan: bugs
+  title: 'Bug: PR ids collide across projects sharing one HOME, so per-HOME history/runtime/QA
+    stores leak between projects'
+  branch: pm/pr-c64eb04-bug-pr-ids-collide-across-projects-sharing-one-hom
+  status: pending
+  depends_on: []
+  description: 'PR ids are sha256(title + "\n" + description), so two projects in
+    one HOME with a same-titled PR (e.g. "History demo", no description) get the same
+    id. ~/.pm/history/<pr>.jsonl, ~/.pm/runtime/<pr>.json and ~/.pm/workdirs/qa/<pr>-<loop>
+    are keyed by PR id only. Repro (QA pr-8020495 scenario 24, captures /pm-captures/scenarios/24/story1):
+    project X runs /review-loop on "History demo" while project Y has its own never-run,
+    pending "History demo". In Y, pm pr history <id> shows X''s running loop, "runtime:
+    review-loop=running" and X''s review verdict grace counting down; afterwards [1
+    run] / review-loop done PASS. The Y actions popup History badge shows "[review-loop
+    i1: working, 17s left]" then "[1 run]", and its review row shows "[loop]" then
+    "[done i2 PASS]" (from the shared runtime file). Also pm pr history <X-only PR
+    id> run in Y renders X''s attempts as a removed PR instead of "not found" once
+    X has journaled it. Fix idea: namespace the journal and runtime mirror per project
+    (e.g. a project key from the repo root or session tag in the path, or recorded
+    on each event and filtered at read time), with a migration or legacy fallback
+    for existing ~/.pm/history files. The TUI mount sweep and QA resume scan cross-project
+    cleanup was fixed separately in pr-8020495 (8103cc94).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T03:19:23.471649+00:00'
+  updated_at: '2026-10-22T03:19:23.471649+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
