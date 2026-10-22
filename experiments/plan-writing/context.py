@@ -193,13 +193,15 @@ def thread_numbers(doc, text, rules):
 
 
 def collect_github(source, docs, cfg):
-    groups, numbered_from = defaultdict(list), {}
+    # per document, which rule found the thread: a design file named after issue N and another file that only
+    # links N in its header share one item, and only the former may be dated by it (document_dates)
+    groups, numbered_from = defaultdict(list), defaultdict(dict)
     for doc in docs:
         number, where = thread_numbers(doc, doc_text(doc), cfg["numbers"])
         if number:
             url = f"https://github.com/{cfg['repo']}/{cfg.get('path', 'issues')}/{int(number)}"
             groups[url].append(doc["id"])
-            numbered_from[url] = where
+            numbered_from[url][doc["id"]] = where
     items, errors = [], []
 
     def one(url):
@@ -809,7 +811,8 @@ def document_dates(source, docs, items):
         for item in by_doc.get(doc["id"], []):
             if rule["from"] == "metadata" and item["kind"] == "metadata":
                 day = docmeta.parse_date(item["fields"].get(rule["field"]))
-            elif rule["from"] == "item" and item["kind"] == rule["kind"] and item.get("number_from") == rule.get("number_from"):
+            elif (rule["from"] == "item" and item["kind"] == rule["kind"]
+                  and (item.get("number_from") or {}).get(doc["id"]) == rule.get("number_from")):
                 day = item.get("written_at")
             elif rule["from"] == "ietf_first_draft" and item["kind"] == "index_entry":
                 day = docmeta.parse_date(item["fields"].get("First draft submitted"))

@@ -841,6 +841,26 @@ def test_stamp_timing_and_document_dates():
         context.stamp_timing({"kind": "x", "fields": {}, "text": ""}, {"written": "sometime"})
 
 
+def test_shared_issue_dates_only_the_document_named_after_it(monkeypatch):
+    pytest.importorskip("bs4")
+    context = importlib.import_module("context")
+    texts = {"named": "# Preemption\n", "linked": "# Inner frames\n\nDiscussion at https://golang.org/issue/24543.\n"}
+    monkeypatch.setattr(context, "doc_text", lambda doc: texts[doc["id"]])
+    monkeypatch.setattr(context, "github_thread", lambda url: (
+        {"title": "t", "body": "b", "author": "a", "created_at": "2018-03-26T00:00:00Z", "url": url}, "2026-10-21"))
+    source = {"id": "go", "context": {"document_date": {"from": "item", "kind": "tracking_issue", "number_from": "identity",
+                                                        "basis": "issue"}}}
+    cfg = {"kind": "tracking_issue", "repo": "golang/go", "written": "dated", "numbers": [
+        {"from": "identity", "pattern": r"^design/(\d+)-"}, {"from": "header", "pattern": r"golang\.org/issues?/(\d+)"}]}
+    # the header-only document comes last, so a per-thread record would mark the shared issue as header-found
+    docs = [{"id": "named", "identity": "design/24543-non-cooperative-preemption.md"},
+            {"id": "linked", "identity": "design/24543/conservative-inner-frame.md"}]
+    items, errors = context.collect_github(source, docs, cfg)
+    assert errors == [] and len(items) == 1 and items[0]["applies_to"] == ["linked", "named"]
+    items = [context.stamp_timing(i, cfg) for i in items]
+    assert context.document_dates(source, docs, items) == {"named": {"date": "2018-03-26", "basis": "issue"}}
+
+
 def test_process_versions_predate_each_document(monkeypatch):
     pytest.importorskip("bs4")
     pytest.importorskip("yaml")

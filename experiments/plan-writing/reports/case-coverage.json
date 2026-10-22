@@ -1,15 +1,15 @@
 {
  "totals": {
   "documents": 18963,
-  "brief_rich": 3137,
+  "brief_rich": 3139,
   "brief_thin": 9280,
-  "both_case_types": 11324,
+  "both_case_types": 11326,
   "whole_document_only": 1093,
-  "continuation_only": 3774,
+  "continuation_only": 3772,
   "dropped": 2772,
   "cases": {
    "continuation": 42757,
-   "whole_document": 12417,
+   "whole_document": 12419,
    "pm_plan": 24
   }
  },
@@ -145,14 +145,14 @@
   },
   "go-proposals": {
    "documents": 128,
-   "brief_rich": 53,
+   "brief_rich": 55,
    "brief_thin": 34,
-   "both_case_types": 85,
+   "both_case_types": 87,
    "whole_document_only": 2,
-   "continuation_only": 35,
+   "continuation_only": 33,
    "dropped": 6,
    "cases": {
-    "whole_document": 87,
+    "whole_document": 89,
     "continuation": 355
    },
    "context": {
@@ -17126,11 +17126,11 @@
     "admitted": 83
    },
    "process": {
-    "admitted": 160
+    "admitted": 164
    },
    "tracking_issue": {
-    "admitted": 88,
-    "excluded": 11
+    "admitted": 90,
+    "excluded": 9
    }
   },
   "ietf-rfcs": {
@@ -17675,10 +17675,10 @@
   }
  ],
  "check": {
-  "cases_checked": 55198,
+  "cases_checked": 55200,
   "by_type": {
    "continuation": 42757,
-   "whole_document": 12417,
+   "whole_document": 12419,
    "pm_plan": 24
   },
   "failures": {},
