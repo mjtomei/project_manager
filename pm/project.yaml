@@ -15890,7 +15890,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T18:50:16.103529+00:00'
+  updated_at: '2026-10-22T18:52:52.574931+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16122,6 +16122,14 @@ prs:
       to PM_POPUP_SESSION move with the has-session =name stale guard in tmux.get_session_name.'
     created_at: '2026-10-22T18:50:16Z'
     last_edited: '2026-10-22T18:50:16Z'
+  - id: note-9815066
+    text: 'Review 3b55 i1: merge 37637456 reviewed, no issues — one popup-session
+      mechanism (master PM_POPUP_SESSION + _session_pm_argv), has-session =name stale
+      guard in tmux.get_session_name, no PM_CALLER_SESSION left in code; 166 picker/tmux
+      tests pass. Only change 7c6f917a: stale comment in popup_picker_cmd (qa shortcut
+      is t, not a), pre-existing on master.'
+    created_at: '2026-10-22T18:52:52Z'
+    last_edited: '2026-10-22T18:52:52Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
