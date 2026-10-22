@@ -6,6 +6,7 @@ access app state and call app methods (log_message, push_screen, etc.).
 
 import os
 import shlex
+import subprocess
 from pathlib import Path
 
 from pm_core.paths import configure_logger, command_log_file
@@ -180,7 +181,17 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
         direction = pane_layout.preferred_split_direction(session, window)
         pane_id = tmux_mod.split_pane(session, direction, wrap, window=window)
         pane_layout.register_and_rebalance(session, window, [(pane_id, role, cmd)])
-        tmux_mod.select_pane_smart(pane_id, session, window)
+        try:
+            tmux_mod.select_pane_smart(pane_id, session, window)
+        except subprocess.CalledProcessError:
+            if tmux_mod.pane_exists(pane_id):
+                raise
+            # A short command already finished (e.g. the V pane of a
+            # concurrent approval that only prints "No pending spec
+            # review"): nothing to focus, and not an error.
+            _log.info("launched pane: role=%s id=%s exited before focus",
+                      role, pane_id)
+            return
         app.log_message(f"Launched {role} pane")
         _log.info("launched pane: role=%s id=%s", role, pane_id)
     except Exception as e:
