@@ -286,6 +286,16 @@ class TestSignoffCommand:
         mock_launch.assert_not_called()
 
 
+BASE_SHA = "BASE-SHA-0123456789"
+INTEG = {"head": "HEAD-SHA", "target_repo": "/repo", "base_branch": "master",
+         "base_sha": BASE_SHA, "candidate_tree": "TREE-SHA",
+         "status": "clean"}
+
+
+def _bound(**over):
+    return dict(INTEG, **over)
+
+
 class TestMergeSignoffGate:
     """`pm pr merge` refuses to merge a PR that hasn't received a fresh
     SIGNOFF_MERGE verdict, unless --no-signoff-check is passed."""
@@ -330,10 +340,50 @@ class TestMergeSignoffGate:
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
               "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
               "signoff": {"verdict": SIGNOFF_MERGE, "sha": "OLD-SHA",
-                          "ts": "earlier", "origin": "auto-sequence"}}
+                          "ts": "earlier", "origin": "auto-sequence",
+                          "integration": _bound(head="OLD-SHA")}}
         result, _ = self._invoke(tmp_path, pr)
         assert result.exit_code != 0
         assert "stale" in result.output
+
+    def test_legacy_head_only_approval_blocks_merge(self, tmp_path):
+        """A SIGNOFF_MERGE recorded before integration-aware sign-off (no
+        integration binding) needs a fresh sign-off — even at HEAD."""
+        from pm_core.signoff import SIGNOFF_MERGE
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+                          "ts": "now", "origin": "auto-sequence"}}
+        result, _ = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert "predates integration-aware sign-off" in result.output
+
+    def test_invalidated_approval_blocks_merge(self, tmp_path):
+        from pm_core.signoff import SIGNOFF_MERGE
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+                          "ts": "now", "origin": "auto-sequence",
+                          "integration": _bound(),
+                          "invalidated": "master moved since sign-off"}}
+        result, _ = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert "no longer valid" in result.output
+        assert "master moved since sign-off" in result.output
+
+    def test_conflicted_or_other_branch_binding_blocks_merge(self, tmp_path):
+        from pm_core.signoff import SIGNOFF_MERGE
+        for bound, text in ((_bound(status="conflict", candidate_tree=None),
+                             "not bound to a conflict-free integration"),
+                            (_bound(base_branch="main"), "merges into")):
+            pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+                  "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+                  "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+                              "ts": "now", "origin": "auto-sequence",
+                              "integration": bound}}
+            result, _ = self._invoke(tmp_path, pr)
+            assert result.exit_code != 0
+            assert text in result.output
 
     def test_fresh_merge_verdict_passes_gate(self, tmp_path):
         """A fresh SIGNOFF_MERGE verdict gets past the gate. We don't drive
@@ -342,37 +392,45 @@ class TestMergeSignoffGate:
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
               "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
               "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
-                          "ts": "now", "origin": "auto-sequence"}}
+                          "ts": "now", "origin": "auto-sequence",
+                          "integration": _bound()}}
         result, _ = self._invoke(tmp_path, pr)
         # Gate-specific text must NOT appear — anything else is fine
         # (the merge will fail downstream because we haven't mocked git).
         assert "sign-off verdict" not in result.output
         assert "no sign-off verdict recorded" not in result.output
 
-    def test_no_signoff_check_overrides_gate(self, tmp_path):
-        """--no-signoff-check bypasses the gate entirely."""
+    def test_no_signoff_check_only_recovers_completed_merges(self, tmp_path):
+        """--no-signoff-check no longer publishes: for a PR that is not in
+        the base yet it refuses instead of merging unapproved code."""
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
               "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
         result, _ = self._invoke(tmp_path, pr, extra_args=["--no-signoff-check"])
-        # Gate text must NOT appear (the merge itself isn't mocked, so
-        # the command will exit non-zero downstream, but the gate is
-        # what we're testing).
-        assert "no sign-off verdict recorded" not in result.output
-        assert "sign-off verdict" not in result.output
+        assert result.exit_code != 0
+        assert "only recover an already-completed merge" in result.output
 
 
-def _report_html(verdict: str = SIGNOFF_MERGE) -> str:
+def _report_html(verdict: str = SIGNOFF_MERGE, head: str | None = "HEAD-SHA",
+                 base: str | None = "BASE-SHA-0123456789",
+                 reason: str | None = None) -> str:
+    extra = ""
+    if head:
+        extra += f'<meta name="pm-signoff-head" content="{head}">'
+    if base:
+        extra += f'<meta content="{base}" name="pm-signoff-base">'
+    if reason:
+        extra += f"<meta name='pm-signoff-reason' content='{reason}'>"
     return ('<!DOCTYPE html><html><head>'
-            f'<meta name="pm-signoff-verdict" content="{verdict}">'
+            f'<meta name="pm-signoff-verdict" content="{verdict}">{extra}'
             '<title>r</title></head><body>report</body></html>')
 
 
 def _write_captures_report(tmp_path, pr_id="pr-001",
-                           verdict: str = SIGNOFF_MERGE):
+                           verdict: str = SIGNOFF_MERGE, **meta):
     croot = tmp_path / "caps"
     (croot / pr_id).mkdir(parents=True, exist_ok=True)
     report = croot / pr_id / "report.html"
-    report.write_text(_report_html(verdict), encoding="utf-8")
+    report.write_text(_report_html(verdict, **meta), encoding="utf-8")
     return croot, report
 
 
@@ -400,7 +458,8 @@ class TestSignoffRecordCommand:
         import hashlib
         croot, report = _write_captures_report(tmp_path)
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
-              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "integration": dict(INTEG)}
         result, data = self._invoke(tmp_path, pr, croot)
         assert result.exit_code == 0, result.output
         rec = data["prs"][0]["signoff"]
@@ -409,8 +468,56 @@ class TestSignoffRecordCommand:
         assert rec["origin"] == "manual"
         assert rec["report_hash"] == \
             hashlib.sha256(report.read_bytes()).hexdigest()
+        # The approval is bound to the integration check the report assessed.
+        assert rec["integration"]["base_sha"] == BASE_SHA
+        assert rec["integration"]["candidate_tree"] == "TREE-SHA"
         # Recording never changes status.
         assert data["prs"][0]["status"] == "sign_off"
+
+    def test_merge_record_refuses_legacy_report(self, tmp_path):
+        """A report without pm-signoff-head/base meta is HEAD-only."""
+        croot, _ = _write_captures_report(tmp_path, head=None, base=None)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "integration": dict(INTEG)}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code != 0
+        assert "legacy HEAD-only report" in result.output
+        assert "signoff" not in data["prs"][0]
+
+    def test_merge_record_refuses_mismatched_head_or_base(self, tmp_path):
+        for meta, integ, text in (
+                ({"head": "OTHERHEAD"}, INTEG, "reviewed HEAD"),
+                ({"base": "OTHERBASE99"}, INTEG, "assessed base"),
+                ({}, dict(INTEG, status="conflict", candidate_tree=None),
+                 "no conflict-free integration check"),
+                ({}, dict(INTEG, head="OLD-SHA"),
+                 "no conflict-free integration check")):
+            croot, _ = _write_captures_report(tmp_path, **meta)
+            pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+                  "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+                  "integration": dict(integ)}
+            result, data = self._invoke(tmp_path, pr, croot)
+            assert result.exit_code != 0, meta
+            assert text in result.output
+            assert "signoff" not in data["prs"][0]
+
+    def test_record_routes_conflicted_review_to_impl(self, tmp_path):
+        """A manual record gets the driver's earliest-step routing: with a
+        conflicted integration a REVIEW verdict is recorded as IMPL."""
+        croot, _ = _write_captures_report(tmp_path, verdict=SIGNOFF_REVIEW)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "integration": dict(INTEG, status="conflict",
+                                  candidate_tree=None,
+                                  conflicts=["shared.txt"])}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code == 0, result.output
+        rec = data["prs"][0]["signoff"]
+        assert rec["verdict"] == SIGNOFF_IMPL
+        assert rec["original_verdict"] == SIGNOFF_REVIEW
+        assert "conflicts" in rec["coerced_reason"]
+        assert "coerced to SIGNOFF_IMPL" in result.output
 
     def test_refuses_without_report(self, tmp_path):
         croot = tmp_path / "caps"
@@ -489,7 +596,7 @@ class TestMergeGateReportHash:
 
     def _pr_with_record(self, tmp_path, report_hash=None):
         rec = {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
-               "ts": "now", "origin": "manual"}
+               "ts": "now", "origin": "manual", "integration": _bound()}
         if report_hash:
             rec["report_hash"] = report_hash
         return {"id": "pr-001", "title": "T", "status": "sign_off",
@@ -537,13 +644,14 @@ class TestMergeGateReportHash:
         assert "changed since the recorded approval" not in result.output
         assert "no sign-off verdict recorded" not in result.output
 
-    def test_no_signoff_check_bypasses_hash_check(self, tmp_path):
+    def test_no_signoff_check_never_bypasses_into_a_merge(self, tmp_path):
         pr = self._pr_with_record(tmp_path, report_hash="deadbeef")
         croot = tmp_path / "caps"
         croot.mkdir()
         result, _ = self._invoke(tmp_path, pr, croot,
                                  extra_args=["--no-signoff-check"])
-        assert "changed since the recorded approval" not in result.output
+        assert result.exit_code != 0
+        assert "only recover an already-completed merge" in result.output
 
 
 def _patch_locked_update_fn(data: dict):
@@ -610,6 +718,14 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.pane_registry.register_pane"))
             p(patch("pm_core.pane_registry.registry_path", return_value=tmp_path))
             p(patch("pm_core.pane_registry.locked_read_modify_write"))
+            p(patch("pm_core.cli.helpers.state_root", return_value=tmp_path))
+            self.checks = []
+            p(patch("pm_core.integration.check_integration",
+                    side_effect=lambda root, pr_id, **kw: (
+                        self.checks.append(pr_id) or {"status": "up_to_date",
+                                                      "base_branch": "master",
+                                                      "base_sha": "b" * 40})))
+            p(patch("pm_core.signoff.store.load", return_value=data))
 
             signoff.launch_signoff_window(
                 data, pr_entry, background=True,
@@ -623,6 +739,15 @@ class TestWindowLaunchWorkdir:
         args = new_window.call_args
         # workdir lands as the 4th positional argument.
         assert args.args[3] == str(workdir)
+
+    def test_new_window_runs_the_integration_check(self, tmp_path):
+        """Sign-off checks integration with the latest base before the
+        router's prompt is built; the reused-window fast path does not."""
+        self._launch(tmp_path)
+        assert self.checks == ["pr-001"]
+        self._launch(tmp_path,
+                     existing={"id": "@9", "index": 9, "name": "signoff-pr-001"})
+        assert self.checks == []
 
     def test_new_window_stamps_launched_head(self, tmp_path):
         """The run is bound to the HEAD it was launched on (verdict binding)."""

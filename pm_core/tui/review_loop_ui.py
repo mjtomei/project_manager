@@ -574,7 +574,9 @@ def _signoff_gate(app, pr_id: str) -> tuple[str | None, str | None, dict]:
         data = app._data
     pr = store.get_pr(data or {}, pr_id) or {}
     sha = signoff_mod.head_sha(pr.get("workdir"))
-    return sha, signoff_mod.merge_gate_refusal(pr, sha), pr
+    base_branch = ((data or {}).get("project") or {}).get("base_branch",
+                                                         "master")
+    return sha, signoff_mod.merge_gate_refusal(pr, sha, base_branch), pr
 
 
 def _maybe_auto_merge(app, pr_id: str) -> None:
@@ -595,10 +597,12 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     "waiting for manual merge" line; otherwise runs
     ``pm pr merge --resolve-window --background <pr_id>`` synchronously,
     then triggers ``auto_start.check_and_start()`` to kick off newly-ready
-    dependents.  If the merge fails (conflict),
-    ``--resolve-window`` causes a Claude merge-resolution window to open;
-    we register ``merge:<pr_id>`` in the idle tracker so
-    ``_poll_impl_idle`` can detect when it finishes and re-attempt.
+    dependents.  The merge only publishes the signed-off candidate: if the
+    PR or base moved it refuses and invalidates the approval, and the
+    sign-off driver re-runs sign-off (the hold, if any, applies again to the
+    new approval).  Only a post-publish failure to update the main repo
+    opens a (recovery) merge window; then ``merge:<pr_id>`` is tracked so
+    ``_poll_impl_idle`` finalizes once it reports MERGED.
     """
     from pm_core.tui import auto_start as _auto_start
     if not _auto_start.is_enabled(app):
@@ -616,8 +620,10 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
             signoff_ui.start_signoff(app, pr_id)
         elif status == "sign_off" and (pr.get("signoff") or {}).get(
                 "verdict") == "SIGNOFF_MERGE":
-            # Signed off, yet the gate refuses (a manual approval whose
-            # report.html changed since): only a human can re-approve.
+            # Signed off, yet the gate refuses (e.g. a manual approval whose
+            # report.html changed since, or one targeting another base
+            # branch): only a human can re-approve.  Stale / invalidated /
+            # legacy approvals never get here — the driver re-runs those.
             # The sign-off driver calls here once per (verdict, sha, policy).
             _log.info("auto_merge: %s refused by sign-off gate: %s",
                       pr_id, refusal)
@@ -658,20 +664,21 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
         _log.info("auto_merge: %s merged, starting dependents", pr_id)
         app.run_worker(_auto_start.check_and_start(app))
     elif refusal := _signoff_gate(app, pr_id)[1]:
-        # The sign-off gate refused (HEAD / report changed since approval):
-        # that is not a conflict — no resolve window opened, so don't track
-        # one.  A moved HEAD makes the sign-off driver re-run against it.
+        # The gate refused (HEAD / base / report changed since approval):
+        # never a conflict to resolve here.  An invalidated approval makes
+        # the sign-off driver re-run sign-off against the current base.
         _log.info("auto_merge: %s refused by sign-off gate: %s",
                   pr_id, refusal)
         app.log_message(
-            f"[yellow]Merge of {pr_id} refused by the sign-off gate:[/] "
-            f"{refusal}")
-    else:
-        # Merge failed (conflict) — a resolve window was launched.
-        # Mark for idle tracking so _poll_impl_idle discovers the pane
-        # and re-attempts the merge after Claude resolves.
-        _log.info("auto_merge: %s merge failed, tracking merge window", pr_id)
+            f"[yellow]Merge of {pr_id} refused:[/] {refusal}")
+    elif _merge_window_exists(app, pr_id):
+        # Published, but updating the main repo failed: a recovery window
+        # was launched.  Track it so _poll_impl_idle finalizes on MERGED.
+        _log.info("auto_merge: %s published, tracking repo-update window",
+                  pr_id)
         app._pending_merge_prs.add(pr_id)
+    else:
+        _log.info("auto_merge: %s merge failed (see command output)", pr_id)
 
 
 # ---------------------------------------------------------------------------
@@ -684,13 +691,14 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
 
     Args:
         resolve_window: If True, pass ``--resolve-window`` so a Claude
-            merge-resolution window opens on conflict.  Used by
-            ``_maybe_auto_merge`` for the initial merge attempt.
+            recovery window opens when updating the main repo fails after
+            publication (the merge itself never resolves conflicts).  Used
+            by ``_maybe_auto_merge`` for the initial merge attempt.
             Verdict-detected finalization and idle fallback pass False
             to prevent cascading windows.
-        propagation_only: If True, pass ``--propagation-only`` to skip
-            the workdir merge and go straight to the pull-into-repo-dir
-            step (step 2 of two-step merge).
+        propagation_only: If True, pass ``--propagation-only``: only
+            finalize a merge already in the published base (update the
+            main repo, mark merged); never publishes.
     """
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
@@ -716,6 +724,21 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
         return False
     merged_pr = store.get_pr(app._data, pr_id)
     return bool(merged_pr and merged_pr.get("status") == "merged")
+
+
+def _merge_window_exists(app, pr_id: str) -> bool:
+    """Whether the PR's (post-merge recovery) merge window is open."""
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _pr_display_id
+    session = getattr(app, "_session_name", None)
+    pr = store.get_pr(app._data or {}, pr_id)
+    if not session or not pr:
+        return False
+    try:
+        return bool(tmux_mod.find_window_by_name(
+            session, f"merge-{_pr_display_id(pr)}"))
+    except Exception:
+        return False
 
 
 def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
@@ -770,75 +793,44 @@ def _kill_merge_window(app, pr_id: str) -> None:
 def _finalize_detected_merge(app, pr_id: str, merge_key: str,
                              tracker, pending_merges: set,
                              active_merge_keys: set) -> None:
-    """Finalize a merge after MERGED verdict is detected from the pane.
+    """Finalize a merge after a recovery window reported MERGED.
 
-    Two-phase logic:
-    - Step 1 MERGED (not in _merge_propagation_phase): Kill current merge
-      window, attempt propagation (--propagation-only --resolve-window).
-      If that succeeds immediately, clean up. Otherwise add to propagation
-      phase for step 2.
-    - Step 2 MERGED (in _merge_propagation_phase): Kill current merge
-      window, attempt propagation (--propagation-only, no resolve window).
-      Clean up regardless.
+    Merge windows only exist after the merge was published (updating the
+    main repo failed), so MERGED means the checkout is updated: kill the
+    window and run ``pm pr merge --propagation-only`` (no new window),
+    which verifies the PR is in the published base before finalizing — a
+    window can never get unapproved code recorded as merged.
     """
-    # Clear merge input_required state if it was set
-    app._merge_input_required_prs.discard(pr_id)
+    from pm_core.tui import auto_start as _auto_start
 
-    # Kill the current merge window and clean up tracker state
+    app._merge_input_required_prs.discard(pr_id)
     _kill_merge_window(app, pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
 
-    in_propagation = pr_id in app._merge_propagation_phase
-
-    if not in_propagation:
-        # Step 1 just completed — attempt propagation with resolve_window
-        _log.info("merge_verdict: step 1 MERGED for %s, attempting propagation", pr_id)
-        app.log_message(f"Step 1 merged for {pr_id}, propagating to repo dir")
-
-        if _attempt_merge(app, pr_id, propagation_only=True, resolve_window=True):
-            # Propagation succeeded immediately
-            _log.info("merge_verdict: %s propagation succeeded, fully merged", pr_id)
-            app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
-            pending_merges.discard(pr_id)
-            from pm_core.tui import auto_start as _auto_start
-            app.run_worker(_auto_start.check_and_start(app))
-        else:
-            # Propagation failed — a resolve window was launched (step 2)
-            _log.info("merge_verdict: %s propagation needs resolution (step 2)", pr_id)
-            app._merge_propagation_phase.add(pr_id)
-            # Keep in pending_merges so idle tracker picks up the new window
+    _log.info("merge_verdict: MERGED for %s, finalizing", pr_id)
+    if _attempt_merge(app, pr_id, propagation_only=True, resolve_window=False):
+        _log.info("merge_verdict: %s fully merged", pr_id)
+        app.log_message(f"[green bold]✓ Merged[/] {pr_id}")
     else:
-        # Step 2 just completed — attempt propagation WITHOUT resolve_window
-        _log.info("merge_verdict: step 2 MERGED for %s, finalizing propagation", pr_id)
-        app.log_message(f"Step 2 merged for {pr_id}, finalizing")
-
-        if _attempt_merge(app, pr_id, propagation_only=True, resolve_window=False):
-            _log.info("merge_verdict: %s fully merged after step 2", pr_id)
-            app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
-        else:
-            _log.warning("merge_verdict: propagation failed for %s after step 2 MERGED", pr_id)
-            app.log_message(
-                f"[yellow]Warning:[/] propagation failed for {pr_id} — "
-                f"run 'pm pr merge --propagation-only {pr_id}' manually",
-                sticky=30,
-            )
-
-        # Clean up regardless
-        app._merge_propagation_phase.discard(pr_id)
-        pending_merges.discard(pr_id)
-        # check_and_start returns early if auto-start is off or merge failed
-        from pm_core.tui import auto_start as _auto_start
-        app.run_worker(_auto_start.check_and_start(app))
+        _log.warning("merge_verdict: finalizing %s failed", pr_id)
+        app.log_message(
+            f"[yellow]Warning:[/] finalizing {pr_id} failed — run "
+            f"'pm pr merge --propagation-only {pr_id}' manually",
+            sticky=30,
+        )
+    pending_merges.discard(pr_id)
+    # check_and_start returns early if auto-start is off or merge failed
+    app.run_worker(_auto_start.check_and_start(app))
 
 
 def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     """Handle INPUT_REQUIRED verdict from a merge window.
 
-    Marks the PR as needing human input for merge resolution.  The user
-    should interact with Claude directly in the merge window pane.
-    After the user helps resolve, Claude will output MERGED and normal
-    verdict detection will finalize.
+    Marks the PR as needing human input to update the main repo after a
+    published merge.  The user should interact with Claude directly in the
+    merge window pane.  Once fixed, Claude outputs MERGED and normal
+    verdict detection finalizes.
     """
     # Track which PRs have merge input_required (for TUI display)
     app._merge_input_required_prs.add(pr_id)
@@ -982,6 +974,13 @@ def _poll_impl_idle(app) -> None:
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
+            from pm_core.signoff import return_awaiting
+            if return_awaiting(pr) == "impl":
+                # Sign-off sent it back but the rework session has not
+                # launched yet: an idle (old) session is not finished work.
+                _log.info("impl_idle: %s awaiting sign-off rework launch", pr_id)
+                tracker.mark_active(pr_id)
+                continue
             if pr.get("spec_pending"):
                 # Spec generation paused for user input (ambiguity
                 # resolution).  The session is waiting, not done.
@@ -990,15 +989,17 @@ def _poll_impl_idle(app) -> None:
             else:
                 newly_idle.append((pr_id, pr))
 
-    # --- Second pass: merge resolution windows ---
-    # Discover merge windows for ALL in_review PRs, not just
+    # --- Second pass: post-publish repo-update (merge) windows ---
+    # Discover merge windows for ALL in_review / sign_off PRs, not just
     # _pending_merge_prs.  This ensures MERGED verdict detection works
     # whether auto-start is enabled or not.
     pending_merges: set[str] = app._pending_merge_prs
     merge_pr_candidates: set[str] = set(pending_merges)
 
     for pr in (app._data.get("prs") or []):
-        if pr.get("status") == "in_review":
+        # A published merge whose main-repo update window is still open
+        # leaves the PR in sign_off (finalize marks it merged).
+        if pr.get("status") in ("in_review", "sign_off"):
             merge_pr_candidates.add(pr["id"])
 
     active_merge_keys: set[str] = set()
@@ -1062,11 +1063,10 @@ def _poll_impl_idle(app) -> None:
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
-            prop_only = pr_id in app._merge_propagation_phase
+            # The merge was already published; only finalize it.
             if _attempt_merge(app, pr_id, resolve_window=False,
-                              propagation_only=prop_only):
+                              propagation_only=True):
                 _log.info("merge_idle: %s merged after resolution, starting dependents", pr_id)
-                app._merge_propagation_phase.discard(pr_id)
                 _on_merge_success(app, pr_id, merge_key, tracker,
                                   pending_merges, active_merge_keys)
             # else: still not merged — keep tracking

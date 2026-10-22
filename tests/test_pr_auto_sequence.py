@@ -20,6 +20,16 @@ def _pr(status: str, **extra) -> dict:
     return pr
 
 
+# What the launch-time integration check records for HEAD "abc".
+_INTEG = {"head": "abc", "status": "up_to_date", "base_branch": "master",
+          "target_repo": "/repo", "base_sha": "base", "candidate_tree": "tree"}
+
+
+def _signoff_pr() -> dict:
+    """A sign_off PR at HEAD "abc" with a clean integration check of it."""
+    return _pr("sign_off", workdir="/wd", integration=dict(_INTEG))
+
+
 def _data_with(pr: dict) -> dict:
     return {"project": {"active_pr": pr["id"]}, "prs": [pr]}
 
@@ -299,9 +309,11 @@ class TestSignOff:
 
     def test_merge_always_reports_ready(self, runner, tmp_path):
         """Sign-off always gates: SIGNOFF_MERGE -> ready_to_merge recommendation."""
-        pr = _pr("sign_off")
+        pr = _signoff_pr()
         data = _data_with(pr)
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.signoff.head_sha", return_value="abc"), \
+             patch("pm_core.signoff.signoff_launched_sha", return_value="abc"), \
              patch("pm_core.cli.pr.store.load", return_value=data), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.cli.pr._check_signoff_verdict",
@@ -446,9 +458,11 @@ class TestSignOff:
         (the PR legitimately stays in sign_off, so its window/verdict persist)."""
         for verdict, hop_echo in (("SIGNOFF_MERGE", "ready_to_merge"),
                                   ("SIGNOFF_BLOCKED", "paused: sign_off_blocked")):
-            pr = _pr("sign_off")
+            pr = _signoff_pr()
             data = _data_with(pr)
             with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+                 patch("pm_core.signoff.head_sha", return_value="abc"), \
+                 patch("pm_core.signoff.signoff_launched_sha", return_value="abc"), \
                  patch("pm_core.cli.pr.store.load", return_value=data), \
                  patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
                  patch("pm_core.cli.pr._check_signoff_verdict",
@@ -547,9 +561,11 @@ class TestTuiRefresh:
         mock_refresh.assert_called()
 
     def test_recorded_signoff_refreshes_tui(self, runner, tmp_path):
-        pr = _pr("sign_off")
+        pr = _signoff_pr()
         data = _data_with(pr)
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.signoff.head_sha", return_value="abc"), \
+             patch("pm_core.signoff.signoff_launched_sha", return_value="abc"), \
              patch("pm_core.cli.pr.store.load", return_value=data), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.cli.pr._check_signoff_verdict",
