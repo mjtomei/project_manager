@@ -127,9 +127,16 @@ suppress-switch logic downstream is already correct (verified: with a valid
   `#N` display id read from another PR's workdir-clone `project.yaml`), so it
   keeps spinning until the QA run reaches `done`/`failed`, holding the popup
   open over the QA window. Same root cause as the review-loop symptom, so the
-  session-root resolution fixes it too. Live real-surface confirmation of this
-  variant is owed by QA (qa.md R6/R7); the unit tests below pin the spinner
-  behavior.
+  session-root resolution fixes it too. The unit tests below pin the spinner
+  behavior but do **not** prove the variant fixed (project-owner direction,
+  2026-10-22): QA must confirm it live in qa.md R6/R7 across the C1–C4
+  context matrix (TUI/root and PR-workdir cwd, `PM_PROJECT` set and unset),
+  asserting focus, popup dismissal and QA continuation separately. By code
+  analysis the old lookup was already correct in C1/C2/C4, so a failure there
+  would be a distinct cause to fix or file. The parent `_popup-picker` itself
+  runs the session's pm_core (pr-24f022e's debug log: `chosen_via=pm_root`),
+  so the picker's spinner code is not affected by that PR's workdir-code
+  resolution bug.
 - **EC5 — failed launch**: unchanged terminal-state short-circuit still prints
   `✗ <action>: failed` and waits via `_wait_dismiss`
   (`tests/test_picker_spinner_terminal.py`).

@@ -79,27 +79,66 @@ switch fires.
   review window, and focus is not later stolen when the launch completes (the
   suppress-switch flag is honored).
 
-### R6 — QA `t` from another window: switch AND popup dismissal (new QA window)
+### R6 — QA `t`, newly launched QA window: live switch AND popup dismissal
 Added 2026-10-22 (user report: `t` switched the client to the QA window but the
-picker popup stayed open over it).
-- **Given** a PR with **no** `qa-<display_id>` window open, and the user's
-  active pane sits in a window whose cwd is outside the PR's project (a
-  different PR's workdir clone is the realistic case — its `pm/project.yaml` is
-  a stale branch copy).
-- **When** the user opens the popup picker on that PR and presses `t`.
-- **Then**, verified **independently**: (a) the invoking client's active window
-  becomes `qa-<display_id>` (the TUI's QA launch performs this switch); and
-  (b) once that window exists the popup process/overlay is gone without any
-  extra `q`/`Esc` keypress — it must not wait for the QA run to finish — while
-  the QA run keeps running (runtime_state still `running`, scenario windows
-  appear afterwards).
+picker popup stayed open over it). Per the project owner (2026-10-22), this
+variant is **not** proven fixed by code inspection or the unit tests in
+`tests/test_spinner_review_loop_switch.py`; it must be shown live, and the
+original context is unknown, so every cell of the context matrix below is
+tested rather than guessed.
+- **Given** a PR with **no** `qa-<display_id>` window open, a client attached
+  to the session (a grouped `pm-<tag>~N` client session, as a real user has),
+  and that client's active pane in one of the contexts **C1–C4** below.
+- **When** the user opens the popup picker on that PR from that pane and
+  presses `t` (`tui:pr qa <pr>`, non-fresh).
+- **Then**, asserted **separately** for each context (one failing assertion
+  fails the cell even if the others hold):
+  - **(a) focus** — the *originating* client's window becomes
+    `qa-<display_id>` (`tmux list-clients -F '#{client_name} #{session_name}
+    #{window_name}'` or `display-message -p -t <client-session>
+    '#{window_name}'`; not the base session's active window, which can differ).
+  - **(b) dismissal** — once that window exists, the `pm _popup-picker`
+    process has exited and the popup overlay is gone from the client's screen,
+    with no extra `q`/`Esc`/Enter, while the QA run is still non-terminal.
+    Record the picker pid and its exit time alongside the runtime_state `qa`
+    entry, and the spinner log line `spinner exit: reason=window_open
+    target=qa-<display_id>` (must NOT be `reason=terminal_state`).
+  - **(c) QA continues** — after the popup is gone the run keeps going:
+    runtime_state `qa` still `launching`/`running`, `qa-<display_id>` still
+    alive, scenario windows `qa-<display_id>-sN` appear/progress afterwards.
 
-### R7 — QA `t` with an existing QA window/run (foreign cwd)
-- **Given** the same foreign-cwd starting pane, with a QA run already open
-  (`qa-<display_id>` and `qa-<display_id>-sN` windows, run still `running`).
+### R7 — QA `t` with an existing QA window/run: live switch AND popup dismissal
+- **Given** the same attached client and contexts **C1–C4**, with a QA run
+  already open for the PR (`qa-<display_id>` and `qa-<display_id>-sN`
+  windows, run `running`), the client sitting on some other window.
 - **When** the user presses `t` on that PR in the picker.
-- **Then** (a) the client lands on the QA window and (b) the popup closes
-  promptly; the existing QA run is not stopped or restarted.
+- **Then**, asserted separately per context: (a) the originating client lands
+  on the QA window; (b) the picker process/overlay is gone promptly
+  (`reason=window_open`), without a keypress and without waiting for the run;
+  (c) the existing run is neither stopped nor restarted — same QA window ids,
+  same run/loop id, scenario windows untouched, state still `running`.
+
+### R6/R7 context matrix
+Run R6 and R7 in every context (8 cells). `PM_PROJECT` is set/unset **in the
+pane that opens the popup** (the popup inherits the pane's cwd via
+`_popup-show -d` and the client environment):
+- **C1 — TUI/root, `PM_PROJECT` unset**: pane cwd = the session's project root
+  (the TUI/main window or a shell `cd`'d there); `unset PM_PROJECT`.
+- **C2 — TUI/root, `PM_PROJECT` set** to the session's pm dir.
+- **C3 — PR workdir, `PM_PROJECT` unset**: pane cwd = another PR's workdir
+  clone whose `pm/project.yaml` is a stale branch copy. Make the staleness
+  real: the target PR is absent from that copy, or (github/`#N` form) lacks
+  the `gh_pr_number` it has on the session root.
+- **C4 — PR workdir, `PM_PROJECT` set** to the session's pm dir (what a
+  session started with `PM_PROJECT` forwards into its panes).
+
+As a control, run C1–C4 on the pre-fix code (`origin/master` pm_core) too and
+record which cells reproduced "switched but popup stayed open". Expected:
+C3 reproduces pre-fix. If any cell fails post-fix, or a pre-fix failure shows
+up in a cell where the old lookup was already correct (C1/C2/C4), that is a
+**distinct remaining cause**: diagnose it from the spinner log
+(`~/.pm/debug/<tag>.log`, `PM_SPINNER_TRACE=1`) and fix it on this PR or file
+it as a separate bug — do not count the cell as passing.
 
 ### R8 — A failed launch still surfaces its error
 - **Given** an action whose launch fails (runtime_state reaches `failed`, or a
@@ -185,13 +224,15 @@ spins forever, no switch. Post-fix: switch fires.)
   passes on this branch (and demonstrably fails when the fix is reverted).
 - `q`/`Esc` closes the popup without switching, and the launch does not later
   steal focus.
-- QA `t` from another window (new and existing QA window): the client is on
-  `qa-<display_id>` AND the popup process is gone while QA keeps running.
+- QA `t` (R6 new window, R7 existing window) in every context C1–C4: the
+  originating client is on `qa-<display_id>`, AND the picker process/overlay
+  is gone (`reason=window_open`) while QA keeps running — each asserted live
+  and separately; unit tests alone do not satisfy this.
 - A failed launch shows its error and waits for dismissal.
 
 **Fail:**
 - The popup stays on the spinner frame after the review (or QA) window has
-  opened.
+  opened, in any R6/R7 context cell, or the QA run is stopped/restarted by `t`.
 - Focus never moves to `review-<display_id>` (active window stays on the
   launching window).
 - The spinner crashes, or a regression breaks the nominal project-cwd path or
