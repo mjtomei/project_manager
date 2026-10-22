@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8c1dd15
+  active_pr: pr-0cf552b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -30193,6 +30193,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-21T21:39:30.108250+00:00'
   updated_at: '2026-10-21T23:22:20.916518+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0cf552b
+  plan: bugs
+  title: 'Bug: TUI crashes at startup on github-backend projects when gh CLI is missing
+    (startup_github_sync lets SystemExit escape)'
+  branch: pm/pr-0cf552b-bug-tui-crashes-at-startup-on-github-backend-proje
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/sync.py startup_github_sync catches only Exception, but
+    gh_ops._check_gh() raises SystemExit(1) when gh is not installed/authenticated
+    (via pr_sync.sync_from_github -> gh_ops.get_pr_state -> run_gh). The SystemExit
+    escapes the Textual worker and kills the TUI ~1s after launch, so pm session on
+    any github-backend project with gh_pr_numbers is unusable without gh. The periodic
+    sync (same file, ~line 229) already has an `except SystemExit` clause that logs
+    and suppresses; startup sync needs the same (and ideally a single "GitHub sync
+    unavailable: gh not installed" log line instead of a stderr print). Repro: container
+    without gh, clone project_manager, pm session from the clone -> pane 0.0 dies
+    with traceback ending gh_ops.py _check_gh SystemExit: 1. Found in pr-9e7847d QA
+    scenario 8 (capture /pm-captures/scenarios/8/gh-missing-crash).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T14:42:12.514214+00:00'
+  updated_at: '2026-10-22T14:42:12.514214+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
