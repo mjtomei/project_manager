@@ -403,33 +403,56 @@ def _resume_incomplete_qa(app) -> None:
     project_data = None
 
     # A fresh start (z t) stops the old loop without processing its
-    # completion, so its snapshot outlives it next to the new run's.  A
-    # live loop rewrites its snapshot every poll tick: take the newest per
-    # PR and drop the older ones as superseded, otherwise whichever the
-    # glob yields first wins and the live run is never resumed.
+    # completion, so its snapshot outlives it next to the new run's.  Pick
+    # one snapshot per PR: unfinished runs first (a stopped run has its
+    # overall written, so a late write from it cannot outrank the live
+    # run), then the newest (a live loop rewrites its snapshot every tick).
+    # Otherwise whichever the glob yields first wins and the live run is
+    # never resumed.
     def _mtime(p):
         try:
             return p.stat().st_mtime
         except OSError:
             return 0.0
 
-    seen_pr_ids: set[str] = set()
-    for resume_file in sorted(qa_root.glob("*/qa_resume.json"),
-                              key=_mtime, reverse=True):
+    def _overall(qa_dir):
+        try:
+            sdata = json.loads((qa_dir / "qa_status.json").read_text())
+            return sdata.get("overall", "")
+        except (json.JSONDecodeError, OSError):
+            return ""
+
+    by_pr: dict[str, list] = {}
+    for resume_file in qa_root.glob("*/qa_resume.json"):
         try:
             rdata = json.loads(resume_file.read_text())
         except (json.JSONDecodeError, OSError):
             continue
-
         pr_id = rdata.get("pr_id", "")
-        if not pr_id:
-            continue
-        if pr_id in seen_pr_ids:
-            _log.info("Dropping superseded QA resume snapshot for %s: %s",
-                      pr_id, resume_file.parent)
-            qa_loop.clear_resume_file(resume_file.parent)
-            continue
-        seen_pr_ids.add(pr_id)
+        if pr_id:
+            by_pr.setdefault(pr_id, []).append(
+                (resume_file, rdata, _overall(resume_file.parent)))
+
+    live_workdirs = {str(s.qa_workdir) for s in app._qa_loops.values()
+                     if getattr(s, "qa_workdir", None)}
+    candidates = []
+    for pr_id, snaps in by_pr.items():
+        snaps.sort(key=lambda s: (bool(s[2]), -_mtime(s[0])))
+        candidates.append(snaps[0])
+        # Drop a superseded snapshot only when its run has finished and
+        # nothing still drives it: not an in-memory loop here, not a live
+        # process elsewhere.  Anything else is left alone.
+        for resume_file, rdata, overall in snaps[1:]:
+            if (overall
+                    and str(resume_file.parent) not in live_workdirs
+                    and str(rdata.get("qa_workdir")) not in live_workdirs
+                    and not qa_loop.resume_owned_elsewhere(rdata)):
+                _log.info("Dropping superseded QA resume snapshot for %s: %s",
+                          pr_id, resume_file.parent)
+                qa_loop.clear_resume_file(resume_file.parent)
+
+    for resume_file, rdata, overall in candidates:
+        pr_id = rdata["pr_id"]
         if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
             continue
         # Not orphaned: another live process (a `pm pr auto-sequence` QA
@@ -455,14 +478,7 @@ def _resume_incomplete_qa(app) -> None:
             continue
 
         # Is the run already complete (daemon wrote overall, TUI died
-        # before processing)?  Read the display status file.
-        overall = ""
-        try:
-            sdata = json.loads((resume_file.parent / "qa_status.json").read_text())
-            overall = sdata.get("overall", "")
-        except (json.JSONDecodeError, OSError):
-            overall = ""
-
+        # before processing)?  *overall* comes from the display status file.
         state = qa_loop.build_resume_state(rdata)
         app._resumed_qa_pr_ids.add(pr_id)
 

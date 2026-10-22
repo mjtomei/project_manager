@@ -405,17 +405,20 @@ def test_resume_noop_when_no_qa_root(tmp_path):
 
 
 @pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])
-def test_resume_prefers_newest_snapshot_over_superseded_run(tmp_path,
-                                                            stale_loop):
+@pytest.mark.parametrize("stale_mtime", [1_000_000, 4_000_000_000])
+def test_resume_prefers_live_snapshot_over_superseded_run(tmp_path,
+                                                          stale_loop,
+                                                          stale_mtime):
     """A fresh start leaves the stopped run's snapshot (overall written,
     completion never processed) beside the live run's.  The restart must
-    resume the live (newest) run, whatever the directory order, and drop
-    the superseded snapshot."""
+    resume the live run whatever the directory order, even when a late
+    write from the stopped run made its snapshot the newest, and drop the
+    superseded snapshot."""
     import os
     app = _make_app(tmp_path)
     stale = _seed_run(tmp_path, overall="INPUT_REQUIRED", loop=stale_loop)
-    os.utime(_resume_file_path(stale), (1_000_000, 1_000_000))
     live = _seed_run(tmp_path, overall="", loop="live")
+    os.utime(_resume_file_path(stale), (stale_mtime, stale_mtime))
 
     with patch("pathlib.Path.home", return_value=tmp_path), \
          patch.object(qa_loop, "resume_qa_background") as resume_bg, \
@@ -427,6 +430,53 @@ def test_resume_prefers_newest_snapshot_over_superseded_run(tmp_path,
     on_complete.assert_not_called()
     assert _resume_file_path(live).is_file()
     assert not _resume_file_path(stale).exists()
+
+
+def test_superseded_snapshot_owned_by_live_process_is_kept(tmp_path):
+    """An older finished snapshot whose run another live process still
+    drives (e.g. an auto-sequence QA child finalizing) is not deleted just
+    because a newer run exists for the PR."""
+    import os
+    app = _make_app(tmp_path)
+    owned = _seed_run(tmp_path, overall="INPUT_REQUIRED", loop="owned")
+    os.utime(_resume_file_path(owned), (1_000_000, 1_000_000))
+    live = _seed_run(tmp_path, overall="", loop="live")
+
+    def _owned_elsewhere(rdata):
+        return rdata.get("qa_workdir") == str(owned)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_owned_elsewhere",
+                      side_effect=_owned_elsewhere), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete"):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert _resume_file_path(owned).is_file()
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args[0][0].qa_workdir == str(live)
+
+
+def test_superseded_snapshot_of_in_memory_loop_is_kept(tmp_path):
+    """The snapshot of a loop this TUI still tracks in memory is never
+    deleted as superseded, even when it is older and finished."""
+    import os
+    app = _make_app(tmp_path)
+    current = _seed_run(tmp_path, overall="PASS", loop="current")
+    os.utime(_resume_file_path(current), (1_000_000, 1_000_000))
+    _seed_run(tmp_path, overall="INPUT_REQUIRED", loop="other")
+    tracked = _make_state(current)
+    tracked.pr_id = "pr-001"
+    app._qa_loops["pr-001"] = tracked
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert _resume_file_path(current).is_file()
+    resume_bg.assert_not_called()
+    on_complete.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
