@@ -85,7 +85,10 @@ rather than the post number (7c552b45); a brief counts as rich only when its
 request items carry real words (bullets/punctuation-only pieces do not count); `identity` index items carry only
 identifying fields (no RFC publication date/category/obsoletes, no RFD labels,
 no index descriptions); attachment versions are committed on or before the
-document date.
+document date. A Go tracking issue shared by several design files is dated and
+attached per document: a file named after issue N keeps its date, tracking
+issue and template even when another file merely links N in its header
+(a39bb3b0).
 
 R6 IETF charter in force.
 Given IETF/QUIC context,
@@ -110,7 +113,13 @@ for the next section without revealing its heading, `reference_text` returns
 that section (heading through the next same-or-shallower heading), the
 reference is absent from the generator input, and each document yields at most
 3 cases meeting the length limits (prefix ≥100 words, reference 30–4000 words).
-Documents with briefs carry both case types.
+Documents with briefs carry both case types. Numbered-heading cuts (RFC/PDF
+text) never land on table-of-contents or figure-list entries (including ones
+whose page number follows a wide column gap), table rows, page header/footer
+lines, column-0 numbered list runs that restart numbering, or inside markdown
+code fences (61bedfb5). Disclosed limits: HS2 numbered paragraphs and some
+NASA two-column PDF lines may still be cut; RFC run-in headings in fully
+justified text (RFC 850 style) are dropped.
 
 R9 PM natural-prompt cases.
 Given the Claude histories mounted and the plan-session map,
@@ -122,7 +131,12 @@ session first) and never the baseline; `reference_text` returns the
 build-time baseline snapshot; each case records task_kind (new/edit/reformat),
 human-turn fidelity applicability, source files and source gaps; plans without
 located history are listed with status (not_located, history_not_mounted,
-not_in_map), never fabricated.
+not_in_map), never fabricated. Human turns exclude `<task-notification>`
+wrappers, queued task-notification commands and messages relayed from other
+sessions (dc695f44); the report's PM table shows the corrected counts.
+Building under a non-UTF-8 locale (e.g. `LC_ALL=C`/`LANG=C`) produces
+byte-identical PM excerpts, baselines and reports and `--check` stays clean
+(afeb8786).
 
 R10 Coverage report accounts for every document.
 Given a full build,

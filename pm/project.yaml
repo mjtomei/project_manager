@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T17:27:48.221789+00:00'
+  updated_at: '2026-10-22T18:42:34.841818+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29728,6 +29728,15 @@ prs:
       --check clean, committed reports match data/cases/coverage.json.'
     created_at: '2026-10-22T17:27:48Z'
     last_edited: '2026-10-22T17:27:48Z'
+  - id: note-595ead4
+    text: 'Review loop 2870 i4 (a39bb3b0): collect_github stored number_from per thread
+      URL, so when a Go design file named after issue N shared it with a file that
+      only links N in its header, the last document processed decided it; 24543-non-cooperative-preemption
+      and 15292-generics lost their dates, tracking issue and template. number_from
+      is now per document (test added). Rebuild: context.py --sources go-proposals,
+      cases.py, cases.py --check (clean, 55200; 3139 rich). 64 tests pass.'
+    created_at: '2026-10-22T18:42:34Z'
+    last_edited: '2026-10-22T18:42:34Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
