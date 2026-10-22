@@ -10,7 +10,10 @@ export function renderCompanion(root, app, pm, act) {
   const v = app.view;
   const parts = [];
   const conn = pm.conn.state === 'ok' ? '' : `<p class="warn">↔ ${pm.conn.state === 'offline' ? 'PM offline' : 'Reconnecting to PM'} · data ${fmtAge(pm.conn.staleFor)} old · actions are refused, not queued</p>`;
-  parts.push(`<header><b>PM on glasses</b> <span class="sim">SIMULATED PM data</span><br><small>${esc(pm.project.name)} · ${esc(pm.now())} · glasses view: <code>${esc(app.sceneId())}</code></small></header>${conn}`);
+  // The glasses footer notice (sent, queued, refused) also shows here, so a
+  // send typed on the phone gets its answer on the phone.
+  const notice = app.toast ? `<p class="${app.toast.startsWith('!') ? 'warn' : 'muted'}" role="status">${esc(app.toast)}</p>` : '';
+  parts.push(`<header><b>PM on glasses</b> <span class="sim">SIMULATED PM data</span><br><small>${esc(pm.project.name)} · ${esc(pm.now())} · glasses view: <code>${esc(app.sceneId())}</code></small></header>${conn}${notice}`);
   if (v.type === 'doc') {
     const d = pm.doc(v.docId), shown = pm.version(v.docId, v.version), latest = pm.latest(v.docId);
     parts.push(`<h2>${esc(d.label)} <small>v${shown.n} · ${shown.hash} · ${esc(d.path)}</small></h2>`);
@@ -42,5 +45,7 @@ export function renderCompanion(root, app, pm, act) {
     if (r.ok) app.say(r.queued ? `Queued from phone in ${app.sessionName(pm.session(v.id))} (busy) · same session` : `Sent from phone to ${app.sessionName(pm.session(v.id))}`);
     else app.fail(r);
     act('noop');
+    // A refused message was not sent; keep it so the user can send it later.
+    if (!r.ok) { const again = root.querySelector('form.compose input'); if (again) again.value = text; }
   });
 }

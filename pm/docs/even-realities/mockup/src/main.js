@@ -42,8 +42,10 @@ function applyDirector(e) {
 // Poll on an interval with an in-flight guard: a single lost timer callback
 // (the SDK wraps WebView timers) cannot stop the director, and the request
 // timeout keeps one hung fetch from holding the guard forever.
+// The first poll only skips to the queue's end: events posted for an earlier
+// page load (a previous capture or demo) must not replay into fresh state.
 let polling = false;
-async function pollDirector() {
+async function pollDirector(skip = false) {
   if (polling) return;
   polling = true;
   const abort = new AbortController();
@@ -53,15 +55,23 @@ async function pollDirector() {
     if (r.ok) {
       const { events, seq } = await r.json();
       directorSeq = seq;
-      for (const e of events) { log(`DIRECTOR ${e.type}`); applyDirector(e); }
+      if (!skip) for (const e of events) { log(`DIRECTOR ${e.type}`); applyDirector(e); }
     }
   } catch (e) { if (!directorFailed) log(`DIRECTOR unavailable: ${e?.message || e}`); directorFailed = true; }
   finally { clearTimeout(timer); polling = false; }
 }
 
+// The SDK hands out a bridge even in a plain browser (its postMessage then
+// fails), so only the host's injected window.flutter_inappwebview (Even app,
+// official simulator) means glasses are attached.
+async function hasEvenHost(ms) {
+  for (const end = Date.now() + ms; !window.flutter_inappwebview && Date.now() < end;) await new Promise(r => setTimeout(r, 100));
+  return Boolean(window.flutter_inappwebview);
+}
+
 async function connectGlasses() {
-  const bridge = await Promise.race([waitForEvenAppBridge(), new Promise(r => setTimeout(() => r(null), 2500))]);
-  if (!bridge) { document.body.dataset.mode = 'browser'; log('No Even bridge: browser preview only'); return; }
+  const bridge = await hasEvenHost(2500) && await Promise.race([waitForEvenAppBridge(), new Promise(r => setTimeout(() => r(null), 2500))]);
+  if (!bridge) { document.body.dataset.mode = 'browser'; log('No Even host: browser preview only'); return; }
   document.body.dataset.mode = 'even';
   glasses = new SdkDisplay(bridge, log);
   bridge.onEvenHubEvent(event => {
@@ -85,6 +95,8 @@ for (const b of document.querySelectorAll('[data-demo]')) {
 }
 
 draw();
+// Before the first glasses frame, so the capture script (which waits for that
+// frame before posting) cannot have its first event skipped.
+await pollDirector(true);
 connectGlasses();
-pollDirector();
 setInterval(pollDirector, 150);

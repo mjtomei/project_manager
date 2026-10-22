@@ -290,7 +290,7 @@ export class App {
         }
         return out;
       }
-      case 'prs': return pm.prs.filter(p => p.status !== 'merged').map(p => it(`#${p.num} ${p.title}`, { t: prState(p), dim: !p.needs }, () => this.push({ type: 'list', kind: 'pr', pr: p.id, cursor: 0, top: 0 })));
+      case 'prs': return pm.prs.filter(p => p.status !== 'merged').map(p => it(`#${p.num} ${p.title}`, { t: prState(p, pm), dim: !p.needs }, () => this.push({ type: 'list', kind: 'pr', pr: p.id, cursor: 0, top: 0 })));
       case 'pr': {
         const p = pm.pr(v.pr);
         const out = [it([{ t: p.activity, dim: false }], null, null)];
@@ -705,11 +705,14 @@ function scenarioSummary(parts) {
   if (work) return { t: `${glyphFor(work.state)} ${work.stateText}`, dim: true };
   return { t: '·', dim: true };
 }
-function prState(p) {
+function prState(p, pm) {
   if (p.needs === 'spec') return '? spec review';
   if (p.needs === 'qa-input') return '? QA input';
   if (p.needs === 'merge') return '◇ manual merge';
-  return { in_progress: '◐ impl', in_review: '◐ review', qa: '◐ QA', sign_off: '◐ sign-off', pending: '· pending', merged: '■ merged' }[p.status] || p.status;
+  // A pending PR waiting on unmerged dependencies is governed by them.
+  const blockers = p.status === 'pending' ? p.deps.map(d => pm.pr(d)).filter(d => d && d.status !== 'merged') : [];
+  if (blockers.length) return `· blocked on ${blockers.map(d => `#${d.num}`).join(' ')}`;
+  return { in_progress: '◐ impl', in_review: '◐ review loop', qa: '◐ QA', sign_off: '◐ sign-off', pending: '· pending', merged: '■ merged' }[p.status] || p.status;
 }
 function defaultTimeline(pm, p) {
   const d = Object.values(pm.docs).find(x => x.pr === p.id && x.approved);

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-22T14:25:46.549Z",
+  "generated": "2026-10-22T14:46:03.307Z",
   "simulated": "All PM state, agent replies, document revisions, connection changes and speech recognition are SIMULATED by the mockup. Inputs are real simulator touchpad actions.",
   "simulator": "@evenrealities/evenhub-simulator 0.9.5",
   "sdk": "@evenrealities/even_hub_sdk 0.0.16",
