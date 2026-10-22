@@ -8410,6 +8410,29 @@ prs:
       pane %20 -> %31, one window. Real router MERGE for A and for B after rework.'
     created_at: '2026-10-22T06:14:35Z'
     last_edited: '2026-10-22T06:14:35Z'
+  - id: note-4f02b94
+    text: 'S23 refine (2026-10-22): the fake gets no prompt, so check the return block
+      on REAL routed sessions (review for REVIEW, planner for REQA; claude -p works).
+      Snapshot <workdir>/pm/prompts/pm_prompt_*.txt while the window is open. Move
+      master only AFTER the PR workdir is cloned, otherwise the workdir master already
+      has the base commit and `git diff master...HEAD` is not stale. Local backend
+      usual diff = `git diff master...HEAD`. Run `pm pr spec <pr> qa` under the fake
+      config before the first QA, or the loop stops at "QA spec missing". QA scenario
+      prompt.md carries no return block (planner only).'
+    created_at: '2026-10-22T04:40:36Z'
+    last_edited: '2026-10-22T04:40:36Z'
+  - id: note-24a9e5f
+    text: 'QA S23 (review/QA-only returns, clean moved base) on 6dd086a4: all Thens
+      held, no code edits. CLI REVIEW bounce: Integrate merge (parents C+BASE), master
+      untouched, block names merge + `git diff <BASE12> HEAD` (app.py only vs master...HEAD
+      +other.txt), i1 PASS not adopted. Dirty tracked workdir: applied null, apply_error,
+      block says "did not merge", edit intact. TUI REQA: real planner prompt carries
+      the block; `pm tui restart --breadcrumb` mid-planner relaunched rework QA once
+      with no sign-off on the pre-return PASS; ↻ to ▲ and SIGNOFF_MERGE up_to_date.
+      Spec note: plain `pm tui restart` clears auto-start by design, so nothing relaunches;
+      use --breadcrumb. Captures /pm-captures/scenarios/23'
+    created_at: '2026-10-22T05:16:09Z'
+    last_edited: '2026-10-22T05:16:09Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
