@@ -696,6 +696,31 @@ def test_concurrent_checks_do_not_race_on_the_base_ref(w):
     refs = git(w.wd, "for-each-ref", "--format=%(refname)", "refs/pm/").split()
     assert refs == [integration.BASE_REF]
 
+def _check_in_child(wd, repo, head):
+    with patch.object(integration, "_git_version", return_value=(2, 34)):
+        base, err = integration.fetch_base(wd, repo, "master")
+        cand = (integration.compute_candidate(wd, head, base)
+                if base else {"status": err})
+    return base, cand["status"], cand.get("error")
+
+
+def test_concurrent_checks_do_not_race_on_candidate_worktrees(w):
+    """git < 2.38: each check adds/removes a temp worktree in the shared
+    repo.  Concurrent checks (separate processes, as CLI calls are) must
+    not collide on its admin dir, prune each other's half-created
+    worktree, or fail a fetch that walks worktree HEADs ("bad object
+    worktrees/candidate1/HEAD")."""
+    import multiprocessing
+    ctx = multiprocessing.get_context("fork")
+    with ctx.Pool(10) as pool:
+        for n in range(5):
+            tip = commit(w.repo, f"base{n}.txt", "x\n", f"base {n}")
+            results = pool.starmap(_check_in_child,
+                                   [(str(w.wd), str(w.repo), w.head)] * 10)
+            assert results == [(tip, integration.CLEAN, None)] * 10, results
+    assert len(git(w.wd, "worktree", "list").splitlines()) == 1
+
+
 # --- one launcher per return (concurrent drivers) -------------------------
 
 def test_claim_return_launch_has_one_winner_until_cleared(tmp_path):

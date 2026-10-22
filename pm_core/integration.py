@@ -34,6 +34,8 @@ integrated code.  It never leaves a half-merge behind.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import functools
 import json
 import os
@@ -41,6 +43,7 @@ import re
 import secrets
 import shutil
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -87,6 +90,45 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Bounded so a hung holder (e.g. a stalled fetch) delays a check, not wedges it.
+_REPO_LOCK_TIMEOUT = 300.0
+
+
+@contextlib.contextmanager
+def _repo_lock(workdir: str):
+    """Serialize pm's fetches and candidate worktrees in one repository.
+
+    On git < 2.38 each check adds and removes a worktree in the shared
+    repository; a concurrent ``git fetch`` there walks every worktree's HEAD
+    and fails on a half-created one ("bad object worktrees/<name>/HEAD"),
+    and concurrent ``worktree add`` calls collide on admin dir names.
+    """
+    common = _out(_git("rev-parse", "--git-common-dir", cwd=workdir))
+    if not common:
+        yield
+        return
+    path = Path(workdir, common) / "pm-integration.lock"
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        yield
+        return
+    deadline = time.monotonic() + _REPO_LOCK_TIMEOUT
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    _log.warning("integration lock %s busy; proceeding", path)
+                    break
+                time.sleep(0.05)
+        yield
+    finally:
+        os.close(fd)
+
+
 # --- target + fetch --------------------------------------------------------
 
 def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str]:
@@ -129,6 +171,13 @@ def fetch_base(workdir: str, target_repo: str, base_branch: str) -> tuple[str | 
     # would otherwise race on the fetch's compare-and-swap of BASE_REF
     # ("cannot lock ref") or read each other's revision.
     own_ref = f"{BASE_REF}-{os.getpid()}-{secrets.token_hex(4)}"
+    with _repo_lock(workdir):
+        return _fetch_into(workdir, target_repo, base_branch, own_ref)
+
+
+def _fetch_into(workdir: str, target_repo: str, base_branch: str,
+                own_ref: str) -> tuple[str | None, str | None]:
+    sha = None
     try:
         r = _git("fetch", "--no-tags", target_repo,
                  f"+refs/heads/{base_branch}:{own_ref}", cwd=workdir)
@@ -184,8 +233,14 @@ def _merge_tree(workdir: str, head: str, base_sha: str):
 
 def _worktree_merge(workdir: str, head: str, base_sha: str):
     """Merge in a temporary detached worktree: ``(tree|None, conflicts, error)``."""
+    with _repo_lock(workdir):
+        return _worktree_merge_locked(workdir, head, base_sha)
+
+
+def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
     tmp = Path(tempfile.mkdtemp(prefix="pm-integrate-"))
-    wt = tmp / "candidate"
+    # A unique basename gives a unique admin dir (.git/worktrees/<name>).
+    wt = tmp / f"candidate-{secrets.token_hex(4)}"
     no_hooks = ("-c", "core.hooksPath=/dev/null")
     try:
         add = _git(*no_hooks, "worktree", "add", "--detach", "--quiet",
@@ -202,9 +257,11 @@ def _worktree_merge(workdir: str, head: str, base_sha: str):
             return None, sorted(conflicts.splitlines()), None
         return None, [], f"candidate merge failed: {_detail(m)}"
     finally:
-        _git("worktree", "remove", "--force", str(wt), cwd=workdir)
+        removed = _git("worktree", "remove", "--force", str(wt),
+                       cwd=workdir).returncode == 0
         shutil.rmtree(tmp, ignore_errors=True)
-        _git("worktree", "prune", cwd=workdir)
+        if not removed:
+            _git("worktree", "prune", cwd=workdir)
 
 
 def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
