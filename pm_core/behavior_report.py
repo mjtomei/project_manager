@@ -89,6 +89,39 @@ def _extract_verdict(report_path: Path) -> str:
     return ""
 
 
+_ANY_META_NAME_RE = re.compile(
+    r'name\s*=\s*["\'](pm-signoff-[a-z-]+)["\']', re.IGNORECASE)
+_ANY_META_CONTENT_RE = re.compile(
+    r'content\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.IGNORECASE)
+
+
+def extract_signoff_meta(report_path: Path) -> dict[str, str]:
+    """All ``pm-signoff-*`` meta tags in a report's ``<head>``.
+
+    Keys drop the ``pm-signoff-`` prefix (``verdict``, ``head``, ``base``,
+    ``reason``); values are HTML-unescaped.  Empty when the file is missing
+    or unreadable.
+    """
+    import html as _html
+    try:
+        with report_path.open("r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read(_HEAD_READ_CAP)
+    except (OSError, ValueError):
+        return {}
+    head_end = text.lower().find("</head>")
+    head = text if head_end < 0 else text[:head_end]
+    out: dict[str, str] = {}
+    for tag in _META_TAG_RE.findall(head):
+        name = _ANY_META_NAME_RE.search(tag)
+        content = _ANY_META_CONTENT_RE.search(tag)
+        if name and content:
+            key = name.group(1).lower().removeprefix("pm-signoff-")
+            val = content.group(1) if content.group(1) is not None \
+                else content.group(2)
+            out.setdefault(key, _html.unescape(val).strip())
+    return out
+
+
 def gather_dashboard_rows(data: dict,
                           captures_root_dir: Path) -> list[_DashRow]:
     """Build one row per PR from ``project.yaml`` + per-PR ``report.html``."""

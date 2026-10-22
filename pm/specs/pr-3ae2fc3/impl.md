@@ -121,6 +121,8 @@
   The runs popup shows the same labels and the reason.
 - Tree (`tech_tree.py`): when `spec_pending`, the marker is `S impl` or `S qa`. It replaces any loop
   marker, so a running QA planner's spinner can't hide it. The `_signature` includes the pending phase.
+  A sign-off return icon (`⇤`/`↩`/`↻`, from master's pr-ac10f03) is not a loop marker: it stays,
+  in its own style, before the `S` marker (e.g. `in_progress ⇤ S impl`).
 - PR Actions picker (`cli/session.py:_build_picker_lines`), added at the user's request: a
   `[spec review]` badge goes on the `start` row for a pending impl spec and on the `qa` row for a pending QA spec.
   The picker's h/l navigation (`_picker_nav_pr_ids`) also includes PRs with a pending spec, so a
@@ -163,3 +165,11 @@
 - `pm pr auto-sequence` (CLI) already reports `paused: spec_pending`; it is unchanged.
 - The impl idle edge (`PaneIdleTracker.became_idle`) is consumed only for in-scope PRs, so an
   impl that went idle while its target was removed still advances after it is re-added (QA S9).
+  For an in-scope PR whose sign-off IMPL return has not launched yet (`return_awaiting == "impl"`),
+  the edge is reset (`mark_active`) like a pending spec.
+- Sign-off returns (master pr-ac10f03): an in_progress PR with both `spec_pending` and an open IMPL
+  return is skipped by `check_and_start` *before* the return-launch claim, so no claim is taken while
+  paused. The approval clears `spec_pending`, `on_state_loaded` schedules `check_and_start`, and the
+  rework then launches `--fresh` as usual. The approval records survive a return, so a returned PR
+  is not paused again. `_spec_phase_due` passes `pr` to `recorded_qa_verdict`, so a QA verdict
+  recorded before an open return does not count as "QA already done".

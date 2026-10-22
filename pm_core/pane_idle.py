@@ -264,7 +264,7 @@ class PaneIdleTracker:
 #   (picker's ``start`` action).
 # * ``qa:<pr_id>:s<N>`` — QA scenario pane (set by
 #   :mod:`pm_core.tui.qa_loop_ui`).  Mirrored as the picker's ``qa`` action.
-# * ``merge:<pr_id>`` — merge resolution window; mirrored as the
+# * ``merge:<pr_id>`` — post-merge repo-update window; mirrored as the
 #   picker's ``merge`` action so the merge row shows [working]/[idle]/
 #   [wait] alongside the impl and QA rows.
 # * ``review:<pr_id>`` — non-loop review pane; mirrored as the picker's

@@ -199,7 +199,7 @@ def _spec_phase_due(app, pr: dict) -> str | None:
         if loop is not None and (loop.latest_verdict
                                  or not getattr(loop, "planning_phase", True)):
             return None
-        if loop is None and recorded_qa_verdict(pr["id"]) in QA_HOLD_VERDICTS:
+        if loop is None and recorded_qa_verdict(pr["id"], pr) in QA_HOLD_VERDICTS:
             return None
         phase = "qa"
     else:
@@ -1062,7 +1062,26 @@ async def check_and_start(app) -> None:
             _log.info("auto_start: ensuring impl window for in_progress PR %s",
                       pr_id)
         try:
-            await _start_pr_quiet(app, pr_id)
+            # A sign-off IMPL return whose fresh session never launched
+            # (e.g. TUI restart right after the hop) must relaunch the agent:
+            # the old, idle impl window would otherwise be adopted as is.
+            # Read from disk: ``prs`` predates this pass's awaits, and a
+            # rework launch that finished meanwhile cleared the mark — a
+            # second --fresh would kill that new session.
+            if pr.get("status") == "in_progress" \
+                    and _awaiting_on_disk(app, pr_id, "impl"):
+                # One launcher: a concurrent `pm pr auto-sequence` tick (or
+                # our own sign-off hop) may already be relaunching it, and a
+                # second --fresh would kill that session.
+                from pm_core.signoff import claim_return_launch
+                if not claim_return_launch(app._root, pr_id, "impl"):
+                    _log.info("auto_start: %s rework launch already "
+                              "claimed, skipping", pr_id)
+                    _recheck_after_claim(app)
+                    continue
+                await _start_pr_quiet(app, pr_id, fresh=True)
+            else:
+                await _start_pr_quiet(app, pr_id)
             started = True
         except Exception as e:
             _log.exception("auto_start: failed to start %s", pr_id)
@@ -1109,6 +1128,17 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
             continue
+        # A sign-off REVIEW return still waiting for its launch (TUI
+        # restart after the hop): the loop's --fresh launch would kill one
+        # a concurrent `pm pr auto-sequence` tick is starting, so take the
+        # return's launch claim first (as the impl catch-up does).
+        if _awaiting_on_disk(app, pr_id, "review"):
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(app._root, pr_id, "review"):
+                _log.info("auto_start: %s review return launch already "
+                          "claimed, skipping", pr_id)
+                _recheck_after_claim(app)
+                continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
@@ -1119,16 +1149,34 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
 QA_HOLD_VERDICTS = ("PASS", "INPUT_REQUIRED")
 
 
-def recorded_qa_verdict(pr_id: str) -> str | None:
-    """Verdict of the PR's last *finished* QA run (runtime_state), or None."""
+def recorded_qa_verdict(pr_id: str, pr: dict | None = None) -> str | None:
+    """Verdict of the PR's last *finished* QA run (runtime_state), or None.
+
+    With *pr*, a run that finished before the PR's open sign-off return is
+    ignored: it verified the code sign-off sent back, not the rework (whose
+    QA run records nothing until its first scenario launches).
+    """
     try:
         from pm_core import runtime_state as _rs
         rec = _rs.get_action_state(pr_id, "qa") or {}
     except Exception:
         return None
-    if rec.get("state") == "done":
-        return rec.get("verdict") or None
-    return None
+    if rec.get("state") != "done":
+        return None
+    if pr is not None and _predates_open_return(rec.get("updated_at"), pr):
+        return None
+    return rec.get("verdict") or None
+
+
+def _predates_open_return(at: str | None, pr: dict) -> bool:
+    from pm_core.signoff import open_return, parse_ts
+    ts = (open_return(pr) or {}).get("ts")
+    if not ts:
+        return False
+    try:
+        return not at or parse_ts(at) < parse_ts(ts)
+    except (TypeError, ValueError):
+        return False
 
 
 def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
@@ -1165,8 +1213,9 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # re-running QA on every later scheduler pass (or restart) would
         # only duplicate finished work.
         # Any real QA start (review→qa, ``t``) overwrites this record.
-        recorded = recorded_qa_verdict(pr_id)
-        if recorded in QA_HOLD_VERDICTS:
+        recorded = recorded_qa_verdict(pr_id, pr)
+        from pm_core.signoff import return_awaiting
+        if recorded in QA_HOLD_VERDICTS and return_awaiting(pr) != "qa":
             _log.debug("auto_start: %s QA already ended %s, not relaunching",
                        pr_id, recorded)
             continue
@@ -1182,6 +1231,39 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui
         qa_loop_ui.start_qa(app, pr_id)
+
+
+def _recheck_after_claim(app) -> None:
+    """Run one more scheduler pass once a skipped return claim can expire.
+
+    The claim's holder may have died before launching (e.g. a TUI restart
+    right after the hop it performed).  The TUI has no periodic auto-start
+    pass, so without this a stranded claim would stall the PR until some
+    unrelated event; with it the expired claim is taken over.  One pending
+    re-check covers every PR.
+    """
+    set_timer = getattr(app, "set_timer", None)
+    if set_timer is None or getattr(app, "_return_claim_recheck", False):
+        return
+    from pm_core.signoff import RETURN_LAUNCH_CLAIM_SECONDS
+
+    def _fire():
+        app._return_claim_recheck = False
+        app.run_worker(check_and_start(app))
+
+    app._return_claim_recheck = True
+    set_timer(RETURN_LAUNCH_CLAIM_SECONDS + 5, _fire)
+
+
+def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
+    """Whether the PR's sign-off return to *hop* still waits for its launch."""
+    from pm_core.signoff import return_awaiting
+    try:
+        pr = store.get_pr(store.load(app._root), pr_id)
+    except Exception:
+        _log.debug("auto_start: reload for %s failed", pr_id, exc_info=True)
+        return False
+    return return_awaiting(pr) == hop
 
 
 async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
@@ -1269,7 +1351,7 @@ def collect_status_inputs(app) -> dict:
         pr_id = pr.get("id")
         if (pr.get("status") == "qa" and pr_id not in qa_loops
                 and pr_id and scoped(pr_id)):
-            verdict = recorded_qa_verdict(pr_id)
+            verdict = recorded_qa_verdict(pr_id, pr)
             if verdict:
                 qa_loops[pr_id] = {"running": False, "verdict": verdict,
                                    "recorded": True}
@@ -1302,6 +1384,9 @@ def collect_status_inputs(app) -> dict:
             fresh = _signoff.fresh_recorded_verdict(pr, sha)
             signoff_info[pr_id] = {"verdict": rec.get("verdict"),
                                    "fresh": fresh is not None}
+            if fresh is None and rec.get("verdict"):
+                signoff_info[pr_id]["stale_reason"] = \
+                    _signoff.stale_reason(rec)
 
     from pm_core import spec_gen
     spec_reviews: dict[str, dict] = {}
@@ -1332,7 +1417,6 @@ def collect_status_inputs(app) -> dict:
         "qa_loops": qa_loops,
         "pending_merge": pending_merge,
         "merge_input_required": set(getattr(app, "_merge_input_required_prs", set()) or ()),
-        "merge_propagation": set(getattr(app, "_merge_propagation_phase", set()) or ()),
         "launching": set(_launching(app)),
         "impl_idle": impl_idle,
         "windows": windows,

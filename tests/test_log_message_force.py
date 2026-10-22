@@ -191,7 +191,6 @@ def test_starting_message_deferred_by_confirmation_hold(tmp_path):
                       ("_qa_loops", {}), ("_self_driving_qa", {}),
                       ("_pending_merge_prs", set()),
                       ("_merge_input_required_prs", set()),
-                      ("_merge_propagation_phase", set()),
                       ("_session_name", None)):
         setattr(app, attr, val)
     app._watcher_manager = MagicMock()

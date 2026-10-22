@@ -537,3 +537,105 @@ async def test_reorder_keeps_cursor_on_same_pr():
         await pilot.pause()
         assert tree._ordered_ids != before, "precondition: order changed"
         assert tree.selected_pr_id == "pr-a"
+
+
+# ---------------------------------------------------------------------------
+# Sign-off marker vs a finished review loop
+# ---------------------------------------------------------------------------
+
+
+def _status_row(app, pr_id):
+    node = next(n for n in app.query(PRNode) if n.pr_id == pr_id)
+    return node.render().plain.splitlines()[3]
+
+
+def _finished_loop(pr_id, verdict="PASS"):
+    from pm_core.review_loop import ReviewLoopState
+    st = ReviewLoopState(pr_id=pr_id, iteration=1, latest_verdict=verdict)
+    st.running = False
+    return st
+
+
+@async_test
+async def test_sign_off_verdict_icon_not_masked_by_finished_review_loop():
+    pr = _pr("pr-a", status="sign_off", workdir="/w",
+             signoff={"verdict": "SIGNOFF_MERGE", "head": "abc"})
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "▲" in row and "⟳" not in row
+
+
+@async_test
+async def test_sign_off_rerun_spinner_not_masked_by_finished_review_loop():
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    pr = _pr("pr-a", status="sign_off", workdir="/w")  # no verdict: running
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert any(f in row for f in SPINNER_FRAMES) and "⟳" not in row
+
+
+@async_test
+async def test_in_review_keeps_finished_loop_marker():
+    app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_return_marker_shown_alongside_running_rework_markers():
+    """R5.2: a PR sent back by sign-off keeps ⇤ while its rework review
+    loop runs (CLI ``pm pr list`` shows it throughout)."""
+    from pm_core.review_loop import ReviewLoopState
+    ret = {"verdict": "SIGNOFF_IMPL", "hop": "impl", "reviewed_head": "abc"}
+    pr = _pr("pr-a", status="in_review", workdir="/w", signoff_return=ret)
+    app = _TreeApp([pr])
+    st = ReviewLoopState(pr_id="pr-a", iteration=2)
+    st.running = True
+    app._review_loops["pr-a"] = st
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "⟳2" in row and "⇤" in row
+
+
+def _style_at(text, offset):
+    return " ".join(str(s.style) for s in text.spans
+                    if s.start <= offset < s.end)
+
+
+@async_test
+async def test_return_marker_kept_next_to_pending_spec_marker():
+    """A spec held for approval resets the loop/idle markers, but a PR sent
+    back by sign-off keeps its return icon beside ``S impl`` / ``S qa``,
+    each in its own style."""
+    impl_ret = {"verdict": "SIGNOFF_IMPL", "hop": "impl", "reviewed_head": "a"}
+    qa_ret = {"verdict": "SIGNOFF_REQA", "hop": "qa", "reviewed_head": "b"}
+    prs = [
+        _pr("pr-a", status="in_progress", workdir="/w",
+            signoff_return=impl_ret, spec_pending={"phase": "impl"}),
+        _pr("pr-b", status="qa", workdir="/w",
+            signoff_return=qa_ret, spec_pending={"phase": "qa"}),
+    ]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 40)) as pilot:
+        await pilot.pause()
+        for pid, icon, marker, icon_style in (
+                ("pr-a", "⇤", "S impl", "bold yellow"),
+                ("pr-b", "↻", "S qa", "bold magenta")):
+            node = next(n for n in app.query(PRNode) if n.pr_id == pid)
+            text = node.render()
+            row = text.plain.splitlines()[3]
+            assert f"{icon} {marker}" in row, row
+            base = sum(len(l) + 1 for l in text.plain.splitlines()[:3])
+            col = row.index(f"{icon} {marker}")
+            assert icon_style in _style_at(text, base + col)
+            for k in range(len(marker)):
+                assert "bold yellow" in _style_at(text, base + col + 2 + k)

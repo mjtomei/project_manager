@@ -131,6 +131,10 @@ def start_qa(app, pr_id: str) -> None:
             app.log_message(f"QA already running for {pr_id}")
             return
 
+    # A sign-off REQA return is now being re-verified.
+    from pm_core.signoff import clear_return_awaiting
+    clear_return_awaiting(app._root, pr_id, "qa")
+
     # Transition status to "qa" if currently in_review
     if pr.get("status") == "in_review":
         def _set_qa(d):
