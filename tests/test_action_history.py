@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import socket
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -344,6 +345,32 @@ class TestRuntimeCapture:
         rs.sweep_stale_states("tui-mount")
         assert _ends()[start]["outcome"] == "interrupted"
         assert "tui-mount" in _ends()[start]["detail"]
+
+    def test_mount_sweep_leaves_other_live_owners_entries(self, clock):
+        """Another project's TUI shares the HOME's runtime dir: a TUI mount
+        sweep must not end the loop that TUI is still running."""
+        ctx = multiprocessing.get_context("fork")
+        ready, done = ctx.Event(), ctx.Event()
+
+        def _other_tui():
+            rs.set_action_state(PR, "review-loop", "running", loop_id="L2")
+            ready.set()
+            done.wait(10)
+
+        p = ctx.Process(target=_other_tui)
+        p.start()
+        assert ready.wait(10)
+        theirs = rs.get_action_state(PR, "review-loop")["attempt_id"]
+        rs.set_action_state("pr-002", "review", "running", session_id="s1")
+        assert rs.sweep_stale_states("tui-mount") == 1
+        assert rs.get_action_state(PR, "review-loop")["state"] == "running"
+        assert theirs not in _ends()
+        assert rs.get_action_state("pr-002", "review") == {}
+        done.set()
+        p.join(10)
+        # Once that process is gone the next mount sweeps its entry.
+        assert rs.sweep_stale_states("tui-mount") == 1
+        assert _ends()[theirs]["outcome"] == "interrupted"
 
     def test_cancelled_outcome_override(self, clock):
         rs.set_action_state(PR, "review-loop", "running", loop_id="aaaa")
@@ -997,6 +1024,50 @@ class TestReconciliation:
         assert [a["id"] for a in m["attempts"] if a.get("open")] == [new]
         text = "\n".join(hq.render_text(m))
         assert "unknown" in text and ">50s" in text
+
+    def test_gate_elapsed_before_owner_died_stays_elapsed(self, clock,
+                                                         monkeypatch):
+        """An uncleared gate that ran out while its owner was alive reads
+        elapsed after the owner dies; one the owner did not outlive is
+        lost.  The owner's lock heartbeat bounds its death."""
+        ah._open_attempts.clear()
+        run = ah.start_attempt(PR, "qa", loop_id="L")
+        kid = ah.start_attempt(PR, "qa", parent=run, scenario=1)
+        ah.phase(PR, kid, "agent")
+        armed = clock.t
+        ah.arm_timer(PR, "qa-grace:L", purpose="QA scenario verdict grace",
+                     owner_action="qa", owner_attempt=run, duration=30)
+        clock.advance(31)
+        m = hq.build_history(PR, now=clock.t, live=False)
+        (row,) = m["timers"]["recent"]
+        assert row["resolution"] == "elapsed"
+        clock.advance(60)
+        beat = [armed + 32]
+        monkeypatch.setattr(ah, "owner_last_alive", lambda owner: beat[0])
+        with patch.object(ah, "owner_alive", return_value=False):
+            m = hq.build_history(PR, now=clock.t, live=False)
+            (row,) = m["timers"]["recent"]
+            assert row["resolution"] == "elapsed"
+            assert row["resolved_at"] == row["due_at"]
+            # The heartbeat also bounds the interrupted scenario (">Ns").
+            (a,) = m["attempts"]
+            assert a["children"][0]["elapsed_lower_bound_s"] == 32
+            beat[0] = armed + 20  # died before the gate ran out
+            m = hq.build_history(PR, now=clock.t, live=False)
+            (row,) = m["timers"]["recent"]
+            assert row["resolution"] == "lost (owner process exited)"
+
+    def test_owner_heartbeat_touches_lock(self, monkeypatch):
+        monkeypatch.setattr(ah, "_HEARTBEAT_S", 0.05)
+        monkeypatch.setattr(ah, "_owner_cache", None)
+        monkeypatch.setattr(ah, "_owner_lock_fd", None)
+        tok = ah.owner_token()
+        first = ah.owner_last_alive(tok)
+        assert first is not None
+        deadline = time.time() + 5
+        while ah.owner_last_alive(tok) == first and time.time() < deadline:
+            time.sleep(0.05)
+        assert ah.owner_last_alive(tok) > first
 
     def test_owner_exit_marker_bounds_interrupted_attempts(self, clock):
         # TUI Ctrl+R mid-QA: the scenarios' last own event is their start,

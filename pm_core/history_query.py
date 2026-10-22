@@ -77,7 +77,8 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     # An open attempt ran at least as long as its owner kept writing (e.g.
     # the owner_exit an in-place restart journals): the owner was alive
     # then and had not ended it.
-    owner_seen = _owner_last_seen(events)
+    alive = _liveness_memo()
+    owner_seen = _owner_last_seen(events, alive, t_now)
     for a in attempts.values():
         if a["ended_t"] is None:
             seen = owner_seen.get(_owner_key(a.get("owner")))
@@ -90,7 +91,6 @@ def build_history(pr_id: str, *, pr: dict | None = None,
         if p is not None:
             p["last_seen_t"] = max(p["last_seen_t"], a["last_seen_t"])
     tracked = _runtime_tracked_attempts(pr_id) if live else set()
-    alive = _liveness_memo()
     _reconcile_attempts(attempts, {aliases.get(i, i) for i in tracked},
                         alive)
     for a in attempts.values():
@@ -99,7 +99,8 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     for a in attempts.values():
         _compute_concurrency(a)
 
-    timer_rows = _reconcile_timers(timers, attempts, t_now, alive)
+    timer_rows = _reconcile_timers(timers, attempts, t_now, alive,
+                                   owner_seen)
     timer_rows["recent"] = (timer_history + timer_rows["recent"])
     _release_terminal_holds(pr or {}, timer_rows)
 
@@ -232,13 +233,22 @@ def _owner_key(owner) -> tuple | None:
             owner.get("instance"))
 
 
-def _owner_last_seen(events: list[dict]) -> dict[tuple, float]:
-    """Time of each owner's newest event, of any kind."""
+def _owner_last_seen(events: list[dict], owner_alive,
+                     t_now: float) -> dict[tuple, float]:
+    """When each owner was last known alive: its newest event of any kind,
+    or for an owner that has exited its last lock heartbeat if later."""
     seen: dict[tuple, float] = {}
+    owners: dict[tuple, dict] = {}
     for ev in events:
         key = _owner_key(ev.get("owner"))
         if key is not None:
             seen[key] = max(seen.get(key, 0.0), float(ev.get("t") or 0))
+            owners.setdefault(key, ev["owner"])
+    for key, owner in owners.items():
+        if owner_alive(owner) is False:
+            beat = _ah.owner_last_alive(owner)
+            if beat is not None:
+                seen[key] = max(seen[key], min(beat, t_now))
     return seen
 
 
@@ -476,7 +486,8 @@ def _cleared_row(tm: dict) -> dict:
 
 
 def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
-                      t_now: float, owner_alive) -> dict:
+                      t_now: float, owner_alive,
+                      owner_seen: dict[tuple, float] | None = None) -> dict:
     active: list[dict] = []
     overdue: list[dict] = []
     recent: list[dict] = []
@@ -493,6 +504,13 @@ def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
         alive = owner_alive(tm.get("owner"))
         if alive is False or (owner_att is not None
                               and owner_att.get("inferred") == "owner-exited"):
+            # A gate needs no owner to elapse: one that ran out while its
+            # owner was still alive stays elapsed after the owner dies.
+            seen = (owner_seen or {}).get(_owner_key(tm.get("owner")))
+            if (tm.get("effect") == "gate" and due is not None
+                    and seen is not None and due <= seen):
+                recent.append(_timer_row(tm, "elapsed", due))
+                continue
             recent.append(_timer_row(tm, "lost (owner process exited)",
                                      None))
             continue

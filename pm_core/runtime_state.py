@@ -189,6 +189,36 @@ def _journal_transition(pr_id: str, action: str, cur: dict,
                    exc_info=True)
 
 
+def _stamp_owner(cur: dict, state: str) -> None:
+    """Record which process image drives an in-flight entry.
+
+    Several TUIs (one per project) and CLI drivers share one runtime
+    directory, so a TUI mount sweep must leave entries another live
+    process still drives alone (see :func:`sweep_stale_states`).
+    """
+    if state not in IN_FLIGHT_STATES:
+        cur.pop("owner", None)
+        return
+    try:
+        from pm_core import action_history as _ah
+        cur["owner"] = _ah.owner_token()
+    except Exception:
+        cur.pop("owner", None)
+
+
+def _owned_by_other_live_process(entry: dict) -> bool:
+    owner = entry.get("owner")
+    if not isinstance(owner, dict):
+        return False
+    try:
+        from pm_core import action_history as _ah
+        if owner.get("instance") == _ah.owner_token().get("instance"):
+            return False
+        return _ah.owner_alive(owner) is True
+    except Exception:
+        return False
+
+
 def set_action_state(pr_id: str, action: str, state: str | None,
                      *, history_outcome: str | None = None,
                      history_reason: str | None = None,
@@ -243,6 +273,7 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                         _journal_transition(pr_id, action, cur, state,
                                             extras, False, history_outcome,
                                             history_reason)
+                        _stamp_owner(cur, state)
                         prior_state = cur.get("state")
                         # A fresh launch of this action invalidates any
                         # suppress_switch flag set by a prior, now-orphaned
@@ -326,6 +357,8 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
     correspond to anything live.  We delete such entries entirely.
     Terminal states (``done`` / ``failed``) are left untouched so
     post-mortem info — e.g. last review-loop verdict — survives restart.
+    Entries another live process drives (another project's TUI sharing
+    this HOME, a running CLI driver) are left alone.
 
     Returns the number of action entries that were cleared.
     """
@@ -347,7 +380,8 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
             continue
         targets = [a for a, e in actions.items()
                    if isinstance(e, dict)
-                   and e.get("state") in IN_FLIGHT_STATES]
+                   and e.get("state") in IN_FLIGHT_STATES
+                   and not _owned_by_other_live_process(e)]
         if not targets:
             continue
         pr_id = data.get("pr_id") or path.stem

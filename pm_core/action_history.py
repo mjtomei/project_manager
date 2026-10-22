@@ -223,6 +223,21 @@ def _prune_owner_locks() -> None:
             os.close(fd)
 
 
+# How often a live owner touches its lock file.  The mtime it leaves
+# behind tells readers how long a dead owner was alive (see
+# owner_last_alive), e.g. whether a gate elapsed before the owner died.
+_HEARTBEAT_S = 1.0
+
+
+def _heartbeat(fd: int) -> None:
+    while _owner_lock_fd == fd:
+        try:
+            os.utime(fd)
+        except OSError:
+            return
+        time.sleep(_HEARTBEAT_S)
+
+
 def _hold_owner_lock(instance: str) -> None:
     global _owner_lock_fd
     try:
@@ -231,6 +246,8 @@ def _hold_owner_lock(instance: str) -> None:
                      os.O_RDWR | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_SH)
         _owner_lock_fd = fd
+        threading.Thread(target=_heartbeat, args=(fd,), daemon=True,
+                         name="pm-owner-heartbeat").start()
     except Exception:
         _log.debug("action_history: owner lock failed", exc_info=True)
 
@@ -270,6 +287,20 @@ def _instance_alive(instance: str) -> bool | None:
     finally:
         os.close(fd)
     return False
+
+
+def owner_last_alive(owner: dict | None) -> float | None:
+    """When the owner's lock heartbeat last fired (epoch seconds), or None.
+
+    Only meaningful once the owner is gone: it then bounds the owner's
+    death from below to within about ``_HEARTBEAT_S``.
+    """
+    if not isinstance(owner, dict) or not owner.get("instance"):
+        return None
+    try:
+        return (_owners_dir() / f"{owner['instance']}.lock").stat().st_mtime
+    except (OSError, TypeError):
+        return None
 
 
 def owner_alive(owner: dict | None) -> bool | None:

@@ -353,6 +353,16 @@ def poll_qa_state(app) -> None:
     app._qa_resume_poll_counter += 1
 
 
+def _foreign_session(app, rdata: dict) -> bool:
+    """True when the snapshot was written by another pm session's QA run."""
+    theirs = rdata.get("session_tag")
+    ours = getattr(app, "_session_name", None)
+    if not isinstance(theirs, str) or not theirs or not isinstance(ours, str) \
+            or not ours:
+        return False
+    return theirs != ours.removeprefix("pm-")
+
+
 def _resume_incomplete_qa(app) -> None:
     """Resume or finish QA runs orphaned by a TUI restart.
 
@@ -413,6 +423,11 @@ def _resume_incomplete_qa(app) -> None:
         # child) is driving it.  Re-checked each scan, so the run is still
         # recovered if that process dies before finishing.
         if qa_loop.resume_owned_elsewhere(rdata):
+            continue
+        # QA workdirs are per-HOME, so another project's TUI sees this
+        # project's snapshots (PR ids can even coincide across projects).
+        # Leave a foreign session's run for its own TUI to resume.
+        if _foreign_session(app, rdata):
             continue
 
         # Only resume PRs still in QA — skip (and forget) ones that have

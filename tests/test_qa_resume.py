@@ -236,6 +236,34 @@ def test_resume_skips_non_qa_pr(tmp_path):
     assert not _resume_file_path(qa_dir).exists()
 
 
+def test_resume_leaves_other_sessions_snapshot_alone(tmp_path):
+    """Another project's TUI shares the HOME's QA workdirs: it must neither
+    resume nor delete this session's orphaned run (its PR may not exist
+    there, or be an unrelated PR with the same id)."""
+    app = _make_app(tmp_path, pr_status="merged")
+    app._session_name = "pm-other_project-0badf00d"
+    qa_dir = _seed_run(tmp_path, overall="")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_not_called()
+    assert "pr-001" not in app._resumed_qa_pr_ids
+    assert _resume_file_path(qa_dir).is_file()
+
+    # Its own session's TUI still resumes it.
+    app = _make_app(tmp_path)
+    app._session_name = "pm-project_manager-deadbeef"
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete"):
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_called_once()
+
+
 def test_resume_skips_run_owned_by_live_process(tmp_path):
     """A run another live process drives (a `pm pr auto-sequence` QA child)
     is not orphaned: adopting it would start a second orchestration loop —
