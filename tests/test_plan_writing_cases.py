@@ -440,6 +440,42 @@ def test_numbered_headings_reject_toc_and_lists():
     assert "Abstract" in titles
 
 
+def test_numbered_headings_reject_gap_toc_table_rows_and_list_runs():
+    body = "\n".join(["   Prose that explains the section in enough words to be a body."] * 6)
+    text = "\n".join([
+        "Table of Contents",
+        "",
+        "1.  Introduction                                                   2",
+        "2.  Design                                                         3",
+        "2.1.  Users                                                        3",
+        "Security Considerations                                            9",
+        "",
+        "1.  Introduction", "", body, "",
+        "2.  Design", "", body, "",
+        "2.1.  Users", "", body, "",
+        "   Steps:", "",
+        "1       Open the stream.", "",
+        "2       Send the widget.", "",
+        "3       Close the stream.", "",
+        "2.2.  Error codes", "", body, "",
+        "4       BadWidget       The widget failed to parse.",
+        "5       BadHost         The host is unknown.",
+        "6       Timeout         No reply arrived in time.", "",
+        "2.3.  Title                             Label: \"Title\"", "", body, "",
+        "3.  Security Considerations", "", body, "",
+    ])
+    found = sections.numbered_headings(text, max_indent=0, single_column=True)
+    titles = [h.title for h in found]
+    # each heading once, at its body position: the TOC entries end in a page number after a column gap
+    assert titles == ["1.  Introduction", "2.  Design", "2.1.  Users", "2.2.  Error codes",
+                      "2.3.  Title", "3.  Security Considerations", "Table of Contents"]
+    assert all(h.start >= text.index("1.  Introduction\n") for h in found[:-1])
+    # a heading beside a label is kept; in PDF text an indented row next to other rows is a table row
+    pdf = "3.  Plan\n\n" + body + "\n\n      2         Trims       FGC3.2 + EXT ADC     2 kA\n" \
+          "      4         Correctors  FGCLITE + ADC        120 A\n\n4.  Costs\n"
+    assert [h.title for h in sections.numbered_headings(pdf)] == ["3.  Plan", "4.  Costs"]
+
+
 def test_rst_heading_levels():
     found = sections.rst_headings("Title\n=====\n\ntext\n\nSub\n---\n\nmore\n\nNext\n====\n")
     assert [(h.title, h.level) for h in found] == [("Title", 1), ("Sub", 2), ("Next", 1)]
