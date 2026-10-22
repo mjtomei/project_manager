@@ -427,6 +427,10 @@ class TestPopup:
         header_len = len(cli.split("◎")[0].splitlines())
         assert [ln[2:] for ln in lines] == cli.splitlines()[header_len:]
         assert _red_ids(body) == NEED_YOU
+        # The selection is a background bar: reverse would invert the
+        # selected row's red attention label.
+        assert not any(getattr(sp.style, "reverse", None)
+                       for sp in body.spans)
         assert "⚠ 5 need you" in out["title"].plain
         assert all(cell_len(ln) <= 99
                    for ln in out["title"].plain.splitlines())

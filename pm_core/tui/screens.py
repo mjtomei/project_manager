@@ -800,8 +800,10 @@ class AutoRunsScreen(ModalScreen):
             texts = []
             for n, ln in enumerate(view.row_lines(row, width, grouped=grouped,
                                                    notice=notice, names=names)):
+                # A gray bar, not reverse: reverse would invert the red
+                # attention label and reason on the selected row.
                 line = Text("▶ " if sel and n == 0 else "  ",
-                            style="reverse" if sel else "")
+                            style="on #444444" if sel else "")
                 line.append_text(view.to_rich(ln))
                 texts.append(line)
             for t in texts:
