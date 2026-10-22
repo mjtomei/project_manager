@@ -855,6 +855,61 @@ class TestPollLoopRouteGating:
         assert launches == ["instructions/q.md", "instructions/q.md"]
         assert state.scenario_verdicts == {1: "PASS", 2: "PASS"}
 
+    def test_queued_launch_status_keeps_remaining_queue(self, tmp_path):
+        """Dequeuing one scenario passes the rest of the queue to the
+        launch's dashboard write, so they stay "queued" (not "pending")."""
+        from pm_core import qa_loop
+        q2 = qa_loop.QAScenario(index=2, title="b", focus="f")
+        q3 = qa_loop.QAScenario(index=3, title="c", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [q2, q3]
+        seen = []
+
+        def launch(st, *a, _status_queued=None, **k):
+            seen.append((st.scenarios[0].index, set(_status_queued)))
+            state.stop_requested = True
+            st.scenarios[0].window_name = "w"
+        ticks = {"n": 0}
+
+        def sleep(_):
+            ticks["n"] += 1
+            if ticks["n"] > 50:  # fail rather than hang
+                state.stop_requested = True
+        with patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+                   side_effect=launch):
+            self._poll(state, tmp_path, [_status(True)],
+                       queued_scenarios=[q2, q3], concurrency_cap=1)
+        assert seen == [(2, {3})]
+
+    def test_launch_status_write_marks_queued(self, tmp_path):
+        """The prep-phase dashboard write of a launch batch lists the whole
+        run, with queued scenarios as "queued"."""
+        from pm_core import qa_loop
+        scs = [qa_loop.QAScenario(index=i, title=f"t{i}", focus="f")
+               for i in (1, 2, 3)]
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = scs[:1]
+        seen = {}
+
+        def concretize(*a, **k):
+            status = json.loads((tmp_path / "qa_status.json").read_text())
+            seen.update({s["index"]: s["verdict"] for s in status["scenarios"]})
+            return None, "stop here"
+        with patch("pm_core.qa_loop._route_checker",
+                   return_value=lambda: _status(True)), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+             patch("pm_core.qa_loop._build_concretize_cmd",
+                   return_value="refiner"), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%9"), \
+             patch("pm_core.qa_loop._concretize_scenario",
+                   side_effect=concretize):
+            qa_loop._launch_scenarios_in_tmux(
+                state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path),
+                _status_scenarios=scs, _status_queued={2, 3})
+        assert seen == {1: "", 2: "queued", 3: "queued"}
+
     def test_queued_launch_gate_does_not_create_windows(self, tmp_path):
         """_launch_scenarios_in_tmux with a deferral dict never opens the
         refiner window when the route is down."""

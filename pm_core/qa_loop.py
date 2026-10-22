@@ -2249,12 +2249,17 @@ def _launch_scenarios_in_tmux(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _status_queued: set[int] | None = None,
     _route_deferred: dict | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
     *_route_deferred* (queued launches): launch gates do not wait on an
     unusable route, see :func:`_route_gate`.
+
+    *_status_scenarios* / *_status_queued*: the run's full scenario list and
+    the indices still waiting in the launch queue, so the dashboard status
+    written here keeps showing queued scenarios as ``queued``.
 
     Both phases run in parallel: workdir cloning, concretizer window creation,
     and agent launch all happen concurrently across scenarios.  The scenario
@@ -2367,6 +2372,7 @@ def _launch_scenarios_in_tmux(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_status_queued,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2473,6 +2479,7 @@ def _launch_scenarios_in_containers(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _status_queued: set[int] | None = None,
     _route_deferred: dict | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
@@ -2626,6 +2633,7 @@ def _launch_scenarios_in_containers(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_status_queued,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -3052,12 +3060,14 @@ def _poll_tmux_verdicts(
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _status_queued=set(_queued_indices),
                     _route_deferred=deferred,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _status_queued=set(_queued_indices),
                     _route_deferred=deferred,
                 )
         finally:
@@ -4436,12 +4446,14 @@ def run_qa_sync(
     if use_containers:
         _launch_scenarios_in_containers(
             state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
+            pm_root=pm_root, _status_scenarios=all_scenarios,
+            _status_queued=queued_indices,
         )
     else:
         _launch_scenarios_in_tmux(
             state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
+            pm_root=pm_root, _status_scenarios=all_scenarios,
+            _status_queued=queued_indices,
         )
     state.scenarios = all_scenarios
 
