@@ -96,8 +96,10 @@ document.addEventListener('keyup', e => {
   const i = keyIntent(e, 'up');
   if (i) { e.preventDefault(); act(...i); }
 });
+// A demo button gives focus back after its click, so the next Enter or Space
+// taps the glasses instead of clicking the button again.
 for (const b of document.querySelectorAll('[data-demo]')) {
-  b.addEventListener('click', () => applyDirector(JSON.parse(b.dataset.demo)));
+  b.addEventListener('click', () => { b.blur(); applyDirector(JSON.parse(b.dataset.demo)); });
 }
 
 draw();

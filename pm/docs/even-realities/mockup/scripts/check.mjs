@@ -11,7 +11,14 @@ const INPUT = { down: 'next', up: 'prev', click: 'select', double_click: 'back',
 const args = process.argv.slice(2);
 const quiet = args.includes('--quiet');
 const only = args.filter(a => !a.startsWith('--'));
+// An unknown id (a typo, or a flag's value left behind when npm took the flag
+// itself because it came without `--`) would check nothing and still pass.
+const unknown = only.filter(id => !JOURNEYS.some(j => j.id === id));
 let failures = 0, shots = 0, frames = 0;
+if (unknown.length) {
+  failures += unknown.length;
+  console.log(`! unknown journey ${unknown.join(', ')}; journeys are ${JOURNEYS.map(j => j.id).join(' ')}. Flags go after \`--\`: npm run check -- --quiet A`);
+}
 
 export function frameText(frame) {
   return frame.rows.map(r => (r ? [...r.l.map(s => s.t), r.r?.t || ''].join(' ') : '')).join('\n') + '\n' + (frame.footer?.left || '') + ' ' + (frame.footer?.right || '');

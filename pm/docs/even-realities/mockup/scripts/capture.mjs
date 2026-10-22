@@ -2,6 +2,10 @@
 // glasses screenshots (576x288) plus a few companion (phone WebView) shots.
 //
 //   npm ci --ignore-scripts && node scripts/capture.mjs [--out ../screenshots] [A B ...]
+//   (through npm: npm run capture -- --out DIR A)
+//
+// Naming journeys recaptures only those and merges them into an existing
+// manifest.json in the output directory.
 //
 // Linux without a display needs Xvfb and dbus-run-session (the simulator is a
 // GTK/WebKitGTK app); this script wraps it with `xvfb-run -a` when DISPLAY is
@@ -103,6 +107,11 @@ function label(raw, dest, text) {
 }
 
 async function main() {
+  // `npm run capture --out X` (no `--`) reaches here as the bare argument X with
+  // the default out; capturing nothing over the committed screenshots must not
+  // pass for a capture.
+  const unknown = only.filter(id => !JOURNEYS.some(j => j.id === id));
+  if (unknown.length) throw new UsageError(`unknown journey ${unknown.join(', ')}; journeys are ${JOURNEYS.map(j => j.id).join(' ')}. Pass flags after \`--\`: npm run capture -- --out DIR A. Nothing was captured.`);
   for (const [port, what, env] of [[PORT, 'mockup server', 'MOCKUP_PORT'], [SIM, 'simulator automation', 'SIMULATOR_PORT']]) {
     if (!await portFree(port)) throw new UsageError(`port ${port} (${what}) is busy, e.g. by \`npm run serve\` or another capture; stop it or set ${env} to a free port. Nothing was captured.`);
   }
@@ -223,7 +232,18 @@ async function main() {
   }
   await pollConsole();
   manifest.problems = problems;
-  fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  // A partial capture (journey ids given) replaces only those journeys in an
+  // existing manifest, so the gallery keeps the rest; journey order follows
+  // journeys.mjs.
+  const manifestFile = path.join(out, 'manifest.json');
+  if (only.length && fs.existsSync(manifestFile)) {
+    const prev = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    const fresh = new Map(manifest.journeys.map(j => [j.id, j]));
+    const kept = new Map((prev.journeys || []).map(j => [j.id, j]));
+    manifest.journeys = JOURNEYS.map(j => fresh.get(j.id) || kept.get(j.id)).filter(Boolean);
+    manifest.osMenu ??= prev.osMenu;
+  }
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`${manifest.journeys.reduce((n, j) => n + j.shots.length, 0)} screenshots in ${out}; ${problems.length} problem(s)`);
   if (problems.length) { console.log(problems.join('\n')); process.exitCode = 1; }
 }
