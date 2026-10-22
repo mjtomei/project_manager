@@ -30295,7 +30295,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-22T15:11:34.640853+00:00'
+  updated_at: '2026-10-22T16:30:11.969341+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30540,6 +30540,22 @@ prs:
       fetch fails and MERGE is coerced to BLOCKED.'
     created_at: '2026-10-22T15:11:34Z'
     last_edited: '2026-10-22T15:11:34Z'
+  - id: note-dc90dfe
+    text: 'QA S28 (returns on review-specs PRs) on 85a74f08, no app edits: all Thens
+      held in run 5 (/p5,q5,r5): IMPL/REQA/REVIEW returns on approved specs relaunch
+      once with no spec pause; regenerated impl spec held 1.1 s -> "in_progress ⇤
+      S impl" (border intact), 15 idle-but-spec_pending resets, approve keeps the
+      window -> review; regenerated QA spec during a ↻ return held 2.7 s, 36 plan-deferred
+      polls, scenarios only after approval; pre-return QA PASS not counted (no QA
+      already ended PASS line). Setup failure (first attempt): container PID 1 (sleep
+      infinity) never reaps, and a sampler running $(... < <(...)) every 0.5 s leaked
+      1929 zombies to the 2048 PID cap; host tmux under a subreaper (scripts/reaper.py)
+      + bounded pipe-only samplers. Gotchas: re-QA scenario windows are -s2/-s3 not
+      -s1; tmux 3.2a has no #{window_created} (compare @window ids); fake impl makes
+      no commits, so sign-off integration is in_base and MERGE is coerced to BLOCKED;
+      commit in the PR workdir first.'
+    created_at: '2026-10-22T16:30:11Z'
+    last_edited: '2026-10-22T16:30:11Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
