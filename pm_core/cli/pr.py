@@ -1873,7 +1873,8 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
                                  background=background, transcript=transcript,
                                  cwd=repo_dir, companion=companion)
             return False
-        click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
+        click.echo("Resolve this manually, then run 'pm pr merge "
+                   f"--propagation-only {pr_entry['id']}' to finalize.", err=True)
         return False
 
     if stash_info:
@@ -1950,7 +1951,6 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
     from pm_core import integration
 
     pr_id = pr_entry["id"]
-    branch = pr_entry.get("branch", "")
     approved = pr_entry["signoff"]
     bound = approved["integration"]
     head = approved["sha"]
@@ -1960,52 +1960,81 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
             root, pr_entry, f"target repository changed "
             f"({bound['target_repo']} -> {target_repo})")
 
+    published = False
     with _publish_lock(data):
         click.echo(f"Checking {base_branch} of {target_repo}...")
         base_sha, err = integration.fetch_base(workdir, target_repo, base_branch)
         if err:
             click.echo(f"PR {pr_id}: cannot verify the base: {err}", err=True)
             raise SystemExit(1)
-        if base_sha != bound["base_sha"]:
+        if base_sha != bound["base_sha"] \
+                and integration.is_ancestor(workdir, head, base_sha):
+            # The approved head is already in the base: an earlier run
+            # published it but did not finish (main-repo update failed, or
+            # it was interrupted).  Finalize it below; refusing would send a
+            # merged PR back to sign-off, whose check can only BLOCK it.
+            published = True
+        elif base_sha != bound["base_sha"]:
             _return_to_signoff(
                 root, pr_entry, f"{base_branch} moved since sign-off "
                 f"({bound['base_sha'][:12]} -> {base_sha[:12]})")
-        cand = integration.compute_candidate(workdir, head, base_sha)
-        if cand.get("status") not in integration.MERGEABLE \
-                or cand.get("candidate_tree") != bound["candidate_tree"]:
-            _return_to_signoff(
-                root, pr_entry, "the integration candidate no longer matches "
-                f"the approved one ({integration.summary(dict(cand, base_branch=base_branch, base_sha=base_sha))})")
-
-        msg = f"Merge {branch}: {pr_entry.get('title', pr_id)}"
-        if backend_name == "github":
-            _publish_github(data, root, pr_entry, workdir, target_repo,
-                            base_branch, base_sha, head, bound,
-                            resolve_window=resolve_window,
-                            background=background, transcript=transcript,
-                            companion=companion)
-            return
-        merge_sha, err = integration.build_merge_commit(
-            workdir, bound["candidate_tree"], base_sha, head, msg)
-        if err:
-            click.echo(f"PR {pr_id}: {err}", err=True)
-            raise SystemExit(1)
-        click.echo(f"Merging {branch} into {base_branch} "
-                   f"({head[:12]} + {base_sha[:12]} -> {merge_sha[:12]})...")
-        if backend_name == "local":
-            _publish_local(data, root, pr_entry, workdir, base_branch,
-                           base_sha, merge_sha)
         else:
-            _publish_vanilla(root, pr_entry, workdir, target_repo,
-                             base_branch, base_sha, merge_sha)
+            _publish_candidate(data, root, pr_entry, backend_name, workdir,
+                               target_repo, base_branch, base_sha, head,
+                               bound)
 
-    if backend_name == "local":
+    if published:
+        _recover_completed_merge(
+            data, root, pr_entry, backend_name, base_branch,
+            resolve_window=resolve_window, background=background,
+            transcript=transcript, companion=companion)
+    elif backend_name == "local":
         _after_publish(root, data, pr_entry, transcript)
+    else:
+        _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
+                                     resolve_window=resolve_window,
+                                     background=background,
+                                     transcript=transcript,
+                                     companion=companion)
+
+
+def _publish_candidate(data: dict, root: Path, pr_entry: dict,
+                       backend_name: str, workdir: str, target_repo: str,
+                       base_branch: str, base_sha: str, head: str,
+                       bound: dict) -> None:
+    """Recompute the candidate against the (unchanged) base and publish it.
+
+    Called under the publish lock.  Refuses (back to sign-off) when the
+    candidate no longer matches the approved tree.
+    """
+    from pm_core import integration
+    pr_id = pr_entry["id"]
+    branch = pr_entry.get("branch", "")
+    cand = integration.compute_candidate(workdir, head, base_sha)
+    if cand.get("status") not in integration.MERGEABLE \
+            or cand.get("candidate_tree") != bound["candidate_tree"]:
+        _return_to_signoff(
+            root, pr_entry, "the integration candidate no longer matches "
+            f"the approved one ({integration.summary(dict(cand, base_branch=base_branch, base_sha=base_sha))})")
+
+    if backend_name == "github":
+        _publish_github(root, pr_entry, workdir, target_repo, base_branch,
+                        base_sha, head, bound)
         return
-    _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
-                                 resolve_window=resolve_window,
-                                 background=background,
-                                 transcript=transcript, companion=companion)
+    msg = f"Merge {branch}: {pr_entry.get('title', pr_id)}"
+    merge_sha, err = integration.build_merge_commit(
+        workdir, bound["candidate_tree"], base_sha, head, msg)
+    if err:
+        click.echo(f"PR {pr_id}: {err}", err=True)
+        raise SystemExit(1)
+    click.echo(f"Merging {branch} into {base_branch} "
+               f"({head[:12]} + {base_sha[:12]} -> {merge_sha[:12]})...")
+    if backend_name == "local":
+        _publish_local(data, root, pr_entry, workdir, base_branch,
+                       base_sha, merge_sha)
+    else:
+        _publish_vanilla(root, pr_entry, workdir, target_repo,
+                         base_branch, base_sha, merge_sha)
 
 
 def _sync_main_repo_and_finalize(data: dict, root: Path, pr_entry: dict,
@@ -2036,12 +2065,14 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     *base_sha*.  Uncommitted work in the main repo is tolerated (stashed
     around an overlapping fast-forward and restored); it is never reset.
     """
+    from pm_core import integration
     pr_id = pr_entry["id"]
     repo_dir = str(_resolve_repo_dir(root, data))
     ref = f"refs/pm/merge/{pr_id}"
     git_ops.run_git("update-ref", ref, merge_sha, cwd=workdir, check=False)
     fetch = git_ops.run_git("fetch", "--no-tags", workdir, ref,
                             cwd=repo_dir, check=False)
+    git_ops.run_git("update-ref", "-d", ref, cwd=workdir, check=False)
     if fetch.returncode != 0 or _ref(repo_dir, "FETCH_HEAD") != merge_sha:
         click.echo(f"PR {pr_id}: could not fetch the merge commit into "
                    f"{repo_dir}: {_git_detail(fetch)}", err=True)
@@ -2087,9 +2118,8 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     old = _ref(workdir, f"refs/heads/{base_branch}")
     wd_head = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
                               cwd=workdir, check=False).stdout.strip()
-    if wd_head != base_branch and (old is None or git_ops.run_git(
-            "merge-base", "--is-ancestor", old, merge_sha, cwd=workdir,
-            check=False).returncode == 0):
+    if wd_head != base_branch and (
+            old is None or integration.is_ancestor(workdir, old, merge_sha)):
         git_ops.run_git("update-ref", f"refs/heads/{base_branch}", merge_sha,
                         cwd=workdir, check=False)
 
@@ -2125,11 +2155,9 @@ def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
     click.echo(f"Pushed merged {base_branch} to origin.")
 
 
-def _publish_github(data: dict, root: Path, pr_entry: dict, workdir: str,
+def _publish_github(root: Path, pr_entry: dict, workdir: str,
                     target_repo: str, base_branch: str, base_sha: str,
-                    head: str, bound: dict, *, resolve_window: bool,
-                    background: bool, transcript: str | None,
-                    companion: bool) -> None:
+                    head: str, bound: dict) -> None:
     """Merge on GitHub (GitHub stays the merger), pinned to the approved head.
 
     The remote PR branch is fast-forwarded to the approved HEAD when behind,
@@ -2159,9 +2187,8 @@ def _publish_github(data: dict, root: Path, pr_entry: dict, workdir: str,
     remote_head = integration.remote_ref(workdir, target_repo,
                                          f"refs/heads/{branch}")
     if remote_head != head:
-        if remote_head and git_ops.run_git(
-                "merge-base", "--is-ancestor", remote_head, head,
-                cwd=workdir, check=False).returncode != 0:
+        if remote_head and not integration.is_ancestor(
+                workdir, remote_head, head):
             _return_to_signoff(root, pr_entry,
                                f"the remote PR branch has commits that were "
                                f"not signed off ({remote_head[:12]})")
@@ -2211,11 +2238,6 @@ def _publish_github(data: dict, root: Path, pr_entry: dict, workdir: str,
         _verify_github_merge(root, pr_entry, workdir, target_repo,
                              base_branch, base_sha, head, bound)
 
-    _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
-                                 resolve_window=resolve_window,
-                                 background=background,
-                                 transcript=transcript, companion=companion)
-
 
 def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
                          target_repo: str, base_branch: str, base_sha: str,
@@ -2249,9 +2271,7 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
         for line in (log.stdout or "").splitlines():
             parts = line.split()
             for parent in parts[2:-1]:
-                if git_ops.run_git("merge-base", "--is-ancestor", head,
-                                   parent, cwd=workdir,
-                                   check=False).returncode == 0:
+                if integration.is_ancestor(workdir, head, parent):
                     published = (parts[0], parent)
         if published:
             merge_sha = published[0]
@@ -2315,18 +2335,15 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
 
     merged = False
     if backend_name == "local":
-        merged = bool(head) and git_ops.run_git(
-            "merge-base", "--is-ancestor", head, f"refs/heads/{base_branch}",
-            cwd=repo_dir, check=False).returncode == 0
+        merged = bool(head) and integration.is_ancestor(
+            repo_dir, head, f"refs/heads/{base_branch}")
     else:
         if head:
             # From the main repo when the workdir is gone (the target then
             # falls back to the project's repo URL).
             target_repo, _ = integration.target_for(data, pr_entry, root)
             tip, _err = integration.fetch_base(cwd, target_repo, base_branch)
-            merged = bool(tip) and git_ops.run_git(
-                "merge-base", "--is-ancestor", head, tip, cwd=cwd,
-                check=False).returncode == 0
+            merged = bool(tip) and integration.is_ancestor(cwd, head, tip)
         if not merged and backend_name == "github" and branch:
             merged = gh_ops.is_pr_merged(cwd, branch)
     if not merged:
@@ -3432,7 +3449,12 @@ def pr_auto_sequence(pr_id: str):
         if awaiting == "impl":
             # Sign-off routed this back but the rework session never
             # launched (interrupted right after the hop): an idle old
-            # session is not finished work.
+            # session is not finished work.  Unless another driver is
+            # already relaunching it (a second --fresh would kill it).
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(root, pr_id, "impl"):
+                click.echo("running: impl")
+                return
             impl_transcript = tdir / f"impl-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
@@ -3683,6 +3705,9 @@ def pr_auto_sequence(pr_id: str):
                 f"sign_off: returning to review (iteration {next_iter})")
             return
         if hop == "impl":
+            if not signoff_mod.claim_return_launch(root, pr_id, "impl"):
+                click.echo("running: impl")
+                return
             impl_transcript = tdir / f"impl-{pr_id}.jsonl"
             ctx = click.get_current_context()
             # fresh=True: a bounce must RELAUNCH the impl agent so it actually

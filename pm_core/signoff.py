@@ -671,10 +671,6 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str,
 # step actually launches a fresh session, so a restart / idle event can't
 # advance the PR on an older session or verdict.
 
-_HOP_VERDICT = {"qa": SIGNOFF_REQA, "review": SIGNOFF_REVIEW,
-                "impl": SIGNOFF_IMPL}
-
-
 def report_meta(pr_id: str) -> dict[str, str]:
     """``pm-signoff-*`` meta tags of the PR's ``report.html`` (or {})."""
     from pm_core.behavior_report import extract_signoff_meta
@@ -747,10 +743,11 @@ RETURN_LAUNCH_CLAIM_SECONDS = 180
 def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
     """Take the launch of the routed *hop*'s fresh session (one winner).
 
-    Several drivers act on ``awaiting`` (the TUI routing a verdict, every
-    ``pm pr auto-sequence`` tick).  Each launch is ``--fresh`` — it kills
-    the window it finds — so two concurrent launchers kill each other's
-    session and leave duplicates behind.  The first caller records a claim
+    Several drivers act on ``awaiting`` (the TUI routing a verdict or
+    catching up after a restart, every ``pm pr auto-sequence`` tick).  The
+    impl and review relaunches are ``--fresh`` — each kills the window it
+    finds — so two concurrent launchers kill each other's session and leave
+    duplicates behind.  The first caller records a claim
     and launches; later callers see it and leave the launch alone.
     ``awaiting`` itself stays set until the session opens, and a claim
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.

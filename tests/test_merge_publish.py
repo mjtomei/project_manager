@@ -378,6 +378,43 @@ def test_post_publish_pull_failure_without_window_exits_nonzero(
     assert "Pull failed" in result.output
 
 
+@pytest.mark.parametrize("backend", ["vanilla", "github"])
+def test_rerun_after_post_publish_failure_finalizes(backend, request):
+    """The printed advice after a failed main-checkout update — fix it, re-run
+    — finalizes the published merge: the moved base is the PR's own merge,
+    so the approval is kept (no return to sign-off) and nothing is
+    published twice."""
+    w = request.getfixturevalue(backend)
+    commit(w.main, "local.txt", "x\n", "unpushed local master commit")
+    approve(w)
+    result, _, finalized = merge(w, "--no-resolve-window")
+    assert result.exit_code != 0 and not finalized
+    remote = w.upstream if backend == "vanilla" else w.remote
+    published = git(remote, "rev-parse", "master")
+    git(w.main, "reset", "-q", "--hard", "HEAD~1")
+    result, windows, finalized = merge(w, "--no-resolve-window")
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert "already in master" in result.output
+    assert git(remote, "rev-parse", "master") == published
+    rec = pr_entry(w)
+    assert not rec["signoff"].get("invalidated")
+    assert "merge_integrity" not in rec
+
+
+def test_local_rerun_after_interrupted_finalize_finalizes(local):
+    approve(local)
+    with mock.patch.object(pr_mod, "_finalize_merge"), \
+            mock.patch.object(pr_mod, "state_root", return_value=local.pm_dir):
+        assert CliRunner().invoke(pr_mod.pr, ["merge", PR]).exit_code == 0
+    published = git(local.repo, "rev-parse", "master")
+    result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert git(local.repo, "rev-parse", "master") == published
+    assert not pr_entry(local)["signoff"].get("invalidated")
+
+
 # --- github backend (git-backed fake) -------------------------------------
 
 @pytest.fixture

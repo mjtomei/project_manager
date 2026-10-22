@@ -851,6 +851,14 @@ async def check_and_start(app) -> None:
             # second --fresh would kill that new session.
             if pr.get("status") == "in_progress" \
                     and _awaiting_impl_on_disk(app, pr_id):
+                # One launcher: a concurrent `pm pr auto-sequence` tick (or
+                # our own sign-off hop) may already be relaunching it, and a
+                # second --fresh would kill that session.
+                from pm_core.signoff import claim_return_launch
+                if not claim_return_launch(app._root, pr_id, "impl"):
+                    _log.info("auto_start: %s rework launch already "
+                              "claimed, skipping", pr_id)
+                    continue
                 await _start_pr_quiet(app, pr_id, fresh=True)
             else:
                 await _start_pr_quiet(app, pr_id)

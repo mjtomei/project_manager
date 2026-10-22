@@ -179,7 +179,11 @@ This PR moves integration into sign-off and turns merge into a pure publisher:
   `_attempt_merge`, CLI) is the single publisher. After the record gate:
   1. per-repo publish lock (`workdirs_base()/.publish-<repo_id>.lock`) so pm
      publishers serialize across PRs;
-  2. re-fetch base; `base_sha` must equal the approved one;
+  2. re-fetch base; `base_sha` must equal the approved one — unless the
+     approved head is already contained in the fetched base (an earlier
+     run published it but the main-repo update / finalize did not
+     finish): then the recovery path finalizes it instead of invalidating
+     (re-running sign-off on a merged PR could only BLOCK it);
   3. recompute the candidate; it must be conflict-free with the approved
      tree;
   4. build the merge commit from the approved tree: `git commit-tree <tree>
@@ -324,6 +328,10 @@ No [UNRESOLVED] ambiguities.
   old idle sessions / old PASS transcripts / old qa_status PASS are not
   adopted.
 - Duplicate ticks: status guard + `_launching` / sign-off inflight sets.
+  Fresh relaunches of an IMPL or REVIEW return (TUI hop, TUI restart
+  catch-up, `pm pr auto-sequence` ticks) take `claim_return_launch`
+  (claim under the yaml lock, 180 s expiry) so only one driver launches;
+  a QA return is guarded by the QA loop's own running check.
 - A merge window left from an old version for an `in_review` PR: its
   `MERGED` verdict now leads to `--propagation-only`, which only finalizes if
   the head is actually in the published base.

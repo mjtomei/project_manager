@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-b2bd388
+  active_pr: pr-2e06289
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -30196,6 +30196,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-21T23:48:30.074151+00:00'
   updated_at: '2026-10-21T23:48:30.074151+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2e06289
+  plan: bugs
+  title: 'Bug: TUI background GitHub sync finalizes a GitHub-side merge without the
+    sign-off integrity check'
+  branch: pm/pr-2e06289-bug-tui-background-github-sync-finalizes-a-github-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/sync.py (do_normal_sync ~L142 / ~L267) marks a PR merged
+    as soon as GitHub reports it MERGED, with no check against the bound SIGNOFF_MERGE.
+    pr-ac10f03 added _verify_github_merge (cli/pr.py) to pm pr merge and its --no-signoff-check
+    recovery path (records pr["merge_integrity"] + a PR note when GitHub published
+    another head/base/tree), but the 5-minute sync bypasses it. Repro (fake-github,
+    see pr-ac10f03 QA S7 note): approve a PR, push an unreviewed commit onto its branch
+    on the remote and merge it there, wait for the TUI sync -> PR is merged, no merge_integrity,
+    no note. Fix: route sync-detected merges of a PR with a SIGNOFF_MERGE record through
+    the same verification.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T00:26:04.150027+00:00'
+  updated_at: '2026-10-22T00:26:04.150027+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

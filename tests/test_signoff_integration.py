@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -714,3 +715,42 @@ def test_cli_leaves_a_claimed_review_return_launch_alone(tmp_path):
     assert result.output.strip() == "running: review"
     review.callback.assert_not_called()
     qa.assert_not_called()
+
+
+def test_cli_leaves_a_claimed_impl_return_launch_alone(tmp_path):
+    """Same for an IMPL return: the TUI (hop or restart catch-up) is already
+    relaunching the rework session; a second --fresh would kill it."""
+    result, start, review, _ = _seq(
+        tmp_path, _returned("in_progress", "impl"),
+        **{"pm_core.cli.pr._check_impl_idle": {"return_value": (True, False)},
+           "pm_core.signoff.claim_return_launch": {"return_value": False}})
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "running: impl"
+    start.callback.assert_not_called()
+    review.callback.assert_not_called()
+
+
+def test_tui_scheduler_leaves_a_claimed_impl_return_launch_alone(tmp_path):
+    from pm_core import autostart_state as st
+    from pm_core.tui import auto_start
+    from tests.test_autostart_multi_target import FakeApp
+    p = _returned("in_progress", "impl",
+                  launch_claim={"hop": "impl", "at": datetime.now(
+                      timezone.utc).isoformat()})
+    p["depends_on"] = []
+    app = FakeApp([p], root=tmp_path)
+    app._auto_start = True
+    app._auto_start_targets = {PR: st.make_target_record("t")}
+    app._auto_start_run_id = "run"
+    store.save(app._data, tmp_path)
+    calls = []
+
+    async def fake_start(_app, pr_id, fresh=False):
+        calls.append((pr_id, fresh))
+
+    with patch.object(auto_start, "_start_pr_quiet", fake_start), \
+         patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+         patch("pm_core.runtime_state.get_action_state", return_value={}), \
+         patch("pm_core.tui.signoff_ui.advance_all"):
+        asyncio.run(auto_start.check_and_start(app))
+    assert calls == []

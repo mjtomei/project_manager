@@ -341,6 +341,8 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         app.log_message(
             f"Sign-off routed {pr_id} back to implementation (SIGNOFF_IMPL)")
         app._review_loops.pop(pr_id, None)
+        # Claim the rework launch (see the review hop above).
+        signoff_mod.claim_return_launch(app._root, pr_id, "impl")
         app.run_worker(_relaunch_impl(app, pr_id))
 
 

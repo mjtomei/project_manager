@@ -158,7 +158,8 @@ def remote_ref(workdir: str, target_repo: str, ref: str) -> str | None:
 
 # --- candidate -------------------------------------------------------------
 
-def _is_ancestor(cwd, a: str, b: str) -> bool:
+def is_ancestor(cwd, a: str, b: str) -> bool:
+    """Whether *a* is an ancestor of (or equal to) *b* in *cwd*."""
     return _git("merge-base", "--is-ancestor", a, b, cwd=cwd).returncode == 0
 
 
@@ -225,10 +226,10 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
 
     # In-base first: a HEAD equal to the base (a PR with no commits of its
     # own) is "contained", not "up to date" — there is nothing to publish.
-    if _is_ancestor(workdir, head, base_sha):
+    if is_ancestor(workdir, head, base_sha):
         out["status"] = IN_BASE
         return out
-    if _is_ancestor(workdir, base_sha, head):
+    if is_ancestor(workdir, base_sha, head):
         out["status"] = UP_TO_DATE
         out["candidate_tree"] = _out(_git("rev-parse", f"{head}^{{tree}}",
                                           cwd=workdir)) or None
