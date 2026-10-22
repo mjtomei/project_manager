@@ -31451,7 +31451,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T20:33:29.061858+00:00'
+  updated_at: '2026-10-22T20:54:31.376387+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31518,6 +31518,16 @@ prs:
       (fails on 81cebf17). Live pre/post captures /pm-captures/scenarios/3/story3.'
     created_at: '2026-10-22T20:33:29Z'
     last_edited: '2026-10-22T20:33:29Z'
+  - id: note-1ffc925
+    text: 'QA s4 2026-10-22: live real-Claude run vs stub router found the _RouteStallWatch
+      resume nudge typed but never submitted (single send-keys text+Enter is taken
+      as a paste). Fixed c5d7d64f with the two follow-up Enters the verdict follow-up
+      paths use; regression test asserts [NUDGE, "", ""] (mutation-checked). CODE
+      CHANGE, needs normal re-review. Queued deferral + window-death retry deferral
+      held live. Evidence /pm-captures/scenarios/4. Note: z t runs continue scenario
+      numbering (4-6, 7-9, ...), so marker-based holds must target the real index.'
+    created_at: '2026-10-22T20:54:31Z'
+    last_edited: '2026-10-22T20:54:31Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
