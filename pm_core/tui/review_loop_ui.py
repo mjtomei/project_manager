@@ -689,13 +689,14 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
 
     Args:
         resolve_window: If True, pass ``--resolve-window`` so a Claude
-            merge-resolution window opens on conflict.  Used by
-            ``_maybe_auto_merge`` for the initial merge attempt.
+            recovery window opens when updating the main repo fails after
+            publication (the merge itself never resolves conflicts).  Used
+            by ``_maybe_auto_merge`` for the initial merge attempt.
             Verdict-detected finalization and idle fallback pass False
             to prevent cascading windows.
-        propagation_only: If True, pass ``--propagation-only`` to skip
-            the workdir merge and go straight to the pull-into-repo-dir
-            step (step 2 of two-step merge).
+        propagation_only: If True, pass ``--propagation-only``: only
+            finalize a merge already in the published base (update the
+            main repo, mark merged); never publishes.
     """
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
@@ -824,10 +825,10 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
 def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     """Handle INPUT_REQUIRED verdict from a merge window.
 
-    Marks the PR as needing human input for merge resolution.  The user
-    should interact with Claude directly in the merge window pane.
-    After the user helps resolve, Claude will output MERGED and normal
-    verdict detection will finalize.
+    Marks the PR as needing human input to update the main repo after a
+    published merge.  The user should interact with Claude directly in the
+    merge window pane.  Once fixed, Claude outputs MERGED and normal
+    verdict detection finalizes.
     """
     # Track which PRs have merge input_required (for TUI display)
     app._merge_input_required_prs.add(pr_id)

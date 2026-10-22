@@ -1800,7 +1800,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                 pm_session, window_name, claude_cmd, workdir,
                 switch=not background,
             )
-        click.echo(f"Opened merge resolution window '{window_name}'")
+        click.echo(f"Opened repo-update window '{window_name}'")
         # The vanilla/GitHub pull-from-origin window resolves in the project
         # root, which pm does not auto-trust (pr-19990de): say why the
         # window is waiting.
@@ -2299,7 +2299,7 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
                     f"{(bound.get('candidate_tree') or '?')[:12]}")
 
     # Recorded and noted on the PR (notes reach every later session and
-    # `pm pr show`), not only printed.
+    # `pm pr note list`), not only printed.
     text = f"Merge integrity: {problem}."
     created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     note = {"id": store.generate_note_id(pr_id, text), "text": text,
@@ -2449,7 +2449,7 @@ def _resolve_window_default() -> bool:
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
-              help="Open a companion shell pane alongside the merge resolution window")
+              help="Open a companion shell pane alongside the post-merge repo-update window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
               help="Recovery: finalize an already-published merge (update "
                    "the main repo, mark merged)")

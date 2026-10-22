@@ -1017,7 +1017,7 @@ def test_merge_window_in_unapproved_dir_names_the_remedy(home, approved,
         pr_mod._launch_merge_window({"project": {}}, {"id": "pr-001"},
                                      "conflict", cwd=str(root))
     out = capsys.readouterr().out
-    assert "Opened merge resolution window" in out
+    assert "Opened repo-update window" in out
     assert (f"pm trust add {root}" in out) is not approved
 
 

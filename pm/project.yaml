@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2e06289
+  active_pr: pr-0368986
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -30229,6 +30229,28 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
   updated_at: '2026-10-22T00:26:04.150027+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0368986
+  plan: bugs
+  title: 'Bug: prompts tell sessions to run ''pm pr show'', which does not exist'
+  branch: pm/pr-0368986-bug-prompts-tell-sessions-to-run-pm-pr-show-which-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/plan.py:388-394 (plan review prompt: ''run `pm pr show
+    <id>` to read'' details) and pm_core/prompt_gen.py:1662 (''`pm pr show <id>` and
+    look for'' user feedback in notes) reference a ''pm pr show'' command; there is
+    no such subcommand (pm pr --help lists none; QA on pr-ac10f03 hit it too). Sessions
+    following the prompt get ''No such command''. Fix: add ''pm pr show <id>'' (description,
+    status, deps, notes, signoff/signoff_return/integration/merge_integrity records),
+    or point the prompts at existing commands (pm pr list / pm pr note list / pm prompt).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T00:51:48.437253+00:00'
+  updated_at: '2026-10-22T00:51:48.437253+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
