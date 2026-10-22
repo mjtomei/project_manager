@@ -1012,6 +1012,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             else:
                 _claude_cwd = str(work_path)
                 _claude_write_dir = None
+            # Session-scoped launch config (fake-claude, skip-permissions)
+            # follows the tmux session, not the cwd — run from a PR workdir
+            # (picker / prefix+M popup) the cwd tag names no session.
+            _stag = pm_session.removeprefix("pm-") if pm_session else None
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
@@ -1019,10 +1023,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          model=resolved_model,
                                          provider=resolved_provider,
                                          effort=_resolution.effort,
+                                         session_tag=_stag,
                                          session_type="impl")
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
-            _stag = pm_session.removeprefix("pm-") if pm_session else None
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
@@ -1195,6 +1199,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
+                                         session_tag=pm_session.removeprefix("pm-"),
                                          session_type="review")
     # Optionally wrap in a container for isolation.
     # Always remove any existing container for this review before creating a
@@ -1771,6 +1776,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
+                                         session_tag=pm_session.removeprefix("pm-"),
                                          session_type="merge")
     # Runs on the host — it updates the main repo checkout, which the
     # branch-scoped container push proxy is not set up for.
