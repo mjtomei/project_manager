@@ -799,6 +799,15 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
         _ah.clear_timer(pr_id, f"merge-input-required:{pr_id}", "released")
     app._merge_input_required_prs.discard(pr_id)
 
+    # Record the verdict before the window goes: unregistering a pane whose
+    # runtime entry is still in flight would journal this successful merge
+    # attempt as "vanished".
+    from pm_core import runtime_state as _rs
+    try:
+        _rs.set_action_state(pr_id, "merge", "done", verdict="MERGED")
+    except Exception:
+        _log.debug("runtime_state merge verdict mirror failed", exc_info=True)
+
     # Kill the current merge window and clean up tracker state
     _kill_merge_window(app, pr_id)
     tracker.unregister(merge_key)

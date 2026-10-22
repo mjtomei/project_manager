@@ -367,3 +367,8 @@ supply `context` (session/window/task); leave a cross-PR note.
   runtime mirror's attempt id for the re-opened attempt maps to the kept
   one.  A different session is a new attempt.  This removes the phantom
   "start untracked (5s)" rows seen in QA S4 without a runtime tombstone.
+- E9. Claude-resolved merge: when the TUI detects a merge window's
+  `MERGED` verdict (`_finalize_detected_merge`) it records runtime
+  `merge` `done` + `MERGED` before killing the window, so the merge
+  attempt ends `done MERGED`.  Killing the window first cleared the
+  in-flight entry and journaled the successful merge as `vanished`.

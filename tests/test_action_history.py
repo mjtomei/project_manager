@@ -494,6 +494,31 @@ class TestRuntimeCapture:
         assert not any(a["open"] for a in
                        hq.build_history(PR, now=clock.t)["attempts"])
 
+    def test_detected_merge_verdict_ends_merge_attempt_done(self, clock):
+        """A merge window's MERGED verdict ends its attempt done; killing
+        the window while the entry was still in flight read "vanished"."""
+        from pm_core import pane_idle
+        from pm_core.tui import review_loop_ui
+        rs.set_action_state(PR, "merge", "running", pane_id="%1",
+                            session_id="s1")
+        aid = rs.get_action_state(PR, "merge")["attempt_id"]
+        app = SimpleNamespace(_merge_input_required_prs=set(),
+                              _merge_propagation_phase=set(),
+                              log_message=lambda *a, **k: None,
+                              run_worker=lambda *a, **k: None)
+        tracker = SimpleNamespace(
+            unregister=lambda key: pane_idle._runtime_mirror_clear(key))
+        with patch.object(review_loop_ui, "_kill_merge_window"), \
+                patch.object(review_loop_ui, "_attempt_merge",
+                             return_value=True), \
+                patch("pm_core.tui.auto_start.check_and_start",
+                      lambda app: None):
+            review_loop_ui._finalize_detected_merge(
+                app, PR, f"merge:{PR}", tracker, {PR}, {f"merge:{PR}"})
+        end = _ends()[aid]
+        assert (end["outcome"], end["verdict"]) == ("done", "MERGED")
+        assert rs.get_action_state(PR, "merge")["verdict"] == "MERGED"
+
     def test_journal_failure_leaves_runtime_unchanged(self, tmp_path,
                                                      monkeypatch):
         blocker = tmp_path / "file"
