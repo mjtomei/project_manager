@@ -76,7 +76,8 @@ R5. **Specific actionable holds** (INPUT_REQUIRED, no planning) for:
     reconciled (prevents an endless QA→review→QA loop when the reviewer
     does not merge).  The last one is detected via a small record on the
     PR (`pr["qa_branch_sync"] = {local, upstream, at}`) written when R3
-    routes.
+    routes.  Only an unchanged / fast-forwarded sync clears it; a hold
+    keeps it so the same heads still hold (no re-route) once fixed.
 
 R6. **Early exits are visible to every driver.** Each sync exit writes
     `qa_status.json` with `overall` and `error` (auto-sequence reads only

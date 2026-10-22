@@ -618,7 +618,7 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
             f"{where}: the histories diverged ({ahead} local-only, "
             f"{behind} upstream-only commit(s)). Merge the upstream into "
             f"the PR branch keeping both histories (`git pull --no-rebase "
-            f"origin {branch}`, resolve conflicts), push, and review the "
+            f"{real_url} {branch}`, resolve conflicts), push, and review the "
             "combined code — never force-push or reset.")
         dirty = _git_capture(workdir_path, "status", "--porcelain",
                              "--untracked-files=no")
@@ -717,7 +717,10 @@ def _branch_sync_stops_qa(state: "QALoopState", sync: BranchSync,
             _log.warning("QA sync: could not read qa_branch_sync for %s",
                          state.pr_id, exc_info=True)
 
-    if sync.outcome != "diverged" and prev and pm_root:
+    # Only a reconciled branch retires the record: a hold (unreachable
+    # remote, dirty tree) after a routed divergence must still recognise
+    # the same heads next time instead of routing to review again.
+    if sync.outcome in ("unchanged", "fast_forwarded") and prev and pm_root:
         _set_sync_record(None)
 
     if sync.outcome == "unchanged":
@@ -3941,8 +3944,9 @@ def run_qa_sync(
             return state
 
         # Reconcile the PR workdir with the upstream before anything reads
-        # it.  The previous run's scenario windows / containers were torn
-        # down above, so its workers are no longer pushing.
+        # it, after the previous run's scenario windows / containers were
+        # torn down above.  A worker that still pushes (pr-3201ea8) is
+        # caught by the planner handoff guard, not here.
         if branch and _branch_sync_stops_qa(
                 state, _sync_pr_branch(workdir_path, branch),
                 pm_root, status_path, _notify):

@@ -133,6 +133,9 @@ class TestSyncPrBranch:
         assert sync.outcome == "diverged"
         assert "1 local-only, 1 upstream-only" in sync.detail
         assert "never force-push" in sync.detail
+        # The merge instruction names the real upstream, not `origin`
+        # (which may be a local clone that never saw the worker's push).
+        assert f"git pull --no-rebase {s['url']} {BRANCH}" in sync.detail
         # No merge, reset or push by pm.
         assert _head(s) == c and _upstream(s) == u
         assert _git(s["wd"], "status", "--porcelain") == ""
@@ -391,3 +394,19 @@ class TestRunQaSyncBranchSync:
             s, sync_record={"local": "a" * 40, "upstream": "b" * 40})
         assert seen["planner_reads"] == s["L"]
         assert "qa_branch_sync" not in pr
+
+    def test_hold_keeps_routed_divergence_record(self, repos):
+        """A hold after a routed divergence must not forget it: once the
+        tree is clean again the same heads hold rather than loop."""
+        s = repos
+        c = _commit(s["wd"], "pm/qa/instructions/s1.md", "S1\n", "planner")
+        u = _worker_push(s)
+        record = {"local": c, "upstream": u}
+        (s["wd"] / "app.py").write_text("wip\n")
+        state, _seen, pr = _run_qa(s, sync_record=record)
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert "uncommitted changes" in state._error
+        assert pr["qa_branch_sync"] == record
+        _git(s["wd"], "checkout", "--", "app.py")
+        state2, _seen2, _ = _run_qa(s, sync_record=pr["qa_branch_sync"])
+        assert "still diverged" in state2._error
