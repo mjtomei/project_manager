@@ -117,6 +117,28 @@ def test_local_publishes_the_approved_candidate(local):
     assert git(local.wd, "rev-parse", "HEAD") == local.head
 
 
+def test_local_publish_does_not_rely_on_main_repo_fetch_head(local):
+    """A concurrent fetch in the main repo rewrites its FETCH_HEAD; the
+    merge commit is fetched into a private ref instead, removed after."""
+    rec = approve(local)
+    real_run_git = pr_mod.git_ops.run_git
+
+    def run_git(*args, cwd=None, **kw):
+        r = real_run_git(*args, cwd=cwd, **kw)
+        if args[0] == "fetch" and str(cwd) == str(local.repo):
+            # Someone else's fetch lands right after ours.
+            git(local.repo, "fetch", "-q", str(local.wd), BRANCH)
+        return r
+
+    with mock.patch.object(pr_mod.git_ops, "run_git", side_effect=run_git):
+        result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+    assert git(local.repo, "for-each-ref", "refs/pm/merge") == ""
+    assert git(local.wd, "for-each-ref", "refs/pm/merge") == ""
+
+
 def test_local_moved_base_integrates_without_changing_the_pr_head(local):
     """Unchanged PR HEAD + moved base: sign-off approves the separate
     candidate; merge publishes exactly it."""

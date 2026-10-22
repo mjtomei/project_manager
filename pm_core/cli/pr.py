@@ -2072,10 +2072,16 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     repo_dir = str(_resolve_repo_dir(root, data))
     ref = f"refs/pm/merge/{pr_id}"
     git_ops.run_git("update-ref", ref, merge_sha, cwd=workdir, check=False)
-    fetch = git_ops.run_git("fetch", "--no-tags", workdir, ref,
+    # Into the same private ref on the main repo side, not FETCH_HEAD: a
+    # concurrent fetch there (a user, an agent) would overwrite FETCH_HEAD.
+    fetch = git_ops.run_git("fetch", "--no-tags", workdir, f"+{ref}:{ref}",
                             cwd=repo_dir, check=False)
     git_ops.run_git("update-ref", "-d", ref, cwd=workdir, check=False)
-    if fetch.returncode != 0 or _ref(repo_dir, "FETCH_HEAD") != merge_sha:
+    fetched = _ref(repo_dir, ref)
+    # The merge commit stays reachable from the base once published; the
+    # private ref is not needed after this check.
+    git_ops.run_git("update-ref", "-d", ref, cwd=repo_dir, check=False)
+    if fetch.returncode != 0 or fetched != merge_sha:
         click.echo(f"PR {pr_id}: could not fetch the merge commit into "
                    f"{repo_dir}: {_git_detail(fetch)}", err=True)
         raise SystemExit(1)
