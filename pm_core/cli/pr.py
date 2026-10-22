@@ -2873,52 +2873,6 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
     return {"has_pm": has_pm, "count": len(dirty), "lock_tui": lock_tui}
 
 
-def _is_id_list(value) -> bool:
-    return isinstance(value, list) and all(
-        isinstance(e, dict) and "id" in e for e in value)
-
-
-def _merge_yaml_3way(base, ours, theirs):
-    """Three-way merge of parsed project.yaml values.
-
-    *theirs* is the stashed working-tree state (pm's live state) and wins
-    true conflicts; *ours* is the merged base, whose changes (e.g. a note an
-    agent committed on its PR branch) are kept wherever the live state left
-    that value as it was in *base*.  Lists of ``id``-keyed entries (prs,
-    plans, notes) merge entry by entry.
-    """
-    if ours == theirs or ours == base:
-        return theirs
-    if theirs == base:
-        return ours
-    if isinstance(ours, dict) and isinstance(theirs, dict):
-        b = base if isinstance(base, dict) else {}
-        out = {}
-        for k in theirs:
-            if k in ours:
-                out[k] = _merge_yaml_3way(b.get(k), ours[k], theirs[k])
-            elif k not in b or b[k] != theirs[k]:
-                out[k] = theirs[k]          # else: removed by the merge
-        for k in ours:
-            if k not in theirs and k not in b:
-                out[k] = ours[k]            # added by the merge
-        return out
-    if (_is_id_list(ours) and _is_id_list(theirs)
-            and (base is None or _is_id_list(base))):
-        b = {e["id"]: e for e in base or []}
-        o = {e["id"]: e for e in ours}
-        t = {e["id"] for e in theirs}
-        out = []
-        for e in theirs:
-            if e["id"] in o:
-                out.append(_merge_yaml_3way(b.get(e["id"]), o[e["id"]], e))
-            elif b.get(e["id"]) != e:
-                out.append(e)
-        out.extend(e for e in ours if e["id"] not in t and e["id"] not in b)
-        return out
-    return theirs
-
-
 def _resolve_project_yaml_pop(cwd: Path) -> bool:
     """Resolve a ``project.yaml`` conflict left by a failed ``stash pop``.
 
@@ -2949,7 +2903,7 @@ def _resolve_project_yaml_pop(cwd: Path) -> bool:
             return False
         root = (cwd / rel).parent
         with store._lock(root):
-            store.save(_merge_yaml_3way(base, ours, theirs), root)
+            store.save(store.merge_3way(base, ours, theirs), root)
         git_ops.run_git("reset", "-q", "--", rel, cwd=cwd, check=False)
         click.echo(f"Merged {rel} (local pm state + merged changes).")
     if len(yaml_paths) < len(unmerged):

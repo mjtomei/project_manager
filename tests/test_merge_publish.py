@@ -803,7 +803,7 @@ def test_merge_yaml_3way_merges_id_lists_and_prefers_live_state():
                     {"id": "b", "status": "pending"}]}
     theirs = {"prs": [{"id": "a", "status": "sign_off", "notes": [{"id": "n1"}],
                        "workdir": "/w"}]}
-    assert pr_mod._merge_yaml_3way(base, ours, theirs) == {"prs": [
+    assert store.merge_3way(base, ours, theirs) == {"prs": [
         {"id": "a", "status": "sign_off", "notes": [{"id": "n1"}, {"id": "n2"}],
          "workdir": "/w"},
         {"id": "b", "status": "pending"}]}

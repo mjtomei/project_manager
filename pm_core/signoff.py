@@ -855,6 +855,15 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
             f"pm merged that base revision into the PR branch (clean) as "
             f"`{applied['merge_sha'][:12]}` — review/verify the integrated "
             "result, not only the PR's own diff.")
+        if applied.get("base_sha"):
+            # The workdir's own base refs (origin/<base>, <base>) are not
+            # updated by pm, so a usual `<base>...HEAD` diff would list the
+            # merged base commits as PR changes.
+            lines.append(
+                f"The PR's changes on top of that base: `git diff "
+                f"{applied['base_sha'][:12]} HEAD` (your usual diff against "
+                f"`{integ.get('base_branch') or 'the base'}` may be stale and "
+                "include the merged base commits).")
     elif rec.get("apply_error"):
         lines.append(f"pm did not merge the base into the branch: "
                      f"{rec['apply_error']}.")
@@ -1062,21 +1071,10 @@ def _step_lock(pr_id: str):
 
     Yields False when another driver still holds it after _STEP_LOCK_WAIT.
     """
-    import fcntl
-    import time
     from pm_core.paths import workdirs_base
-    deadline = time.monotonic() + _STEP_LOCK_WAIT
-    with open(workdirs_base() / f".signoff-step-{pr_id}.lock", "w") as f:
-        while True:
-            try:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() > deadline:
-                    yield False
-                    return
-                time.sleep(0.05)
-        yield True
+    with store.bounded_flock(workdirs_base() / f".signoff-step-{pr_id}.lock",
+                             _STEP_LOCK_WAIT) as held:
+        yield held
 
 
 def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,

@@ -35,7 +35,6 @@ integrated code.  It never leaves a half-merge behind.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import functools
 import json
 import os
@@ -44,7 +43,6 @@ import secrets
 import shutil
 import subprocess
 import tempfile
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -109,25 +107,15 @@ def _repo_lock(workdir: str):
         yield
         return
     path = Path(workdir, common) / "pm-integration.lock"
-    try:
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    except OSError:
+    with contextlib.ExitStack() as stack:
+        try:
+            held = stack.enter_context(
+                store.bounded_flock(path, _REPO_LOCK_TIMEOUT))
+        except OSError:
+            held = None  # no lock file (e.g. read-only repo): unserialized
+        if held is False:
+            _log.warning("integration lock %s busy; proceeding", path)
         yield
-        return
-    deadline = time.monotonic() + _REPO_LOCK_TIMEOUT
-    try:
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() > deadline:
-                    _log.warning("integration lock %s busy; proceeding", path)
-                    break
-                time.sleep(0.05)
-        yield
-    finally:
-        os.close(fd)
 
 
 # --- target + fetch --------------------------------------------------------
