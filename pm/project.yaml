@@ -29860,11 +29860,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T14:01:30.872312+00:00'
-  updated_at: '2026-10-13T14:01:30.872312+00:00'
+  updated_at: '2026-10-22T17:04:03.852934+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-568d5cc
+    text: 'Likely fixed by pr-f094946 cff91240: start_or_stop_qa_loop now calls qa_loop_ui._enter_qa_status
+      (shared with start_qa), so the first zz t on an in_review PR moves it to qa
+      before the run starts; with the PR in qa, arming auto-start should no longer
+      launch a review loop for it. Test: tests/test_qa_self_driving.py::TestZZTStart::test_moves_in_review_pr_to_qa.
+      Verify the auto-start half on master after pr-f094946 merges; close or narrow.'
+    created_at: '2026-10-22T17:04:03Z'
+    last_edited: '2026-10-22T17:04:03Z'
 - id: pr-a9fa258
   plan: bugs
   title: 'Bug: sign-off driver relaunches a new router after every verdict while the
