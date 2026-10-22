@@ -131,6 +131,7 @@ export class SimPM {
       case 'publish-revision': { // the session rewrote the document
         const d = this.doc(e.doc);
         const next = d.revisions.shift();
+        if (!next) break; // no scripted revision left (e.g. demo button pressed again)
         d.versions.push(next);
         if (d.pending) d.pending = { version: next.n, since: this.now() };
         break;

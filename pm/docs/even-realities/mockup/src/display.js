@@ -16,7 +16,8 @@ export function intentForEvent(event) {
   // Even Hub event values (OsEventTypeList): 0 click (often omitted),
   // 1 scroll top (swipe up), 2 scroll bottom (swipe down), 3 double click,
   // 4/5 foreground enter/exit, 6 abnormal exit, 7 system exit,
-  // 9 long press, 10 long-press release. Candidate binding only.
+  // 8 IMU data (ignored), 9 long press, 10 long-press release.
+  // Candidate binding only.
   if (event.menuItemClickEvent) return ['menu', event.menuItemClickEvent.itemID];
   const parts = [event.sysEvent, event.textEvent, event.listEvent].filter(Boolean);
   if (!parts.length) return null;
