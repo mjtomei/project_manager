@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-22T01:17:46.426033+00:00'
+  updated_at: '2026-10-22T01:38:55.410835+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8262,6 +8262,14 @@ prs:
       holds a candidate worktree (git-level; the lock only covers pm). Captures /pm-captures/scenarios/12'
     created_at: '2026-10-22T01:17:46Z'
     last_edited: '2026-10-22T01:17:46Z'
+  - id: note-9c3adef
+    text: 'QA S13 (github via fake-github) on b867c62d: all 6 stories held, no code
+      changes. Story 5 first attempt was pre-empted by the TUI 300 s GitHub sync (finalized
+      #5 unverified = pr-2e06289); re-run in a fresh project right after a sync tick
+      held. Drive github recovery stories right after a sync tick (watch "gh pr view"
+      in ~/.pm/debug/<tag>.log). Captures /pm-captures/scenarios/13.'
+    created_at: '2026-10-22T01:38:55Z'
+    last_edited: '2026-10-22T01:38:55Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
@@ -30242,11 +30250,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
-  updated_at: '2026-10-22T00:26:04.150027+00:00'
+  updated_at: '2026-10-22T01:38:54.583871+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-dbd2859
+    text: 'QA pr-ac10f03 S13 repro (2026-10-22): github via fake-github, #4/#5 held
+      SIGNOFF_MERGE, teammate commit on each head + fake re-seed MERGED; pm pr merge
+      4 --no-signoff-check verified (WARNING+merge_integrity), but the TUI 300 s background
+      sync tick 7 s later finalized #5 with no WARNING/merge_integrity/note ("[pr_sync]
+      PR pr-bbac94b detected as merged"). Evidence /pm-captures/scenarios/13/when5-plain-merge-pr5/tui-sync-finalized-pr5.log.'
+    created_at: '2026-10-22T01:38:54Z'
+    last_edited: '2026-10-22T01:38:54Z'
 - id: pr-0368986
   plan: bugs
   title: 'Bug: prompts tell sessions to run ''pm pr show'', which does not exist'
