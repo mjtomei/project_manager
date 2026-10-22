@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f4db036
+  active_pr: pr-09f01da
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31780,6 +31780,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T22:42:09.505150+00:00'
   updated_at: '2026-10-22T22:42:09.505150+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-09f01da
+  plan: bugs
+  title: 'Bug: in-container pm shim imports the project''s own pm_core/ from cwd'
+  branch: pm/pr-09f01da-bug-in-container-pm-shim-imports-the-project-s-own
+  status: pending
+  depends_on: []
+  description: 'The base image installs /usr/local/bin/pm as "exec python3 -m pm_core.wrapper"
+    (Dockerfile:155). python -m puts the cwd first on sys.path, and container sessions
+    run with cwd /workspace = the project clone, so in any project with a top-level
+    pm_core/ package that is not pm (no pm_core/cli/), every in-container pm command
+    (pm which, pm pr note add, and the fake-claude shim that calls pm which) imports
+    the project package and fails. Repro (pr-592e4bd QA S10): project with pm_core/__init__.py
+    that raises ImportError; container QA with qa_scenario faked → fake-claude exits
+    127, worker windows die and retry; marker shows argv ["-m","which"]. Python 3.10
+    in the image has no -P; e.g. resolve the package from PYTHONPATH explicitly or
+    run from a neutral cwd while preserving the caller cwd for the wrapper. Same class
+    as the host push proxy fix dbb88ea8. Evidence /pm-captures/scenarios/10/story4-attempt-a.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T22:55:04.357673+00:00'
+  updated_at: '2026-10-22T22:55:04.357673+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
