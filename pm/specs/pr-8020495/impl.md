@@ -149,9 +149,12 @@ R5. **QA** (`pm_core/qa_loop.py`):
     `_poll_tmux_verdicts` once per tick (and on exit). It diffs
     `{index: (pane_id, session_id, pending, verifying, queued, verdict)}`
     and emits: scenario attempt start (`scenario=N`, `retry=k`), `queued`
-    phase while waiting for a concurrency slot, `verifying` phase, back to
-    `agent` after a verification follow-up, attempt end with verdict, and
-    end `vanished` + new attempt `retry=k+1` on relaunch.
+    phase while waiting for a concurrency slot (then `launching` while
+    the dequeued worker is prepared, and `agent` carrying the worker's
+    session id once it runs, so the live view reads its hook events),
+    `verifying` phase, back to `agent` after a verification follow-up,
+    attempt end with verdict, and end `vanished` + new attempt
+    `retry=k+1` on relaunch.
   - Relaunch backoff: `fires` timer armed before `time.sleep(backoff)`,
     cleared (`fired`) after.  The retry attempt (`retry=k+1`) starts when
     the window is found dead, in a `backoff` phase that owns the timer, so
@@ -282,7 +285,7 @@ attempt rows uninterpreted (omitted when absent).
   fails (e.g. read-only history dir).
 - I2. Attempt ids must be unique across processes and restarts
   (`secrets.token_hex(6)`); restarts never reuse an attempt.
-- I3. Reading tolerates torn/garbage lines (skip; a non-UTF-8 byte spoils only its own line), unknown kinds, and
+- I3. Reading tolerates torn/garbage lines (skip; a non-UTF-8 byte spoils only its own line, and a line whose `t`/`armed_t`/`due_t` is not a finite number is skipped like bad JSON), unknown kinds, and
   events for unknown attempts (shown as orphan phase/ends are ignored).
 - I4. Liveness check: the TUI restarts in place with `exec` (Ctrl+R),
   keeping its pid and start time, so pid checks alone would call a

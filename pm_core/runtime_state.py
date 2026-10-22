@@ -136,8 +136,10 @@ def _journal_transition(pr_id: str, action: str, cur: dict,
 
     Called under the runtime file's lock so concurrent writers agree on
     a single attempt id, which is stored in the entry as ``attempt_id``.
-    Mutates *cur* (the entry about to be written) only to set/drop that
-    field.  Never raises.
+    Mutates *cur* (the entry about to be written) only to set that field.
+    A finished entry keeps the id of its ended attempt, so readers can
+    still link the runtime entry to its history row; only an in-flight
+    entry's id counts as an open attempt.  Never raises.
     """
     if action in _UNJOURNALED_ACTIONS:
         return
