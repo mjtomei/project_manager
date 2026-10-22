@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2fed1ab
+  active_pr: pr-4fa69f1
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -30629,6 +30629,30 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T03:19:23.471649+00:00'
   updated_at: '2026-10-22T03:19:23.471649+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4fa69f1
+  plan: bugs
+  title: fake-claude cannot emit merge MERGED / INPUT_REQUIRED verdicts
+  branch: pm/pr-4fa69f1-fake-claude-cannot-emit-merge-merged-input-require
+  status: pending
+  depends_on: []
+  description: 'pm_core/fake_claude.py SESSION_TYPE_VERDICTS["merge"] is (), so the
+    fake merge-conflict window never prints MERGED or INPUT_REQUIRED. The TUI merge
+    verdict path (review_loop_ui._poll_merge / _finalize_detected_merge, _handle_merge_input_required,
+    the merge-input-required hold timer) cannot be exercised live in QA; pr-8020495
+    QA notes hit this repeatedly (merge INPUT_REQUIRED hold, Claude-resolved merge
+    ending done MERGED). Proposal: allow ("MERGED","INPUT_REQUIRED") for merge only
+    via an explicit per-type entry, keeping the _all catch-all a no-verdict merge
+    session (paths.fake_claude_config gives catch-all verdict types their first verdict,
+    so merge must be special-cased or other QA flows would auto-merge).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T04:46:51.884122+00:00'
+  updated_at: '2026-10-22T04:46:51.884122+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

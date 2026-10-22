@@ -68,7 +68,11 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   (`no history`, `N runs`, `hold: …`, `review-loop i2: turn done, 8s left`…);
   when the user selects it (or presses `H`), then the same text as
   `pm pr history` for that PR is shown in a pager inside the popup and `q`
-  dismisses it.
+  dismisses it. The badge follows the same human-first row as
+  `Waiting for:`; its countdown is the row's own `fires` timer, or the
+  verdict grace only once the agent's turn has finished — a working review
+  iteration reads e.g. `review-loop i1: working` with no "Ns left", and a
+  working QA scenario row shows no countdown either.
 - **R9 — merged / closed PRs.** Given a PR that ran actions and was then
   merged (runtime state cleaned up, panes closed), when the user opens the
   actions popup, then only the History row is offered (not "No actions
@@ -76,8 +80,8 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   hold still open shows as `released (PR merged)`. A stale
   spec-awaiting-approval flag on a merged/closed PR is not shown as a hold.
 - **R10 — sign-off router and throttle.** Given auto-start drives a PR into
-  sign-off, when the router launches, then history shows a `signoff`
-  attempt and a 60 s relaunch-throttle timer (gate, id
+  sign-off, when the router launches, then history shows a
+  `signoff router` attempt and a 60 s relaunch-throttle timer (gate, id
   `signoff-throttle:<pr>`, one id per PR); when the router's verdict is
   routed the attempt ends with that verdict. A relaunch re-arms the same
   throttle id, so Recent timers keeps the earlier entry (`re-armed`, or
@@ -93,7 +97,10 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   `Waiting for: human: …`; when the merge completes, the hold is released.
   *Live-test caveat:* merge INPUT_REQUIRED is not drivable with
   fake-claude (merge sessions emit no verdicts), and a clean `g` merge
-  journals no merge attempt; use the stop-before-merge hold.
+  journals no merge attempt; use the stop-before-merge hold. A merge
+  completed by a Claude conflict-resolution window (MERGED verdict
+  detected by the TUI) ends `done MERGED`, not `vanished` (impl E9);
+  fake-claude cannot emit MERGED either, so this is unit-tested only.
 - **R12 — derived holds.** Given a PR with a spec awaiting approval, QA
   ended INPUT_REQUIRED while status is `qa`, or sign-off BLOCKED, then a
   corresponding hold is shown without countdown even though nothing was
@@ -120,7 +127,13 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   No attempt id is reused and no pre-restart attempt is shown running.
   A restart within seconds of a scenario relaunch or dequeue resumes the
   live retry pane (no spurious `vanished` + duplicate worker in the resumed
-  run; the cap still holds).
+  run; the cap still holds). A restart within seconds after a dequeued
+  scenario's worker launched (the debug-log "Launched scenario N" line,
+  ~15 s after "Launching queued scenario N") keeps verifications that
+  landed during the dequeue, does not poll already-settled scenarios
+  again (one `done PASS` per scenario, never "up to 3 at once" under cap
+  2) and does not end QA ERROR. A restart *between* "Launching" and
+  "Launched" is outside this fix (see pr-1b90b51).
 - **R15 — hard-killed TUI.** Given a review loop running in a TUI that is
   SIGKILLed (no breadcrumb, so a new TUI does not resume it), when the user
   runs `pm pr history` before and after a new TUI mounts, then the killed
@@ -158,6 +171,12 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   user runs `pm pr history`, then the output says "No recorded action
   history…", lists milestones from project.yaml if any, `--json` has
   `attempts: []` and a `missing` note; the popup badge says `no history`.
+  Given a PR whose journal starts more than 60 s after its `started_at`
+  (e.g. started from the CLI, which journals nothing, and only later
+  reviewed in the TUI), the history shows the recorded attempts plus the
+  note "Actions before <time> were not recorded; earlier milestones come
+  from project.yaml only."
+
 - **E2 — unknown PR.** Given an id that is neither in project.yaml nor has a
   journal, the command prints the standard not-found error and exits
   non-zero. Given a PR removed from project.yaml whose journal survives, the
@@ -170,6 +189,12 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   and status transitions as normal; only history is missing.
 - **E5 — 80 columns.** Text output and the pager view do not exceed 80
   columns at an 80-column terminal (phase breakdowns and timer lines wrap).
+  Times are local `HH:MM:SS` on the reader's day, `MM-DD HH:MM:SS` on an
+  earlier day of the same year, full `YYYY-MM-DD HH:MM:SS` in another
+  year; an attempt's end carries a date only when it falls on another day
+  than its start. Rows from an earlier day (the usual view of a merged
+  PR) still fit 80 columns unwrapped, and the Milestones line wraps
+  between items, never inside one.
 - **E6 — overdue.** A `fires` timer past due whose owner is alive shows
   `overdue by Xs`, never negative remaining.
 - **E7 — concurrent writers.** Two or more processes (TUI loop threads, a
@@ -207,6 +232,21 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   exits 0; loops are unaffected. The same holds for a read-only
   `~/.pm/history` that has no `owners/` subdirectory (the liveness probe
   falls back to the pid check, never tracebacks).
+- **E16 — two projects, one HOME.** `~/.pm/history`, `~/.pm/runtime`
+  and `~/.pm/workdirs/qa` are per-HOME. Given two project TUIs in one
+  HOME, a restart (mount sweep) in one project never ends the other
+  project's live runtime-mirrored attempts (runtime entries carry an
+  owner; the sweep skips entries of other live owners), a TUI never
+  deletes another session's `qa_resume.json` (so a SIGKILLed TUI's QA can
+  still be resumed by its own respawned TUI), and a gate that already read
+  `elapsed` before its owner died stays `elapsed` (owners heartbeat their
+  lock once a second). Two projects with identically titled PRs share one
+  PR id and journal — a known defect filed as pr-c64eb04, out of scope;
+  use distinct titles.
+- **E17 — many past owners.** Every TUI restart / CLI run is a journal
+  owner; only owners with an open attempt or uncleared timer are probed,
+  so `pm pr history` stays fast (≈ the same latency) on a PR whose journal
+  has dozens of finished owners.
 - **E15 — popup ergonomics.** At 80 columns the popup header wraps so the
   `H=history` hint is visible, Enter on any action row (including history)
   runs it, and the History pager wraps at word boundaries to the popup
@@ -233,7 +273,11 @@ invalid JSON lines in the journal after concurrent writes.
 ## 5. Ambiguities (resolved)
 
 - *Controlled clocks* — not user-reachable; covered by unit tests and by
-  tolerance-based comparisons of live JSON output (see Setup).
+  tolerance-based comparisons of live JSON output (see Setup). Date
+  display (E5) is local time, so a reader can be put on "another day" by
+  running `pm pr history` with a `TZ` whose local midnight falls between
+  the attempts and now (e.g. a POSIX offset like `TZ='<X>-09:58'`), or
+  with libfaketime (`faketime '+80 days'`) for the other-year form.
 - *"Retries"* — QA scenario relaunches, sign-off relaunches, superseded
   review loops and repeated runs of the same action (impl spec A1). There is
   no review-loop retry/backoff in production code.
