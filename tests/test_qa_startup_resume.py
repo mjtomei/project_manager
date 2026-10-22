@@ -601,3 +601,81 @@ def test_legacy_snapshot_still_resumes(world, tmp_path):
     assert state.run_phase == "executing"
     assert [s.launch_phase for s in state.scenarios] == [
         "running", "queued", "settled"]
+
+
+# ---------------------------------------------------------------------------
+# Restart during planning
+# ---------------------------------------------------------------------------
+
+PLAN = ("QA_PLAN_START\n\n"
+        "SCENARIO 1: Alpha\nFOCUS: a\nSTEPS: do a\n\n"
+        "SCENARIO 2: Beta\nFOCUS: b\nSTEPS: do b\n\n"
+        "QA_PLAN_END\n")
+
+
+def _planning_snapshot(world, tmp_path, planner_alive: bool):
+    state = QALoopState(pr_id="pr-001", loop_id="plan1")
+    state.qa_workdir = str(tmp_path / "qa")
+    Path(state.qa_workdir).mkdir(parents=True)
+    state.session_tag = "tag"
+    state.run_phase = "planning"
+    state.started_at = "2026-10-22T00:00:00+00:00"
+    state.planner_session_id = str(uuid.uuid4())
+    state.scenario_start = 1
+    if planner_alive:
+        world.new_window("pm-sess", "qa-pr-001",
+                         f"planner --session-id {state.planner_session_id}")
+    qa_loop._checkpoint(state)
+    return _load_resume_file(state.qa_workdir)
+
+
+@pytest.fixture
+def planning_env(world, monkeypatch):
+    monkeypatch.setattr(qa_loop, "_get_qa_spec", lambda pr, phase: "spec")
+    monkeypatch.setattr(qa_loop, "_publish_planner_head",
+                        lambda wd, branch: "c" * 40)
+    monkeypatch.setattr(qa_loop, "_planner_code_changes", lambda *a: [])
+    monkeypatch.setattr(qa_loop, "_rev_parse", lambda *a: "c" * 40)
+
+    def _on_launch(kind, window, pane, cmd):
+        if kind == "worker":
+            sid = cmd.split("--session-id ")[1].split()[0]
+            idx = int(window.rsplit("-s", 1)[1])
+            world.finish(world._qa_dir / f"transcript-s{idx}.jsonl",
+                         "PASS", sid)
+    world.on_launch = _on_launch
+    return world
+
+
+def test_restart_during_planning_adopts_plan_emitted_while_down(
+        planning_env, tmp_path):
+    world = planning_env
+    (tmp_path / "wd").mkdir()
+    snap = _planning_snapshot(world, tmp_path, planner_alive=False)
+    world._qa_dir = tmp_path / "qa"
+    world.finish(world.native_transcript(str(tmp_path / "wd"),
+                                         snap["planner_session_id"]),
+                 PLAN, snap["planner_session_id"])
+    before = len(world.launches)
+    resumed, finalize = _resume(world, tmp_path, snap)
+    kinds = [k for k, _ in world.launches[before:]]
+    assert "planner" not in kinds          # no second planner
+    assert kinds.count("refiner") == 2 and kinds.count("worker") == 2
+    assert resumed.loop_id == "plan1"
+    assert resumed.scenario_verdicts == {1: VERDICT_PASS, 2: VERDICT_PASS}
+    assert finalize.call_count == 1
+
+
+def test_restart_during_planning_without_plan_does_not_replan(
+        planning_env, tmp_path):
+    world = planning_env
+    (tmp_path / "wd").mkdir()
+    snap = _planning_snapshot(world, tmp_path, planner_alive=False)
+    before = len(world.launches)
+    resumed, finalize = _resume(world, tmp_path, snap)
+    # Only the status window that shows the error; no planner or workers.
+    assert [k for k, _ in world.launches[before:]] in ([], ["echo"])
+    assert resumed.latest_verdict == "INPUT_REQUIRED"
+    assert "during a restart" in resumed.latest_output
+    finalize.assert_not_called()
+    assert _load_resume_file(tmp_path / "qa")["phase"] == "done"
