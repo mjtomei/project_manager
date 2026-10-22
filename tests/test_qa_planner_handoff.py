@@ -824,7 +824,7 @@ class TestPlannerHeadPublication:
                 qa_loop._publish_planner_head(str(s["workdir"]), "pm/pr-001")
         msg = str(ei.value)
         assert "is behind upstream" in msg and "diverged" not in msg
-        assert "Pull the PR branch" in msg
+        assert "Restart QA: it fast-forwards" in msg
         # Classifying must not move the workdir's branch.
         assert _git(s["workdir"], "rev-parse", "pm/pr-001") == s["c"]
 
