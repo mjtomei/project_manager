@@ -15952,6 +15952,17 @@ prs:
       actions by shortcut key. No-active-windows screen closes only on q/Esc/Enter.'
     created_at: '2026-10-22T15:00:55Z'
     last_edited: '2026-10-22T15:00:55Z'
+  - id: note-27f5a28
+    text: 'QA S1 refiner dry-run (2026-10-22): container has no fzf (picker falls
+      back to numbered list, no h/l nav) — `sudo apt-get update && sudo apt-get install
+      -y fzf` gives 0.29, which works with the picker flags. project.yaml is 0444:
+      set status via `pm pr edit --status`, gh_pr_number via chmod u+w bootstrap edit.
+      Real prefix+P works by attaching an outer client: `tmux -u -L rec new-session
+      -d -s rec -x 160 -y 45 "env -u TMUX tmux attach -t <base>~1"`, then `tmux -L
+      rec send-keys -t rec C-b P`. All 4 S1 stories held live in the dry-run; pressing
+      d on a qa PR flips it to in_review and opens review-<id>.'
+    created_at: '2026-10-22T14:59:07Z'
+    last_edited: '2026-10-22T14:59:07Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
