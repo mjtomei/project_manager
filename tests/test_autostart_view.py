@@ -169,6 +169,19 @@ class TestDedupe:
         qa_spec = _row_block(text, "└ #237").splitlines()[0]
         assert "QA SPEC REVIEW" in qa_spec and "REVIEW qa" not in qa_spec
 
+    def test_spec_review_label_hides_held_phase_progress(self):
+        # The live path to a QA spec review: QA ended INPUT_REQUIRED for the
+        # missing spec, then the spec was flagged.  The recorded verdict's
+        # ``qa INPUT_REQUIRED`` progress must not follow the label.
+        inp = mixed_inputs()
+        inp["qa_loops"]["pr-7d8e9f0"] = {"running": False, "total": 0,
+                                         "verdict": "INPUT_REQUIRED",
+                                         "recorded": True}
+        qa_spec = _row_block(_text(status=st.build_status(inp)), "└ #237")
+        first = qa_spec.splitlines()[0]
+        assert "QA SPEC REVIEW" in first and "REVIEW qa" not in first
+        assert "INPUT_REQUIRED" not in qa_spec
+
     def test_old_owner_without_short_reason_falls_back(self):
         s = mixed_status()
         for r in s["runs"]:

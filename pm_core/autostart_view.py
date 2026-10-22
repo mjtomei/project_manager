@@ -225,20 +225,20 @@ def phase_text(row: dict) -> str:
     phase (omitted for completed rows, whose reason says merged/closed)."""
     run = row["run"]
     progress = row.get("progress") or ""
-    if progress and run.get("attention"):
+    phase = run.get("phase") or ""
+    token = _PHASE_TOKENS.get(phase, phase)
+    label = state_label(run)[0] if run.get("attention") else ""
+    # ``QA SPEC REVIEW qa`` / ``QA SPEC REVIEW qa INPUT_REQUIRED``: the
+    # label already names the phase, whose progress waits behind it.
+    if token and label.lower().startswith(token + " "):
+        return ""
+    if progress and label:
         # ``qa INPUT_REQUIRED`` next to an INPUT_REQUIRED label says it twice.
-        label = state_label(run)[0]
         if progress.endswith(" " + label):
             progress = progress[:-len(label) - 1]
     if progress:
         return progress
     if run.get("state") == "completed":
-        return ""
-    phase = run.get("phase") or ""
-    token = _PHASE_TOKENS.get(phase, phase)
-    # ``QA SPEC REVIEW qa``: the label already names the phase.
-    if run.get("attention") and state_label(run)[0].lower().startswith(
-            token + " "):
         return ""
     return token
 

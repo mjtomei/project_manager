@@ -31054,6 +31054,19 @@ prs:
       Spec says "changed:" but CLI prints pre-existing "policy_changed:".'
     created_at: '2026-10-22T16:15:09Z'
     last_edited: '2026-10-22T16:15:09Z'
+  - id: note-3692030
+    text: 'QA setup facts (refiner S1): spec_pending is only set by `pm pr spec <pr>
+      impl|qa` with `pm set spec-mode review` (prompt mode needs AMBIGUITY_FLAG; inline
+      session spec gen never sets it) — works under fake-claude _all print mode. `pm
+      pr start` refuses a PR with spec_pending, so set the impl spec AFTER the PR
+      is in_progress (hold impl with fake `impl: {"delay":3600}`). `pm autostart add`
+      defaults to stop-before-merge; `remove` keeps stop marks (way to stop-mark a
+      dep). Merged targets are pruned, so an auto-merge target that signs off leaves
+      the report. Fake scripted cursors are per session type (shared across PRs) and
+      reset on `config set` — stage targets one at a time. Fake QA needs pm/specs/<pr>/qa.md
+      (pm pr spec <pr> qa in spec-mode auto) or it ends INPUT_REQUIRED.'
+    created_at: '2026-10-22T15:55:52Z'
+    last_edited: '2026-10-22T15:55:52Z'
 - id: pr-c8482a8
   plan: bugs
   title: 'fake-claude cannot hold a review INPUT_REQUIRED: 2 s idle_prompt refresh
@@ -31075,8 +31088,16 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T16:15:04.011213+00:00'
-  updated_at: '2026-10-22T16:15:04.011213+00:00'
+  updated_at: '2026-10-22T16:59:36.311146+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b78e581
+    text: 'Also seen in pr-8700be3 QA S1 (same hook-dir workaround). Loop-side angle:
+      loop_shared.wait_for_follow_up_verdict accepts any idle_prompt newer than the
+      wait start and never checks the transcript grew, so the fix could instead require
+      a new turn — but fake-driven QA verification follow-ups currently depend on
+      the phantom refresh.'
+    created_at: '2026-10-22T16:59:36Z'
+    last_edited: '2026-10-22T16:59:36Z'
