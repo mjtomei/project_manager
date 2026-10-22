@@ -3967,8 +3967,7 @@ prs:
       while the main repo concurrently added a note via pm pr note. The merge-propagation
       path (git stash + pop, used by pr-83b98d5 to merge notes across clones) bypassed
       the file lock from pr-f38005f and left literal <<<<<<< Updated upstream / =======
-      / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
-      all pm commands until manually resolved. Resolution: keep timestamps + workdir
+      /       all pm commands until manually resolved. Resolution: keep timestamps + workdir
       from the workdir side, keep the new note from the main side. Likely shares root
       cause with this bug.'
     created_at: '2026-05-01T21:41:09Z'
@@ -22665,8 +22664,7 @@ prs:
   description: "Observed while merging PR #209 (gh #209 / pr-1160366). The merge left\
     \ pm/project.yaml containing raw git conflict markers:\n\n    <<<<<<< Updated\
     \ upstream\n      updated_at: '...02:44:25...'\n    =======\n      updated_at:\
-    \ '...02:52:11...'\n    >>>>>>> Stashed changes\n\nwhich is invalid YAML, so store.load()\
-    \ raised ProjectYamlParseError and EVERY pm command (list, tui, sync, merge) broke\
+    \ '...02:52:11...'\n        \ raised ProjectYamlParseError and EVERY pm command (list, tui, sync, merge) broke\
     \ until hand-fixed. Two distinct failure modes from the same root cause:\n\n1.\
     \ CORRUPTION: pm merge auto-stashes local project.yaml edits (commit msg 'pm:\
     \ auto-stash for merge'), performs the git merge, then 'git stash pop'. When another\
@@ -23685,7 +23683,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/223
   gh_pr_number: 223
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-10-22T17:10:19.794667+00:00'
+  updated_at: '2026-10-22T17:26:42.425297+00:00'
   started_at: '2026-05-25T03:27:03.889385+00:00'
   reviewed_at: '2026-05-25T03:39:45.883451+00:00'
   merged_at: null
@@ -24080,6 +24078,38 @@ prs:
       against runtime_state loop_id.'
     created_at: '2026-10-22T17:01:50Z'
     last_edited: '2026-10-22T17:01:50Z'
+  - id: note-fe38566
+    text: 'QA S18 refiner (2026-10-22): from the code, E6 running->running is expected
+      to FAIL. After q/Esc on a held zz d, request_suppress_switch leaves suppress_switch
+      on the review-loop entry (state running). Nothing consumes it for review-loop.
+      A second zz d while that loop runs supersedes via _start_loop -> set_action_state(running)
+      from running, which does NOT drop the flag (runtime_state.py drops it only on
+      a transition into launching/running from a non-running state). The new spinner
+      then consume_suppress_switch()=True at window_open and skips select_window,
+      so the switch is swallowed (log: reason=window_open with no "spinner select_window"
+      line). The terminal case (done -> running) drops the flag and should pass. Candidate
+      fixes: the spinner clears any stale suppress_switch for (pr, action) at spinner
+      start before polling, or _start_loop passes suppress_switch=None on a fresh
+      start. QA hold mechanics: review = flock ~/.pm/workdirs/.review-launch-<pm-session>-<pr>.lock;
+      qa t = rm -rf the PR workdir + flock ~/.pm/workdirs/<proj>/.workdir-<pr>.lock
+      (blocks _ensure_workdir).'
+    created_at: '2026-10-22T17:04:24Z'
+    last_edited: '2026-10-22T17:04:24Z'
+  - id: note-c0113df
+    text: 'QA S18 (2026-10-22) NEEDS_WORK→fixed 91706329: E6 running→running reproduced
+      live. After q/Esc on a held zz d, the review-loop entry kept suppress_switch:true.
+      The next non-dismissed zz d on the still-running loop logged reason=window_open
+      with no select_window, and the client stayed on scratch. Fix: at window_open
+      for non-qa actions the spinner clears any leftover flag (log "cleared stale
+      suppress_switch") and always select_windows, since reaching window_open means
+      this popup was not dismissed. Added test_stale_suppress_flag_does_not_swallow_switch,
+      which fails pre-fix. Post-fix live: client on review-A +0.5 s. All other S18
+      stories held: q/Esc no later steal, terminal-then-switch, QA t+q then t focuses,
+      failed zz d/t show ✗+Press q, missing pm_root fallback from the project cwd
+      + "No project.yaml found." from scratch, d/z d direct with fake-claude. Captures
+      /pm-captures/scenarios/18.'
+    created_at: '2026-10-22T17:26:42Z'
+    last_edited: '2026-10-22T17:26:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
