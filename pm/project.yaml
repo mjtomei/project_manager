@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4296808
+  active_pr: pr-3c7ce04
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31451,7 +31451,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T20:59:02.371019+00:00'
+  updated_at: '2026-10-22T21:04:04.339257+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31541,6 +31541,20 @@ prs:
       default, so the log shows effort=medium, not high.'
     created_at: '2026-10-22T20:59:02Z'
     last_edited: '2026-10-22T20:59:02Z'
+  - id: note-c0320d1
+    text: 'QA S5 follow-up to note-f7c9ff7: filed pr-3c7ce04 (pending, not started)
+      for the reproducible product behavior: the QA loop waits silently (no log, no
+      TUI notice, no verdict/timeout) when a Claude pane is idle on "Login expired
+      · Please run /login" (7 min observed, 20:37:41→20:44:31; the route stall watch
+      only rechecks the healthy router). Test-setup artifacts, NOT product bugs: (a)
+      the expired login itself came from copying ~/.claude/.credentials.json into
+      a nested test HOME, which forked the rotating refresh token, so the in-container
+      refresh was rejected and the copy wiped; (b) the "Live OK in the same minute"
+      remark in note-f7c9ff7 is withdrawn: the -p probe finished before the refresh
+      side effect, and a probe cannot predict a later refresh failure. Routed checks
+      themselves all held on 81cebf17.'
+    created_at: '2026-10-22T21:04:04Z'
+    last_edited: '2026-10-22T21:04:04Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -31587,6 +31601,41 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T20:39:48.696543+00:00'
   updated_at: '2026-10-22T20:39:48.696543+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3c7ce04
+  plan: bugs
+  title: 'Bug: QA loop waits silently forever when a Claude pane is blocked on login
+    ("Login expired" / "Not logged in")'
+  branch: pm/pr-3c7ce04-bug-qa-loop-waits-silently-forever-when-a-claude-p
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/loop_shared.py poll_for_verdict + pm_core/qa_loop.py
+    _concretize_scenario / worker polling (and _RouteStallWatch.on_idle_without_verdict
+    for routed panes). pm has no detection of Claude auth-blocked panes (no match
+    for "Please run /login", "Login expired", "Not logged in", "Invalid API key" anywhere
+    in pm_core). Repro (pr-592e4bd QA s5, 2026-10-22; evidence /pm-captures/scenarios/5/attempt2-login-expired):
+    start QA (t) when the Claude login seen by the scenario panes cannot authenticate
+    (in s5: nested test HOME whose ~/.claude/.credentials.json had been wiped by a
+    failed OAuth refresh; any expired/absent main login reproduces it). Both refiner
+    panes print "Login expired · Please run /login" and sit at the idle prompt (idle_prompt
+    hook fires). The loop logged nothing for either refiner from 20:37:41 to 20:44:31,
+    the TUI showed no notice, and no verdict, timeout or fallback happened. For routed
+    panes the route stall watch only rechecks the router, which is healthy, so it
+    stays quiet too. Expected: when an idle pane without a verdict shows a Claude
+    auth error, surface it in the TUI/log (e.g. "QA [pr]: scenario k refiner blocked:
+    Claude login expired — run /login") and mark the scenario INPUT_REQUIRED or hold
+    it with a visible reason, instead of waiting forever. Applies to routed and unrouted
+    QA panes alike (routed containers still send the main-account OAuth from the mounted
+    ~/.claude to the router). Not caused by the token copy itself: the copy only produced
+    the expired login; the silent wait is pm behavior.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T21:03:52.814027+00:00'
+  updated_at: '2026-10-22T21:03:52.814027+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
