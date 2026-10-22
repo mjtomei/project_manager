@@ -418,6 +418,45 @@ def test_queued_launch_runs_off_the_poll_thread(tmp_path):
     assert state.scenario_verdicts == {1: VERDICT_PASS, 2: VERDICT_NEEDS_WORK}
 
 
+def test_status_shows_window_of_inflight_launch(tmp_path):
+    """The status file picks up a dequeued scenario's concretizer window
+    while its launch is still running, so the dashboard can navigate to it."""
+    queued = QAScenario(index=2, title="q", focus="f")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [queued]
+    status = tmp_path / "qa_status.json"
+    seen = {}
+
+    def slow_launch(st, data, pr_data, session, repo_root, wd, pm_root=None,
+                    scenarios=None, write_status=True, **kw):
+        sc = scenarios[0]
+        sc.window_name = "w2"  # concretizer window up, worker not yet
+        deadline = time.monotonic_ns() + 5_000_000_000
+        while time.monotonic_ns() < deadline:
+            try:
+                rows = json.loads(status.read_text())["scenarios"]
+            except (OSError, ValueError):
+                rows = []
+            if any(r["index"] == 2 and r["window_name"] == "w2" for r in rows):
+                seen["window"] = True
+                break
+            _real_sleep(0.01)
+        sc.pane_id, sc.session_id, sc.transcript_path = "%2", "sid-2", "/t/s2"
+
+    clock = FakeClock()
+    patches = _base_patches(clock, {"sid-2": _idle("sid-2")},
+                            {"/t/s2": VERDICT_PASS}) + [
+        patch("pm_core.tmux.pane_exists", return_value=True),
+        patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+              side_effect=slow_launch),
+    ]
+    _run(state, tmp_path, patches, queued_scenarios=[queued],
+         concurrency_cap=1)
+
+    assert seen.get("window") is True
+    assert state.scenario_verdicts == {2: VERDICT_PASS}
+
+
 def test_create_retry_tears_down_previous_attempt(tmp_path):
     """The worker split failed after the container and concretizer window
     were created.  The full relaunch re-clones the scenario dir, so it must
@@ -443,8 +482,12 @@ def test_create_retry_tears_down_previous_attempt(tmp_path):
     patches = _base_patches(clock, {"sid-new": _idle("sid-new")},
                             {"/t/s1": VERDICT_PASS}) + [
         patch("pm_core.tmux.pane_exists", return_value=True),
-        patch("pm_core.tmux.find_window_by_name",
-              return_value={"id": "@1", "index": "1"}),
+        # A dead relaunch can leave two windows with the scenario's name.
+        patch("pm_core.tmux.list_windows", return_value=[
+            {"id": "@1", "index": "1", "name": "qa-x-s1"},
+            {"id": "@2", "index": "2", "name": "other"},
+            {"id": "@3", "index": "3", "name": "qa-x-s1"}]),
+        patch("pm_core.home_window.park_if_on"),
         patch("pm_core.tmux.kill_window",
               side_effect=lambda s, w: killed.append(w)),
         patch("pm_core.container.remove_container", side_effect=removed.append),
@@ -453,7 +496,7 @@ def test_create_retry_tears_down_previous_attempt(tmp_path):
     ]
     _run(state, tmp_path, patches, use_containers=True)
 
-    assert killed == ["qa-x-s1"]
+    assert killed == ["@1", "@3"]
     assert removed == ["pm-qa-x-1"]
     assert seen_at_launch == [(None, None)]
     assert state.launch_retries[1]["kind"] == "create"

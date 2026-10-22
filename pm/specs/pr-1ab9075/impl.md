@@ -105,8 +105,11 @@ While retrying, `qa_status.json` shows the scenario as
 `qa_status.py` renders it as "launch retry n/max" and does not count it as
 complete.  When retries are exhausted the scenario gets INPUT_REQUIRED with
 an explicit reason
-`launch failed — not an agent verdict: <kind summary> after <n> attempts:
-<cause>`; the overall verdict therefore stays INPUT_REQUIRED (not PASS).
+`<kind label> (runtime failure, not an agent verdict); gave up after <n>
+relaunch attempt(s): <cause>` (kind labels: "worker could not be created",
+"worker exited before Claude started", "worker exited before any verdict" —
+"launch failed" would misdescribe an `exit`); the overall verdict therefore
+stays INPUT_REQUIRED (not PASS).
 
 R7. **Cancellation.**  A stop request is observed on the next tick (≤
 `_POLL_INTERVAL`), never after a backoff.  Background launch threads check
@@ -151,7 +154,9 @@ are unchanged apart from per-scenario grace.
 - Concretizer rejections / trust-blocked concretizers record a verdict and
   must NOT be retried (existing "no session id + verdict present" branch).
 - Status/resume snapshot are refreshed when a background launch publishes a
-  window name, so the dashboard can navigate to an in-flight concretizer.
+  window name, so the dashboard can navigate to an in-flight concretizer
+  (the resume snapshot is rewritten every tick; the status file is rewritten
+  whenever any scenario's window name differs from the last write).
 - Existing tests that drive the old sleep-based retry with
   `time.monotonic` side-effect lists are rewritten against the new
   deadline model.
@@ -162,8 +167,8 @@ A1. *New verdict state vs INPUT_REQUIRED.*  pr-7ab0a99 allows either an
 explicit error state or "INPUT_REQUIRED with reason 'container exec failed:
 …'".  A new verdict would change verdict criteria and ripple through
 auto-sequence/TUI routing (forbidden).  **Resolution:** keep INPUT_REQUIRED
-as the terminal verdict, with an explicit "launch failed — not an agent
-verdict: <cause>" reason; during retries show a non-verdict
+as the terminal verdict, with an explicit "<kind label> (runtime failure,
+not an agent verdict) … <cause>" reason (see R6); during retries show a non-verdict
 `(launch-retry:n/max)` state.
 
 A2. *Container health/restart.*  The incident was cleared by restarting the

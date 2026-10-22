@@ -2012,7 +2012,6 @@ def _launch_scenarios_in_tmux(
     repo_root: Path | None,
     workdir_path: str,
     pm_root: Path | None = None,
-    _status_scenarios: list | None = None,
     scenarios: list[QAScenario] | None = None,
     write_status: bool = True,
 ) -> None:
@@ -2129,7 +2128,7 @@ def _launch_scenarios_in_tmux(
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
             state.pr_id,
-            _status_scenarios if _status_scenarios is not None else state.scenarios,
+            state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
             verdict_reasons=state.scenario_verdict_reasons,
@@ -2234,7 +2233,6 @@ def _launch_scenarios_in_containers(
     repo_root: Path | None,
     workdir_path: str,
     pm_root: Path | None = None,
-    _status_scenarios: list | None = None,
     scenarios: list[QAScenario] | None = None,
     write_status: bool = True,
 ) -> None:
@@ -2387,7 +2385,7 @@ def _launch_scenarios_in_containers(
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
             state.pr_id,
-            _status_scenarios if _status_scenarios is not None else state.scenarios,
+            state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
             verdict_reasons=state.scenario_verdict_reasons,
@@ -2756,6 +2754,10 @@ def _poll_tmux_verdicts(
     grace_until: dict[int, float] = {
         idx: _start_mono + _VERDICT_GRACE_PERIOD for idx in pending}
     verdicts_changed = False
+    # Window names last written to the status file: a background launch
+    # sets its concretizer window mid-flight, and the dashboard should be
+    # able to navigate to it before the launch finishes.
+    status_windows = {s.index: s.window_name for s in state.scenarios}
 
     def _scenario_by_index(idx: int) -> QAScenario | None:
         return next((s for s in state.scenarios if s.index == idx), None)
@@ -2853,9 +2855,14 @@ def _poll_tmux_verdicts(
         # running same-name container still mounting the deleted clone; a
         # leftover concretizer window would duplicate the window name.
         if scenario.window_name:
+            # By id, and every match: an earlier relaunch can leave a
+            # second window with the same name.
             try:
-                if tmux_mod.find_window_by_name(session, scenario.window_name):
-                    tmux_mod.kill_window(session, scenario.window_name)
+                from pm_core import home_window
+                for win in tmux_mod.list_windows(session):
+                    if win["name"] == scenario.window_name:
+                        home_window.park_if_on(session, win["id"])
+                        tmux_mod.kill_window(session, win["id"])
             except Exception:
                 _log.debug("Could not kill stale window for scenario %d",
                            scenario.index, exc_info=True)
@@ -3316,7 +3323,9 @@ def _poll_tmux_verdicts(
         if completed_verifications:
             _launch_next_queued()
 
-        if verdicts_changed or completed_verifications:
+        windows = {s.index: s.window_name for s in state.scenarios}
+        if verdicts_changed or completed_verifications or windows != status_windows:
+            status_windows = windows
             with verification_lock:
                 verifying_snapshot = set(verifying)
             _write_status_file(status_path, state.pr_id, state.scenarios,
