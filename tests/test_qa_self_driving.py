@@ -90,6 +90,19 @@ class TestZZTStart:
         app.set_interval.assert_called_once()
         assert app._review_loop_timer is app.set_interval.return_value
 
+    def test_moves_in_review_pr_to_qa(self, tmp_path):
+        """The first zz t on an in_review PR moves it to qa, as t does."""
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = _make_app(tmp_path, pr_status="in_review")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
+             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=3):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        pr = store.get_pr(store.load(app._root), "pr-001")
+        assert pr["status"] == "qa"
+
     def test_start_qa_arms_poll_timer(self, tmp_path):
         from pm_core.tui.qa_loop_ui import start_qa
 

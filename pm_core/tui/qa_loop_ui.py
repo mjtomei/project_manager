@@ -137,20 +137,8 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(app._root, pr_id, "qa")
 
-    # Transition status to "qa" if currently in_review
-    if pr.get("status") == "in_review":
-        def _set_qa(d):
-            p = store.get_pr(d, pr_id)
-            if p and p.get("status") == "in_review":
-                p["status"] = "qa"
-        try:
-            store.locked_update(app._root, _set_qa)
-        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-            app.log_message(f"Error: {e}")
-            _log.warning("start_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return
-        app._load_state()
-        _log.info("start_qa: transitioned %s to qa status", pr_id)
+    if not _enter_qa_status(app, pr, "start_qa"):
+        return
 
     state = QALoopState(pr_id=pr_id, focus_on_create=focus)
 
@@ -163,6 +151,31 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+
+
+def _enter_qa_status(app, pr: dict, caller: str) -> bool:
+    """Transition *pr* to "qa" if it is in_review.
+
+    Returns False (after logging) when project.yaml can't be updated, so
+    the caller doesn't start a run whose status never moved.
+    """
+    if pr.get("status") != "in_review":
+        return True
+    pr_id = pr["id"]
+
+    def _set_qa(d):
+        p = store.get_pr(d, pr_id)
+        if p and p.get("status") == "in_review":
+            p["status"] = "qa"
+    try:
+        store.locked_update(app._root, _set_qa)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        app.log_message(f"Error: {e}")
+        _log.warning("%s: %s for %s: %s", caller, type(e).__name__, pr_id, e)
+        return False
+    app._load_state()
+    _log.info("%s: transitioned %s to qa status", caller, pr_id)
+    return True
 
 
 def _ensure_poll_timer(app) -> None:
@@ -258,6 +271,11 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # Remove stale loop state — run_qa_sync will clean up old windows
     # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
+
+    # Like start_qa: the first run of a loop on an in_review PR moves it
+    # to qa (restarts go through start_qa, which already does this).
+    if not _enter_qa_status(app, pr, "qa_loop_ui"):
+        return
 
     # Register self-driving QA state
     app._self_driving_qa[pr_id] = {
