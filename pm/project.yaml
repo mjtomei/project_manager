@@ -15879,7 +15879,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T16:32:37.319631+00:00'
+  updated_at: '2026-10-22T16:53:01.520593+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16011,6 +16011,15 @@ prs:
       and expect the popup to stay open.'
     created_at: '2026-10-22T16:32:37Z'
     last_edited: '2026-10-22T16:32:37Z'
+  - id: note-cce36ac
+    text: 'QA s10 (2026-10-22): all 5 stories PASS on 85743dad, no edits. The container
+      has no vi/nano and EDITOR is unset, so the e (tui:edit) pane exits at once:
+      run apt-get install nano and tmux set-environment -g EDITOR nano. The edit pane
+      opens as a split of the client''s current window (launch_pane -> get_window_id),
+      not the TUI window. That matches master, so do not treat it as a picker bug.
+      No xxd: build SGR click hex with od -An -tx1. Captures in /pm-captures/scenarios/10.'
+    created_at: '2026-10-22T16:53:01Z'
+    last_edited: '2026-10-22T16:53:01Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
