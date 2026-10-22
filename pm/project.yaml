@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T05:57:15.590743+00:00'
+  updated_at: '2026-10-22T05:58:43.233174+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30578,6 +30578,33 @@ prs:
       CLI. Obs: the queued s3 also reads interrupted. Captures /pm-captures/scenarios/32.'
     created_at: '2026-10-22T05:57:15Z'
     last_edited: '2026-10-22T05:57:15Z'
+  - id: note-f309c0a
+    text: 'S34 refine (aed1565b): single-run variant of S22/S27. s3 INPUT_REQUIRED
+      comes from a scripted qa_scenario sequence [PASS d40, PASS d40, PASS d40, INPUT_REQUIRED
+      d20]: the cursor advances per worker launch (s1, s2, s1 retry 1, s3), and a
+      5th (duplicate) launch would also emit IR. Restart 1 (after Relaunched scenario
+      1) is a plain `pm tui restart`, because QA resume runs from the TUI poll-tick
+      qa_resume scan without a breadcrumb. Restart 2 (after Launched scenario 3) is
+      `--breadcrumb`. The final resumed run holds only s3, so it has no scenario summary.
+      Check wall < summed on the earlier runs. Recent timers keeps only 10 rows, so
+      read the planner "cancelled" row soon after the plan is found, or from JSON.
+      bbd53aab wraps Recent-timer rows: a "lost (owner process exited) at unknown
+      (armed …)" row should wrap to ≤80 cols. Drivers: /pm-captures/scenarios/27/scripts.
+      Change the END regex to "QA INPUT_REQUIRED for".'
+    created_at: '2026-10-22T05:43:49Z'
+    last_edited: '2026-10-22T05:43:49Z'
+  - id: note-eeb44f4
+    text: 'QA S34 (2026-10-22) PASS on aed1565b, no edits: one QA run, cap 2, s1 killed+retry,
+      plain pm tui restart 2 s after the s1 relaunch (QA resumes without a breadcrumb;
+      grace lost then re-armed; >44s/>17s/>7s), and --breadcrumb 1.2 s after "Launched
+      scenario 3" (grace elapsed then re-armed; >1m23s). One done per scenario (s1/s2
+      PASS, s3 INPUT_REQUIRED), cap held, 502 JSON + 95 text reads clean, Recent timers
+      <=75 cols, latency 0.090 -> 0.073 s with no step, IR hold agrees across text/JSON/badge/pager.
+      Spec nit: the interactive Scenario 0 pane takes qa_scenario scripted slot 0,
+      so a [PASS,PASS,PASS,IR] sequence needs a filler first slot. The resumed s1
+      retry PASS is on a plain "qa s1" child. Captures /pm-captures/scenarios/34.'
+    created_at: '2026-10-22T05:58:43Z'
+    last_edited: '2026-10-22T05:58:43Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
