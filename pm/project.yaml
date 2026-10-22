@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-446cb83
+  active_pr: pr-064fe5b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -28353,7 +28353,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-22T15:26:49.700885+00:00'
+  updated_at: '2026-10-22T16:24:29.577356+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28407,6 +28407,17 @@ prs:
       of S3 all held post-fix.'
     created_at: '2026-10-22T15:26:49Z'
     last_edited: '2026-10-22T15:26:49Z'
+  - id: note-ff1551a
+    text: 'QA S7 (2026-10-22) incidental fixes: (1) cff91240 the first zz t on an
+      in_review PR now moves it to qa (start_or_stop_qa_loop skipped start_qa''s transition,
+      so the PR stayed in_review for the whole first run); (2) 976b6f6a plain-t NEEDS_WORK
+      with auto-start off now calls _update_display, so the tree shows in_review without
+      a refresh. Spec note: the interactive Scenario 0 pane consumes the first qa_scenario
+      scripted verdict, so a bounce needs ["NEEDS_WORK","NEEDS_WORK","PASS"]. send-keys
+      has no source client, so select_window targets whichever grouped session was
+      active last; drive keys through the rec client (tmux -L rec send-keys -t base).'
+    created_at: '2026-10-22T16:24:29Z'
+    last_edited: '2026-10-22T16:24:29Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
@@ -31037,6 +31048,30 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T15:20:10.391157+00:00'
   updated_at: '2026-10-22T15:20:10.391157+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-064fe5b
+  plan: bugs
+  title: 'Bug: user zz t over a leftover qa-<pr> window replaces it without focusing
+    the new one'
+  branch: pm/pr-064fe5b-bug-user-zz-t-over-a-leftover-qa-pr-window-replace
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py window setup: when a previous run left qa-<pr>
+    windows, a user-initiated zz t (focus_on_create=True) kills and recreates them,
+    but only sessions already watching the old window follow (switch_sessions_to_window);
+    the pressing client stays on the TUI. The first-time-creation path (no window)
+    does select_window. Repro (pr-f094946 QA S7, 2026-10-22): zz t on a PR, let run
+    finish PASS 1/1, both clients on main, press zz t again -> no select_window/switch,
+    client stays on main. Same on master. Plain t on an existing window focuses it,
+    so zz t is the odd one out.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T16:24:28.617755+00:00'
+  updated_at: '2026-10-22T16:24:28.617755+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
