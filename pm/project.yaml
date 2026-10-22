@@ -28353,7 +28353,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-22T17:31:28.754953+00:00'
+  updated_at: '2026-10-22T18:41:25.464821+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28447,6 +28447,15 @@ prs:
       workdir during impl (/pm-captures/scenarios/9/scripts/impl_commit.sh).'
     created_at: '2026-10-22T17:31:28Z'
     last_edited: '2026-10-22T17:31:28Z'
+  - id: note-115e982
+    text: 'QA S11 (2026-10-22) incidental fix 456c0830: self-driving NEEDS_WORK bounce
+      line "QA NEEDS_WORK for <pr> — returning to review" is now held CONFIRM_HOLD_SECONDS
+      (it was replaced in the same frame by "Review loop started" and never painted).
+      Test: tests/test_qa_self_driving.py::TestNeedsWorkStrict::test_needs_work_starts_review_loop_directly.
+      All S11 focus Thens (R7/R12/E4) held pre- and post-fix; scripts in /pm-captures/scenarios/11/scripts
+      (drive.sh runs all triples unattended).'
+    created_at: '2026-10-22T18:41:25Z'
+    last_edited: '2026-10-22T18:41:25Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
