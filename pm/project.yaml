@@ -8201,6 +8201,27 @@ prs:
       pr) now ignores runs older than the open return.'
     created_at: '2026-10-21T23:57:05Z'
     last_edited: '2026-10-21T23:57:05Z'
+  - id: note-17cae28
+    text: 'QA S2 concretizer (integrate CLI): in this container ~/.local/bin/git proxies
+      fetch/ls-remote to the host — put /usr/bin first in PATH or every check errors.
+      Pre-observed on 6907bb40 (git 2.34 → temp-worktree path): (1) local backend,
+      `pm pr signoff integrate` run from the PR workdir (no PM_PROJECT/-C) resolves
+      state to the workdir''s tracked pm/ and targets the WORKDIR itself, so after
+      main-repo master moves it still says "up to date with master@<old>" (spec R1:
+      local target = main repo dir); (2) two checks fired right after master moves
+      race on refs/pm/integration/base: ~1 in 2 pairs one reports "integration check
+      failed: ... cannot lock ref refs/pm/integration/base" (no race once the ref
+      is current).'
+    created_at: '2026-10-21T23:06:02Z'
+    last_edited: '2026-10-21T23:06:02Z'
+  - id: note-e9c8062
+    text: 'QA S2 (integrate CLI): fixed 3fbd4abb (unreviewed) — local target from
+      a PR workdir resolved the clone itself (stale master) → now its origin; concurrent
+      checks raced on refs/pm/integration/base CAS ("cannot lock ref", 4/20 in simultaneous
+      bg starts; tmux send-keys rounds too staggered to hit it) → per-call fetch ref
+      + unconditional pin. All 6 stories held after fix.'
+    created_at: '2026-10-21T23:19:37Z'
+    last_edited: '2026-10-21T23:19:37Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
