@@ -886,6 +886,19 @@ class TestPopupPickerEnterSelection:
         assert run_cmd.call_args.args[0] == next(c for d, c, _ in rows
                                                  if d == row)
 
+    def test_enter_on_title_row_keeps_picker_open(self, tmp_path, monkeypatch):
+        """fzf starts on the title row, which has no command: Enter there
+        is a no-op and only q/Esc closes the popup."""
+        from pm_core.cli import session as sess
+
+        rows = sess._build_picker_lines(self.PRS, "#240", {"#240"})
+        title = next(d for d, c, _ in rows if not c)
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, ["#240"], "#240",
+            [(0, f"\n{title}\n"), (130, "")])
+        assert len(fzf.calls) == 2
+        run_cmd.assert_not_called()
+
 
 class TestPopupPickerTypeAhead:
     """A key typed while the picker reloads reaches fzf before its rows:

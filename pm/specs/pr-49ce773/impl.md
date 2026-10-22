@@ -151,7 +151,9 @@ both the display id and the local id.
 - Enter / double-click on an action row (pre-existing, also master): fzf
   prints an empty `--expect` key line first; `stdout.strip()` dropped it so
   the selected row was read as the key and nothing was dispatched.  Only
-  the trailing newline is stripped now.
+  the trailing newline is stripped now.  Enter on the PR title row (where
+  fzf's cursor starts) has no command and is a no-op — it used to close
+  the popup (S7 refiner); only q/Esc quits.
 - Type-ahead closed the popup (QA scenario 8): a nav key typed while the
   picker reloads between fzf runs reached the next fzf before its rows
   loaded; fzf exits 1 ("no match") but still prints the `--expect` key, and

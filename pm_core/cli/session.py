@@ -2167,12 +2167,15 @@ def popup_picker_cmd(session: str, window_name: str):
                         if display == selected:
                             selected_cmd = cmd or None
                             break
-                    if selected_cmd:
-                        label = next((lbl for lbl, c in _label_to_cmd.items()
-                                      if c == selected_cmd), None)
-                        if label and not _still_has_action(label):
-                            continue
-                        cmd_to_run = _label_to_cmd.get(label, selected_cmd)
+                    if not selected_cmd:
+                        # Title row: nothing to run.  fzf starts on it, so
+                        # an early Enter must not close the picker.
+                        continue
+                    label = next((lbl for lbl, c in _label_to_cmd.items()
+                                  if c == selected_cmd), None)
+                    if label and not _still_has_action(label):
+                        continue
+                    cmd_to_run = _label_to_cmd.get(label, selected_cmd)
                     break
                 # No actionable input — bail.
                 break
