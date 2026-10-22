@@ -8171,6 +8171,24 @@ prs:
       ▲ until the driver stale tick reloads.'
     created_at: '2026-10-21T23:27:46Z'
     last_edited: '2026-10-21T23:27:46Z'
+  - id: note-99a6f1d
+    text: 'QA S7 refine (github via fake-github), smoke-tested on 9cbb6c9b with manual
+      approvals: (1) fake `gh pr create` ignores the cwd branch -> PRs created by
+      `pm pr start` get head "branch-N" plus a bogus branch, so a --match-head-commit
+      merge can never pass. Seed PRs in `pm fake-github config set` before `pm init
+      --backend github` (import gives gh_pr_number + branch), and re-seed with state
+      MERGED to simulate a teammate merge. (2) There is no `pm pr show`. merge_integrity
+      is only in pm/project.yaml; the note shows in `pm pr note list`. (3) Base race:
+      a one-shot post-checkout hook in the fake remote.git commits to master inside
+      gh pr merge. Output: WARNING ... (the base moved during publication), merge_integrity
+      + note recorded, rc 0. (4) Likely gap: teammate pushes an unreviewed commit
+      onto the approved head and merges on GitHub. `pm pr merge` refuses (master moved),
+      then `pm pr merge --no-signoff-check` finalizes silently: no merge_integrity,
+      no note. _verify_github_merge runs only in the gh-merge-failed/already-merged
+      branch, which a moved base makes unreachable. The TUI background sync (5 min)
+      also finalizes teammate merges unverified.'
+    created_at: '2026-10-21T23:14:05Z'
+    last_edited: '2026-10-21T23:14:05Z'
   - id: note-1c373f5
     text: 'QA S7 (4e62b9d2): pm pr merge --no-signoff-check on github now verifies
       a GitHub-side merge against the bound SIGNOFF_MERGE (WARNING + merge_integrity
