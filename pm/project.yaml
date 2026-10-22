@@ -29525,7 +29525,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677711+00:00'
-  updated_at: '2026-10-22T17:21:08.359692+00:00'
+  updated_at: '2026-10-22T17:27:48.221789+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29720,6 +29720,14 @@ prs:
       reviewed with no further changes.'
     created_at: '2026-10-22T17:21:08Z'
     last_edited: '2026-10-22T17:21:08Z'
+  - id: note-1ffde78
+    text: 'Review loop 2870 i3 (81fac547): spec-only update — impl.md now states the
+      QA s3 human-turn exclusions (task notifications, other-session messages) and
+      the QA s2 numbered-heading rules (column-gap TOC, table rows, restarting list
+      runs, RFC run-in trade-off). Code reviewed with no changes; 63 tests pass, real-catalog
+      --check clean, committed reports match data/cases/coverage.json.'
+    created_at: '2026-10-22T17:27:48Z'
+    last_edited: '2026-10-22T17:27:48Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
