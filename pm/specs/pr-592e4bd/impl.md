@@ -330,3 +330,23 @@ Review loop 03db i1: added
 untested; both cases fail with the exit check disabled). The inode-only
 identity check is sound: the old bridge's open listener pins its socket
 inode, so a replacement socket cannot reuse the number.
+
+### QA S9/S10 fixes (pre-existing on master, fixed in scope)
+7. *Push proxy shadowed by a project pm_core* (dbb88ea8) —
+   `_start_proxy_subprocess` ran `python -m pm_core.push_proxy` from the
+   caller's cwd; now cwd `/` with pm's own root first on PYTHONPATH.
+   Regression `test_proxy_subprocess_ignores_shadow_pm_core_in_cwd`.
+8. *Dashboard dropped / mislabelled queued scenarios* (b97c0e3d) — both
+   launch paths pass the full scenario list and queued indices
+   (`_status_queued`).
+9. *TUI resume picked a stale snapshot* (60574f28, aea1fb8a; ordering
+   corrected in review loop acdb i1) — one candidate per PR, the newest
+   *run*, ordered by highest scenario index (runs of a PR continue each
+   other's numbering), then unfinished, then mtime. mtime alone is wrong
+   both ways: a stopped run's late write, or an older orphan beside a run
+   that completed while the TUI was down (the orphan was revived and the
+   completed run's snapshot dropped unprocessed). Superseded snapshots,
+   finished or not, are dropped unless an in-memory loop or a live process
+   elsewhere drives them, so a later restart cannot revive them.
+   Regressions in `tests/test_qa_resume.py` (the two acdb cases fail on
+   aea1fb8a).

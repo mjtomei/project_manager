@@ -161,12 +161,18 @@ def _make_app(tmp_path, *, pr_status="qa"):
     return app
 
 
-def _seed_run(home, *, overall="", pr_id="pr-001", loop="loop1"):
-    """Create a qa workdir under <home>/.pm/workdirs/qa with resume+status."""
+def _seed_run(home, *, overall="", pr_id="pr-001", loop="loop1",
+              first_index=1):
+    """Create a qa workdir under <home>/.pm/workdirs/qa with resume+status.
+
+    *first_index* numbers the run's scenarios, as a later run of the same
+    PR continues from the earlier runs' indices."""
     qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop}"
     qa_dir.mkdir(parents=True, exist_ok=True)
     state = _make_state(qa_dir)
     state.pr_id = pr_id
+    for i, sc in enumerate(state.scenarios):
+        sc.index = first_index + i
     # Incomplete by default: clear verdicts so it has pending work.
     state.scenario_verdicts = {}
     state.verified_scenarios = set()
@@ -477,6 +483,73 @@ def test_superseded_snapshot_of_in_memory_loop_is_kept(tmp_path):
     assert _resume_file_path(current).is_file()
     resume_bg.assert_not_called()
     on_complete.assert_not_called()
+
+
+def test_older_unfinished_orphan_does_not_outrank_newer_completed_run(
+        tmp_path):
+    """An older run left unfinished (its driver died) beside a newer run
+    that completed while the TUI was down: the newer run's completion is
+    processed, the stale run is not revived, and its snapshot is dropped so
+    a later restart cannot revive it either."""
+    import os
+    app = _make_app(tmp_path)
+    stale = _seed_run(tmp_path, overall="", loop="old", first_index=1)
+    done = _seed_run(tmp_path, overall="PASS", loop="new", first_index=3)
+    os.utime(_resume_file_path(done), (1_000_000, 1_000_000))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_called_once()
+    assert on_complete.call_args[0][1].qa_workdir == str(done)
+    assert not _resume_file_path(stale).exists()
+
+
+def test_two_unfinished_runs_resume_the_newer_run(tmp_path):
+    """Two unfinished snapshots for one PR: the newer run (higher scenario
+    numbers) is resumed even when the older one's snapshot is newer on
+    disk; the older snapshot is dropped."""
+    import os
+    app = _make_app(tmp_path)
+    old = _seed_run(tmp_path, overall="", loop="old", first_index=1)
+    new = _seed_run(tmp_path, overall="", loop="new", first_index=3)
+    os.utime(_resume_file_path(new), (1_000_000, 1_000_000))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args[0][0].qa_workdir == str(new)
+    on_complete.assert_not_called()
+    assert _resume_file_path(new).is_file()
+    assert not _resume_file_path(old).exists()
+
+
+def test_older_unfinished_run_owned_elsewhere_is_kept(tmp_path):
+    """An older unfinished run another live process still drives is
+    neither resumed nor deleted, whatever newer run exists."""
+    app = _make_app(tmp_path)
+    owned = _seed_run(tmp_path, overall="", loop="owned", first_index=1)
+    new = _seed_run(tmp_path, overall="", loop="new", first_index=3)
+
+    def _owned_elsewhere(rdata):
+        return rdata.get("qa_workdir") == str(owned)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_owned_elsewhere",
+                      side_effect=_owned_elsewhere), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete"):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert _resume_file_path(owned).is_file()
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args[0][0].qa_workdir == str(new)
 
 
 # ---------------------------------------------------------------------------

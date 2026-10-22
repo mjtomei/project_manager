@@ -403,12 +403,12 @@ def _resume_incomplete_qa(app) -> None:
     project_data = None
 
     # A fresh start (z t) stops the old loop without processing its
-    # completion, so its snapshot outlives it next to the new run's.  Pick
-    # one snapshot per PR: unfinished runs first (a stopped run has its
-    # overall written, so a late write from it cannot outrank the live
-    # run), then the newest (a live loop rewrites its snapshot every tick).
-    # Otherwise whichever the glob yields first wins and the live run is
-    # never resumed.
+    # completion, so its snapshot outlives it next to the new run's.  Only
+    # the newest run per PR is a candidate.  Runs of a PR number their
+    # scenarios on from earlier runs (_next_scenario_offset), so the highest
+    # scenario index orders them; mtime cannot (a late write from a stopped
+    # run, or an older orphan, may be newer).  Ties (no scenarios, runs
+    # started together) prefer unfinished, then the newest snapshot.
     def _mtime(p):
         try:
             return p.stat().st_mtime
@@ -421,6 +421,11 @@ def _resume_incomplete_qa(app) -> None:
             return sdata.get("overall", "")
         except (json.JSONDecodeError, OSError):
             return ""
+
+    def _run_order(rdata):
+        idx = [s["index"] for s in rdata.get("scenarios") or []
+               if isinstance(s, dict) and isinstance(s.get("index"), int)]
+        return max(idx, default=0)
 
     by_pr: dict[str, list] = {}
     for resume_file in qa_root.glob("*/qa_resume.json"):
@@ -437,14 +442,15 @@ def _resume_incomplete_qa(app) -> None:
                      if getattr(s, "qa_workdir", None)}
     candidates = []
     for pr_id, snaps in by_pr.items():
-        snaps.sort(key=lambda s: (bool(s[2]), -_mtime(s[0])))
+        snaps.sort(key=lambda s: (-_run_order(s[1]), bool(s[2]),
+                                  -_mtime(s[0])))
         candidates.append(snaps[0])
-        # Drop a superseded snapshot only when its run has finished and
-        # nothing still drives it: not an in-memory loop here, not a live
-        # process elsewhere.  Anything else is left alone.
+        # A newer run superseded the rest: drop their snapshots (finished
+        # or not, so a later restart cannot revive a stale run) unless
+        # something still drives them: an in-memory loop here or a live
+        # process elsewhere.  Their status, verdicts and transcripts stay.
         for resume_file, rdata, overall in snaps[1:]:
-            if (overall
-                    and str(resume_file.parent) not in live_workdirs
+            if (str(resume_file.parent) not in live_workdirs
                     and str(rdata.get("qa_workdir")) not in live_workdirs
                     and not qa_loop.resume_owned_elsewhere(rdata)):
                 _log.info("Dropping superseded QA resume snapshot for %s: %s",
