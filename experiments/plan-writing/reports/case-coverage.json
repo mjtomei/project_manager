@@ -3,12 +3,12 @@
   "documents": 18963,
   "brief_rich": 3137,
   "brief_thin": 9280,
-  "both_case_types": 11333,
-  "whole_document_only": 1084,
-  "continuation_only": 3775,
-  "dropped": 2771,
+  "both_case_types": 11324,
+  "whole_document_only": 1093,
+  "continuation_only": 3774,
+  "dropped": 2772,
   "cases": {
-   "continuation": 42765,
+   "continuation": 42757,
    "whole_document": 12417,
    "pm_plan": 24
   }
@@ -46,10 +46,10 @@
    "brief_thin": 0,
    "both_case_types": 0,
    "whole_document_only": 0,
-   "continuation_only": 18,
-   "dropped": 6,
+   "continuation_only": 17,
+   "dropped": 7,
    "cases": {
-    "continuation": 51
+    "continuation": 49
    },
    "context": null
   },
@@ -182,13 +182,13 @@
    "documents": 9841,
    "brief_rich": 2500,
    "brief_thin": 7341,
-   "both_case_types": 8896,
-   "whole_document_only": 945,
+   "both_case_types": 8887,
+   "whole_document_only": 954,
    "continuation_only": 0,
    "dropped": 0,
    "cases": {
     "whole_document": 9841,
-    "continuation": 26175
+    "continuation": 26170
    },
    "context": {
     "items": 10631,
@@ -256,7 +256,7 @@
    "dropped": 0,
    "cases": {
     "whole_document": 2,
-    "continuation": 6
+    "continuation": 5
    },
    "context": {
     "items": 3,
@@ -811,6 +811,12 @@
    "document_id": "647347e42b7356fced4d8ce9",
    "source": "cern-hl-lhc",
    "identity": "https://e-publishing.cern.ch/index.php/CYRM/article/download/1171/971/4964",
+   "reason": "no headings detected; source has no context collector"
+  },
+  {
+   "document_id": "ea6a09acdd32ad0560a0d517",
+   "source": "cern-hl-lhc",
+   "identity": "https://e-publishing.cern.ch/index.php/CYRM/article/download/1173/972/4965",
    "reason": "no headings detected; source has no context collector"
   },
   {
@@ -17669,9 +17675,9 @@
   }
  ],
  "check": {
-  "cases_checked": 55206,
+  "cases_checked": 55198,
   "by_type": {
-   "continuation": 42765,
+   "continuation": 42757,
    "whole_document": 12417,
    "pm_plan": 24
   },
