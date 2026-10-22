@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T15:33:13.659087+00:00'
+  updated_at: '2026-10-22T15:37:19.764497+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30132,6 +30132,16 @@ prs:
       Proposal Approve row updated; /pm-captures/even-realities synced.'
     created_at: '2026-10-22T15:33:13Z'
     last_edited: '2026-10-22T15:33:13Z'
+  - id: note-d648198
+    text: 'Review 450f i12: ended QA run sessions (planner/s0/scenario helpers/finalize,
+      e.g. s4 refiner with pane gone) offered "Start new refine session…" — a user
+      start duplicating the QA loop, with no side effects named. Now a dim "Ended
+      · only the QA loop launches it" row; ended #215 impl and plan breakdown Start
+      confirmations name effects (pr start keeps status qa). check.mjs +rule over
+      every ended session (fails on old code); 186 journey frames byte-identical,
+      no recapture. Proposal B16-B19 row updated; /pm-captures/even-realities synced.'
+    created_at: '2026-10-22T15:37:19Z'
+    last_edited: '2026-10-22T15:37:19Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
