@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T05:58:43.233174+00:00'
+  updated_at: '2026-10-22T06:01:08.558182+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30605,6 +30605,17 @@ prs:
       retry PASS is on a plain "qa s1" child. Captures /pm-captures/scenarios/34.'
     created_at: '2026-10-22T05:58:43Z'
     last_edited: '2026-10-22T05:58:43Z'
+  - id: note-a85ec1b
+    text: 'QA S33 (2026-10-22) PASS on aed1565b, no edits: O auto-start A→hold with
+      signoff delay 30 s — router Waiting for/badge [signoff router: working]/one
+      60 s throttle, hold text/JSON/badge; kill -9 TUI then CLI pm pr merge A and
+      pm session kill then pm pr merge B both read "released (PR merged)" at merged_at
+      (481 no-TUI reader polls, never lost/active); merged popups single history [4
+      runs], pager word-equal; A JSON stable across 3 reads; shifted TZ/+2d/+365d
+      TTY==|cat, max 79 cols, year merge-hold row wraps between parts. Driver gotcha:
+      quote a POSIX TZ like <-0548>+05:48:30 inside script -qec. Captures /pm-captures/scenarios/33.'
+    created_at: '2026-10-22T06:01:08Z'
+    last_edited: '2026-10-22T06:01:08Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
