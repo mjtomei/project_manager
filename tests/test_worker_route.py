@@ -137,6 +137,33 @@ class TestRouterProvider:
 # Launcher boundary
 # ---------------------------------------------------------------------------
 
+class TestResolveProvider:
+    def test_router_run_env_drops_stray_keys(self, pm_home_dir, monkeypatch):
+        """launch_claude* paths (subprocess env) unset the same variables
+        build_claude_shell_cmd removes with ``env -u``."""
+        from pm_core.claude_launcher import _resolve_provider
+        _write_providers(pm_home_dir, api_base="http://127.0.0.1:8790")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stray")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-stray")
+        env, flag, run_env = _resolve_provider(ROUTE)
+        assert flag == MODEL
+        assert run_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8790"
+        assert not {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} & set(run_env)
+
+    def test_other_providers_keep_environment(self, pm_home_dir, monkeypatch):
+        from pm_core.claude_launcher import _resolve_provider
+        import yaml
+        (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump(
+            {"providers": {"loc": {"type": "local",
+                                   "api_base": "http://127.0.0.1:1",
+                                   "model": "m"}}}))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stray")
+        _, _, run_env = _resolve_provider("loc")
+        # The local provider's own key settings are left in place.
+        assert run_env["ANTHROPIC_API_KEY"] == ""
+        assert run_env["ANTHROPIC_AUTH_TOKEN"] == "ollama"
+
+
 class TestBuildShellCmd:
     def _build(self, **kw):
         from pm_core.claude_launcher import build_claude_shell_cmd

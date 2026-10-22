@@ -288,6 +288,11 @@ def _resolve_provider(provider: str | None = None):
     provider_env = provider_cfg.env_vars()
     model_flag = provider_cfg.model_flag()
     run_env = {**os.environ, **provider_env} if provider_env else None
+    if run_env is not None:
+        # As build_claude_shell_cmd's ``env -u``: a router authenticates
+        # upstream itself, so a stray key must not reach Claude.
+        for var in provider_cfg.unset_env_vars():
+            run_env.pop(var, None)
     return provider_env, model_flag, run_env
 
 SESSION_REGISTRY = ".pm-sessions.json"
