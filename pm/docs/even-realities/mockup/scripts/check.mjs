@@ -118,6 +118,9 @@ if (!only.length) {
     const pm = new SimPM();
     pm.start('pr-215/signoff');
     rule(pm.send('pr-215/signoff', 'rule check', null).queued, 'send to a starting session is not queued');
+    // Once started, the queued message is still shown in that session.
+    pm.started('pr-215/signoff');
+    rule(pm.session('pr-215/signoff').transcript.some(m => m.t === 'rule check' && m.queued), 'message queued while starting vanished once started');
   }
   // PM refuses a message to a session with no window (queued scenario,
   // ended, never started), as hold-to-speak does before listening.

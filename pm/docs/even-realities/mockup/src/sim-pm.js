@@ -112,13 +112,18 @@ export class SimPM {
     const id = `r${++this.seq}`;
     this.pendingStarts.set(sessionId, id);
     s.state = 'starting'; s.stateText = 'starting…';
+    s.startMark = (s.transcript ?? []).length; // messages after this were sent while starting
     return { ok: true, id };
   }
   started(sessionId) {
     const s = this.session(sessionId);
     this.pendingStarts.delete(sessionId);
     s.state = 'working'; s.stateText = 'working';
-    s.transcript = [{ who: 'pm', t: `Started from glasses at ${this.now()}` }, { who: 'agent', t: s.short === 'sign-off' ? `Reading the QA verdicts and evidence for ${this.prLabel(s.pr)}…` : `Loading context for ${s.role}…` }];
+    // A new session starts a new transcript, but messages queued while it was
+    // starting are still waiting for its first turn to finish.
+    const queued = (s.transcript ?? []).slice(s.startMark ?? Infinity);
+    delete s.startMark;
+    s.transcript = [{ who: 'pm', t: `Started from glasses at ${this.now()}` }, { who: 'agent', t: s.short === 'sign-off' ? `Reading the QA verdicts and evidence for ${this.prLabel(s.pr)}…` : `Loading context for ${s.role}…` }, ...queued];
     if (s.pr && s.short === 'sign-off') { const p = this.pr(s.pr); p.status = 'sign_off'; p.activity = 'Sign-off running'; }
   }
 
