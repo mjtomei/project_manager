@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8c1dd15
+  active_pr: pr-b2bd388
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8113,7 +8113,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
-  updated_at: '2026-10-21T23:56:23.978180+00:00'
+  updated_at: '2026-10-21T23:57:05.571317+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8140,6 +8140,29 @@ prs:
       not prevented.'
     created_at: '2026-10-21T21:46:48Z'
     last_edited: '2026-10-21T21:46:48Z'
+  - id: note-9c69588
+    text: 'QA S1 refine (real e2e, watcher off): real claude only works here with
+      ANTHROPIC_API_KEY unset (OAuth creds in ~/.claude); start the test tmux server
+      from a shell without it and with a git->/usr/bin/git shim first on PATH (local
+      backend fetch breaks through ~/.local/bin/git). There is no `pm pr show`: the
+      return record is visible via `pm pr list` ([in_progress ⇤]), `pm prompt <pr>`
+      / the live impl prompt file (<workdir>/pm/prompts/pm_prompt_*.txt, "Returned
+      from sign-off") and pr.signoff_return in project.yaml. Plain Ctrl+R drops auto-start
+      targets and O marks by design; restart with `pm tui restart --breadcrumb`. The
+      TUI relaunches impl immediately after an IMPL hop, so "restart before relaunch"
+      needs a 0.1 s poll on `awaiting: impl`. Fake QA needs pm/specs/<pr>/qa.md seeded.
+      Impl prompt asks for no captures, so put evidence requests in the test PR descriptions
+      or the real router may REQA on thin evidence.'
+    created_at: '2026-10-21T23:10:47Z'
+    last_edited: '2026-10-21T23:10:47Z'
+  - id: note-cd88dd5
+    text: 'QA S1 bbe142ad: local publish''s stash pop conflicted on pm/project.yaml
+      when the PR branch committed a cross-PR note (A''s agent noted B), leaving markers
+      + A unfinalized; _unstash_after_merge now 3-way merges a conflicted project.yaml
+      structurally (live wins, id lists merged) and drops the stash. Same naive stash
+      exists on master (_propagate_to_repo).'
+    created_at: '2026-10-21T23:27:41Z'
+    last_edited: '2026-10-21T23:27:41Z'
   - id: note-9f1e672
     text: 'QA S8: fixed pre-existing tech-tree marker bug b290ebcb: a finished review
       loop (⟳1✓) masked the sign_off ▲ / stale re-run spinner, so the TUI disagreed
@@ -8169,6 +8192,15 @@ prs:
       Local backend needs pm push + merge before O. Captures /pm-captures/scenarios/3'
     created_at: '2026-10-21T23:56:23Z'
     last_edited: '2026-10-21T23:56:23Z'
+  - id: note-26c2b64
+    text: 'QA S1 dc20ad4c: tree drew the return icon (⇤/↻/↩) only when no spinner/loop
+      marker was shown, so during rework impl/review/QA the TUI node lacked ⇤ while
+      pm pr list showed it (R5.2); now drawn alongside. b8699d7c: TUI restart mid-rework-QA
+      handed B to sign-off on the PRE-return QA PASS (rework QA records nothing in
+      runtime_state until a scenario launches) -> router REQA''d; recorded_qa_verdict(pr_id,
+      pr) now ignores runs older than the open return.'
+    created_at: '2026-10-21T23:57:05Z'
+    last_edited: '2026-10-21T23:57:05Z'
 - id: pr-abcf70f
   plan: plan-regression
   title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
@@ -22358,7 +22390,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-10-14T16:53:55.963293+00:00'
+  updated_at: '2026-10-21T23:45:02.916394+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -22451,6 +22483,15 @@ prs:
       /tmp/pm230-232-main-before-merge-20261014T175913Z.'
     created_at: '2026-10-14T18:09:10Z'
     last_edited: '2026-10-14T18:09:10Z'
+  - id: note-cf49fa4
+    text: 'pr-ac10f03 QA S1 (bbe142ad) hit this live: A''s agent committed a cross-PR
+      note on its branch, the local publish''s stash pop conflicted on pm/project.yaml.
+      pr-ac10f03 now resolves a conflicted project.yaml in _unstash_after_merge with
+      a structured 3-way merge (stash^1 base / merged HEAD / stashed live state; live
+      wins, id lists like notes merged per id) and drops the stash. Reconcile with
+      this PR''s lock/_NEVER_STASH approach when rebasing.'
+    created_at: '2026-10-21T23:45:02Z'
+    last_edited: '2026-10-21T23:45:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -30090,6 +30131,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-21T19:14:51.114484+00:00'
   updated_at: '2026-10-21T19:14:51.114484+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b2bd388
+  plan: bugs
+  title: 'Bug: TUI d on a PR returned to impl by sign-off switches to the stale pre-return
+    review window'
+  branch: pm/pr-b2bd388-bug-tui-d-on-a-pr-returned-to-impl-by-sign-off-swi
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pr_view.py review_pr fast path: when a review-<id> window
+    exists and fresh=False it just select_window()s and returns, regardless of PR
+    status. After sign-off routes a PR back (SIGNOFF_IMPL, pr-ac10f03) the pre-return
+    review window survives, so pressing d (or the rework agent running ''pm tui send
+    d'' as its prompt suggests) after the rework only shows the OLD review and leaves
+    the PR in_progress; no fresh review starts. Seen in pr-ac10f03 QA S1 (debug log
+    23:43:28 ''Switched to review window'', PR stayed in_progress until auto-review
+    on idle replaced the window at 23:44:39). Auto-start masks it; manual flow stalls.
+    Fix idea: skip the fast path when status is in_progress (or when signoff_return
+    is open) so pm pr review marks in_review and replaces the stale window.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T23:48:30.074151+00:00'
+  updated_at: '2026-10-21T23:48:30.074151+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
