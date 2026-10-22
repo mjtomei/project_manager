@@ -29965,7 +29965,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T16:26:45.244748+00:00'
+  updated_at: '2026-10-22T17:32:43.777153+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30711,6 +30711,20 @@ prs:
       /pm-captures/scenarios/43.'
     created_at: '2026-10-22T16:01:42Z'
     last_edited: '2026-10-22T16:01:42Z'
+  - id: note-611a922
+    text: 'S46 refine (b28d2f62): re-run of S42 on the i2-i6 head. Draft fixes: (1)
+      the commit that yields the MERGE router must come AFTER the BLOCKED verdict
+      (BLOCKED is terminal until HEAD moves -> stale router 3 MERGE); a commit after
+      the SIGNOFF_REVIEW hop does nothing (the bounce already consumes the record,
+      router 2 launches fresh). (2) review grace is a 20 s minimum from poll start,
+      so z d ''in the i2 grace'' needs a short i2 delay (d5), not d20 (turn_finished
+      would land with ~0 s left). Offline render of the S42 run2 journal on b28d2f62:
+      max 79 cols, TTY==cat under today/<QQQ> TZ/+2d/+365d; MM-DD form wraps ''signoff
+      router (adopted)'' but the ''review-loop (loop ..) cancelled KILLED'' root row
+      fits unwrapped (wraps only under +365d); BLOCKED hold head wraps as ''... (signoff)
+      [project.yaml signoff'' / ''    record]''. S42 drivers: /pm-captures/scenarios/42/run2/scripts.'
+    created_at: '2026-10-22T17:32:43Z'
+    last_edited: '2026-10-22T17:32:43Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
