@@ -30244,6 +30244,30 @@ prs:
       untracked'' row is expected.'
     created_at: '2026-10-22T00:39:39Z'
     last_edited: '2026-10-22T00:39:39Z'
+  - id: note-a155b4e
+    text: 'S13 refine (dc41da83): a resumed QA run reuses loop_id, so its grace timer
+      id qa-grace:<loop_id> is the same as the pre-restart one. The pre-restart grace
+      reads "lost (owner process exited)" only until the resumed run arms its grace;
+      after that _replay lists the old entry in Recent as "re-armed" (spec R14 says
+      lost). Restart within 30 s of the poll-loop grace arm, or no QA timer is active
+      to lose (grace is a gate and goes "elapsed"). Resumed scenario children are
+      plain "qa sN" under "qa (loop …) (resumed)", with no resumed/adopted flag of
+      their own. Literal text is "lost (owner process exited)", not "lost (owner exited)".'
+    created_at: '2026-10-22T00:39:39Z'
+    last_edited: '2026-10-22T00:39:39Z'
+  - id: note-7437321
+    text: 'QA S13 (2026-10-22): fixed c0761fa8. After TUI Ctrl+R mid-QA, the pre-restart
+      qa s1/s2/s3 read elapsed "unknown" (lower bound 0, their last own event was
+      their start), not ">Ns". restart_app now journals owner_exit to PRs with open
+      attempts, and history bounds owner-exited attempts by the owner''s newest event
+      (now >10s children, >42s run). All other S13 Thens held pre and post (cap 2,
+      s3 queued then launching, vanished s1 + retry backoff fired, shared grace re-armed
+      then elapsed, ends match the TUI verified line, 1.4-1.5k JSON reads per story
+      clean, popup badge = focus row, popup rows = CLI). Obs: the badge shows no countdown
+      on a working row (the shared grace shows only on turn-finished rows). The lost-grace
+      window after Ctrl+R is ~1 s before the resume re-arms it. Drivers in /pm-captures/scenarios/13/scripts.'
+    created_at: '2026-10-22T01:05:37Z'
+    last_edited: '2026-10-22T01:05:37Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
